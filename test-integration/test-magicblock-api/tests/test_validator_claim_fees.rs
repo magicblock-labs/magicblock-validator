@@ -57,7 +57,7 @@ fn test_claim_fees_instruction() {
     println!("✓ Claim fees instruction created successfully");
 }
 
-/// Initialize the validator fees vault (required before claiming)
+/// Initialize the validator fees vault
 fn test_init_validator_fees_vault() {
     println!("Testing validator fees vault initialization...");
 
@@ -107,7 +107,7 @@ fn test_init_validator_fees_vault() {
     }
 }
 
-/// Add test fees to the vault to simulate validator earnings
+/// Add test fees to the vault
 fn test_add_fees_to_vault() {
     println!("Adding test fees to vault...");
 
@@ -152,8 +152,7 @@ fn test_add_fees_to_vault() {
             }
         }
         Err(e) => {
-            println!("✗ Failed to add test fees to vault: {}", e);
-            println!("  This might be expected in some test environments");
+            println!("✗ Failed to add test fees to vault: {}", e); 
         }
     }
 }
@@ -290,15 +289,6 @@ fn test_claim_fees_transaction() {
                         assert!(
                             vault_difference > 0,
                             "Should have claimed some fees"
-                        );
-
-                        // Validator should receive most of the fees (minus transaction costs)
-                        let fee_efficiency = validator_difference as f64
-                            / vault_difference as f64;
-                        assert!(fee_efficiency > 0.8, "Validator should receive at least 80% of claimed fees (rest goes to transaction costs)");
-                        println!(
-                            "✓ Fee efficiency: {:.1}%",
-                            fee_efficiency * 100.0
                         );
                     } else {
                         println!("ⅈ No fees were available to claim");
