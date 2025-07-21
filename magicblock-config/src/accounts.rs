@@ -231,10 +231,6 @@ pub enum PrepareLookupTables {
 pub struct AccountsCloneConfig {
     #[serde(default)]
     pub prepare_lookup_tables: PrepareLookupTables,
-    /// The number of threads to use for cloning accounts.
-    #[derive_env_var]
-    #[serde(default = "default_cloning_concurrency")]
-    pub concurrency: usize,
 }
 
 impl AccountsCloneConfig {
@@ -246,16 +242,7 @@ impl AccountsCloneConfig {
         {
             self.prepare_lookup_tables = other.prepare_lookup_tables;
         }
-        if self.concurrency == default.concurrency
-            && other.concurrency != default.concurrency
-        {
-            self.concurrency = other.concurrency;
-        }
     }
-}
-
-const fn default_cloning_concurrency() -> usize {
-    10
 }
 
 #[derive(
@@ -431,7 +418,6 @@ mod tests {
         let other = AccountsConfig {
             clone: AccountsCloneConfig {
                 prepare_lookup_tables: PrepareLookupTables::Always,
-                concurrency: 20,
             },
             ..Default::default()
         };
@@ -441,7 +427,6 @@ mod tests {
             config.clone.prepare_lookup_tables,
             PrepareLookupTables::Always
         );
-        assert_eq!(config.clone.concurrency, 20);
     }
 
     #[test]
@@ -449,7 +434,6 @@ mod tests {
         let toml_str = r#"
 [clone]
 prepare_lookup_tables = "always"
-concurrency = 20
 "#;
 
         let config: AccountsConfig = toml::from_str(toml_str).unwrap();
@@ -457,6 +441,5 @@ concurrency = 20
             config.clone.prepare_lookup_tables,
             PrepareLookupTables::Always
         );
-        assert_eq!(config.clone.concurrency, 20);
     }
 }

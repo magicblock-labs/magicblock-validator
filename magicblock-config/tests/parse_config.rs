@@ -5,7 +5,7 @@ use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategyConfig, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
     MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteConfig,
-    RpcConfig, ValidatorConfig,
+    ReplayConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use url::Url;
@@ -225,4 +225,20 @@ path = "/tmp/program.so"
     let res = toml::from_str::<EphemeralConfig>(toml);
     eprintln!("{:?}", res);
     assert!(res.is_err());
+}
+
+#[test]
+fn test_replay_toml() {
+    let toml = r#"
+[ledger]
+replay.hydration_concurrency = 20
+"#;
+
+    let res = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    assert_eq!(
+        res.ledger.replay,
+        ReplayConfig {
+            hydration_concurrency: 20,
+        }
+    );
 }

@@ -224,7 +224,6 @@ mod tests {
                 },
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
-                    concurrency: 20,
                 },
                 max_monitored_accounts: 1234,
             },
@@ -250,6 +249,9 @@ mod tests {
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
+                replay: ReplayConfig {
+                    hydration_concurrency: 20,
+                },
             },
             programs: vec![ProgramConfig {
                 id: Pubkey::from_str_const(
@@ -308,7 +310,6 @@ mod tests {
                 },
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
-                    concurrency: 20,
                 },
                 max_monitored_accounts: 1234,
             },
@@ -334,6 +335,9 @@ mod tests {
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
+                replay: ReplayConfig {
+                    hydration_concurrency: 20,
+                },
             },
             programs: vec![ProgramConfig {
                 id: Pubkey::from_str_const(
@@ -389,7 +393,6 @@ mod tests {
                 },
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
-                    concurrency: 20,
                 },
                 max_monitored_accounts: 12346,
             },
@@ -415,6 +418,9 @@ mod tests {
                 skip_keypair_match_check: true,
                 path: Some("ledger2.example.com".to_string()),
                 size: 100000,
+                replay: ReplayConfig {
+                    hydration_concurrency: 20,
+                },
             },
             programs: vec![ProgramConfig {
                 id: Pubkey::from_str_const(
@@ -463,7 +469,6 @@ mod tests {
                 },
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
-                    concurrency: 30,
                 },
                 max_monitored_accounts: 1234,
             },
@@ -489,6 +494,9 @@ mod tests {
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
+                replay: ReplayConfig {
+                    hydration_concurrency: 20,
+                },
             },
             programs: vec![ProgramConfig {
                 id: Pubkey::from_str_const(
@@ -530,14 +538,20 @@ mod tests {
                 db: AccountsDbConfig::default(),
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
-                    concurrency: 20,
                 },
                 max_monitored_accounts: 2048,
             },
             rpc: RpcConfig::default(),
             geyser_grpc: GeyserGrpcConfig::default(),
             validator: ValidatorConfig::default(),
-            ledger: LedgerConfig::default(),
+            ledger: LedgerConfig {
+                reset: false,
+                path: Some("ledger.example.com".to_string()),
+                size: 1000000000,
+                replay: ReplayConfig {
+                    hydration_concurrency: 20,
+                },
+            },
             programs: vec![],
             metrics: MetricsConfig::default(),
         };
