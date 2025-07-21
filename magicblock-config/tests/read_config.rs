@@ -9,7 +9,8 @@ use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, CommitStrategyConfig, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
     MagicBlockConfig, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
-    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
+    ProgramConfig, RemoteCluster, RemoteConfig, ReplayConfig, RpcConfig,
+    ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -34,6 +35,23 @@ fn test_load_custom_ws_remote_toml() {
         .join("09_custom-ws-remote.toml");
     let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
     assert_eq!(config.accounts.remote.cluster, RemoteCluster::CustomWithWs);
+}
+
+#[test]
+fn test_load_replay_toml() {
+    let workspace_dir = cargo_workspace_dir();
+    let config_file_dir = workspace_dir
+        .join("magicblock-config")
+        .join("tests")
+        .join("fixtures")
+        .join("11_replay.toml");
+    let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
+    assert_eq!(
+        config.ledger.replay,
+        ReplayConfig {
+            hydration_concurrency: 20,
+        }
+    );
 }
 
 #[test]
@@ -125,6 +143,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
     env::set_var("CLONE_CONCURRENCY", "20");
     env::set_var("CLONE_AUTO_AIRDROP_LAMPORTS", "123");
+    env::set_var("REPLAY_HYDRATION_CONCURRENCY", "20");
 
     let config = parse_config_with_file(&config_file_dir);
 
@@ -176,6 +195,9 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 skip_keypair_match_check: true,
                 path: Some("/hello/world".to_string()),
                 size: 123123,
+                replay: ReplayConfig {
+                    hydration_concurrency: 20,
+                },
             },
             metrics: MetricsConfig {
                 enabled: false,

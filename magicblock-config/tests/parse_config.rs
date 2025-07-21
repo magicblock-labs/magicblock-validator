@@ -6,7 +6,7 @@ use magicblock_config::{
     BlockSize, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
     LedgerConfig, LedgerResumeStrategy, LifecycleMode, MetricsConfig,
     MetricsServiceConfig, PrepareLookupTables, ProgramConfig, RemoteCluster,
-    RemoteConfig, RpcConfig, ValidatorConfig,
+    RemoteConfig, ReplayConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use url::Url;
@@ -267,6 +267,9 @@ fn test_everything_defined() {
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1_000_000_000,
+                replay: ReplayConfig {
+                    hydration_concurrency: 20,
+                },
             },
             programs: vec![ProgramConfig {
                 id: pubkey!("wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"),
@@ -307,4 +310,20 @@ path = "/tmp/program.so"
     let res = toml::from_str::<EphemeralConfig>(toml);
     eprintln!("{:?}", res);
     assert!(res.is_err());
+}
+
+#[test]
+fn test_replay_toml() {
+    let toml = r#"
+[ledger]
+replay.hydration_concurrency = 20
+"#;
+
+    let res = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    assert_eq!(
+        res.ledger.replay,
+        ReplayConfig {
+            hydration_concurrency: 20,
+        }
+    );
 }

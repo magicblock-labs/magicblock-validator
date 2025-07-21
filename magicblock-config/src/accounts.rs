@@ -432,7 +432,6 @@ mod tests {
             config.clone.prepare_lookup_tables,
             PrepareLookupTables::Always
         );
-        assert_eq!(config.clone.concurrency, 20);
     }
 
     #[test]

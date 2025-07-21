@@ -359,6 +359,7 @@ impl MagicValidator {
             identity_keypair.pubkey(),
             config.validator_config.accounts.max_monitored_accounts,
             config.validator_config.accounts.clone.clone(),
+            config.validator_config.ledger.replay.clone(),
         );
 
         let accounts_manager = Self::init_accounts_manager(

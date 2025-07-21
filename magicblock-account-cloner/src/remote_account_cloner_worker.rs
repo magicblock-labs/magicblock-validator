@@ -18,7 +18,9 @@ use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::{AccountUpdates, AccountUpdatesResult};
 use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_committor_service::ChangesetCommittor;
-use magicblock_config::{AccountsCloneConfig, PrepareLookupTables};
+use magicblock_config::{
+    AccountsCloneConfig, PrepareLookupTables, ReplayConfig,
+};
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
@@ -111,6 +113,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC> {
     validator_identity: Pubkey,
     monitored_accounts: RefCell<LruCache<Pubkey, ()>>,
     clone_config: AccountsCloneConfig,
+    replay_config: ReplayConfig,
 }
 
 // SAFETY:
@@ -150,6 +153,7 @@ where
         validator_authority: Pubkey,
         max_monitored_accounts: usize,
         clone_config: AccountsCloneConfig,
+        replay_config: ReplayConfig,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) = flume::unbounded();
         let fetch_retries = 50;
@@ -174,6 +178,7 @@ where
             validator_identity: validator_authority,
             monitored_accounts: LruCache::new(max_monitored_accounts).into(),
             clone_config,
+            replay_config,
         }
     }
 
@@ -298,7 +303,7 @@ where
         let result = stream
             .map(Ok::<_, AccountClonerError>)
             .try_for_each_concurrent(
-                self.clone_config.concurrency,
+                self.replay_config.hydration_concurrency,
                 |(pubkey, owner)| async move {
                     trace!("Hydrating '{}'", pubkey);
                     let res = self
