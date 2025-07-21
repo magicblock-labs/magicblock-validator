@@ -6,34 +6,32 @@ use std::{
 
 use fd_lock::{RwLock, RwLockWriteGuard};
 use log::*;
+use magicblock_accounts_db::ACCOUNTSDB_DIR;
+use magicblock_config::LedgerResumeStrategy;
 use magicblock_ledger::Ledger;
 use solana_sdk::{clock::Slot, signature::Keypair, signer::EncodableKey};
 
-use crate::{
-    errors::{ApiError, ApiResult},
-    utils::fs::remove_ledger_directory_if_exists,
-};
+use crate::errors::{ApiError, ApiResult};
 
 // -----------------
 // Init
 // -----------------
 pub(crate) fn init(
     ledger_path: PathBuf,
-    reset: bool,
-    skip_replay: bool,
+    resume_strategy: &LedgerResumeStrategy,
 ) -> ApiResult<(Ledger, Slot)> {
     // Save the last slot from the previous ledger to restart from it
-    let last_slot = if skip_replay || !reset {
+    let last_slot = if resume_strategy.resume() {
         let previous_ledger = Ledger::open(ledger_path.as_path())?;
         previous_ledger.get_max_blockhash().map(|(slot, _)| slot)?
     } else {
         Slot::default()
     };
 
-    if reset || skip_replay {
+    if resume_strategy.remove_ledger() {
         remove_ledger_directory_if_exists(
             ledger_path.as_path(),
-            skip_replay && last_slot != Slot::default(),
+            resume_strategy,
         )
         .map_err(|err| {
             error!(
@@ -178,4 +176,40 @@ pub(crate) fn ledger_parent_dir(ledger_path: &Path) -> ApiResult<PathBuf> {
         )
     })?;
     Ok(parent.to_path_buf())
+}
+
+fn remove_ledger_directory_if_exists(
+    dir: &Path,
+    resume_strategy: &LedgerResumeStrategy,
+) -> Result<(), std::io::Error> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+
+        // When resuming, keep the accounts db
+        if entry.file_name() == ACCOUNTSDB_DIR && resume_strategy.resume() {
+            continue;
+        }
+
+        // When resuming, keep the validator keypair
+        if let Ok(validator_keypair_path) = validator_keypair_path(dir) {
+            if resume_strategy.resume()
+                && validator_keypair_path
+                    .file_name()
+                    .map(|key_path| key_path == entry.file_name())
+                    .unwrap_or(false)
+            {
+                continue;
+            }
+        }
+
+        if entry.metadata()?.is_dir() {
+            fs::remove_dir_all(entry.path())?
+        } else {
+            fs::remove_file(entry.path())?
+        }
+    }
+    Ok(())
 }

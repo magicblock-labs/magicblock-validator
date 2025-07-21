@@ -10,4 +10,4 @@ lifecycle = "replica"
 sigverify = false
 
 [ledger]
-reset = false
+resume-strategy = "replay-and-resume"

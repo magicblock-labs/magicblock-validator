@@ -10,8 +10,8 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode,
-    ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
+    AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
+    LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
     DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::state::FlexiCounter;
@@ -37,8 +37,7 @@ pub fn setup_offline_validator(
     ledger_path: &Path,
     programs: Option<Vec<ProgramConfig>>,
     millis_per_slot: Option<u64>,
-    reset: bool,
-    skip_replay: bool,
+    resume_strategy: LedgerResumeStrategy,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let mut accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Offline,
@@ -57,8 +56,7 @@ pub fn setup_offline_validator(
 
     let config = EphemeralConfig {
         ledger: LedgerConfig {
-            reset,
-            skip_replay,
+            resume_strategy,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         },
@@ -102,9 +100,14 @@ pub fn setup_validator_with_local_remote(
 
     let programs = resolve_programs(programs);
 
+    let resume_strategy = if reset {
+        LedgerResumeStrategy::Reset
+    } else {
+        LedgerResumeStrategy::ReplayAndResume
+    };
     let config = EphemeralConfig {
         ledger: LedgerConfig {
-            reset,
+            resume_strategy,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
             ..Default::default()

@@ -8,7 +8,6 @@ pub mod ledger;
 pub mod magic_validator;
 mod slot;
 mod tickers;
-mod utils;
 
 pub use init_geyser_service::InitGeyserServiceConfig;
 pub use magicblock_config::EphemeralConfig;

@@ -1,5 +1,5 @@
 use cleanass::{assert, assert_eq};
-use magicblock_config::TEST_SNAPSHOT_FREQUENCY;
+use magicblock_config::{LedgerResumeStrategy, TEST_SNAPSHOT_FREQUENCY};
 use solana_transaction_status::UiTransactionEncoding;
 use std::{path::Path, process::Child};
 
@@ -33,8 +33,12 @@ fn write(
     ledger_path: &Path,
     keypairs: &[Keypair],
 ) -> (Child, u64, Vec<Signature>) {
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, true, false);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::Reset,
+    );
 
     let mut signatures = Vec::with_capacity(keypairs.len());
     for pubkey in keypairs.iter().map(|kp| kp.pubkey()) {
@@ -63,8 +67,12 @@ fn read(
     signatures: &[Signature],
     slot: u64,
 ) -> Child {
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, false, true);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::ResumeOnly,
+    );
 
     // Current slot of the new validator should be at least the last slot of the previous validator
     let validator_slot = expect!(ctx.get_slot_ephem(), validator);
