@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use magicblock_bank::bank::Bank;
+use magicblock_config::LedgerResumeStrategy;
 use magicblock_core::magic_program;
 use solana_sdk::{
     account::Account, clock::Epoch, pubkey::Pubkey, signature::Keypair,
@@ -56,9 +57,9 @@ pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
 pub(crate) fn funded_faucet(
     bank: &Bank,
     ledger_path: &Path,
-    create_new: bool,
+    resume_strategy: &LedgerResumeStrategy,
 ) -> ApiResult<Keypair> {
-    let faucet_keypair = if create_new {
+    let faucet_keypair = if resume_strategy.remove_ledger() {
         let faucet_keypair = Keypair::new();
         write_faucet_keypair_to_ledger(ledger_path, &faucet_keypair)?;
         faucet_keypair

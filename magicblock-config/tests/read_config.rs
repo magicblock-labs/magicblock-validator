@@ -7,9 +7,9 @@ use std::{
 use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, CommitStrategy, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LifecycleMode, MagicBlockConfig, MetricsConfig,
-    MetricsServiceConfig, ProgramConfig, RemoteCluster, RemoteConfig,
-    RpcConfig, ValidatorConfig,
+    LedgerConfig, LedgerResumeStrategy, LifecycleMode, MagicBlockConfig,
+    MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteCluster,
+    RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -123,6 +123,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_PORT", "1234");
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
     env::set_var("LEDGER_SIZE", "123123");
+    env::set_var("LEDGER_RESUME_STRATEGY", "resume-only");
 
     let config = parse_config_with_file(&config_file_dir);
 
@@ -165,8 +166,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 ..Default::default()
             },
             ledger: LedgerConfig {
-                reset: false,
-                skip_replay: true,
+                resume_strategy: LedgerResumeStrategy::ResumeOnly,
                 path: Some("/hello/world".to_string()),
                 size: 123123
             },

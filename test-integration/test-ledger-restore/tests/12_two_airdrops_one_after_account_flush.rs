@@ -1,5 +1,5 @@
 use cleanass::assert_eq;
-use magicblock_config::TEST_SNAPSHOT_FREQUENCY;
+use magicblock_config::{LedgerResumeStrategy, TEST_SNAPSHOT_FREQUENCY};
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{
@@ -34,8 +34,12 @@ fn restore_ledger_with_two_airdrops_with_account_flush_in_between() {
 }
 
 fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64) {
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, true, false);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::Reset,
+    );
 
     // First airdrop followed by wait until account is flushed
     {
@@ -66,8 +70,12 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64) {
 fn read(ledger_path: &Path, pubkey: &Pubkey) -> Child {
     // Measure time
     let _ = std::time::Instant::now();
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, false, false);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::ReplayAndResume,
+    );
     eprintln!(
         "Validator started in {:?}",
         std::time::Instant::now().elapsed()
