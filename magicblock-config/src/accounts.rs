@@ -65,14 +65,12 @@ impl AccountsConfig {
         if self.db == default.db && other.db != default.db {
             self.db = other.db;
         }
-        if self.clone == default.clone && other.clone != default.clone {
-            self.clone = other.clone;
-        }
         if self.max_monitored_accounts == default.max_monitored_accounts
             && other.max_monitored_accounts != default.max_monitored_accounts
         {
             self.max_monitored_accounts = other.max_monitored_accounts;
         }
+        self.clone.merge(other.clone);
     }
 }
 
@@ -245,6 +243,18 @@ pub enum PrepareLookupTables {
 pub struct AccountsCloneConfig {
     #[serde(default)]
     pub prepare_lookup_tables: PrepareLookupTables,
+}
+
+impl AccountsCloneConfig {
+    pub fn merge(&mut self, other: AccountsCloneConfig) {
+        let default = Self::default();
+
+        if self.prepare_lookup_tables == default.prepare_lookup_tables
+            && other.prepare_lookup_tables != default.prepare_lookup_tables
+        {
+            self.prepare_lookup_tables = other.prepare_lookup_tables;
+        }
+    }
 }
 
 #[derive(

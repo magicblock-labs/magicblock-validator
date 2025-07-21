@@ -4,7 +4,7 @@ use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LifecycleMode, MetricsConfig,
-    MetricsServiceConfig, ProgramConfig, RemoteConfig, RpcConfig,
+    MetricsServiceConfig, ProgramConfig, RemoteConfig, ReplayConfig, RpcConfig,
     ValidatorConfig,
 };
 use solana_sdk::pubkey;
@@ -225,4 +225,20 @@ path = "/tmp/program.so"
     let res = toml::from_str::<EphemeralConfig>(toml);
     eprintln!("{:?}", res);
     assert!(res.is_err());
+}
+
+#[test]
+fn test_replay_toml() {
+    let toml = r#"
+[ledger]
+replay.hydration_concurrency = 20
+"#;
+
+    let res = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    assert_eq!(
+        res.ledger.replay,
+        ReplayConfig {
+            hydration_concurrency: 20,
+        }
+    );
 }

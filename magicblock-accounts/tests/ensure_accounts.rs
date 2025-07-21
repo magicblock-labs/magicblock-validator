@@ -18,7 +18,7 @@ use magicblock_accounts::{
 };
 use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_committor_service::stubs::ChangesetCommittorStub;
-use magicblock_config::AccountsCloneConfig;
+use magicblock_config::{AccountsCloneConfig, ReplayConfig};
 use solana_sdk::pubkey::Pubkey;
 use stubs::{
     account_committer_stub::AccountCommitterStub,
@@ -62,6 +62,7 @@ fn setup_with_lifecycle(
         Pubkey::new_unique(),
         1024,
         AccountsCloneConfig::default(),
+        ReplayConfig::default(),
     );
     let remote_account_cloner_client =
         RemoteAccountClonerClient::new(&remote_account_cloner_worker);
