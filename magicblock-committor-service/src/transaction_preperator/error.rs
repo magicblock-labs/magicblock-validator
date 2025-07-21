@@ -11,6 +11,10 @@ pub enum Error {
     FailedToFitError,
     #[error("Missing commit id for pubkey: {0}")]
     MissingCommitIdError(Pubkey),
+    #[error("DeliveryPreparationError: {0}")]
+    DeliveryPreparationError(
+        #[from] crate::transaction_preperator::delivery_preparator::Error,
+    ),
     #[error("InternalError: {0}")]
     InternalError(#[from] anyhow::Error),
 }

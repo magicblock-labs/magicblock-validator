@@ -32,7 +32,7 @@ impl<D: DB> CommitScheduler<D> {
     pub fn new<P: L1MessagesPersisterIface>(
         rpc_client: MagicblockRpcClient,
         db: D,
-        l1_message_persister: P,
+        l1_message_persister: Option<P>,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
     ) -> Self {

@@ -29,6 +29,7 @@ use crate::{
         task_strategist::TransactionStrategy,
         tasks::{L1Task, TaskPreparationInfo},
     },
+    utils::persist_status_update,
     ComputeBudgetConfig,
 };
 
@@ -65,16 +66,18 @@ impl DeliveryPreparator {
         let preparation_futures = strategy
             .optimized_tasks
             .iter()
-            .map(|task| self.prepare_task(authority, task));
+            .map(|task| self.prepare_task(authority, task, persister));
 
         let task_preparations = join_all(preparation_futures);
         let alts_preparations =
             self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys);
 
         let (res1, res2) = join(task_preparations, alts_preparations).await;
-        res1.into_iter().collect::<Result<Vec<_>, _>>()?;
+        res1.into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::FailedToPrepareBufferAccounts)?;
 
-        let lookup_tables = res2?;
+        let lookup_tables = res2.map_err(Error::FailedToCreateALTError)?;
         Ok(lookup_tables)
     }
 
@@ -84,12 +87,23 @@ impl DeliveryPreparator {
         &self,
         authority: &Keypair,
         task: &Box<dyn L1Task>,
-        persister: Option<P>,
-    ) -> DeliveryPreparatorResult<()> {
+        persister: &Option<P>,
+    ) -> DeliveryPreparatorResult<(), InternalError> {
         let Some(preparation_info) = task.preparation_info(&authority.pubkey())
         else {
             return Ok(());
         };
+
+        // Persist as failed until rewritten
+        let update_status = CommitStatus::BufferAndChunkPartiallyInitialized(
+            preparation_info.commit_id,
+        );
+        persist_status_update(
+            persister,
+            &preparation_info.pubkey,
+            preparation_info.commit_id,
+            update_status,
+        );
 
         // Initialize buffer account. Init + reallocs
         self.initialize_buffer_account(
@@ -98,26 +112,29 @@ impl DeliveryPreparator {
             &preparation_info,
         )
         .await?;
+        // Persist initialization success
+        let update_status =
+            CommitStatus::BufferAndChunkInitialized(preparation_info.commit_id);
+        persist_status_update(
+            persister,
+            &preparation_info.pubkey,
+            preparation_info.commit_id,
+            update_status,
+        );
+
         // Writing chunks with some retries. Stol
         self.write_buffer_with_retries(authority, &preparation_info, 5)
             .await?;
-
         // Persist that buffer account initiated successfully
-        if let Some(persister) = &persister {
-            let update_status = CommitStatus::BufferAndChunkFullyInitialized(
-                preparation_info.commit_id,
-            );
-            if let Err(err) = persister.update_status_by_message(
-                preparation_info.commit_id,
-                &preparation_info.pubkey,
-                update_status.clone(),
-            ) {
-                error!(
-                    "Failed to persist new status {}: {}",
-                    update_status, err
-                );
-            }
-        }
+        let update_status = CommitStatus::BufferAndChunkFullyInitialized(
+            preparation_info.commit_id,
+        );
+        persist_status_update(
+            persister,
+            &preparation_info.pubkey,
+            preparation_info.commit_id,
+            update_status,
+        );
 
         Ok(())
     }
@@ -128,7 +145,7 @@ impl DeliveryPreparator {
         authority: &Keypair,
         task: &dyn L1Task,
         preparation_info: &TaskPreparationInfo,
-    ) -> DeliveryPreparatorResult<()> {
+    ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_instructions =
             task.instructions_from_info(&preparation_info);
         let preparation_instructions = preparation_instructions
@@ -168,9 +185,9 @@ impl DeliveryPreparator {
         authority: &Keypair,
         info: &TaskPreparationInfo,
         max_retries: usize,
-    ) -> DeliveryPreparatorResult<()> {
+    ) -> DeliveryPreparatorResult<(), InternalError> {
         let mut last_error =
-            Error::InternalError(anyhow!("ZeroRetriesRequested"));
+            InternalError::InternalError(anyhow!("ZeroRetriesRequested"));
         for _ in 0..max_retries {
             let chunks =
                 match self.rpc_client.get_account(&info.chunks_pda).await {
@@ -182,7 +199,7 @@ impl DeliveryPreparator {
                             "Chunks PDA does not exist for writing. pda: {}",
                             info.chunks_pda
                         );
-                        return Err(Error::InternalError(anyhow!(
+                        return Err(InternalError::InternalError(anyhow!(
                             "Chunks PDA does not exist for writing. pda: {}",
                             info.chunks_pda
                         )));
@@ -220,11 +237,11 @@ impl DeliveryPreparator {
         authority: &Keypair,
         chunks: &Chunks,
         write_instructions: &[Instruction],
-    ) -> DeliveryPreparatorResult<()> {
+    ) -> DeliveryPreparatorResult<(), InternalError> {
         if write_instructions.len() != chunks.count() {
             let err = anyhow!("Chunks count mismatches write instruction! chunks: {}, ixs: {}", write_instructions.len(), chunks.count());
             error!("{}", err.to_string());
-            return Err(Error::InternalError(err));
+            return Err(InternalError::InternalError(err));
         }
 
         let missing_chunks = chunks.get_missing_chunks();
@@ -259,9 +276,9 @@ impl DeliveryPreparator {
         &self,
         instructions: &[Instruction],
         authority: &Keypair,
-    ) -> DeliveryPreparatorResult<()> {
+    ) -> DeliveryPreparatorResult<(), InternalError> {
         let mut last_error =
-            Error::InternalError(anyhow!("ZeroRetriesRequested"));
+            InternalError::InternalError(anyhow!("ZeroRetriesRequested"));
         for _ in 0..MAX_RETRIES {
             match self.try_send_ixs(instructions, authority).await {
                 Ok(()) => return Ok(()),
@@ -277,7 +294,7 @@ impl DeliveryPreparator {
         &self,
         instructions: &[Instruction],
         authority: &Keypair,
-    ) -> DeliveryPreparatorResult<()> {
+    ) -> DeliveryPreparatorResult<(), InternalError> {
         let latest_block_hash = self.rpc_client.get_latest_blockhash().await?;
         let message = Message::try_compile(
             &authority.pubkey(),
@@ -304,7 +321,8 @@ impl DeliveryPreparator {
         &self,
         authority: &Keypair,
         lookup_table_keys: &[Pubkey],
-    ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
+    ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>, InternalError>
+    {
         let pubkeys = HashSet::from_iter(lookup_table_keys.iter().copied());
         self.table_mania
             .reserve_pubkeys(authority, &pubkeys)
@@ -328,9 +346,8 @@ impl DeliveryPreparator {
     }
 }
 
-// TODO(edwin): properly define these for TransactionPreparator interface
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum InternalError {
     #[error("InternalError: {0}")]
     InternalError(anyhow::Error),
     #[error("BorshError: {0}")]
@@ -343,6 +360,12 @@ pub enum Error {
     TransactionSigningError(#[from] SignerError),
     #[error("FailedToPrepareBufferError: {0}")]
     FailedToPrepareBufferError(#[from] MagicBlockRpcClientError),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    FailedToPrepareBufferAccounts(#[source] InternalError),
+    FailedToCreateALTError(#[source] InternalError),
 }
 
 pub type DeliveryPreparatorResult<T, E = Error> = Result<T, E>;

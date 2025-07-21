@@ -16,7 +16,7 @@ mod transactions;
 mod types;
 mod undelegate;
 
-mod commit_scheduler;
+pub mod commit_scheduler;
 // TODO(edwin): define visibility
 pub(crate) mod l1_message_executor;
 #[cfg(feature = "dev-context-only-utils")]

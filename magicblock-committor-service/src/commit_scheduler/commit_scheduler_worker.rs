@@ -41,8 +41,8 @@ pub type BroadcasteddMessageExecutionResult = MessageExecutorResult<
 // TODO(edwin): reduce num of params: 1,2,3, could be united
 pub(crate) struct CommitSchedulerWorker<D, P> {
     db: Arc<D>,
-    l1_messages_persister: P,
-    executor_factory: L1MessageExecutorFactory<P>,
+    l1_messages_persister: Option<P>,
+    executor_factory: L1MessageExecutorFactory,
     commit_id_tracker: CommitIdTracker,
     receiver: mpsc::Receiver<ScheduledL1Message>,
 
@@ -59,7 +59,7 @@ where
 {
     pub fn new(
         db: Arc<D>,
-        l1_messages_persister: P,
+        l1_messages_persister: Option<P>,
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
@@ -72,7 +72,6 @@ where
             rpc_client: rpc_client.clone(),
             table_mania,
             compute_budget_config,
-            l1_messages_persister: l1_messages_persister.clone(),
         };
         let commit_id_tracker = CommitIdTracker::new(rpc_client);
         Self {
@@ -150,10 +149,13 @@ where
 
             // Spawn executor
             let executor = self.executor_factory.create_executor();
+            let persister = self.l1_messages_persister.clone();
             let inner = self.inner.clone();
             let notify = self.notify.clone();
+
             tokio::spawn(Self::execute(
                 executor,
+                persister,
                 l1_message,
                 commit_ids,
                 inner,
@@ -220,7 +222,8 @@ where
 
     /// Wrapper on [`L1MessageExecutor`] that handles its results and drops execution permit
     async fn execute<T: TransactionPreparator>(
-        executor: L1MessageExecutor<T, P>,
+        executor: L1MessageExecutor<T>,
+        persister: Option<P>,
         l1_message: ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
         inner_scheduler: Arc<Mutex<CommitSchedulerInner>>,
@@ -229,8 +232,9 @@ where
         notify: Arc<Notify>,
     ) {
         let result = executor
-            .execute(l1_message.clone(), commit_ids)
+            .execute(l1_message.clone(), commit_ids, persister)
             .await
+            .inspect_err(|err| error!("Failed to execute L1Message: {:?}", err))
             .map_err(|err| Arc::new(err));
 
         // Broadcast result to subscribers
@@ -251,22 +255,20 @@ where
 }
 
 /// Dummy struct to implify signatur
-struct L1MessageExecutorFactory<P> {
+struct L1MessageExecutorFactory {
     rpc_client: MagicblockRpcClient,
     table_mania: TableMania,
     compute_budget_config: ComputeBudgetConfig,
-    l1_messages_persister: P,
 }
 
-impl<P: L1MessagesPersisterIface> L1MessageExecutorFactory<P> {
+impl L1MessageExecutorFactory {
     pub fn create_executor(
         &self,
-    ) -> L1MessageExecutor<TransactionPreparatorV1, P> {
-        L1MessageExecutor::<TransactionPreparatorV1, P>::new_v1(
+    ) -> L1MessageExecutor<TransactionPreparatorV1> {
+        L1MessageExecutor::<TransactionPreparatorV1>::new_v1(
             self.rpc_client.clone(),
             self.table_mania.clone(),
             self.compute_budget_config.clone(),
-            self.l1_messages_persister.clone(),
         )
     }
 }

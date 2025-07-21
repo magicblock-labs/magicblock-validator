@@ -110,20 +110,8 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         // create tasks
         let tasks = TaskBuilderV1::commit_tasks(l1_message, &commit_ids)?;
         // optimize to fit tx size. aka Delivery Strategy
-        let tx_strategy = match TaskStrategist::build_strategy(
-            tasks,
-            &authority.pubkey(),
-        ) {
-            Ok(value) => Ok(value),
-            Err(err) => match err {
-                err
-                @ crate::tasks::task_strategist::Error::FailedToFitError => {
-                    // TODO(edwin)
-                    commit_ids.iter().for_each(|(pubkey, commit_id)| {});
-                    Err(err.into())
-                }
-            },
-        }?;
+        let tx_strategy =
+            TaskStrategist::build_strategy(tasks, &authority.pubkey())?;
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator
@@ -132,9 +120,9 @@ impl TransactionPreparator for TransactionPreparatorV1 {
                 &tx_strategy,
                 l1_messages_persister,
             )
-            .await
-            .unwrap(); // TODO: fix
-                       // Build resulting TX to be executed
+            .await?;
+
+        // Build resulting TX to be executed
         let message = TransactionUtils::assemble_tasks_tx(
             authority,
             &tx_strategy.optimized_tasks,
@@ -161,9 +149,12 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator
-            .prepare_for_delivery(authority, &tx_strategy)
-            .await
-            .unwrap(); // TODO: fix
+            .prepare_for_delivery(
+                authority,
+                &tx_strategy,
+                l1_messages_persister,
+            )
+            .await?;
 
         let message = TransactionUtils::assemble_tasks_tx(
             authority,

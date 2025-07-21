@@ -20,6 +20,7 @@ use crate::{
     consts::MAX_WRITE_CHUNK_SIZE, tasks::budget_calculator::ComputeBudgetV1,
 };
 
+#[derive(Clone, Debug)]
 pub struct TaskPreparationInfo {
     pub commit_id: u64,
     pub pubkey: Pubkey,

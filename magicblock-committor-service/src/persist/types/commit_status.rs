@@ -35,8 +35,6 @@ pub enum CommitStatus {
     FailedProcess((u64, CommitStrategy, Option<CommitStatusSignatures>)),
     /// The commit was properly processed but the requested finalize transaction failed.
     FailedFinalize((u64, CommitStrategy, CommitStatusSignatures)),
-    /// The commit was properly processed and finalized but the requested undelegate transaction failed.
-    FailedUndelegate((u64, CommitStrategy, CommitStatusSignatures)),
     /// The commit was successfully processed and finalized.
     Succeeded((u64, CommitStrategy, CommitStatusSignatures)),
 }
@@ -73,15 +71,6 @@ impl fmt::Display for CommitStatus {
                 write!(
                     f,
                     "FailedFinalize({}, {}, {:?})",
-                    bundle_id,
-                    strategy.as_str(),
-                    sigs
-                )
-            }
-            CommitStatus::FailedUndelegate((bundle_id, strategy, sigs)) => {
-                write!(
-                    f,
-                    "FailedUndelegate({}, {}, {:?})",
                     bundle_id,
                     strategy.as_str(),
                     sigs
@@ -143,9 +132,6 @@ impl TryFrom<(&str, u64, CommitStrategy, Option<CommitStatusSignatures>)>
             "FailedFinalize" => {
                 Ok(FailedFinalize((commit_id, strategy, get_sigs()?)))
             }
-            "FailedUndelegate" => {
-                Ok(FailedUndelegate((commit_id, strategy, get_sigs()?)))
-            }
             "Succeeded" => Ok(Succeeded((commit_id, strategy, get_sigs()?))),
             _ => {
                 Err(CommitPersistError::InvalidCommitStatus(status.to_string()))
@@ -187,7 +173,6 @@ impl CommitStatus {
             PartOfTooLargeBundleToProcess(_) => "PartOfTooLargeBundleToProcess",
             FailedProcess(_) => "FailedProcess",
             FailedFinalize(_) => "FailedFinalize",
-            FailedUndelegate(_) => "FailedUndelegate",
             Succeeded(_) => "Succeeded",
         }
     }
@@ -202,7 +187,6 @@ impl CommitStatus {
             | PartOfTooLargeBundleToProcess(bundle_id)
             | FailedProcess((bundle_id, _, _))
             | FailedFinalize((bundle_id, _, _))
-            | FailedUndelegate((bundle_id, _, _))
             | Succeeded((bundle_id, _, _)) => Some(*bundle_id),
             Pending => None,
         }
@@ -229,7 +213,6 @@ impl CommitStatus {
             PartOfTooLargeBundleToProcess(_) => CommitStrategy::Undetermined,
             FailedProcess((_, strategy, _)) => *strategy,
             FailedFinalize((_, strategy, _)) => *strategy,
-            FailedUndelegate((_, strategy, _)) => *strategy,
             Succeeded((_, strategy, _)) => *strategy,
         }
     }
