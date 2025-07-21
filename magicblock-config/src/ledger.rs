@@ -103,9 +103,8 @@ const fn default_ledger_size() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::EphemeralConfig;
-
     use super::*;
+    use crate::EphemeralConfig;
 
     #[test]
     fn test_merge_with_default() {
