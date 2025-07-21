@@ -20,7 +20,9 @@ pub type AdbResult<T> = Result<T, AccountsDbError>;
 pub type StWLock = Arc<RwLock<()>>;
 
 pub const ACCOUNTSDB_DIR: &str = "accountsdb";
-const ACCOUNTSDB_SUB_DIR: &str = "accountsdb/main";
+fn accountsdb_sub_dir() -> String {
+    format!("{}/main", ACCOUNTSDB_DIR)
+}
 
 pub struct AccountsDb {
     /// Main accounts storage, where actual account records are kept
@@ -42,7 +44,7 @@ impl AccountsDb {
         directory: &Path,
         lock: StWLock,
     ) -> AdbResult<Self> {
-        let directory = directory.join(ACCOUNTSDB_SUB_DIR);
+        let directory = directory.join(accountsdb_sub_dir());
 
         std::fs::create_dir_all(&directory).inspect_err(log_err!(
             "ensuring existence of accountsdb directory"
