@@ -59,7 +59,7 @@ impl Default for LedgerConfig {
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-#[clap(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
 pub enum LedgerResumeStrategy {
     #[default]
     Reset,
@@ -87,10 +87,10 @@ const fn default_ledger_size() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use crate::EphemeralConfig;
     use magicblock_config_helpers::Merge;
-
-    use super::*;
 
     #[test]
     fn test_merge_with_default() {
