@@ -1,5 +1,5 @@
 [accounts]
-remote = { http = "https://rpc.ironforge.network/devnet?apiKey=01HBGMPGFMCPPFCXDZ43Y1K80K", ws = ["wss://devnet.helius-rpc.com/?api-key=1bf47fbb-a652-4e8d-b35a-c07af6f60391", "wss://magicblo-devd137-9da1.devnet.rpcpool.com/93b47c17-2067-4a37-9778-ed731f9c6427"]}
+remote = { url = "https://rpc.ironforge.network/devnet?apiKey=01HBGMPGFMCPPFCXDZ43Y1K80K", ws_url = ["wss://devnet.helius-rpc.com/?api-key=1bf47fbb-a652-4e8d-b35a-c07af6f60391", "wss://magicblo-devd137-9da1.devnet.rpcpool.com/93b47c17-2067-4a37-9778-ed731f9c6427"]}
 lifecycle = "ephemeral"
 commit = { frequency_millis = 10_000 }
 
