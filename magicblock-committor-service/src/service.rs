@@ -16,7 +16,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    commit::CommittorProcessor,
+    committor_processor::CommittorProcessor,
     config::ChainConfig,
     error::CommittorServiceResult,
     persist::{CommitStatusRow, MessageSignatures},
@@ -61,6 +61,7 @@ pub enum CommittorMessage {
         respond_to:
             oneshot::Sender<CommittorServiceResult<Option<MessageSignatures>>>,
         commit_id: u64,
+        pubkey: Pubkey,
     },
     GetLookupTables {
         respond_to: oneshot::Sender<LookupTables>,
@@ -140,8 +141,10 @@ impl CommittorActor {
             GetCommitSignatures {
                 commit_id,
                 respond_to,
+                pubkey,
             } => {
-                let sig = self.processor.get_signature(commit_id);
+                let sig =
+                    self.processor.get_commit_signature(commit_id, pubkey);
                 if let Err(e) = respond_to.send(sig) {
                     error!("Failed to send response {:?}", e);
                 }
@@ -237,12 +240,14 @@ impl CommittorService {
     pub fn get_commit_signatures(
         &self,
         commit_id: u64,
+        pubkey: Pubkey,
     ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
     {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::GetCommitSignatures {
             respond_to: tx,
             commit_id,
+            pubkey,
         });
         rx
     }
@@ -315,12 +320,14 @@ impl L1MessageCommittor for CommittorService {
     fn get_commit_signatures(
         &self,
         commit_id: u64,
+        pubkey: Pubkey,
     ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
     {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::GetCommitSignatures {
             respond_to: tx,
             commit_id,
+            pubkey,
         });
         rx
     }
@@ -352,6 +359,7 @@ pub trait L1MessageCommittor: Send + Sync + 'static {
     /// Gets signatures for commit of particular accounts
     fn get_commit_signatures(
         &self,
-        bundle_id: u64,
+        commit_id: u64,
+        pubkey: Pubkey,
     ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>;
 }

@@ -1,7 +1,12 @@
-use crate::persist::{CommitStrategy, L1MessagesPersisterIface};
-use crate::tasks::tasks::{ArgsTask, BufferTask};
-use crate::tasks::visitor::Visitor;
 use log::error;
+
+use crate::{
+    persist::{CommitStrategy, L1MessagesPersisterIface},
+    tasks::{
+        tasks::{ArgsTask, BufferTask},
+        visitor::Visitor,
+    },
+};
 
 pub enum PersistorContext {
     PersistStrategy { uses_lookup_tables: bool },
@@ -37,7 +42,8 @@ where
                 ) {
                     error!(
                         "Failed to persist commit strategy {}: {}",
-                        commit_strategy.as_str(), err
+                        commit_strategy.as_str(),
+                        err
                     );
                 }
             }
@@ -61,7 +67,8 @@ where
                 ) {
                     error!(
                         "Failed to persist commit strategy {}: {}",
-                        commit_strategy.as_str(), err
+                        commit_strategy.as_str(),
+                        err
                     );
                 }
             }

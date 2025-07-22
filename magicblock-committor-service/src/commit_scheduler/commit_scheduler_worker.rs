@@ -90,7 +90,7 @@ where
 
     /// Spawns `main_loop` and return `Receiver` listening to results
     pub fn spawn(
-        mut self,
+        self,
     ) -> broadcast::Receiver<BroadcasteddMessageExecutionResult> {
         let (result_sender, result_receiver) = broadcast::channel(100);
         tokio::spawn(self.main_loop(result_sender));

@@ -1,8 +1,6 @@
 mod bundle_strategy;
 mod bundles;
-mod commit;
 mod commit_info;
-mod commit_stage;
 mod commit_strategist;
 mod compute_budget;
 pub mod config;
@@ -18,6 +16,7 @@ mod undelegate;
 
 pub mod commit_scheduler;
 // TODO(edwin): define visibility
+mod committor_processor;
 pub(crate) mod l1_message_executor;
 #[cfg(feature = "dev-context-only-utils")]
 pub mod stubs;
@@ -26,7 +25,6 @@ pub(crate) mod transaction_preperator;
 pub(crate) mod utils;
 
 pub use commit_info::CommitInfo;
-pub use commit_stage::CommitStage;
 pub use compute_budget::ComputeBudgetConfig;
 pub use magicblock_committor_program::{
     ChangedAccount, Changeset, ChangesetMeta,

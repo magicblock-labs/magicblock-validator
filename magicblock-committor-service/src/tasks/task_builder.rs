@@ -15,7 +15,7 @@ pub trait TasksBuilder {
     fn commit_tasks(
         l1_message: &ScheduledL1Message,
         commit_ids: &HashMap<Pubkey, u64>,
-    ) -> Vec<Box<dyn L1Task>>;
+    ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>>;
 
     // Create tasks for finalize stage
     fn finalize_tasks(

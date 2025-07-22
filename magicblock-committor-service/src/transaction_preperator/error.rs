@@ -1,7 +1,5 @@
-use solana_pubkey::{pubkey, Pubkey};
+use solana_pubkey::Pubkey;
 use thiserror::Error;
-
-use crate::transaction_preperator::transaction_preparator::PreparatorVersion;
 
 #[derive(Error, Debug)]
 pub enum Error {

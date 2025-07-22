@@ -3,12 +3,12 @@ use std::{collections::BinaryHeap, ptr::NonNull};
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 
-use crate::persist::L1MessagesPersisterIface;
-use crate::tasks::task_visitors::persistor_visitor::{
-    PersistorContext, PersistorVisitor,
-};
 use crate::{
+    persist::L1MessagesPersisterIface,
     tasks::{
+        task_visitors::persistor_visitor::{
+            PersistorContext, PersistorVisitor,
+        },
         tasks::{ArgsTask, L1Task},
         utils::TransactionUtils,
     },

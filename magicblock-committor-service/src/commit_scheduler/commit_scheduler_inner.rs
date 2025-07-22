@@ -84,12 +84,18 @@ impl CommitSchedulerInner {
             return Some(l1_message);
         };
 
-        let (entries, is_conflicting) =
-            Self::find_conflicting_entries(&pubkeys, &mut self.blocked_keys);
+        // Check if there are any conflicting keys
+        let is_conflicting = pubkeys
+            .iter()
+            .any(|pubkey| self.blocked_keys.contains_key(pubkey));
         // In any case block the corresponding accounts
-        entries
-            .into_iter()
-            .for_each(|entry| entry.or_default().push_back(message_id));
+        pubkeys.iter().for_each(|pubkey| {
+            self.blocked_keys
+                .entry(*pubkey)
+                .or_default()
+                .push_back(message_id)
+        });
+
         if is_conflicting {
             // Enqueue incoming message
             self.blocked_messages.insert(
@@ -116,10 +122,10 @@ impl CommitSchedulerInner {
             return;
         };
 
-        let (entries, _) =
-            Self::find_conflicting_entries(&pubkeys, &mut self.blocked_keys);
-        entries.into_iter().for_each(|entry| {
-            let mut occupied = match entry {
+        pubkeys
+            .iter()
+            .for_each(|pubkey| {
+            let mut occupied = match self.blocked_keys.entry(*pubkey) {
                 Entry::Vacant(_) => unreachable!("Invariant: queue for conflicting tasks shall exist"),
                 Entry::Occupied(value) => value
             };
@@ -165,35 +171,6 @@ impl CommitSchedulerInner {
         } else {
             None
         }
-    }
-
-    fn find_conflicting_entries<'a, 'b>(
-        pubkeys: &[Pubkey],
-        blocked_keys: &'a mut HashMap<Pubkey, VecDeque<MessageID>>,
-    ) -> (Vec<Entry<'b, Pubkey, VecDeque<MessageID>>>, bool)
-    where
-        'a: 'b,
-    {
-        let mut is_conflicting = false;
-        let entries = pubkeys
-            .iter()
-            .map(|pubkey| {
-                let entry = blocked_keys.entry(*pubkey);
-
-                if is_conflicting {
-                    entry
-                } else {
-                    if let Entry::Occupied(_) = &entry {
-                        is_conflicting = true;
-                        entry
-                    } else {
-                        entry
-                    }
-                }
-            })
-            .collect();
-
-        (entries, is_conflicting)
     }
 
     /// Returns number of blocked messages

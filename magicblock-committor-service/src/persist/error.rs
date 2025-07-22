@@ -22,6 +22,9 @@ pub enum CommitPersistError {
     #[error("Invalid Commit Status: '{0}' ({0:?})")]
     InvalidCommitStatus(String),
 
+    #[error("Invalid Commit Strategy: '{0}' ({0:?})")]
+    InvalidCommitStrategy(String),
+
     #[error(
         "Commit Status update requires status with bundle id: '{0}' ({0:?})"
     )]

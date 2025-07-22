@@ -124,9 +124,27 @@ const ALL_COMMIT_STATUS_COLUMNS: &str = "
     retries_count // 17
 ";
 
-const SELECT_ALL_COMMIT_STATUS_COLUMNS: &str = const {
-    concat!("SELECT", ALL_COMMIT_STATUS_COLUMNS, "FROM commit_status")
-};
+const SELECT_ALL_COMMIT_STATUS_COLUMNS: &str = r#"
+SELECT
+    message_id, // 1
+    pubkey, // 2
+    commit_id, // 3
+    delegated_account_owner, // 4
+    slot, // 5
+    ephemeral_blockhash, // 6
+    undelegate, // 7
+    lamports, // 8
+    data, // 9
+    commit_type, // 10
+    created_at, // 11
+    commit_strategy, // 12
+    commit_status, // 13
+    processed_signature, // 14
+    finalized_signature, // 15
+    last_retried_at, // 16
+    retries_count // 17
+FROM commit_status
+"#;
 
 // -----------------
 // CommittorDb
@@ -309,10 +327,9 @@ impl CommittsDb {
     ) -> CommitPersistResult<()> {
         let (processed_signature, finalized_signature) =
             match commit.commit_status.signatures() {
-                Some(sigs) => (
-                    Some(sigs.process_signature),
-                    sigs.finalize_signature,
-                ),
+                Some(sigs) => {
+                    (Some(sigs.process_signature), sigs.finalize_signature)
+                }
                 None => (None, None),
             };
         tx.execute(
@@ -408,7 +425,7 @@ impl CommittsDb {
             LIMIT 1";
 
         let mut stmt = self.conn.prepare(&query)?;
-        let mut rows = stmt.query(params![commit_id, pubkey])?;
+        let mut rows = stmt.query(params![commit_id, pubkey.to_string()])?;
 
         let result = rows
             .next()?
@@ -500,7 +517,7 @@ fn extract_committor_row(
 
     let commit_strategy = {
         let commit_strategy: String = row.get(11)?;
-        CommitStrategy::from(commit_strategy.as_str())
+        CommitStrategy::try_from(commit_strategy.as_str())?
     };
 
     let commit_status = {
@@ -521,11 +538,7 @@ fn extract_committor_row(
             process_signature: s,
             finalize_signature: finalized_signature,
         });
-        CommitStatus::try_from((
-            commit_status.as_str(),
-            commit_id,
-            sigs,
-        ))?
+        CommitStatus::try_from((commit_status.as_str(), commit_id, sigs))?
     };
 
     let last_retried_at: u64 = {

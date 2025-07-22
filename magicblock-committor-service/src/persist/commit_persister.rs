@@ -127,6 +127,7 @@ impl L1MessagePersister {
                     data,
                     commit_type,
                     created_at,
+                    commit_strategy: CommitStrategy::default(),
                     commit_status: CommitStatus::Pending,
                     last_retried_at: created_at,
                     retries_count: 0,

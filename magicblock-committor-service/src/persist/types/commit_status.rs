@@ -2,7 +2,6 @@ use std::fmt;
 
 use solana_sdk::signature::Signature;
 
-use super::commit_strategy::CommitStrategy;
 use crate::persist::error::CommitPersistError;
 
 /// The status of a committed account.
@@ -59,44 +58,23 @@ impl fmt::Display for CommitStatus {
                 write!(f, "PartOfTooLargeBundleToProcess({})", bundle_id)
             }
             CommitStatus::FailedProcess((bundle_id, sigs)) => {
-                write!(
-                    f,
-                    "FailedProcess({}, {:?})",
-                    bundle_id,
-                    sigs
-                )
+                write!(f, "FailedProcess({}, {:?})", bundle_id, sigs)
             }
             CommitStatus::FailedFinalize((bundle_id, sigs)) => {
-                write!(
-                    f,
-                    "FailedFinalize({}, {:?})",
-                    bundle_id,
-                    sigs
-                )
+                write!(f, "FailedFinalize({}, {:?})", bundle_id, sigs)
             }
             CommitStatus::Succeeded((bundle_id, sigs)) => {
-                write!(
-                    f,
-                    "Succeeded({}, {:?})",
-                    bundle_id,
-                    sigs
-                )
+                write!(f, "Succeeded({}, {:?})", bundle_id, sigs)
             }
         }
     }
 }
 
-impl TryFrom<(&str, u64, Option<CommitStatusSignatures>)>
-    for CommitStatus
-{
+impl TryFrom<(&str, u64, Option<CommitStatusSignatures>)> for CommitStatus {
     type Error = CommitPersistError;
 
     fn try_from(
-        (status, commit_id, sigs): (
-            &str,
-            u64,
-            Option<CommitStatusSignatures>,
-        ),
+        (status, commit_id, sigs): (&str, u64, Option<CommitStatusSignatures>),
     ) -> Result<Self, Self::Error> {
         let get_sigs = || {
             if let Some(sigs) = sigs.clone() {
@@ -125,9 +103,7 @@ impl TryFrom<(&str, u64, Option<CommitStatusSignatures>)>
                 Ok(PartOfTooLargeBundleToProcess(commit_id))
             }
             "FailedProcess" => Ok(FailedProcess((commit_id, sigs))),
-            "FailedFinalize" => {
-                Ok(FailedFinalize((commit_id, get_sigs()?)))
-            }
+            "FailedFinalize" => Ok(FailedFinalize((commit_id, get_sigs()?))),
             "Succeeded" => Ok(Succeeded((commit_id, get_sigs()?))),
             _ => {
                 Err(CommitPersistError::InvalidCommitStatus(status.to_string()))

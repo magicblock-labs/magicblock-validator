@@ -18,14 +18,12 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 
-use crate::persist::CommitStatusSignatures;
-use crate::utils::persist_status_update;
 use crate::{
-    persist::{CommitStatus, L1MessagesPersisterIface},
+    persist::{CommitStatus, CommitStatusSignatures, L1MessagesPersisterIface},
     transaction_preperator::transaction_preparator::{
         TransactionPreparator, TransactionPreparatorV1,
     },
-    utils::persist_status_update_set,
+    utils::{persist_status_update, persist_status_update_set},
     ComputeBudgetConfig,
 };
 
@@ -72,7 +70,9 @@ where
         commit_ids: HashMap<Pubkey, u64>,
         persister: Option<P>,
     ) -> MessageExecutorResult<ExecutionOutput> {
-        let result = self.execute_inner(l1_message, &commit_ids, &persister).await;
+        let result = self
+            .execute_inner(l1_message, &commit_ids, &persister)
+            .await;
         Self::persist_result(&persister, &result, &commit_ids);
 
         result

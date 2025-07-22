@@ -1,37 +1,24 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashSet, path::Path, sync::Arc};
 
 use log::*;
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
-use magicblock_rpc_client::{
-    MagicBlockSendTransactionConfig, MagicblockRpcClient,
-};
+use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    hash::Hash,
-    signature::{Keypair, Signature},
-    signer::Signer,
+    commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
 };
-use tokio::task::JoinSet;
 
-use super::common::{lookup_table_keys, send_and_confirm};
 use crate::{
     commit_scheduler::{db::DummyDB, CommitScheduler},
-    compute_budget::{ComputeBudget, ComputeBudgetConfig},
+    compute_budget::ComputeBudgetConfig,
     config::ChainConfig,
     error::CommittorServiceResult,
     persist::{
         CommitStatusRow, L1MessagePersister, L1MessagesPersisterIface,
         MessageSignatures,
     },
-    types::{InstructionsForCommitable, InstructionsKind},
-    CommitInfo,
 };
 
 pub(crate) struct CommittorProcessor {
@@ -76,7 +63,7 @@ impl CommittorProcessor {
         let commits_scheduler = CommitScheduler::new(
             magic_block_rpc_client.clone(),
             DummyDB::new(),
-            persister.clone(),
+            Some(persister.clone()),
             table_mania.clone(),
             chain_config.compute_budget_config.clone(),
         );
@@ -126,11 +113,14 @@ impl CommittorProcessor {
         Ok(commit_statuses)
     }
 
-    pub fn get_signature(
+    pub fn get_commit_signature(
         &self,
         commit_id: u64,
+        pubkey: Pubkey,
     ) -> CommittorServiceResult<Option<MessageSignatures>> {
-        let signatures = self.persister.get_signatures_by_commit(commit_id)?;
+        let signatures = self
+            .persister
+            .get_signatures_by_commit(commit_id, &pubkey)?;
         Ok(signatures)
     }
 
