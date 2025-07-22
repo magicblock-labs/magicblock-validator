@@ -5,7 +5,6 @@ use syn::{Data, DeriveInput, Fields, Type};
 pub struct Merger;
 
 impl Merger {
-    /// Helper function to check if a type has a merge method by looking for common patterns
     fn type_has_merge_method(ty: &Type) -> bool {
         match ty {
             Type::Path(type_path) => {
@@ -66,10 +65,9 @@ impl Merger {
                     self.#name.merge(other.#name);
                 }
             } else {
-                // Otherwise, use the current default-based merging logic
-                // Use .clone() to avoid move issues with non-Copy types
+                // Otherwise, overwrite the field if it has the default value
                 quote! {
-                    if self.#name == default.#name && other.#name != default.#name {
+                    if self.#name == default.#name {
                         self.#name = other.#name;
                     }
                 }

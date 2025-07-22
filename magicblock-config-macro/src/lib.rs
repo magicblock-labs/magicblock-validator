@@ -199,10 +199,10 @@ pub fn clap_from_serde(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// impl Merge for SomeOtherConfig {
 ///     fn merge(&mut self, other: Self) {
 ///         let default = Self::default();
-///         if self.field1 == default.field1 && other.field1 != default.field1 {
+///         if self.field1 == default.field1 {
 ///             self.field1 = other.field1;
 ///         }
-///         if self.field2 == default.field2 && other.field2 != default.field2 {
+///         if self.field2 == default.field2 {
 ///             self.field2 = other.field2;
 ///         }
 ///     }
@@ -217,7 +217,7 @@ pub fn clap_from_serde(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// impl Merge for MyConfig {
 ///     fn merge(&mut self, other: Self) {
 ///         let default = Self::default();
-///         if self.field1 == default.field1 && other.field1 != default.field1 {
+///         if self.field1 == default.field1 {
 ///             self.field1 = other.field1;
 ///         }
 ///         self.field2.merge(other.field2);
