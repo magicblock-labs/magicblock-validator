@@ -1,0 +1,78 @@
+use hyper::{body::Incoming, Request, Response};
+use json::JsonValueTrait;
+use utils::{extract_bytes, parse_body, JsonBody};
+
+use crate::{error::RpcError, state::SharedState, RpcResult};
+
+pub(crate) async fn dispatch(
+    request: Request<Incoming>,
+    state: SharedState,
+) -> RpcResult<Response<JsonBody>> {
+    let body = extract_bytes(request).await?;
+    let mut body = parse_body(body)?;
+
+    let params = body
+        .remove(&"params")
+        .and_then(|p| p.into_array())
+        .ok_or_else(|| {
+            RpcError::invalid_request("missing or invalid request params")
+        })?;
+    let method = body
+        .get(&"method")
+        .and_then(|m| m.as_str())
+        .ok_or_else(|| RpcError::invalid_request("missing request method"))?;
+    match method {
+        "getAccountInfo" => {
+            todo!()
+        }
+        "getMultipleAccounts" => {
+            todo!()
+        }
+        "getProgramAccounts" => {
+            todo!()
+        }
+        "sendTransaction" => {
+            todo!()
+        }
+        "simulateTransaction" => {
+            todo!()
+        }
+        "getTransaction" => {
+            todo!()
+        }
+        "getSignatureStatuses" => {
+            todo!()
+        }
+        "getSignaturesForAddress" => {
+            todo!()
+        }
+        "getTokenAccountsByOwner" => {
+            todo!()
+        }
+        "getTokenAccountsByDelegate" => {
+            todo!()
+        }
+        unknown => Err(RpcError::method_not_found(unknown)),
+    }
+}
+
+mod get_account_info;
+mod get_balance;
+mod get_block;
+mod get_block_height;
+mod get_block_time;
+mod get_blocks;
+mod get_blocks_with_limit;
+mod get_fees_for_message;
+mod get_identity;
+mod get_latest_blockhash;
+mod get_multiple_accounts;
+mod get_program_accounts;
+mod get_signature_statuses;
+mod get_signatures_for_address;
+mod get_slot;
+mod get_token_account_balance;
+mod get_token_accounts_by_delegate;
+mod get_token_accounts_by_owner;
+mod get_transaction;
+mod utils;
