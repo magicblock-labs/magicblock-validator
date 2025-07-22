@@ -144,7 +144,7 @@ mod tests {
     fn test_serde() {
         let toml_str = r#"
 [ledger]
-resume-strategy = "replay-and-resume"
+resume-strategy = "replay"
 path = "ledger.example.com"
 size = 1000000000
 "#;
