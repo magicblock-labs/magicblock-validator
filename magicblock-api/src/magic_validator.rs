@@ -169,6 +169,7 @@ pub struct MagicValidator {
     geyser_rpc_service: Arc<GeyserRpcService>,
     pubsub_config: PubsubConfig,
     pub transaction_status_sender: TransactionStatusSender,
+    claim_fees_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl MagicValidator {
@@ -415,6 +416,7 @@ impl MagicValidator {
             accounts_manager,
             transaction_listener,
             transaction_status_sender,
+            claim_fees_task: None,
         })
     }
 
@@ -699,11 +701,11 @@ impl MagicValidator {
         }
     }
 
-    async fn claim_fees(&self) -> ApiResult<()> {
+    async fn claim_fees(config: EphemeralConfig) -> ApiResult<()> {
         info!("Claiming validator fees");
 
         // building the config
-        let url = cluster_from_remote(&self.config.accounts.remote);
+        let url = cluster_from_remote(&config.accounts.remote);
         let rpc_client = RpcClient::new_with_commitment(
             url.url().to_string(),
             CommitmentConfig::confirmed(),
@@ -753,7 +755,23 @@ impl MagicValidator {
             }
         }
 
-        self.claim_fees().await?; //this will block the main thread should we spawn a new task?
+        let claim_fees_token = self.token.clone();
+        let claim_fees_interval = Duration::from_secs(60 * 60);
+        let config = self.config.clone();
+
+        self.claim_fees_task = Some(tokio::spawn(async move {
+            log::info!("Starting claim fees task");
+            loop {
+                log::info!("Claiming fees");
+                if let Err(err) = MagicValidator::claim_fees(config.clone()).await {
+                    log::error!("Failed to claim fees: {:?}", err);
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(claim_fees_interval) => {}
+                    _ = claim_fees_token.cancelled() => break,
+                }
+            }
+        }));
 
         self.maybe_process_ledger()?;
 
