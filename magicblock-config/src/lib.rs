@@ -247,7 +247,7 @@ mod tests {
                 country_code: CountryCode::for_alpha2("FR").unwrap(),
             },
             ledger: LedgerConfig {
-                reset: false,
+                resume_strategy: LedgerResumeStrategy::Replay,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },
@@ -326,7 +326,7 @@ mod tests {
                 country_code: CountryCode::for_alpha2("FR").unwrap(),
             },
             ledger: LedgerConfig {
-                reset: false,
+                resume_strategy: LedgerResumeStrategy::Replay,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },
@@ -402,7 +402,7 @@ mod tests {
                 country_code: CountryCode::for_alpha2("DE").unwrap(),
             },
             ledger: LedgerConfig {
-                reset: false,
+                resume_strategy: LedgerResumeStrategy::ResumeOnly,
                 path: Some("ledger2.example.com".to_string()),
                 size: 100000,
             },
@@ -471,7 +471,7 @@ mod tests {
                 country_code: CountryCode::for_alpha2("FR").unwrap(),
             },
             ledger: LedgerConfig {
-                reset: false,
+                resume_strategy: LedgerResumeStrategy::Replay,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },

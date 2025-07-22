@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Arc};
 
+use const_format::concatcp;
 use error::AccountsDbError;
 use index::AccountsDbIndex;
 use log::{error, warn};
@@ -19,7 +20,8 @@ pub type AdbResult<T> = Result<T, AccountsDbError>;
 /// some critical operation is in action, e.g. snapshotting
 pub type StWLock = Arc<RwLock<()>>;
 
-const ACCOUNTSDB_SUB_DIR: &str = "accountsdb/main";
+pub const ACCOUNTSDB_DIR: &str = "accountsdb";
+const ACCOUNTSDB_SUB_DIR: &str = concatcp!(ACCOUNTSDB_DIR, "/main");
 
 pub struct AccountsDb {
     /// Main accounts storage, where actual account records are kept

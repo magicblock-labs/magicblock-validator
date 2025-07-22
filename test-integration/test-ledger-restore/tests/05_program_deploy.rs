@@ -1,4 +1,5 @@
 use cleanass::assert_eq;
+use magicblock_config::LedgerResumeStrategy;
 use std::{
     io::{self, Write},
     path::Path,
@@ -62,8 +63,12 @@ fn write(
 ) -> (Child, u64) {
     let authority = read_authority_pubkey(flexi_counter_paths);
 
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, true);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::Reset,
+    );
 
     expect!(ctx.wait_for_slot_ephem(1), validator);
 
@@ -120,8 +125,12 @@ fn write(
 }
 
 fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
-    let (_, mut validator, _) =
-        setup_offline_validator(ledger_path, None, None, false);
+    let (_, mut validator, _) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::Replay,
+    );
 
     let counter_decoded = fetch_counter_ephem(payer, &mut validator);
     assert_eq!(
