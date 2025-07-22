@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Arc};
 
+use const_format::concatcp;
 use error::AccountsDbError;
 use index::AccountsDbIndex;
 use log::{error, warn};
@@ -20,9 +21,7 @@ pub type AdbResult<T> = Result<T, AccountsDbError>;
 pub type StWLock = Arc<RwLock<()>>;
 
 pub const ACCOUNTSDB_DIR: &str = "accountsdb";
-fn accountsdb_sub_dir() -> String {
-    format!("{}/main", ACCOUNTSDB_DIR)
-}
+const ACCOUNTSDB_SUB_DIR: &str = concatcp!(ACCOUNTSDB_DIR, "/main");
 
 pub struct AccountsDb {
     /// Main accounts storage, where actual account records are kept
@@ -44,7 +43,7 @@ impl AccountsDb {
         directory: &Path,
         lock: StWLock,
     ) -> AdbResult<Self> {
-        let directory = directory.join(accountsdb_sub_dir());
+        let directory = directory.join(ACCOUNTSDB_SUB_DIR);
 
         std::fs::create_dir_all(&directory).inspect_err(log_err!(
             "ensuring existence of accountsdb directory"

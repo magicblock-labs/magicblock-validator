@@ -21,6 +21,7 @@ solana-account = { workspace = true }
 parking_lot = "0.12"
 
 # misc
+const_format = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 log = { workspace = true }
