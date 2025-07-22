@@ -2,6 +2,10 @@
 
 A set of macro helpers to keep the config DRY (Don't Repeat Yourself). It contains two attributes meant to be used on struct that need to derive `serde::Deserialize` and `clap::Args`.
 
+## Tests
+
+If the implementation changes, `tests/fixtures/*.expanded.rs` files must be removed. Re-running tests will regenerate them with the implementation changes included.
+
 ## `clap_prefix`
 
 This macro will update existing `#[arg]` (or create one if needed) and add a `long`, `name`, and `env` constructed from the prefix and the name of each field in annotated struct.
@@ -78,3 +82,58 @@ struct RpcConfig {
 This macro will implement the `magicblock_config_helpers::Merge` trait for annotated struct. 
 
 ### Example
+
+```rust
+use magicblock_config_macro::Mergeable;
+
+#[derive(Default, Mergeable)]
+struct SomeOtherConfig {
+    field1: u32,
+    field2: String,
+}
+
+#[derive(Default, Mergeable)]
+struct MyConfig {
+    field1: u32,
+    field2: SomeOtherConfig,
+}
+```
+
+Will become:
+```rust
+use magicblock_config_helpers::Merge;
+
+#[derive(Default)]
+struct SomeOtherConfig {
+    field1: u32,
+    field2: String,
+}
+
+impl Merge for SomeOtherConfig {
+    fn merge(&mut self, other: Self) {
+        let default = Self::default();
+        if self.field1 == default.field1 {
+            self.field1 = other.field1;
+        }
+        if self.field2 == default.field2 {
+            self.field2 = other.field2;
+        }
+    }
+}
+
+#[derive(Default)]
+struct MyConfig {
+    field1: u32,
+    field2: SomeOtherConfig,
+}
+
+impl Merge for MyConfig {
+    fn merge(&mut self, other: Self) {
+        let default = Self::default();
+        if self.field1 == default.field1 {
+            self.field1 = other.field1;
+        }
+        self.field2.merge(other.field2);
+    }
+}
+```

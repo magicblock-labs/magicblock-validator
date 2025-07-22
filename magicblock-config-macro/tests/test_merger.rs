@@ -1,3 +1,4 @@
+use macrotest::expand;
 use magicblock_config_helpers::Merge;
 use magicblock_config_macro::Mergeable;
 
@@ -67,4 +68,15 @@ fn test_merge_macro_with_non_default_values() {
 
     // nested should use its own merge method (preserves original since both are non-default)
     assert_eq!(config.nested.value, 50);
+}
+
+#[test]
+fn test_merge_macro_codegen() {
+    let t = trybuild::TestCases::new();
+    t.pass("tests/fixtures/pass_merge.rs");
+    t.compile_fail("tests/fixtures/fail_merge_enum.rs");
+    t.compile_fail("tests/fixtures/fail_merge_union.rs");
+    t.compile_fail("tests/fixtures/fail_merge_unnamed.rs");
+
+    expand("tests/fixtures/pass_merge.rs");
 }
