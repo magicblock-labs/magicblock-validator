@@ -1,22 +1,38 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-use fastwebsockets::upgrade::{upgrade, UpgradeFut};
+use fastwebsockets::{
+    upgrade::upgrade, CloseCode, Frame, Payload, WebSocket, WebSocketError,
+};
 use http_body_util::Empty;
 use hyper::{
     body::{Bytes, Incoming},
     server::conn::http1,
     service::service_fn,
+    upgrade::Upgraded,
     Request, Response,
 };
 use hyper_util::rt::TokioIo;
+use json::Value;
 use log::warn;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::Notify,
+    time::interval,
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{error::RpcError, state::SharedState, RpcResult};
+use crate::{
+    error::RpcError,
+    requests::{websocket::utils::SubResult, JsonRequest},
+    state::SharedState,
+    RpcResult,
+};
+
+use super::Shutdown;
+
+type WebscoketStream = WebSocket<TokioIo<Upgraded>>;
 
 pub struct WebsocketServer {
     socket: TcpListener,
@@ -66,32 +82,103 @@ async fn handle_upgrade(
     sd: Arc<Shutdown>,
 ) -> RpcResult<Response<Empty<Bytes>>> {
     let (response, ws) = upgrade(request).map_err(RpcError::internal)?;
-    tokio::spawn(handle_ws_connection(
-        ws,
-        state.clone(),
-        cancel.clone(),
-        sd.clone(),
-    ));
+    tokio::spawn(async move {
+        let Ok(ws) = ws.await else {
+            warn!("failed http upgrade to ws connection");
+            return;
+        };
+        let handler = ConnectionHandler::new(ws, state, cancel, sd);
+        handler.run().await
+    });
     Ok(response)
 }
 
-async fn handle_ws_connection(
-    ws: UpgradeFut,
+struct ConnectionHandler {
     state: SharedState,
     cancel: CancellationToken,
+    ws: WebscoketStream,
     _sd: Arc<Shutdown>,
-) {
-    let Ok(ws) = ws.await else {
-        warn!("failed to upgrade to ws connection");
-        return;
-    };
-    todo!()
 }
 
-#[derive(Default)]
-struct Shutdown(Notify);
-impl Drop for Shutdown {
-    fn drop(&mut self) {
-        self.0.notify_last();
+impl ConnectionHandler {
+    fn new(
+        ws: WebscoketStream,
+        state: SharedState,
+        cancel: CancellationToken,
+        _sd: Arc<Shutdown>,
+    ) -> Self {
+        Self {
+            state,
+            cancel,
+            ws,
+            _sd,
+        }
+    }
+
+    async fn run(mut self) {
+        const MAX_INACTIVE_INTERVAL: Duration = Duration::from_secs(60);
+        let last_activity = Instant::now();
+        let mut ping = interval(Duration::from_secs(30));
+        loop {
+            tokio::select! {
+                Ok(frame) = self.ws.read_frame() => {
+                    let parsed = json::from_slice::<JsonRequest>(&frame.payload).map_err(RpcError::parse_error);
+                    let request = match parsed {
+                        Ok(r) => r,
+                        Err(error) => {
+                            self.report_failure(error, None).await;
+                            continue;
+                        }
+                    };
+                }
+                _ = ping.tick() => {
+                    if last_activity.elapsed() > MAX_INACTIVE_INTERVAL {
+                        let frame = Frame::close(CloseCode::Policy.into(), b"connection inactive for too long");
+                        let _ = self.ws.write_frame(frame).await;
+                        break;
+                    }
+                }
+                _ = self.cancel.cancelled() => break,
+            }
+        }
+    }
+
+    async fn report_success(
+        &mut self,
+        id: Value,
+        result: SubResult,
+    ) -> Result<(), WebSocketError> {
+        let msg = json::json! {{
+            "jsonrpc": "2.0",
+            "result": result,
+            "id": id
+        }};
+        let payload = json::to_vec(&msg)
+            .expect("vec serialization for Value is infallible");
+        self.send(payload).await
+    }
+
+    async fn report_failure(
+        &mut self,
+        error: RpcError,
+        id: Option<Value>,
+    ) -> Result<(), WebSocketError> {
+        let msg = json::json! {{
+            "jsonrpc": "2.0",
+            "error": error,
+            "id": id,
+        }};
+        let payload = json::to_vec(&msg)
+            .expect("vec serialization for Value is infallible");
+        self.send(payload).await
+    }
+
+    #[inline]
+    async fn send(
+        &mut self,
+        payload: impl Into<Payload<'_>>,
+    ) -> Result<(), WebSocketError> {
+        let frame = Frame::text(payload.into());
+        self.ws.write_frame(frame).await
     }
 }

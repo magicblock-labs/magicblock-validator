@@ -1,5 +1,4 @@
 use hyper::{body::Incoming, Request, Response};
-use json::JsonValueTrait;
 use utils::{extract_bytes, parse_body, JsonBody};
 
 use crate::{error::RpcError, state::SharedState, RpcResult};
@@ -9,47 +8,47 @@ pub(crate) async fn dispatch(
     state: SharedState,
 ) -> RpcResult<Response<JsonBody>> {
     let body = extract_bytes(request).await?;
-    let mut body = parse_body(body)?;
+    let request = parse_body(body)?;
 
-    let params = body
-        .remove(&"params")
-        .and_then(|p| p.into_array())
-        .ok_or_else(|| {
-            RpcError::invalid_request("missing or invalid request params")
-        })?;
-    let method = body
-        .get(&"method")
-        .and_then(|m| m.as_str())
-        .ok_or_else(|| RpcError::invalid_request("missing request method"))?;
-    match method {
-        "getAccountInfo" => {
+    use super::JsonRpcMethod::*;
+    match request.method {
+        GetAccountInfo => {
             todo!()
         }
-        "getMultipleAccounts" => {
+        GetMultipleAccounts => {
             todo!()
         }
-        "getProgramAccounts" => {
+        GetProgramAccounts => {
             todo!()
         }
-        "sendTransaction" => {
+        SendTransaction => {
             todo!()
         }
-        "simulateTransaction" => {
+        SimulateTransaction => {
             todo!()
         }
-        "getTransaction" => {
+        GetTransaction => {
             todo!()
         }
-        "getSignatureStatuses" => {
+        GetSignatureStatuses => {
             todo!()
         }
-        "getSignaturesForAddress" => {
+        GetSignaturesForAddress => {
             todo!()
         }
-        "getTokenAccountsByOwner" => {
+        GetTokenAccountsByOwner => {
             todo!()
         }
-        "getTokenAccountsByDelegate" => {
+        GetTokenAccountsByDelegate => {
+            todo!()
+        }
+        GetSlot => {
+            todo!()
+        }
+        GetBlock => {
+            todo!()
+        }
+        GetBlocks => {
             todo!()
         }
         unknown => Err(RpcError::method_not_found(unknown)),

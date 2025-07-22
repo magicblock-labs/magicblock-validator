@@ -8,9 +8,8 @@ use http_body_util::BodyExt;
 use hyper::body::{Body, Bytes, Frame, Incoming, SizeHint};
 use hyper::Request;
 use json::Serialize;
-use json::{Object, Value};
 
-use crate::RpcResult;
+use crate::{requests::JsonRequest, RpcResult};
 
 use super::RpcError;
 
@@ -20,7 +19,7 @@ pub(super) enum Data {
     MultiChunk(Vec<u8>),
 }
 
-pub(super) fn parse_body(body: Data) -> RpcResult<Object> {
+pub(super) fn parse_body(body: Data) -> RpcResult<JsonRequest> {
     let body = match &body {
         Data::Empty => {
             return Err(RpcError::invalid_request("missing request body"));
@@ -28,9 +27,7 @@ pub(super) fn parse_body(body: Data) -> RpcResult<Object> {
         Data::SingleChunk(slice) => slice.as_ref(),
         Data::MultiChunk(vec) => vec.as_ref(),
     };
-    let body = json::from_slice::<Value>(body)?;
-    body.into_object()
-        .ok_or_else(|| RpcError::invalid_request("missing request params"))
+    json::from_slice(body).map_err(Into::into)
 }
 
 pub(super) async fn extract_bytes(

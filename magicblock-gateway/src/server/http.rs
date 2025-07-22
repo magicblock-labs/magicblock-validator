@@ -1,24 +1,22 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
-use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::service::service_fn;
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn,
 };
-use tokio::{
-    net::{TcpListener, TcpStream},
-    task::JoinHandle,
-};
+use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 
 use crate::{error::RpcError, requests, state::SharedState, RpcResult};
+
+use super::Shutdown;
 
 struct HttpServer {
     socket: TcpListener,
     state: SharedState,
     cancel: CancellationToken,
-    connections: FuturesUnordered<JoinHandle<()>>,
+    shutdown: Arc<Shutdown>,
 }
 
 impl HttpServer {
@@ -29,12 +27,12 @@ impl HttpServer {
     ) -> RpcResult<Self> {
         let socket =
             TcpListener::bind(addr).await.map_err(RpcError::internal)?;
-        let connections = FuturesUnordered::new();
+        let shutdown = Arc::default();
         Ok(Self {
             socket,
             state,
-            connections,
             cancel,
+            shutdown,
         })
     }
 
@@ -43,10 +41,9 @@ impl HttpServer {
             tokio::select! {
                 Ok((stream, _)) = self.socket.accept() => self.handle(stream),
                 _ = self.cancel.cancelled() => break,
-                _ = self.connections.next(), if !self.connections.is_empty() => {}
             }
         }
-        while self.connections.next().await.is_some() {}
+        self.shutdown.0.notified().await;
     }
 
     fn handle(&mut self, stream: TcpStream) {
@@ -57,8 +54,9 @@ impl HttpServer {
         let handler = service_fn(move |request| {
             requests::http::dispatch(request, state.clone())
         });
+        let shutdown = self.shutdown.clone();
 
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             let builder = conn::auto::Builder::new(TokioExecutor::new());
             let connection = builder.serve_connection(io, handler);
             tokio::pin!(connection);
@@ -72,7 +70,7 @@ impl HttpServer {
                     }
                 }
             }
+            drop(shutdown);
         });
-        self.connections.push(handle);
     }
 }
