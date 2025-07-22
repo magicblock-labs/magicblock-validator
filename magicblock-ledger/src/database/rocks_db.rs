@@ -1,10 +1,18 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::Path,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use rocksdb::{
     AsColumnFamilyRef, ColumnFamily, DBIterator, DBPinnableSlice,
     DBRawIterator, FlushOptions, IteratorMode as RocksIteratorMode, LiveFile,
     Options, WriteBatch as RWriteBatch, DB,
 };
+use solana_sdk::clock::Slot;
 
 use super::{
     cf_descriptors::cf_descriptors,
@@ -22,15 +30,20 @@ use crate::errors::{LedgerError, LedgerResult};
 pub struct Rocks {
     pub db: DB,
     access_type: AccessType,
+    /// Oldest slot we want to keep in DB, slots before will be removed
+    oldest_slot: Arc<AtomicU64>,
 }
 
 impl Rocks {
     pub fn open(path: &Path, options: LedgerOptions) -> LedgerResult<Self> {
+        const DEFAULT_OLD_SLOT: Slot = 0;
+
         let access_type = options.access_type.clone();
         fs::create_dir_all(path)?;
 
+        let oldest_slot = Arc::new(DEFAULT_OLD_SLOT.into());
         let db_options = get_rocksdb_options(&access_type);
-        let descriptors = cf_descriptors(path, &options);
+        let descriptors = cf_descriptors(path, &options, &oldest_slot);
 
         let db = match access_type {
             AccessType::Primary => {
@@ -39,7 +52,11 @@ impl Rocks {
             _ => unreachable!("Only primary access is supported"),
         };
 
-        Ok(Self { db, access_type })
+        Ok(Self {
+            db,
+            access_type,
+            oldest_slot,
+        })
     }
 
     pub fn destroy(path: &Path) -> LedgerResult<()> {
@@ -235,6 +252,12 @@ impl Rocks {
             Err(e) => Err(LedgerError::RocksDb(e)),
         }
     }
+
+    /// Stores oldest maintained slot in db
+    /// Used in CompactionFilter to decide if slot can be safely removed
+    pub fn set_oldest_slot(&self, slot: Slot) {
+        self.oldest_slot.store(slot, Ordering::Relaxed);
+    }
 }
 
 #[cfg(test)]
@@ -254,7 +277,10 @@ mod tests {
         // The names and descriptors don't need to be in the same order for our use cases;
         // however, there should be the same number of each. For example, adding a new column
         // should update both lists.
-        assert_eq!(columns().len(), cf_descriptors(&path, &options,).len());
+        assert_eq!(
+            columns().len(),
+            cf_descriptors(&path, &options, &Arc::new(0.into())).len()
+        );
     }
 
     #[test]
