@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: magicblock-validator
-          ref: '7d55f5bd48e56cd1d6120ca5b08d6913de604683'
+          ref: 'bd8cd997196b4ad094e1dad05b47392a6a47ccf3'
 
       - name: Checkout redline
         uses: actions/checkout@v4
