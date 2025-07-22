@@ -80,20 +80,20 @@ pub enum LedgerResumeStrategy {
     #[default]
     Reset,
     ResumeOnly,
-    ReplayAndResume,
+    Replay,
 }
 
 impl LedgerResumeStrategy {
-    pub fn resume(&self) -> bool {
+    pub fn is_resuming(&self) -> bool {
         self != &Self::Reset
     }
 
-    pub fn remove_ledger(&self) -> bool {
-        self != &Self::ReplayAndResume
+    pub fn is_removing_ledger(&self) -> bool {
+        self != &Self::Replay
     }
 
-    pub fn replay(&self) -> bool {
-        self == &Self::ReplayAndResume
+    pub fn is_replaying(&self) -> bool {
+        self == &Self::Replay
     }
 }
 
@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn test_merge_with_default() {
         let mut config = LedgerConfig {
-            resume_strategy: LedgerResumeStrategy::ReplayAndResume,
+            resume_strategy: LedgerResumeStrategy::Replay,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
@@ -125,7 +125,7 @@ mod tests {
     fn test_merge_default_with_non_default() {
         let mut config = LedgerConfig::default();
         let other = LedgerConfig {
-            resume_strategy: LedgerResumeStrategy::ReplayAndResume,
+            resume_strategy: LedgerResumeStrategy::Replay,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_merge_non_default() {
         let mut config = LedgerConfig {
-            resume_strategy: LedgerResumeStrategy::ReplayAndResume,
+            resume_strategy: LedgerResumeStrategy::Replay,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
@@ -167,7 +167,7 @@ size = 1000000000
         assert_eq!(
             config.ledger,
             LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::ReplayAndResume,
+                resume_strategy: LedgerResumeStrategy::Replay,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             }

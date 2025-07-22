@@ -539,7 +539,7 @@ impl MagicValidator {
         validator_keypair: &Keypair,
         resume_strategy: &LedgerResumeStrategy,
     ) -> ApiResult<()> {
-        if !resume_strategy.resume() {
+        if !resume_strategy.is_resuming() {
             write_validator_keypair_to_ledger(ledger_path, validator_keypair)?;
         } else {
             let ledger_validator_keypair =
@@ -579,7 +579,7 @@ impl MagicValidator {
     // Start/Stop
     // -----------------
     fn maybe_process_ledger(&self) -> ApiResult<()> {
-        if !self.config.ledger.resume_strategy.replay() {
+        if !self.config.ledger.resume_strategy.is_replaying() {
             return Ok(());
         }
         let slot_to_continue_at = process_ledger(&self.ledger, &self.bank)?;
@@ -812,7 +812,7 @@ impl MagicValidator {
                 }
             }
 
-            if self.config.ledger.resume_strategy.resume() {
+            if self.config.ledger.resume_strategy.is_replaying() {
                 let remote_account_cloner_worker =
                     remote_account_cloner_worker.clone();
                 tokio::spawn(async move {

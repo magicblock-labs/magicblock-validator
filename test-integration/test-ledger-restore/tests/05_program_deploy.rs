@@ -129,7 +129,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::ReplayAndResume,
+        LedgerResumeStrategy::Replay,
     );
 
     let counter_decoded = fetch_counter_ephem(payer, &mut validator);

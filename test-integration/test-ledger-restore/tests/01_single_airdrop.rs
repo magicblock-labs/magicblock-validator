@@ -58,7 +58,7 @@ fn read_ledger(
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::ReplayAndResume,
+        LedgerResumeStrategy::Replay,
     );
 
     let acc = expect!(

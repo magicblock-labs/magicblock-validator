@@ -240,7 +240,7 @@ fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
         ledger_path,
         Some(programs),
         Some(SLOT_MS),
-        LedgerResumeStrategy::ReplayAndResume,
+        LedgerResumeStrategy::Replay,
     );
 
     let counter1_decoded = fetch_counter_ephem(payer1, &mut validator);
