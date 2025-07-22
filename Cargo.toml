@@ -66,6 +66,7 @@ borsh-derive = "1.5.1"
 bs58 = "0.4.0"
 byteorder = "1.5.0"
 cargo-lock = "10.0.0"
+cargo-expand = "1"
 clap = "4.5.40"
 convert_case = "0.8.0"
 conjunto-transwise = { git = "https://github.com/magicblock-labs/conjunto.git", rev = "bf82b45" }
