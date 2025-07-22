@@ -53,9 +53,7 @@ jobs:
         run: |
           # Avvia il validatore in background
           # Modifica questo comando secondo la tua configurazione
-          pwd
-          ls -a
-          ls -a .github
+          ulimit -n 1000000
           ./target/release/rpc ./.github/configs/validator-ci.toml &
           VALIDATOR_PID=$!
           echo "VALIDATOR_PID=$VALIDATOR_PID" >> $GITHUB_ENV
