@@ -8,7 +8,6 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     persist::{CommitStatus, L1MessagesPersisterIface},
-    tasks::tasks::TaskPreparationInfo,
 };
 
 pub trait ScheduledMessageExt {

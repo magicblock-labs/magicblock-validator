@@ -7,7 +7,7 @@ use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 const POISONED_MUTEX_MSG: &str = "Mutex poisoned";
 
 #[async_trait]
-pub(crate) trait DB: Send + Sync + 'static {
+pub trait DB: Send + Sync + 'static {
     async fn store_l1_message(
         &self,
         l1_message: ScheduledL1Message,

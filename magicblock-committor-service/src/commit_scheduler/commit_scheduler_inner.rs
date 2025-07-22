@@ -147,7 +147,7 @@ impl CommitSchedulerInner {
     pub fn pop_next_scheduled_message(&mut self) -> Option<ScheduledL1Message> {
         // TODO(edwin): optimize. Create counter im MessageMeta & update
         let mut execute_candidates: HashMap<MessageID, usize> = HashMap::new();
-        self.blocked_keys.iter().for_each(|(pubkey, queue)| {
+        self.blocked_keys.iter().for_each(|(_, queue)| {
             let message_id = queue
                 .front()
                 .expect("Invariant: we maintain ony non-empty queues");

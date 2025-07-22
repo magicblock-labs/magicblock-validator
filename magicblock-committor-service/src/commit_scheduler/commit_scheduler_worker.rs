@@ -21,8 +21,7 @@ use crate::{
         Error,
     },
     l1_message_executor::{
-        BroadcastedMessageExecutionResult, ExecutionOutput, L1MessageExecutor,
-        MessageExecutorResult,
+        BroadcastedMessageExecutionResult, L1MessageExecutor,
     },
     persist::L1MessagesPersisterIface,
     transaction_preperator::transaction_preparator::{
@@ -46,7 +45,6 @@ impl ResultSubscriber {
     }
 }
 
-// TODO(edwin): reduce num of params: 1,2,3, could be united
 pub(crate) struct CommitSchedulerWorker<D, P> {
     db: Arc<D>,
     l1_messages_persister: Option<P>,

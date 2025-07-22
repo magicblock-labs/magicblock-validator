@@ -233,9 +233,9 @@ where
                 });
             }
             Err(Error::FailedFinalizePreparationError(_)) => {
-                // TODO(edwin): not supported by persister yet
+                // Not supported in persistor
             },
-            Err(Error::FailedToFinalizeError {err, commit_signature, finalize_signature}) => {
+            Err(Error::FailedToFinalizeError {err: _, commit_signature, finalize_signature}) => {
                 // Finalize is a single TX, so if it fails, all of commited accounts marked FailedFinalize
                 commit_ids.iter().for_each(|(pubkey, commit_id)| {
                     // Invalid task
