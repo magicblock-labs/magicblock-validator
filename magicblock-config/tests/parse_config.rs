@@ -67,7 +67,7 @@ fn test_all_goes_toml() {
                 ..Default::default()
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::ReplayAndResume,
+                resume_strategy: LedgerResumeStrategy::Replay,
                 ..Default::default()
             },
             ..Default::default()

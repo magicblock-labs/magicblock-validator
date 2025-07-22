@@ -160,7 +160,7 @@ fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
         ledger_path,
         None,
         Some(SLOT_MS),
-        LedgerResumeStrategy::ReplayAndResume,
+        LedgerResumeStrategy::Replay,
     );
 
     for keypair in keypairs {

@@ -103,7 +103,7 @@ pub fn setup_validator_with_local_remote(
     let resume_strategy = if reset {
         LedgerResumeStrategy::Reset
     } else {
-        LedgerResumeStrategy::ReplayAndResume
+        LedgerResumeStrategy::Replay
     };
     let config = EphemeralConfig {
         ledger: LedgerConfig {

@@ -101,7 +101,7 @@ fn read(
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::ReplayAndResume,
+        LedgerResumeStrategy::Replay,
     );
 
     let ephem_client = expect!(ctx.try_ephem_client(), validator);
@@ -182,6 +182,6 @@ fn _diagnose_read() {
         &ledger_path,
         None,
         None,
-        LedgerResumeStrategy::ReplayAndResume,
+        LedgerResumeStrategy::Replay,
     );
 }

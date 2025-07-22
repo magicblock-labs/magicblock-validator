@@ -59,7 +59,7 @@ pub(crate) fn funded_faucet(
     ledger_path: &Path,
     resume_strategy: &LedgerResumeStrategy,
 ) -> ApiResult<Keypair> {
-    let faucet_keypair = if resume_strategy.remove_ledger() {
+    let faucet_keypair = if resume_strategy.is_removing_ledger() {
         let faucet_keypair = Keypair::new();
         write_faucet_keypair_to_ledger(ledger_path, &faucet_keypair)?;
         faucet_keypair

@@ -74,7 +74,7 @@ fn read(ledger_path: &Path, pubkey: &Pubkey) -> Child {
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::ReplayAndResume,
+        LedgerResumeStrategy::Replay,
     );
     eprintln!(
         "Validator started in {:?}",

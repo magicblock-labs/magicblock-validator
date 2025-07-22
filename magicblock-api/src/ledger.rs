@@ -21,14 +21,14 @@ pub(crate) fn init(
     resume_strategy: &LedgerResumeStrategy,
 ) -> ApiResult<(Ledger, Slot)> {
     // Save the last slot from the previous ledger to restart from it
-    let last_slot = if resume_strategy.resume() {
+    let last_slot = if resume_strategy.is_resuming() {
         let previous_ledger = Ledger::open(ledger_path.as_path())?;
         previous_ledger.get_max_blockhash().map(|(slot, _)| slot)?
     } else {
         Slot::default()
     };
 
-    if resume_strategy.remove_ledger() {
+    if resume_strategy.is_removing_ledger() {
         remove_ledger_directory_if_exists(
             ledger_path.as_path(),
             resume_strategy,
@@ -189,13 +189,14 @@ fn remove_ledger_directory_if_exists(
         let entry = entry?;
 
         // When resuming, keep the accounts db
-        if entry.file_name() == ACCOUNTSDB_DIR && resume_strategy.resume() {
+        if entry.file_name() == ACCOUNTSDB_DIR && resume_strategy.is_resuming()
+        {
             continue;
         }
 
         // When resuming, keep the validator keypair
         if let Ok(validator_keypair_path) = validator_keypair_path(dir) {
-            if resume_strategy.resume()
+            if resume_strategy.is_resuming()
                 && validator_keypair_path
                     .file_name()
                     .map(|key_path| key_path == entry.file_name())
