@@ -20,12 +20,6 @@ pub struct CommitSignatures {
     /// If the finalize instruction was part of the process transaction then
     /// this signature is the same as [Self::process_signature].
     pub finalize_signature: Option<Signature>,
-    /// The signature of the transaction undelegating the committed accounts
-    /// if so requested.
-    /// If the account was not undelegated or it failed the this is `None`.
-    /// NOTE: this can be removed if we decide to perform the undelegation
-    ///       step as part of the finalize instruction in the delegation program
-    pub undelegate_signature: Option<Signature>,
 }
 
 impl CommitSignatures {
@@ -33,7 +27,6 @@ impl CommitSignatures {
         Self {
             process_signature,
             finalize_signature: None,
-            undelegate_signature: None,
         }
     }
 }
@@ -43,7 +36,6 @@ impl From<CommitSignatures> for CommitStatusSignatures {
         Self {
             process_signature: commit_signatures.process_signature,
             finalize_signature: commit_signatures.finalize_signature,
-            undelegate_signature: commit_signatures.undelegate_signature,
         }
     }
 }
@@ -263,14 +255,12 @@ impl CommitStage {
             | PartOfTooLargeBundleToFinalize(ci) => {
                 CommitStatus::PartOfTooLargeBundleToProcess(ci.bundle_id())
             }
-            FailedProcess((ci, strategy, sigs)) => CommitStatus::FailedProcess((
+            FailedProcess((ci,  sigs)) => CommitStatus::FailedProcess((
                 ci.bundle_id(),
-                *strategy,
                 sigs.as_ref().cloned().map(CommitStatusSignatures::from),
             )),
             FailedFinalize((ci, strategy, sigs)) => CommitStatus::FailedFinalize((
                 ci.bundle_id(),
-                *strategy,
                 CommitStatusSignatures::from(sigs.clone()),
             )),
             FailedUndelegate((ci, strategy, sigs)) => CommitStatus::FailedUndelegate((

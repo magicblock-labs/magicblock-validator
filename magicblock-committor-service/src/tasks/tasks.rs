@@ -16,9 +16,15 @@ use magicblock_program::magic_scheduled_l1_message::{
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 
+use crate::tasks::visitor::Visitor;
 use crate::{
     consts::MAX_WRITE_CHUNK_SIZE, tasks::budget_calculator::ComputeBudgetV1,
 };
+
+pub enum TaskStrategy {
+    Args,
+    Buffer,
+}
 
 #[derive(Clone, Debug)]
 pub struct TaskPreparationInfo {
@@ -45,7 +51,7 @@ pub trait L1Task: Send + Sync {
     /// Gets instruction for task execution
     fn instruction(&self, validator: &Pubkey) -> Instruction;
 
-    /// If has optimizations returns optimized Task, otherwise returns itself
+    /// Optimizes Task strategy if possible, otherwise returns itself
     fn optimize(self: Box<Self>) -> Result<Box<dyn L1Task>, Box<dyn L1Task>>;
 
     /// Returns [`TaskPreparationInfo`] if task needs to be prepared before executing,
@@ -69,9 +75,14 @@ pub trait L1Task: Send + Sync {
             Some(info.init_instruction.clone()),
         )
     }
+
+    /// Returns current [`TaskStrategy`]
+    fn strategy(&self) -> TaskStrategy;
+
+    /// Calls [`Visitor`] with specific task type
+    fn visit(&self, visitor: &mut dyn Visitor);
 }
 
-// TODO(edwin): commit_id is common thing, extract
 #[derive(Clone)]
 pub struct CommitTask {
     pub commit_id: u64,
@@ -95,7 +106,7 @@ pub struct FinalizeTask {
 #[derive(Clone)]
 pub enum ArgsTask {
     Commit(CommitTask),
-    Finalize(FinalizeTask), // TODO(edwin): introduce Stages instead?
+    Finalize(FinalizeTask),
     Undelegate(UndelegateTask), // Special action really
     L1Action(L1Action),
 }
@@ -167,6 +178,15 @@ impl L1Task for ArgsTask {
 
     fn budget(&self) -> ComputeBudgetV1 {
         todo!()
+    }
+
+    fn strategy(&self) -> TaskStrategy {
+        TaskStrategy::Args
+    }
+
+    /// For tasks using Args strategy call corresponding `Visitor` method
+    fn visit(&self, visitor: &mut dyn Visitor) {
+        visitor.visit_args_task(self);
     }
 }
 
@@ -266,5 +286,14 @@ impl L1Task for BufferTask {
 
     fn budget(&self) -> ComputeBudgetV1 {
         todo!()
+    }
+
+    fn strategy(&self) -> TaskStrategy {
+        TaskStrategy::Buffer
+    }
+
+    /// For tasks using Args strategy call corresponding `Visitor` method
+    fn visit(&self, visitor: &mut dyn Visitor) {
+        visitor.visit_buffer_task(self);
     }
 }

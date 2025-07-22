@@ -14,7 +14,7 @@ pub trait TasksBuilder {
     // Creates tasks for commit stage
     fn commit_tasks(
         l1_message: &ScheduledL1Message,
-        commit_ids: HashMap<Pubkey, u64>,
+        commit_ids: &HashMap<Pubkey, u64>,
     ) -> Vec<Box<dyn L1Task>>;
 
     // Create tasks for finalize stage
@@ -35,13 +35,14 @@ impl TasksBuilder for TaskBuilderV1 {
     ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>> {
         let (accounts, allow_undelegation) = match &l1_message.l1_message {
             MagicL1Message::L1Actions(actions) => {
-                return actions
+                let tasks = actions
                     .into_iter()
                     .map(|el| {
                         Box::new(ArgsTask::L1Action(el.clone()))
                             as Box<dyn L1Task>
                     })
-                    .collect()
+                    .collect();
+                return Ok(tasks);
             }
             MagicL1Message::Commit(t) => (t.get_committed_accounts(), false),
             MagicL1Message::CommitAndUndelegate(t) => {

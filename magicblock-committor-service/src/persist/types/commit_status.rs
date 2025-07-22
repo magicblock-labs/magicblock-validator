@@ -32,11 +32,11 @@ pub enum CommitStatus {
     /// The commit was properly initialized and added to a chunk of instructions to process
     /// commits via a transaction. For large commits the buffer and chunk accounts were properly
     /// prepared and haven't been closed.
-    FailedProcess((u64, CommitStrategy, Option<CommitStatusSignatures>)),
+    FailedProcess((u64, Option<CommitStatusSignatures>)),
     /// The commit was properly processed but the requested finalize transaction failed.
-    FailedFinalize((u64, CommitStrategy, CommitStatusSignatures)),
+    FailedFinalize((u64, CommitStatusSignatures)),
     /// The commit was successfully processed and finalized.
-    Succeeded((u64, CommitStrategy, CommitStatusSignatures)),
+    Succeeded((u64, CommitStatusSignatures)),
 }
 
 impl fmt::Display for CommitStatus {
@@ -58,30 +58,27 @@ impl fmt::Display for CommitStatus {
             CommitStatus::PartOfTooLargeBundleToProcess(bundle_id) => {
                 write!(f, "PartOfTooLargeBundleToProcess({})", bundle_id)
             }
-            CommitStatus::FailedProcess((bundle_id, strategy, sigs)) => {
+            CommitStatus::FailedProcess((bundle_id, sigs)) => {
                 write!(
                     f,
-                    "FailedProcess({}, {}, {:?})",
+                    "FailedProcess({}, {:?})",
                     bundle_id,
-                    strategy.as_str(),
                     sigs
                 )
             }
-            CommitStatus::FailedFinalize((bundle_id, strategy, sigs)) => {
+            CommitStatus::FailedFinalize((bundle_id, sigs)) => {
                 write!(
                     f,
-                    "FailedFinalize({}, {}, {:?})",
+                    "FailedFinalize({}, {:?})",
                     bundle_id,
-                    strategy.as_str(),
                     sigs
                 )
             }
-            CommitStatus::Succeeded((bundle_id, strategy, sigs)) => {
+            CommitStatus::Succeeded((bundle_id, sigs)) => {
                 write!(
                     f,
-                    "Succeeded({}, {}, {:?})",
+                    "Succeeded({}, {:?})",
                     bundle_id,
-                    strategy.as_str(),
                     sigs
                 )
             }
@@ -89,16 +86,15 @@ impl fmt::Display for CommitStatus {
     }
 }
 
-impl TryFrom<(&str, u64, CommitStrategy, Option<CommitStatusSignatures>)>
+impl TryFrom<(&str, u64, Option<CommitStatusSignatures>)>
     for CommitStatus
 {
     type Error = CommitPersistError;
 
     fn try_from(
-        (status, commit_id, strategy, sigs): (
+        (status, commit_id, sigs): (
             &str,
             u64,
-            CommitStrategy,
             Option<CommitStatusSignatures>,
         ),
     ) -> Result<Self, Self::Error> {
@@ -128,11 +124,11 @@ impl TryFrom<(&str, u64, CommitStrategy, Option<CommitStatusSignatures>)>
             "PartOfTooLargeBundleToProcess" => {
                 Ok(PartOfTooLargeBundleToProcess(commit_id))
             }
-            "FailedProcess" => Ok(FailedProcess((commit_id, strategy, sigs))),
+            "FailedProcess" => Ok(FailedProcess((commit_id, sigs))),
             "FailedFinalize" => {
-                Ok(FailedFinalize((commit_id, strategy, get_sigs()?)))
+                Ok(FailedFinalize((commit_id, get_sigs()?)))
             }
-            "Succeeded" => Ok(Succeeded((commit_id, strategy, get_sigs()?))),
+            "Succeeded" => Ok(Succeeded((commit_id, get_sigs()?))),
             _ => {
                 Err(CommitPersistError::InvalidCommitStatus(status.to_string()))
             }
@@ -149,12 +145,6 @@ pub struct CommitStatusSignatures {
     /// If the finalize instruction was part of the process transaction then
     /// this signature is the same as [Self::process_signature].
     pub finalize_signature: Option<Signature>,
-    /// The signature of the transaction undelegating the committed accounts
-    /// if so requested.
-    /// If the account was not undelegated or it failed the this is `None`.
-    /// NOTE: this can be removed if we decide to perform the undelegation
-    ///       step as part of the finalize instruction in the delegation program
-    pub undelegate_signature: Option<Signature>,
 }
 
 impl CommitStatus {
@@ -185,9 +175,9 @@ impl CommitStatus {
             | BufferAndChunkInitialized(bundle_id)
             | BufferAndChunkFullyInitialized(bundle_id)
             | PartOfTooLargeBundleToProcess(bundle_id)
-            | FailedProcess((bundle_id, _, _))
-            | FailedFinalize((bundle_id, _, _))
-            | Succeeded((bundle_id, _, _)) => Some(*bundle_id),
+            | FailedProcess((bundle_id, _))
+            | FailedFinalize((bundle_id, _))
+            | Succeeded((bundle_id, _)) => Some(*bundle_id),
             Pending => None,
         }
     }
@@ -195,25 +185,10 @@ impl CommitStatus {
     pub fn signatures(&self) -> Option<CommitStatusSignatures> {
         use CommitStatus::*;
         match self {
-            FailedProcess((_, _, sigs)) => sigs.as_ref().cloned(),
-            FailedFinalize((_, _, sigs)) => Some(sigs.clone()),
-            Succeeded((_, _, sigs)) => Some(sigs.clone()),
+            FailedProcess((_, sigs)) => sigs.as_ref().cloned(),
+            FailedFinalize((_, sigs)) => Some(sigs.clone()),
+            Succeeded((_, sigs)) => Some(sigs.clone()),
             _ => None,
-        }
-    }
-
-    pub fn commit_strategy(&self) -> CommitStrategy {
-        use CommitStatus::*;
-        match self {
-            Pending => CommitStrategy::Undetermined,
-            Failed(_) => CommitStrategy::Undetermined,
-            BufferAndChunkPartiallyInitialized(_)
-            | BufferAndChunkInitialized(_)
-            | BufferAndChunkFullyInitialized(_) => CommitStrategy::FromBuffer,
-            PartOfTooLargeBundleToProcess(_) => CommitStrategy::Undetermined,
-            FailedProcess((_, strategy, _)) => *strategy,
-            FailedFinalize((_, strategy, _)) => *strategy,
-            Succeeded((_, strategy, _)) => *strategy,
         }
     }
 

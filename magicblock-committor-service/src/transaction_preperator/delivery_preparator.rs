@@ -364,7 +364,9 @@ pub enum InternalError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("FailedToPrepareBufferAccounts: {0}")]
     FailedToPrepareBufferAccounts(#[source] InternalError),
+    #[error("FailedToCreateALTError: {0}")]
     FailedToCreateALTError(#[source] InternalError),
 }
 

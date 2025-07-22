@@ -8,7 +8,7 @@ use solana_sdk::pubkey::Pubkey;
 
 use super::{
     db::CommitStatusRow, error::CommitPersistResult, utils::now, CommitStatus,
-    CommitType, CommittsDb, MessageSignatures,
+    CommitStrategy, CommitType, CommittsDb, MessageSignatures,
 };
 use crate::utils::ScheduledMessageExt;
 
@@ -30,6 +30,12 @@ pub trait L1MessagesPersisterIface: Send + Sync + Clone + 'static {
         message_id: u64,
         pubkey: &Pubkey,
         commit_id: u64,
+    ) -> CommitPersistResult<()>;
+    fn set_commit_strategy(
+        &self,
+        commit_id: u64,
+        pubkey: &Pubkey,
+        value: CommitStrategy,
     ) -> CommitPersistResult<()>;
     fn update_status_by_message(
         &self,
@@ -171,6 +177,18 @@ impl L1MessagesPersisterIface for L1MessagePersister {
             .lock()
             .expect(POISONED_MUTEX_MSG)
             .set_commit_id(message_id, pubkey, commit_id)
+    }
+
+    fn set_commit_strategy(
+        &self,
+        commit_id: u64,
+        pubkey: &Pubkey,
+        value: CommitStrategy,
+    ) -> CommitPersistResult<()> {
+        self.commits_db
+            .lock()
+            .expect(POISONED_MUTEX_MSG)
+            .set_commit_strategy(commit_id, pubkey, value)
     }
 
     fn update_status_by_message(

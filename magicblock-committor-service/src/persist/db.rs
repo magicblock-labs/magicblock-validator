@@ -45,6 +45,8 @@ pub struct CommitStatusRow {
     /// For single accounts a bundle_id will be generated as well for consistency
     /// For Pending commits the bundle_id is not set
     pub commit_status: CommitStatus,
+    /// Strategy defined for Commit of a particular account
+    pub commit_strategy: CommitStrategy,
     /// Time since epoch at which the commit was last retried
     pub last_retried_at: u64,
     /// Number of times the commit was retried
@@ -58,9 +60,6 @@ pub struct MessageSignatures {
     /// The signature of the transaction on chain that finalized the commit
     /// if applicable
     pub finalized_signature: Option<Signature>,
-    /// The signature of the transaction on chain that undelegated the account(s)
-    /// if applicable
-    pub undelegate_signature: Option<Signature>,
     /// Time since epoch at which the bundle signature was created
     pub created_at: u64,
 }
@@ -82,6 +81,7 @@ impl fmt::Display for CommitStatusRow {
     commit_type: {},
     created_at: {},
     commit_status: {},
+    commit_strategy: {},
     last_retried_at: {},
     retries_count: {}
 }}",
@@ -97,6 +97,7 @@ impl fmt::Display for CommitStatusRow {
             self.commit_type.as_str(),
             self.created_at,
             self.commit_status,
+            self.commit_strategy.as_str(),
             self.last_retried_at,
             self.retries_count
         )
@@ -115,13 +116,12 @@ const ALL_COMMIT_STATUS_COLUMNS: &str = "
     data, // 9
     commit_type, // 10
     created_at, // 11
-    commit_status, // 12
-    commit_strategy, // 13
+    commit_strategy, // 12
+    commit_status, // 13
     processed_signature, // 14
     finalized_signature, // 15
-    undelegated_signature, // 16
-    last_retried_at, // 17
-    retries_count // 18
+    last_retried_at, // 16
+    retries_count // 17
 ";
 
 const SELECT_ALL_COMMIT_STATUS_COLUMNS: &str = const {
@@ -160,31 +160,23 @@ impl CommittsDb {
         let query = "UPDATE commit_status
             SET
                 commit_status = ?1,
-                commit_strategy = ?3,
-                processed_signature = ?4,
-                finalized_signature = ?5,
-                undelegated_signature = ?6
+                processed_signature = ?2,
+                finalized_signature = ?3,
             WHERE
-                pubkey = ?7 AND message_id = ?8";
+                pubkey = ?4 AND message_id = ?5";
 
         let tx = self.conn.transaction()?;
         let stmt = &mut tx.prepare(query)?;
         stmt.execute(params![
             status.as_str(),
-            status.commit_strategy().as_str(),
             status.signatures().map(|s| s.process_signature.to_string()),
             status
                 .signatures()
                 .and_then(|s| s.finalize_signature)
                 .map(|s| s.to_string()),
-            status
-                .signatures()
-                .and_then(|s| s.undelegate_signature)
-                .map(|s| s.to_string()),
             pubkey.to_string(),
             message_id
         ])?;
-        tx.commit()?;
 
         Ok(())
     }
@@ -198,31 +190,42 @@ impl CommittsDb {
         let query = "UPDATE commit_status
             SET
                 commit_status = ?1,
-                commit_strategy = ?3,
-                processed_signature = ?4,
-                finalized_signature = ?5,
-                undelegated_signature = ?6
+                processed_signature = ?2,
+                finalized_signature = ?3,
             WHERE
-                pubkey = ?7 AND commit_id = ?8";
+                pubkey = ?4 AND commit_id = ?5";
 
         let tx = self.conn.transaction()?;
         let stmt = &mut tx.prepare(query)?;
         stmt.execute(params![
             status.as_str(),
-            status.commit_strategy().as_str(),
             status.signatures().map(|s| s.process_signature.to_string()),
             status
                 .signatures()
                 .and_then(|s| s.finalize_signature)
                 .map(|s| s.to_string()),
-            status
-                .signatures()
-                .and_then(|s| s.undelegate_signature)
-                .map(|s| s.to_string()),
             pubkey.to_string(),
             commit_id
         ])?;
-        tx.commit()?;
+
+        Ok(())
+    }
+
+    pub fn set_commit_strategy(
+        &mut self,
+        commit_id: u64,
+        pubkey: &Pubkey,
+        value: CommitStrategy,
+    ) -> CommitPersistResult<()> {
+        let query = "UPDATE commit_status
+            SET
+                commit_strategy = ?1,
+            WHERE
+                pubkey = ?2 AND commit_id = ?3";
+
+        let tx = self.conn.transaction()?;
+        let stmt = &mut tx.prepare(query)?;
+        stmt.execute(params![value.as_str(), pubkey.to_string(), commit_id])?;
 
         Ok(())
     }
@@ -264,11 +267,10 @@ impl CommittsDb {
                 data                    BLOB,
                 commit_type             TEXT NOT NULL,
                 created_at              INTEGER NOT NULL,
-                commit_status           TEXT NOT NULL,
                 commit_strategy         TEXT NOT NULL,
+                commit_status           TEXT NOT NULL,
                 processed_signature     TEXT,
                 finalized_signature     TEXT,
-                undelegated_signature   TEXT,
                 last_retried_at         INTEGER NOT NULL,
                 retries_count           INTEGER NOT NULL,
                 PRIMARY KEY (message_id, pubkey)
@@ -305,19 +307,18 @@ impl CommittsDb {
         tx: &Transaction<'_>,
         commit: &CommitStatusRow,
     ) -> CommitPersistResult<()> {
-        let (processed_signature, finalized_signature, undelegated_signature) =
+        let (processed_signature, finalized_signature) =
             match commit.commit_status.signatures() {
                 Some(sigs) => (
                     Some(sigs.process_signature),
                     sigs.finalize_signature,
-                    sigs.undelegate_signature,
                 ),
-                None => (None, None, None),
+                None => (None, None),
             };
         tx.execute(
             &format!(
                 "INSERT INTO commit_status ({ALL_COMMIT_STATUS_COLUMNS}) VALUES
-            (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             ),
             params![
             commit.message_id,
@@ -331,15 +332,12 @@ impl CommittsDb {
             commit.data.as_deref(),
             commit.commit_type.as_str(),
             u64_into_i64(commit.created_at),
+            commit.commit_strategy.as_str(),
             commit.commit_status.as_str(),
-            commit.commit_status.commit_strategy().as_str(),
             processed_signature
                 .as_ref()
                 .map(|s| s.to_string()),
             finalized_signature
-                .as_ref()
-                .map(|s| s.to_string()),
-            undelegated_signature
                 .as_ref()
                 .map(|s| s.to_string()),
             u64_into_i64(commit.last_retried_at),
@@ -404,7 +402,7 @@ impl CommittsDb {
         pubkey: &Pubkey,
     ) -> CommitPersistResult<Option<MessageSignatures>> {
         let query = "SELECT
-            processed_signature, finalized_signature, undelegated_signature, created_at
+            processed_signature, finalized_signature, created_at
             FROM commit_status
         WHERE commit_id = ?1 AND pubkey = ?2
             LIMIT 1";
@@ -417,17 +415,13 @@ impl CommittsDb {
             .map(|row| {
                 let processed_signature: String = row.get(0)?;
                 let finalized_signature: Option<String> = row.get(1)?;
-                let undelegated_signature: Option<String> = row.get(2)?;
-                let created_at: i64 = row.get(3)?;
+                let created_at: i64 = row.get(2)?;
 
                 Ok::<_, CommitPersistError>(MessageSignatures {
                     processed_signature: Signature::from_str(
                         &processed_signature,
                     )?,
                     finalized_signature: finalized_signature
-                        .map(|s| Signature::from_str(&s))
-                        .transpose()?,
-                    undelegate_signature: undelegated_signature
                         .map(|s| Signature::from_str(&s))
                         .transpose()?,
                     created_at: i64_into_u64(created_at),
@@ -503,12 +497,14 @@ fn extract_committor_row(
         let created_at: i64 = row.get(10)?;
         i64_into_u64(created_at)
     };
+
+    let commit_strategy = {
+        let commit_strategy: String = row.get(11)?;
+        CommitStrategy::from(commit_strategy.as_str())
+    };
+
     let commit_status = {
-        let commit_status: String = row.get(11)?;
-        let commit_strategy = {
-            let commit_strategy: String = row.get(12)?;
-            CommitStrategy::from(commit_strategy.as_str())
-        };
+        let commit_status: String = row.get(12)?;
         let processed_signature = {
             let processed_signature: Option<String> = row.get(13)?;
             processed_signature
@@ -521,21 +517,13 @@ fn extract_committor_row(
                 .map(|s| Signature::from_str(s.as_str()))
                 .transpose()?
         };
-        let undelegated_signature = {
-            let undelegated_signature: Option<String> = row.get(15)?;
-            undelegated_signature
-                .map(|s| Signature::from_str(s.as_str()))
-                .transpose()?
-        };
         let sigs = processed_signature.map(|s| CommitStatusSignatures {
             process_signature: s,
             finalize_signature: finalized_signature,
-            undelegate_signature: undelegated_signature,
         });
         CommitStatus::try_from((
             commit_status.as_str(),
             commit_id,
-            commit_strategy,
             sigs,
         ))?
     };
@@ -561,6 +549,7 @@ fn extract_committor_row(
         data,
         commit_type,
         created_at,
+        commit_strategy,
         commit_status,
         last_retried_at,
         retries_count,

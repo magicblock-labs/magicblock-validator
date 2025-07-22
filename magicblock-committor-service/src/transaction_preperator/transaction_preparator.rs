@@ -48,7 +48,7 @@ pub trait TransactionPreparator {
         &self,
         authority: &Keypair,
         l1_message: &ScheduledL1Message,
-        commit_ids: HashMap<Pubkey, u64>,
+        commit_ids: &HashMap<Pubkey, u64>,
         l1_messages_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
 
@@ -104,14 +104,17 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         &self,
         authority: &Keypair,
         l1_message: &ScheduledL1Message,
-        commit_ids: HashMap<Pubkey, u64>,
+        commit_ids: &HashMap<Pubkey, u64>,
         l1_messages_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
         // create tasks
-        let tasks = TaskBuilderV1::commit_tasks(l1_message, &commit_ids)?;
+        let tasks = TaskBuilderV1::commit_tasks(l1_message, commit_ids)?;
         // optimize to fit tx size. aka Delivery Strategy
-        let tx_strategy =
-            TaskStrategist::build_strategy(tasks, &authority.pubkey())?;
+        let tx_strategy = TaskStrategist::build_strategy(
+            tasks,
+            &authority.pubkey(),
+            l1_messages_persister,
+        )?;
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator
@@ -144,8 +147,11 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         let tasks =
             TaskBuilderV1::finalize_tasks(l1_message, rent_reimbursement);
         // optimize to fit tx size. aka Delivery Strategy
-        let tx_strategy =
-            TaskStrategist::build_strategy(tasks, &authority.pubkey())?;
+        let tx_strategy = TaskStrategist::build_strategy(
+            tasks,
+            &authority.pubkey(),
+            l1_messages_persister,
+        )?;
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator

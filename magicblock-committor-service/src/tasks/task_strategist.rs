@@ -3,6 +3,10 @@ use std::{collections::BinaryHeap, ptr::NonNull};
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 
+use crate::persist::L1MessagesPersisterIface;
+use crate::tasks::task_visitors::persistor_visitor::{
+    PersistorContext, PersistorVisitor,
+};
 use crate::{
     tasks::{
         tasks::{ArgsTask, L1Task},
@@ -20,12 +24,26 @@ pub struct TaskStrategist;
 impl TaskStrategist {
     /// Returns [`TaskDeliveryStrategy`] for every [`Task`]
     /// Returns Error if all optimizations weren't enough
-    pub fn build_strategy(
+    pub fn build_strategy<P: L1MessagesPersisterIface>(
         mut tasks: Vec<Box<dyn L1Task>>,
         validator: &Pubkey,
+        persistor: &Option<P>,
     ) -> TaskStrategistResult<TransactionStrategy> {
         // Attempt optimizing tasks themselves(using buffers)
         if Self::optimize_strategy(&mut tasks) <= MAX_ENCODED_TRANSACTION_SIZE {
+            // Persist tasks strategy
+            if let Some(persistor) = persistor {
+                let mut persistor_visitor = PersistorVisitor {
+                    persistor,
+                    context: PersistorContext::PersistStrategy {
+                        uses_lookup_tables: false,
+                    },
+                };
+                tasks
+                    .iter()
+                    .for_each(|task| task.visit(&mut persistor_visitor));
+            }
+
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys: vec![],
@@ -35,6 +53,19 @@ impl TaskStrategist {
             // attempt using lookup tables for all keys involved in tasks
             let lookup_tables_keys =
                 Self::attempt_lookup_tables(&validator, &tasks)?;
+
+            // Persist tasks strategy
+            if let Some(persistor) = persistor {
+                let mut persistor_visitor = PersistorVisitor {
+                    persistor,
+                    context: PersistorContext::PersistStrategy {
+                        uses_lookup_tables: true,
+                    },
+                };
+                tasks
+                    .iter()
+                    .for_each(|task| task.visit(&mut persistor_visitor));
+            }
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys,

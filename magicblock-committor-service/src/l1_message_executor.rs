@@ -18,6 +18,8 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 
+use crate::persist::CommitStatusSignatures;
+use crate::utils::persist_status_update;
 use crate::{
     persist::{CommitStatus, L1MessagesPersisterIface},
     transaction_preperator::transaction_preparator::{
@@ -70,6 +72,18 @@ where
         commit_ids: HashMap<Pubkey, u64>,
         persister: Option<P>,
     ) -> MessageExecutorResult<ExecutionOutput> {
+        let result = self.execute_inner(l1_message, &commit_ids, &persister).await;
+        Self::persist_result(&persister, &result, &commit_ids);
+
+        result
+    }
+
+    async fn execute_inner<P: L1MessagesPersisterIface>(
+        &self,
+        l1_message: ScheduledL1Message,
+        commit_ids: &HashMap<Pubkey, u64>,
+        persister: &Option<P>,
+    ) -> MessageExecutorResult<ExecutionOutput> {
         // Update tasks status to Pending
         {
             let update_status = CommitStatus::Pending;
@@ -87,7 +101,8 @@ where
                     commit_ids,
                     &persister,
                 )
-                .await?;
+                .await
+                .map_err(Error::FailedCommitPreparationError)?;
 
             // Commit
             self.send_prepared_message(prepared_message).await.map_err(
@@ -112,7 +127,8 @@ where
                     &l1_message,
                     &persister,
                 )
-                .await?;
+                .await
+                .map_err(Error::FailedFinalizePreparationError)?;
 
             // Finalize
             self.send_prepared_message(prepared_message).await.map_err(
@@ -168,6 +184,68 @@ where
 
         Ok(result.into_signature())
     }
+
+    fn persist_result<P: L1MessagesPersisterIface>(
+        persistor: &Option<P>,
+        result: &MessageExecutorResult<ExecutionOutput>,
+        commit_ids: &HashMap<Pubkey, u64>,
+    ) {
+        match result {
+            Ok(value) => {
+                commit_ids.iter().for_each(|(pubkey, commit_id)| {
+                    let signatures = CommitStatusSignatures {
+                        process_signature: value.commit_signature,
+                        finalize_signature: Some(value.commit_signature)
+                    };
+                    let update_status = CommitStatus::Succeeded((*commit_id, signatures));
+                    persist_status_update(persistor, pubkey, *commit_id, update_status)
+                });
+            }
+            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::FailedToFitError)) => {
+                commit_ids.iter().for_each(|(pubkey, commit_id)| {
+                    let update_status = CommitStatus::PartOfTooLargeBundleToProcess(*commit_id);
+                    persist_status_update(persistor, pubkey, *commit_id, update_status)
+                });
+            }
+            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::MissingCommitIdError(_))) => {
+                commit_ids.iter().for_each(|(pubkey, commit_id)| {
+                    // Invalid task
+                    let update_status = CommitStatus::Failed(*commit_id);
+                    persist_status_update(persistor, pubkey, *commit_id, update_status)
+                });
+            },
+            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::DeliveryPreparationError(_))) => {
+                // Persisted internally
+            },
+            Err(Error::FailedToCommitError {err: _, signature}) => {
+                // Commit is a single TX, so if it fails, all of commited accounts marked FailedProcess
+                commit_ids.iter().for_each(|(pubkey, commit_id)| {
+                    // Invalid task
+                    let status_signature = signature.map(|sig| CommitStatusSignatures {
+                        process_signature: sig,
+                        finalize_signature: None
+                    });
+                    let update_status = CommitStatus::FailedProcess((*commit_id, status_signature));
+                    persist_status_update(persistor, pubkey, *commit_id, update_status)
+                });
+            }
+            Err(Error::FailedFinalizePreparationError(_)) => {
+                // TODO(edwin): not supported by persister yet
+            },
+            Err(Error::FailedToFinalizeError {err, commit_signature, finalize_signature}) => {
+                // Finalize is a single TX, so if it fails, all of commited accounts marked FailedFinalize
+                commit_ids.iter().for_each(|(pubkey, commit_id)| {
+                    // Invalid task
+                    let status_signature = CommitStatusSignatures {
+                        process_signature: *commit_signature,
+                        finalize_signature: *finalize_signature
+                    };
+                    let update_status = CommitStatus::FailedFinalize((*commit_id, status_signature));
+                    persist_status_update(persistor, pubkey, *commit_id, update_status)
+                });
+            }
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -180,22 +258,26 @@ pub enum InternalError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("FailedToCommitError: {0}")]
+    #[error("FailedToCommitError: {err}")]
     FailedToCommitError {
         #[source]
         err: InternalError,
         signature: Option<Signature>,
     },
-    #[error("FailedToFinalizeError: {0}")]
+    #[error("FailedToFinalizeError: {err}")]
     FailedToFinalizeError {
         #[source]
         err: InternalError,
         commit_signature: Signature,
         finalize_signature: Option<Signature>,
     },
-    #[error("PreparatorError: {0}")]
-    FailedToPrepareTransactionError(
-        #[from] crate::transaction_preperator::error::Error,
+    #[error("FailedCommitPreparationError: {0}")]
+    FailedCommitPreparationError(
+        #[source] crate::transaction_preperator::error::Error,
+    ),
+    #[error("FailedFinalizePreparationError: {0}")]
+    FailedFinalizePreparationError(
+        #[source] crate::transaction_preperator::error::Error,
     ),
 }
 
