@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use log::warn;
 use magicblock_program::{
@@ -26,6 +26,9 @@ use crate::{
     utils::{persist_status_update, persist_status_update_set},
     ComputeBudgetConfig,
 };
+
+pub type BroadcastedMessageExecutionResult =
+    MessageExecutorResult<ExecutionOutput, Arc<Error>>;
 
 // TODO(edwin): define struct
 // (commit_id, signature)s that it sent. Single worker in [`RemoteScheduledCommitsProcessor`]

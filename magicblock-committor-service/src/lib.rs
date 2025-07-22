@@ -17,11 +17,11 @@ mod undelegate;
 pub mod commit_scheduler;
 // TODO(edwin): define visibility
 mod committor_processor;
-pub(crate) mod l1_message_executor;
+pub mod l1_message_executor;
 #[cfg(feature = "dev-context-only-utils")]
 pub mod stubs;
 pub mod tasks;
-pub(crate) mod transaction_preperator;
+pub mod transaction_preperator;
 pub(crate) mod utils;
 
 pub use commit_info::CommitInfo;

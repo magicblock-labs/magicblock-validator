@@ -8,7 +8,6 @@ use tokio::{
     select,
     sync::{
         broadcast,
-        broadcast::Receiver,
         mpsc::{self, error::TrySendError},
         oneshot,
     },
@@ -19,6 +18,7 @@ use crate::{
     committor_processor::CommittorProcessor,
     config::ChainConfig,
     error::CommittorServiceResult,
+    l1_message_executor::BroadcastedMessageExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
 };
@@ -65,6 +65,11 @@ pub enum CommittorMessage {
     },
     GetLookupTables {
         respond_to: oneshot::Sender<LookupTables>,
+    },
+    SubscribeForResults {
+        respond_to: oneshot::Sender<
+            broadcast::Receiver<BroadcastedMessageExecutionResult>,
+        >,
     },
 }
 
@@ -158,6 +163,12 @@ impl CommittorActor {
                     released: released_tables,
                 }) {
                     error!("Failed to send response {:?}", e);
+                }
+            }
+            SubscribeForResults { respond_to } => {
+                let subscription = self.processor.subscribe_for_results();
+                if let Err(err) = respond_to.send(subscription) {
+                    error!("Failed to send response {:?}", err);
                 }
             }
         }
@@ -293,16 +304,8 @@ impl L1MessageCommittor for CommittorService {
         rx
     }
 
-    fn commit_l1_messages(
-        &self,
-        l1_messages: Vec<ScheduledL1Message>,
-    ) -> oneshot::Receiver<Option<String>> {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::CommitChangeset {
-            respond_to: tx,
-            l1_messages,
-        });
-        rx
+    fn commit_l1_messages(&self, l1_messages: Vec<ScheduledL1Message>) {
+        self.try_send(CommittorMessage::CommitChangeset { l1_messages });
     }
 
     fn get_commit_statuses(
@@ -332,8 +335,13 @@ impl L1MessageCommittor for CommittorService {
         rx
     }
 
-    fn subscribe_for_results(&self) -> Receiver<()> {
-        todo!()
+    fn subscribe_for_results(
+        &self,
+    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedMessageExecutionResult>>
+    {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::SubscribeForResults { respond_to: tx });
+        rx
     }
 }
 
@@ -348,7 +356,10 @@ pub trait L1MessageCommittor: Send + Sync + 'static {
     /// Commits the changeset and returns
     fn commit_l1_messages(&self, l1_messages: Vec<ScheduledL1Message>);
 
-    fn subscribe_for_results(&self) -> broadcast::Receiver<()>;
+    /// Subscribes for results of L1Message execution
+    fn subscribe_for_results(
+        &self,
+    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedMessageExecutionResult>>;
 
     /// Gets statuses of accounts that were committed as part of a request with provided message_id
     fn get_commit_statuses(

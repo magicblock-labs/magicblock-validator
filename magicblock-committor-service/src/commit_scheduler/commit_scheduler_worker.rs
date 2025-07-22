@@ -21,7 +21,8 @@ use crate::{
         Error,
     },
     l1_message_executor::{
-        ExecutionOutput, L1MessageExecutor, MessageExecutorResult,
+        BroadcastedMessageExecutionResult, ExecutionOutput, L1MessageExecutor,
+        MessageExecutorResult,
     },
     persist::L1MessagesPersisterIface,
     transaction_preperator::transaction_preparator::{
@@ -33,10 +34,17 @@ use crate::{
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 
-pub type BroadcasteddMessageExecutionResult = MessageExecutorResult<
-    ExecutionOutput,
-    Arc<crate::l1_message_executor::Error>,
->;
+/// Struct that exposes only `subscribe` method of `broadcast::Sender` for better isolation
+pub struct ResultSubscriber(
+    broadcast::Sender<BroadcastedMessageExecutionResult>,
+);
+impl ResultSubscriber {
+    pub fn subscribe(
+        &self,
+    ) -> broadcast::Receiver<BroadcastedMessageExecutionResult> {
+        self.0.subscribe()
+    }
+}
 
 // TODO(edwin): reduce num of params: 1,2,3, could be united
 pub(crate) struct CommitSchedulerWorker<D, P> {
@@ -89,13 +97,11 @@ where
     }
 
     /// Spawns `main_loop` and return `Receiver` listening to results
-    pub fn spawn(
-        self,
-    ) -> broadcast::Receiver<BroadcasteddMessageExecutionResult> {
-        let (result_sender, result_receiver) = broadcast::channel(100);
-        tokio::spawn(self.main_loop(result_sender));
+    pub fn spawn(self) -> ResultSubscriber {
+        let (result_sender, _) = broadcast::channel(100);
+        tokio::spawn(self.main_loop(result_sender.clone()));
 
-        result_receiver
+        ResultSubscriber(result_sender)
     }
 
     /// Main loop that:
@@ -104,7 +110,7 @@ where
     /// 3. Spawns execution of scheduled message
     async fn main_loop(
         mut self,
-        result_sender: broadcast::Sender<BroadcasteddMessageExecutionResult>,
+        result_sender: broadcast::Sender<BroadcastedMessageExecutionResult>,
     ) {
         loop {
             // TODO: unwraps
@@ -231,7 +237,7 @@ where
         commit_ids: HashMap<Pubkey, u64>,
         inner_scheduler: Arc<Mutex<CommitSchedulerInner>>,
         execution_permit: OwnedSemaphorePermit,
-        result_sender: broadcast::Sender<BroadcasteddMessageExecutionResult>,
+        result_sender: broadcast::Sender<BroadcastedMessageExecutionResult>,
         notify: Arc<Notify>,
     ) {
         let result = executor

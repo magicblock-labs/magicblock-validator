@@ -13,18 +13,17 @@ use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
 
 use crate::{
     commit_scheduler::{
-        commit_scheduler_worker::{
-            BroadcasteddMessageExecutionResult, CommitSchedulerWorker,
-        },
+        commit_scheduler_worker::{CommitSchedulerWorker, ResultSubscriber},
         db::DB,
     },
+    l1_message_executor::BroadcastedMessageExecutionResult,
     persist::L1MessagesPersisterIface,
     ComputeBudgetConfig,
 };
 
 pub struct CommitScheduler<D: DB> {
     db: Arc<D>,
-    result_receiver: broadcast::Receiver<BroadcasteddMessageExecutionResult>,
+    result_subscriber: ResultSubscriber,
     message_sender: mpsc::Sender<ScheduledL1Message>,
 }
 
@@ -48,12 +47,12 @@ impl<D: DB> CommitScheduler<D> {
             compute_budget_config,
             receiver,
         );
-        let result_receiver = worker.spawn();
+        let result_subscriber = worker.spawn();
 
         Self {
             db,
             message_sender: sender,
-            result_receiver,
+            result_subscriber,
         }
     }
 
@@ -89,6 +88,13 @@ impl<D: DB> CommitScheduler<D> {
         }
 
         Ok(())
+    }
+
+    /// Creates a subscription for results of L1Message execution
+    pub fn subscribe_for_results(
+        &self,
+    ) -> broadcast::Receiver<BroadcastedMessageExecutionResult> {
+        self.result_subscriber.subscribe()
     }
 }
 

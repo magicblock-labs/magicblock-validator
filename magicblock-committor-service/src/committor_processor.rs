@@ -9,12 +9,14 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
 };
+use tokio::sync::broadcast;
 
 use crate::{
     commit_scheduler::{db::DummyDB, CommitScheduler},
     compute_budget::ComputeBudgetConfig,
     config::ChainConfig,
     error::CommittorServiceResult,
+    l1_message_executor::BroadcastedMessageExecutionResult,
     persist::{
         CommitStatusRow, L1MessagePersister, L1MessagesPersisterIface,
         MessageSignatures,
@@ -140,7 +142,14 @@ impl CommittorProcessor {
 
         if let Err(err) = self.commits_scheduler.schedule(l1_messages).await {
             error!("Failed to schedule L1 message: {}", err);
-            // TODO(edwin): handle
+            // TODO(edwin): handsle
         }
+    }
+
+    /// Creates a subscription for results of L1Message execution
+    pub fn subscribe_for_results(
+        &self,
+    ) -> broadcast::Receiver<BroadcastedMessageExecutionResult> {
+        self.commits_scheduler.subscribe_for_results()
     }
 }
