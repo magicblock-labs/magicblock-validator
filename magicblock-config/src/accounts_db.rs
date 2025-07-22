@@ -66,7 +66,7 @@ impl Default for AccountsDbConfig {
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-#[clap(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
 #[repr(u32)]
 pub enum BlockSize {
     Block128 = 128,

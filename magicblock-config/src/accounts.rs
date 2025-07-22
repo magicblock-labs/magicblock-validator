@@ -106,7 +106,7 @@ pub struct RemoteConfig {
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-#[clap(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
 pub enum RemoteCluster {
     #[default]
     Devnet,
@@ -138,7 +138,7 @@ pub enum RemoteCluster {
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-#[clap(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
 pub enum LifecycleMode {
     Replica,
     #[default]
@@ -205,7 +205,7 @@ impl Default for CommitStrategy {
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-#[clap(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
 pub enum PrepareLookupTables {
     Always,
     #[default]
