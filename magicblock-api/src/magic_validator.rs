@@ -108,6 +108,9 @@ use crate::{
         init_system_metrics_ticker,
     },
 };
+
+const CLAIM_FEES_INTERVAL_SECS: u64 = 60 * 60;
+
 // -----------------
 // MagicValidatorConfig
 // -----------------
@@ -756,14 +759,16 @@ impl MagicValidator {
         }
 
         let claim_fees_token = self.token.clone();
-        let claim_fees_interval = Duration::from_secs(60 * 60);
+        let claim_fees_interval = Duration::from_secs(CLAIM_FEES_INTERVAL_SECS);
         let config = self.config.clone();
 
         self.claim_fees_task = Some(tokio::spawn(async move {
             log::info!("Starting claim fees task");
             loop {
                 log::info!("Claiming fees");
-                if let Err(err) = MagicValidator::claim_fees(config.clone()).await {
+                if let Err(err) =
+                    MagicValidator::claim_fees(config.clone()).await
+                {
                     log::error!("Failed to claim fees: {:?}", err);
                 }
                 tokio::select! {
@@ -915,6 +920,10 @@ impl MagicValidator {
         PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
         self.ledger_truncator.stop();
+
+        if let Some(handle) = self.claim_fees_task.take() {
+            handle.abort();
+        }
 
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));

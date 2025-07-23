@@ -291,7 +291,7 @@ fn test_claim_fees_transaction() {
                             "Should have claimed some fees"
                         );
                     } else {
-                        println!("ⅈ No fees were available to claim");
+                        println!("ℹ No fees were available to claim");
                     }
                 }
                 Err(e) => {
