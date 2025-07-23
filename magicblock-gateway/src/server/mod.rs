@@ -1,7 +1,7 @@
 use tokio::sync::Notify;
 
 mod http;
-mod websocket;
+pub(crate) mod websocket;
 
 #[derive(Default)]
 struct Shutdown(Notify);

@@ -19,6 +19,7 @@ use json::Value;
 use log::warn;
 use tokio::{
     net::{TcpListener, TcpStream},
+    sync::mpsc,
     time::interval,
 };
 use tokio_util::sync::CancellationToken;
@@ -33,6 +34,8 @@ use crate::{
 use super::Shutdown;
 
 type WebscoketStream = WebSocket<TokioIo<Upgraded>>;
+pub(crate) type ConnectionID = u64;
+pub(crate) type ConnectionTx = mpsc::Sender<Bytes>;
 
 pub struct WebsocketServer {
     socket: TcpListener,
@@ -181,4 +184,9 @@ impl ConnectionHandler {
         let frame = Frame::text(payload.into());
         self.ws.write_frame(frame).await
     }
+}
+
+pub(crate) struct WsConnectionChannel {
+    pub id: ConnectionID,
+    pub tx: ConnectionTx,
 }

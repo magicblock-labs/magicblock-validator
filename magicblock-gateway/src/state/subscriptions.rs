@@ -1,20 +1,25 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
-use hyper::body::Bytes;
 use magicblock_gateway_types::{
     accounts::{AccountSharedData, Pubkey},
     transactions::{TransactionResult, TransactionStatus},
 };
 use parking_lot::RwLock;
 use solana_signature::Signature;
-use tokio::sync::mpsc;
 
-use crate::encoder::{
-    AccountEncoder, Encoder, ProgramAccountEncoder, SlotEncoder,
-    TransactionLogsEncoder, TransactionResultEncoder,
+use crate::{
+    encoder::{
+        AccountEncoder, Encoder, ProgramAccountEncoder, SlotEncoder,
+        TransactionLogsEncoder, TransactionResultEncoder,
+    },
+    server::websocket::{ConnectionID, ConnectionTx, WsConnectionChannel},
+    Slot,
 };
 
 type AccountSubscriptionsDb =
@@ -27,11 +32,9 @@ type LogsSubscriptionsDb =
     Arc<RwLock<UpdateSubscribers<TransactionLogsEncoder>>>;
 type SlotSubscriptionsDb = Arc<RwLock<UpdateSubscriber<SlotEncoder>>>;
 
-pub type SubscriptionID = u64;
-pub type ConnectionID = u64;
-pub type Slot = u64;
+pub(crate) type SubscriptionID = u64;
 
-static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+static SUBID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone)]
 pub(crate) struct SubscriptionsDb {
@@ -49,7 +52,7 @@ impl Default for SubscriptionsDb {
         let signatures = Default::default();
         let logs = Arc::new(RwLock::new(UpdateSubscribers(Vec::new())));
         let slot = UpdateSubscriber {
-            id: ID_COUNTER.fetch_add(1, Ordering::Relaxed),
+            id: SUBID_COUNTER.fetch_add(1, Ordering::Relaxed),
             encoder: SlotEncoder,
             txs: Default::default(),
         };
@@ -68,13 +71,13 @@ impl SubscriptionsDb {
         &self,
         pubkey: Pubkey,
         encoder: AccountEncoder,
-        tx: ConnectionTx,
+        chan: WsConnectionChannel,
     ) -> SubscriptionID {
         self.accounts
             .entry_async(pubkey)
             .await
             .or_insert_with(|| UpdateSubscribers(vec![]))
-            .add_subscriber(tx, encoder)
+            .add_subscriber(chan, encoder)
     }
 
     pub(crate) async fn unsubscribe_from_account(
@@ -108,13 +111,13 @@ impl SubscriptionsDb {
         &self,
         pubkey: Pubkey,
         encoder: ProgramAccountEncoder,
-        tx: ConnectionTx,
+        chan: WsConnectionChannel,
     ) -> SubscriptionID {
         self.programs
             .entry_async(pubkey)
             .await
             .or_insert_with(|| UpdateSubscribers(vec![]))
-            .add_subscriber(tx, encoder)
+            .add_subscriber(chan, encoder)
     }
 
     pub(crate) async fn unsubscribe_from_program(
@@ -147,14 +150,14 @@ impl SubscriptionsDb {
     pub(crate) async fn subscribe_to_signature(
         &self,
         signature: Signature,
-        tx: ConnectionTx,
+        chan: WsConnectionChannel,
     ) -> SubscriptionID {
         let encoder = TransactionResultEncoder;
         self.signatures
             .entry_async(signature)
             .await
             .or_insert_with(|| UpdateSubscribers(vec![]))
-            .add_subscriber(tx, encoder)
+            .add_subscriber(chan, encoder)
     }
 
     pub(crate) async fn unsubscribe_from_signature(
@@ -187,10 +190,10 @@ impl SubscriptionsDb {
 
     pub(crate) fn subscribe_to_logs(
         &self,
-        tx: ConnectionTx,
+        chan: WsConnectionChannel,
         encoder: TransactionLogsEncoder,
     ) -> SubscriptionID {
-        self.logs.write().add_subscriber(tx, encoder)
+        self.logs.write().add_subscriber(chan, encoder)
     }
 
     pub(crate) fn unsubscribe_from_logs(
@@ -210,15 +213,18 @@ impl SubscriptionsDb {
         subscribers.send(update, slot);
     }
 
-    pub(crate) fn subscribe_to_slot(&self, tx: ConnectionTx) -> SubscriptionID {
+    pub(crate) fn subscribe_to_slot(
+        &self,
+        chan: WsConnectionChannel,
+    ) -> SubscriptionID {
         let mut subscriber = self.slot.write();
-        subscriber.txs.push(tx);
+        subscriber.txs.insert(chan.id, chan.tx);
         subscriber.id
     }
 
     pub(crate) fn unsubscribe_from_slot(&self, conid: ConnectionID) {
         let mut subscriber = self.slot.write();
-        subscriber.txs.retain(|s| s.conid != conid);
+        subscriber.txs.remove(&conid);
     }
 
     pub(crate) fn send_slot(&self, slot: Slot) {
@@ -233,30 +239,22 @@ struct UpdateSubscribers<E>(Vec<UpdateSubscriber<E>>);
 struct UpdateSubscriber<E> {
     id: SubscriptionID,
     encoder: E,
-    txs: Vec<ConnectionTx>,
-}
-
-#[derive(Clone)]
-pub(crate) struct ConnectionTx {
-    pub conid: ConnectionID,
-    pub tx: mpsc::Sender<Bytes>,
+    txs: BTreeMap<ConnectionID, ConnectionTx>,
 }
 
 impl<E: Encoder> UpdateSubscribers<E> {
-    fn add_subscriber(&mut self, tx: ConnectionTx, encoder: E) -> u64 {
+    fn add_subscriber(&mut self, chan: WsConnectionChannel, encoder: E) -> u64 {
         match self.0.binary_search_by(|s| s.encoder.cmp(&encoder)) {
             Ok(index) => {
                 let subscriber = &mut self.0[index];
-                subscriber.txs.push(tx);
+                subscriber.txs.insert(chan.id, chan.tx);
                 subscriber.id
             }
             Err(index) => {
-                let id = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-                let subsriber = UpdateSubscriber {
-                    id,
-                    encoder,
-                    txs: vec![tx],
-                };
+                let id = SUBID_COUNTER.fetch_add(1, Ordering::Relaxed);
+                let mut txs = BTreeMap::new();
+                txs.insert(chan.id, chan.tx);
+                let subsriber = UpdateSubscriber { id, encoder, txs };
                 self.0.insert(index, subsriber);
                 id
             }
@@ -264,12 +262,12 @@ impl<E: Encoder> UpdateSubscribers<E> {
     }
 
     fn remove_subscriber(&mut self, conid: ConnectionID, encoder: &E) -> bool {
-        let Ok(index) = self.0.binary_search_by(|s| s.encoder.cmp(&encoder))
+        let Ok(index) = self.0.binary_search_by(|s| s.encoder.cmp(encoder))
         else {
             return false;
         };
         let subscriber = &mut self.0[index];
-        subscriber.txs.retain(|tx| tx.conid != conid);
+        subscriber.txs.remove(&conid);
         if subscriber.txs.is_empty() {
             self.0.remove(index);
         }
@@ -291,8 +289,8 @@ impl<E: Encoder> UpdateSubscriber<E> {
         let Some(bytes) = self.encoder.encode(slot, msg, self.id) else {
             return;
         };
-        for tx in &self.txs {
-            let _ = tx.tx.try_send(bytes.clone());
+        for tx in self.txs.values() {
+            let _ = tx.try_send(bytes.clone());
         }
     }
 }
