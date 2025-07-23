@@ -22,4 +22,5 @@ impl SharedState {
     }
 }
 
+mod subscriptions;
 mod transactions_cache;

@@ -3998,9 +3998,12 @@ dependencies = [
  "hyper-util",
  "log",
  "magicblock-accounts-db",
+ "magicblock-gateway-types",
  "magicblock-ledger",
+ "parking_lot 0.12.4",
  "scc",
  "serde",
+ "solana-account-decoder",
  "solana-signature",
  "solana-transaction",
  "sonic-rs",
@@ -4013,6 +4016,7 @@ name = "magicblock-gateway-types"
 version = "0.1.7"
 dependencies = [
  "solana-account",
+ "solana-account-decoder",
  "solana-message",
  "solana-pubkey",
  "solana-signature",
