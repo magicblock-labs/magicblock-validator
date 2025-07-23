@@ -251,13 +251,22 @@ impl Ledger {
         (lowest_cleanup_slot, lowest_available_slot)
     }
 
+    /// Returns lowest slot in the ledger if there's any
+    pub fn get_lowest_slot(&self) -> Result<Option<Slot>, LedgerError> {
+        Ok(self
+            .blockhash_cf
+            .iter(IteratorMode::Start)?
+            .next()
+            .map(|(slot, _)| slot))
+    }
+
     pub fn get_lowest_cleanup_slot(&self) -> Slot {
         *self
             .lowest_cleanup_slot
             .read()
             .expect(Self::LOWEST_CLEANUP_SLOT_POISONED)
     }
-    ///
+
     /// Updates both lowest_cleanup_slot and oldest_slot for CompactionFilter
     /// All slots less or equal to argument will be removed during compaction
     pub fn set_lowest_cleanup_slot(&self, slot: Slot) {
@@ -279,18 +288,12 @@ impl Ledger {
 
     /// Initializes lowest slot to cleanup from
     pub fn initialize_lowest_cleanup_slot(&self) -> Result<(), LedgerError> {
-        let lowest_cleanup_slot =
-            match self.blockhash_cf.iter(IteratorMode::Start)?.next() {
-                Some((lowest_slot, _)) if lowest_slot > 0 => lowest_slot - 1,
-                _ => 0,
-            };
+        let lowest_cleanup_slot = match self.get_lowest_slot()? {
+            Some(lowest_slot) if lowest_slot > 0 => lowest_slot - 1,
+            _ => 0,
+        };
 
         info!("initializing lowest cleanup slot: {}", lowest_cleanup_slot);
-        *self
-            .lowest_cleanup_slot
-            .write()
-            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED) = lowest_cleanup_slot;
-
         self.set_lowest_cleanup_slot(lowest_cleanup_slot);
 
         Ok(())
@@ -1163,8 +1166,9 @@ impl Ledger {
         from_slot: Slot,
         to_slot: Slot,
     ) -> LedgerResult<()> {
-        let mut batch = self.db.batch();
+        self.set_lowest_cleanup_slot(to_slot);
 
+        let mut batch = self.db.batch();
         let mut lowest_cleanup_slot = self
             .lowest_cleanup_slot
             .write()

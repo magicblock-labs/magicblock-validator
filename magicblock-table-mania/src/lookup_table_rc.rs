@@ -109,6 +109,15 @@ impl RefcountedPubkeys {
             .values()
             .any(|rc_pubkey| rc_pubkey.load(Ordering::SeqCst) > 0)
     }
+
+    /// Returns the refcount of a pubkey if it exists in this table
+    /// - *pubkey* to query refcount for
+    /// - *returns* `Some(refcount)` if the pubkey exists, `None` otherwise
+    fn get_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
+        self.pubkeys
+            .get(pubkey)
+            .map(|count| count.load(Ordering::Relaxed))
+    }
 }
 
 impl Deref for RefcountedPubkeys {
@@ -316,6 +325,12 @@ impl LookupTableRc {
         })
     }
 
+    /// Returns the refcount of a pubkey if it exists in this table
+    /// - *pubkey* to query refcount for
+    /// - *returns* `Some(refcount)` if the pubkey exists, `None` otherwise
+    pub fn get_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
+        self.pubkeys()?.get_refcount(pubkey)
+    }
     /// Returns `true` if the we requested to deactivate this table.
     /// NOTE: this doesn't mean that the deactivation period passed, thus
     ///       the table could still be considered _deactivating_ on chain.

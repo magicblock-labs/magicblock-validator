@@ -90,7 +90,6 @@ impl<C: Column + ColumnName> CompactionFilter for PurgedSlotFilter<C> {
         if C::keep_all_on_compaction() {
             return Keep;
         }
-
         trace!("CompactionFilter: triggered!");
 
         let slot_in_key = C::slot(C::index(key));

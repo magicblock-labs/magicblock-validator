@@ -1,17 +1,40 @@
 use std::{
     env,
     net::{IpAddr, Ipv4Addr},
+    path::Path,
 };
 
 use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, CommitStrategy, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LifecycleMode, MetricsConfig, MetricsServiceConfig,
-    ProgramConfig, RemoteConfig, RpcConfig, ValidatorConfig,
+    LedgerConfig, LifecycleMode, MagicBlockConfig, MetricsConfig,
+    MetricsServiceConfig, ProgramConfig, RemoteCluster, RemoteConfig,
+    RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
 use url::Url;
+
+fn parse_config_with_file(config_file_dir: &Path) -> EphemeralConfig {
+    MagicBlockConfig::try_parse_config_from_arg(&vec![
+        "--config-file".to_string(),
+        config_file_dir.to_str().unwrap().to_string(),
+    ])
+    .unwrap()
+    .config
+}
+
+#[test]
+fn test_load_custom_ws_remote_toml() {
+    let workspace_dir = cargo_workspace_dir();
+    let config_file_dir = workspace_dir
+        .join("magicblock-config")
+        .join("tests")
+        .join("fixtures")
+        .join("09_custom-ws-remote.toml");
+    let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
+    assert_eq!(config.accounts.remote.cluster, RemoteCluster::CustomWithWs);
+}
 
 #[test]
 fn test_load_local_dev_with_programs_toml() {
@@ -21,9 +44,7 @@ fn test_load_local_dev_with_programs_toml() {
         .join("tests")
         .join("fixtures")
         .join("06_local-dev-with-programs.toml");
-    let config =
-        EphemeralConfig::try_load_from_file(config_file_dir.to_str().unwrap())
-            .unwrap();
+    let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
 
     assert_eq!(
         config,
@@ -84,17 +105,17 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     let base_cluster_ws = "ws://remote-account-url";
 
     // Set the ENV variables
-    env::set_var("ACCOUNTS_REMOTE", base_cluster);
+    env::set_var("REMOTE_URL", base_cluster);
     env::set_var("ACCOUNTS_LIFECYCLE", "ephemeral");
-    env::set_var("ACCOUNTS_COMMIT_FREQUENCY_MILLIS", "123");
-    env::set_var("ACCOUNTS_COMMIT_COMPUTE_UNIT_PRICE", "1");
+    env::set_var("COMMIT_FREQUENCY_MILLIS", "123");
+    env::set_var("COMMIT_COMPUTE_UNIT_PRICE", "1");
     env::set_var("RPC_ADDR", "0.1.0.1");
     env::set_var("RPC_PORT", "123");
     env::set_var("GEYSER_GRPC_ADDR", "0.1.0.1");
     env::set_var("GEYSER_GRPC_PORT", "123");
     env::set_var("VALIDATOR_MILLIS_PER_SLOT", "100");
     env::set_var("VALIDATOR_COUNTRY_CODE", "CY");
-    env::set_var("VALIDATOR_FDQN", "magicblock.er.com");
+    env::set_var("VALIDATOR_FQDN", "magicblock.er.com");
     env::set_var("LEDGER_RESET", "false");
     env::set_var("LEDGER_PATH", "/hello/world");
     env::set_var("METRICS_ENABLED", "false");
@@ -102,10 +123,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
     env::set_var("LEDGER_SIZE", "123123");
 
-    let config =
-        EphemeralConfig::try_load_from_file(config_file_dir.to_str().unwrap())
-            .unwrap();
-    let config = config.override_from_envs();
+    let config = parse_config_with_file(&config_file_dir);
 
     assert_eq!(
         config,
@@ -116,7 +134,11 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                     frequency_millis: 123,
                     compute_unit_price: 1,
                 },
-                remote: RemoteConfig::Custom(Url::parse(base_cluster).unwrap()),
+                remote: RemoteConfig {
+                    cluster: RemoteCluster::Custom,
+                    url: Some(Url::parse(base_cluster).unwrap()),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             programs: vec![ProgramConfig {
@@ -138,7 +160,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             validator: ValidatorConfig {
                 millis_per_slot: 100,
                 country_code: CountryCode::for_alpha2("CY").unwrap(),
-                fdqn: Some("magicblock.er.com".to_string()),
+                fqdn: Some("magicblock.er.com".to_string()),
                 ..Default::default()
             },
             ledger: LedgerConfig {
@@ -156,14 +178,16 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             },
         }
     );
-    env::set_var("ACCOUNTS_REMOTE_WS", base_cluster_ws);
-    let config = config.override_from_envs();
+
+    env::set_var("REMOTE_WS_URL", base_cluster_ws);
+    let config = parse_config_with_file(&config_file_dir);
 
     assert_eq!(
         config.accounts.remote,
-        RemoteConfig::CustomWithWs(
-            base_cluster.parse().unwrap(),
-            base_cluster_ws.parse().unwrap()
-        )
+        RemoteConfig {
+            cluster: RemoteCluster::CustomWithWs,
+            url: Some(Url::parse(base_cluster).unwrap()),
+            ws_url: Some(vec![Url::parse(base_cluster_ws).unwrap()]),
+        }
     );
 }

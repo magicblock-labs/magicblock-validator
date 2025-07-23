@@ -130,12 +130,12 @@ impl AccountsDbIndex {
         };
         let offset =
             // SAFETY:
-            // The accounts index stores two u32 values (offset and blocks) 
+            // The accounts index stores two u32 values (offset and blocks)
             // serialized into 8 byte long slice. Here we are interested only in the first 4 bytes
             // (offset). The memory used by lmdb to store the serialization might not be u32
-            // aligned, so we make use `read_unaligned`. 
+            // aligned, so we make use `read_unaligned`.
             //
-            // We read the data stored by corresponding put in `insert_account`, 
+            // We read the data stored by corresponding put in `insert_account`,
             // thus it should be of valid length and contain valid value
             unsafe { (offset.as_ptr() as *const u32).read_unaligned() };
         Ok(offset)
@@ -398,6 +398,16 @@ impl AccountsDbIndex {
         const DEFAULT_SIZE: usize = 1024 * 1024;
         *self = Self::new(DEFAULT_SIZE, dbpath)?;
         Ok(())
+    }
+
+    /// Returns the number of deallocations in the database
+    #[cfg(test)]
+    pub(crate) fn get_delloactions_count(&self) -> usize {
+        let Ok(txn) = self.env.begin_ro_txn() else {
+            warn!("failed to start transaction for stats retrieval");
+            return 0;
+        };
+        self.deallocations.entries(&txn)
     }
 }
 

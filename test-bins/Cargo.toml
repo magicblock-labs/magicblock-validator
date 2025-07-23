@@ -9,6 +9,7 @@ edition.workspace = true
 default-run = "rpc"
 
 [dependencies]
+clap = { workspace = true, features = ["derive", "env"] }
 console-subscriber = { workspace = true, optional = true }
 env_logger = { workspace = true }
 log = { workspace = true }

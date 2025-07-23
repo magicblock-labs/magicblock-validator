@@ -117,6 +117,7 @@ pub fn init_commit_accounts_ticker(
     })
 }
 
+#[allow(unused_variables)]
 pub fn init_system_metrics_ticker(
     tick_duration: Duration,
     bank: &Arc<Bank>,
