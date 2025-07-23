@@ -1,0 +1,22 @@
+[accounts]
+remote.cluster = "devnet"
+lifecycle = "offline"
+commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
+
+[accounts.db]
+db-size = 1048576000
+block-size = "block256"
+index-map-size = 2048576
+max-snapshots = 7
+snapshot-frequency = 1024
+
+[validator]
+millis_per_slot = 50
+sigverify = true
+
+[[program]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+path = "../schedulecommit/elfs/dlp.so"
+
+[rpc]
+port = 7799

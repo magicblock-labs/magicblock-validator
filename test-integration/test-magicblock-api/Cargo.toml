@@ -12,8 +12,16 @@ solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 integration-test-tools = { workspace = true }
 isocountry = "0.3.2"
+magicblock-config = { workspace = true }
+magicblock-delegation-program = { workspace = true }
+magicblock-program = { path = "../../programs/magicblock" }
 
 [[test]]
 name = "test-domain-registry"
 path = "tests/test_domain_registry.rs"
+harness = false
+
+[[test]]
+name = "test-validator-claim-fees"
+path = "tests/test_validator_claim_fees.rs"
 harness = false
