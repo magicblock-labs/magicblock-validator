@@ -2,27 +2,35 @@ use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
 use conjunto_transwise::AccountChainSnapshot;
-use log::error;
+use log::{debug, error};
 use magicblock_account_cloner::{AccountClonerOutput, CloneOutputMap};
 use magicblock_bank::bank::Bank;
 use magicblock_committor_service::{
-    types::ScheduledL1MessageWrapper, utils::ScheduledMessageExt,
+    commit_scheduler::{
+        BroadcastedMessageExecutionResult, ExecutionOutputWrapper,
+    },
+    types::ScheduledL1MessageWrapper,
+    utils::ScheduledMessageExt,
     L1MessageCommittor,
 };
+use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
     magic_scheduled_l1_message::{CommittedAccountV2, ScheduledL1Message},
-    FeePayerAccount, TransactionScheduler,
+    register_scheduled_commit_sent, FeePayerAccount, TransactionScheduler,
 };
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     account::{Account, ReadableAccount},
     pubkey::Pubkey,
 };
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::{
+    broadcast,
+    mpsc::{channel, Sender},
+    oneshot,
+};
 
 use crate::{
     errors::AccountsResult,
-    remote_scheduled_commits_worker::RemoteScheduledCommitsWorker,
     ScheduledCommitsProcessor,
 };
 
@@ -44,12 +52,11 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
         transaction_status_sender: TransactionStatusSender,
     ) -> Self {
         let result_subscriber = committor.subscribe_for_results();
-        let worker = RemoteScheduledCommitsWorker::new(
+        tokio::spawn(Self::result_processor(
             bank.clone(),
             result_subscriber,
             transaction_status_sender,
-        );
-        tokio::spawn(worker.start());
+        ));
 
         Self {
             bank,
@@ -75,7 +82,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
         let mut excluded_pubkeys = HashSet::new();
         let mut feepayers = HashSet::new();
 
-        let process_feepayer = |account: &mut CommittedAccountV2| -> bool {
+        let mut process_feepayer = |account: &mut CommittedAccountV2| -> bool {
             let pubkey = account.pubkey;
             let ephemeral_pubkey =
                 AccountChainSnapshot::ephemeral_balance_pda(&pubkey);
@@ -104,7 +111,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
                         "Scheduled commit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
                         pubkey
                     );
-                    excluded_pubkeys.insert(*pubkey);
+                    excluded_pubkeys.insert(pubkey);
                     false
                 }
             }
@@ -143,6 +150,56 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
             scheduled_l1_message: l1_message,
             feepayers: feepayers.into_iter().collect(),
             excluded_pubkeys: excluded_pubkeys.into_iter().collect(),
+        }
+    }
+
+    async fn result_processor(
+        bank: Arc<Bank>,
+        result_subscriber: oneshot::Receiver<
+            broadcast::Receiver<BroadcastedMessageExecutionResult>,
+        >,
+        transaction_status_sender: TransactionStatusSender,
+    ) {
+        const SUBSCRIPTION_ERR_MSG: &str =
+            "Failed to get subscription of results of L1Messages execution";
+
+        let mut result_receiver =
+            result_subscriber.await.expect(SUBSCRIPTION_ERR_MSG);
+        while let Ok(execution_result) = result_receiver.recv().await {
+            match execution_result {
+                Ok(value) => {
+                    Self::process_message_result(
+                        &bank,
+                        &transaction_status_sender,
+                        value,
+                    )
+                    .await
+                }
+                Err(err) => {
+                    todo!()
+                }
+            }
+        }
+    }
+
+    async fn process_message_result(
+        bank: &Arc<Bank>,
+        transaction_status_sender: &TransactionStatusSender,
+        execution_outcome: ExecutionOutputWrapper,
+    ) {
+        register_scheduled_commit_sent(execution_outcome.sent_commit);
+        match execute_legacy_transaction(
+            execution_outcome.action_sent_transaction,
+            bank,
+            Some(transaction_status_sender),
+        ) {
+            Ok(signature) => debug!(
+                "Signaled sent commit with internal signature: {:?}",
+                signature
+            ),
+            Err(err) => {
+                error!("Failed to signal sent commit via transaction: {}", err);
+            }
         }
     }
 }

@@ -98,8 +98,7 @@ where
         RwLock<HashMap<Pubkey, ExternalCommitableAccount>>,
 }
 
-impl<IAP, ACL, ACM, TAE, TAV>
-    ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV>
+impl<IAP, ACL, ACM, TAE, TAV> ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,

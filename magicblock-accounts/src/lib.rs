@@ -4,7 +4,6 @@ pub mod errors;
 mod external_accounts_manager;
 mod remote_account_committer;
 pub mod remote_scheduled_commits_processor;
-mod remote_scheduled_commits_worker;
 mod traits;
 pub mod utils;
 
