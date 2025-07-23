@@ -1,5 +1,9 @@
 use std::fmt;
 
+use magicblock_program::{
+    magic_scheduled_l1_message::ScheduledL1Message, FeePayerAccount,
+};
+use solana_pubkey::Pubkey;
 use solana_sdk::instruction::Instruction;
 
 use crate::CommitInfo;
@@ -54,4 +58,10 @@ impl fmt::Display for InstructionsForCommitable {
             self.kind
         )
     }
+}
+
+pub struct ScheduledL1MessageWrapper {
+    pub scheduled_l1_message: ScheduledL1Message,
+    pub feepayers: Vec<FeePayerAccount>,
+    pub excluded_pubkeys: Vec<Pubkey>,
 }

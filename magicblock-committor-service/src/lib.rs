@@ -11,7 +11,7 @@ pub mod persist;
 mod pubkeys_provider;
 mod service;
 mod transactions;
-mod types;
+pub mod types;
 mod undelegate;
 
 pub mod commit_scheduler;
@@ -22,7 +22,7 @@ pub mod l1_message_executor;
 pub mod stubs;
 pub mod tasks;
 pub mod transaction_preperator;
-pub(crate) mod utils;
+pub mod utils; // TODO(edwin) pub(crate)
 
 pub use commit_info::CommitInfo;
 pub use compute_budget::ComputeBudgetConfig;

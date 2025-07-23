@@ -145,6 +145,10 @@ impl CommitAndUndelegate {
     pub fn get_committed_accounts(&self) -> &Vec<CommittedAccountV2> {
         self.commit_action.get_committed_accounts()
     }
+
+    pub fn get_committed_accounts_mut(&mut self) -> &Vec<CommittedAccountV2> {
+        self.commit_action.get_committed_accounts_mut()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -396,6 +400,17 @@ impl CommitType {
     }
 
     pub fn get_committed_accounts(&self) -> &Vec<CommittedAccountV2> {
+        match self {
+            Self::Standalone(committed_accounts) => committed_accounts,
+            Self::WithL1Actions {
+                committed_accounts, ..
+            } => committed_accounts,
+        }
+    }
+
+    pub fn get_committed_accounts_mut(
+        &mut self,
+    ) -> &mut Vec<CommittedAccountV2> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
             Self::WithL1Actions {

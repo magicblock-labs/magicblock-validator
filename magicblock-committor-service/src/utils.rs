@@ -6,9 +6,7 @@ use magicblock_program::magic_scheduled_l1_message::{
 };
 use solana_pubkey::Pubkey;
 
-use crate::{
-    persist::{CommitStatus, L1MessagesPersisterIface},
-};
+use crate::persist::{CommitStatus, L1MessagesPersisterIface};
 
 pub trait ScheduledMessageExt {
     fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccountV2>>;
@@ -20,6 +18,18 @@ pub trait ScheduledMessageExt {
 
 impl ScheduledMessageExt for ScheduledL1Message {
     fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccountV2>> {
+        match &self.l1_message {
+            MagicL1Message::L1Actions(_) => None,
+            MagicL1Message::Commit(t) => Some(t.get_committed_accounts()),
+            MagicL1Message::CommitAndUndelegate(t) => {
+                Some(t.get_committed_accounts())
+            }
+        }
+    }
+
+    fn get_committed_accounts_mut(
+        &mut self,
+    ) -> Option<&mut Vec<CommittedAccountV2>> {
         match &self.l1_message {
             MagicL1Message::L1Actions(_) => None,
             MagicL1Message::Commit(t) => Some(t.get_committed_accounts()),

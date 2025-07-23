@@ -6,7 +6,9 @@ use std::{
 use log::{debug, error};
 use magicblock_bank::bank::Bank;
 use magicblock_committor_service::{
-    persist::MessageSignatures, ChangesetMeta, L1MessageCommittor,
+    l1_message_executor::{BroadcastedMessageExecutionResult, ExecutionOutput},
+    persist::MessageSignatures,
+    ChangesetMeta, L1MessageCommittor,
 };
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
@@ -15,63 +17,63 @@ use magicblock_program::{
 };
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::transaction::Transaction;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::{broadcast, mpsc::Receiver, oneshot};
 
 pub(crate) struct RemoteScheduledCommitsWorker<C: L1MessageCommittor> {
     bank: Arc<Bank>,
-    committor: Arc<C>,
+    result_subscriber: oneshot::Receiver<
+        broadcast::Receiver<BroadcastedMessageExecutionResult>,
+    >,
     transaction_status_sender: TransactionStatusSender,
-    message_receiver: Receiver<Vec<ScheduledL1Message>>,
 }
 
 impl<C: L1MessageCommittor> RemoteScheduledCommitsWorker<C> {
     pub fn new(
         bank: Arc<Bank>,
-        committor: Arc<C>,
+        result_subscriber: oneshot::Receiver<
+            broadcast::Receiver<BroadcastedMessageExecutionResult>,
+        >,
         transaction_status_sender: TransactionStatusSender,
-        message_receiver: Receiver<Vec<ScheduledL1Message>>,
     ) -> Self {
         Self {
             bank,
-            committor,
+            result_subscriber,
             transaction_status_sender,
-            message_receiver,
         }
     }
 
     // TODO(edwin): maybe not needed
     pub async fn start(mut self) {
-        while let Some(l1_messages) = self.message_receiver.recv().await {
-            let metadata = ChangesetMeta::from(&l1_messages);
-            // TODO(edwin) mayne actuall  self.committor.commit_l1_messages(l1_messages).
-            // should be on a client, and here we just send receivers to wait on and process
-            match self.committor.commit_l1_messages(l1_messages).await {
-                Ok(Some(reqid)) => {
-                    debug!(
-                        "Committed changeset with {} accounts via reqid {}",
-                        metadata.accounts.len(),
-                        reqid
-                    );
-                }
-                Ok(None) => {
-                    debug!(
-                        "Committed changeset with {} accounts, but did not get a reqid",
-                        metadata.accounts.len()
-                    );
-                }
-                Err(err) => {
-                    error!(
-                        "Tried to commit changeset with {} accounts but failed to send request ({:#?})",
-                        metadata.accounts.len(),err
-                    );
-                }
-            }
+        const SUBSCRIPTION_ERR_MSG: &str =
+            "Failed to get subscription of results of L1Messages execution";
 
+        let mut result_receiver =
+            self.result_subscriber.await.expect(SUBSCRIPTION_ERR_MSG);
+        while let Ok(l1_messages) = result_receiver.recv().await {
+            let metadata = ChangesetMeta::from(&l1_messages);
             self.process_message_result(metadata, todo!()).await;
         }
     }
 
-    async fn process_message_result(
+    async fn process_message_result(&self, execution_outcome: ExecutionOutput) {
+        sent_commit.chain_signatures = chain_signatures;
+        register_scheduled_commit_sent(sent_commit);
+        match execute_legacy_transaction(
+            commit_sent_transaction,
+            &self.bank,
+            Some(&self.transaction_status_sender),
+        ) {
+            Ok(signature) => debug!(
+                "Signaled sent commit with internal signature: {:?}",
+                signature
+            ),
+            Err(err) => {
+                error!("Failed to signal sent commit via transaction: {}", err);
+            }
+        }
+    }
+
+    async fn process_message_result_old(
         &self,
         metadata: ChangesetMeta,
         mut sent_commits: HashMap<u64, (Transaction, SentCommit)>,
@@ -101,7 +103,6 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsWorker<C> {
                 Some(MessageSignatures {
                     processed_signature,
                     finalized_signature,
-                    bundle_id,
                     ..
                 }) => {
                     let mut chain_signatures = vec![processed_signature];

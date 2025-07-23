@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use log::warn;
 use magicblock_program::{
     magic_scheduled_l1_message::ScheduledL1Message,
-    validator::validator_authority,
+    validator::validator_authority, SentCommit,
 };
 use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
@@ -15,7 +15,7 @@ use solana_sdk::{
     message::VersionedMessage,
     signature::{Keypair, Signature},
     signer::{Signer, SignerError},
-    transaction::VersionedTransaction,
+    transaction::{Transaction, VersionedTransaction},
 };
 
 use crate::{
@@ -36,6 +36,8 @@ pub type BroadcastedMessageExecutionResult =
 pub struct ExecutionOutput {
     commit_signature: Signature,
     finalize_signature: Signature,
+    sent_commit: SentCommit,
+    action_sent_transaction: Transaction,
 }
 
 pub(crate) struct L1MessageExecutor<T> {
@@ -88,65 +90,79 @@ where
         persister: &Option<P>,
     ) -> MessageExecutorResult<ExecutionOutput> {
         // Update tasks status to Pending
-        {
-            let update_status = CommitStatus::Pending;
-            persist_status_update_set(&persister, &commit_ids, update_status);
-        }
+        let update_status = CommitStatus::Pending;
+        persist_status_update_set(&persister, &commit_ids, update_status);
 
         // Commit stage
-        let commit_signature = {
-            // Prepare everything for commit
-            let prepared_message = self
-                .transaction_preparator
-                .prepare_commit_tx(
-                    &self.authority,
-                    &l1_message,
-                    commit_ids,
-                    &persister,
-                )
-                .await
-                .map_err(Error::FailedCommitPreparationError)?;
-
-            // Commit
-            self.send_prepared_message(prepared_message).await.map_err(
-                |(err, signature)| Error::FailedToCommitError {
-                    err,
-                    signature,
-                },
-            )?
-        };
-
+        let commit_signature = self
+            .execute_commit_stage(&l1_message, commit_ids, persister)
+            .await?;
         // Finalize stage
         // At the moment validator finalizes right away
         // In the future there will be a challenge window
-        let finalize_signature = {
-            // Prepare eveything for finalize
-            let rent_reimbursement = self.authority.pubkey();
-            let prepared_message = self
-                .transaction_preparator
-                .prepare_finalize_tx(
-                    &self.authority,
-                    &rent_reimbursement,
-                    &l1_message,
-                    &persister,
-                )
-                .await
-                .map_err(Error::FailedFinalizePreparationError)?;
+        let finalize_signature = self
+            .execute_finalize_stage(&l1_message, commit_signature, persister)
+            .await?;
 
-            // Finalize
-            self.send_prepared_message(prepared_message).await.map_err(
-                |(err, finalize_signature)| Error::FailedToFinalizeError {
-                    err,
-                    commit_signature,
-                    finalize_signature,
-                },
-            )?
+        let sent_commit = SentCommit {
+            message_id: l1_message.id,
+            slot: l1_message.slot,
+            blockhash: l1_message.blockhash,
         };
-
         Ok(ExecutionOutput {
             commit_signature,
             finalize_signature,
+            action_sent_transaction: l1_message.action_sent_transaction,
         })
+    }
+
+    async fn execute_commit_stage<P: L1MessagesPersisterIface>(
+        &self,
+        l1_message: &ScheduledL1Message,
+        commit_ids: &HashMap<Pubkey, u64>,
+        persister: &Option<P>,
+    ) -> MessageExecutorResult<Signature> {
+        let prepared_message = self
+            .transaction_preparator
+            .prepare_commit_tx(
+                &self.authority,
+                l1_message,
+                commit_ids,
+                persister,
+            )
+            .await
+            .map_err(Error::FailedCommitPreparationError)?;
+
+        self.send_prepared_message(prepared_message).await.map_err(
+            |(err, signature)| Error::FailedToCommitError { err, signature },
+        )
+    }
+
+    async fn execute_finalize_stage<P: L1MessagesPersisterIface>(
+        &self,
+        l1_message: &ScheduledL1Message,
+        commit_signature: Signature,
+        persister: &Option<P>,
+    ) -> MessageExecutorResult<Signature> {
+        let rent_reimbursement = self.authority.pubkey();
+        let prepared_message = self
+            .transaction_preparator
+            .prepare_finalize_tx(
+                &self.authority,
+                &rent_reimbursement,
+                l1_message,
+                persister,
+            )
+            .await
+            .map_err(Error::FailedFinalizePreparationError)?;
+
+        self.send_prepared_message(prepared_message).await.map_err(
+            |(err, finalize_signature)| Error::FailedToFinalizeError {
+                err,
+                commit_signature,
+                finalize_signature,
+            },
+        )
     }
 
     /// Shared helper for sending transactions
