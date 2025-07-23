@@ -4,25 +4,29 @@ use std::{collections::VecDeque, sync::Mutex};
 use async_trait::async_trait;
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 
+use crate::types::ScheduledL1MessageWrapper;
+
 const POISONED_MUTEX_MSG: &str = "Mutex poisoned";
 
 #[async_trait]
 pub trait DB: Send + Sync + 'static {
     async fn store_l1_message(
         &self,
-        l1_message: ScheduledL1Message,
+        l1_message: ScheduledL1MessageWrapper,
     ) -> DBResult<()>;
     async fn store_l1_messages(
         &self,
-        l1_messages: Vec<ScheduledL1Message>,
+        l1_messages: Vec<ScheduledL1MessageWrapper>,
     ) -> DBResult<()>;
     /// Return message with smallest bundle_id
-    async fn pop_l1_message(&self) -> DBResult<Option<ScheduledL1Message>>;
+    async fn pop_l1_message(
+        &self,
+    ) -> DBResult<Option<ScheduledL1MessageWrapper>>;
     fn is_empty(&self) -> bool;
 }
 
 pub(crate) struct DummyDB {
-    db: Mutex<VecDeque<ScheduledL1Message>>,
+    db: Mutex<VecDeque<ScheduledL1MessageWrapper>>,
 }
 
 impl DummyDB {
@@ -37,7 +41,7 @@ impl DummyDB {
 impl DB for DummyDB {
     async fn store_l1_message(
         &self,
-        l1_message: ScheduledL1Message,
+        l1_message: ScheduledL1MessageWrapper,
     ) -> DBResult<()> {
         self.db
             .lock()
@@ -48,7 +52,7 @@ impl DB for DummyDB {
 
     async fn store_l1_messages(
         &self,
-        l1_messages: Vec<ScheduledL1Message>,
+        l1_messages: Vec<ScheduledL1MessageWrapper>,
     ) -> DBResult<()> {
         self.db
             .lock()
@@ -57,7 +61,9 @@ impl DB for DummyDB {
         Ok(())
     }
 
-    async fn pop_l1_message(&self) -> DBResult<Option<ScheduledL1Message>> {
+    async fn pop_l1_message(
+        &self,
+    ) -> DBResult<Option<ScheduledL1MessageWrapper>> {
         Ok(self.db.lock().expect(POISONED_MUTEX_MSG).pop_front())
     }
 

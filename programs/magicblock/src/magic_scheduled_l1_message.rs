@@ -146,7 +146,9 @@ impl CommitAndUndelegate {
         self.commit_action.get_committed_accounts()
     }
 
-    pub fn get_committed_accounts_mut(&mut self) -> &Vec<CommittedAccountV2> {
+    pub fn get_committed_accounts_mut(
+        &mut self,
+    ) -> &mut Vec<CommittedAccountV2> {
         self.commit_action.get_committed_accounts_mut()
     }
 }

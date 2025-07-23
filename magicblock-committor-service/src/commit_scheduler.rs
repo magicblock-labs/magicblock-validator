@@ -6,6 +6,9 @@ mod executor_pool;
 
 use std::sync::Arc;
 
+pub use commit_scheduler_worker::{
+    BroadcastedMessageExecutionResult, ExecutionOutputWrapper,
+};
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
@@ -16,15 +19,15 @@ use crate::{
         commit_scheduler_worker::{CommitSchedulerWorker, ResultSubscriber},
         db::DB,
     },
-    l1_message_executor::BroadcastedMessageExecutionResult,
     persist::L1MessagesPersisterIface,
+    types::ScheduledL1MessageWrapper,
     ComputeBudgetConfig,
 };
 
 pub struct CommitScheduler<D: DB> {
     db: Arc<D>,
     result_subscriber: ResultSubscriber,
-    message_sender: mpsc::Sender<ScheduledL1Message>,
+    message_sender: mpsc::Sender<ScheduledL1MessageWrapper>,
 }
 
 impl<D: DB> CommitScheduler<D> {
@@ -61,7 +64,7 @@ impl<D: DB> CommitScheduler<D> {
     /// Messages will be extracted and handled in the [`CommitSchedulerWorker`]
     pub async fn schedule(
         &self,
-        l1_messages: Vec<ScheduledL1Message>,
+        l1_messages: Vec<ScheduledL1MessageWrapper>,
     ) -> Result<(), Error> {
         // If db not empty push el-t there
         // This means that at some point channel got full

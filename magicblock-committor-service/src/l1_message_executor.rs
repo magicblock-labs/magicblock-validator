@@ -23,21 +23,17 @@ use crate::{
     transaction_preperator::transaction_preparator::{
         TransactionPreparator, TransactionPreparatorV1,
     },
+    types::ScheduledL1MessageWrapper,
     utils::{persist_status_update, persist_status_update_set},
     ComputeBudgetConfig,
 };
-
-pub type BroadcastedMessageExecutionResult =
-    MessageExecutorResult<ExecutionOutput, Arc<Error>>;
 
 // TODO(edwin): define struct
 // (commit_id, signature)s that it sent. Single worker in [`RemoteScheduledCommitsProcessor`]
 #[derive(Clone, Debug)]
 pub struct ExecutionOutput {
-    commit_signature: Signature,
-    finalize_signature: Signature,
-    sent_commit: SentCommit,
-    action_sent_transaction: Transaction,
+    pub commit_signature: Signature,
+    pub finalize_signature: Signature,
 }
 
 pub(crate) struct L1MessageExecutor<T> {
@@ -104,15 +100,9 @@ where
             .execute_finalize_stage(&l1_message, commit_signature, persister)
             .await?;
 
-        let sent_commit = SentCommit {
-            message_id: l1_message.id,
-            slot: l1_message.slot,
-            blockhash: l1_message.blockhash,
-        };
         Ok(ExecutionOutput {
             commit_signature,
             finalize_signature,
-            action_sent_transaction: l1_message.action_sent_transaction,
         })
     }
 

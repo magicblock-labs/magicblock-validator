@@ -6,7 +6,10 @@ use std::{
 use log::{debug, error};
 use magicblock_bank::bank::Bank;
 use magicblock_committor_service::{
-    l1_message_executor::{BroadcastedMessageExecutionResult, ExecutionOutput},
+    commit_scheduler::{
+        BroadcastedMessageExecutionResult, ExecutionOutputWrapper,
+    },
+    l1_message_executor::ExecutionOutput,
     persist::MessageSignatures,
     ChangesetMeta, L1MessageCommittor,
 };
@@ -49,17 +52,23 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsWorker<C> {
 
         let mut result_receiver =
             self.result_subscriber.await.expect(SUBSCRIPTION_ERR_MSG);
-        while let Ok(l1_messages) = result_receiver.recv().await {
-            let metadata = ChangesetMeta::from(&l1_messages);
-            self.process_message_result(metadata, todo!()).await;
+        while let Ok(execution_result) = result_receiver.recv().await {
+            match execution_result {
+                Ok(value) => self.process_message_result(value).await,
+                Err(err) => {
+                    todo!()
+                }
+            }
         }
     }
 
-    async fn process_message_result(&self, execution_outcome: ExecutionOutput) {
-        sent_commit.chain_signatures = chain_signatures;
-        register_scheduled_commit_sent(sent_commit);
+    async fn process_message_result(
+        &self,
+        execution_outcome: ExecutionOutputWrapper,
+    ) {
+        register_scheduled_commit_sent(execution_outcome.sent_commit);
         match execute_legacy_transaction(
-            commit_sent_transaction,
+            execution_outcome.action_sent_transaction,
             &self.bank,
             Some(&self.transaction_status_sender),
         ) {
@@ -69,75 +78,6 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsWorker<C> {
             ),
             Err(err) => {
                 error!("Failed to signal sent commit via transaction: {}", err);
-            }
-        }
-    }
-
-    async fn process_message_result_old(
-        &self,
-        metadata: ChangesetMeta,
-        mut sent_commits: HashMap<u64, (Transaction, SentCommit)>,
-    ) {
-        for bundle_id in metadata
-            .accounts
-            .iter()
-            .map(|account| account.bundle_id)
-            .collect::<HashSet<_>>()
-        {
-            let bundle_signatures = match self
-                .committor
-                .get_commit_signatures(bundle_id)
-                .await
-            {
-                Ok(Ok(sig)) => sig,
-                Ok(Err(err)) => {
-                    error!("Encountered error while getting bundle signatures for {}: {:?}", bundle_id, err);
-                    continue;
-                }
-                Err(err) => {
-                    error!("Encountered error while getting bundle signatures for {}: {:?}", bundle_id, err);
-                    continue;
-                }
-            };
-            match bundle_signatures {
-                Some(MessageSignatures {
-                    processed_signature,
-                    finalized_signature,
-                    ..
-                }) => {
-                    let mut chain_signatures = vec![processed_signature];
-                    if let Some(finalized_signature) = finalized_signature {
-                        chain_signatures.push(finalized_signature);
-                    }
-                    if let Some((commit_sent_transaction, mut sent_commit)) =
-                        sent_commits.remove(&bundle_id)
-                    {
-                        sent_commit.chain_signatures = chain_signatures;
-                        register_scheduled_commit_sent(sent_commit);
-                        match execute_legacy_transaction(
-                            commit_sent_transaction,
-                            &self.bank,
-                            Some(&self.transaction_status_sender),
-                        ) {
-                            Ok(signature) => debug!(
-                                "Signaled sent commit with internal signature: {:?}",
-                                signature
-                            ),
-                            Err(err) => {
-                                error!("Failed to signal sent commit via transaction: {}", err);
-                            }
-                        }
-                    } else {
-                        error!(
-                                "BUG: Failed to get sent commit for bundle id {} that should have been added",
-                                bundle_id
-                            );
-                    }
-                }
-                None => error!(
-                    "Failed to get bundle signatures for bundle id {}",
-                    bundle_id
-                ),
             }
         }
     }

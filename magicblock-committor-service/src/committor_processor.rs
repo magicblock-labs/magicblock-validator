@@ -12,15 +12,17 @@ use solana_sdk::{
 use tokio::sync::broadcast;
 
 use crate::{
-    commit_scheduler::{db::DummyDB, CommitScheduler},
+    commit_scheduler::{
+        db::DummyDB, BroadcastedMessageExecutionResult, CommitScheduler,
+    },
     compute_budget::ComputeBudgetConfig,
     config::ChainConfig,
     error::CommittorServiceResult,
-    l1_message_executor::BroadcastedMessageExecutionResult,
     persist::{
         CommitStatusRow, L1MessagePersister, L1MessagesPersisterIface,
         MessageSignatures,
     },
+    types::ScheduledL1MessageWrapper,
 };
 
 pub(crate) struct CommittorProcessor {
@@ -128,9 +130,13 @@ impl CommittorProcessor {
 
     pub async fn commit_l1_messages(
         &self,
-        l1_messages: Vec<ScheduledL1Message>,
+        l1_messages: Vec<ScheduledL1MessageWrapper>,
     ) {
-        if let Err(err) = self.persister.start_l1_messages(&l1_messages) {
+        let l1_messages_inner = l1_messages
+            .iter()
+            .map(|l1_message| l1_message.scheduled_l1_message.clone())
+            .collect::<Vec<_>>();
+        if let Err(err) = self.persister.start_l1_messages(&l1_messages_inner) {
             // We will still try to perform the commits, but the fact that we cannot
             // persist the intent is very serious and we should probably restart the
             // valiator

@@ -24,15 +24,12 @@ pub type AccountsManager = ExternalAccountsManager<
     RemoteAccountCommitter,
     TransactionAccountsExtractorImpl,
     TransactionAccountsValidatorImpl,
-    RemoteScheduledCommitsProcessor,
 >;
 
 impl AccountsManager {
     pub fn try_new(
         bank: &Arc<Bank>,
-        cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
-        transaction_status_sender: TransactionStatusSender,
         validator_keypair: Keypair,
         config: AccountsConfig,
     ) -> AccountsResult<Self> {

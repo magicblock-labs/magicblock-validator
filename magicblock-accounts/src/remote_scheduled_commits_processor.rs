@@ -59,10 +59,6 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
         }
     }
 
-    // fn preprocess_messages(&self, mut l1_messages: Vec<ScheduledL1Message>) -> Vec<ScheduledL1MessageWrapper> {
-    //     l1_messages.
-    // }
-
     fn preprocess_message(
         &self,
         mut l1_message: ScheduledL1Message,
@@ -85,7 +81,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
                 AccountChainSnapshot::ephemeral_balance_pda(&pubkey);
 
             feepayers.insert(FeePayerAccount {
-                pubkey: *pubkey,
+                pubkey,
                 delegated_pda: ephemeral_pubkey,
             });
 
@@ -105,9 +101,9 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
                 }
                 None => {
                     error!(
-                    "Scheduled commit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
-                    pubkey
-                );
+                        "Scheduled commit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
+                        pubkey
+                    );
                     excluded_pubkeys.insert(*pubkey);
                     false
                 }
@@ -136,85 +132,10 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
                         true
                     }
                 }
-                Some(AccountClonerOutput::Unclonable {..}) => {
+                Some(AccountClonerOutput::Unclonable { .. }) => {
                     todo!()
                 }
                 None => true,
-            }
-        });
-
-        ScheduledL1MessageWrapper {
-            scheduled_l1_message: l1_message,
-            feepayers: feepayers.into_iter().collect(),
-            excluded_pubkeys: excluded_pubkeys.into_iter().collect(),
-        }
-    }
-
-    fn preprocess_message2(
-        &self,
-        mut l1_message: ScheduledL1Message,
-    ) -> ScheduledL1MessageWrapper {
-        let Some(committed_accounts) = l1_message.get_committed_accounts_mut()
-        else {
-            return ScheduledL1MessageWrapper {
-                scheduled_l1_message: l1_message,
-                excluded_pubkeys: vec![],
-                feepayers: vec![],
-            };
-        };
-
-        let mut excluded_pubkeys = HashSet::new();
-        let mut feepayers = HashSet::new();
-        committed_accounts.retain_mut(|account| {
-            let pubkey = account.pubkey;
-            if let Some(AccountClonerOutput::Cloned {
-                account_chain_snapshot,
-                ..
-            }) = self
-                .cloned_accounts
-                .read()
-                .expect(POISONED_RWLOCK_MSG)
-                .get(&pubkey)
-            {
-                if account_chain_snapshot.chain_state.is_feepayer() {
-                    let ephemeral_pubkey =
-                        AccountChainSnapshot::ephemeral_balance_pda(&pubkey);
-                    let ephemeral_owner =
-                        AccountChainSnapshot::ephemeral_balance_pda_owner();
-                    feepayers.insert(FeePayerAccount {
-                        pubkey: *pubkey,
-                        delegated_pda: ephemeral_pubkey,
-                    });
-
-                    if let Some(account_data) = self.bank.get_account(&ephemeral_pubkey) {
-                        account.pubkey = ephemeral_pubkey;
-                        account.account = Account {
-                            lamports: account_data.lamports(),
-                            data: account_data.data().to_vec(),
-                            owner: ephemeral_owner,
-                            executable: account_data.executable(),
-                            rent_epoch: account_data.rent_epoch()
-                        };
-                        true
-                    } else {
-                        error!(
-                            "Scheduled commmit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
-                            pubkey
-                        );
-
-                        // Exclude this
-                        // TODO(edwin): should fail commit really
-                        excluded_pubkeys.insert(pubkey);
-                        false
-                    }
-                } else if account_chain_snapshot.chain_state.is_undelegated() {
-                    excluded_pubkeys.insert(pubkey);
-                    false
-                } else {
-                    true
-                }
-            } else {
-                true
             }
         });
 
@@ -238,8 +159,12 @@ impl<C: L1MessageCommittor> ScheduledCommitsProcessor
             return Ok(());
         }
 
-        let l1_messages = self.preprocess(scheduled_l1_messages);
-        self.committor.commit_l1_messages(scheduled_l1_messages);
+        let scheduled_l1_messages_wrapped = scheduled_l1_messages
+            .into_iter()
+            .map(|message| self.preprocess_message(message))
+            .collect();
+        self.committor
+            .commit_l1_messages(scheduled_l1_messages_wrapped);
 
         Ok(())
     }

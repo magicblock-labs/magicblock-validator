@@ -80,7 +80,7 @@ impl ExternalCommitableAccount {
 }
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV, SCP>
+pub struct ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
@@ -98,15 +98,14 @@ where
         RwLock<HashMap<Pubkey, ExternalCommitableAccount>>,
 }
 
-impl<IAP, ACL, ACM, TAE, TAV, SCP>
-    ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV, SCP>
+impl<IAP, ACL, ACM, TAE, TAV>
+    ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
     ACM: AccountCommitter,
     TAE: TransactionAccountsExtractor,
     TAV: TransactionAccountsValidator,
-    SCP: ScheduledCommitsProcessor,
 {
     pub async fn ensure_accounts(
         &self,

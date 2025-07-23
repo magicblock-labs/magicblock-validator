@@ -1,13 +1,16 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
 use log::{error, info, trace, warn};
-use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
+use magicblock_program::{
+    magic_scheduled_l1_message::ScheduledL1Message, FeePayerAccount, SentCommit,
+};
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_pubkey::Pubkey;
+use solana_sdk::transaction::Transaction;
 use tokio::sync::{
     broadcast, mpsc, mpsc::error::TryRecvError, Notify, OwnedSemaphorePermit,
     Semaphore,
@@ -21,17 +24,30 @@ use crate::{
         Error,
     },
     l1_message_executor::{
-        BroadcastedMessageExecutionResult, L1MessageExecutor,
+        ExecutionOutput, L1MessageExecutor, MessageExecutorResult,
     },
     persist::L1MessagesPersisterIface,
     transaction_preperator::transaction_preparator::{
         TransactionPreparator, TransactionPreparatorV1,
     },
+    types::ScheduledL1MessageWrapper,
     utils::ScheduledMessageExt,
     ComputeBudgetConfig,
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
+
+// TODO(edwin): rename
+#[derive(Clone)]
+pub struct ExecutionOutputWrapper {
+    pub output: ExecutionOutput,
+    pub action_sent_transaction: Transaction,
+    pub sent_commit: SentCommit,
+}
+pub type BroadcastedMessageExecutionResult = MessageExecutorResult<
+    ExecutionOutputWrapper,
+    Arc<crate::l1_message_executor::Error>,
+>;
 
 /// Struct that exposes only `subscribe` method of `broadcast::Sender` for better isolation
 pub struct ResultSubscriber(
@@ -50,7 +66,7 @@ pub(crate) struct CommitSchedulerWorker<D, P> {
     l1_messages_persister: Option<P>,
     executor_factory: L1MessageExecutorFactory,
     commit_id_tracker: CommitIdTracker,
-    receiver: mpsc::Receiver<ScheduledL1Message>,
+    receiver: mpsc::Receiver<ScheduledL1MessageWrapper>,
 
     // TODO(edwin): replace notify. issue: 2 simultaneous notifications
     notify: Arc<Notify>,
@@ -69,7 +85,7 @@ where
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
-        receiver: mpsc::Receiver<ScheduledL1Message>,
+        receiver: mpsc::Receiver<ScheduledL1MessageWrapper>,
     ) -> Self {
         // Number of executors that can send messages in parallel to L1
         const NUM_OF_EXECUTORS: u8 = 50;
@@ -129,7 +145,7 @@ where
 
             // Prepare data for execution
             let commit_ids = if let Some(pubkeys) =
-                l1_message.get_committed_pubkeys()
+                l1_message.scheduled_l1_message.get_committed_pubkeys()
             {
                 let commit_ids = self
                     .commit_id_tracker
@@ -143,8 +159,8 @@ where
                         let Some(persistor) = &self.l1_messages_persister else {
                             return;
                         };
-                        if let Err(err) = persistor.set_commit_id(l1_message.id, pubkey, *commit_id) {
-                            error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, l1_message.id, pubkey, err);
+                        if let Err(err) = persistor.set_commit_id(l1_message.scheduled_l1_message.id, pubkey, *commit_id) {
+                            error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, l1_message.scheduled_l1_message.id, pubkey, err);
                         }
                     });
 
@@ -173,10 +189,10 @@ where
         }
     }
 
-    /// Returns [`ScheduledL1Message`] or None if all messages are blocked
+    /// Returns [`ScheduledL1MessageWrapper`] or None if all messages are blocked
     async fn next_scheduled_message(
         &mut self,
-    ) -> Result<Option<ScheduledL1Message>, Error> {
+    ) -> Result<Option<ScheduledL1MessageWrapper>, Error> {
         // Limit on number of messages that can be stored in scheduler
         const SCHEDULER_CAPACITY: usize = 1000;
 
@@ -211,7 +227,9 @@ where
     }
 
     /// Returns [`ScheduledL1Message`] from external channel
-    async fn get_new_message(&mut self) -> Result<ScheduledL1Message, Error> {
+    async fn get_new_message(
+        &mut self,
+    ) -> Result<ScheduledL1MessageWrapper, Error> {
         match self.receiver.try_recv() {
             Ok(val) => Ok(val),
             Err(TryRecvError::Empty) => {
@@ -231,7 +249,7 @@ where
     async fn execute<T: TransactionPreparator>(
         executor: L1MessageExecutor<T>,
         persister: Option<P>,
-        l1_message: ScheduledL1Message,
+        l1_message: ScheduledL1MessageWrapper,
         commit_ids: HashMap<Pubkey, u64>,
         inner_scheduler: Arc<Mutex<CommitSchedulerInner>>,
         execution_permit: OwnedSemaphorePermit,
@@ -239,9 +257,16 @@ where
         notify: Arc<Notify>,
     ) {
         let result = executor
-            .execute(l1_message.clone(), commit_ids, persister)
+            .execute(
+                l1_message.scheduled_l1_message.clone(),
+                commit_ids,
+                persister,
+            )
             .await
             .inspect_err(|err| error!("Failed to execute L1Message: {:?}", err))
+            .map(|raw_result| {
+                Self::map_execution_outcome(&l1_message, raw_result)
+            })
             .map_err(|err| Arc::new(err));
 
         // Broadcast result to subscribers
@@ -252,12 +277,55 @@ where
         inner_scheduler
             .lock()
             .expect(POISONED_INNER_MSG)
-            .complete(&l1_message);
+            .complete(&l1_message.scheduled_l1_message);
         // Notify main loop that executor is done
         // This will trigger scheduling next message
         notify.notify_waiters();
         // Free worker
         drop(execution_permit);
+    }
+
+    /// Maps output of `L1MessageExecutor` to final result
+    fn map_execution_outcome(
+        l1_message: &ScheduledL1MessageWrapper,
+        raw_outcome: ExecutionOutput,
+    ) -> ExecutionOutputWrapper {
+        let ScheduledL1MessageWrapper {
+            scheduled_l1_message,
+            feepayers,
+            excluded_pubkeys,
+        } = l1_message;
+        let included_pubkeys = if let Some(included_pubkeys) =
+            scheduled_l1_message.get_committed_pubkeys()
+        {
+            included_pubkeys
+        } else {
+            // Case with standalone actions
+            vec![]
+        };
+        let requested_undelegation = scheduled_l1_message.is_undelegate();
+        let chain_signatures =
+            vec![raw_outcome.commit_signature, raw_outcome.finalize_signature];
+
+        let sent_commit = SentCommit {
+            message_id: scheduled_l1_message.id,
+            slot: scheduled_l1_message.slot,
+            blockhash: scheduled_l1_message.blockhash,
+            payer: scheduled_l1_message.payer,
+            included_pubkeys,
+            excluded_pubkeys: excluded_pubkeys.clone(),
+            feepayers: HashSet::from_iter(feepayers.iter().cloned()),
+            requested_undelegation,
+            chain_signatures,
+        };
+
+        ExecutionOutputWrapper {
+            output: raw_outcome,
+            action_sent_transaction: scheduled_l1_message
+                .action_sent_transaction
+                .clone(),
+            sent_commit,
+        }
     }
 }
 

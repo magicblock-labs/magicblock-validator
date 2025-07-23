@@ -3,7 +3,7 @@ use std::collections::{hash_map::Entry, HashMap, VecDeque};
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use solana_pubkey::Pubkey;
 
-use crate::utils::ScheduledMessageExt;
+use crate::{types::ScheduledL1MessageWrapper, utils::ScheduledMessageExt};
 
 pub(crate) const POISONED_INNER_MSG: &str =
     "Mutex on CommitSchedulerInner is poisoned.";
@@ -11,7 +11,7 @@ pub(crate) const POISONED_INNER_MSG: &str =
 type MessageID = u64;
 struct MessageMeta {
     num_keys: usize,
-    message: ScheduledL1Message,
+    message: ScheduledL1MessageWrapper,
 }
 
 /// A scheduler that ensures mutually exclusive access to pubkeys across messages
@@ -77,10 +77,12 @@ impl CommitSchedulerInner {
     /// otherwise consumes it and enqueues
     pub fn schedule(
         &mut self,
-        l1_message: ScheduledL1Message,
-    ) -> Option<ScheduledL1Message> {
-        let message_id = l1_message.id;
-        let Some(pubkeys) = l1_message.get_committed_pubkeys() else {
+        l1_message: ScheduledL1MessageWrapper,
+    ) -> Option<ScheduledL1MessageWrapper> {
+        let message_id = l1_message.scheduled_l1_message.id;
+        let Some(pubkeys) =
+            l1_message.scheduled_l1_message.get_committed_pubkeys()
+        else {
             return Some(l1_message);
         };
 
@@ -144,7 +146,9 @@ impl CommitSchedulerInner {
     }
 
     // Returns [`ScheduledL1Message`] that can be executed
-    pub fn pop_next_scheduled_message(&mut self) -> Option<ScheduledL1Message> {
+    pub fn pop_next_scheduled_message(
+        &mut self,
+    ) -> Option<ScheduledL1MessageWrapper> {
         // TODO(edwin): optimize. Create counter im MessageMeta & update
         let mut execute_candidates: HashMap<MessageID, usize> = HashMap::new();
         self.blocked_keys.iter().for_each(|(_, queue)| {

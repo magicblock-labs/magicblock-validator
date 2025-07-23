@@ -15,12 +15,13 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    commit_scheduler::BroadcastedMessageExecutionResult,
     committor_processor::CommittorProcessor,
     config::ChainConfig,
     error::CommittorServiceResult,
-    l1_message_executor::BroadcastedMessageExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
+    types::ScheduledL1MessageWrapper,
 };
 
 #[derive(Debug)]
@@ -50,7 +51,7 @@ pub enum CommittorMessage {
     },
     CommitChangeset {
         /// The [`ScheduledL1Message`]s to commit
-        l1_messages: Vec<ScheduledL1Message>,
+        l1_messages: Vec<ScheduledL1MessageWrapper>,
     },
     GetCommitStatuses {
         respond_to:
@@ -304,7 +305,7 @@ impl L1MessageCommittor for CommittorService {
         rx
     }
 
-    fn commit_l1_messages(&self, l1_messages: Vec<ScheduledL1Message>) {
+    fn commit_l1_messages(&self, l1_messages: Vec<ScheduledL1MessageWrapper>) {
         self.try_send(CommittorMessage::CommitChangeset { l1_messages });
     }
 
@@ -354,7 +355,7 @@ pub trait L1MessageCommittor: Send + Sync + 'static {
     ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
     /// Commits the changeset and returns
-    fn commit_l1_messages(&self, l1_messages: Vec<ScheduledL1Message>);
+    fn commit_l1_messages(&self, l1_messages: Vec<ScheduledL1MessageWrapper>);
 
     /// Subscribes for results of L1Message execution
     fn subscribe_for_results(
