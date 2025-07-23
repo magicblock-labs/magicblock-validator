@@ -29,10 +29,7 @@ use tokio::sync::{
     oneshot,
 };
 
-use crate::{
-    errors::AccountsResult,
-    ScheduledCommitsProcessor,
-};
+use crate::{errors::AccountsResult, ScheduledCommitsProcessor};
 
 const POISONED_RWLOCK_MSG: &str =
     "RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned";
@@ -79,77 +76,98 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
             };
         };
 
-        let mut excluded_pubkeys = HashSet::new();
-        let mut feepayers = HashSet::new();
+        struct Processor<'a> {
+            excluded_pubkeys: HashSet<Pubkey>,
+            feepayers: HashSet<FeePayerAccount>,
+            bank: &'a Bank,
+        }
 
-        let mut process_feepayer = |account: &mut CommittedAccountV2| -> bool {
-            let pubkey = account.pubkey;
-            let ephemeral_pubkey =
-                AccountChainSnapshot::ephemeral_balance_pda(&pubkey);
+        impl<'a> Processor<'a> {
+            /// Handles case when committed account is feepayer
+            /// Returns `true` if account should be retained, `false` otherwise
+            fn process_feepayer(
+                &mut self,
+                account: &mut CommittedAccountV2,
+            ) -> bool {
+                let pubkey = account.pubkey;
+                let ephemeral_pubkey =
+                    AccountChainSnapshot::ephemeral_balance_pda(&pubkey);
 
-            feepayers.insert(FeePayerAccount {
-                pubkey,
-                delegated_pda: ephemeral_pubkey,
-            });
+                self.feepayers.insert(FeePayerAccount {
+                    pubkey,
+                    delegated_pda: ephemeral_pubkey,
+                });
 
-            match self.bank.get_account(&ephemeral_pubkey) {
-                Some(account_data) => {
-                    let ephemeral_owner =
-                        AccountChainSnapshot::ephemeral_balance_pda_owner();
-                    account.pubkey = ephemeral_pubkey;
-                    account.account = Account {
-                        lamports: account_data.lamports(),
-                        data: account_data.data().to_vec(),
-                        owner: ephemeral_owner,
-                        executable: account_data.executable(),
-                        rent_epoch: account_data.rent_epoch(),
-                    };
-                    true
-                }
-                None => {
-                    error!(
-                        "Scheduled commit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
-                        pubkey
-                    );
-                    excluded_pubkeys.insert(pubkey);
-                    false
+                match self.bank.get_account(&ephemeral_pubkey) {
+                    Some(account_data) => {
+                        let ephemeral_owner =
+                            AccountChainSnapshot::ephemeral_balance_pda_owner();
+                        account.pubkey = ephemeral_pubkey;
+                        account.account = Account {
+                            lamports: account_data.lamports(),
+                            data: account_data.data().to_vec(),
+                            owner: ephemeral_owner,
+                            executable: account_data.executable(),
+                            rent_epoch: account_data.rent_epoch(),
+                        };
+                        true
+                    }
+                    None => {
+                        // TODO(edwin): shouldn't be possible panic?
+                        error!(
+                            "Scheduled commit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
+                            pubkey
+                        );
+                        self.excluded_pubkeys.insert(pubkey);
+                        false
+                    }
                 }
             }
+        }
+
+        let mut processor = Processor {
+            excluded_pubkeys: HashSet::new(),
+            feepayers: HashSet::new(),
+            bank: &self.bank,
         };
 
+        /// Retains onlu account that are valid to be commited
         committed_accounts.retain_mut(|account| {
             let pubkey = account.pubkey;
-            let cloned_accounts =
-                self.cloned_accounts.read().expect(POISONED_RWLOCK_MSG);
-
-            match cloned_accounts.get(&pubkey) {
+            let account_chain_snapshot = match self
+                .cloned_accounts
+                .read()
+                .expect(POISONED_RWLOCK_MSG)
+                .get(&pubkey)
+            {
                 Some(AccountClonerOutput::Cloned {
                     account_chain_snapshot,
                     ..
-                }) => {
-                    if account_chain_snapshot.chain_state.is_feepayer() {
-                        process_feepayer(account)
-                    } else if account_chain_snapshot
-                        .chain_state
-                        .is_undelegated()
-                    {
-                        excluded_pubkeys.insert(pubkey);
-                        false
-                    } else {
-                        true
-                    }
-                }
+                }) => account_chain_snapshot,
                 Some(AccountClonerOutput::Unclonable { .. }) => {
                     todo!()
                 }
-                None => true,
+                // TODO(edwin): hmm
+                None => return true,
+            };
+
+            if account_chain_snapshot.chain_state.is_feepayer() {
+                // Feepayer case, should actually always return true
+                processor.process_feepayer(account)
+            } else if account_chain_snapshot.chain_state.is_undelegated() {
+                // Can be safely excluded
+                processor.excluded_pubkeys.insert(account.pubkey);
+                false
+            } else {
+                // Means delegated so we keep it
+                true
             }
         });
 
         ScheduledL1MessageWrapper {
             scheduled_l1_message: l1_message,
-            feepayers: feepayers.into_iter().collect(),
-            excluded_pubkeys: excluded_pubkeys.into_iter().collect(),
+            feepayers: processor.feepayers.into_iter().collect(),
+            excluded_pubkeys: processor.excluded_pubkeys.into_iter().collect(),
         }
     }
 
