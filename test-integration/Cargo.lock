@@ -3890,6 +3890,7 @@ dependencies = [
 name = "magicblock-ledger"
 version = "0.1.7"
 dependencies = [
+ "async-trait",
  "bincode",
  "byteorder",
  "fs_extra",
@@ -3898,6 +3899,7 @@ dependencies = [
  "magicblock-accounts-db",
  "magicblock-bank",
  "magicblock-core",
+ "magicblock-metrics",
  "num-format",
  "num_cpus",
  "prost",
