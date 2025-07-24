@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use clap::{Args, ValueEnum};
-use magicblock_config_macro::{clap_from_serde, clap_prefix};
+use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use strum::{Display, EnumString};
@@ -14,7 +14,9 @@ use crate::accounts_db::AccountsDbConfig;
 // -----------------
 #[clap_prefix("accounts")]
 #[clap_from_serde]
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
+)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct AccountsConfig {
     #[serde(default)]
@@ -42,40 +44,6 @@ pub struct AccountsConfig {
     pub max_monitored_accounts: usize,
 }
 
-impl AccountsConfig {
-    pub fn merge(&mut self, other: AccountsConfig) {
-        let default = Self::default();
-
-        if self.remote == default.remote && other.remote != default.remote {
-            self.remote = other.remote;
-        }
-        if self.lifecycle == default.lifecycle
-            && other.lifecycle != default.lifecycle
-        {
-            self.lifecycle = other.lifecycle;
-        }
-        if self.commit == default.commit && other.commit != default.commit {
-            self.commit = other.commit;
-        }
-        if self.allowed_programs == default.allowed_programs
-            && other.allowed_programs != default.allowed_programs
-        {
-            self.allowed_programs = other.allowed_programs;
-        }
-        if self.db == default.db && other.db != default.db {
-            self.db = other.db;
-        }
-        if self.clone == default.clone && other.clone != default.clone {
-            self.clone = other.clone;
-        }
-        if self.max_monitored_accounts == default.max_monitored_accounts
-            && other.max_monitored_accounts != default.max_monitored_accounts
-        {
-            self.max_monitored_accounts = other.max_monitored_accounts;
-        }
-    }
-}
-
 impl Default for AccountsConfig {
     fn default() -> Self {
         Self {
@@ -95,7 +63,15 @@ impl Default for AccountsConfig {
 #[clap_prefix("remote")]
 #[clap_from_serde]
 #[derive(
-    Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, Args,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    Args,
+    Mergeable,
 )]
 #[serde(deny_unknown_fields)]
 pub struct RemoteConfig {
@@ -130,7 +106,7 @@ pub struct RemoteConfig {
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-#[clap(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
 pub enum RemoteCluster {
     #[default]
     Devnet,
@@ -162,7 +138,7 @@ pub enum RemoteCluster {
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-#[clap(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
 pub enum LifecycleMode {
     Replica,
     #[default]
@@ -229,7 +205,7 @@ impl Default for CommitStrategy {
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-#[clap(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
 pub enum PrepareLookupTables {
     Always,
     #[default]
@@ -239,7 +215,15 @@ pub enum PrepareLookupTables {
 #[clap_prefix("clone")]
 #[clap_from_serde]
 #[derive(
-    Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, Args,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    Args,
+    Mergeable,
 )]
 #[serde(deny_unknown_fields)]
 pub struct AccountsCloneConfig {
@@ -285,6 +269,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use magicblock_config_helpers::Merge;
+
     use super::*;
     use crate::BlockSize;
 

@@ -25,6 +25,9 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
+      - name: Install cargo-expand
+        run: cargo install cargo-expand
+
       - name: Run unit tests
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576

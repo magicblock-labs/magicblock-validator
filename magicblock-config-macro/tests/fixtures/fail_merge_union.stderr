@@ -1,0 +1,56 @@
+error: this trait cannot be derived for unions
+ --> tests/fixtures/fail_merge_union.rs:3:10
+  |
+3 | #[derive(Default, Mergeable)]
+  |          ^^^^^^^
+
+error: Merge can only be derived for structs
+ --> tests/fixtures/fail_merge_union.rs:4:1
+  |
+4 | / union TestUnion {
+5 | |     a: u32,
+6 | |     b: String,
+7 | | }
+  | |_^
+
+error[E0740]: field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union
+ --> tests/fixtures/fail_merge_union.rs:6:5
+  |
+6 |     b: String,
+  |     ^^^^^^^^^
+  |
+  = note: union fields must not have drop side-effects, which is currently enforced via either `Copy` or `ManuallyDrop<...>`
+help: wrap the field type in `ManuallyDrop<...>`
+  |
+6 |     b: std::mem::ManuallyDrop<String>,
+  |        +++++++++++++++++++++++      +
+
+error[E0277]: the trait bound `TestUnion: Default` is not satisfied
+ --> tests/fixtures/fail_merge_union.rs:4:7
+  |
+4 | union TestUnion {
+  |       ^^^^^^^^^ the trait `Default` is not implemented for `TestUnion`
+  |
+note: required by a bound in `Merge`
+ --> $WORKSPACE/magicblock-config-helpers/src/lib.rs
+  |
+  | pub trait Merge: Default {
+  |                  ^^^^^^^ required by this bound in `Merge`
+help: consider annotating `TestUnion` with `#[derive(Default)]`
+  |
+4 + #[derive(Default)]
+5 | union TestUnion {
+  |
+
+error[E0599]: no function or associated item named `default` found for union `TestUnion` in the current scope
+ --> tests/fixtures/fail_merge_union.rs:3:19
+  |
+3 | #[derive(Default, Mergeable)]
+  |                   ^^^^^^^^^ function or associated item not found in `TestUnion`
+4 | union TestUnion {
+  | --------------- function or associated item `default` not found for this union
+  |
+  = help: items from traits can only be used if the trait is implemented and in scope
+  = note: the following trait defines an item `default`, perhaps you need to implement it:
+          candidate #1: `Default`
+  = note: this error originates in the derive macro `Mergeable` (in Nightly builds, run with -Z macro-backtrace for more info)

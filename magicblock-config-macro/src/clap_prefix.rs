@@ -43,7 +43,7 @@ impl VisitMut for ClapPrefix {
                         ident.to_string(),
                         kebab_str,
                         constant_str,
-                        vec!["long".to_string(), "name".to_string()],
+                        vec!["long".to_string(), "id".to_string()],
                     );
                     replacer.visit_attributes_mut(&mut field.attrs);
                     self.compile_errors.extend(replacer.compile_errors);

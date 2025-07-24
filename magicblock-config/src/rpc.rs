@@ -1,12 +1,14 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use clap::Args;
-use magicblock_config_macro::{clap_from_serde, clap_prefix};
+use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
 
 #[clap_prefix("rpc")]
 #[clap_from_serde]
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
+)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct RpcConfig {
     #[derive_env_var]
@@ -24,22 +26,6 @@ pub struct RpcConfig {
     #[arg(help = "The max number of WebSocket connections to accept.")]
     #[serde(default = "default_max_ws_connections")]
     pub max_ws_connections: usize,
-}
-
-impl RpcConfig {
-    pub fn merge(&mut self, other: RpcConfig) {
-        if self.addr == default_addr() && other.addr != default_addr() {
-            self.addr = other.addr;
-        }
-        if self.port == default_port() && other.port != default_port() {
-            self.port = other.port;
-        }
-        if self.max_ws_connections == default_max_ws_connections()
-            && other.max_ws_connections != default_max_ws_connections()
-        {
-            self.max_ws_connections = other.max_ws_connections;
-        }
-    }
 }
 
 impl Default for RpcConfig {
@@ -97,6 +83,8 @@ fn default_max_ws_connections() -> usize {
 
 #[cfg(test)]
 mod tests {
+    use magicblock_config_helpers::Merge;
+
     use super::*;
 
     #[test]
