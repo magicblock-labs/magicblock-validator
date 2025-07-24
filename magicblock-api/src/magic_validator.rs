@@ -41,7 +41,8 @@ use magicblock_bank::{
     transaction_logs::TransactionLogCollectorFilter,
 };
 use magicblock_committor_service::{
-    config::ChainConfig, CommittorService, ComputeBudgetConfig,
+    config::ChainConfig, service_ext::CommittorServiceExt, CommittorService,
+    ComputeBudgetConfig,
 };
 use magicblock_config::{EphemeralConfig, LifecycleMode, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
@@ -326,13 +327,8 @@ impl MagicValidator {
                 ),
             },
         )?);
-
-        let remote_scheduled_commits_processor =
-            Arc::new(RemoteScheduledCommitsProcessor::new(
-                bank.clone(),
-                committor_service.clone(),
-                transaction_status_sender.clone(),
-            ));
+        let committor_service_ext =
+            Arc::new(CommittorServiceExt::new(committor_service.clone()));
 
         let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
             bank_account_provider,
@@ -353,12 +349,18 @@ impl MagicValidator {
             config.validator_config.accounts.max_monitored_accounts,
         );
 
+        let remote_scheduled_commits_processor =
+            Arc::new(RemoteScheduledCommitsProcessor::new(
+                bank.clone(),
+                remote_account_cloner_worker.get_last_clone_output(),
+                committor_service.clone(),
+                transaction_status_sender.clone(),
+            ));
+
         let accounts_manager = Self::init_accounts_manager(
             &bank,
-            &remote_account_cloner_worker.get_last_clone_output(),
+            &committor_service_ext,
             RemoteAccountClonerClient::new(&remote_account_cloner_worker),
-            transaction_status_sender.clone(),
-            &identity_keypair,
             &config.validator_config,
         );
 
@@ -446,10 +448,8 @@ impl MagicValidator {
 
     fn init_accounts_manager(
         bank: &Arc<Bank>,
-        cloned_accounts: &CloneOutputMap,
+        commitor_service: &Arc<CommittorServiceExt<CommittorService>>,
         remote_account_cloner_client: RemoteAccountClonerClient,
-        transaction_status_sender: TransactionStatusSender,
-        validator_keypair: &Keypair,
         config: &EphemeralConfig,
     ) -> Arc<AccountsManager> {
         let accounts_config = try_convert_accounts_config(&config.accounts)
@@ -458,15 +458,8 @@ impl MagicValidator {
         );
         let accounts_manager = AccountsManager::try_new(
             bank,
-            cloned_accounts,
+            commitor_service.clone(),
             remote_account_cloner_client,
-            transaction_status_sender,
-            // NOTE: we could avoid passing a copy of the keypair here if we instead pass
-            // something akin to a ValidatorTransactionSigner that gets it via the [validator_authority]
-            // method from the [magicblock_program] module, forgetting it immediately after.
-            // That way we would at least hold it in memory for a long time only in one place and in all other
-            // places only temporarily
-            validator_keypair.insecure_clone(),
             accounts_config,
         )
         .expect("Failed to create accounts manager");

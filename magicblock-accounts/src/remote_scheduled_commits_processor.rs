@@ -2,14 +2,14 @@ use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
 use conjunto_transwise::AccountChainSnapshot;
-use log::{debug, error};
+use log::{debug, error, info};
 use magicblock_account_cloner::{AccountClonerOutput, CloneOutputMap};
 use magicblock_bank::bank::Bank;
 use magicblock_committor_service::{
     commit_scheduler::{
         BroadcastedMessageExecutionResult, ExecutionOutputWrapper,
     },
-    types::ScheduledL1MessageWrapper,
+    types::{ScheduledL1MessageWrapper, TriggerType},
     utils::ScheduledMessageExt,
     L1MessageCommittor,
 };
@@ -73,6 +73,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
                 scheduled_l1_message: l1_message,
                 excluded_pubkeys: Vec::new(),
                 feepayers: Vec::new(),
+                trigger_type: TriggerType::OnChain,
             };
         };
 
@@ -134,12 +135,9 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
         /// Retains onlu account that are valid to be commited
         committed_accounts.retain_mut(|account| {
             let pubkey = account.pubkey;
-            let account_chain_snapshot = match self
-                .cloned_accounts
-                .read()
-                .expect(POISONED_RWLOCK_MSG)
-                .get(&pubkey)
-            {
+            let cloned_accounts =
+                self.cloned_accounts.read().expect(POISONED_RWLOCK_MSG);
+            let account_chain_snapshot = match cloned_accounts.get(&pubkey) {
                 Some(AccountClonerOutput::Cloned {
                     account_chain_snapshot,
                     ..
@@ -168,6 +166,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
             scheduled_l1_message: l1_message,
             feepayers: processor.feepayers.into_iter().collect(),
             excluded_pubkeys: processor.excluded_pubkeys.into_iter().collect(),
+            trigger_type: TriggerType::OnChain,
         }
     }
 
@@ -194,6 +193,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
                     .await
                 }
                 Err(err) => {
+                    error!("Failed to commit: {:?}", err);
                     todo!()
                 }
             }
@@ -205,19 +205,31 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
         transaction_status_sender: &TransactionStatusSender,
         execution_outcome: ExecutionOutputWrapper,
     ) {
-        register_scheduled_commit_sent(execution_outcome.sent_commit);
-        match execute_legacy_transaction(
-            execution_outcome.action_sent_transaction,
-            bank,
-            Some(transaction_status_sender),
-        ) {
-            Ok(signature) => debug!(
-                "Signaled sent commit with internal signature: {:?}",
-                signature
-            ),
-            Err(err) => {
-                error!("Failed to signal sent commit via transaction: {}", err);
+        // We don't trigger sent tx for `TriggerType::OffChain`
+        // TODO: should be removed once crank supported
+        if matches!(execution_outcome.trigger_type, TriggerType::OnChain) {
+            register_scheduled_commit_sent(execution_outcome.sent_commit);
+            match execute_legacy_transaction(
+                execution_outcome.action_sent_transaction,
+                bank,
+                Some(transaction_status_sender),
+            ) {
+                Ok(signature) => debug!(
+                    "Signaled sent commit with internal signature: {:?}",
+                    signature
+                ),
+                Err(err) => {
+                    error!(
+                        "Failed to signal sent commit via transaction: {}",
+                        err
+                    );
+                }
             }
+        } else {
+            info!(
+                "OffChain triggered L1Message executed: {}",
+                execution_outcome.sent_commit.message_id
+            );
         }
     }
 }

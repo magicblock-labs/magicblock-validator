@@ -25,54 +25,54 @@ pub(crate) const MAX_ENCODED_TRANSACTION_SIZE: usize = 1644;
 
 /// How many process and commit buffer instructions fit into a single transaction
 #[allow(unused)] // serves as documentation as well
-pub(crate) const MAX_PROCESS_PER_TX: u8 = 3;
+pub const MAX_PROCESS_PER_TX: u8 = 3;
 
 /// How many process and commit buffer instructions fit into a single transaction
 /// when using address lookup tables but not including the buffer account in the
 /// lookup table
 #[allow(unused)] // serves as documentation as well
-pub(crate) const MAX_PROCESS_PER_TX_USING_LOOKUP: u8 = 12;
+pub const MAX_PROCESS_PER_TX_USING_LOOKUP: u8 = 12;
 
 /// How many close buffer instructions fit into a single transaction
 #[allow(unused)] // serves as documentation as well
-pub(crate) const MAX_CLOSE_PER_TX: u8 = 7;
+pub const MAX_CLOSE_PER_TX: u8 = 7;
 
 /// How many close buffer instructions fit into a single transaction
 /// when using address lookup tables but not including the buffer account
 /// nor chunk account in the lookup table
 #[allow(unused)] // serves as documentation as well
-pub(crate) const MAX_CLOSE_PER_TX_USING_LOOKUP: u8 = 7;
+pub const MAX_CLOSE_PER_TX_USING_LOOKUP: u8 = 7;
 
 /// How many process and commit buffer instructions combined with close buffer instructions
 /// fit into a single transaction
 #[allow(unused)] // serves as documentation as well
-pub(crate) const MAX_PROCESS_AND_CLOSE_PER_TX: u8 = 2;
+pub const MAX_PROCESS_AND_CLOSE_PER_TX: u8 = 2;
 
 /// How many process and commit buffer instructions combined with
 /// close buffer instructions fit into a single transaction when
 /// using lookup tables but not including the buffer account
 #[allow(unused)] // serves as documentation as well
-pub(crate) const MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP: u8 = 4;
+pub const MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP: u8 = 4;
 
 /// How many finalize instructions fit into a single transaction
 #[allow(unused)] // serves as documentation as well
-pub(crate) const MAX_FINALIZE_PER_TX: u8 = 5;
+pub const MAX_FINALIZE_PER_TX: u8 = 5;
 
 /// How many finalize instructions fit into a single transaction
 /// when using address lookup tables
 #[allow(unused)] // serves as documentation as well
-pub(crate) const MAX_FINALIZE_PER_TX_USING_LOOKUP: u8 = 48;
+pub const MAX_FINALIZE_PER_TX_USING_LOOKUP: u8 = 48;
 
 /// How many undelegate instructions fit into a single transaction
 /// NOTE: that we assume the rent reimbursement account to be the delegated account
 #[allow(unused)] // serves as documentation as well
-pub(crate) const MAX_UNDELEGATE_PER_TX: u8 = 3;
+pub const MAX_UNDELEGATE_PER_TX: u8 = 3;
 
 /// How many undelegate instructions fit into a single transaction
 /// when using address lookup tables
 /// NOTE: that we assume the rent reimbursement account to be the delegated account
 #[allow(unused)] // serves as documentation as well
-pub(crate) const MAX_UNDELEGATE_PER_TX_USING_LOOKUP: u8 = 16;
+pub const MAX_UNDELEGATE_PER_TX_USING_LOOKUP: u8 = 16;
 
 // Allows us to run undelegate instructions without rechunking them since we know
 // that we didn't process more than we also can undelegate

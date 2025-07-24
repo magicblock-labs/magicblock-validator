@@ -1,6 +1,9 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    sync::{Arc, RwLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, RwLock,
+    },
     time::Duration,
     vec,
 };
@@ -16,14 +19,30 @@ use futures_util::future::{try_join, try_join_all};
 use log::*;
 use magicblock_account_cloner::{AccountCloner, AccountClonerOutput};
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::L1MessageCommittor;
+use magicblock_committor_service::{
+    commit_scheduler::{
+        BroadcastedMessageExecutionResult, ExecutionOutputWrapper,
+    },
+    l1_message_executor::ExecutionOutput,
+    service_ext::L1MessageCommittorExt,
+    transactions::MAX_PROCESS_PER_TX,
+    types::{ScheduledL1MessageWrapper, TriggerType},
+    utils::ScheduledMessageExt,
+    L1MessageCommittor,
+};
 use magicblock_core::magic_program;
+use magicblock_program::{
+    magic_scheduled_l1_message::{
+        CommitType, CommittedAccountV2, MagicL1Message, ScheduledL1Message,
+    },
+    validator::validator_authority_id,
+};
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     hash::Hash,
     pubkey::Pubkey,
     signature::Signature,
-    transaction::SanitizedTransaction,
+    transaction::{SanitizedTransaction, Transaction},
 };
 
 use crate::{
@@ -80,31 +99,31 @@ impl ExternalCommitableAccount {
 }
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV>
+pub struct ExternalAccountsManager<IAP, ACL, TAE, TAV, CC>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
-    ACM: AccountCommitter,
     TAE: TransactionAccountsExtractor,
     TAV: TransactionAccountsValidator,
+    CC: L1MessageCommittorExt,
 {
     pub internal_account_provider: IAP,
     pub account_cloner: ACL,
-    pub account_committer: Arc<ACM>,
     pub transaction_accounts_extractor: TAE,
     pub transaction_accounts_validator: TAV,
+    pub committor_service: Arc<CC>,
     pub lifecycle: LifecycleMode,
     pub external_commitable_accounts:
         RwLock<HashMap<Pubkey, ExternalCommitableAccount>>,
 }
 
-impl<IAP, ACL, ACM, TAE, TAV> ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV>
+impl<IAP, ACL, TAE, TAV, CC> ExternalAccountsManager<IAP, ACL, TAE, TAV, CC>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
-    ACM: AccountCommitter,
     TAE: TransactionAccountsExtractor,
     TAV: TransactionAccountsValidator,
+    CC: L1MessageCommittorExt,
 {
     pub async fn ensure_accounts(
         &self,
@@ -247,7 +266,9 @@ where
     /// This will look at the time that passed since the last commit and determine
     /// which accounts are due to be committed, perform that step for them
     /// and return the signatures of the transactions that were sent to the cluster.
-    pub async fn commit_delegated(&self) -> AccountsResult<Vec<Signature>> {
+    pub async fn commit_delegated(
+        &self,
+    ) -> AccountsResult<Vec<ExecutionOutput>> {
         let now = get_epoch();
         // Find all accounts that are due to be committed let accounts_to_be_committed = self
         let accounts_to_be_committed = self
@@ -269,107 +290,64 @@ where
             return Ok(vec![]);
         }
 
-        // NOTE: the scheduled commits use the slot at which the commit was scheduled
-        // However frequent commits run async and could be running before a slot is completed
-        // Thus they really commit in between two slots instead of at the end of a particular slot.
-        // Therefore we use the current slot which could result in two commits with the same
-        // slot. However since we most likely will phase out frequent commits we accept this
-        // inconsistency for now.
-        let slot = self.internal_account_provider.get_slot();
-        let commit_infos = self
-            .create_transactions_to_commit_specific_accounts(
-                accounts_to_be_committed,
-                slot,
-                false,
-            )
+        // Convert committees to L1Messages s
+        let scheduled_l1_messages =
+            self.create_scheduled_l1_message(accounts_to_be_committed);
+
+        // Commit L1Messages
+        let results = self
+            .committor_service
+            .commit_l1_messages_waiting(scheduled_l1_messages.clone())
             .await?;
-        let sendables = commit_infos
-            .into_iter()
-            .flat_map(|x| match x.transaction {
-                Some(tx) => Some(SendableCommitAccountsPayload {
-                    transaction: tx,
-                    committees: x.committees,
-                }),
-                None => None,
-            })
-            .collect::<Vec<_>>();
-        // NOTE: we ignore the [PendingCommitTransaction::undelegated_accounts] here since for
-        // scheduled commits we never request undelegation
-        self.run_transactions_to_commit_specific_accounts(now, sendables)
-            .await
-            .map(|pendings| pendings.into_iter().map(|x| x.signature).collect())
+
+        // Process results
+        let output = self.process_l1_messages_results(
+            &now,
+            results,
+            &scheduled_l1_messages,
+        );
+        Ok(output)
     }
 
-    async fn create_transactions_to_commit_specific_accounts(
+    fn process_l1_messages_results(
         &self,
-        accounts_to_be_committed: Vec<(Pubkey, Pubkey, Option<Hash>)>,
-        slot: u64,
-        undelegation_request: bool,
-    ) -> AccountsResult<Vec<CommitAccountsPayload>> {
-        let mut committees = accounts_to_be_committed
-            .iter()
-            .filter_map(|(pubkey, owner, committable_account_prev_hash)| {
-                if let Some(account) = self.internal_account_provider.get_account(pubkey) {
-                    Some((pubkey, owner, committable_account_prev_hash, account))
-                } else {
-                    error!(
-                        "Cannot find state for account that needs to be committed '{}' ",
-                        pubkey
-                    );
+        now: &Duration,
+        results: Vec<BroadcastedMessageExecutionResult>,
+        scheduled_l1_messages: &[ScheduledL1MessageWrapper],
+    ) -> Vec<ExecutionOutput> {
+        // Filter failed l1 messages, log failed ones
+        let outputs = results
+            .into_iter()
+            .filter_map(|execution_result| match execution_result {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    error!("Failed to send l1 message: {}", err.1);
                     None
                 }
             })
-            .filter(|(pubkey, _, committable_account_prev_hash, acc)| {
-                let should_commit = committable_account_prev_hash
-                    .map_or(true, |hash| hash_account(acc).ne(&hash));
-                if !should_commit {
-                    info!(
-                        "Cannot find state for account that needs to be committed '{}'",
-                        pubkey
-                    );
-                }
-                should_commit
-            })
-            .map(|(pubkey, owner, _, acc)| AccountCommittee {
-                pubkey: *pubkey,
-                owner: *owner,
-                account_data: acc,
-                slot,
-                undelegation_requested: undelegation_request,
-            })
-            .collect();
+            .map(|output| (output.id, output))
+            .collect::<HashMap<u64, ExecutionOutputWrapper>>();
 
-        // NOTE: Once we run into issues that the data to be committed in a single
-        // transaction is too large, we can split these into multiple batches
-        // That is why we return a Vec of CreateCommitAccountsTransactionResult
-        let txs = try_join_all(committees.into_iter().map(|commitee| {
-            self.account_committer
-                .create_commit_accounts_transaction(vec![commitee])
-        }))
-        .await?;
-
-        Ok(txs)
-    }
-
-    pub async fn run_transactions_to_commit_specific_accounts(
-        &self,
-        now: Duration,
-        payloads: Vec<SendableCommitAccountsPayload>,
-    ) -> AccountsResult<Vec<PendingCommitTransaction>> {
-        let pubkeys_with_hashes = payloads
+        // For successfully committed accounts get their (pubkey, hash)
+        let pubkeys_with_hashes = scheduled_l1_messages
             .iter()
-            .flat_map(|x| {
-                x.committees.iter().map(|(pubkey, account_shared_data)| {
-                    (*pubkey, hash_account(account_shared_data))
-                })
+            // Filter out unsuccessful messages
+            .filter(|message| {
+                outputs.contains_key(&message.scheduled_l1_message.id)
             })
-            .collect::<Vec<_>>();
-
-        // Commit all transactions
-        let pending_commits = self
-            .account_committer
-            .send_commit_transactions(payloads)
-            .await?;
+            // Extract accounts that got committed
+            .filter_map(|message| {
+                message.scheduled_l1_message.get_committed_accounts()
+            })
+            .flatten()
+            // Calculate hash of committed accounts
+            .map(|committed_account| {
+                let acc =
+                    AccountSharedData::from(committed_account.account.clone());
+                let hash = hash_account(&acc);
+                (committed_account.pubkey, hash)
+            })
+            .collect::<Vec<(Pubkey, Hash)>>();
 
         // Mark committed accounts
         for (pubkey, hash) in pubkeys_with_hashes {
@@ -377,7 +355,7 @@ where
                 .external_commitable_accounts
                 .write()
                 .expect(
-                "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
+                    "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
                 )
                 .get_mut(&pubkey)
             {
@@ -392,7 +370,78 @@ where
             }
         }
 
-        Ok(pending_commits)
+        outputs
+            .into_iter()
+            .map(|(_, output)| output.output)
+            .collect()
+    }
+
+    fn create_scheduled_l1_message(
+        &self,
+        accounts_to_be_committed: Vec<(Pubkey, Pubkey, Option<Hash>)>,
+    ) -> Vec<ScheduledL1MessageWrapper> {
+        // NOTE: the scheduled commits use the slot at which the commit was scheduled
+        // However frequent commits run async and could be running before a slot is completed
+        // Thus they really commit in between two slots instead of at the end of a particular slot.
+        // Therefore we use the current slot which could result in two commits with the same
+        // slot. However since we most likely will phase out frequent commits we accept this
+        // inconsistency for now.
+        static MESSAGE_ID: AtomicU64 = AtomicU64::new(u64::MAX - 1);
+
+        let slot = self.internal_account_provider.get_slot();
+        let blockhash = self.internal_account_provider.get_blockhash();
+
+        // Deduce accounts that should be committed
+        let committees = accounts_to_be_committed
+            .iter()
+            .filter_map(|(pubkey, owner, prev_hash)| {
+                self.internal_account_provider.get_account(pubkey)
+                    .map(|account| (pubkey, owner, prev_hash, account))
+                    .or_else(|| {
+                        error!("Cannot find state for account that needs to be committed '{}'", pubkey);
+                        None
+                    })
+            })
+            .filter(|(pubkey, _, prev_hash, acc)| {
+                prev_hash.map_or(true, |hash| hash_account(acc) != hash)
+            })
+            .map(|(pubkey, owner, _, acc)| AccountCommittee {
+                pubkey: *pubkey,
+                owner: *owner,
+                account_data: acc,
+                slot,
+                undelegation_requested: false,
+            })
+            .collect::<Vec<_>>();
+
+        committees
+            .chunks(MAX_PROCESS_PER_TX as usize)
+            .into_iter()
+            .map(|committees| {
+                let committees = committees
+                    .iter()
+                    .cloned()
+                    .map(|committee| CommittedAccountV2::from(committee))
+                    .collect();
+                ScheduledL1Message {
+                    // isn't important but shall be unique
+                    id: MESSAGE_ID.fetch_sub(1, Ordering::Relaxed),
+                    slot,
+                    blockhash,
+                    action_sent_transaction: Transaction::default(),
+                    payer: validator_authority_id(),
+                    l1_message: MagicL1Message::Commit(CommitType::Standalone(
+                        committees,
+                    )),
+                }
+            })
+            .map(|scheduled_l1_message| ScheduledL1MessageWrapper {
+                scheduled_l1_message,
+                excluded_pubkeys: vec![],
+                feepayers: vec![],
+                trigger_type: TriggerType::OffChain,
+            })
+            .collect()
     }
 
     pub fn last_commit(&self, pubkey: &Pubkey) -> Option<Duration> {

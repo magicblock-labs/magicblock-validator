@@ -4,16 +4,22 @@ use async_trait::async_trait;
 use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_committor_service::L1MessageCommittor;
 use magicblock_metrics::metrics::HistogramTimer;
+use magicblock_program::magic_scheduled_l1_message::{
+    CommittedAccountV2, ScheduledL1Message,
+};
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
-    account::AccountSharedData, pubkey::Pubkey, signature::Signature,
+    account::{Account, AccountSharedData, ReadableAccount},
+    clock::Epoch,
+    pubkey::Pubkey,
+    signature::Signature,
     transaction::Transaction,
 };
 
 use crate::errors::AccountsResult;
 
 #[async_trait]
-pub trait ScheduledCommitsProcessor {
+pub trait ScheduledCommitsProcessor: Send + Sync + 'static {
     /// Processes all commits that were scheduled and accepted
     async fn process(&self) -> AccountsResult<()>;
 
@@ -23,6 +29,8 @@ pub trait ScheduledCommitsProcessor {
     fn clear_scheduled_commits(&self);
 }
 
+// TODO(edwin): remove this
+#[derive(Clone)]
 pub struct AccountCommittee {
     /// The pubkey of the account to be committed.
     pub pubkey: Pubkey,
@@ -36,6 +44,22 @@ pub struct AccountCommittee {
     pub slot: u64,
     /// Only present if undelegation was requested.
     pub undelegation_requested: bool,
+}
+
+impl From<AccountCommittee> for CommittedAccountV2 {
+    fn from(value: AccountCommittee) -> Self {
+        CommittedAccountV2 {
+            pubkey: value.pubkey,
+            account: Account {
+                lamports: value.account_data.lamports(),
+                data: value.account_data.data().to_vec(),
+                // TODO(edwin): shall take from account_data instead?
+                owner: value.owner,
+                executable: value.account_data.executable(),
+                rent_epoch: value.account_data.rent_epoch(),
+            },
+        }
+    }
 }
 
 #[derive(Debug)]

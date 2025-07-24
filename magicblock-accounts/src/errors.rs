@@ -11,18 +11,23 @@ pub type AccountsResult<T> = std::result::Result<T, AccountsError>;
 
 #[derive(Error, Debug)]
 pub enum AccountsError {
-    #[error("TranswiseError")]
+    #[error("TranswiseError: {0}")]
     TranswiseError(#[from] Box<conjunto_transwise::errors::TranswiseError>),
 
-    #[error("UrlParseError")]
+    #[error("UrlParseError: {0}")]
     UrlParseError(#[from] Box<url::ParseError>),
 
-    #[error("TransactionError")]
+    #[error("TransactionError: {0}")]
     TransactionError(#[from] Box<solana_sdk::transaction::TransactionError>),
 
     #[error("CommittorSerivceError")]
     CommittorSerivceError(
         #[from] Box<magicblock_committor_service::error::CommittorServiceError>,
+    ),
+
+    #[error("CommittorServiceExtError: {0}")]
+    CommittorServiceExtError(
+        #[from] magicblock_committor_service::service_ext::Error,
     ),
 
     #[error("TokioOneshotRecvError")]

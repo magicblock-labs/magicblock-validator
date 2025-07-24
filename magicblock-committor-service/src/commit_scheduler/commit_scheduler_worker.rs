@@ -30,7 +30,7 @@ use crate::{
     transaction_preperator::transaction_preparator::{
         TransactionPreparator, TransactionPreparatorV1,
     },
-    types::ScheduledL1MessageWrapper,
+    types::{ScheduledL1MessageWrapper, TriggerType},
     utils::ScheduledMessageExt,
     ComputeBudgetConfig,
 };
@@ -40,14 +40,17 @@ const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 // TODO(edwin): rename
 #[derive(Clone)]
 pub struct ExecutionOutputWrapper {
+    pub id: u64,
     pub output: ExecutionOutput,
     pub action_sent_transaction: Transaction,
     pub sent_commit: SentCommit,
+    pub trigger_type: TriggerType,
 }
-pub type BroadcastedMessageExecutionResult = MessageExecutorResult<
-    ExecutionOutputWrapper,
-    Arc<crate::l1_message_executor::Error>,
->;
+
+pub type BroadcastedError = (u64, Arc<crate::l1_message_executor::Error>);
+
+pub type BroadcastedMessageExecutionResult =
+    MessageExecutorResult<ExecutionOutputWrapper, BroadcastedError>;
 
 /// Struct that exposes only `subscribe` method of `broadcast::Sender` for better isolation
 pub struct ResultSubscriber(
@@ -267,7 +270,7 @@ where
             .map(|raw_result| {
                 Self::map_execution_outcome(&l1_message, raw_result)
             })
-            .map_err(|err| Arc::new(err));
+            .map_err(|err| (l1_message.scheduled_l1_message.id, Arc::new(err)));
 
         // Broadcast result to subscribers
         if let Err(err) = result_sender.send(result) {
@@ -294,6 +297,7 @@ where
             scheduled_l1_message,
             feepayers,
             excluded_pubkeys,
+            trigger_type,
         } = l1_message;
         let included_pubkeys = if let Some(included_pubkeys) =
             scheduled_l1_message.get_committed_pubkeys()
@@ -320,10 +324,12 @@ where
         };
 
         ExecutionOutputWrapper {
+            id: scheduled_l1_message.id,
             output: raw_outcome,
             action_sent_transaction: scheduled_l1_message
                 .action_sent_transaction
                 .clone(),
+            trigger_type: *trigger_type,
             sent_commit,
         }
     }
@@ -347,43 +353,3 @@ impl L1MessageExecutorFactory {
         )
     }
 }
-
-// Worker schedule:
-// We have a pool of workers
-// We are ready to accept message
-// When we have a worker available to process it
-
-/// 1. L1Messages arrive
-/// 2. We call to schedule their execution
-/// 3. Once landed we need to execute a sent tx on L2s
-
-/// There's a part that schedules and sends TXs
-/// L1MessageExecutor - runs Preparator + executes txs
-/// Scheduler/MessageExecutionManager - Schedules execution of L1MessageExecutor
-/// Committor - gets results and persists them
-/// RemoteScheduledCommitsProcessor - just gets results and writes them to db
-///
-fn useless() {}
-
-// Committor needs to get result of execution & persist it
-// Committor needs to send results to Remote
-
-// Could committor retry or handle failed execution somehow?
-// Should that be a business of persister?
-//
-
-// Committor is used to manager TableMania
-// On commits we fetch the state
-
-// Does Remote care about readiness of particular task? No
-// It just runs TXs where he commits results to l2.
-// TODO(edwin): Remote takes single channel for result
-
-// Does Committor care about readiness of particular task?
-// It kinda doesn't
-// Is it correct for MessageExecutionManager to be just a Stream?
-//
-
-// TODO(edwin): TransactionExecutor doesn't care about channels and shit
-// It gets message, sends, retries & gives back result
-fn useless2() {}
