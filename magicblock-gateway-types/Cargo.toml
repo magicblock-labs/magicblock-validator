@@ -1,0 +1,20 @@
+[package]
+name = "magicblock-gateway-types"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+
+solana-account = { workspace = true }
+solana-message = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-signature = { workspace = true }
+solana-transaction = { workspace = true }
+solana-transaction-error = { workspace = true }
+solana-transaction-context = { workspace = true }
+
