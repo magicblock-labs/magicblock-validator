@@ -1,5 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
+use log::warn;
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use solana_pubkey::Pubkey;
 
@@ -75,11 +76,19 @@ impl CommitSchedulerInner {
 
     /// Returns [`ScheduledL1Message`] if message can be executed,
     /// otherwise consumes it and enqueues
+    ///
+    /// CRITICAL: MessageIds should be unique
+    /// Message should be scheduled once!
     pub fn schedule(
         &mut self,
         l1_message: ScheduledL1MessageWrapper,
     ) -> Option<ScheduledL1MessageWrapper> {
         let message_id = l1_message.scheduled_l1_message.id;
+        if self.blocked_messages.contains_key(&message_id) {
+            warn!("Attempt to schedule already scheduled message!");
+            return None;
+        }
+
         let Some(pubkeys) =
             l1_message.scheduled_l1_message.get_committed_pubkeys()
         else {
@@ -116,7 +125,7 @@ impl CommitSchedulerInner {
     /// Completes Message, cleaning up data after itself and allowing Messages to move forward
     /// NOTE: This doesn't unblock message, hence Self::messages_blocked will return old value.
     /// NOTE: this shall be called on executing messages to finilize their execution.
-    /// Calling on incorrect `pubkyes` set will result in panic
+    /// Calling on incorrect `pubkeys` set will result in panic
     pub fn complete(&mut self, l1_message: &ScheduledL1Message) {
         // Release data for completed message
         let message_id = l1_message.id;
