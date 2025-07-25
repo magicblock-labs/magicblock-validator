@@ -6,7 +6,7 @@ repository.workspace = true
 homepage.workspace = true
 license.workspace = true
 edition.workspace = true
-default-run = "rpc"
+default-run = "magicblock-validator"
 
 [dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
@@ -21,8 +21,8 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 git-version = { workspace = true }
 
 [[bin]]
-name = "rpc"
-path = "src/rpc.rs"
+name = "magicblock-validator"
+path = "src/main.rs"
 
 [features]
 default = []
