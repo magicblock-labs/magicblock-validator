@@ -1,0 +1,31 @@
+[package]
+name = "magicblock-gateway"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = [ "server", "http2", "http1" ] }
+hyper-util = { workspace = true, features = [ "server", "http2", "http1" ] }
+fastwebsockets = { version = "0.10", features = [ "upgrade" ] } 
+
+futures = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+scc = { workspace = true }
+
+magicblock-accounts-db = { workspace = true }
+magicblock-ledger = { workspace = true }
+
+solana-signature = { workspace = true }
+solana-transaction = { workspace = true }
+
+serde = { workspace = true }
+json = { workspace = true }
+ 
+log = { workspace = true }
