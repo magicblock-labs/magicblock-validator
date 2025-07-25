@@ -1,6 +1,8 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
-use solana_pubkey::Pubkey;
+
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
+use solana_pubkey::Pubkey;
+
 use crate::{types::ScheduledL1MessageWrapper, utils::ScheduledMessageExt};
 
 pub(crate) const POISONED_INNER_MSG: &str =
@@ -132,9 +134,10 @@ impl CommitSchedulerInner {
             };
 
             let blocked_messages: &mut VecDeque<MessageID> = occupied.get_mut();
+            let front = blocked_messages.pop_front();
             assert_eq!(
                 message_id,
-                blocked_messages.pop_front().expect("Invariant: if message executing, queue for each account is non-empty"),
+                front.expect("Invariant: if message executing, queue for each account is non-empty"),
                 "Invariant: executing message must be first at qeueue"
             );
 
@@ -157,20 +160,37 @@ impl CommitSchedulerInner {
             *execute_candidates.entry(*message_id).or_default() += 1;
         });
 
+        // NOTE:
+        // Not all self.blocked_messages would be in execute_candidates
+        // t1:
+        // 1: [a, b]
+        // 2: [a, b]
+        // 3: [b]
+        // t2:
+        // 1: [a, b] - completed
+        // 2: [a, b]
+        // 3: [b]
+        // now 3 is in blocked messages but not in execute candidate
+        // NOTE:
+        // Other way around is also true, since execute_candidates also include
+        // currently executing messages
         let candidate =
-            self.blocked_messages.iter().find_map(|(message_id, meta)| {
-                if execute_candidates.get(message_id).expect(
-                    "Invariant: blocked messages are always in candidates",
-                ) == &meta.num_keys
-                {
-                    Some(*message_id)
+            execute_candidates.iter().find_map(|(id, ready_keys)| {
+                if let Some(candidate) = self.blocked_messages.get(id) {
+                    if candidate.num_keys.eq(ready_keys) {
+                        Some(id)
+                    } else {
+                        // Not enough keys are ready
+                        None
+                    }
                 } else {
+                    // This means that this message id is currently executing & not blocked
                     None
                 }
             });
 
         if let Some(next) = candidate {
-            Some(self.blocked_messages.remove(&next).unwrap().message)
+            Some(self.blocked_messages.remove(next).unwrap().message)
         } else {
             None
         }
@@ -183,12 +203,12 @@ impl CommitSchedulerInner {
     }
 }
 
-
 /// Set of simple tests
 #[cfg(test)]
 mod simple_test {
-    use super::*;
     use solana_pubkey::pubkey;
+
+    use super::*;
 
     #[test]
     fn test_empty_scheduler() {
@@ -201,8 +221,14 @@ mod simple_test {
     #[test]
     fn test_non_conflicting_messages() {
         let mut scheduler = CommitSchedulerInner::new();
-        let msg1 = create_test_message(1, &[pubkey!("1111111111111111111111111111111111111111111")]);
-        let msg2 = create_test_message(2, &[pubkey!("22222222222222222222222222222222222222222222")]);
+        let msg1 = create_test_message(
+            1,
+            &[pubkey!("1111111111111111111111111111111111111111111")],
+        );
+        let msg2 = create_test_message(
+            2,
+            &[pubkey!("22222222222222222222222222222222222222222222")],
+        );
 
         // First message should execute immediately
         assert!(scheduler.schedule(msg1.clone()).is_some());
@@ -237,8 +263,9 @@ mod simple_test {
 /// Set of simple completion tests
 #[cfg(test)]
 mod completion_simple_test {
-    use super::*;
     use solana_pubkey::pubkey;
+
+    use super::*;
 
     #[test]
     fn test_completion_unblocks_messages() {
@@ -295,9 +322,10 @@ mod completion_simple_test {
 }
 
 #[cfg(test)]
-mod complex_blocking {
-    use super::*;
+mod complex_blocking_test {
     use solana_pubkey::pubkey;
+
+    use super::*;
 
     /// Case:
     /// executing: `[a1, a2, a3] [b1, b2, b3]` - 1
@@ -415,18 +443,102 @@ mod complex_blocking {
         assert_eq!(expected_msg3, msg3);
         assert_eq!(scheduler.messages_blocked(), 0);
     }
+
+    #[test]
+    fn test_complex_contention_scenario() {
+        let mut scheduler = CommitSchedulerInner::new();
+        let a = pubkey!("1111111111111111111111111111111111111111111");
+        let b = pubkey!("21111111111111111111111111111111111111111111");
+        let c = pubkey!("31111111111111111111111111111111111111111111");
+
+        // Messages with various key combinations
+        let msg1 = create_test_message(1, &[a, b]);
+        let msg2 = create_test_message(2, &[a, c]);
+        let msg3 = create_test_message(3, &[c]);
+        let msg4 = create_test_message(4, &[b]);
+        let msg5 = create_test_message(5, &[a]);
+
+        // msg1 executes immediately
+        let executed1 = scheduler.schedule(msg1.clone()).unwrap();
+        // Others get blocked
+        assert!(scheduler.schedule(msg2.clone()).is_none());
+        assert!(scheduler.schedule(msg3.clone()).is_none());
+        assert!(scheduler.schedule(msg4.clone()).is_none());
+        assert!(scheduler.schedule(msg5.clone()).is_none());
+        assert_eq!(scheduler.messages_blocked(), 4);
+
+        // Complete msg1
+        scheduler.complete(&executed1.scheduled_l1_message);
+
+        // msg2 and msg4 should be available (they don't conflict)
+        let next_msgs = [
+            scheduler.pop_next_scheduled_message().unwrap(),
+            scheduler.pop_next_scheduled_message().unwrap(),
+        ];
+        assert!(next_msgs.contains(&msg2));
+        assert!(next_msgs.contains(&msg4));
+        assert_eq!(scheduler.messages_blocked(), 2);
+
+        // Complete msg2
+        scheduler.complete(&msg2.scheduled_l1_message);
+        // msg2 and msg4 should be available (they don't conflict)
+        let next_messages = [
+            scheduler.pop_next_scheduled_message().unwrap(),
+            scheduler.pop_next_scheduled_message().unwrap(),
+        ];
+        assert!(next_messages.contains(&msg3));
+        assert!(next_messages.contains(&msg5));
+        assert_eq!(scheduler.messages_blocked(), 0);
+    }
 }
 
+#[cfg(test)]
+mod edge_cases_test {
+    use magicblock_program::magic_scheduled_l1_message::MagicL1Message;
+    use solana_pubkey::pubkey;
 
+    use super::*;
+
+    #[test]
+    fn test_message_without_pubkeys() {
+        let mut scheduler = CommitSchedulerInner::new();
+        let mut msg = create_test_message(1, &[]);
+        msg.scheduled_l1_message.l1_message = MagicL1Message::L1Actions(vec![]);
+
+        // Should execute immediately since it has no pubkeys
+        assert!(scheduler.schedule(msg.clone()).is_some());
+        assert_eq!(scheduler.messages_blocked(), 0);
+    }
+
+    #[test]
+    fn test_completion_without_scheduling() {
+        let mut scheduler = CommitSchedulerInner::new();
+        let msg = create_test_message(
+            1,
+            &[pubkey!("11111111111111111111111111111111")],
+        );
+
+        // Completing a message that wasn't scheduled should panic
+        let result = std::panic::catch_unwind(move || {
+            scheduler.complete(&msg.scheduled_l1_message)
+        });
+        assert!(result.is_err());
+    }
+}
 
 // Helper function to create test messages
 #[cfg(test)]
-fn create_test_message(id: u64, pubkeys: &[Pubkey]) -> ScheduledL1MessageWrapper {
-    use solana_sdk::hash::Hash;
-    use solana_sdk::transaction::Transaction;
-    use magicblock_program::magic_scheduled_l1_message::{CommitType, CommittedAccountV2, MagicL1Message};
-    use crate::types::TriggerType;
+fn create_test_message(
+    id: u64,
+    pubkeys: &[Pubkey],
+) -> ScheduledL1MessageWrapper {
+    use magicblock_program::magic_scheduled_l1_message::{
+        CommitType, CommittedAccountV2, MagicL1Message,
+    };
     use solana_account::Account;
+    use solana_sdk::{hash::Hash, transaction::Transaction};
+
+    use crate::types::TriggerType;
 
     let mut message = ScheduledL1Message {
         id,
@@ -439,12 +551,16 @@ fn create_test_message(id: u64, pubkeys: &[Pubkey]) -> ScheduledL1MessageWrapper
 
     // Only set pubkeys if provided
     if !pubkeys.is_empty() {
-        let committed_accounts = pubkeys.iter().map(|&pubkey| CommittedAccountV2 {
-            pubkey,
-            account: Account::default(),
-        }).collect();
+        let committed_accounts = pubkeys
+            .iter()
+            .map(|&pubkey| CommittedAccountV2 {
+                pubkey,
+                account: Account::default(),
+            })
+            .collect();
 
-        message.l1_message = MagicL1Message::Commit(CommitType::Standalone(committed_accounts));
+        message.l1_message =
+            MagicL1Message::Commit(CommitType::Standalone(committed_accounts));
     }
 
     ScheduledL1MessageWrapper {

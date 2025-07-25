@@ -582,9 +582,10 @@ fn extract_committor_row(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use solana_sdk::{signature::Signature, hash::Hash};
+    use solana_sdk::{hash::Hash, signature::Signature};
     use tempfile::NamedTempFile;
+
+    use super::*;
 
     // Helper to create a test database
     fn setup_test_db() -> (CommittsDb, NamedTempFile) {
@@ -636,7 +637,8 @@ mod tests {
         let row2 = create_test_row(1, 0); // Same message_id, different pubkey
 
         // Insert rows
-        db.insert_commit_status_rows(&[row1.clone(), row2.clone()]).unwrap();
+        db.insert_commit_status_rows(&[row1.clone(), row2.clone()])
+            .unwrap();
 
         // Retrieve by message_id
         let rows = db.get_commit_statuses_by_id(1).unwrap();
@@ -670,7 +672,8 @@ mod tests {
         db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
         let new_status = CommitStatus::Pending;
-        db.update_status_by_message(1, &row.pubkey, &new_status).unwrap();
+        db.update_status_by_message(1, &row.pubkey, &new_status)
+            .unwrap();
 
         let updated = db.get_commit_status(1, &row.pubkey).unwrap().unwrap();
         assert_eq!(updated.commit_status, new_status);
@@ -689,7 +692,8 @@ mod tests {
                 finalize_signature: None,
             },
         ));
-        db.update_status_by_commit(100, &row.pubkey, &new_status).unwrap();
+        db.update_status_by_commit(100, &row.pubkey, &new_status)
+            .unwrap();
 
         let updated = db.get_commit_status(1, &row.pubkey).unwrap().unwrap();
         assert_eq!(updated.commit_status, new_status);
@@ -702,7 +706,8 @@ mod tests {
         db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
         let new_strategy = CommitStrategy::FromBuffer;
-        db.set_commit_strategy(100, &row.pubkey, new_strategy).unwrap();
+        db.set_commit_strategy(100, &row.pubkey, new_strategy)
+            .unwrap();
 
         let updated = db.get_commit_status(1, &row.pubkey).unwrap().unwrap();
         assert_eq!(updated.commit_strategy, new_strategy);
@@ -724,7 +729,10 @@ mod tests {
         ));
         db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
-        let sigs = db.get_signatures_by_commit(100, &row.pubkey).unwrap().unwrap();
+        let sigs = db
+            .get_signatures_by_commit(100, &row.pubkey)
+            .unwrap()
+            .unwrap();
         assert_eq!(sigs.processed_signature, process_sig);
         assert_eq!(sigs.finalized_signature, Some(finalize_sig));
     }
@@ -734,7 +742,8 @@ mod tests {
         let (mut db, _file) = setup_test_db();
         let row1 = create_test_row(1, 0);
         let row2 = create_test_row(2, 0);
-        db.insert_commit_status_rows(&[row1.clone(), row2.clone()]).unwrap();
+        db.insert_commit_status_rows(&[row1.clone(), row2.clone()])
+            .unwrap();
 
         // Remove one message
         db.remove_commit_statuses_with_id(1).unwrap();
