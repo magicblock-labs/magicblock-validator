@@ -202,7 +202,7 @@ where
                 .inner
                 .lock()
                 .expect(POISONED_INNER_MSG)
-                .blocked_messages_len();
+                .messages_blocked();
             if num_blocked_messages < SCHEDULER_CAPACITY {
                 true
             } else {

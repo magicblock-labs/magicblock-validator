@@ -1,8 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
-
-use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use solana_pubkey::Pubkey;
-
+use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use crate::{types::ScheduledL1MessageWrapper, utils::ScheduledMessageExt};
 
 pub(crate) const POISONED_INNER_MSG: &str =
@@ -114,7 +112,8 @@ impl CommitSchedulerInner {
     }
 
     /// Completes Message, cleaning up data after itself and allowing Messages to move forward
-    /// Note: this shall be called on executing messages to finilize their execution.
+    /// NOTE: This doesn't unblock message, hence Self::messages_blocked will return old value.
+    /// NOTE: this shall be called on executing messages to finilize their execution.
     /// Calling on incorrect `pubkyes` set will result in panic
     pub fn complete(&mut self, l1_message: &ScheduledL1Message) {
         // Release data for completed message
@@ -179,7 +178,279 @@ impl CommitSchedulerInner {
 
     /// Returns number of blocked messages
     /// Note: this doesn't include "executing" messages
-    pub fn blocked_messages_len(&self) -> usize {
+    pub fn messages_blocked(&self) -> usize {
         self.blocked_messages.len()
+    }
+}
+
+
+/// Set of simple tests
+#[cfg(test)]
+mod simple_test {
+    use super::*;
+    use solana_pubkey::pubkey;
+
+    #[test]
+    fn test_empty_scheduler() {
+        let mut scheduler = CommitSchedulerInner::new();
+        assert_eq!(scheduler.messages_blocked(), 0);
+        assert!(scheduler.pop_next_scheduled_message().is_none());
+    }
+
+    /// Ensure messages with non-conflicting set of keys can run in parallel
+    #[test]
+    fn test_non_conflicting_messages() {
+        let mut scheduler = CommitSchedulerInner::new();
+        let msg1 = create_test_message(1, &[pubkey!("1111111111111111111111111111111111111111111")]);
+        let msg2 = create_test_message(2, &[pubkey!("22222222222222222222222222222222222222222222")]);
+
+        // First message should execute immediately
+        assert!(scheduler.schedule(msg1.clone()).is_some());
+        // Second message should also execute immediately
+        assert!(scheduler.schedule(msg2.clone()).is_some());
+        // No messages are blocked
+        assert_eq!(scheduler.messages_blocked(), 0);
+    }
+
+    /// Ensure messages conflicting messages get blocked
+    #[test]
+    fn test_conflicting_messages() {
+        const NUM_MESSAGES: u64 = 10;
+
+        let mut scheduler = CommitSchedulerInner::new();
+        let pubkey = pubkey!("1111111111111111111111111111111111111111111");
+        let msg1 = create_test_message(1, &[pubkey]);
+
+        // First message executes immediately
+        assert!(scheduler.schedule(msg1).is_some());
+        for id in 2..=NUM_MESSAGES {
+            let msg = create_test_message(id, &[pubkey]);
+            // Message gets blocked
+            assert!(scheduler.schedule(msg).is_none());
+        }
+
+        // 1 message executing, NUM_MESSAGES - 1 are blocked
+        assert_eq!(scheduler.messages_blocked() as u64, NUM_MESSAGES - 1);
+    }
+}
+
+/// Set of simple completion tests
+#[cfg(test)]
+mod completion_simple_test {
+    use super::*;
+    use solana_pubkey::pubkey;
+
+    #[test]
+    fn test_completion_unblocks_messages() {
+        let mut scheduler = CommitSchedulerInner::new();
+        let pubkey = pubkey!("1111111111111111111111111111111111111111111");
+        let msg1 = create_test_message(1, &[pubkey]);
+        let msg2 = create_test_message(2, &[pubkey]);
+
+        // First message executes immediately
+        let executed = scheduler.schedule(msg1.clone()).unwrap();
+        // Second message gets blocked
+        assert!(scheduler.schedule(msg2.clone()).is_none());
+        assert_eq!(scheduler.messages_blocked(), 1);
+
+        // Complete first message
+        scheduler.complete(&executed.scheduled_l1_message);
+
+        let next = scheduler.pop_next_scheduled_message().unwrap();
+        assert_eq!(next, msg2);
+        assert_eq!(scheduler.messages_blocked(), 0);
+    }
+
+    #[test]
+    fn test_multiple_blocked_messages() {
+        let mut scheduler = CommitSchedulerInner::new();
+        let pubkey = pubkey!("1111111111111111111111111111111111111111111");
+        let msg1 = create_test_message(1, &[pubkey]);
+        let msg2 = create_test_message(2, &[pubkey]);
+        let msg3 = create_test_message(3, &[pubkey]);
+
+        // First message executes immediately
+        let executed = scheduler.schedule(msg1.clone()).unwrap();
+        // Others get blocked
+        assert!(scheduler.schedule(msg2.clone()).is_none());
+        assert!(scheduler.schedule(msg3.clone()).is_none());
+        assert_eq!(scheduler.messages_blocked(), 2);
+
+        // Complete first message
+        scheduler.complete(&executed.scheduled_l1_message);
+
+        // Second message should now be available
+        let expected_msg2 = scheduler.pop_next_scheduled_message().unwrap();
+        assert_eq!(expected_msg2, msg2);
+        assert_eq!(scheduler.messages_blocked(), 1);
+
+        // Complete second message
+        scheduler.complete(&expected_msg2.scheduled_l1_message);
+
+        // Third message should now be available
+        let expected_msg3 = scheduler.pop_next_scheduled_message().unwrap();
+        assert_eq!(expected_msg3, msg3);
+        assert_eq!(scheduler.messages_blocked(), 0);
+    }
+}
+
+#[cfg(test)]
+mod complex_blocking {
+    use super::*;
+    use solana_pubkey::pubkey;
+
+    /// Case:
+    /// executing: `[a1, a2, a3] [b1, b2, b3]` - 1
+    /// blocked:   `[a1,         b1]` - 2
+    /// arriving:  `[a1,     a3]` - 3
+    #[test]
+    fn test_edge_case_1_earlier_message_blocks_later_overlapping() {
+        let mut scheduler = CommitSchedulerInner::new();
+        let a1 = pubkey!("1111111111111111111111111111111111111111111");
+        let a2 = pubkey!("21111111111111111111111111111111111111111111");
+        let a3 = pubkey!("31111111111111111111111111111111111111111111");
+        let b1 = pubkey!("41111111111111111111111111111111111111111111");
+        let b2 = pubkey!("51111111111111111111111111111111111111111111");
+        let b3 = pubkey!("61111111111111111111111111111111111111111111");
+
+        // Message 1: [a1, a2, a3]
+        let msg1_keys = vec![a1, a2, a3];
+        let msg1 = create_test_message(1, &msg1_keys);
+        assert!(scheduler.schedule(msg1.clone()).is_some());
+        assert_eq!(scheduler.messages_blocked(), 0);
+
+        // Message 2:  [b1, b2, b3]
+        let msg2_keys = vec![b1, b2, b3];
+        let msg2 = create_test_message(2, &msg2_keys);
+        assert!(scheduler.schedule(msg2.clone()).is_some());
+        assert_eq!(scheduler.messages_blocked(), 0);
+
+        // Message 3: [a1, b1] - blocked by msg1 & msg2
+        let msg3_keys = vec![a1, b1];
+        let msg3 = create_test_message(3, &msg3_keys);
+        assert!(scheduler.schedule(msg3.clone()).is_none());
+        assert_eq!(scheduler.messages_blocked(), 1);
+
+        // Message 4: [a1, a3] - blocked by msg1 & msg3
+        let msg4_keys = vec![a1, a3];
+        let msg4 = create_test_message(4, &msg4_keys);
+        assert!(scheduler.schedule(msg4.clone()).is_none());
+        assert_eq!(scheduler.messages_blocked(), 2);
+
+        // Complete msg1
+        scheduler.complete(&msg1.scheduled_l1_message);
+        // None of the messages can execute yet
+        // msg3 is blocked msg2
+        // msg4 is blocked by msg3
+        assert!(scheduler.pop_next_scheduled_message().is_none());
+
+        // Complete msg2
+        scheduler.complete(&msg2.scheduled_l1_message);
+        // Now msg3 is unblocked
+        let next = scheduler.pop_next_scheduled_message().unwrap();
+        assert_eq!(next, msg3);
+        assert_eq!(scheduler.messages_blocked(), 1);
+        // Complete msg3
+        scheduler.complete(&next.scheduled_l1_message);
+
+        // Now msg4 should be available
+        let next = scheduler.pop_next_scheduled_message().unwrap();
+        assert_eq!(next, msg4);
+        assert_eq!(scheduler.messages_blocked(), 0);
+    }
+
+    /// Case:
+    /// executing:         `[a1, a2, a3]`
+    /// blocked:      `[c1, a1]`
+    /// arriving: `[c2, c1]`
+    /// `[c2, c1]` - Even there's no overlaps with executing
+    #[test]
+    fn test_edge_case_2_indirect_blocking_through_shared_key() {
+        let mut scheduler = CommitSchedulerInner::new();
+        let a1 = pubkey!("1111111111111111111111111111111111111111111");
+        let a2 = pubkey!("21111111111111111111111111111111111111111111");
+        let a3 = pubkey!("31111111111111111111111111111111111111111111");
+        let c1 = pubkey!("41111111111111111111111111111111111111111111");
+        let c2 = pubkey!("51111111111111111111111111111111111111111111");
+
+        // Message 1: [a1, a2, a3] (executing)
+        let msg1_keys = vec![a1, a2, a3];
+        let msg1 = create_test_message(1, &msg1_keys);
+
+        // Message 2: [c1, a1] (blocked by msg1)
+        let msg2_keys = vec![c1, a1];
+        let msg2 = create_test_message(2, &msg2_keys);
+
+        // Message 3: [c2, c1] (arriving later)
+        let msg3_keys = vec![c2, c1];
+        let msg3 = create_test_message(3, &msg3_keys);
+
+        // Schedule msg1 (executes immediately)
+        let executed_msg1 = scheduler.schedule(msg1.clone()).unwrap();
+        assert_eq!(executed_msg1, msg1);
+
+        // Schedule msg2 (gets blocked)
+        assert!(scheduler.schedule(msg2.clone()).is_none());
+        assert_eq!(scheduler.messages_blocked(), 1);
+
+        // Schedule msg3 (gets blocked, even though c2 is available)
+        assert!(scheduler.schedule(msg3.clone()).is_none());
+        assert_eq!(scheduler.messages_blocked(), 2);
+
+        // Complete msg1
+        scheduler.complete(&executed_msg1.scheduled_l1_message);
+
+        // Now only msg2 should be available (not msg3)
+        let expected_msg2 = scheduler.pop_next_scheduled_message().unwrap();
+        assert_eq!(expected_msg2, msg2);
+        assert_eq!(scheduler.messages_blocked(), 1);
+        // msg 3 still should be blocked
+        assert_eq!(scheduler.pop_next_scheduled_message(), None);
+
+        // Complete msg2
+        scheduler.complete(&expected_msg2.scheduled_l1_message);
+
+        // Now msg3 should be available
+        let expected_msg3 = scheduler.pop_next_scheduled_message().unwrap();
+        assert_eq!(expected_msg3, msg3);
+        assert_eq!(scheduler.messages_blocked(), 0);
+    }
+}
+
+
+
+// Helper function to create test messages
+#[cfg(test)]
+fn create_test_message(id: u64, pubkeys: &[Pubkey]) -> ScheduledL1MessageWrapper {
+    use solana_sdk::hash::Hash;
+    use solana_sdk::transaction::Transaction;
+    use magicblock_program::magic_scheduled_l1_message::{CommitType, CommittedAccountV2, MagicL1Message};
+    use crate::types::TriggerType;
+    use solana_account::Account;
+
+    let mut message = ScheduledL1Message {
+        id,
+        slot: 0,
+        blockhash: Hash::default(),
+        action_sent_transaction: Transaction::default(),
+        payer: Pubkey::default(),
+        l1_message: MagicL1Message::L1Actions(vec![]),
+    };
+
+    // Only set pubkeys if provided
+    if !pubkeys.is_empty() {
+        let committed_accounts = pubkeys.iter().map(|&pubkey| CommittedAccountV2 {
+            pubkey,
+            account: Account::default(),
+        }).collect();
+
+        message.l1_message = MagicL1Message::Commit(CommitType::Standalone(committed_accounts));
+    }
+
+    ScheduledL1MessageWrapper {
+        scheduled_l1_message: message,
+        feepayers: vec![],
+        excluded_pubkeys: vec![],
+        trigger_type: TriggerType::OffChain,
     }
 }
