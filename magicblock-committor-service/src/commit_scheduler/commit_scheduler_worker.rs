@@ -4,9 +4,7 @@ use std::{
 };
 
 use log::{error, info, trace, warn};
-use magicblock_program::{
-    magic_scheduled_l1_message::ScheduledL1Message, FeePayerAccount, SentCommit,
-};
+use magicblock_program::SentCommit;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_pubkey::Pubkey;

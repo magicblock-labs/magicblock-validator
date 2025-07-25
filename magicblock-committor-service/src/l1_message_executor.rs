@@ -1,9 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use log::warn;
 use magicblock_program::{
     magic_scheduled_l1_message::ScheduledL1Message,
-    validator::validator_authority, SentCommit,
+    validator::validator_authority,
 };
 use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
@@ -15,7 +15,7 @@ use solana_sdk::{
     message::VersionedMessage,
     signature::{Keypair, Signature},
     signer::{Signer, SignerError},
-    transaction::{Transaction, VersionedTransaction},
+    transaction::VersionedTransaction,
 };
 
 use crate::{
@@ -23,7 +23,6 @@ use crate::{
     transaction_preperator::transaction_preparator::{
         TransactionPreparator, TransactionPreparatorV1,
     },
-    types::ScheduledL1MessageWrapper,
     utils::{persist_status_update, persist_status_update_set},
     ComputeBudgetConfig,
 };

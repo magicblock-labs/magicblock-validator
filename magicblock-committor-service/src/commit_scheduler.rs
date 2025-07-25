@@ -9,7 +9,6 @@ use std::sync::Arc;
 pub use commit_scheduler_worker::{
     BroadcastedMessageExecutionResult, ExecutionOutputWrapper,
 };
-use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};

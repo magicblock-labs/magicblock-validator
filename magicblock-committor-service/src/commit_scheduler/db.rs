@@ -2,7 +2,6 @@ use std::{collections::VecDeque, sync::Mutex};
 
 /// DB for storing messages that overflow committor channel
 use async_trait::async_trait;
-use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 
 use crate::types::ScheduledL1MessageWrapper;
 

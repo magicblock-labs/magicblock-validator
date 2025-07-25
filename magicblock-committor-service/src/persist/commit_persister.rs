@@ -255,107 +255,208 @@ impl L1MessagesPersisterIface for L1MessagePersister {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_committor_program::ChangedAccount;
-    use solana_pubkey::Pubkey;
-    use solana_sdk::signature::Signature;
+    use magicblock_program::magic_scheduled_l1_message::{
+        CommitType, CommittedAccountV2, MagicL1Message,
+    };
+    use solana_sdk::{
+        account::Account, hash::Hash, pubkey::Pubkey, signature::Signature,
+        transaction::Transaction,
+    };
+    use tempfile::NamedTempFile;
 
     use super::*;
-    use crate::persist::{CommitStatusSignatures, CommitStrategy};
+    use crate::persist::{db, types, CommitStatusSignatures};
 
-    #[test]
-    fn test_start_changeset_and_update_status() {
-        let mut persister = L1MessagePersister::try_new(":memory:").unwrap();
+    fn create_test_persister() -> (L1MessagePersister, NamedTempFile) {
+        let temp_file = NamedTempFile::new().unwrap();
+        let persister = L1MessagePersister::try_new(temp_file.path()).unwrap();
+        (persister, temp_file)
+    }
 
-        // Create a test changeset
-        let mut changeset = Changeset {
-            slot: 100,
-            ..Default::default()
+    fn create_test_message(id: u64) -> ScheduledL1Message {
+        let account1 = Account {
+            lamports: 1000,
+            owner: Pubkey::new_unique(),
+            data: vec![],
+            executable: false,
+            rent_epoch: 0,
+        };
+        let account2 = Account {
+            lamports: 2000,
+            owner: Pubkey::new_unique(),
+            data: vec![1, 2, 3],
+            executable: false,
+            rent_epoch: 0,
         };
 
-        let pubkey1 = Pubkey::new_unique();
-        let pubkey2 = Pubkey::new_unique();
-        let owner = Pubkey::new_unique();
+        ScheduledL1Message {
+            id,
+            slot: 100,
+            blockhash: Hash::new_unique(),
+            action_sent_transaction: Transaction::default(),
+            payer: Pubkey::new_unique(),
+            l1_message: MagicL1Message::Commit(CommitType::Standalone(vec![
+                CommittedAccountV2 {
+                    pubkey: Pubkey::new_unique(),
+                    account: account1,
+                },
+                CommittedAccountV2 {
+                    pubkey: Pubkey::new_unique(),
+                    account: account2,
+                },
+            ])),
+        }
+    }
 
-        // Add an empty account
-        changeset.add(
-            pubkey1,
-            ChangedAccount::Full {
-                lamports: 1000,
-                owner,
-                data: vec![],
-                bundle_id: 1,
-            },
-        );
+    #[test]
+    fn test_create_commit_rows() {
+        let message = create_test_message(1);
+        let rows = L1MessagePersister::create_commit_rows(&message);
 
-        // Add a data account
-        changeset.add(
-            pubkey2,
-            ChangedAccount::Full {
-                lamports: 2000,
-                owner,
-                data: vec![1, 2, 3, 4, 5],
-                bundle_id: 42,
-            },
-        );
-
-        changeset.request_undelegation(pubkey1);
-
-        // Start tracking the changeset
-        let blockhash = Hash::new_unique();
-        let reqid = persister
-            .start_l1_messages(&changeset, blockhash, true)
-            .unwrap();
-
-        // Verify the rows were inserted correctly
-        let rows = persister
-            .commits_db
-            .get_commit_statuses_by_reqid(&reqid)
-            .unwrap();
         assert_eq!(rows.len(), 2);
 
-        let empty_account_row =
-            rows.iter().find(|row| row.pubkey == pubkey1).unwrap();
-        assert_eq!(empty_account_row.commit_type, CommitType::EmptyAccount);
-        assert!(empty_account_row.undelegate);
-        assert_eq!(empty_account_row.data, None);
-        assert_eq!(empty_account_row.commit_status, CommitStatus::Pending);
-        assert_eq!(empty_account_row.retries_count, 0);
+        let empty_account = rows.iter().find(|r| r.data.is_none()).unwrap();
+        assert_eq!(empty_account.commit_type, types::CommitType::EmptyAccount);
+        assert_eq!(empty_account.lamports, 1000);
 
-        let data_account_row =
-            rows.iter().find(|row| row.pubkey == pubkey2).unwrap();
-        assert_eq!(data_account_row.commit_type, CommitType::DataAccount);
-        assert!(!data_account_row.undelegate);
-        assert_eq!(data_account_row.data, Some(vec![1, 2, 3, 4, 5]));
-        assert_eq!(data_account_row.commit_status, CommitStatus::Pending);
+        let data_account = rows.iter().find(|r| r.data.is_some()).unwrap();
+        assert_eq!(data_account.commit_type, types::CommitType::DataAccount);
+        assert_eq!(data_account.lamports, 2000);
+        assert_eq!(data_account.data, Some(vec![1, 2, 3]));
+    }
 
-        // Update status and verify commit status and the signatures
-        let process_signature = Signature::new_unique();
-        let finalize_signature = Some(Signature::new_unique());
-        let new_status = CommitStatus::FailedFinalize((
-            1,
-            CommitStrategy::Args,
+    #[test]
+    fn test_start_l1_message() {
+        let (persister, _temp_file) = create_test_persister();
+        let message = create_test_message(1);
+
+        persister.start_l1_message(&message).unwrap();
+
+        let expected_statuses =
+            L1MessagePersister::create_commit_rows(&message);
+        let statuses = persister.get_commit_statuses_by_message(1).unwrap();
+
+        assert_eq!(statuses.len(), 2);
+        assert_eq!(expected_statuses[0], statuses[0]);
+        assert_eq!(expected_statuses[1], statuses[1]);
+    }
+
+    #[test]
+    fn test_start_l1_messages() {
+        let (persister, _temp_file) = create_test_persister();
+        let message1 = create_test_message(1);
+        let message2 = create_test_message(2);
+
+        persister.start_l1_messages(&[message1, message2]).unwrap();
+
+        let statuses1 = persister.get_commit_statuses_by_message(1).unwrap();
+        let statuses2 = persister.get_commit_statuses_by_message(2).unwrap();
+        assert_eq!(statuses1.len(), 2);
+        assert_eq!(statuses2.len(), 2);
+    }
+
+    #[test]
+    fn test_update_status() {
+        let (persister, _temp_file) = create_test_persister();
+        let message = create_test_message(1);
+        persister.start_l1_message(&message).unwrap();
+
+        let pubkey = message.get_committed_pubkeys().unwrap()[0];
+
+        // Update by message
+        persister
+            .update_status_by_message(1, &pubkey, CommitStatus::Pending)
+            .unwrap();
+
+        let updated = persister
+            .get_commit_status_by_message(1, &pubkey)
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.commit_status, CommitStatus::Pending);
+
+        // Set commit ID and update by commit
+        persister.set_commit_id(1, &pubkey, 100).unwrap();
+        persister
+            .update_status_by_commit(
+                100,
+                &pubkey,
+                CommitStatus::BufferAndChunkInitialized(100),
+            )
+            .unwrap();
+
+        let updated = persister
+            .get_commit_status_by_message(1, &pubkey)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            updated.commit_status,
+            CommitStatus::BufferAndChunkInitialized(100)
+        );
+    }
+
+    #[test]
+    fn test_set_commit_strategy() {
+        let (persister, _temp_file) = create_test_persister();
+        let message = create_test_message(1);
+        persister.start_l1_message(&message).unwrap();
+
+        let pubkey = message.get_committed_pubkeys().unwrap()[0];
+        persister.set_commit_id(1, &pubkey, 100).unwrap();
+
+        persister
+            .set_commit_strategy(100, &pubkey, CommitStrategy::Args)
+            .unwrap();
+
+        let updated = persister
+            .get_commit_status_by_message(1, &pubkey)
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.commit_strategy, CommitStrategy::Args);
+    }
+
+    #[test]
+    fn test_get_signatures() {
+        let (persister, _temp_file) = create_test_persister();
+        let message = create_test_message(1);
+        persister.start_l1_message(&message).unwrap();
+
+        let statuses = persister.get_commit_statuses_by_message(1).unwrap();
+        let pubkey = statuses[0].pubkey;
+        persister.set_commit_id(1, &pubkey, 100).unwrap();
+
+        let process_sig = Signature::new_unique();
+        let finalize_sig = Signature::new_unique();
+        let status = CommitStatus::Succeeded((
+            100,
             CommitStatusSignatures {
-                process_signature,
-                finalize_signature,
-                undelegate_signature: None,
+                process_signature: process_sig,
+                finalize_signature: Some(finalize_sig),
             },
         ));
+
         persister
-            .update_status_by_message(&reqid, &pubkey1, new_status.clone())
+            .update_status_by_commit(100, &pubkey, status)
             .unwrap();
 
-        let updated_row = persister
-            .get_commit_status_by_message(&reqid, &pubkey1)
+        let sigs = persister
+            .get_signatures_by_commit(100, &pubkey)
             .unwrap()
             .unwrap();
+        assert_eq!(sigs.processed_signature, process_sig);
+        assert_eq!(sigs.finalized_signature, Some(finalize_sig));
+    }
 
-        assert_eq!(updated_row.commit_status, new_status);
+    #[test]
+    fn test_empty_accounts_not_persisted() {
+        let (persister, _temp_file) = create_test_persister();
+        let message = ScheduledL1Message {
+            l1_message: MagicL1Message::L1Actions(vec![]), // No committed accounts
+            ..create_test_message(1)
+        };
 
-        let signatures = persister
-            .get_signatures_by_commit(new_status.bundle_id().unwrap())
-            .unwrap()
-            .unwrap();
-        assert_eq!(signatures.processed_signature, process_signature);
-        assert_eq!(signatures.finalized_signature, finalize_signature);
+        persister.start_l1_message(&message).unwrap();
+
+        let statuses = persister.get_commit_statuses_by_message(1).unwrap();
+        assert_eq!(statuses.len(), 0); // No rows should be persisted
     }
 }

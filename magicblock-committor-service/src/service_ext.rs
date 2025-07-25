@@ -88,7 +88,7 @@ impl<CC: L1MessageCommittor> L1MessageCommittorExt for CommittorServiceExt<CC> {
         l1_messages: Vec<ScheduledL1MessageWrapper>,
     ) -> L1MessageCommitorExtResult<Vec<BroadcastedMessageExecutionResult>>
     {
-        let mut receivers = {
+        let receivers = {
             let mut pending_messages =
                 self.pending_messages.lock().expect(POISONED_MUTEX_MSG);
 

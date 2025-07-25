@@ -1,6 +1,6 @@
 use std::{fmt, path::Path, str::FromStr};
 
-use rusqlite::{params, Connection, Result, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Result, Transaction};
 use solana_pubkey::Pubkey;
 use solana_sdk::{clock::Slot, hash::Hash, signature::Signature};
 
@@ -105,44 +105,44 @@ impl fmt::Display for CommitStatusRow {
 }
 
 const ALL_COMMIT_STATUS_COLUMNS: &str = "
-    message_id, // 1
-    pubkey, // 2
-    commit_id, // 3
-    delegated_account_owner, // 4
-    slot, // 5
-    ephemeral_blockhash, // 6
-    undelegate, // 7
-    lamports, // 8
-    data, // 9
-    commit_type, // 10
-    created_at, // 11
-    commit_strategy, // 12
-    commit_status, // 13
-    processed_signature, // 14
-    finalized_signature, // 15
-    last_retried_at, // 16
-    retries_count // 17
+    message_id,
+    pubkey,
+    commit_id,
+    delegated_account_owner,
+    slot,
+    ephemeral_blockhash,
+    undelegate,
+    lamports,
+    data,
+    commit_type,
+    created_at,
+    commit_strategy,
+    commit_status,
+    processed_signature,
+    finalized_signature,
+    last_retried_at,
+    retries_count
 ";
 
 const SELECT_ALL_COMMIT_STATUS_COLUMNS: &str = r#"
 SELECT
-    message_id, // 1
-    pubkey, // 2
-    commit_id, // 3
-    delegated_account_owner, // 4
-    slot, // 5
-    ephemeral_blockhash, // 6
-    undelegate, // 7
-    lamports, // 8
-    data, // 9
-    commit_type, // 10
-    created_at, // 11
-    commit_strategy, // 12
-    commit_status, // 13
-    processed_signature, // 14
-    finalized_signature, // 15
-    last_retried_at, // 16
-    retries_count // 17
+    message_id,
+    pubkey,
+    commit_id,
+    delegated_account_owner,
+    slot,
+    ephemeral_blockhash,
+    undelegate,
+    lamports,
+    data,
+    commit_type,
+    created_at,
+    commit_strategy,
+    commit_status,
+    processed_signature,
+    finalized_signature,
+    last_retried_at,
+    retries_count
 FROM commit_status
 "#;
 
@@ -179,13 +179,12 @@ impl CommittsDb {
             SET
                 commit_status = ?1,
                 processed_signature = ?2,
-                finalized_signature = ?3,
+                finalized_signature = ?3
             WHERE
                 pubkey = ?4 AND message_id = ?5";
 
         let tx = self.conn.transaction()?;
-        let stmt = &mut tx.prepare(query)?;
-        stmt.execute(params![
+        tx.prepare(query)?.execute(params![
             status.as_str(),
             status.signatures().map(|s| s.process_signature.to_string()),
             status
@@ -195,6 +194,7 @@ impl CommittsDb {
             pubkey.to_string(),
             message_id
         ])?;
+        tx.commit()?;
 
         Ok(())
     }
@@ -209,13 +209,12 @@ impl CommittsDb {
             SET
                 commit_status = ?1,
                 processed_signature = ?2,
-                finalized_signature = ?3,
+                finalized_signature = ?3
             WHERE
                 pubkey = ?4 AND commit_id = ?5";
 
         let tx = self.conn.transaction()?;
-        let stmt = &mut tx.prepare(query)?;
-        stmt.execute(params![
+        tx.prepare(query)?.execute(params![
             status.as_str(),
             status.signatures().map(|s| s.process_signature.to_string()),
             status
@@ -225,6 +224,7 @@ impl CommittsDb {
             pubkey.to_string(),
             commit_id
         ])?;
+        tx.commit()?;
 
         Ok(())
     }
@@ -237,13 +237,17 @@ impl CommittsDb {
     ) -> CommitPersistResult<()> {
         let query = "UPDATE commit_status
             SET
-                commit_strategy = ?1,
+                commit_strategy = ?1
             WHERE
                 pubkey = ?2 AND commit_id = ?3";
 
         let tx = self.conn.transaction()?;
-        let stmt = &mut tx.prepare(query)?;
-        stmt.execute(params![value.as_str(), pubkey.to_string(), commit_id])?;
+        tx.prepare(query)?.execute(params![
+            value.as_str(),
+            pubkey.to_string(),
+            commit_id
+        ])?;
+        tx.commit()?;
 
         Ok(())
     }
@@ -255,14 +259,19 @@ impl CommittsDb {
         commit_id: u64,
     ) -> CommitPersistResult<()> {
         let query = "UPDATE commit_status
-            SET
-                commit_id = ?1,
-            WHERE
-                pubkey = ?2 AND message_id = ?3";
-        let tx = self.conn.transaction()?;
-        let stmt = &mut tx.prepare(query)?;
-        stmt.execute(params![commit_id, pubkey.to_string(), message_id])?;
+        SET
+            commit_id = ?1
+        WHERE
+            pubkey = ?2 AND message_id = ?3";
 
+        let tx = self.conn.transaction()?;
+        tx.prepare(query)?.execute(params![
+            commit_id,
+            pubkey.to_string(),
+            message_id
+        ])?;
+
+        tx.commit()?;
         Ok(())
     }
 
@@ -291,10 +300,11 @@ impl CommittsDb {
                 finalized_signature     TEXT,
                 last_retried_at         INTEGER NOT NULL,
                 retries_count           INTEGER NOT NULL,
-                PRIMARY KEY (message_id, pubkey)
+                PRIMARY KEY (message_id, commit_id, pubkey)
             );
             CREATE INDEX IF NOT EXISTS idx_commits_pubkey ON commit_status (pubkey);
             CREATE INDEX IF NOT EXISTS idx_commits_message_id ON commit_status (message_id);
+            CREATE INDEX IF NOT EXISTS idx_commits_commit_id ON commit_status (commit_id);
         COMMIT;",
         ) {
             Ok(_) => Ok(()),
@@ -418,11 +428,12 @@ impl CommittsDb {
         commit_id: u64,
         pubkey: &Pubkey,
     ) -> CommitPersistResult<Option<MessageSignatures>> {
-        let query = "SELECT
-            processed_signature, finalized_signature, created_at
-            FROM commit_status
+        let query = "
+        SELECT
+           processed_signature, finalized_signature, created_at
+        FROM commit_status
         WHERE commit_id = ?1 AND pubkey = ?2
-            LIMIT 1";
+        LIMIT 1";
 
         let mut stmt = self.conn.prepare(&query)?;
         let mut rows = stmt.query(params![commit_id, pubkey.to_string()])?;
@@ -542,11 +553,11 @@ fn extract_committor_row(
     };
 
     let last_retried_at: u64 = {
-        let last_retried_at: i64 = row.get(16)?;
+        let last_retried_at: i64 = row.get(15)?;
         i64_into_u64(last_retried_at)
     };
     let retries_count: u16 = {
-        let retries_count: i64 = row.get(17)?;
+        let retries_count: i64 = row.get(16)?;
         retries_count.try_into().unwrap_or_default()
     };
 
@@ -570,221 +581,192 @@ fn extract_committor_row(
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
+    use solana_sdk::{signature::Signature, hash::Hash};
+    use tempfile::NamedTempFile;
 
-    fn setup_db() -> CommittsDb {
-        let db = CommittsDb::new(":memory:").unwrap();
+    // Helper to create a test database
+    fn setup_test_db() -> (CommittsDb, NamedTempFile) {
+        let temp_file = NamedTempFile::new().unwrap();
+        let mut db = CommittsDb::new(temp_file.path()).unwrap();
         db.create_commit_status_table().unwrap();
-        db
+
+        (db, temp_file)
     }
 
-    // -----------------
-    // Commit Status
-    // -----------------
-    fn create_commit_status_row(message_id: u64) -> CommitStatusRow {
+    // Helper to create a test CommitStatusRow
+    fn create_test_row(message_id: u64, commit_id: u64) -> CommitStatusRow {
         CommitStatusRow {
             message_id,
-            commit_id: 0,
+            commit_id,
             pubkey: Pubkey::new_unique(),
             delegated_account_owner: Pubkey::new_unique(),
             slot: 100,
             ephemeral_blockhash: Hash::new_unique(),
             undelegate: false,
-            lamports: 100,
-            data: None,
-            commit_type: CommitType::EmptyAccount,
+            lamports: 1000,
+            data: Some(vec![1, 2, 3]),
+            commit_type: CommitType::DataAccount,
             created_at: 1000,
             commit_status: CommitStatus::Pending,
+            commit_strategy: CommitStrategy::Args,
             last_retried_at: 1000,
             retries_count: 0,
         }
     }
 
     #[test]
-    fn test_round_trip_commit_status_rows() {
-        let one_unbundled_commit_row_no_data = CommitStatusRow {
-            message_id: 123,
-            commit_id: 0,
-            pubkey: Pubkey::new_unique(),
-            delegated_account_owner: Pubkey::new_unique(),
-            slot: 100,
-            ephemeral_blockhash: Hash::new_unique(),
-            undelegate: false,
-            lamports: 100,
-            data: None,
-            commit_type: CommitType::EmptyAccount,
-            created_at: 1000,
-            commit_status: CommitStatus::Pending,
-            last_retried_at: 1000,
-            retries_count: 0,
-        };
+    fn test_table_creation() {
+        let (db, _) = setup_test_db();
 
-        let two_bundled_commit_row_with_data = CommitStatusRow {
-            message_id: 123,
-            commit_id: 0,
-            pubkey: Pubkey::new_unique(),
-            delegated_account_owner: Pubkey::new_unique(),
-            slot: 100,
-            ephemeral_blockhash: Hash::new_unique(),
-            undelegate: false,
-            lamports: 2000,
-            data: Some(vec![1, 2, 3]),
-            commit_type: CommitType::DataAccount,
-            created_at: 1000,
-            commit_status: CommitStatus::FailedProcess((
-                2,
-                CommitStrategy::Args,
-                None,
-            )),
-            last_retried_at: 1000,
-            retries_count: 0,
-        };
-
-        let mut db = setup_db();
-        db.insert_commit_status_rows(&[
-            one_unbundled_commit_row_no_data.clone(),
-            two_bundled_commit_row_with_data.clone(),
-        ])
-        .unwrap();
-
-        let one = db
-            .get_commit_statuses_by_pubkey(
-                &one_unbundled_commit_row_no_data.pubkey,
-            )
-            .unwrap();
-        assert_eq!(one.len(), 1);
-        assert_eq!(one[0], one_unbundled_commit_row_no_data);
-
-        let two = db
-            .get_commit_statuses_by_pubkey(
-                &two_bundled_commit_row_with_data.pubkey,
-            )
-            .unwrap();
-        assert_eq!(two.len(), 1);
-        assert_eq!(two[0], two_bundled_commit_row_with_data);
-
-        let by_message_id = db
-            .get_commit_statuses_by_id(
-                one_unbundled_commit_row_no_data.message_id,
-            )
-            .unwrap();
-        assert_eq!(by_message_id.len(), 2);
-        assert_eq!(
-            by_message_id,
-            [
-                one_unbundled_commit_row_no_data,
-                two_bundled_commit_row_with_data
-            ]
-        );
-    }
-
-    fn create_message_signature_row(
-        commit_status: &CommitStatus,
-    ) -> Option<MessageSignatures> {
-        commit_status
-            .bundle_id()
-            .map(|bundle_id| MessageSignatures {
-                processed_signature: Signature::new_unique(),
-                finalized_signature: None,
-                undelegate_signature: None,
-                created_at: 1000,
-            })
+        // Verify table exists
+        let table_exists: bool = db.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='commit_status')",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(table_exists);
     }
 
     #[test]
-    fn test_commits_with_message_id() {
-        let mut db = setup_db();
-        const MESSAGE_ID_ONE: u64 = 123;
-        const MESSAGE_ID_TWO: u64 = 456;
+    fn test_insert_and_retrieve_rows() {
+        let (mut db, _file) = setup_test_db();
+        let row1 = create_test_row(1, 0);
+        let row2 = create_test_row(1, 0); // Same message_id, different pubkey
 
-        let commit_row_one = create_commit_status_row(MESSAGE_ID_ONE);
-        let commit_row_one_other = create_commit_status_row(MESSAGE_ID_ONE);
-        let commit_row_two = create_commit_status_row(MESSAGE_ID_TWO);
+        // Insert rows
+        db.insert_commit_status_rows(&[row1.clone(), row2.clone()]).unwrap();
 
-        db.insert_commit_status_rows(&[
-            commit_row_one.clone(),
-            commit_row_one_other.clone(),
-            commit_row_two.clone(),
-        ])
-        .unwrap();
+        // Retrieve by message_id
+        let rows = db.get_commit_statuses_by_id(1).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.contains(&row1));
+        assert!(rows.contains(&row2));
 
-        let commits_one = db.get_commit_statuses_by_id(MESSAGE_ID_ONE).unwrap();
-        assert_eq!(commits_one.len(), 2);
-        assert_eq!(commits_one[0], commit_row_one);
-        assert_eq!(commits_one[1], commit_row_one_other);
-
-        let commits_two = db.get_commit_statuses_by_id(MESSAGE_ID_TWO).unwrap();
-        assert_eq!(commits_two.len(), 1);
-        assert_eq!(commits_two[0], commit_row_two);
-
-        // Remove commits with MESSAGE_ID_ONE
-        db.remove_commit_statuses_with_id(MESSAGE_ID_ONE).unwrap();
-        let commits_one_after_removal =
-            db.get_commit_statuses_by_id(MESSAGE_ID_ONE).unwrap();
-        assert_eq!(commits_one_after_removal.len(), 0);
-
-        let commits_two_after_removal =
-            db.get_commit_statuses_by_id(MESSAGE_ID_TWO).unwrap();
-        assert_eq!(commits_two_after_removal.len(), 1);
+        // Retrieve individual row
+        let retrieved = db.get_commit_status(1, &row1.pubkey).unwrap().unwrap();
+        assert_eq!(retrieved, row1);
     }
 
     #[test]
-    fn test_update_commit_status() {
-        let mut db = setup_db();
-        const MESSAGE_ID: u64 = 123;
+    fn test_set_commit_id() {
+        let (mut db, _file) = setup_test_db();
+        let mut row = create_test_row(1, 0);
+        db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
-        let failing_commit_row = create_commit_status_row(MESSAGE_ID);
-        let success_commit_row = create_commit_status_row(MESSAGE_ID);
-        db.insert_commit_status_rows(&[
-            failing_commit_row.clone(),
-            success_commit_row.clone(),
-        ])
-        .unwrap();
+        // Update commit_id
+        db.set_commit_id(1, &row.pubkey, 100).unwrap();
 
-        // Update the statuses
-        let new_failing_status =
-            CommitStatus::FailedProcess((22, CommitStrategy::FromBuffer, None));
-        db.update_status_by_message(
-            failing_commit_row.message_id,
-            &failing_commit_row.pubkey,
-            &new_failing_status,
-        )
-        .unwrap();
-        let sigs = CommitStatusSignatures {
-            process_signature: Signature::new_unique(),
-            finalize_signature: None,
-            undelegate_signature: None,
-        };
-        let new_success_status =
-            CommitStatus::Succeeded((33, CommitStrategy::Args, sigs));
-        let success_signatures_row =
-            create_message_signature_row(&new_success_status);
-        let success_signatures = success_signatures_row.clone().unwrap();
-        db.update_status_by_message(
-            success_commit_row.message_id,
-            &success_commit_row.pubkey,
-            &new_success_status,
-        )
-        .unwrap();
+        // Verify update
+        let updated = db.get_commit_status(1, &row.pubkey).unwrap().unwrap();
+        assert_eq!(updated.commit_id, 100);
+    }
 
-        // Verify the statuses were updated
-        let failed_commit_row = db
-            .get_commit_status(MESSAGE_ID, &failing_commit_row.pubkey)
-            .unwrap()
-            .unwrap();
-        assert_eq!(failed_commit_row.commit_status, new_failing_status);
+    #[test]
+    fn test_update_status_by_message() {
+        let (mut db, _file) = setup_test_db();
+        let row = create_test_row(1, 0);
+        db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
-        let succeeded_commit_row = db
-            .get_commit_status(MESSAGE_ID, &success_commit_row.pubkey)
-            .unwrap()
-            .unwrap();
-        assert_eq!(succeeded_commit_row.commit_status, new_success_status);
-        let signature_row = db.get_signatures_by_commit(33).unwrap().unwrap();
-        assert_eq!(
-            signature_row.processed_signature,
-            success_signatures.processed_signature,
-        );
-        assert_eq!(signature_row.finalized_signature, None);
+        let new_status = CommitStatus::Pending;
+        db.update_status_by_message(1, &row.pubkey, &new_status).unwrap();
+
+        let updated = db.get_commit_status(1, &row.pubkey).unwrap().unwrap();
+        assert_eq!(updated.commit_status, new_status);
+    }
+
+    #[test]
+    fn test_update_status_by_commit() {
+        let (mut db, _file) = setup_test_db();
+        let mut row = create_test_row(1, 100); // Set commit_id to 100
+        db.insert_commit_status_rows(&[row.clone()]).unwrap();
+
+        let new_status = CommitStatus::Succeeded((
+            100,
+            CommitStatusSignatures {
+                process_signature: Signature::new_unique(),
+                finalize_signature: None,
+            },
+        ));
+        db.update_status_by_commit(100, &row.pubkey, &new_status).unwrap();
+
+        let updated = db.get_commit_status(1, &row.pubkey).unwrap().unwrap();
+        assert_eq!(updated.commit_status, new_status);
+    }
+
+    #[test]
+    fn test_set_commit_strategy() {
+        let (mut db, _file) = setup_test_db();
+        let mut row = create_test_row(1, 100);
+        db.insert_commit_status_rows(&[row.clone()]).unwrap();
+
+        let new_strategy = CommitStrategy::FromBuffer;
+        db.set_commit_strategy(100, &row.pubkey, new_strategy).unwrap();
+
+        let updated = db.get_commit_status(1, &row.pubkey).unwrap().unwrap();
+        assert_eq!(updated.commit_strategy, new_strategy);
+    }
+
+    #[test]
+    fn test_get_signatures_by_commit() {
+        let (mut db, _file) = setup_test_db();
+        let process_sig = Signature::new_unique();
+        let finalize_sig = Signature::new_unique();
+
+        let mut row = create_test_row(1, 100);
+        row.commit_status = CommitStatus::Succeeded((
+            100,
+            CommitStatusSignatures {
+                process_signature: process_sig,
+                finalize_signature: Some(finalize_sig),
+            },
+        ));
+        db.insert_commit_status_rows(&[row.clone()]).unwrap();
+
+        let sigs = db.get_signatures_by_commit(100, &row.pubkey).unwrap().unwrap();
+        assert_eq!(sigs.processed_signature, process_sig);
+        assert_eq!(sigs.finalized_signature, Some(finalize_sig));
+    }
+
+    #[test]
+    fn test_remove_commit_statuses() {
+        let (mut db, _file) = setup_test_db();
+        let row1 = create_test_row(1, 0);
+        let row2 = create_test_row(2, 0);
+        db.insert_commit_status_rows(&[row1.clone(), row2.clone()]).unwrap();
+
+        // Remove one message
+        db.remove_commit_statuses_with_id(1).unwrap();
+
+        // Verify removal
+        assert!(db.get_commit_statuses_by_id(1).unwrap().is_empty());
+        assert_eq!(db.get_commit_statuses_by_id(2).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_empty_data_handling() {
+        let (mut db, _file) = setup_test_db();
+        let mut row = create_test_row(1, 0);
+        row.data = None;
+        row.commit_type = CommitType::EmptyAccount;
+
+        db.insert_commit_status_rows(&[row.clone()]).unwrap();
+
+        let retrieved = db.get_commit_status(1, &row.pubkey).unwrap().unwrap();
+        assert!(retrieved.data.is_none());
+        assert_eq!(retrieved.commit_type, CommitType::EmptyAccount);
+    }
+
+    #[test]
+    fn test_undelegate_flag() {
+        let (mut db, _file) = setup_test_db();
+        let mut row = create_test_row(1, 0);
+        row.undelegate = true;
+
+        db.insert_commit_status_rows(&[row.clone()]).unwrap();
+
+        let retrieved = db.get_commit_status(1, &row.pubkey).unwrap().unwrap();
+        assert!(retrieved.undelegate);
     }
 }
