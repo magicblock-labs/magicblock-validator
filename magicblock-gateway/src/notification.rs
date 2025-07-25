@@ -15,7 +15,7 @@ struct NotificationParams<R> {
 }
 
 #[derive(Serialize)]
-struct NotificationResult<T> {
+pub(crate) struct NotificationResult<T> {
     context: NotificationContext,
     value: T,
 }

@@ -10,12 +10,12 @@ use solana_account_decoder::{encode_ui_account, UiAccount, UiAccountEncoding};
 
 use crate::notification::WebsocketNotification;
 
-pub(crate) trait Encoder: Ord + Eq {
+pub(crate) trait Encoder: Ord + Eq + Clone {
     type Data;
     fn encode(&self, slot: u64, data: &Self::Data, id: u64) -> Option<Bytes>;
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub(crate) enum AccountEncoder {
     Base58,
     Base64,
@@ -34,13 +34,13 @@ impl From<&AccountEncoder> for UiAccountEncoding {
     }
 }
 
-#[derive(PartialEq, PartialOrd, Ord, Eq)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub enum ProgramFilter {
     DataSize(usize),
     MemCmp { offset: usize, bytes: Vec<u8> },
 }
 
-#[derive(PartialEq, PartialOrd, Ord, Eq)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub struct ProgramFilters(Vec<ProgramFilter>);
 
 impl ProgramFilter {
@@ -65,7 +65,7 @@ impl ProgramFilters {
     }
 }
 
-#[derive(PartialEq, PartialOrd, Ord, Eq)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub struct ProgramAccountEncoder {
     pub encoder: AccountEncoder,
     pub filters: ProgramFilters,
@@ -108,7 +108,7 @@ impl Encoder for ProgramAccountEncoder {
     }
 }
 
-#[derive(PartialEq, PartialOrd, Ord, Eq)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub(crate) struct TransactionResultEncoder;
 
 impl Encoder for TransactionResultEncoder {
@@ -126,7 +126,7 @@ impl Encoder for TransactionResultEncoder {
     }
 }
 
-#[derive(PartialEq, PartialOrd, Ord, Eq)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub(crate) enum TransactionLogsEncoder {
     All,
     Mentions(Pubkey),
@@ -163,7 +163,7 @@ impl Encoder for TransactionLogsEncoder {
     }
 }
 
-#[derive(PartialEq, PartialOrd, Ord, Eq)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub(crate) struct SlotEncoder;
 
 impl Encoder for SlotEncoder {

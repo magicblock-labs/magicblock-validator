@@ -7,9 +7,9 @@ pub(crate) mod websocket;
 
 #[derive(json::Deserialize)]
 pub(crate) struct JsonRequest {
-    id: Value,
-    method: JsonRpcMethod,
-    params: Option<Array>,
+    pub(crate) id: Value,
+    pub(crate) method: JsonRpcMethod,
+    pub(crate) params: Option<Array>,
 }
 
 #[derive(json::Deserialize, Debug)]
