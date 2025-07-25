@@ -17,9 +17,9 @@ hostname = { workspace = true }
 flume = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+json = { workspace = true }
 magicblock-transaction-status = { workspace = true }
-scc = "2.3"
+scc = { workspace = true }
 solana-geyser-plugin-interface = { workspace = true }
 solana-sdk = { workspace = true }
 spl-token-2022 = { workspace = true, features = ["no-entrypoint"] }
