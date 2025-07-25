@@ -2,24 +2,29 @@ use std::sync::Arc;
 
 use magicblock_accounts_db::AccountsDb;
 use magicblock_ledger::Ledger;
-use transactions_cache::TransactionsCache;
+use subscriptions::SubscriptionsDb;
+use transactions::TransactionsCache;
 
 #[derive(Clone)]
 pub struct SharedState {
-    accountsdb: Arc<AccountsDb>,
-    ledger: Arc<Ledger>,
-    txn_cache: Arc<TransactionsCache>,
+    pub(crate) accountsdb: Arc<AccountsDb>,
+    pub(crate) ledger: Arc<Ledger>,
+    pub(crate) transactions: Arc<TransactionsCache>,
+    pub(crate) subscriptions: SubscriptionsDb,
 }
 
 impl SharedState {
     fn new(accountsdb: Arc<AccountsDb>, ledger: Arc<Ledger>) -> Self {
-        let txn_cache = TransactionsCache::init();
+        let transactions = TransactionsCache::init();
+        let subscriptions = SubscriptionsDb::default();
         Self {
             accountsdb,
             ledger,
-            txn_cache,
+            transactions,
+            subscriptions,
         }
     }
 }
 
-mod transactions_cache;
+pub(crate) mod subscriptions;
+pub(crate) mod transactions;
