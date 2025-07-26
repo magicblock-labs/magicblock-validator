@@ -1,7 +1,6 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
 use log::*;
-use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_pubkey::Pubkey;

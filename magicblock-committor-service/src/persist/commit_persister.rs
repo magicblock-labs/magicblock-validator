@@ -253,6 +253,123 @@ impl L1MessagesPersisterIface for L1MessagePersister {
     // }
 }
 
+/// Blanket implementation for Option
+impl<T: L1MessagesPersisterIface> L1MessagesPersisterIface for Option<T> {
+    fn start_l1_messages(
+        &self,
+        l1_messages: &[ScheduledL1Message],
+    ) -> CommitPersistResult<()> {
+        match self {
+            Some(persister) => persister.start_l1_messages(l1_messages),
+            None => Ok(()),
+        }
+    }
+
+    fn start_l1_message(
+        &self,
+        l1_message: &ScheduledL1Message,
+    ) -> CommitPersistResult<()> {
+        match self {
+            Some(persister) => persister.start_l1_message(l1_message),
+            None => Ok(()),
+        }
+    }
+
+    fn set_commit_id(
+        &self,
+        message_id: u64,
+        pubkey: &Pubkey,
+        commit_id: u64,
+    ) -> CommitPersistResult<()> {
+        match self {
+            Some(persister) => {
+                persister.set_commit_id(message_id, pubkey, commit_id)
+            }
+            None => Ok(()),
+        }
+    }
+
+    fn set_commit_strategy(
+        &self,
+        commit_id: u64,
+        pubkey: &Pubkey,
+        value: CommitStrategy,
+    ) -> CommitPersistResult<()> {
+        match self {
+            Some(persister) => {
+                persister.set_commit_strategy(commit_id, pubkey, value)
+            }
+            None => Ok(()),
+        }
+    }
+
+    fn update_status_by_message(
+        &self,
+        message_id: u64,
+        pubkey: &Pubkey,
+        status: CommitStatus,
+    ) -> CommitPersistResult<()> {
+        match self {
+            Some(persister) => {
+                persister.update_status_by_message(message_id, pubkey, status)
+            }
+            None => Ok(()),
+        }
+    }
+
+    fn update_status_by_commit(
+        &self,
+        commit_id: u64,
+        pubkey: &Pubkey,
+        status: CommitStatus,
+    ) -> CommitPersistResult<()> {
+        match self {
+            Some(persister) => {
+                persister.update_status_by_commit(commit_id, pubkey, status)
+            }
+            None => Ok(()),
+        }
+    }
+
+    fn get_commit_statuses_by_message(
+        &self,
+        message_id: u64,
+    ) -> CommitPersistResult<Vec<CommitStatusRow>> {
+        match self {
+            Some(persister) => {
+                persister.get_commit_statuses_by_message(message_id)
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn get_commit_status_by_message(
+        &self,
+        message_id: u64,
+        pubkey: &Pubkey,
+    ) -> CommitPersistResult<Option<CommitStatusRow>> {
+        match self {
+            Some(persister) => {
+                persister.get_commit_status_by_message(message_id, pubkey)
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn get_signatures_by_commit(
+        &self,
+        commit_id: u64,
+        pubkey: &Pubkey,
+    ) -> CommitPersistResult<Option<MessageSignatures>> {
+        match self {
+            Some(persister) => {
+                persister.get_signatures_by_commit(commit_id, pubkey)
+            }
+            None => Ok(None),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use magicblock_program::magic_scheduled_l1_message::{

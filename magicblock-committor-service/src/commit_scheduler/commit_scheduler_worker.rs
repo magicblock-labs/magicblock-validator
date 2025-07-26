@@ -16,7 +16,7 @@ use tokio::sync::{
 
 use crate::{
     commit_scheduler::{
-        commit_id_tracker::{CommitIdTracker, CommitIdTrackerImpl},
+        commit_id_tracker::CommitIdTracker,
         commit_scheduler_inner::{CommitSchedulerInner, POISONED_INNER_MSG},
         db::DB,
         Error,
@@ -24,15 +24,11 @@ use crate::{
     message_executor::{
         error::MessageExecutorResult,
         message_executor_factory::MessageExecutorFactory, ExecutionOutput,
-        L1MessageExecutor, MessageExecutor,
+        MessageExecutor,
     },
     persist::L1MessagesPersisterIface,
-    transaction_preperator::transaction_preparator::{
-        TransactionPreparator, TransactionPreparatorV1,
-    },
     types::{ScheduledL1MessageWrapper, TriggerType},
     utils::ScheduledMessageExt,
-    ComputeBudgetConfig,
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
@@ -327,6 +323,227 @@ where
                 .clone(),
             trigger_type: *trigger_type,
             sent_commit,
+        }
+    }
+}
+
+/// Worker tests
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
+    use solana_pubkey::pubkey;
+    use solana_sdk::{signature::Signature, signer::SignerError};
+    use tokio::sync::mpsc;
+
+    use super::*;
+    use crate::{
+        commit_scheduler::{
+            commit_id_tracker::{CommitIdTracker, CommitIdTrackerResult},
+            commit_scheduler_inner::create_test_message,
+            db::{DummyDB, DB},
+        },
+        message_executor::error::{
+            Error as ExecutorError, InternalError, MessageExecutorResult,
+        },
+        persist::L1MessagePersister,
+    };
+
+    type MockCommitSchedulerWorker = CommitSchedulerWorker<
+        DummyDB,
+        L1MessagePersister,
+        MockMessageExecutorFactory,
+        MockCommitIdTracker,
+    >;
+    fn setup_worker(should_fail: bool) -> (
+        mpsc::Sender<ScheduledL1MessageWrapper>,
+        MockCommitSchedulerWorker,
+    ) {
+        let (sender, receiver) = mpsc::channel(10);
+
+        let db = Arc::new(DummyDB::new());
+        let executor_factory = if !should_fail {
+            MockMessageExecutorFactory::new()
+        } else {
+            MockMessageExecutorFactory::new_failing()
+        };
+        let commit_id_tracker = MockCommitIdTracker::new();
+        let worker = CommitSchedulerWorker::new(
+            db.clone(),
+            executor_factory,
+            commit_id_tracker,
+            None::<L1MessagePersister>,
+            receiver,
+        );
+
+        (sender, worker)
+    }
+
+    #[tokio::test]
+    async fn test_worker_processes_messages() {
+        let (sender, worker) = setup_worker(false);
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        // Send a test message
+        let msg = create_test_message(
+            1,
+            &[pubkey!("1111111111111111111111111111111111111111111")],
+        );
+        sender.send(msg.clone()).await.unwrap();
+
+        // Verify the message was processed
+        let result = result_receiver.recv().await.unwrap();
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.id, 1);
+    }
+
+    #[tokio::test]
+    async fn test_worker_handles_conflicting_messages() {
+        let (sender, worker) = setup_worker(false);
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        // Send two conflicting messages
+        let pubkey = pubkey!("1111111111111111111111111111111111111111111");
+        let msg1 = create_test_message(1, &[pubkey]);
+        let msg2 = create_test_message(2, &[pubkey]);
+
+        sender.send(msg1.clone()).await.unwrap();
+        sender.send(msg2.clone()).await.unwrap();
+
+        // First message should be processed immediately
+        let result1 = result_receiver.recv().await.unwrap();
+        assert!(result1.is_ok());
+        assert_eq!(result1.unwrap().id, 1);
+
+        // Second message should be processed after first completes
+        let result2 = result_receiver.recv().await.unwrap();
+        assert!(result2.is_ok());
+        assert_eq!(result2.unwrap().id, 2);
+    }
+
+    #[tokio::test]
+    async fn test_worker_handles_executor_failure() {
+        let (sender, worker) = setup_worker(true);
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        // Send a test message that will fail
+        let msg = create_test_message(
+            1,
+            &[pubkey!("1111111111111111111111111111111111111111111")],
+        );
+        sender.send(msg.clone()).await.unwrap();
+
+        // Verify the failure was properly reported
+        let result = result_receiver.recv().await.unwrap();
+        let Err((id, err)) = result else {
+            panic!();
+        };
+        assert_eq!(id, 1);
+        assert_eq!(
+            err.to_string(),
+            "FailedToCommitError: SignerError: custom error: oops"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_worker_falls_back_to_db_when_channel_empty() {
+        let (sender, worker) = setup_worker(false);
+
+        // Add a message to the DB
+        let msg = create_test_message(
+            1,
+            &[pubkey!("1111111111111111111111111111111111111111111")],
+        );
+        worker.db.store_l1_message(msg.clone()).await.unwrap();
+
+        // Start worker
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        // Verify the message from DB was processed
+        let result = result_receiver.recv().await.unwrap();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, 1);
+    }
+
+    // Mock implementations for testing
+    pub struct MockMessageExecutorFactory {
+        should_fail: bool,
+    }
+
+    impl MockMessageExecutorFactory {
+        pub fn new() -> Self {
+            Self { should_fail: false }
+        }
+
+        pub fn new_failing() -> Self {
+            Self { should_fail: true }
+        }
+    }
+
+    impl MessageExecutorFactory for MockMessageExecutorFactory {
+        type Executor = MockMessageExecutor;
+
+        fn create_instance(&self) -> Self::Executor {
+            MockMessageExecutor {
+                should_fail: self.should_fail,
+            }
+        }
+    }
+
+    pub struct MockMessageExecutor {
+        should_fail: bool,
+    }
+
+    #[async_trait]
+    impl MessageExecutor for MockMessageExecutor {
+        async fn execute<P: L1MessagesPersisterIface>(
+            &self,
+            l1_message: ScheduledL1Message,
+            _commit_ids: HashMap<Pubkey, u64>,
+            _persister: Option<P>,
+        ) -> MessageExecutorResult<ExecutionOutput> {
+            // TODO: add sleep
+            if self.should_fail {
+                Err(ExecutorError::FailedToCommitError {
+                    err: InternalError::SignerError(SignerError::Custom(
+                        "oops".to_string(),
+                    )),
+                    signature: None,
+                })
+            } else {
+                Ok(ExecutionOutput {
+                    commit_signature: Signature::default(),
+                    finalize_signature: Signature::default(),
+                })
+            }
+        }
+    }
+
+    pub struct MockCommitIdTracker;
+    impl MockCommitIdTracker {
+        pub fn new() -> Self {
+            Self
+        }
+    }
+
+    #[async_trait]
+    impl CommitIdTracker for MockCommitIdTracker {
+        async fn next_commit_ids(
+            &mut self,
+            pubkeys: &[Pubkey],
+        ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>> {
+            Ok(pubkeys.iter().map(|&k| (k, 1)).collect())
+        }
+
+        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<&u64> {
+            None
         }
     }
 }

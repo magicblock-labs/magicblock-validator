@@ -537,7 +537,7 @@ mod edge_cases_test {
 
 // Helper function to create test messages
 #[cfg(test)]
-fn create_test_message(
+pub(crate) fn create_test_message(
     id: u64,
     pubkeys: &[Pubkey],
 ) -> ScheduledL1MessageWrapper {
