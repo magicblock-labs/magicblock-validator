@@ -2,7 +2,8 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
-
+use futures_util::stream::FuturesUnordered;
+use futures_util::StreamExt;
 use log::{error, info, trace, warn};
 use magicblock_program::SentCommit;
 use magicblock_rpc_client::MagicblockRpcClient;
@@ -13,7 +14,7 @@ use tokio::sync::{
     broadcast, mpsc, mpsc::error::TryRecvError, Notify, OwnedSemaphorePermit,
     Semaphore,
 };
-
+use tokio::task::JoinHandle;
 use crate::{
     commit_scheduler::{
         commit_id_tracker::CommitIdTracker,
@@ -68,7 +69,7 @@ pub(crate) struct CommitSchedulerWorker<D, P, F, C> {
     receiver: mpsc::Receiver<ScheduledL1MessageWrapper>,
 
     // TODO(edwin): replace notify. issue: 2 simultaneous notifications
-    notify: Arc<Notify>,
+    running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
     inner: Arc<Mutex<CommitSchedulerInner>>,
 }
@@ -97,7 +98,7 @@ where
             executor_factory,
             commit_id_tracker,
             receiver,
-            notify: Arc::new(Notify::new()),
+            running_executors: FuturesUnordered::new(),
             executors_semaphore: Arc::new(Semaphore::new(
                 NUM_OF_EXECUTORS as usize,
             )),
@@ -169,9 +170,8 @@ where
             let executor = self.executor_factory.create_instance();
             let persister = self.l1_messages_persister.clone();
             let inner = self.inner.clone();
-            let notify = self.notify.clone();
 
-            tokio::spawn(Self::execute(
+            let handle = tokio::spawn(Self::execute(
                 executor,
                 persister,
                 l1_message,
@@ -179,8 +179,9 @@ where
                 inner,
                 permit,
                 result_sender.clone(),
-                notify,
             ));
+
+            self.running_executors.push(handle);
         }
     }
 
@@ -204,17 +205,29 @@ where
                 false
             }
         };
-        let notify = self.notify.clone();
+
+        let running_executors = &mut self.running_executors;
+        let receiver = &mut self.receiver;
+        let db = &self.db;
         let message = tokio::select! {
             // Notify polled first to prioritize unblocked messages over new one
             biased;
-            _ = notify.notified() => {
+            Some(result) = running_executors.next() => {
+                if let Err(err) = result {
+                    error!("Executor failed to complete: {}", err);
+                };
                 trace!("Worker executed L1Message, fetching new available one");
                 self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_message()
             },
-            result = self.get_new_message(), if can_receive() => {
+            result = Self::get_new_message(receiver, db), if can_receive() => {
                 let l1_message = result?;
                 self.inner.lock().expect(POISONED_INNER_MSG).schedule(l1_message)
+            },
+            else => {
+                // Shouldn't be possible
+                // If no executors spawned -> we can receive
+                // If can't receive -> there are running executors
+                unreachable!("next_scheduled_message")
             }
         };
 
@@ -223,17 +236,18 @@ where
 
     /// Returns [`ScheduledL1Message`] from external channel
     async fn get_new_message(
-        &mut self,
+        receiver: &mut mpsc::Receiver<ScheduledL1MessageWrapper>,
+        db: &Arc<D>
     ) -> Result<ScheduledL1MessageWrapper, Error> {
-        match self.receiver.try_recv() {
+        match receiver.try_recv() {
             Ok(val) => Ok(val),
             Err(TryRecvError::Empty) => {
                 // Worker either cleaned-up congested channel and now need to clean-up DB
                 // or we're just waiting on empty channel
-                if let Some(l1_message) = self.db.pop_l1_message().await? {
+                if let Some(l1_message) = db.pop_l1_message().await? {
                     Ok(l1_message)
                 } else {
-                    self.receiver.recv().await.ok_or(Error::ChannelClosed)
+                    receiver.recv().await.ok_or(Error::ChannelClosed)
                 }
             }
             Err(TryRecvError::Disconnected) => Err(Error::ChannelClosed),
@@ -249,7 +263,6 @@ where
         inner_scheduler: Arc<Mutex<CommitSchedulerInner>>,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedMessageExecutionResult>,
-        notify: Arc<Notify>,
     ) {
         let result = executor
             .execute(
@@ -273,9 +286,7 @@ where
             .lock()
             .expect(POISONED_INNER_MSG)
             .complete(&l1_message.scheduled_l1_message);
-        // Notify main loop that executor is done
-        // This will trigger scheduling next message
-        notify.notify_waiters();
+
         // Free worker
         drop(execution_permit);
     }
