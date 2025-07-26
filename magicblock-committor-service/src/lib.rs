@@ -18,7 +18,7 @@ mod undelegate;
 pub mod commit_scheduler;
 // TODO(edwin): define visibility
 mod committor_processor;
-pub mod l1_message_executor;
+pub mod message_executor;
 #[cfg(feature = "dev-context-only-utils")]
 pub mod stubs;
 pub mod tasks;

@@ -19,6 +19,10 @@ use solana_sdk::{
 };
 
 use crate::{
+    message_executor::{
+        error::{Error, InternalError, MessageExecutorResult},
+        ExecutionOutput, MessageExecutor,
+    },
     persist::{CommitStatus, CommitStatusSignatures, L1MessagesPersisterIface},
     transaction_preperator::transaction_preparator::{
         TransactionPreparator, TransactionPreparatorV1,
@@ -27,15 +31,7 @@ use crate::{
     ComputeBudgetConfig,
 };
 
-// TODO(edwin): define struct
-// (commit_id, signature)s that it sent. Single worker in [`RemoteScheduledCommitsProcessor`]
-#[derive(Clone, Debug)]
-pub struct ExecutionOutput {
-    pub commit_signature: Signature,
-    pub finalize_signature: Signature,
-}
-
-pub(crate) struct L1MessageExecutor<T> {
+pub struct L1MessageExecutor<T> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
     transaction_preparator: T,
@@ -61,21 +57,6 @@ where
             rpc_client,
             transaction_preparator,
         }
-    }
-
-    /// Executes message on L1
-    pub async fn execute<P: L1MessagesPersisterIface>(
-        &self,
-        l1_message: ScheduledL1Message,
-        commit_ids: HashMap<Pubkey, u64>,
-        persister: Option<P>,
-    ) -> MessageExecutorResult<ExecutionOutput> {
-        let result = self
-            .execute_inner(l1_message, &commit_ids, &persister)
-            .await;
-        Self::persist_result(&persister, &result, &commit_ids);
-
-        result
     }
 
     async fn execute_inner<P: L1MessagesPersisterIface>(
@@ -256,37 +237,24 @@ where
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum InternalError {
-    #[error("SignerError: {0}")]
-    SignerError(#[from] SignerError),
-    #[error("MagicBlockRpcClientError: {0}")]
-    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
-}
+#[async_trait::async_trait]
+impl<T> MessageExecutor for L1MessageExecutor<T>
+where
+    T: TransactionPreparator,
+{
+    /// Executes Message on Base layer
+    /// Returns `ExecutionOutput` or an `Error`
+    async fn execute<P: L1MessagesPersisterIface>(
+        &self,
+        l1_message: ScheduledL1Message,
+        commit_ids: HashMap<Pubkey, u64>,
+        persister: Option<P>,
+    ) -> MessageExecutorResult<ExecutionOutput> {
+        let result = self
+            .execute_inner(l1_message, &commit_ids, &persister)
+            .await;
+        Self::persist_result(&persister, &result, &commit_ids);
 
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("FailedToCommitError: {err}")]
-    FailedToCommitError {
-        #[source]
-        err: InternalError,
-        signature: Option<Signature>,
-    },
-    #[error("FailedToFinalizeError: {err}")]
-    FailedToFinalizeError {
-        #[source]
-        err: InternalError,
-        commit_signature: Signature,
-        finalize_signature: Option<Signature>,
-    },
-    #[error("FailedCommitPreparationError: {0}")]
-    FailedCommitPreparationError(
-        #[source] crate::transaction_preperator::error::Error,
-    ),
-    #[error("FailedFinalizePreparationError: {0}")]
-    FailedFinalizePreparationError(
-        #[source] crate::transaction_preperator::error::Error,
-    ),
+        result
+    }
 }
-
-pub type MessageExecutorResult<T, E = Error> = Result<T, E>;

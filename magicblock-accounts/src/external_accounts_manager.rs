@@ -23,7 +23,7 @@ use magicblock_committor_service::{
     commit_scheduler::{
         BroadcastedMessageExecutionResult, ExecutionOutputWrapper,
     },
-    l1_message_executor::ExecutionOutput,
+    message_executor::ExecutionOutput,
     service_ext::L1MessageCommittorExt,
     transactions::MAX_PROCESS_PER_TX,
     types::{ScheduledL1MessageWrapper, TriggerType},

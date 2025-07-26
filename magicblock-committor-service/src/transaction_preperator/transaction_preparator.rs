@@ -38,7 +38,7 @@ impl std::fmt::Display for PreparatorVersion {
 }
 
 #[async_trait]
-pub trait TransactionPreparator {
+pub trait TransactionPreparator: Send + Sync + 'static {
     fn version(&self) -> PreparatorVersion;
 
     /// Returns [`VersionedMessage`] corresponding to [`ScheduledL1Message`] tasks

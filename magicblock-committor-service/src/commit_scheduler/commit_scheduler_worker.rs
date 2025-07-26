@@ -16,13 +16,15 @@ use tokio::sync::{
 
 use crate::{
     commit_scheduler::{
-        commit_id_tracker::CommitIdTracker,
+        commit_id_tracker::{CommitIdTracker, CommitIdTrackerImpl},
         commit_scheduler_inner::{CommitSchedulerInner, POISONED_INNER_MSG},
         db::DB,
         Error,
     },
-    l1_message_executor::{
-        ExecutionOutput, L1MessageExecutor, MessageExecutorResult,
+    message_executor::{
+        error::MessageExecutorResult,
+        message_executor_factory::MessageExecutorFactory, ExecutionOutput,
+        L1MessageExecutor, MessageExecutor,
     },
     persist::L1MessagesPersisterIface,
     transaction_preperator::transaction_preparator::{
@@ -45,7 +47,7 @@ pub struct ExecutionOutputWrapper {
     pub trigger_type: TriggerType,
 }
 
-pub type BroadcastedError = (u64, Arc<crate::l1_message_executor::Error>);
+pub type BroadcastedError = (u64, Arc<crate::message_executor::error::Error>);
 
 pub type BroadcastedMessageExecutionResult =
     MessageExecutorResult<ExecutionOutputWrapper, BroadcastedError>;
@@ -62,11 +64,11 @@ impl ResultSubscriber {
     }
 }
 
-pub(crate) struct CommitSchedulerWorker<D, P> {
+pub(crate) struct CommitSchedulerWorker<D, P, F, C> {
     db: Arc<D>,
     l1_messages_persister: Option<P>,
-    executor_factory: L1MessageExecutorFactory,
-    commit_id_tracker: CommitIdTracker,
+    executor_factory: F,
+    commit_id_tracker: C,
     receiver: mpsc::Receiver<ScheduledL1MessageWrapper>,
 
     // TODO(edwin): replace notify. issue: 2 simultaneous notifications
@@ -75,28 +77,24 @@ pub(crate) struct CommitSchedulerWorker<D, P> {
     inner: Arc<Mutex<CommitSchedulerInner>>,
 }
 
-impl<D, P> CommitSchedulerWorker<D, P>
+impl<D, P, F, E, C> CommitSchedulerWorker<D, P, F, C>
 where
     D: DB,
     P: L1MessagesPersisterIface,
+    F: MessageExecutorFactory<Executor = E> + Send + Sync + 'static,
+    E: MessageExecutor,
+    C: CommitIdTracker + Send + Sync + 'static,
 {
     pub fn new(
         db: Arc<D>,
+        executor_factory: F,
+        commit_id_tracker: C,
         l1_messages_persister: Option<P>,
-        rpc_client: MagicblockRpcClient,
-        table_mania: TableMania,
-        compute_budget_config: ComputeBudgetConfig,
         receiver: mpsc::Receiver<ScheduledL1MessageWrapper>,
     ) -> Self {
         // Number of executors that can send messages in parallel to L1
         const NUM_OF_EXECUTORS: u8 = 50;
 
-        let executor_factory = L1MessageExecutorFactory {
-            rpc_client: rpc_client.clone(),
-            table_mania,
-            compute_budget_config,
-        };
-        let commit_id_tracker = CommitIdTracker::new(rpc_client);
         Self {
             db,
             l1_messages_persister,
@@ -172,7 +170,7 @@ where
             };
 
             // Spawn executor
-            let executor = self.executor_factory.create_executor();
+            let executor = self.executor_factory.create_instance();
             let persister = self.l1_messages_persister.clone();
             let inner = self.inner.clone();
             let notify = self.notify.clone();
@@ -247,8 +245,8 @@ where
     }
 
     /// Wrapper on [`L1MessageExecutor`] that handles its results and drops execution permit
-    async fn execute<T: TransactionPreparator>(
-        executor: L1MessageExecutor<T>,
+    async fn execute(
+        executor: E,
         persister: Option<P>,
         l1_message: ScheduledL1MessageWrapper,
         commit_ids: HashMap<Pubkey, u64>,
@@ -330,24 +328,5 @@ where
             trigger_type: *trigger_type,
             sent_commit,
         }
-    }
-}
-
-/// Dummy struct to implify signatur
-struct L1MessageExecutorFactory {
-    rpc_client: MagicblockRpcClient,
-    table_mania: TableMania,
-    compute_budget_config: ComputeBudgetConfig,
-}
-
-impl L1MessageExecutorFactory {
-    pub fn create_executor(
-        &self,
-    ) -> L1MessageExecutor<TransactionPreparatorV1> {
-        L1MessageExecutor::<TransactionPreparatorV1>::new_v1(
-            self.rpc_client.clone(),
-            self.table_mania.clone(),
-            self.compute_budget_config.clone(),
-        )
     }
 }

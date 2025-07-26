@@ -15,9 +15,11 @@ use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
 
 use crate::{
     commit_scheduler::{
+        commit_id_tracker::CommitIdTrackerImpl,
         commit_scheduler_worker::{CommitSchedulerWorker, ResultSubscriber},
         db::DB,
     },
+    message_executor::message_executor_factory::L1MessageExecutorFactory,
     persist::L1MessagesPersisterIface,
     types::ScheduledL1MessageWrapper,
     ComputeBudgetConfig,
@@ -38,17 +40,23 @@ impl<D: DB> CommitScheduler<D> {
         compute_budget_config: ComputeBudgetConfig,
     ) -> Self {
         let db = Arc::new(db);
-        let (sender, receiver) = mpsc::channel(1000);
 
-        // TODO(edwin): add concellation logic
-        let worker = CommitSchedulerWorker::new(
-            db.clone(),
-            l1_message_persister,
-            rpc_client,
+        let executor_factory = L1MessageExecutorFactory {
+            rpc_client: rpc_client.clone(),
             table_mania,
             compute_budget_config,
+        };
+        let commit_id_tracker = CommitIdTrackerImpl::new(rpc_client);
+
+        let (sender, receiver) = mpsc::channel(1000);
+        let worker = CommitSchedulerWorker::new(
+            db.clone(),
+            executor_factory,
+            commit_id_tracker,
+            l1_message_persister,
             receiver,
         );
+        // TODO(edwin): add concellation logic
         let result_subscriber = worker.spawn();
 
         Self {
