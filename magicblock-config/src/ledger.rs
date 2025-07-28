@@ -60,25 +60,15 @@ impl Default for LedgerConfig {
 
 #[clap_prefix("replay")]
 #[clap_from_serde]
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ReplayConfig {
     /// The number of threads to use for cloning accounts.
     #[derive_env_var]
     #[serde(default = "default_cloning_concurrency")]
     pub hydration_concurrency: usize,
-}
-
-impl ReplayConfig {
-    pub fn merge(&mut self, other: Self) {
-        let default = Self::default();
-
-        if self.hydration_concurrency == default.hydration_concurrency
-            && other.hydration_concurrency != default.hydration_concurrency
-        {
-            self.hydration_concurrency = other.hydration_concurrency;
-        }
-    }
 }
 
 impl Default for ReplayConfig {
