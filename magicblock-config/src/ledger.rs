@@ -20,6 +20,13 @@ pub struct LedgerConfig {
     #[arg(help = "Whether to reset the ledger before starting the validator.")]
     #[serde(default = "bool_true")]
     pub reset: bool,
+    /// Checks that the validator keypair matches the one in the ledger.
+    #[derive_env_var]
+    #[arg(
+        help = "Whether to check that the validator keypair matches the one in the ledger."
+    )]
+    #[serde(default = "bool_true")]
+    pub enforce_keypair_match: bool,
     /// The file system path onto which the ledger should be written at
     /// If left empty it will be auto-generated to a temporary folder
     #[derive_env_var]
@@ -40,6 +47,7 @@ impl Default for LedgerConfig {
     fn default() -> Self {
         Self {
             reset: bool_true(),
+            enforce_keypair_match: bool_true(),
             path: Default::default(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         }
@@ -60,6 +68,7 @@ mod tests {
     fn test_merge_with_default() {
         let mut config = LedgerConfig {
             reset: false,
+            enforce_keypair_match: false,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
@@ -76,6 +85,7 @@ mod tests {
         let mut config = LedgerConfig::default();
         let other = LedgerConfig {
             reset: false,
+            enforce_keypair_match: false,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
@@ -89,12 +99,14 @@ mod tests {
     fn test_merge_non_default() {
         let mut config = LedgerConfig {
             reset: false,
+            enforce_keypair_match: false,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
         let original_config = config.clone();
         let other = LedgerConfig {
             reset: true,
+            enforce_keypair_match: true,
             path: Some("ledger2.example.com".to_string()),
             size: 10000,
         };
