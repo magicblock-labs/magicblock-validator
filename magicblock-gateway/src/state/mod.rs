@@ -26,5 +26,6 @@ impl SharedState {
     }
 }
 
+pub(crate) mod signatures;
 pub(crate) mod subscriptions;
 pub(crate) mod transactions;

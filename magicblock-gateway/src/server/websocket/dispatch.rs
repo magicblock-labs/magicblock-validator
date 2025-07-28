@@ -1,13 +1,10 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::{atomic::AtomicBool, Arc},
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     error::RpcError,
     requests::JsonRpcMethod,
     state::{
+        signatures::SignaturesExpirer,
         subscriptions::{CleanUp, SubscriptionID, SubscriptionsDb},
         transactions::TransactionsCache,
         SharedState,
@@ -18,11 +15,7 @@ use crate::{
 use super::{connection::ConnectionID, JsonRequest};
 use hyper::body::Bytes;
 use json::{Serialize, Value};
-use solana_signature::Signature;
-use tokio::{
-    sync::mpsc,
-    time::{self, Interval},
-};
+use tokio::sync::mpsc;
 
 pub(crate) type ConnectionTx = mpsc::Sender<Bytes>;
 
@@ -69,60 +62,6 @@ impl WsDispatcher {
     }
 }
 
-struct SignaturesExpirer {
-    signatures: VecDeque<ExpiringSignature>,
-    tick: u64,
-    ticker: Interval,
-}
-
-struct ExpiringSignature {
-    ttl: u64,
-    signature: Signature,
-    subscribed: Arc<AtomicBool>,
-}
-
-impl SignaturesExpirer {
-    const WAIT: u64 = 5;
-    const TTL: u64 = 90 / Self::WAIT;
-    fn init() -> Self {
-        Self {
-            signatures: Default::default(),
-            tick: 0,
-            ticker: time::interval(Duration::from_secs(Self::WAIT)),
-        }
-    }
-
-    fn push(&mut self, signature: Signature, subscribed: Arc<AtomicBool>) {
-        let sig = ExpiringSignature {
-            signature,
-            ttl: self.tick + Self::TTL,
-            subscribed,
-        };
-        self.signatures.push_back(sig);
-    }
-
-    async fn step(&mut self) -> Signature {
-        loop {
-            'expire: {
-                let Some(s) = self.signatures.front() else {
-                    break 'expire;
-                };
-                if s.ttl > self.tick {
-                    break 'expire;
-                }
-                let Some(s) = self.signatures.pop_front() else {
-                    break 'expire;
-                };
-                if s.subscribed.load(std::sync::atomic::Ordering::Relaxed) {
-                    return s.signature;
-                }
-            }
-            self.ticker.tick().await;
-            self.tick += 1;
-        }
-    }
-}
-
 pub(crate) struct WsConnectionChannel {
     pub(crate) id: ConnectionID,
     pub(crate) tx: ConnectionTx,
@@ -142,7 +81,7 @@ pub(crate) struct WsDispatchResult {
 
 impl Drop for WsDispatcher {
     fn drop(&mut self) {
-        for s in self.signatures.signatures.drain(..) {
+        for s in self.signatures.cache.drain(..) {
             self.subscriptions.signatures.remove(&s.signature);
         }
     }
