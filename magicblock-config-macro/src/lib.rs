@@ -1,10 +1,13 @@
 mod clap_from_serde;
 mod clap_prefix;
+mod merger;
+
 use clap_from_serde::*;
 use clap_prefix::*;
+use merger::*;
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, visit_mut::VisitMut, ItemStruct};
+use syn::{parse_macro_input, visit_mut::VisitMut, DeriveInput, ItemStruct};
 
 /// Prefixes the fields of the annotated struct with the given prefix.
 ///
@@ -157,4 +160,74 @@ pub fn clap_from_serde(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #input
     }
     .into()
+}
+
+/// Derives the `Merge` trait for the annotated struct.
+///
+/// **ASSUMES THAT FIELDS WITH NAMES CONTAINING "Config" HAVE A `merge` METHOD**
+///
+/// This macro is used to derive the `Merge` trait for a struct.
+/// The `Merge` trait is used to merge two instances of the struct.
+///
+/// # Example
+/// ```rust
+/// use magicblock_config_macro::Mergeable;
+///
+/// #[derive(Default, Mergeable)]
+/// struct SomeOtherConfig {
+///     field1: u32,
+///     field2: String,
+/// }
+///
+/// #[derive(Default, Mergeable)]
+/// struct MyConfig {
+///     field1: u32,
+///     field2: SomeOtherConfig,
+/// }
+/// ```
+///
+/// Will become:
+/// ```rust
+/// use magicblock_config_helpers::Merge;
+///
+/// #[derive(Default)]
+/// struct SomeOtherConfig {
+///     field1: u32,
+///     field2: String,
+/// }
+///
+/// impl Merge for SomeOtherConfig {
+///     fn merge(&mut self, other: Self) {
+///         let default = Self::default();
+///         if self.field1 == default.field1 {
+///             self.field1 = other.field1;
+///         }
+///         if self.field2 == default.field2 {
+///             self.field2 = other.field2;
+///         }
+///     }
+/// }
+///
+/// #[derive(Default)]
+/// struct MyConfig {
+///     field1: u32,
+///     field2: SomeOtherConfig,
+/// }
+///
+/// impl Merge for MyConfig {
+///     fn merge(&mut self, other: Self) {
+///         let default = Self::default();
+///         if self.field1 == default.field1 {
+///             self.field1 = other.field1;
+///         }
+///         self.field2.merge(other.field2);
+///     }
+/// }
+/// ```
+#[proc_macro_derive(Mergeable)]
+pub fn derive_merge(input: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(input as DeriveInput);
+
+    let mut merger = Merger;
+    merger.add_impl(&mut input)
 }

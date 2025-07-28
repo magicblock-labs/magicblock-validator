@@ -1,5 +1,5 @@
 use clap::Args;
-use magicblock_config_macro::{clap_from_serde, clap_prefix};
+use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
 
 use crate::helpers::serde_defaults::bool_true;
@@ -9,7 +9,9 @@ pub const DEFAULT_LEDGER_SIZE_BYTES: u64 = 100 * 1024 * 1024 * 1024;
 
 #[clap_prefix("ledger")]
 #[clap_from_serde]
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
+)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct LedgerConfig {
     /// If a previous ledger is found it is removed before starting the validator
@@ -34,22 +36,6 @@ pub struct LedgerConfig {
     pub size: u64,
 }
 
-impl LedgerConfig {
-    pub fn merge(&mut self, other: LedgerConfig) {
-        if self.reset == bool_true() && other.reset != bool_true() {
-            self.reset = other.reset;
-        }
-        if self.path == Default::default() && other.path != Default::default() {
-            self.path = other.path;
-        }
-        if self.size == default_ledger_size()
-            && other.size != default_ledger_size()
-        {
-            self.size = other.size;
-        }
-    }
-}
-
 impl Default for LedgerConfig {
     fn default() -> Self {
         Self {
@@ -66,6 +52,8 @@ const fn default_ledger_size() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use magicblock_config_helpers::Merge;
+
     use super::*;
 
     #[test]
