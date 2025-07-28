@@ -1,6 +1,8 @@
-use solana_account::{cow::AccountSeqLock, AccountSharedData};
-use solana_pubkey::Pubkey;
+use solana_account::cow::AccountSeqLock;
 use tokio::sync::mpsc::{Receiver, Sender};
+
+pub use solana_account::{AccountSharedData, ReadableAccount};
+pub use solana_pubkey::Pubkey;
 
 pub type AccountUpdateRx = Receiver<LockedAccount>;
 pub type AccountUpdateTx = Sender<LockedAccount>;
