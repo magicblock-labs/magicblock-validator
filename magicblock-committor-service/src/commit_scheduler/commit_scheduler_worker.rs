@@ -151,10 +151,7 @@ where
                 commit_ids
                     .iter()
                     .for_each(|(pubkey, commit_id) | {
-                        let Some(persistor) = &self.l1_messages_persister else {
-                            return;
-                        };
-                        if let Err(err) = persistor.set_commit_id(l1_message.scheduled_l1_message.id, pubkey, *commit_id) {
+                        if let Err(err) = self.l1_messages_persister.set_commit_id(l1_message.scheduled_l1_message.id, pubkey, *commit_id) {
                             error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, l1_message.scheduled_l1_message.id, pubkey, err);
                         }
                     });

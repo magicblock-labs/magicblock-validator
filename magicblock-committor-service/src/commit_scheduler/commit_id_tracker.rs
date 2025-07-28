@@ -133,6 +133,10 @@ impl CommitIdTracker for CommitIdTrackerImpl {
         const NUM_FETCH_RETRIES: NonZeroUsize =
             unsafe { NonZeroUsize::new_unchecked(5) };
 
+        if pubkeys.is_empty() {
+            return Ok(HashMap::new());
+        }
+
         let mut result = HashMap::new();
         let mut to_request = Vec::new();
         for pubkey in pubkeys {
@@ -141,9 +145,8 @@ impl CommitIdTracker for CommitIdTrackerImpl {
                 continue;
             }
 
-            if let Some(id) = self.cache.get_mut(pubkey) {
-                *id += 1;
-                result.insert(*pubkey, *id);
+            if let Some(id) = self.cache.get(pubkey) {
+                result.insert(*pubkey, *id + 1);
             } else {
                 to_request.push(*pubkey);
             }
@@ -153,9 +156,17 @@ impl CommitIdTracker for CommitIdTrackerImpl {
         to_request.sort();
         to_request.dedup();
 
-        let remaining_ids =
-            Self::fetch_commit_ids_with_retries(&self.rpc_client, &to_request, NUM_FETCH_RETRIES)
-                .await?;
+        let remaining_ids = Self::fetch_commit_ids_with_retries(
+            &self.rpc_client,
+            &to_request,
+            NUM_FETCH_RETRIES,
+        )
+        .await?;
+
+        // Avoid changes to LRU until all data is ready - atomic update
+        result.iter().for_each(|(pubkey, id)| {
+            self.cache.push(*pubkey, *id);
+        });
         to_request
             .iter()
             .zip(remaining_ids)
