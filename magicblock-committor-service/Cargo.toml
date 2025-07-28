@@ -50,6 +50,7 @@ magicblock-table-mania = { workspace = true, features = [
 ] }
 # program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
+rand = { workspace = true }
 
 [features]
 default = []

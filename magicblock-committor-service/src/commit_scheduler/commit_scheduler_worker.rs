@@ -2,19 +2,22 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
-use futures_util::stream::FuturesUnordered;
-use futures_util::StreamExt;
+
+use futures_util::{stream::FuturesUnordered, StreamExt};
 use log::{error, info, trace, warn};
 use magicblock_program::SentCommit;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_pubkey::Pubkey;
 use solana_sdk::transaction::Transaction;
-use tokio::sync::{
-    broadcast, mpsc, mpsc::error::TryRecvError, Notify, OwnedSemaphorePermit,
-    Semaphore,
+use tokio::{
+    sync::{
+        broadcast, mpsc, mpsc::error::TryRecvError, Notify,
+        OwnedSemaphorePermit, Semaphore,
+    },
+    task::JoinHandle,
 };
-use tokio::task::JoinHandle;
+
 use crate::{
     commit_scheduler::{
         commit_id_tracker::CommitIdTracker,
@@ -33,6 +36,8 @@ use crate::{
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
+// Number of executors that can send messages in parallel to L1
+const MAX_EXECUTORS: u8 = 50;
 
 // TODO(edwin): rename
 #[derive(Clone)]
@@ -89,9 +94,6 @@ where
         l1_messages_persister: Option<P>,
         receiver: mpsc::Receiver<ScheduledL1MessageWrapper>,
     ) -> Self {
-        // Number of executors that can send messages in parallel to L1
-        const NUM_OF_EXECUTORS: u8 = 50;
-
         Self {
             db,
             l1_messages_persister,
@@ -100,7 +102,7 @@ where
             receiver,
             running_executors: FuturesUnordered::new(),
             executors_semaphore: Arc::new(Semaphore::new(
-                NUM_OF_EXECUTORS as usize,
+                MAX_EXECUTORS as usize,
             )),
             inner: Arc::new(Mutex::new(CommitSchedulerInner::new())),
         }
@@ -237,7 +239,7 @@ where
     /// Returns [`ScheduledL1Message`] from external channel
     async fn get_new_message(
         receiver: &mut mpsc::Receiver<ScheduledL1MessageWrapper>,
-        db: &Arc<D>
+        db: &Arc<D>,
     ) -> Result<ScheduledL1MessageWrapper, Error> {
         match receiver.try_recv() {
             Ok(val) => Ok(val),
@@ -341,14 +343,19 @@ where
 /// Worker tests
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use tokio::time::sleep;
-    use std::time::Duration;
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
+
     use async_trait::async_trait;
     use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
     use solana_pubkey::pubkey;
     use solana_sdk::{signature::Signature, signer::SignerError};
-    use tokio::sync::mpsc;
+    use tokio::{sync::mpsc, time::sleep};
 
     use super::*;
     use crate::{
@@ -369,11 +376,13 @@ mod tests {
         MockMessageExecutorFactory,
         MockCommitIdTracker,
     >;
-    fn setup_worker(should_fail: bool) -> (
+    fn setup_worker(
+        should_fail: bool,
+    ) -> (
         mpsc::Sender<ScheduledL1MessageWrapper>,
         MockCommitSchedulerWorker,
     ) {
-        let (sender, receiver) = mpsc::channel(10);
+        let (sender, receiver) = mpsc::channel(1000);
 
         let db = Arc::new(DummyDB::new());
         let executor_factory = if !should_fail {
@@ -484,18 +493,210 @@ mod tests {
         assert_eq!(result.unwrap().id, 1);
     }
 
+    /// Tests multiple blocking messages being sent at the same time
+    #[tokio::test]
+    async fn test_high_throughput_message_processing() {
+        const NUM_MESSAGES: usize = 20;
+
+        let (sender, mut worker) = setup_worker(false);
+
+        let active_tasks = Arc::new(AtomicUsize::new(0));
+        let max_concurrent = Arc::new(AtomicUsize::new(0));
+        worker
+            .executor_factory
+            .with_concurrency_tracking(&active_tasks, &max_concurrent);
+
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        // Send a flood of messages
+        for i in 0..NUM_MESSAGES {
+            let msg = create_test_message(
+                i as u64,
+                &[pubkey!("1111111111111111111111111111111111111111111")],
+            );
+            sender.send(msg).await.unwrap();
+        }
+
+        // Process results and verify constraints
+        let mut completed = 0;
+        while completed < NUM_MESSAGES {
+            let result = result_receiver.recv().await.unwrap();
+            assert!(result.is_ok());
+            // Tasks are blocking so will complete sequentially
+            assert_eq!(result.unwrap().id, completed as u64);
+            completed += 1;
+        }
+
+        // Verify we didn't exceed concurrency limits
+        let max_observed = max_concurrent.load(Ordering::SeqCst);
+        assert_eq!(
+            max_observed, 1,
+            "Blocking messages can't execute in parallel!"
+        );
+    }
+
+    /// Tests that errors from executor propagated gracefully
+    #[tokio::test]
+    async fn test_multiple_failures() {
+        let (sender, worker) = setup_worker(true); // Worker that always fails
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        // Send several messages that will fail
+        const NUM_FAILURES: usize = 10;
+        for i in 0..NUM_FAILURES {
+            let msg = create_test_message(
+                i as u64,
+                &[pubkey!("1111111111111111111111111111111111111111111")],
+            );
+            sender.send(msg).await.unwrap();
+        }
+
+        // Verify all failures are processed and semaphore slots released
+        for _ in 0..NUM_FAILURES {
+            let result = result_receiver.recv().await.unwrap();
+            assert!(result.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_non_blocking_messages() {
+        const NUM_MESSAGES: u64 = 200;
+
+        let (sender, mut worker) = setup_worker(false);
+
+        let active_tasks = Arc::new(AtomicUsize::new(0));
+        let max_concurrent = Arc::new(AtomicUsize::new(0));
+        worker
+            .executor_factory
+            .with_concurrency_tracking(&active_tasks, &max_concurrent);
+
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        // Send messages with unique keys (non-blocking)
+        let mut received_ids = HashSet::new();
+        for i in 0..NUM_MESSAGES {
+            let unique_pubkey = Pubkey::new_unique(); // Each message gets unique key
+            let msg = create_test_message(i, &[unique_pubkey]);
+
+            received_ids.insert(i);
+            sender.send(msg).await.unwrap();
+        }
+
+        // Process results
+        let mut completed = 0;
+        while completed < NUM_MESSAGES {
+            let result = result_receiver.recv().await.unwrap();
+            assert!(result.is_ok());
+
+            // Message has to be present in set
+            let id = result.unwrap().id;
+            assert!(received_ids.remove(&id));
+
+            completed += 1;
+        }
+        // Set has to be empty
+        assert!(received_ids.is_empty());
+
+        // Verify concurrency
+        let max_observed = max_concurrent.load(Ordering::SeqCst);
+        assert!(
+            max_observed <= MAX_EXECUTORS as usize,
+            "Max concurrency {} exceeded limit {}",
+            max_observed,
+            MAX_EXECUTORS
+        );
+        println!("max_observed: {}", max_observed);
+        // Likely even max_observed == 50
+        assert!(
+            max_observed > 1,
+            "Non-blocking messages should execute in parallel"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mixed_blocking_non_blocking() {
+        const NUM_MESSAGES: usize = 100;
+        // 30% blocking messages
+        const BLOCKING_RATIO: f32 = 0.3;
+
+        let (sender, mut worker) = setup_worker(false);
+
+        let active_tasks = Arc::new(AtomicUsize::new(0));
+        let max_concurrent = Arc::new(AtomicUsize::new(0));
+        worker
+            .executor_factory
+            .with_concurrency_tracking(&active_tasks, &max_concurrent);
+
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        // Shared key for blocking messages
+        let blocking_key =
+            pubkey!("1111111111111111111111111111111111111111111");
+        // Send mixed messages
+        for i in 0..NUM_MESSAGES {
+            let is_blocking = rand::random::<f32>() < BLOCKING_RATIO;
+            let pubkeys = if is_blocking {
+                vec![blocking_key]
+            } else {
+                vec![Pubkey::new_unique()]
+            };
+
+            let msg = create_test_message(i as u64, &pubkeys);
+            sender.send(msg).await.unwrap();
+        }
+
+        // Process results
+        let mut completed = 0;
+        while completed < NUM_MESSAGES {
+            let result = result_receiver.recv().await.unwrap();
+            assert!(result.is_ok());
+            completed += 1;
+        }
+
+        // Verify concurrency was between 1 and MAX_CONCURRENCY
+        let max_observed = max_concurrent.load(Ordering::SeqCst);
+        assert!(
+            max_observed >= 1 && max_observed <= MAX_EXECUTORS as usize,
+            "Concurrency {} outside expected range",
+            max_observed
+        );
+    }
+
     // Mock implementations for testing
     pub struct MockMessageExecutorFactory {
         should_fail: bool,
+        active_tasks: Option<Arc<AtomicUsize>>,
+        max_concurrent: Option<Arc<AtomicUsize>>,
     }
 
     impl MockMessageExecutorFactory {
         pub fn new() -> Self {
-            Self { should_fail: false }
+            Self {
+                should_fail: false,
+                active_tasks: None,
+                max_concurrent: None,
+            }
         }
 
         pub fn new_failing() -> Self {
-            Self { should_fail: true }
+            Self {
+                should_fail: true,
+                active_tasks: None,
+                max_concurrent: None,
+            }
+        }
+
+        pub fn with_concurrency_tracking(
+            &mut self,
+            active_tasks: &Arc<AtomicUsize>,
+            max_concurrent: &Arc<AtomicUsize>,
+        ) {
+            self.active_tasks = Some(active_tasks.clone());
+            self.max_concurrent = Some(max_concurrent.clone());
         }
     }
 
@@ -505,12 +706,47 @@ mod tests {
         fn create_instance(&self) -> Self::Executor {
             MockMessageExecutor {
                 should_fail: self.should_fail,
+                active_tasks: self.active_tasks.clone(),
+                max_concurrent: self.max_concurrent.clone(),
             }
         }
     }
 
     pub struct MockMessageExecutor {
         should_fail: bool,
+        active_tasks: Option<Arc<AtomicUsize>>,
+        max_concurrent: Option<Arc<AtomicUsize>>,
+    }
+
+    impl MockMessageExecutor {
+        fn on_task_started(&self) {
+            if let (Some(active), Some(max)) =
+                (&self.active_tasks, &self.max_concurrent)
+            {
+                // Increment active task count
+                let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+
+                // Update max concurrent if needed
+                let mut observed_max = max.load(Ordering::SeqCst);
+                while current > observed_max {
+                    match max.compare_exchange_weak(
+                        observed_max,
+                        current,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    ) {
+                        Ok(_) => break,
+                        Err(x) => observed_max = x,
+                    }
+                }
+            }
+        }
+
+        fn on_task_finished(&self) {
+            if let Some(active) = &self.active_tasks {
+                active.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
     }
 
     #[async_trait]
@@ -521,10 +757,12 @@ mod tests {
             _commit_ids: HashMap<Pubkey, u64>,
             _persister: Option<P>,
         ) -> MessageExecutorResult<ExecutionOutput> {
+            self.on_task_started();
+
             // Simulate some work
             sleep(Duration::from_millis(50)).await;
 
-            if self.should_fail {
+            let result = if self.should_fail {
                 Err(ExecutorError::FailedToCommitError {
                     err: InternalError::SignerError(SignerError::Custom(
                         "oops".to_string(),
@@ -536,7 +774,11 @@ mod tests {
                     commit_signature: Signature::default(),
                     finalize_signature: Signature::default(),
                 })
-            }
+            };
+
+            self.on_task_finished();
+
+            result
         }
     }
 

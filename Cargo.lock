@@ -3826,6 +3826,7 @@ dependencies = [
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
+ "rand 0.8.5",
  "rusqlite",
  "solana-account",
  "solana-pubkey",
