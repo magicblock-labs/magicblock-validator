@@ -117,6 +117,8 @@ magicblock-config-macro = { path = "./magicblock-config-macro" }
 magicblock-core = { path = "./magicblock-core" }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
+magicblock-gateway = { path = "./magicblock-gateway" }
+magicblock-gateway-types = { path = "./magicblock-gateway-types" }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-metrics = { path = "./magicblock-metrics" }
@@ -135,6 +137,7 @@ num-derive = "0.4"
 num-format = "0.4.4"
 num-traits = "0.2"
 num_cpus = "1.16.0"
+parking_lot = "0.12"
 paste = "1.0"
 proc-macro2 = "1.0"
 prometheus = "0.13.4"

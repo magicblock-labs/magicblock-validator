@@ -1,8 +1,11 @@
 use error::RpcError;
 
+mod encoder;
 pub mod error;
-pub mod requests;
+mod notification;
+mod requests;
 pub mod server;
-pub mod state;
+mod state;
 
 type RpcResult<T> = Result<T, RpcError>;
+type Slot = u64;
