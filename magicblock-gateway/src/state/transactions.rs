@@ -6,7 +6,7 @@ use std::{
 use scc::{HashMap, Queue};
 use solana_signature::Signature;
 
-pub struct TransactionsCache {
+pub(crate) struct TransactionsCache {
     index: HashMap<Signature, bool>,
     queue: Queue<ExpiringSignature>,
 }
