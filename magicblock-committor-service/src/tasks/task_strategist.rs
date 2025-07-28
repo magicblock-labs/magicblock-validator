@@ -114,14 +114,19 @@ impl TaskStrategist {
     /// Returns size of tx after optimizations
     fn optimize_strategy(tasks: &mut [Box<dyn L1Task>]) -> usize {
         // Get initial transaction size
-        let current_tx_length = match TransactionUtils::assemble_tasks_tx(
-            &Keypair::new(),
-            &tasks,
-            &[],
-        ) {
-            Ok(tx) => serialize_and_encode_base64(&tx).len(),
-            Err(_) => usize::MAX,
+        let calculate_tx_length = |tasks: &[Box<dyn L1Task>] | {
+            match TransactionUtils::assemble_tasks_tx(
+                &Keypair::new(),
+                &tasks,
+                &[],
+            ) {
+                Ok(tx) => serialize_and_encode_base64(&tx).len(),
+                Err(_) => usize::MAX,
+            }
         };
+
+        // Get initial transaction size
+        let mut current_tx_length = calculate_tx_length(tasks);
 
         // Create heap size -> index
         // TODO(edwin): OPTIMIZATION. update ixs arr, since we know index, coul then reuse for tx creation
@@ -169,17 +174,7 @@ impl TaskStrategist {
                         .expect("instruction serialization")
                         as usize;
 
-                    let current_tx_length =
-                        match TransactionUtils::assemble_tasks_tx(
-                            &Keypair::new(),
-                            &tasks,
-                            &[],
-                        ) {
-                            Ok(new_tx) => {
-                                serialize_and_encode_base64(&new_tx).len()
-                            }
-                            Err(_) => usize::MAX,
-                        };
+                    current_tx_length = calculate_tx_length(tasks);
                     map.push((new_ix_size, index));
                 }
                 // That means el-t can't be optimized further
