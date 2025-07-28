@@ -70,7 +70,7 @@ pub trait L1MessagesPersisterIface: Send + Sync + Clone + 'static {
 pub struct L1MessagePersister {
     // DB that tracks lifespan of Commit intents
     commits_db: Arc<Mutex<CommittsDb>>,
-    // TODO(edwin): something like
+    // TODO: add something like
     // actions_db: Arc<Mutex<ActionsDb>>
 }
 

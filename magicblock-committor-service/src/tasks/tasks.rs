@@ -87,6 +87,7 @@ pub trait L1Task: Send + Sync {
 
 #[derive(Clone)]
 pub struct CommitTask {
+    // TODO: rename to commit_nonce?
     pub commit_id: u64,
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccountV2,
@@ -124,10 +125,10 @@ impl L1Task for ArgsTask {
         match self {
             Self::Commit(value) => {
                 let args = CommitStateArgs {
-                    slot: value.commit_id, // TODO(edwin): change slot,
+                    slot: value.commit_id,
                     lamports: value.committed_account.account.lamports,
                     data: value.committed_account.account.data.clone(),
-                    allow_undelegation: value.allow_undelegation, // TODO(edwin):
+                    allow_undelegation: value.allow_undelegation,
                 };
                 dlp::instruction_builder::commit_state(
                     *validator,
@@ -204,7 +205,7 @@ impl L1Task for ArgsTask {
 #[derive(Clone)]
 pub enum BufferTask {
     Commit(CommitTask),
-    // TODO(edwin): Action in the future
+    // Action in the future
 }
 
 impl L1Task for BufferTask {
@@ -224,7 +225,7 @@ impl L1Task for BufferTask {
             value.committed_account.account.owner,
             commit_buffer_pubkey,
             CommitStateFromBufferArgs {
-                slot: value.commit_id, //TODO(edwin): change to commit_id
+                slot: value.commit_id,
                 lamports: value.committed_account.account.lamports,
                 allow_undelegation: value.allow_undelegation,
             },

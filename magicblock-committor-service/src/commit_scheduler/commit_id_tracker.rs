@@ -61,7 +61,7 @@ impl CommitIdTrackerImpl {
                 err @ Err(Error::InvalidAccountDataError(_)) => return err,
                 err @ Err(Error::MetadataNotFoundError(_)) => return err,
                 Err(Error::MagicBlockRpcClientError(err)) => {
-                    // TODO: RPC error handlings should be more robus
+                    // TODO: RPC error handlings should be more robust
                     last_err = Error::MagicBlockRpcClientError(err)
                 }
             };

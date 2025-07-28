@@ -127,7 +127,9 @@ impl TransactionPreparator for TransactionPreparatorV1 {
             &tx_strategy.optimized_tasks,
             &lookup_tables,
         )
+        .expect("TaskStrategist had to fail prior. This shouldn't be reachable")
         .message;
+
         Ok(message)
     }
 
@@ -163,7 +165,9 @@ impl TransactionPreparator for TransactionPreparatorV1 {
             &tx_strategy.optimized_tasks,
             &lookup_tables,
         )
+        .expect("TaskStrategist had to fail prior. This shouldn't be reachable")
         .message;
+
         Ok(message)
     }
 }

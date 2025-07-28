@@ -4,7 +4,9 @@ use solana_pubkey::Pubkey;
 use solana_sdk::{
     hash::Hash,
     instruction::Instruction,
-    message::{v0::Message, AddressLookupTableAccount, VersionedMessage},
+    message::{
+        v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
+    },
     signature::Keypair,
     signer::Signer,
     transaction::VersionedTransaction,
@@ -75,7 +77,7 @@ impl TransactionUtils {
         authority: &Keypair,
         tasks: &[Box<dyn L1Task>],
         lookup_tables: &[AddressLookupTableAccount],
-    ) -> VersionedTransaction {
+    ) -> Result<VersionedTransaction, CompileError> {
         let budget_instructions =
             Self::budget_instructions(&Self::tasks_budgets(&tasks));
         let ixs = Self::tasks_instructions(&authority.pubkey(), &tasks);
@@ -92,20 +94,21 @@ impl TransactionUtils {
         instructions: &[Instruction],
         budget_instructions: &[Instruction],
         lookup_tables: &[AddressLookupTableAccount],
-    ) -> VersionedTransaction {
+    ) -> Result<VersionedTransaction, CompileError> {
         let message = Message::try_compile(
             &authority.pubkey(),
             &[budget_instructions, instructions].concat(),
             &lookup_tables,
             Hash::new_unique(),
-        )
-        .unwrap(); // TODO(edwin): unwrap
+        )?;
+        // SignerError is critical
         let tx = VersionedTransaction::try_new(
             VersionedMessage::V0(message),
             &[authority],
         )
-        .unwrap();
-        tx
+        .expect("Signing transaction has to be non-failing");
+
+        Ok(tx)
     }
 
     pub fn tasks_budgets(

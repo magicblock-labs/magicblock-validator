@@ -122,8 +122,13 @@ where
         result_sender: broadcast::Sender<BroadcastedMessageExecutionResult>,
     ) {
         loop {
-            // TODO: unwraps
-            let l1_message = self.next_scheduled_message().await.unwrap();
+            let l1_message = match self.next_scheduled_message().await {
+                Ok(value) => value,
+                Err(err) => {
+                    error!("Failed to get next message: {}", err);
+                    break;
+                }
+            };
             let Some(l1_message) = l1_message else {
                 // Messages are blocked, skipping
                 info!("Could not schedule any messages, as all of them are blocked!");
@@ -246,6 +251,7 @@ where
             match commit_ids {
                 Ok(value) => value,
                 Err(err) => {
+                    // TODO(edwin): support contract and send result via receiver as well
                     // At this point this is unrecoverable.
                     // We just skip for now and pretend this message didn't exist
                     error!("Failed to fetch commit nonces for message: {:?}, error: {:?}", l1_message, err);

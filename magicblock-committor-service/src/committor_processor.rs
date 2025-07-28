@@ -146,8 +146,8 @@ impl CommittorProcessor {
         };
 
         if let Err(err) = self.commits_scheduler.schedule(l1_messages).await {
-            error!("Failed to schedule L1 message: {}", err);
-            // TODO(edwin): handsle
+            // CommittorService broken
+            panic!("Failed to schedule L1 message: {}", err);
         }
     }
 

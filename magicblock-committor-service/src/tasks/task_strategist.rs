@@ -99,7 +99,9 @@ impl TaskStrategist {
             &instructions,
             &budget_instructions,
             &dummy_lookup_tables,
-        );
+        )
+        .map_err(|_| Error::FailedToFitError)?;
+
         let encoded_alt_tx = serialize_and_encode_base64(&alt_tx);
         if encoded_alt_tx.len() <= MAX_ENCODED_TRANSACTION_SIZE {
             Ok(unique_involved_pubkeys)
@@ -112,9 +114,14 @@ impl TaskStrategist {
     /// Returns size of tx after optimizations
     fn optimize_strategy(tasks: &mut [Box<dyn L1Task>]) -> usize {
         // Get initial transaction size
-        let tx =
-            TransactionUtils::assemble_tasks_tx(&Keypair::new(), &tasks, &[]);
-        let mut current_tx_length = serialize_and_encode_base64(&tx).len();
+        let current_tx_length = match TransactionUtils::assemble_tasks_tx(
+            &Keypair::new(),
+            &tasks,
+            &[],
+        ) {
+            Ok(tx) => serialize_and_encode_base64(&tx).len(),
+            Err(_) => usize::MAX,
+        };
 
         // Create heap size -> index
         // TODO(edwin): OPTIMIZATION. update ixs arr, since we know index, coul then reuse for tx creation
@@ -156,21 +163,24 @@ impl TaskStrategist {
                 // 3. Update overall tx size
                 Ok(optimized_task) => {
                     tasks[index] = optimized_task;
-                    // TODO(edwin): this is expensive
                     let new_ix =
                         tasks[index].instruction(&Pubkey::new_unique());
                     let new_ix_size = bincode::serialized_size(&new_ix)
                         .expect("instruction serialization")
-                        as usize; // TODO(edwin): unwrap
-                    let new_tx = TransactionUtils::assemble_tasks_tx(
-                        &Keypair::new(),
-                        &tasks,
-                        &[],
-                    );
+                        as usize;
 
+                    let current_tx_length =
+                        match TransactionUtils::assemble_tasks_tx(
+                            &Keypair::new(),
+                            &tasks,
+                            &[],
+                        ) {
+                            Ok(new_tx) => {
+                                serialize_and_encode_base64(&new_tx).len()
+                            }
+                            Err(_) => usize::MAX,
+                        };
                     map.push((new_ix_size, index));
-                    current_tx_length =
-                        serialize_and_encode_base64(&new_tx).len();
                 }
                 // That means el-t can't be optimized further
                 // We move it back with oldest state
