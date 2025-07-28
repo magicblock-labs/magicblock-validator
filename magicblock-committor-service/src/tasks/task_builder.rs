@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use dlp::args::Context;
 use magicblock_program::magic_scheduled_l1_message::{
     CommitType, CommittedAccountV2, MagicL1Message, ScheduledL1Message,
     UndelegateType,
@@ -7,7 +8,7 @@ use magicblock_program::magic_scheduled_l1_message::{
 use solana_pubkey::Pubkey;
 
 use crate::tasks::tasks::{
-    ArgsTask, CommitTask, FinalizeTask, L1Task, UndelegateTask,
+    ArgsTask, CommitTask, FinalizeTask, L1ActionTask, L1Task, UndelegateTask,
 };
 
 pub trait TasksBuilder {
@@ -38,8 +39,11 @@ impl TasksBuilder for TaskBuilderV1 {
                 let tasks = actions
                     .into_iter()
                     .map(|el| {
-                        Box::new(ArgsTask::L1Action(el.clone()))
-                            as Box<dyn L1Task>
+                        let task = L1ActionTask {
+                            context: Context::Standalone,
+                            action: el.clone(),
+                        };
+                        Box::new(ArgsTask::L1Action(task)) as Box<dyn L1Task>
                     })
                     .collect();
                 return Ok(tasks);
@@ -106,9 +110,12 @@ impl TasksBuilder for TaskBuilderV1 {
                         .iter()
                         .map(finalize_task)
                         .collect::<Vec<_>>();
-                    tasks.extend(l1_actions.iter().map(|a| {
-                        Box::new(ArgsTask::L1Action(a.clone()))
-                            as Box<dyn L1Task>
+                    tasks.extend(l1_actions.iter().map(|action| {
+                        let task = L1ActionTask {
+                            context: Context::Commit,
+                            action: action.clone(),
+                        };
+                        Box::new(ArgsTask::L1Action(task)) as Box<dyn L1Task>
                     }));
                     tasks
                 }
@@ -136,8 +143,12 @@ impl TasksBuilder for TaskBuilderV1 {
                                 undelegate_task(a, rent_reimbursement)
                             }),
                         );
-                        tasks.extend(actions.iter().map(|a| {
-                            Box::new(ArgsTask::L1Action(a.clone()))
+                        tasks.extend(actions.iter().map(|action| {
+                            let task = L1ActionTask {
+                                context: Context::Undelegate,
+                                action: action.clone(),
+                            };
+                            Box::new(ArgsTask::L1Action(task))
                                 as Box<dyn L1Task>
                         }));
                     }

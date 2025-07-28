@@ -1,4 +1,6 @@
-use dlp::args::{CallHandlerArgs, CommitStateArgs, CommitStateFromBufferArgs};
+use dlp::args::{
+    CallHandlerArgs, CommitStateArgs, CommitStateFromBufferArgs, Context,
+};
 use magicblock_committor_program::{
     instruction_builder::{
         init_buffer::{create_init_ix, CreateInitIxArgs},
@@ -102,13 +104,19 @@ pub struct FinalizeTask {
     pub delegated_account: Pubkey,
 }
 
+#[derive(Clone)]
+pub struct L1ActionTask {
+    pub context: Context,
+    pub action: L1Action,
+}
+
 /// Task that will be executed on Base layer via arguments
 #[derive(Clone)]
 pub enum ArgsTask {
     Commit(CommitTask),
     Finalize(FinalizeTask),
     Undelegate(UndelegateTask), // Special action really
-    L1Action(L1Action),
+    L1Action(L1ActionTask),
 }
 
 impl L1Task for ArgsTask {
@@ -139,7 +147,8 @@ impl L1Task for ArgsTask {
                 value.rent_reimbursement,
             ),
             Self::L1Action(value) => {
-                let account_metas = value
+                let action = &value.action;
+                let account_metas = action
                     .account_metas_per_program
                     .iter()
                     .map(|short_meta| AccountMeta {
@@ -150,12 +159,13 @@ impl L1Task for ArgsTask {
                     .collect();
                 dlp::instruction_builder::call_handler(
                     *validator,
-                    value.destination_program,
-                    value.escrow_authority,
+                    action.destination_program,
+                    action.escrow_authority,
                     account_metas,
                     CallHandlerArgs {
-                        data: value.data_per_program.data.clone(),
-                        escrow_index: value.data_per_program.escrow_index,
+                        context: value.context,
+                        data: action.data_per_program.data.clone(),
+                        escrow_index: action.data_per_program.escrow_index,
                     },
                 )
             }

@@ -198,7 +198,7 @@ where
             Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::MissingCommitIdError(_))) => {
                 commit_ids.iter().for_each(|(pubkey, commit_id)| {
                     // Invalid task
-                    let update_status = CommitStatus::Failed(*commit_id);
+                    let update_status = CommitStatus::Failed;
                     persist_status_update(persistor, pubkey, *commit_id, update_status)
                 });
             },

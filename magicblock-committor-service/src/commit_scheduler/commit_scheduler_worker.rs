@@ -28,9 +28,9 @@ use crate::{
         message_executor_factory::MessageExecutorFactory, ExecutionOutput,
         MessageExecutor,
     },
-    persist::L1MessagesPersisterIface,
+    persist::{CommitStatus, L1MessagesPersisterIface},
     types::{ScheduledL1MessageWrapper, TriggerType},
-    utils::ScheduledMessageExt,
+    utils::{persist_status_update_by_message_set, ScheduledMessageExt},
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
@@ -82,7 +82,7 @@ where
     P: L1MessagesPersisterIface,
     F: MessageExecutorFactory<Executor = E> + Send + Sync + 'static,
     E: MessageExecutor,
-    C: CommitIdTracker + Send + Sync + 'static,
+    C: CommitIdTracker + Clone + Send + Sync + 'static,
 {
     pub fn new(
         db: Arc<D>,
@@ -138,40 +138,17 @@ where
                 .await
                 .expect(SEMAPHORE_CLOSED_MSG);
 
-            // Prepare data for execution
-            let commit_ids = if let Some(pubkeys) =
-                l1_message.scheduled_l1_message.get_committed_pubkeys()
-            {
-                let commit_ids = self
-                    .commit_id_tracker
-                    .next_commit_ids(&pubkeys)
-                    .await
-                    .unwrap();
-                // Persist data
-                commit_ids
-                    .iter()
-                    .for_each(|(pubkey, commit_id) | {
-                        if let Err(err) = self.l1_messages_persister.set_commit_id(l1_message.scheduled_l1_message.id, pubkey, *commit_id) {
-                            error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, l1_message.scheduled_l1_message.id, pubkey, err);
-                        }
-                    });
-
-                commit_ids
-            } else {
-                // Pure L1Action, no commit ids used
-                HashMap::new()
-            };
-
             // Spawn executor
             let executor = self.executor_factory.create_instance();
             let persister = self.l1_messages_persister.clone();
+            let commit_id_tracker = self.commit_id_tracker.clone();
             let inner = self.inner.clone();
 
             let handle = tokio::spawn(Self::execute(
                 executor,
                 persister,
                 l1_message,
-                commit_ids,
+                commit_id_tracker,
                 inner,
                 permit,
                 result_sender.clone(),
@@ -255,11 +232,58 @@ where
         executor: E,
         persister: Option<P>,
         l1_message: ScheduledL1MessageWrapper,
-        commit_ids: HashMap<Pubkey, u64>,
+        mut commit_id_tracker: C,
         inner_scheduler: Arc<Mutex<CommitSchedulerInner>>,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedMessageExecutionResult>,
     ) {
+        // Prepare commit ids for execution
+        let commit_ids = if let Some(pubkeys) =
+            l1_message.scheduled_l1_message.get_committed_pubkeys()
+        {
+            let commit_ids = commit_id_tracker.next_commit_ids(&pubkeys).await;
+
+            match commit_ids {
+                Ok(value) => value,
+                Err(err) => {
+                    // At this point this is unrecoverable.
+                    // We just skip for now and pretend this message didn't exist
+                    error!("Failed to fetch commit nonces for message: {:?}, error: {:?}", l1_message, err);
+
+                    let message_id = l1_message.scheduled_l1_message.id;
+                    info!(
+                        "Message has to be committed manually: {}",
+                        message_id
+                    );
+                    // Persist as Failed in DB
+                    persist_status_update_by_message_set(
+                        &persister,
+                        message_id,
+                        &pubkeys,
+                        CommitStatus::Failed,
+                    );
+                    inner_scheduler
+                        .lock()
+                        .expect(POISONED_INNER_MSG)
+                        .complete(&l1_message.scheduled_l1_message);
+                    drop(execution_permit);
+                    return;
+                }
+            }
+        } else {
+            // Pure L1Action, no commit ids used
+            HashMap::new()
+        };
+
+        // Persist data
+        commit_ids
+            .iter()
+            .for_each(|(pubkey, commit_id) | {
+                if let Err(err) = persister.set_commit_id(l1_message.scheduled_l1_message.id, pubkey, *commit_id) {
+                    error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, l1_message.scheduled_l1_message.id, pubkey, err);
+                }
+            });
+
         let result = executor
             .execute(
                 l1_message.scheduled_l1_message.clone(),
@@ -468,7 +492,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_falls_back_to_db_when_channel_empty() {
-        let (_, worker) = setup_worker(false);
+        let (_sender, worker) = setup_worker(false);
 
         // Add a message to the DB
         let msg = create_test_message(
@@ -776,6 +800,7 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
     pub struct MockCommitIdTracker;
     impl MockCommitIdTracker {
         pub fn new() -> Self {
@@ -792,7 +817,7 @@ mod tests {
             Ok(pubkeys.iter().map(|&k| (k, 1)).collect())
         }
 
-        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<&u64> {
+        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
             None
         }
     }

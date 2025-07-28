@@ -2,7 +2,7 @@ use std::fmt;
 
 use solana_sdk::signature::Signature;
 
-use crate::persist::error::CommitPersistError;
+use crate::persist::{error::CommitPersistError, CommitStatus::Failed};
 
 /// The status of a committed account.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,7 +11,7 @@ pub enum CommitStatus {
     Pending,
     /// No part of the commit pipeline succeeded.
     /// The commit for this account needs to be restarted from scratch.
-    Failed(u64),
+    Failed,
     /// The buffer and chunks account were initialized, but could either not
     /// be retrieved or deserialized. It is recommended to fully re-initialize
     /// them on retry.
@@ -42,8 +42,8 @@ impl fmt::Display for CommitStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CommitStatus::Pending => write!(f, "Pending"),
-            CommitStatus::Failed(bundle_id) => {
-                write!(f, "Failed({})", bundle_id)
+            CommitStatus::Failed => {
+                write!(f, "Failed")
             }
             CommitStatus::BufferAndChunkPartiallyInitialized(bundle_id) => {
                 write!(f, "BufferAndChunkPartiallyInitialized({})", bundle_id)
@@ -89,7 +89,7 @@ impl TryFrom<(&str, u64, Option<CommitStatusSignatures>)> for CommitStatus {
         use CommitStatus::*;
         match status {
             "Pending" => Ok(Pending),
-            "Failed" => Ok(Failed(commit_id)),
+            "Failed" => Ok(Failed),
             "BufferAndChunkPartiallyInitialized" => {
                 Ok(BufferAndChunkPartiallyInitialized(commit_id))
             }
@@ -128,7 +128,7 @@ impl CommitStatus {
         use CommitStatus::*;
         match self {
             Pending => "Pending",
-            Failed(_) => "Failed",
+            Failed => "Failed",
             BufferAndChunkPartiallyInitialized(_) => {
                 "BufferAndChunkPartiallyInitialized"
             }
@@ -146,8 +146,7 @@ impl CommitStatus {
     pub fn bundle_id(&self) -> Option<u64> {
         use CommitStatus::*;
         match self {
-            Failed(bundle_id)
-            | BufferAndChunkPartiallyInitialized(bundle_id)
+            BufferAndChunkPartiallyInitialized(bundle_id)
             | BufferAndChunkInitialized(bundle_id)
             | BufferAndChunkFullyInitialized(bundle_id)
             | PartOfTooLargeBundleToProcess(bundle_id)
@@ -155,6 +154,7 @@ impl CommitStatus {
             | FailedFinalize((bundle_id, _))
             | Succeeded((bundle_id, _)) => Some(*bundle_id),
             Pending => None,
+            Failed => None,
         }
     }
 

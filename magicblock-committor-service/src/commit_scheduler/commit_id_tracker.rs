@@ -1,4 +1,9 @@
-use std::{collections::HashMap, num::NonZeroUsize, time::Duration};
+use std::{
+    collections::HashMap,
+    num::NonZeroUsize,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use dlp::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
@@ -17,12 +22,15 @@ pub trait CommitIdTracker {
         pubkeys: &[Pubkey],
     ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>>;
 
-    fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<&u64>;
+    fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<u64>;
 }
 
+const MUTEX_POISONED_MSG: &str = "CommitIdTrackerImpl mutex poisoned!";
+
+#[derive(Clone)]
 pub struct CommitIdTrackerImpl {
     rpc_client: MagicblockRpcClient,
-    cache: LruCache<Pubkey, u64>,
+    cache: Arc<Mutex<LruCache<Pubkey, u64>>>,
 }
 
 impl CommitIdTrackerImpl {
@@ -32,7 +40,7 @@ impl CommitIdTrackerImpl {
 
         Self {
             rpc_client,
-            cache: LruCache::new(CACHE_SIZE),
+            cache: Arc::new(Mutex::new(LruCache::new(CACHE_SIZE))),
         }
     }
 
@@ -112,9 +120,9 @@ impl CommitIdTrackerImpl {
                     DelegationMetadata::try_from_bytes_with_discriminator(
                         &account.data,
                     )
-                    .map_err(Error::InvalidAccountDataError(pubkey))?;
+                    .map_err(|_| Error::InvalidAccountDataError(pubkey))?;
 
-                Ok(metadata.last_update_external_slot)
+                Ok::<_, Error>(metadata.last_update_external_slot)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -139,17 +147,26 @@ impl CommitIdTracker for CommitIdTrackerImpl {
 
         let mut result = HashMap::new();
         let mut to_request = Vec::new();
-        for pubkey in pubkeys {
-            // in case already inserted
-            if result.contains_key(pubkey) {
-                continue;
-            }
+        // Lock cache and extract whatever ids we can
+        {
+            let mut cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
+            for pubkey in pubkeys {
+                // in case already inserted
+                if result.contains_key(pubkey) {
+                    continue;
+                }
 
-            if let Some(id) = self.cache.get(pubkey) {
-                result.insert(*pubkey, *id + 1);
-            } else {
-                to_request.push(*pubkey);
+                if let Some(id) = cache.get(pubkey) {
+                    result.insert(*pubkey, *id + 1);
+                } else {
+                    to_request.push(*pubkey);
+                }
             }
+        }
+
+        // If all in cache - great! return
+        if to_request.is_empty() {
+            return Ok(result);
         }
 
         // Remove duplicates
@@ -163,24 +180,29 @@ impl CommitIdTracker for CommitIdTrackerImpl {
         )
         .await?;
 
-        // Avoid changes to LRU until all data is ready - atomic update
-        result.iter().for_each(|(pubkey, id)| {
-            self.cache.push(*pubkey, *id);
-        });
-        to_request
-            .iter()
-            .zip(remaining_ids)
-            .for_each(|(pubkey, id)| {
-                result.insert(*pubkey, id + 1);
-                self.cache.push(*pubkey, id + 1);
+        // We don't care if anything changed in between with cache - just update and return our ids.
+        {
+            let mut cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
+            // Avoid changes to LRU until all data is ready - atomic update
+            result.iter().for_each(|(pubkey, id)| {
+                cache.push(*pubkey, *id);
             });
+            to_request
+                .iter()
+                .zip(remaining_ids)
+                .for_each(|(pubkey, id)| {
+                    result.insert(*pubkey, id + 1);
+                    cache.push(*pubkey, id + 1);
+                });
+        }
 
         Ok(result)
     }
 
     /// Returns current commit id without raising priority
-    fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<&u64> {
-        self.cache.peek(pubkey)
+    fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<u64> {
+        let cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
+        cache.peek(pubkey).copied()
     }
 }
 
