@@ -39,7 +39,7 @@ impl HttpServer {
     async fn run(mut self) {
         loop {
             tokio::select! {
-                Ok((stream, _)) = self.socket.accept() => self.handle(stream),
+                biased; Ok((stream, _)) = self.socket.accept() => self.handle(stream),
                 _ = self.cancel.cancelled() => break,
             }
         }
