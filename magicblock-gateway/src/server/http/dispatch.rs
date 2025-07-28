@@ -46,6 +46,7 @@ impl HttpDispatcher {
         let request = unwrap!(parse_body(body));
 
         use crate::requests::JsonRpcMethod::*;
+        use requests::http::*;
         let response = match request.method {
             GetAccountInfo => self.get_account_info(request),
             GetBalance => self.get_balance(request),
