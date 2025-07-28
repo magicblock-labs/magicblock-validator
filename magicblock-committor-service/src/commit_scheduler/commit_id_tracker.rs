@@ -1,5 +1,9 @@
-use std::{collections::HashMap, num::NonZeroUsize};
+use std::{collections::HashMap, num::NonZeroUsize, time::Duration};
 
+use dlp::{
+    delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
+};
+use log::{error, warn};
 use lru::LruCache;
 use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockRpcClientResult, MagicblockRpcClient,
@@ -32,13 +36,89 @@ impl CommitIdTrackerImpl {
         }
     }
 
+    /// Fetches commit_ids with some num of retries
+    pub async fn fetch_commit_ids_with_retries(
+        rpc_client: &MagicblockRpcClient,
+        pubkeys: &[Pubkey],
+        num_retries: NonZeroUsize,
+    ) -> CommitIdTrackerResult<Vec<u64>> {
+        if pubkeys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut last_err = Error::MetadataNotFoundError(pubkeys[0]);
+        for i in 0..num_retries.get() {
+            match Self::fetch_commit_ids(rpc_client, pubkeys).await {
+                Ok(value) => return Ok(value),
+                err @ Err(Error::InvalidAccountDataError(_)) => return err,
+                err @ Err(Error::MetadataNotFoundError(_)) => return err,
+                Err(Error::MagicBlockRpcClientError(err)) => {
+                    // TODO: RPC error handlings should be more robus
+                    last_err = Error::MagicBlockRpcClientError(err)
+                }
+            };
+
+            warn!("Fetch commit last error: {}, attempt: {}", last_err, i);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        Err(last_err)
+    }
+
     /// Fetches commit_ids using RPC
     /// Note: remove duplicates prior to calling
     pub async fn fetch_commit_ids(
         rpc_client: &MagicblockRpcClient,
         pubkeys: &[Pubkey],
-    ) -> MagicBlockRpcClientResult<Vec<u64>> {
-        todo!()
+    ) -> CommitIdTrackerResult<Vec<u64>> {
+        // Early return if no pubkeys to process
+        if pubkeys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Find PDA accounts for each pubkey
+        let pda_accounts = pubkeys
+            .iter()
+            .map(|delegated_account| {
+                Pubkey::find_program_address(
+                    delegation_metadata_seeds_from_delegated_account!(
+                        delegated_account
+                    ),
+                    &dlp::id(),
+                )
+                .0
+            })
+            .collect::<Vec<_>>();
+
+        // Fetch account data for all PDAs
+        let accounts_data = rpc_client
+            .get_multiple_accounts(&pda_accounts, None)
+            .await?;
+
+        // Process each account data to extract last_update_external_slot
+        let commit_ids = accounts_data
+            .into_iter()
+            .enumerate()
+            .map(|(i, account)| {
+                let pubkey = if let Some(pubkey) = pda_accounts.get(i) {
+                    *pubkey
+                } else {
+                    error!("invalid pubkey index in pda_accounts: {i}");
+                    Pubkey::new_unique()
+                };
+                let account = account
+                    .ok_or(Error::MetadataNotFoundError(pda_accounts[i]))?;
+                let metadata =
+                    DelegationMetadata::try_from_bytes_with_discriminator(
+                        &account.data,
+                    )
+                    .map_err(Error::InvalidAccountDataError(pubkey))?;
+
+                Ok(metadata.last_update_external_slot)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(commit_ids)
     }
 }
 
@@ -50,6 +130,9 @@ impl CommitIdTracker for CommitIdTrackerImpl {
         &mut self,
         pubkeys: &[Pubkey],
     ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>> {
+        const NUM_FETCH_RETRIES: NonZeroUsize =
+            unsafe { NonZeroUsize::new_unchecked(5) };
+
         let mut result = HashMap::new();
         let mut to_request = Vec::new();
         for pubkey in pubkeys {
@@ -71,7 +154,8 @@ impl CommitIdTracker for CommitIdTrackerImpl {
         to_request.dedup();
 
         let remaining_ids =
-            Self::fetch_commit_ids(&self.rpc_client, &to_request).await?;
+            Self::fetch_commit_ids_with_retries(&self.rpc_client, &to_request, NUM_FETCH_RETRIES)
+                .await?;
         to_request
             .iter()
             .zip(remaining_ids)
@@ -91,8 +175,10 @@ impl CommitIdTracker for CommitIdTrackerImpl {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Failed to get keys: {0:?}")]
-    GetCommitIdsError(Vec<u64>),
+    #[error("Metadata not found for: {0}")]
+    MetadataNotFoundError(Pubkey),
+    #[error("InvalidAccountDataError for: {0}")]
+    InvalidAccountDataError(Pubkey),
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
 }

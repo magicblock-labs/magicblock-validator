@@ -12,7 +12,6 @@ use magicblock_accounts::{
     AccountsManager, ScheduledCommitsProcessor,
 };
 use magicblock_bank::bank::Bank;
-use magicblock_committor_service::CommittorService;
 use magicblock_core::magic_program;
 use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics;

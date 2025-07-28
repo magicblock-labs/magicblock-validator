@@ -216,7 +216,7 @@ impl L1Action {
         // We need to ensure that action was authorized by legit owner
         let authority_pubkey = get_instruction_pubkey_with_idx(
             context.transaction_context,
-            args.destination_program as u16,
+            args.escrow_authority as u16,
         )?;
         if !context.signers.contains(authority_pubkey) {
             ic_msg!(
