@@ -590,7 +590,7 @@ mod tests {
     // Helper to create a test database
     fn setup_test_db() -> (CommittsDb, NamedTempFile) {
         let temp_file = NamedTempFile::new().unwrap();
-        let mut db = CommittsDb::new(temp_file.path()).unwrap();
+        let db = CommittsDb::new(temp_file.path()).unwrap();
         db.create_commit_status_table().unwrap();
 
         (db, temp_file)
@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn test_set_commit_id() {
         let (mut db, _file) = setup_test_db();
-        let mut row = create_test_row(1, 0);
+        let row = create_test_row(1, 0);
         db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
         // Update commit_id
@@ -682,7 +682,7 @@ mod tests {
     #[test]
     fn test_update_status_by_commit() {
         let (mut db, _file) = setup_test_db();
-        let mut row = create_test_row(1, 100); // Set commit_id to 100
+        let row = create_test_row(1, 100); // Set commit_id to 100
         db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
         let new_status = CommitStatus::Succeeded((
@@ -702,7 +702,7 @@ mod tests {
     #[test]
     fn test_set_commit_strategy() {
         let (mut db, _file) = setup_test_db();
-        let mut row = create_test_row(1, 100);
+        let row = create_test_row(1, 100);
         db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
         let new_strategy = CommitStrategy::FromBuffer;

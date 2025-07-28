@@ -69,8 +69,6 @@ pub trait TransactionPreparator: Send + Sync + 'static {
 /// It creates TXs using current per account commit/finalize
 pub struct TransactionPreparatorV1 {
     delivery_preparator: DeliveryPreparator,
-    rpc_client: MagicblockRpcClient,
-    table_mania: TableMania, // TODO(edwin): Arc<TableMania>?
 }
 
 impl TransactionPreparatorV1 {
@@ -80,13 +78,11 @@ impl TransactionPreparatorV1 {
         compute_budget_config: ComputeBudgetConfig,
     ) -> Self {
         let delivery_preparator = DeliveryPreparator::new(
-            rpc_client.clone(),
-            table_mania.clone(),
+            rpc_client,
+            table_mania,
             compute_budget_config,
         );
         Self {
-            rpc_client,
-            table_mania,
             delivery_preparator,
         }
     }

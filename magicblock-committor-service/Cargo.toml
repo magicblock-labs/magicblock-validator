@@ -48,7 +48,6 @@ lazy_static = { workspace = true }
 magicblock-table-mania = { workspace = true, features = [
   "randomize_lookup_table_slot",
 ] }
-# program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 rand = { workspace = true }
 

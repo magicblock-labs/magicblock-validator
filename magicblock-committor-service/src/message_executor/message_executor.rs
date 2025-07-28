@@ -6,15 +6,14 @@ use magicblock_program::{
     validator::validator_authority,
 };
 use magicblock_rpc_client::{
-    MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
-    MagicblockRpcClient,
+    MagicBlockSendTransactionConfig, MagicblockRpcClient,
 };
 use magicblock_table_mania::TableMania;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     message::VersionedMessage,
     signature::{Keypair, Signature},
-    signer::{Signer, SignerError},
+    signer::Signer,
     transaction::VersionedTransaction,
 };
 

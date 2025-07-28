@@ -2,7 +2,6 @@ mod commit_id_tracker;
 pub(crate) mod commit_scheduler_inner;
 mod commit_scheduler_worker;
 pub(crate) mod db; // TODO(edwin): define visibility
-mod executor_pool;
 
 use std::sync::Arc;
 

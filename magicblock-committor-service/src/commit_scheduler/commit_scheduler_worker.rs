@@ -6,14 +6,12 @@ use std::{
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use log::{error, info, trace, warn};
 use magicblock_program::SentCommit;
-use magicblock_rpc_client::MagicblockRpcClient;
-use magicblock_table_mania::TableMania;
 use solana_pubkey::Pubkey;
 use solana_sdk::transaction::Transaction;
 use tokio::{
     sync::{
-        broadcast, mpsc, mpsc::error::TryRecvError, Notify,
-        OwnedSemaphorePermit, Semaphore,
+        broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
+        Semaphore,
     },
     task::JoinHandle,
 };
@@ -36,7 +34,7 @@ use crate::{
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
-// Number of executors that can send messages in parallel to L1
+/// Max number of executors that can send messages in parallel to L1
 const MAX_EXECUTORS: u8 = 50;
 
 // TODO(edwin): rename
@@ -68,15 +66,14 @@ impl ResultSubscriber {
 
 pub(crate) struct CommitSchedulerWorker<D, P, F, C> {
     db: Arc<D>,
-    l1_messages_persister: Option<P>,
     executor_factory: F,
     commit_id_tracker: C,
+    l1_messages_persister: Option<P>,
     receiver: mpsc::Receiver<ScheduledL1MessageWrapper>,
 
-    // TODO(edwin): replace notify. issue: 2 simultaneous notifications
+    inner: Arc<Mutex<CommitSchedulerInner>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
-    inner: Arc<Mutex<CommitSchedulerInner>>,
 }
 
 impl<D, P, F, E, C> CommitSchedulerWorker<D, P, F, C>
@@ -474,7 +471,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_falls_back_to_db_when_channel_empty() {
-        let (sender, worker) = setup_worker(false);
+        let (_, worker) = setup_worker(false);
 
         // Add a message to the DB
         let msg = create_test_message(
