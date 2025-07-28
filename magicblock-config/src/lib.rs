@@ -206,7 +206,7 @@ mod tests {
                     .unwrap()]),
                 },
                 lifecycle: LifecycleMode::Offline,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 123,
                     compute_unit_price: 123,
                 },
@@ -285,7 +285,7 @@ mod tests {
                     .unwrap()]),
                 },
                 lifecycle: LifecycleMode::Offline,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 123,
                     compute_unit_price: 123,
                 },
@@ -361,7 +361,7 @@ mod tests {
                     .unwrap()]),
                 },
                 lifecycle: LifecycleMode::Offline,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 12365,
                     compute_unit_price: 123665,
                 },
@@ -430,7 +430,7 @@ mod tests {
                     .unwrap()]),
                 },
                 lifecycle: LifecycleMode::Offline,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 123,
                     compute_unit_price: 123,
                 },
@@ -502,7 +502,7 @@ mod tests {
                     ws_url: None,
                 },
                 lifecycle: LifecycleMode::Offline,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 9_000_000_000_000,
                     compute_unit_price: 1_000_000,
                 },

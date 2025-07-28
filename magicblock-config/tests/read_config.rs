@@ -6,7 +6,7 @@ use std::{
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsConfig, CommitStrategy, EphemeralConfig, GeyserGrpcConfig,
+    AccountsConfig, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
     LedgerConfig, LedgerResumeStrategy, LifecycleMode, MagicBlockConfig,
     MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteCluster,
     RemoteConfig, RpcConfig, ValidatorConfig,
@@ -50,7 +50,7 @@ fn test_load_local_dev_with_programs_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 600_000,
                     compute_unit_price: 0,
                 },
@@ -132,7 +132,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
         EphemeralConfig {
             accounts: AccountsConfig {
                 lifecycle: LifecycleMode::Ephemeral,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 123,
                     compute_unit_price: 1,
                 },

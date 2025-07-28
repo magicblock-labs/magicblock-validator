@@ -2,7 +2,7 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
+    AccountsConfig, AllowedProgram, CommitStrategyConfig, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
     MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteConfig,
     RpcConfig, ValidatorConfig,
@@ -84,7 +84,7 @@ fn test_local_dev_with_programs_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 600_000,
                     compute_unit_price: 0,
                 },

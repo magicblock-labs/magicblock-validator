@@ -28,7 +28,7 @@ pub struct AccountsConfig {
     pub lifecycle: LifecycleMode,
     #[serde(default)]
     #[command(flatten)]
-    pub commit: CommitStrategy,
+    pub commit: CommitStrategyConfig,
     #[clap_from_serde_skip]
     #[arg(help = "The list of allowed programs to load.")]
     #[serde(default)]
@@ -152,9 +152,11 @@ pub enum LifecycleMode {
 // -----------------
 #[clap_prefix("commit")]
 #[clap_from_serde]
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
+)]
 #[serde(deny_unknown_fields)]
-pub struct CommitStrategy {
+pub struct CommitStrategyConfig {
     #[derive_env_var]
     #[serde(default = "default_frequency_millis")]
     pub frequency_millis: u64,
@@ -179,7 +181,7 @@ fn default_compute_unit_price() -> u64 {
     1_000_000 // 1_000_000 micro-lamports == 1 Lamport
 }
 
-impl Default for CommitStrategy {
+impl Default for CommitStrategyConfig {
     fn default() -> Self {
         Self {
             frequency_millis: default_frequency_millis(),
@@ -283,7 +285,7 @@ mod tests {
                 ws_url: None,
             },
             lifecycle: LifecycleMode::Ephemeral,
-            commit: CommitStrategy {
+            commit: CommitStrategyConfig {
                 frequency_millis: 123,
                 compute_unit_price: 123,
             },
@@ -315,7 +317,7 @@ mod tests {
                 ws_url: None,
             },
             lifecycle: LifecycleMode::Ephemeral,
-            commit: CommitStrategy {
+            commit: CommitStrategyConfig {
                 frequency_millis: 123,
                 compute_unit_price: 123,
             },
@@ -344,7 +346,7 @@ mod tests {
                 ws_url: Some(vec![Url::parse("wss://0.0.0.0:7999").unwrap()]),
             },
             lifecycle: LifecycleMode::Offline,
-            commit: CommitStrategy {
+            commit: CommitStrategyConfig {
                 frequency_millis: 1234,
                 compute_unit_price: 1234,
             },
@@ -372,7 +374,7 @@ mod tests {
                 ws_url: None,
             },
             lifecycle: LifecycleMode::Ephemeral,
-            commit: CommitStrategy {
+            commit: CommitStrategyConfig {
                 frequency_millis: 123,
                 compute_unit_price: 123,
             },

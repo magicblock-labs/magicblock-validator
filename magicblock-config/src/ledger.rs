@@ -87,10 +87,10 @@ const fn default_ledger_size() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use crate::EphemeralConfig;
     use magicblock_config_helpers::Merge;
+
+    use super::*;
+    use crate::EphemeralConfig;
 
     #[test]
     fn test_merge_with_default() {
