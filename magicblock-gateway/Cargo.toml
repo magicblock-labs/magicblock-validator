@@ -29,6 +29,7 @@ solana-account-decoder = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-signature = { workspace = true }
 solana-transaction = { workspace = true }
+solana-transaction-status-client-types = { workspace = true }
 
 serde = { workspace = true }
 json = { workspace = true }

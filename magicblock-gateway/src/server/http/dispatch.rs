@@ -6,13 +6,10 @@ use magicblock_ledger::Ledger;
 
 use crate::{
     error::RpcError,
-    requests::{
-        self,
-        http::utils::{extract_bytes, parse_body, JsonBody},
-        payload::ResponseErrorPayload,
-    },
+    requests::{self, payload::ResponseErrorPayload},
     state::transactions::TransactionsCache,
     unwrap,
+    utils::JsonBody,
 };
 
 pub(crate) struct HttpDispatcher {
@@ -30,16 +27,16 @@ impl HttpDispatcher {
         let request = unwrap!(parse_body(body));
 
         use crate::requests::JsonRpcMethod::*;
+        use requests::http::*;
         let response = match request.method {
-            GetAccountInfo => requests::http::get_account_info::handle(
-                request,
-                &self.accountsdb,
-            ),
+            GetAccountInfo => {
+                get_account_info::handle(request, &self.accountsdb)
+            }
             GetMultipleAccounts => {
-                todo!()
+                get_balance::handle(request, &self.accountsdb)
             }
             GetProgramAccounts => {
-                todo!()
+                get_program_accounts::handle(request, &self.accountsdb)
             }
             SendTransaction => {
                 todo!()
@@ -47,9 +44,7 @@ impl HttpDispatcher {
             SimulateTransaction => {
                 todo!()
             }
-            GetTransaction => {
-                todo!()
-            }
+            GetTransaction => get_transaction::handle(request, &self.ledger),
             GetSignatureStatuses => {
                 todo!()
             }
@@ -57,20 +52,19 @@ impl HttpDispatcher {
                 todo!()
             }
             GetTokenAccountsByOwner => {
-                todo!()
+                get_token_accounts_by_owner::handle(request, &self.accountsdb)
             }
             GetTokenAccountsByDelegate => {
-                todo!()
+                get_token_accounts_by_delegate::handle(
+                    request,
+                    &self.accountsdb,
+                )
             }
-            GetSlot => {
-                todo!()
-            }
+            GetSlot => get_slot::handle(request, &self.accountsdb),
             GetBlock => {
                 todo!()
             }
-            GetBlocks => {
-                todo!()
-            }
+            GetBlocks => get_blocks::handle(request, &self.accountsdb),
             unknown => {
                 let error = RpcError::method_not_found(unknown);
                 return Ok(ResponseErrorPayload::encode(

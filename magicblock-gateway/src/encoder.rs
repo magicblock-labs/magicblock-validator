@@ -6,11 +6,13 @@ use magicblock_gateway_types::{
         TransactionProcessingResult, TransactionResult, TransactionStatus,
     },
 };
-use solana_account_decoder::{encode_ui_account, UiAccount, UiAccountEncoding};
+use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
 
 use crate::{
-    requests::payload::NotificationPayload,
-    state::subscriptions::SubscriptionID, Slot,
+    requests::{params::SerdeSignature, payload::NotificationPayload},
+    state::subscriptions::SubscriptionID,
+    utils::{AccountWithPubkey, ProgramFilters},
+    Slot,
 };
 
 pub(crate) trait Encoder: Ord + Eq + Clone {
@@ -51,37 +53,6 @@ impl From<&UiAccountEncoding> for AccountEncoder {
 }
 
 #[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
-pub enum ProgramFilter {
-    DataSize(usize),
-    MemCmp { offset: usize, bytes: Vec<u8> },
-}
-
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
-pub struct ProgramFilters(Vec<ProgramFilter>);
-
-impl ProgramFilter {
-    fn matches(&self, data: &[u8]) -> bool {
-        match self {
-            Self::DataSize(len) => data.len() == *len,
-            Self::MemCmp { offset, bytes } => {
-                if let Some(slice) = data.get(*offset..*offset + bytes.len()) {
-                    slice == bytes
-                } else {
-                    false
-                }
-            }
-        }
-    }
-}
-
-impl ProgramFilters {
-    #[inline]
-    pub fn matches(&self, data: &[u8]) -> bool {
-        self.0.iter().all(|f| f.matches(data))
-    }
-}
-
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub struct ProgramAccountEncoder {
     pub encoder: AccountEncoder,
     pub filters: ProgramFilters,
@@ -107,23 +78,13 @@ impl Encoder for ProgramAccountEncoder {
     type Data = (Pubkey, AccountSharedData);
 
     fn encode(&self, slot: Slot, data: &Self::Data, id: u64) -> Option<Bytes> {
-        #[derive(Serialize)]
-        struct AccountWithPubkey {
-            pubkey: String,
-            account: UiAccount,
-        }
         self.filters.matches(data.1.data()).then_some(())?;
-        let account = encode_ui_account(
-            &data.0,
+        let value = AccountWithPubkey::new(
+            data.0,
             &data.1,
             (&self.encoder).into(),
             None,
-            None,
         );
-        let value = AccountWithPubkey {
-            pubkey: data.0.to_string(),
-            account,
-        };
         let method = "programNotification";
         NotificationPayload::encode(value, slot, method, id)
     }
@@ -180,13 +141,13 @@ impl Encoder for TransactionLogsEncoder {
         }
         #[derive(Serialize)]
         struct TransactionLogs<'a> {
-            signature: String,
+            signature: SerdeSignature,
             err: Option<String>,
             logs: &'a [String],
         }
         let method = "logsNotification";
         let result = TransactionLogs {
-            signature: data.signature.to_string(),
+            signature: SerdeSignature(data.signature),
             err: execution.result.as_ref().map_err(|e| e.to_string()).err(),
             logs: &execution.logs,
         };

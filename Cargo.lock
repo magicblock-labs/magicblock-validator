@@ -4002,6 +4002,7 @@ dependencies = [
  "solana-rpc-client-api",
  "solana-signature",
  "solana-transaction",
+ "solana-transaction-status-client-types",
  "sonic-rs",
  "tokio",
  "tokio-util 0.7.15",

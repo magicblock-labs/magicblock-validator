@@ -7,9 +7,8 @@ use crate::{
     error::RpcError,
     requests::{params::SerdePubkey, payload::ResponsePayload, JsonRequest},
     unwrap,
+    utils::JsonBody,
 };
-
-use super::utils::JsonBody;
 
 pub(crate) fn handle(
     request: JsonRequest,
@@ -18,12 +17,12 @@ pub(crate) fn handle(
     let params = request
         .params
         .ok_or_else(|| RpcError::invalid_request("missing params"));
-    unwrap!(mut params, &request.id);
+    unwrap!(mut params, request.id);
     let (pubkey, config) =
         parse_params!(params, SerdePubkey, RpcAccountInfoConfig);
     let pubkey = pubkey
         .ok_or_else(|| RpcError::invalid_params("missing or invalid pubkey"));
-    unwrap!(pubkey, &request.id);
+    unwrap!(pubkey, request.id);
     let config = config.unwrap_or_default();
     let slot = accountsdb.slot();
     let Some(account) = accountsdb.get_account(&pubkey.0).ok() else {
