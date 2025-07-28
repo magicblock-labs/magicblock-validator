@@ -342,7 +342,8 @@ where
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-
+    use tokio::time::sleep;
+    use std::time::Duration;
     use async_trait::async_trait;
     use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
     use solana_pubkey::pubkey;
@@ -520,7 +521,9 @@ mod tests {
             _commit_ids: HashMap<Pubkey, u64>,
             _persister: Option<P>,
         ) -> MessageExecutorResult<ExecutionOutput> {
-            // TODO: add sleep
+            // Simulate some work
+            sleep(Duration::from_millis(50)).await;
+
             if self.should_fail {
                 Err(ExecutorError::FailedToCommitError {
                     err: InternalError::SignerError(SignerError::Custom(
