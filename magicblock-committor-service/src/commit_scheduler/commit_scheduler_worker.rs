@@ -6,7 +6,6 @@ use std::{
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use log::{error, info, trace, warn};
 use magicblock_program::SentCommit;
-use solana_pubkey::Pubkey;
 use solana_sdk::transaction::Transaction;
 use tokio::{
     sync::{

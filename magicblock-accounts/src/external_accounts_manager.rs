@@ -28,7 +28,6 @@ use magicblock_committor_service::{
     transactions::MAX_PROCESS_PER_TX,
     types::{ScheduledL1MessageWrapper, TriggerType},
     utils::ScheduledMessageExt,
-    L1MessageCommittor,
 };
 use magicblock_core::magic_program;
 use magicblock_program::{
@@ -47,11 +46,8 @@ use solana_sdk::{
 
 use crate::{
     errors::{AccountsError, AccountsResult},
-    traits::AccountCommitter,
     utils::get_epoch,
-    AccountCommittee, CommitAccountsPayload, LifecycleMode,
-    PendingCommitTransaction, ScheduledCommitsProcessor,
-    SendableCommitAccountsPayload,
+    AccountCommittee, LifecycleMode, SendableCommitAccountsPayload,
 };
 
 #[derive(Debug)]

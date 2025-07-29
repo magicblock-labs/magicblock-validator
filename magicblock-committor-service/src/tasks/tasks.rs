@@ -18,10 +18,7 @@ use magicblock_program::magic_scheduled_l1_message::{
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 
-use crate::{
-    consts::MAX_WRITE_CHUNK_SIZE,
-    tasks::{budget_calculator::ComputeBudgetV1, visitor::Visitor},
-};
+use crate::{consts::MAX_WRITE_CHUNK_SIZE, tasks::visitor::Visitor};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TaskStrategy {

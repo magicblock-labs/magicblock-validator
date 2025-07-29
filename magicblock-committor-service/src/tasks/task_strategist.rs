@@ -231,9 +231,10 @@ mod tests {
     use super::*;
     use crate::{
         persist::L1MessagePersister,
-        tasks::tasks::{CommitTask, L1ActionTask, TaskStrategy},
+        tasks::tasks::{
+            CommitTask, L1ActionTask, TaskStrategy, UndelegateTask,
+        },
     };
-    use crate::tasks::tasks::UndelegateTask;
 
     // Helper to create a simple commit task
     fn create_test_commit_task(commit_id: u64, data_size: usize) -> ArgsTask {
@@ -285,7 +286,6 @@ mod tests {
             rent_reimbursement: Pubkey::new_unique(),
         })
     }
-
 
     #[test]
     fn test_build_strategy_with_single_small_task() {
@@ -432,21 +432,25 @@ mod tests {
             &validator,
             &None::<L1MessagePersister>,
         )
-            .expect("Should build strategy");
+        .expect("Should build strategy");
 
         assert_eq!(strategy.optimized_tasks.len(), 4);
 
-        let strategies: Vec<TaskStrategy> = strategy.optimized_tasks
+        let strategies: Vec<TaskStrategy> = strategy
+            .optimized_tasks
             .iter()
             .map(|t| t.strategy())
             .collect();
 
-        assert_eq!(strategies, vec![
-            TaskStrategy::Buffer, // Commit task optimized
-            TaskStrategy::Args,    // Finalize stays
-            TaskStrategy::Args,    // L1Action stays
-            TaskStrategy::Args,   // Undelegate stays
-        ]);
+        assert_eq!(
+            strategies,
+            vec![
+                TaskStrategy::Buffer, // Commit task optimized
+                TaskStrategy::Args,   // Finalize stays
+                TaskStrategy::Args,   // L1Action stays
+                TaskStrategy::Args,   // Undelegate stays
+            ]
+        );
         // This means that couldn't squeeze task optimization
         // So had to switch to ALTs
         // As expected

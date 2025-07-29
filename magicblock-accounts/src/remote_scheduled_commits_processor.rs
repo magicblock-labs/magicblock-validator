@@ -23,11 +23,7 @@ use solana_sdk::{
     account::{Account, ReadableAccount},
     pubkey::Pubkey,
 };
-use tokio::sync::{
-    broadcast,
-    mpsc::{channel, Sender},
-    oneshot,
-};
+use tokio::sync::{broadcast, oneshot};
 
 use crate::{errors::AccountsResult, ScheduledCommitsProcessor};
 
@@ -132,7 +128,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
             bank: &self.bank,
         };
 
-        /// Retains onlu account that are valid to be commited
+        // Retains onlu account that are valid to be commited
         committed_accounts.retain_mut(|account| {
             let pubkey = account.pubkey;
             let cloned_accounts =

@@ -10,9 +10,7 @@ use dlp::{
 };
 use log::{error, warn};
 use lru::LruCache;
-use magicblock_rpc_client::{
-    MagicBlockRpcClientError, MagicBlockRpcClientResult, MagicblockRpcClient,
-};
+use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 
 #[async_trait::async_trait]

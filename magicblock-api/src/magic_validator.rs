@@ -14,7 +14,7 @@ use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
     map_committor_request_result, standard_blacklisted_accounts,
-    CloneOutputMap, RemoteAccountClonerClient, RemoteAccountClonerWorker,
+    RemoteAccountClonerClient, RemoteAccountClonerWorker,
     ValidatorCollectionMode,
 };
 use magicblock_account_dumper::AccountDumperBank;

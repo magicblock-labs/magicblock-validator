@@ -1,6 +1,6 @@
 use std::{fmt, path::Path, str::FromStr};
 
-use rusqlite::{params, Connection, OptionalExtension, Result, Transaction};
+use rusqlite::{params, Connection, Result, Transaction};
 use solana_pubkey::Pubkey;
 use solana_sdk::{clock::Slot, hash::Hash, signature::Signature};
 

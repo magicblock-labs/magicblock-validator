@@ -1,16 +1,11 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 
 use async_trait::async_trait;
-use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::L1MessageCommittor;
 use magicblock_metrics::metrics::HistogramTimer;
-use magicblock_program::magic_scheduled_l1_message::{
-    CommittedAccountV2, ScheduledL1Message,
-};
+use magicblock_program::magic_scheduled_l1_message::CommittedAccountV2;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
     account::{Account, AccountSharedData, ReadableAccount},
-    clock::Epoch,
     pubkey::Pubkey,
     signature::Signature,
     transaction::Transaction,

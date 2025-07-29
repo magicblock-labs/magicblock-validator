@@ -7,10 +7,7 @@ use std::{
 };
 
 use log::*;
-use magicblock_accounts::{
-    remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
-    AccountsManager, ScheduledCommitsProcessor,
-};
+use magicblock_accounts::{AccountsManager, ScheduledCommitsProcessor};
 use magicblock_bank::bank::Bank;
 use magicblock_core::magic_program;
 use magicblock_ledger::Ledger;
