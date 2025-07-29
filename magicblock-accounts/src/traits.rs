@@ -111,34 +111,3 @@ pub struct PendingCommitTransaction {
     /// the transaction is confirmed.
     pub timer: HistogramTimer,
 }
-
-#[async_trait]
-pub trait AccountCommitter: Send + Sync + 'static {
-    /// Creates a transaction to commit each provided account unless it determines
-    /// that it isn't necessary, i.e. when the previously committed state is the same
-    /// as the [commit_state_data].
-    /// Returns the transaction committing the accounts and the pubkeys of accounts
-    /// it did commit
-    async fn create_commit_accounts_transaction(
-        &self,
-        committees: Vec<AccountCommittee>,
-    ) -> AccountsResult<CommitAccountsPayload>;
-
-    /// Returns the main-chain signatures of the commit transactions
-    /// This will only fail due to network issues, not if the transaction failed.
-    /// Therefore we want to either fail all transactions or none which is why
-    /// we return a `Result<Vec>` instead of a `Vec<Result>`.
-    async fn send_commit_transactions(
-        &self,
-        payloads: Vec<SendableCommitAccountsPayload>,
-    ) -> AccountsResult<Vec<PendingCommitTransaction>>;
-
-    /// Confirms all transactions for the given [pending_commits] with 'confirmed'
-    /// commitment level.
-    /// Updates the metrics for each transaction in order to record the time it took
-    /// to fully confirm it on chain.
-    async fn confirm_pending_commits(
-        &self,
-        pending_commits: Vec<PendingCommitTransaction>,
-    );
-}

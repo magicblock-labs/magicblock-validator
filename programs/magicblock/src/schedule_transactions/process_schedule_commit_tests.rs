@@ -24,7 +24,6 @@ use crate::{
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     test_utils::{ensure_started_validator, process_instruction},
     utils::DELEGATION_PROGRAM_ID,
-    ScheduledCommit,
 };
 
 // For the scheduling itself and the debit to fund the scheduled transaction

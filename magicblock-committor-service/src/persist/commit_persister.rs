@@ -87,7 +87,7 @@ impl L1MessagePersister {
         })
     }
 
-    fn create_commit_rows(
+    pub fn create_commit_rows(
         l1_message: &ScheduledL1Message,
     ) -> Vec<CommitStatusRow> {
         let Some(committed_accounts) = l1_message.get_committed_accounts()
