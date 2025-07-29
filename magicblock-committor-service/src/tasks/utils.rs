@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use solana_pubkey::Pubkey;
 use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction,
     hash::Hash,
     instruction::Instruction,
     message::{
@@ -76,10 +77,13 @@ impl TransactionUtils {
     pub fn assemble_tasks_tx(
         authority: &Keypair,
         tasks: &[Box<dyn L1Task>],
+        compute_unit_price: u64,
         lookup_tables: &[AddressLookupTableAccount],
     ) -> Result<VersionedTransaction, CompileError> {
-        let budget_instructions =
-            Self::budget_instructions(&Self::tasks_budgets(&tasks));
+        let budget_instructions = Self::budget_instructions(
+            Self::tasks_compute_units(&tasks),
+            compute_unit_price,
+        );
         let ixs = Self::tasks_instructions(&authority.pubkey(), &tasks);
         Self::assemble_tx_raw(
             authority,
@@ -111,18 +115,20 @@ impl TransactionUtils {
         Ok(tx)
     }
 
-    pub fn tasks_budgets(
-        tasks: &[impl AsRef<dyn L1Task>],
-    ) -> Vec<ComputeBudgetV1> {
-        tasks
-            .iter()
-            .map(|task| task.as_ref().budget())
-            .collect::<Vec<_>>()
+    pub fn tasks_compute_units(tasks: &[impl AsRef<dyn L1Task>]) -> u32 {
+        tasks.iter().map(|task| task.as_ref().compute_units()).sum()
     }
 
     pub fn budget_instructions(
-        budgets: &[ComputeBudgetV1],
+        compute_units: u32,
+        compute_unit_price: u64,
     ) -> [Instruction; 2] {
-        todo!()
+        let compute_budget_ix =
+            ComputeBudgetInstruction::set_compute_unit_limit(compute_units);
+        let compute_unit_price_ix =
+            ComputeBudgetInstruction::set_compute_unit_price(
+                compute_unit_price,
+            );
+        [compute_budget_ix, compute_unit_price_ix]
     }
 }

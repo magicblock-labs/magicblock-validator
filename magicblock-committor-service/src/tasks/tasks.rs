@@ -64,19 +64,7 @@ pub trait L1Task: Send + Sync {
     ) -> Option<TaskPreparationInfo>;
 
     /// Returns [`Task`] budget
-    fn budget(&self) -> ComputeBudgetV1;
-
-    /// Returns Instructions per TX
-    // TODO(edwin): shall be here?
-    fn instructions_from_info(
-        &self,
-        info: &TaskPreparationInfo,
-    ) -> Vec<Vec<Instruction>> {
-        chunk_realloc_ixs(
-            info.realloc_instructions.clone(),
-            Some(info.init_instruction.clone()),
-        )
-    }
+    fn compute_units(&self) -> u32;
 
     /// Returns current [`TaskStrategy`]
     fn strategy(&self) -> TaskStrategy;
@@ -187,8 +175,13 @@ impl L1Task for ArgsTask {
         None
     }
 
-    fn budget(&self) -> ComputeBudgetV1 {
-        todo!()
+    fn compute_units(&self) -> u32 {
+        match self {
+            Self::Commit(_) => 35_000,
+            Self::L1Action(task) => task.action.compute_units,
+            Self::Undelegate(_) => 35_000,
+            Self::Finalize(_) => 25_000,
+        }
     }
 
     fn strategy(&self) -> TaskStrategy {
@@ -295,8 +288,10 @@ impl L1Task for BufferTask {
         })
     }
 
-    fn budget(&self) -> ComputeBudgetV1 {
-        todo!()
+    fn compute_units(&self) -> u32 {
+        match self {
+            Self::Commit(_) => 45_000,
+        }
     }
 
     fn strategy(&self) -> TaskStrategy {

@@ -4,7 +4,9 @@ use anyhow::anyhow;
 use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all};
 use log::error;
-use magicblock_committor_program::Chunks;
+use magicblock_committor_program::{
+    instruction_chunks::chunk_realloc_ixs, Chunks,
+};
 use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicblockRpcClient,
@@ -29,6 +31,7 @@ use crate::{
         task_strategist::TransactionStrategy,
         tasks::{L1Task, TaskPreparationInfo},
     },
+    transactions::serialize_and_encode_base64,
     utils::persist_status_update,
     ComputeBudgetConfig,
 };
@@ -40,7 +43,7 @@ pub struct DeliveryPreparationResult {
 pub struct DeliveryPreparator {
     rpc_client: MagicblockRpcClient,
     table_mania: TableMania,
-    compute_budget_config: ComputeBudgetConfig, // TODO(edwin): needed?
+    compute_budget_config: ComputeBudgetConfig,
 }
 
 impl DeliveryPreparator {
@@ -82,8 +85,7 @@ impl DeliveryPreparator {
     }
 
     /// Prepares necessary parts for TX if needed, otherwise returns immediately
-    // TODO(edwin): replace with interfaces
-    async fn prepare_task<P: L1MessagesPersisterIface>(
+    pub async fn prepare_task<P: L1MessagesPersisterIface>(
         &self,
         authority: &Keypair,
         task: &Box<dyn L1Task>,
@@ -143,11 +145,13 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        task: &dyn L1Task,
+        _task: &dyn L1Task,
         preparation_info: &TaskPreparationInfo,
     ) -> DeliveryPreparatorResult<(), InternalError> {
-        let preparation_instructions =
-            task.instructions_from_info(&preparation_info);
+        let preparation_instructions = chunk_realloc_ixs(
+            preparation_info.realloc_instructions.clone(),
+            Some(preparation_info.init_instruction.clone()),
+        );
         let preparation_instructions = preparation_instructions
             .into_iter()
             .enumerate()
@@ -156,13 +160,13 @@ impl DeliveryPreparator {
                     let init_budget_ixs = self
                         .compute_budget_config
                         .buffer_init
-                        .instructions(ixs.len() - 1);
+                        .instructions(ixs.len());
                     init_budget_ixs
                 } else {
                     let realloc_budget_ixs = self
                         .compute_budget_config
                         .buffer_realloc
-                        .instructions(ixs.len() - 1);
+                        .instructions(ixs.len());
                     realloc_budget_ixs
                 };
                 ixs_with_budget.extend(ixs.into_iter());
@@ -270,7 +274,6 @@ impl DeliveryPreparator {
         Ok(())
     }
 
-    // TODO(edwin): move somewhere appropritate
     // CommitProcessor::init_accounts analog
     async fn send_ixs_with_retry<const MAX_RETRIES: usize>(
         &self,
@@ -282,7 +285,10 @@ impl DeliveryPreparator {
         for _ in 0..MAX_RETRIES {
             match self.try_send_ixs(instructions, authority).await {
                 Ok(()) => return Ok(()),
-                Err(err) => last_error = err,
+                Err(err) => {
+                    println!("Failed attempt to send tx: {:?}", err);
+                    last_error = err;
+                }
             }
             sleep(Duration::from_millis(200)).await;
         }
@@ -341,9 +347,9 @@ impl DeliveryPreparator {
     }
 
     // TODO(edwin): cleanup
-    async fn clean() {
-        todo!()
-    }
+    // async fn clean() {
+    //     todo!()
+    // }
 }
 
 #[derive(thiserror::Error, Debug)]

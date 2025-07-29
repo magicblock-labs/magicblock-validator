@@ -69,6 +69,7 @@ pub trait TransactionPreparator: Send + Sync + 'static {
 /// It creates TXs using current per account commit/finalize
 pub struct TransactionPreparatorV1 {
     delivery_preparator: DeliveryPreparator,
+    compute_budget_config: ComputeBudgetConfig,
 }
 
 impl TransactionPreparatorV1 {
@@ -80,10 +81,11 @@ impl TransactionPreparatorV1 {
         let delivery_preparator = DeliveryPreparator::new(
             rpc_client,
             table_mania,
-            compute_budget_config,
+            compute_budget_config.clone(),
         );
         Self {
             delivery_preparator,
+            compute_budget_config,
         }
     }
 }
@@ -125,6 +127,7 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         let message = TransactionUtils::assemble_tasks_tx(
             authority,
             &tx_strategy.optimized_tasks,
+            self.compute_budget_config.compute_unit_price,
             &lookup_tables,
         )
         .expect("TaskStrategist had to fail prior. This shouldn't be reachable")
@@ -163,6 +166,7 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         let message = TransactionUtils::assemble_tasks_tx(
             authority,
             &tx_strategy.optimized_tasks,
+            self.compute_budget_config.compute_unit_price,
             &lookup_tables,
         )
         .expect("TaskStrategist had to fail prior. This shouldn't be reachable")

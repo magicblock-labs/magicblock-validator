@@ -9,6 +9,7 @@ pub struct ActionArgs {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct L1ActionArgs {
     pub args: ActionArgs,
+    pub compute_units: u32, // compute units your action will use
     pub escrow_authority: u8, // index of account authorizing action on actor pda
     pub destination_program: u8, // index of the account
     pub accounts: Vec<u8>,    // indices of account

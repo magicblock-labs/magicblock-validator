@@ -182,6 +182,7 @@ pub struct ShortAccountMeta {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct L1Action {
+    pub compute_units: u32,
     pub destination_program: Pubkey,
     pub escrow_authority: Pubkey,
     pub data_per_program: ProgramArgs,
@@ -242,6 +243,7 @@ impl L1Action {
             .collect::<Result<Vec<ShortAccountMeta>, InstructionError>>()?;
 
         Ok(L1Action {
+            compute_units: args.compute_units,
             destination_program: destination_program_pubkey,
             escrow_authority: *authority_pubkey,
             data_per_program: args.args.clone().into(),

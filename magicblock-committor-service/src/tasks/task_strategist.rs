@@ -75,14 +75,14 @@ impl TaskStrategist {
 
     /// Attempt to use ALTs for ALL keys in tx
     /// TODO: optimize to use only necessary amount of pubkeys
-    fn attempt_lookup_tables(
+    pub fn attempt_lookup_tables(
         validator: &Pubkey,
         tasks: &[Box<dyn L1Task>],
     ) -> TaskStrategistResult<Vec<Pubkey>> {
         // Gather all involved keys in tx
-        let budgets = TransactionUtils::tasks_budgets(&tasks);
+        let budgets = TransactionUtils::tasks_compute_units(&tasks);
         let budget_instructions =
-            TransactionUtils::budget_instructions(&budgets);
+            TransactionUtils::budget_instructions(budgets, u64::default());
         let unique_involved_pubkeys = TransactionUtils::unique_involved_pubkeys(
             &tasks,
             validator,
@@ -114,10 +114,11 @@ impl TaskStrategist {
     /// Returns size of tx after optimizations
     fn optimize_strategy(tasks: &mut [Box<dyn L1Task>]) -> usize {
         // Get initial transaction size
-        let calculate_tx_length = |tasks: &[Box<dyn L1Task>] | {
+        let calculate_tx_length = |tasks: &[Box<dyn L1Task>]| {
             match TransactionUtils::assemble_tasks_tx(
-                &Keypair::new(),
+                &Keypair::new(), // placeholder
                 &tasks,
+                u64::default(), // placeholder
                 &[],
             ) {
                 Ok(tx) => serialize_and_encode_base64(&tx).len(),
