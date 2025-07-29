@@ -6,17 +6,16 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::L1MessagePersister,
     tasks::{
-        task_strategist::TransactionStrategy,
-        tasks::{BufferTask, CommitTask, L1Task},
+        task_strategist::{TaskStrategist, TransactionStrategy},
+        tasks::{ArgsTask, BufferTask, CommitTask, L1Task},
     },
+    transaction_preperator::delivery_preparator::DeliveryPreparator,
 };
 use magicblock_program::magic_scheduled_l1_message::CommittedAccountV2;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_sdk::signer::Signer;
-use magicblock_committor_service::tasks::task_strategist::TaskStrategist;
-use magicblock_committor_service::tasks::tasks::ArgsTask;
-use magicblock_committor_service::transaction_preperator::delivery_preparator::DeliveryPreparator;
+
 use crate::common::TestFixture;
 
 mod common;
@@ -190,27 +189,34 @@ async fn test_lookup_tables() {
         })
         .collect::<Vec<_>>();
 
-    let lookup_tables_keys = TaskStrategist::attempt_lookup_tables(&fixture.authority.pubkey(), &tasks).unwrap();
+    let lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
+        &fixture.authority.pubkey(),
+        &tasks,
+    );
     let strategy = TransactionStrategy {
         optimized_tasks: tasks,
-        lookup_tables_keys
+        lookup_tables_keys,
     };
 
-    let result = preparator.prepare_for_delivery(&fixture.authority, &strategy, &None::<L1MessagePersister>).await;
+    let result = preparator
+        .prepare_for_delivery(
+            &fixture.authority,
+            &strategy,
+            &None::<L1MessagePersister>,
+        )
+        .await;
     assert!(result.is_ok(), "Failed to prepare lookup tables");
 
     let alts = result.unwrap();
     // Verify the ALTs were actually created
     for alt in alts {
-        let alt_account = fixture.rpc_client
+        let alt_account = fixture
+            .rpc_client
             .get_account(&alt.key)
             .await
             .unwrap()
             .expect("ALT account should exist");
 
-        assert!(
-            !alt_account.data.is_empty(),
-            "ALT account should have data"
-        );
+        assert!(!alt_account.data.is_empty(), "ALT account should have data");
     }
 }

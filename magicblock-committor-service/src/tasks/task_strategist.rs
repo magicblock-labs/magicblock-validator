@@ -1,7 +1,7 @@
 use std::{collections::BinaryHeap, ptr::NonNull};
 
 use solana_pubkey::Pubkey;
-use solana_sdk::signature::Keypair;
+use solana_sdk::{signature::Keypair, signer::Signer};
 
 use crate::{
     persist::L1MessagesPersisterIface,
@@ -48,44 +48,45 @@ impl TaskStrategist {
                 optimized_tasks: tasks,
                 lookup_tables_keys: vec![],
             })
-        } else {
-            // In case task optimization didn't work
-            // attempt using lookup tables for all keys involved in tasks
-            let lookup_tables_keys =
-                Self::attempt_lookup_tables(&validator, &tasks)?;
-
+        }
+        // In case task optimization didn't work
+        // attempt using lookup tables for all keys involved in tasks
+        else if Self::attempt_lookup_tables(&tasks) {
             // Persist tasks strategy
-            if let Some(persistor) = persistor {
-                let mut persistor_visitor = PersistorVisitor {
-                    persistor,
-                    context: PersistorContext::PersistStrategy {
-                        uses_lookup_tables: true,
-                    },
-                };
-                tasks
-                    .iter()
-                    .for_each(|task| task.visit(&mut persistor_visitor));
-            }
+            let mut persistor_visitor = PersistorVisitor {
+                persistor,
+                context: PersistorContext::PersistStrategy {
+                    uses_lookup_tables: true,
+                },
+            };
+            tasks
+                .iter()
+                .for_each(|task| task.visit(&mut persistor_visitor));
+
+            // Get lookup table keys
+            let lookup_tables_keys =
+                Self::collect_lookup_table_keys(&validator, &tasks);
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys,
             })
+        } else {
+            Err(Error::FailedToFitError)
         }
     }
 
     /// Attempt to use ALTs for ALL keys in tx
+    /// Returns `true` if ALTs make tx fit, otherwise `false`
     /// TODO: optimize to use only necessary amount of pubkeys
-    pub fn attempt_lookup_tables(
-        validator: &Pubkey,
-        tasks: &[Box<dyn L1Task>],
-    ) -> TaskStrategistResult<Vec<Pubkey>> {
+    pub fn attempt_lookup_tables(tasks: &[Box<dyn L1Task>]) -> bool {
+        let placeholder = Keypair::new();
         // Gather all involved keys in tx
         let budgets = TransactionUtils::tasks_compute_units(&tasks);
         let budget_instructions =
             TransactionUtils::budget_instructions(budgets, u64::default());
         let unique_involved_pubkeys = TransactionUtils::unique_involved_pubkeys(
             &tasks,
-            validator,
+            &placeholder.pubkey(),
             &budget_instructions,
         );
         let dummy_lookup_tables =
@@ -93,21 +94,41 @@ impl TaskStrategist {
 
         // Create final tx
         let instructions =
-            TransactionUtils::tasks_instructions(validator, &tasks);
-        let alt_tx = TransactionUtils::assemble_tx_raw(
-            &Keypair::new(),
+            TransactionUtils::tasks_instructions(&placeholder.pubkey(), &tasks);
+        let alt_tx = if let Ok(tx) = TransactionUtils::assemble_tx_raw(
+            &placeholder,
             &instructions,
             &budget_instructions,
             &dummy_lookup_tables,
-        )
-        .map_err(|_| Error::FailedToFitError)?;
+        ) {
+            tx
+        } else {
+            // Transaction doesn't fit, see CompileError
+            return false;
+        };
 
         let encoded_alt_tx = serialize_and_encode_base64(&alt_tx);
         if encoded_alt_tx.len() <= MAX_ENCODED_TRANSACTION_SIZE {
-            Ok(unique_involved_pubkeys)
+            true
         } else {
-            Err(Error::FailedToFitError)
+            false
         }
+    }
+
+    pub fn collect_lookup_table_keys(
+        authority: &Pubkey,
+        tasks: &[Box<dyn L1Task>],
+    ) -> Vec<Pubkey> {
+        let budgets = TransactionUtils::tasks_compute_units(&tasks);
+        let budget_instructions =
+            TransactionUtils::budget_instructions(budgets, u64::default());
+        let unique_involved_pubkeys = TransactionUtils::unique_involved_pubkeys(
+            &tasks,
+            authority,
+            &budget_instructions,
+        );
+
+        unique_involved_pubkeys
     }
 
     /// Optimizes set of [`TaskDeliveryStrategy`] to fit [`MAX_ENCODED_TRANSACTION_SIZE`]
