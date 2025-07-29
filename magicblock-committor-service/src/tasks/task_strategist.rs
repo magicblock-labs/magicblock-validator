@@ -1,4 +1,4 @@
-use std::{collections::BinaryHeap, ptr::NonNull};
+use std::collections::BinaryHeap;
 
 use solana_pubkey::Pubkey;
 use solana_sdk::{signature::Keypair, signer::Signer};

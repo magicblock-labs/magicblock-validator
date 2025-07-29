@@ -1,4 +1,6 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+// solana-test-validator \
+// --bpf-program corabpNrkBEqbTZP7xfJgSWTdBmVdLf1PARWXZbcMcS \
+// ./magicblock-committor-program/bin/magicblock_committor_program.so
 
 use borsh::BorshDeserialize;
 use futures_util::StreamExt;

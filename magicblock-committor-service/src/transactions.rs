@@ -35,13 +35,13 @@ pub const MAX_PROCESS_PER_TX_USING_LOOKUP: u8 = 12;
 
 /// How many close buffer instructions fit into a single transaction
 #[allow(unused)] // serves as documentation as well
-pub const MAX_CLOSE_PER_TX: u8 = 7;
+pub const MAX_CLOSE_PER_TX: u8 = 8;
 
 /// How many close buffer instructions fit into a single transaction
 /// when using address lookup tables but not including the buffer account
 /// nor chunk account in the lookup table
 #[allow(unused)] // serves as documentation as well
-pub const MAX_CLOSE_PER_TX_USING_LOOKUP: u8 = 7;
+pub const MAX_CLOSE_PER_TX_USING_LOOKUP: u8 = 8;
 
 /// How many process and commit buffer instructions combined with close buffer instructions
 /// fit into a single transaction
@@ -52,7 +52,7 @@ pub const MAX_PROCESS_AND_CLOSE_PER_TX: u8 = 2;
 /// close buffer instructions fit into a single transaction when
 /// using lookup tables but not including the buffer account
 #[allow(unused)] // serves as documentation as well
-pub const MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP: u8 = 4;
+pub const MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP: u8 = 5;
 
 /// How many finalize instructions fit into a single transaction
 #[allow(unused)] // serves as documentation as well

@@ -9,7 +9,7 @@ use solana_sdk::{
         v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
     },
     signature::Keypair,
-    signer::{Signer},
+    signer::Signer,
     transaction::VersionedTransaction,
 };
 
