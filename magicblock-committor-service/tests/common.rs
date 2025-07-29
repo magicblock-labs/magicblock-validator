@@ -1,11 +1,24 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use magicblock_committor_service::{
-    transaction_preperator::delivery_preparator::DeliveryPreparator,
+    tasks::tasks::CommitTask,
+    transaction_preperator::{
+        delivery_preparator::DeliveryPreparator,
+        transaction_preparator::TransactionPreparatorV1,
+    },
+    types::{ScheduledL1MessageWrapper, TriggerType},
     ComputeBudgetConfig,
+};
+use magicblock_program::magic_scheduled_l1_message::{
+    CommittedAccountV2, ScheduledL1Message,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
+use solana_account::Account;
+use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::{CommitmentConfig, CommitmentLevel},
@@ -13,7 +26,6 @@ use solana_sdk::{
     signer::Signer,
     system_program,
 };
-use tempfile::TempDir;
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {
@@ -60,11 +72,57 @@ impl TestFixture {
         }
     }
 
-    pub fn create_preparator(&self) -> DeliveryPreparator {
+    pub fn create_delivery_preparator(&self) -> DeliveryPreparator {
         DeliveryPreparator::new(
             self.rpc_client.clone(),
             self.table_mania.clone(),
             self.compute_budget_config.clone(),
         )
+    }
+
+    pub fn create_transaction_preparator(&self) -> TransactionPreparatorV1 {
+        TransactionPreparatorV1::new(
+            self.rpc_client.clone(),
+            self.table_mania.clone(),
+            self.compute_budget_config.clone(),
+        )
+    }
+}
+
+pub fn generate_random_bytes(length: usize) -> Vec<u8> {
+    use rand::Rng;
+
+    let mut rng = rand::thread_rng();
+    (0..length).map(|_| rng.gen()).collect()
+}
+
+pub fn create_commit_task(data: &[u8]) -> CommitTask {
+    static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
+    CommitTask {
+        commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
+        allow_undelegation: false,
+        committed_account: CommittedAccountV2 {
+            pubkey: Pubkey::new_unique(),
+            account: Account {
+                lamports: 1000,
+                data: data.to_vec(),
+                owner: dlp::id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+        },
+    }
+}
+
+pub fn create_committed_account(data: &[u8]) -> CommittedAccountV2 {
+    CommittedAccountV2 {
+        pubkey: Pubkey::new_unique(),
+        account: Account {
+            lamports: 1000,
+            data: data.to_vec(),
+            owner: dlp::id(),
+            executable: false,
+            rent_epoch: 0,
+        },
     }
 }

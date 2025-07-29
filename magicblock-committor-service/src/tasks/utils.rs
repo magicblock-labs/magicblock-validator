@@ -9,11 +9,11 @@ use solana_sdk::{
         v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
     },
     signature::Keypair,
-    signer::Signer,
+    signer::{Signer},
     transaction::VersionedTransaction,
 };
 
-use crate::tasks::tasks::L1Task;
+use crate::tasks::{task_strategist::TaskStrategistResult, tasks::L1Task};
 
 /// Returns [`Vec<AddressLookupTableAccount>`] where all TX accounts stored in ALT
 pub fn estimate_lookup_tables_for_tx(
@@ -79,7 +79,7 @@ impl TransactionUtils {
         tasks: &[Box<dyn L1Task>],
         compute_unit_price: u64,
         lookup_tables: &[AddressLookupTableAccount],
-    ) -> Result<VersionedTransaction, CompileError> {
+    ) -> TaskStrategistResult<VersionedTransaction> {
         let budget_instructions = Self::budget_instructions(
             Self::tasks_compute_units(&tasks),
             compute_unit_price,
@@ -98,13 +98,38 @@ impl TransactionUtils {
         instructions: &[Instruction],
         budget_instructions: &[Instruction],
         lookup_tables: &[AddressLookupTableAccount],
-    ) -> Result<VersionedTransaction, CompileError> {
-        let message = Message::try_compile(
+    ) -> TaskStrategistResult<VersionedTransaction> {
+        // This is needed because VersionedMessage::serialize uses unwrap() ¯\_(ツ)_/¯
+        instructions
+            .iter()
+            .map(|el| {
+                if el.data.len() > u16::MAX as usize {
+                    Err(crate::tasks::task_strategist::Error::FailedToFitError)
+                } else {
+                    Ok(())
+                }
+            })
+            .collect::<TaskStrategistResult<_>>()?;
+
+        let message = match Message::try_compile(
             &authority.pubkey(),
             &[budget_instructions, instructions].concat(),
             &lookup_tables,
             Hash::new_unique(),
-        )?;
+        ) {
+            Ok(message) => Ok(message),
+            Err(CompileError::AccountIndexOverflow)
+            | Err(CompileError::AddressTableLookupIndexOverflow) => {
+                Err(crate::tasks::task_strategist::Error::FailedToFitError)
+            }
+            Err(CompileError::UnknownInstructionKey(pubkey)) => {
+                panic!(
+                    "Supplied instruction has to be valid: {}",
+                    CompileError::UnknownInstructionKey(pubkey)
+                );
+            }
+        }?;
+
         // SignerError is critical
         let tx = VersionedTransaction::try_new(
             VersionedMessage::V0(message),

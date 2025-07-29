@@ -376,7 +376,7 @@ mod tests {
 
     use async_trait::async_trait;
     use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
-    use solana_pubkey::pubkey;
+    use solana_pubkey::{pubkey, Pubkey};
     use solana_sdk::{signature::Signature, signer::SignerError};
     use tokio::{sync::mpsc, time::sleep};
 

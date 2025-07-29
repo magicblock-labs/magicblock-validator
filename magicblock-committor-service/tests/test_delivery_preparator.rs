@@ -7,48 +7,19 @@ use magicblock_committor_service::{
     persist::L1MessagePersister,
     tasks::{
         task_strategist::{TaskStrategist, TransactionStrategy},
-        tasks::{ArgsTask, BufferTask, CommitTask, L1Task},
+        tasks::{ArgsTask, BufferTask, L1Task},
     },
-    transaction_preperator::delivery_preparator::DeliveryPreparator,
 };
-use magicblock_program::magic_scheduled_l1_message::CommittedAccountV2;
-use solana_account::Account;
-use solana_pubkey::Pubkey;
 use solana_sdk::signer::Signer;
 
-use crate::common::TestFixture;
+use crate::common::{create_commit_task, generate_random_bytes, TestFixture};
 
 mod common;
-
-pub fn generate_random_bytes(length: usize) -> Vec<u8> {
-    use rand::Rng;
-
-    let mut rng = rand::thread_rng();
-    (0..length).map(|_| rng.gen()).collect()
-}
-
-fn create_commit_task(data: &[u8]) -> CommitTask {
-    static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
-    CommitTask {
-        commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
-        allow_undelegation: false,
-        committed_account: CommittedAccountV2 {
-            pubkey: Pubkey::new_unique(),
-            account: Account {
-                lamports: 1000,
-                data: data.to_vec(),
-                owner: dlp::id(),
-                executable: false,
-                rent_epoch: 0,
-            },
-        },
-    }
-}
 
 #[tokio::test]
 async fn test_prepare_10kb_buffer() {
     let fixture = TestFixture::new().await;
-    let preparator = fixture.create_preparator();
+    let preparator = fixture.create_delivery_preparator();
 
     let data = generate_random_bytes(10 * 1024);
     let buffer_task = BufferTask::Commit(create_commit_task(&data));
@@ -103,7 +74,7 @@ async fn test_prepare_10kb_buffer() {
 #[tokio::test]
 async fn test_prepare_multiple_buffers() {
     let fixture = TestFixture::new().await;
-    let preparator = fixture.create_preparator();
+    let preparator = fixture.create_delivery_preparator();
 
     let datas = vec![
         generate_random_bytes(10 * 1024),
@@ -174,7 +145,7 @@ async fn test_prepare_multiple_buffers() {
 #[tokio::test]
 async fn test_lookup_tables() {
     let fixture = TestFixture::new().await;
-    let preparator = fixture.create_preparator();
+    let preparator = fixture.create_delivery_preparator();
 
     let datas = vec![
         generate_random_bytes(10),
