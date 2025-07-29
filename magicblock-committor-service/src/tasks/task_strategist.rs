@@ -233,6 +233,7 @@ mod tests {
         persist::L1MessagePersister,
         tasks::tasks::{CommitTask, L1ActionTask, TaskStrategy},
     };
+    use crate::tasks::tasks::UndelegateTask;
 
     // Helper to create a simple commit task
     fn create_test_commit_task(commit_id: u64, data_size: usize) -> ArgsTask {
@@ -268,6 +269,23 @@ mod tests {
             },
         })
     }
+
+    // Helper to create a finalize task
+    fn create_test_finalize_task() -> ArgsTask {
+        ArgsTask::Finalize(FinalizeTask {
+            delegated_account: Pubkey::new_unique(),
+        })
+    }
+
+    // Helper to create an undelegate task
+    fn create_test_undelegate_task() -> ArgsTask {
+        ArgsTask::Undelegate(UndelegateTask {
+            delegated_account: Pubkey::new_unique(),
+            owner_program: system_program::id(),
+            rent_reimbursement: Pubkey::new_unique(),
+        })
+    }
+
 
     #[test]
     fn test_build_strategy_with_single_small_task() {
@@ -397,5 +415,41 @@ mod tests {
         // The larger task should have been optimized first
         assert!(matches!(tasks[0].strategy(), TaskStrategy::Args));
         assert!(matches!(tasks[1].strategy(), TaskStrategy::Buffer));
+    }
+
+    #[test]
+    fn test_mixed_task_types_with_optimization() {
+        let validator = Pubkey::new_unique();
+        let tasks = vec![
+            Box::new(create_test_commit_task(1, 1000)) as Box<dyn L1Task>,
+            Box::new(create_test_finalize_task()) as Box<dyn L1Task>,
+            Box::new(create_test_l1_action_task(500)) as Box<dyn L1Task>,
+            Box::new(create_test_undelegate_task()) as Box<dyn L1Task>,
+        ];
+
+        let strategy = TaskStrategist::build_strategy(
+            tasks,
+            &validator,
+            &None::<L1MessagePersister>,
+        )
+            .expect("Should build strategy");
+
+        assert_eq!(strategy.optimized_tasks.len(), 4);
+
+        let strategies: Vec<TaskStrategy> = strategy.optimized_tasks
+            .iter()
+            .map(|t| t.strategy())
+            .collect();
+
+        assert_eq!(strategies, vec![
+            TaskStrategy::Buffer, // Commit task optimized
+            TaskStrategy::Args,    // Finalize stays
+            TaskStrategy::Args,    // L1Action stays
+            TaskStrategy::Args,   // Undelegate stays
+        ]);
+        // This means that couldn't squeeze task optimization
+        // So had to switch to ALTs
+        // As expected
+        assert!(!strategy.lookup_tables_keys.is_empty());
     }
 }

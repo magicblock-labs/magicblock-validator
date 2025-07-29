@@ -23,6 +23,7 @@ use crate::{
     tasks::{budget_calculator::ComputeBudgetV1, visitor::Visitor},
 };
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TaskStrategy {
     Args,
     Buffer,
