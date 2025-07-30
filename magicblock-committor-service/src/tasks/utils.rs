@@ -109,7 +109,7 @@ impl TransactionUtils {
                     Ok(())
                 }
             })
-            .collect::<TaskStrategistResult<_>>()?;
+            .collect::<TaskStrategistResult<()>>()?;
 
         let message = match Message::try_compile(
             &authority.pubkey(),

@@ -381,7 +381,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use super::*;
-    use crate::persist::{db, types, CommitStatusSignatures};
+    use crate::persist::{types, CommitStatusSignatures};
 
     fn create_test_persister() -> (L1MessagePersister, NamedTempFile) {
         let temp_file = NamedTempFile::new().unwrap();

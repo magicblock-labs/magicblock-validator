@@ -2,12 +2,9 @@ pub mod error;
 pub mod message_executor;
 pub(crate) mod message_executor_factory;
 
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 pub use message_executor::L1MessageExecutor;
-use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 
 use crate::{

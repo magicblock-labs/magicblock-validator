@@ -46,7 +46,7 @@ use solana_sdk::{
 use crate::{
     errors::{AccountsError, AccountsResult},
     utils::get_epoch,
-    AccountCommittee, LifecycleMode, SendableCommitAccountsPayload,
+    AccountCommittee, LifecycleMode,
 };
 
 #[derive(Debug)]
@@ -397,7 +397,7 @@ where
                         None
                     })
             })
-            .filter(|(pubkey, _, prev_hash, acc)| {
+            .filter(|(_, _, prev_hash, acc)| {
                 prev_hash.map_or(true, |hash| hash_account(acc) != hash)
             })
             .map(|(pubkey, owner, _, acc)| AccountCommittee {

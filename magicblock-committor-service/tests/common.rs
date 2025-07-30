@@ -1,10 +1,16 @@
-use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
+
 use async_trait::async_trait;
 use magicblock_committor_service::{
+    commit_scheduler::commit_id_tracker::{
+        CommitIdFetcher, CommitIdTrackerResult,
+    },
     tasks::tasks::CommitTask,
     transaction_preperator::{
         delivery_preparator::DeliveryPreparator,
@@ -27,7 +33,6 @@ use solana_sdk::{
     signer::Signer,
     system_program,
 };
-use magicblock_committor_service::commit_scheduler::commit_id_tracker::{CommitIdFetcher, CommitIdTrackerResult};
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {
@@ -82,12 +87,14 @@ impl TestFixture {
         )
     }
 
-    pub fn create_transaction_preparator(&self) -> TransactionPreparatorV1<MockCommitIdFetcher> {
+    pub fn create_transaction_preparator(
+        &self,
+    ) -> TransactionPreparatorV1<MockCommitIdFetcher> {
         TransactionPreparatorV1::<MockCommitIdFetcher>::new(
             self.rpc_client.clone(),
             self.table_mania.clone(),
             self.compute_budget_config.clone(),
-            Arc::new(MockCommitIdFetcher)
+            Arc::new(MockCommitIdFetcher),
         )
     }
 }
@@ -96,7 +103,10 @@ pub struct MockCommitIdFetcher;
 
 #[async_trait::async_trait]
 impl CommitIdFetcher for MockCommitIdFetcher {
-    async fn fetch_commit_ids(&self, pubkeys: &[Pubkey]) -> CommitIdTrackerResult<HashMap<Pubkey, u64>> {
+    async fn fetch_commit_ids(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>> {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
     }
 
@@ -104,7 +114,6 @@ impl CommitIdFetcher for MockCommitIdFetcher {
         None
     }
 }
-
 
 pub fn generate_random_bytes(length: usize) -> Vec<u8> {
     use rand::Rng;

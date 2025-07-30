@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 
 use log::error;
-use magicblock_program::magic_scheduled_l1_message::{
-    CommittedAccountV2, MagicL1Message, ScheduledL1Message,
-};
 use solana_pubkey::Pubkey;
 
 use crate::persist::{CommitStatus, L1MessagesPersisterIface};

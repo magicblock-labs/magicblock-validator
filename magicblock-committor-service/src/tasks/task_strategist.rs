@@ -226,7 +226,7 @@ mod tests {
         CommittedAccountV2, L1Action, ProgramArgs,
     };
     use solana_account::Account;
-    use solana_sdk::{signature::Keypair, system_program};
+    use solana_sdk::system_program;
 
     use super::*;
     use crate::{

@@ -1,5 +1,3 @@
-use std::{collections::HashMap, sync::Arc};
-
 use log::warn;
 use magicblock_program::{
     magic_scheduled_l1_message::ScheduledL1Message,
@@ -8,30 +6,21 @@ use magicblock_program::{
 use magicblock_rpc_client::{
     MagicBlockSendTransactionConfig, MagicblockRpcClient,
 };
-use magicblock_table_mania::TableMania;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     message::VersionedMessage,
     signature::{Keypair, Signature},
-    signer::Signer,
     transaction::VersionedTransaction,
 };
 
 use crate::{
-    commit_scheduler::commit_id_tracker::CommitIdFetcher,
     message_executor::{
         error::{Error, InternalError, MessageExecutorResult},
         ExecutionOutput, MessageExecutor,
     },
     persist::{CommitStatus, CommitStatusSignatures, L1MessagesPersisterIface},
-    transaction_preperator::transaction_preparator::{
-        TransactionPreparator, TransactionPreparatorV1,
-    },
-    utils::{
-        persist_status_update, persist_status_update_by_message_set,
-        persist_status_update_set,
-    },
-    ComputeBudgetConfig,
+    transaction_preperator::transaction_preparator::TransactionPreparator,
+    utils::persist_status_update_by_message_set,
 };
 
 pub struct L1MessageExecutor<T> {
@@ -177,9 +166,16 @@ where
                 let update_status = CommitStatus::PartOfTooLargeBundleToProcess;
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
-            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::TaskBuilderError(_))) => {
-                let update_status = CommitStatus::Failed;
-                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
+            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::TaskBuilderError(err))) => {
+                match err {
+                    crate::tasks::task_builder::Error::CommitTasksBuildError(_) => {
+                        let update_status = CommitStatus::Failed;
+                        persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
+                    }
+                    crate::tasks::task_builder::Error::FinalizedTasksBuildError(_) => {
+                        // TODO: commit signature to set this
+                    }
+                 }
             },
             Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::DeliveryPreparationError(_))) => {
                 // Persisted internally

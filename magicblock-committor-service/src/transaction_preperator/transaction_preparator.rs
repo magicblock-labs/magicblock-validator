@@ -1,10 +1,9 @@
-use std::{collections::HashMap, fmt::Formatter, sync::Arc};
+use std::{fmt::Formatter, sync::Arc};
 
 use async_trait::async_trait;
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
-use solana_pubkey::Pubkey;
 use solana_sdk::{
     message::VersionedMessage, signature::Keypair, signer::Signer,
 };
@@ -116,9 +115,12 @@ where
         l1_messages_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
         // create tasks
-        let tasks =
-            TaskBuilderV1::commit_tasks(&self.commit_id_fetcher, l1_message)
-                .await?;
+        let tasks = TaskBuilderV1::commit_tasks(
+            &self.commit_id_fetcher,
+            l1_message,
+            l1_messages_persister,
+        )
+        .await?;
         // optimize to fit tx size. aka Delivery Strategy
         let tx_strategy = TaskStrategist::build_strategy(
             tasks,

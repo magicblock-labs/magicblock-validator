@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use dlp::{args::Context, state::DelegationMetadata};
 use log::error;
@@ -11,6 +11,7 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     commit_scheduler::commit_id_tracker::CommitIdFetcher,
+    persist::L1MessagesPersisterIface,
     tasks::tasks::{
         ArgsTask, CommitTask, FinalizeTask, L1ActionTask, L1Task,
         UndelegateTask,
@@ -20,9 +21,10 @@ use crate::{
 #[async_trait::async_trait]
 pub trait TasksBuilder {
     // Creates tasks for commit stage
-    async fn commit_tasks<C: CommitIdFetcher>(
+    async fn commit_tasks<C: CommitIdFetcher, P: L1MessagesPersisterIface>(
         commit_id_fetcher: &Arc<C>,
         l1_message: &ScheduledL1Message,
+        persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>>;
 
     // Create tasks for finalize stage
@@ -84,9 +86,10 @@ impl TaskBuilderV1 {
 #[async_trait::async_trait]
 impl TasksBuilder for TaskBuilderV1 {
     /// Returns [`Task`]s for Commit stage
-    async fn commit_tasks<C: CommitIdFetcher>(
+    async fn commit_tasks<C: CommitIdFetcher, P: L1MessagesPersisterIface>(
         commit_id_fetcher: &Arc<C>,
         l1_message: &ScheduledL1Message,
+        persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>> {
         let (accounts, allow_undelegation) = match &l1_message.l1_message {
             MagicL1Message::L1Actions(actions) => {
@@ -116,6 +119,15 @@ impl TasksBuilder for TaskBuilderV1 {
         let commit_ids = commit_id_fetcher
             .fetch_commit_ids(&committed_pubkeys)
             .await?;
+
+        // Persist commit ids for commitees
+        commit_ids
+            .iter()
+            .for_each(|(pubkey, commit_id) | {
+                if let Err(err) = persister.set_commit_id(l1_message.id, pubkey, *commit_id) {
+                    error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, l1_message.id, pubkey, err);
+                }
+            });
 
         let tasks = accounts
             .into_iter()

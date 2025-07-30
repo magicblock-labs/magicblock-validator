@@ -31,7 +31,6 @@ use crate::{
         task_strategist::TransactionStrategy,
         tasks::{L1Task, TaskPreparationInfo},
     },
-    transactions::serialize_and_encode_base64,
     utils::persist_status_update,
     ComputeBudgetConfig,
 };

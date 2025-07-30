@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     sync::{Arc, Mutex},
 };
 
@@ -17,7 +17,6 @@ use tokio::{
 
 use crate::{
     commit_scheduler::{
-        commit_id_tracker::CommitIdFetcher,
         commit_scheduler_inner::{CommitSchedulerInner, POISONED_INNER_MSG},
         db::DB,
         Error,
@@ -27,9 +26,8 @@ use crate::{
         message_executor_factory::MessageExecutorFactory, ExecutionOutput,
         MessageExecutor,
     },
-    persist::{CommitStatus, L1MessagesPersisterIface},
+    persist::L1MessagesPersisterIface,
     types::{ScheduledL1MessageWrapper, TriggerType},
-    utils::persist_status_update_by_message_set,
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
@@ -234,54 +232,6 @@ where
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedMessageExecutionResult>,
     ) {
-        // Prepare commit ids for execution
-        // let commit_ids = if let Some(pubkeys) =
-        //     l1_message.scheduled_l1_message.get_committed_pubkeys()
-        // {
-        //     let commit_ids = commit_id_tracker.fetch_commit_ids(&pubkeys).await;
-        //
-        //     match commit_ids {
-        //         Ok(value) => value,
-        //         Err(err) => {
-        //             // TODO(edwin): support contract and send result via receiver as well
-        //             // At this point this is unrecoverable.
-        //             // We just skip for now and pretend this message didn't exist
-        //             error!("Failed to fetch commit nonces for message: {:?}, error: {:?}", l1_message, err);
-        //
-        //             let message_id = l1_message.scheduled_l1_message.id;
-        //             info!(
-        //                 "Message has to be committed manually: {}",
-        //                 message_id
-        //             );
-        //             // Persist as Failed in DB
-        //             persist_status_update_by_message_set(
-        //                 &persister,
-        //                 message_id,
-        //                 &pubkeys,
-        //                 CommitStatus::Failed,
-        //             );
-        //             inner_scheduler
-        //                 .lock()
-        //                 .expect(POISONED_INNER_MSG)
-        //                 .complete(&l1_message.scheduled_l1_message);
-        //             drop(execution_permit);
-        //             return;
-        //         }
-        //     }
-        // } else {
-        //     // Pure L1Action, no commit ids used
-        //     HashMap::new()
-        // };
-        //
-        // // Persist data
-        // commit_ids
-        //     .iter()
-        //     .for_each(|(pubkey, commit_id) | {
-        //         if let Err(err) = persister.set_commit_id(l1_message.scheduled_l1_message.id, pubkey, *commit_id) {
-        //             error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, l1_message.scheduled_l1_message.id, pubkey, err);
-        //         }
-        //     });
-
         let result = executor
             .execute(l1_message.scheduled_l1_message.clone(), persister)
             .await
@@ -356,6 +306,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::HashMap,
         sync::{
             atomic::{AtomicUsize, Ordering},
             Arc,

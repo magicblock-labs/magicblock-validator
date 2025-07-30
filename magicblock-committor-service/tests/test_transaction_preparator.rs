@@ -163,7 +163,7 @@ async fn test_prepare_commit_tx_with_l1_actions() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 }
 
-#[ignore= "Implement MetadataFetcher for finaliztion"]
+#[ignore = "Implement MetadataFetcher for finaliztion"]
 #[tokio::test]
 async fn test_prepare_finalize_tx_with_undelegate() {
     let fixture = TestFixture::new().await;

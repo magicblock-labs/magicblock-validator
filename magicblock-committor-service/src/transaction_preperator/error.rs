@@ -1,4 +1,3 @@
-use solana_pubkey::Pubkey;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
