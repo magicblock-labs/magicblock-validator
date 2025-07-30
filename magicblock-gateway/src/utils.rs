@@ -6,7 +6,9 @@ use std::{
 
 use hyper::body::{Body, Bytes, Frame, SizeHint};
 use json::Serialize;
-use magicblock_gateway_types::accounts::{Pubkey, ReadableAccount};
+use magicblock_gateway_types::accounts::{
+    LockedAccount, Pubkey, ReadableAccount,
+};
 use solana_account_decoder::{
     encode_ui_account, UiAccount, UiAccountEncoding, UiDataSliceConfig,
 };
@@ -140,15 +142,15 @@ pub(crate) struct AccountWithPubkey {
 }
 
 impl AccountWithPubkey {
-    pub(crate) fn new<A: ReadableAccount>(
-        pubkey: Pubkey,
-        account: &A,
+    pub(crate) fn new(
+        account: &LockedAccount,
         encoding: UiAccountEncoding,
         slice: Option<UiDataSliceConfig>,
     ) -> Self {
-        let account =
-            encode_ui_account(&pubkey, account, encoding, None, slice);
-        let pubkey = SerdePubkey(pubkey);
+        let pubkey = SerdePubkey(account.pubkey);
+        let account = account.read_locked(|pk, acc| {
+            encode_ui_account(pk, acc, encoding, None, slice)
+        });
         Self { pubkey, account }
     }
 }

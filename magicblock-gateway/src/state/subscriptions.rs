@@ -9,7 +9,7 @@ use std::{
 };
 
 use magicblock_gateway_types::{
-    accounts::{AccountSharedData, Pubkey},
+    accounts::{AccountWithSlot, Pubkey, ReadableAccount},
     transactions::{TransactionResult, TransactionStatus},
 };
 use parking_lot::RwLock;
@@ -43,11 +43,11 @@ static SUBID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone)]
 pub(crate) struct SubscriptionsDb {
-    accounts: AccountSubscriptionsDb,
-    programs: ProgramSubscriptionsDb,
+    pub(crate) accounts: AccountSubscriptionsDb,
+    pub(crate) programs: ProgramSubscriptionsDb,
     pub(crate) signatures: SignatureSubscriptionsDb,
-    logs: LogsSubscriptionsDb,
-    slot: SlotSubscriptionsDb,
+    pub(crate) logs: LogsSubscriptionsDb,
+    pub(crate) slot: SlotSubscriptionsDb,
 }
 
 impl Default for SubscriptionsDb {
@@ -89,14 +89,10 @@ impl SubscriptionsDb {
         SubscriptionHandle { id, cleanup }
     }
 
-    pub(crate) async fn send_account_update(
-        &self,
-        update: (Pubkey, AccountSharedData),
-        slot: Slot,
-    ) {
+    pub(crate) async fn send_account_update(&self, update: &AccountWithSlot) {
         self.accounts
-            .read_async(&update.0, |_, subscribers| {
-                subscribers.send(&update, slot)
+            .read_async(&update.account.pubkey, |_, subscribers| {
+                subscribers.send(&update.account, update.slot)
             })
             .await;
     }
@@ -126,14 +122,11 @@ impl SubscriptionsDb {
         SubscriptionHandle { id, cleanup }
     }
 
-    pub(crate) async fn send_program_update(
-        &self,
-        update: (Pubkey, AccountSharedData),
-        slot: Slot,
-    ) {
+    pub(crate) async fn send_program_update(&self, update: &AccountWithSlot) {
+        let owner = update.account.account.owner();
         self.programs
-            .read_async(&update.0, |_, subscribers| {
-                subscribers.send(&update, slot)
+            .read_async(owner, |_, subscribers| {
+                subscribers.send(&update.account, update.slot)
             })
             .await;
     }
@@ -168,8 +161,8 @@ impl SubscriptionsDb {
 
     pub(crate) fn subscribe_to_logs(
         &self,
-        chan: WsConnectionChannel,
         encoder: TransactionLogsEncoder,
+        chan: WsConnectionChannel,
     ) -> SubscriptionHandle {
         let conid = chan.id;
         let id = self.logs.write().add_subscriber(chan, encoder.clone());

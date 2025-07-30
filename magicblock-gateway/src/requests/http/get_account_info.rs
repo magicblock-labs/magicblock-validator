@@ -1,39 +1,45 @@
 use hyper::Response;
-use magicblock_accounts_db::AccountsDb;
+use magicblock_gateway_types::accounts::LockedAccount;
 use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
 use crate::{
     error::RpcError,
     requests::{params::SerdePubkey, payload::ResponsePayload, JsonRequest},
+    server::http::dispatch::HttpDispatcher,
     unwrap,
     utils::JsonBody,
 };
 
-pub(crate) fn handle(
-    request: JsonRequest,
-    accountsdb: &AccountsDb,
-) -> Response<JsonBody> {
-    let params = request
-        .params
-        .ok_or_else(|| RpcError::invalid_request("missing params"));
-    unwrap!(mut params, request.id);
-    let (pubkey, config) =
-        parse_params!(params, SerdePubkey, RpcAccountInfoConfig);
-    let pubkey = pubkey
-        .ok_or_else(|| RpcError::invalid_params("missing or invalid pubkey"));
-    unwrap!(pubkey, request.id);
-    let config = config.unwrap_or_default();
-    let slot = accountsdb.slot();
-    let Some(account) = accountsdb.get_account(&pubkey.0).ok() else {
-        return ResponsePayload::encode(&request.id, None::<()>, slot);
-    };
-    let account = encode_ui_account(
-        &pubkey.0,
-        &account,
-        config.encoding.unwrap_or(UiAccountEncoding::Base58),
-        None,
-        None,
-    );
-    ResponsePayload::encode(&request.id, account, slot)
+impl HttpDispatcher {
+    pub(crate) fn get_account_info(
+        &self,
+        request: JsonRequest,
+    ) -> Response<JsonBody> {
+        let params = request
+            .params
+            .ok_or_else(|| RpcError::invalid_request("missing params"));
+        unwrap!(mut params, request.id);
+        let (pubkey, config) =
+            parse_params!(params, SerdePubkey, RpcAccountInfoConfig);
+        let pubkey = pubkey.ok_or_else(|| {
+            RpcError::invalid_params("missing or invalid pubkey")
+        });
+        unwrap!(pubkey, request.id);
+        let config = config.unwrap_or_default();
+        let slot = self.accountsdb.slot();
+        let account = self.accountsdb.get_account(&pubkey.0).ok().map(|acc| {
+            let locked = LockedAccount::new(pubkey.0, acc);
+            locked.read_locked(|pk, acc| {
+                encode_ui_account(
+                    pk,
+                    acc,
+                    config.encoding.unwrap_or(UiAccountEncoding::Base58),
+                    None,
+                    None,
+                )
+            })
+        });
+        ResponsePayload::encode(&request.id, account, slot)
+    }
 }

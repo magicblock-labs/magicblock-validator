@@ -9,26 +9,6 @@ use crate::{error::RpcError, RpcResult};
 
 use super::JsonRequest;
 
-pub(crate) mod get_account_info;
-pub(crate) mod get_balance;
-pub(crate) mod get_block;
-pub(crate) mod get_block_height;
-pub(crate) mod get_block_time;
-pub(crate) mod get_blocks;
-pub(crate) mod get_blocks_with_limit;
-pub(crate) mod get_fees_for_message;
-pub(crate) mod get_identity;
-pub(crate) mod get_latest_blockhash;
-pub(crate) mod get_multiple_accounts;
-pub(crate) mod get_program_accounts;
-pub(crate) mod get_signature_statuses;
-pub(crate) mod get_signatures_for_address;
-pub(crate) mod get_slot;
-pub(crate) mod get_token_account_balance;
-pub(crate) mod get_token_accounts_by_delegate;
-pub(crate) mod get_token_accounts_by_owner;
-pub(crate) mod get_transaction;
-
 pub(crate) enum Data {
     Empty,
     SingleChunk(Bytes),
@@ -78,3 +58,25 @@ const TOKEN_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const TOKEN_2022_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+pub(crate) mod get_account_info;
+pub(crate) mod get_balance;
+pub(crate) mod get_block;
+pub(crate) mod get_block_height;
+pub(crate) mod get_block_time;
+pub(crate) mod get_blocks;
+pub(crate) mod get_blocks_with_limit;
+pub(crate) mod get_fees_for_message;
+pub(crate) mod get_identity;
+pub(crate) mod get_latest_blockhash;
+pub(crate) mod get_multiple_accounts;
+pub(crate) mod get_program_accounts;
+pub(crate) mod get_signature_statuses;
+pub(crate) mod get_signatures_for_address;
+pub(crate) mod get_slot;
+pub(crate) mod get_token_account_balance;
+pub(crate) mod get_token_accounts_by_delegate;
+pub(crate) mod get_token_accounts_by_owner;
+pub(crate) mod get_transaction;
+pub(crate) mod send_transaction;
+pub(crate) mod simulate_transaction;

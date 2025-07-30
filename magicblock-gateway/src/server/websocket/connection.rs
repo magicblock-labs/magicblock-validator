@@ -8,6 +8,7 @@ use fastwebsockets::{
 };
 use hyper::{body::Bytes, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
+use json::Value;
 use log::debug;
 use tokio::{
     sync::mpsc::{self, Receiver},
@@ -22,40 +23,39 @@ use crate::{
         JsonRequest,
     },
     server::{websocket::dispatch::WsConnectionChannel, Shutdown},
-    state::SharedState,
 };
 
-use super::dispatch::{WsDispatchResult, WsDispatcher};
+use super::{
+    dispatch::{WsDispatchResult, WsDispatcher},
+    ConnectionState,
+};
 
-type WebscoketStream = WebSocket<TokioIo<Upgraded>>;
+type WebsocketStream = WebSocket<TokioIo<Upgraded>>;
 pub(crate) type ConnectionID = u32;
 
 pub(super) struct ConnectionHandler {
     cancel: CancellationToken,
-    ws: WebscoketStream,
+    ws: WebsocketStream,
     dispatcher: WsDispatcher,
     updates_rx: Receiver<Bytes>,
     _sd: Arc<Shutdown>,
 }
 
 impl ConnectionHandler {
-    pub(super) fn new(
-        ws: WebscoketStream,
-        state: SharedState,
-        cancel: CancellationToken,
-        _sd: Arc<Shutdown>,
-    ) -> Self {
+    pub(super) fn new(ws: WebsocketStream, state: ConnectionState) -> Self {
         static CONNECTION_COUNTER: AtomicU32 = AtomicU32::new(0);
-        let id = CONNECTION_COUNTER.load(std::sync::atomic::Ordering::Relaxed);
+        let id = CONNECTION_COUNTER
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, updates_rx) = mpsc::channel(4096);
         let chan = WsConnectionChannel { id, tx };
-        let dispatcher = WsDispatcher::new(state, chan);
+        let dispatcher =
+            WsDispatcher::new(state.subscriptions, state.transactions, chan);
         Self {
             dispatcher,
-            cancel,
+            cancel: state.cancel,
             ws,
             updates_rx,
-            _sd,
+            _sd: state.shutdown,
         }
     }
 
@@ -72,16 +72,16 @@ impl ConnectionHandler {
                     }
                     let parsed = json::from_slice::<JsonRequest>(&frame.payload)
                         .map_err(RpcError::parse_error);
-                    let request = match parsed {
+                    let mut request = match parsed {
                         Ok(r) => r,
                         Err(error) => {
-                            self.report_failure(error).await;
+                            self.report_failure(None, error).await;
                             continue;
                         }
                     };
-                    let success = match self.dispatcher.dispatch(request).await {
+                    let success = match self.dispatcher.dispatch(&mut request).await {
                         Ok(r) => self.report_success(r).await,
-                        Err(e) => self.report_failure(e).await,
+                        Err(e) => self.report_failure(Some(&request.id), e).await,
                     };
                     if !success { break };
                 }
@@ -91,9 +91,21 @@ impl ConnectionHandler {
                         let _ = self.ws.write_frame(frame).await;
                         break;
                     }
+                    let frame = Frame::new(true, OpCode::Ping, None, b"".as_ref().into());
+                    if self.ws.write_frame(frame).await.is_err() {
+                        break;
+                    };
+                }
+                Some(update) = self.updates_rx.recv() => {
+                    if self.send(update.as_ref()).await.is_err() {
+                        break;
+                    }
                 }
                 _ = self.cancel.cancelled() => break,
                 _ = self.dispatcher.cleanup() => {}
+                else => {
+                    break;
+                }
             }
         }
     }
@@ -104,8 +116,12 @@ impl ConnectionHandler {
         self.send(payload.0).await.is_ok()
     }
 
-    async fn report_failure(&mut self, error: RpcError) -> bool {
-        let payload = ResponseErrorPayload::encode(None, error);
+    async fn report_failure(
+        &mut self,
+        id: Option<&Value>,
+        error: RpcError,
+    ) -> bool {
+        let payload = ResponseErrorPayload::encode(id, error);
         self.send(payload.into_body().0).await.is_ok()
     }
 

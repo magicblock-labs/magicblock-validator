@@ -1,15 +1,14 @@
 use hyper::Response;
-use magicblock_accounts_db::AccountsDb;
 
 use crate::{
     requests::{payload::ResponsePayload, JsonRequest},
+    server::http::dispatch::HttpDispatcher,
     utils::JsonBody,
 };
 
-pub(crate) fn handle(
-    request: JsonRequest,
-    accountsdb: &AccountsDb,
-) -> Response<JsonBody> {
-    let slot = accountsdb.slot();
-    Response::new(ResponsePayload::encode_no_context(&request.id, slot))
+impl HttpDispatcher {
+    pub(crate) fn get_slot(&self, request: JsonRequest) -> Response<JsonBody> {
+        let slot = self.accountsdb.slot();
+        Response::new(ResponsePayload::encode_no_context(&request.id, slot))
+    }
 }

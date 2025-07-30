@@ -1,10 +1,8 @@
 use hyper::body::Bytes;
 use json::Serialize;
 use magicblock_gateway_types::{
-    accounts::{AccountSharedData, Pubkey, ReadableAccount},
-    transactions::{
-        TransactionProcessingResult, TransactionResult, TransactionStatus,
-    },
+    accounts::{AccountSharedData, LockedAccount, Pubkey, ReadableAccount},
+    transactions::{TransactionResult, TransactionStatus},
 };
 use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
 
@@ -39,8 +37,8 @@ impl From<&AccountEncoder> for UiAccountEncoding {
     }
 }
 
-impl From<&UiAccountEncoding> for AccountEncoder {
-    fn from(value: &UiAccountEncoding) -> Self {
+impl From<UiAccountEncoding> for AccountEncoder {
+    fn from(value: UiAccountEncoding) -> Self {
         match value {
             UiAccountEncoding::Base58 | UiAccountEncoding::Binary => {
                 Self::Base58
@@ -59,7 +57,7 @@ pub struct ProgramAccountEncoder {
 }
 
 impl Encoder for AccountEncoder {
-    type Data = (Pubkey, AccountSharedData);
+    type Data = LockedAccount;
 
     fn encode(
         &self,
@@ -67,24 +65,20 @@ impl Encoder for AccountEncoder {
         data: &Self::Data,
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        let encoded =
-            encode_ui_account(&data.0, &data.1, self.into(), None, None);
+        let encoded = data.read_locked(|pk, acc| {
+            encode_ui_account(pk, acc, self.into(), None, None)
+        });
         let method = "accountNotification";
         NotificationPayload::encode(encoded, slot, method, id)
     }
 }
 
 impl Encoder for ProgramAccountEncoder {
-    type Data = (Pubkey, AccountSharedData);
+    type Data = LockedAccount;
 
     fn encode(&self, slot: Slot, data: &Self::Data, id: u64) -> Option<Bytes> {
-        self.filters.matches(data.1.data()).then_some(())?;
-        let value = AccountWithPubkey::new(
-            data.0,
-            &data.1,
-            (&self.encoder).into(),
-            None,
-        );
+        self.filters.matches(data.account.data()).then_some(())?;
+        let value = AccountWithPubkey::new(data, (&self.encoder).into(), None);
         let method = "programNotification";
         NotificationPayload::encode(value, slot, method, id)
     }
@@ -128,10 +122,7 @@ impl Encoder for TransactionLogsEncoder {
         data: &Self::Data,
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        let TransactionProcessingResult::Execution(execution) = &data.result
-        else {
-            return None;
-        };
+        let execution = &data.result;
         if let Self::Mentions(pubkey) = self {
             execution
                 .accounts

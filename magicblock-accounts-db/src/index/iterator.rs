@@ -3,14 +3,11 @@ use log::error;
 use solana_pubkey::Pubkey;
 
 use super::{table::Table, MDB_SET_OP};
-use crate::AdbResult;
+use crate::{index::Offset, AdbResult};
 
 /// Iterator over pubkeys and offsets, where accounts
-/// for those pubkeys can be found in database
-///
-/// S: Starting position operation, determines where to place cursor initially
-/// N: Next position operation, determines where to move cursor next
-pub(crate) struct OffsetPubkeyIter<'env> {
+/// for those pubkeys can be found in the database
+pub struct OffsetPubkeyIter<'env> {
     iter: lmdb::Iter<'env>,
     _cursor: RoCursor<'env>,
     _txn: RoTransaction<'env>,
@@ -50,10 +47,10 @@ impl<'env> OffsetPubkeyIter<'env> {
 }
 
 impl Iterator for OffsetPubkeyIter<'_> {
-    type Item = (u32, Pubkey);
+    type Item = (Offset, Pubkey);
     fn next(&mut self) -> Option<Self::Item> {
         match self.iter.next()? {
-            Ok(entry) => Some(bytes!(#unpack, entry.1, u32, Pubkey)),
+            Ok(entry) => Some(bytes!(#unpack, entry.1, Offset, Pubkey)),
             Err(error) => {
                 error!("error advancing offset iterator cursor: {error}");
                 None
