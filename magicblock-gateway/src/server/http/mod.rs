@@ -1,5 +1,6 @@
 use std::{net::SocketAddr, sync::Arc};
 
+use dispatch::HttpDispatcher;
 use hyper::service::service_fn;
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -8,13 +9,13 @@ use hyper_util::{
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 
-use crate::{error::RpcError, requests, state::SharedState, RpcResult};
+use crate::{error::RpcError, state::SharedState, RpcResult};
 
 use super::Shutdown;
 
 struct HttpServer {
     socket: TcpListener,
-    state: SharedState,
+    dispatcher: Arc<HttpDispatcher>,
     cancel: CancellationToken,
     shutdown: Arc<Shutdown>,
 }
@@ -28,9 +29,15 @@ impl HttpServer {
         let socket =
             TcpListener::bind(addr).await.map_err(RpcError::internal)?;
         let shutdown = Arc::default();
+
+        let dispatcher = Arc::new(HttpDispatcher {
+            accountsdb: state.accountsdb.clone(),
+            ledger: state.ledger.clone(),
+            transactions: state.transactions.clone(),
+        });
         Ok(Self {
             socket,
-            state,
+            dispatcher,
             cancel,
             shutdown,
         })
@@ -47,13 +54,12 @@ impl HttpServer {
     }
 
     fn handle(&mut self, stream: TcpStream) {
-        let state = self.state.clone();
         let cancel = self.cancel.child_token();
 
         let io = TokioIo::new(stream);
-        let handler = service_fn(move |request| {
-            requests::http::dispatch(request, state.clone())
-        });
+        let dispatcher = self.dispatcher.clone();
+        let handler =
+            service_fn(move |request| dispatcher.clone().dispatch(request));
         let shutdown = self.shutdown.clone();
 
         tokio::spawn(async move {
@@ -74,3 +80,5 @@ impl HttpServer {
         });
     }
 }
+
+mod dispatch;
