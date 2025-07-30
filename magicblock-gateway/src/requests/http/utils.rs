@@ -9,17 +9,15 @@ use hyper::body::{Body, Bytes, Frame, Incoming, SizeHint};
 use hyper::Request;
 use json::Serialize;
 
-use crate::{requests::JsonRequest, RpcResult};
+use crate::{error::RpcError, requests::JsonRequest, RpcResult};
 
-use super::RpcError;
-
-pub(super) enum Data {
+pub(crate) enum Data {
     Empty,
     SingleChunk(Bytes),
     MultiChunk(Vec<u8>),
 }
 
-pub(super) fn parse_body(body: Data) -> RpcResult<JsonRequest> {
+pub(crate) fn parse_body(body: Data) -> RpcResult<JsonRequest> {
     let body = match &body {
         Data::Empty => {
             return Err(RpcError::invalid_request("missing request body"));
@@ -30,7 +28,7 @@ pub(super) fn parse_body(body: Data) -> RpcResult<JsonRequest> {
     json::from_slice(body).map_err(Into::into)
 }
 
-pub(super) async fn extract_bytes(
+pub(crate) async fn extract_bytes(
     request: Request<Incoming>,
 ) -> RpcResult<Data> {
     let mut request = request.into_body();
@@ -55,7 +53,7 @@ pub(super) async fn extract_bytes(
     Ok(data)
 }
 
-pub(crate) struct JsonBody(Vec<u8>);
+pub(crate) struct JsonBody(pub Vec<u8>);
 
 impl<S: Serialize> From<S> for JsonBody {
     fn from(value: S) -> Self {
@@ -84,4 +82,34 @@ impl Body for JsonBody {
             Poll::Ready(None)
         }
     }
+}
+
+#[macro_export]
+macro_rules! unwrap {
+    ($result:expr) => {
+        match $result {
+            Ok(r) => r,
+            Err(error) => {
+                return Ok($crate::requests::payload::ResponseErrorPayload::encode(
+                    None, error,
+                ));
+            }
+        }
+    };
+    (@match $result: expr, $id:expr) => {
+        match $result {
+            Ok(r) => r,
+            Err(error) => {
+                return $crate::requests::payload::ResponseErrorPayload::encode(
+                    Some($id), error,
+                );
+            }
+        }
+    };
+    (mut $result: ident, $id:expr) => {
+        let mut $result = unwrap!(@match $result, $id);
+    };
+    ($result:ident, $id:expr) => {
+        let $result = unwrap!(@match $result, $id);
+    };
 }
