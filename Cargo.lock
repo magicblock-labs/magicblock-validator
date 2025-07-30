@@ -838,12 +838,6 @@ dependencies = [
 
 [[package]]
 name = "bs58"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "771fe0050b883fcc3ea2359b1a96bcfbc090b7116eae7c3c512c7a083fdf23d3"
-
-[[package]]
-name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4"
@@ -3380,7 +3374,7 @@ dependencies = [
 name = "keypair-base58"
 version = "0.0.0"
 dependencies = [
- "bs58 0.5.1",
+ "bs58",
  "serde_json",
 ]
 
@@ -3939,7 +3933,7 @@ dependencies = [
 name = "magicblock-config"
 version = "0.1.7"
 dependencies = [
- "bs58 0.4.0",
+ "bs58",
  "clap 4.5.40",
  "isocountry",
  "magicblock-config-macro",
@@ -3991,6 +3985,7 @@ dependencies = [
 name = "magicblock-gateway"
 version = "0.1.7"
 dependencies = [
+ "bs58",
  "fastwebsockets",
  "futures 0.3.31",
  "http-body-util",
@@ -4004,6 +3999,7 @@ dependencies = [
  "scc",
  "serde",
  "solana-account-decoder",
+ "solana-rpc-client-api",
  "solana-signature",
  "solana-transaction",
  "sonic-rs",
@@ -4033,7 +4029,7 @@ dependencies = [
  "agave-geyser-plugin-interface",
  "anyhow",
  "base64 0.21.7",
- "bs58 0.4.0",
+ "bs58",
  "cargo-lock",
  "expiring-hashmap",
  "flume",
@@ -4197,7 +4193,7 @@ version = "0.1.7"
 dependencies = [
  "base64 0.21.7",
  "bincode",
- "bs58 0.4.0",
+ "bs58",
  "jsonrpc-core",
  "jsonrpc-core-client",
  "jsonrpc-derive",
@@ -6597,7 +6593,7 @@ dependencies = [
  "Inflector",
  "base64 0.22.1",
  "bincode",
- "bs58 0.5.1",
+ "bs58",
  "bv",
  "lazy_static",
  "serde",
@@ -6634,7 +6630,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b3485b583fcc58b5fa121fa0b4acb90061671fb1a9769493e8b4ad586581f47"
 dependencies = [
  "base64 0.22.1",
- "bs58 0.5.1",
+ "bs58",
  "serde",
  "serde_derive",
  "serde_json",
@@ -7587,7 +7583,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce8287469a6f059411a3940bbc1b0a428b27104827ae1a80e465a1139f8b0773"
 dependencies = [
  "agave-geyser-plugin-interface",
- "bs58 0.5.1",
+ "bs58",
  "crossbeam-channel",
  "json5",
  "jsonrpc-core",
@@ -7682,7 +7678,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf7bcb14392900fe02e4e34e90234fbf0c673d4e327888410ba99fa2ba0f4e99"
 dependencies = [
  "borsh 1.5.7",
- "bs58 0.5.1",
+ "bs58",
  "bytemuck",
  "bytemuck_derive",
  "js-sys",
@@ -7766,7 +7762,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3dbb7042c2e0c561afa07242b2099d55c57bd1b1da3b6476932197d84e15e3e4"
 dependencies = [
- "bs58 0.5.1",
+ "bs58",
  "ed25519-dalek",
  "ed25519-dalek-bip32",
  "rand 0.7.3",
@@ -7800,7 +7796,7 @@ checksum = "5fff3aab7ad7578d0bd2ac32d232015e535dfe268e35d45881ab22db0ba61c1e"
 dependencies = [
  "base64 0.22.1",
  "blake3",
- "bs58 0.5.1",
+ "bs58",
  "bytemuck",
 ]
 
@@ -8251,7 +8247,7 @@ dependencies = [
  "blake3",
  "borsh 0.10.4",
  "borsh 1.5.7",
- "bs58 0.5.1",
+ "bs58",
  "bytemuck",
  "console_error_panic_hook",
  "console_log",
@@ -8460,7 +8456,7 @@ checksum = "40db1ff5a0f8aea2c158d78ab5f2cf897848964251d1df42fef78efd3c85b863"
 dependencies = [
  "borsh 0.10.4",
  "borsh 1.5.7",
- "bs58 0.5.1",
+ "bs58",
  "bytemuck",
  "bytemuck_derive",
  "curve25519-dalek 4.1.3",
@@ -8650,7 +8646,7 @@ checksum = "b978303a9d6f3270ab83fa28ad07a2f4f3181a65ce332b4b5f5d06de5f2a46c5"
 dependencies = [
  "base64 0.22.1",
  "bincode",
- "bs58 0.5.1",
+ "bs58",
  "crossbeam-channel",
  "dashmap",
  "itertools 0.12.1",
@@ -8713,7 +8709,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bincode",
- "bs58 0.5.1",
+ "bs58",
  "indicatif",
  "log",
  "reqwest",
@@ -8750,7 +8746,7 @@ checksum = "f7105452c4f039fd2c07e6fda811ff23bd270c99f91ac160308f02701eb19043"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "bs58 0.5.1",
+ "bs58",
  "jsonrpc-core",
  "reqwest",
  "reqwest-middleware",
@@ -8927,7 +8923,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4808e8d7f3c931657e615042d4176b423e66f64dc99e3dc3c735a197e512029b"
 dependencies = [
  "bincode",
- "bs58 0.5.1",
+ "bs58",
  "getrandom 0.1.16",
  "js-sys",
  "serde",
@@ -9006,7 +9002,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86280da8b99d03560f6ab5aca9de2e38805681df34e0bb8f238e69b29433b9df"
 dependencies = [
- "bs58 0.5.1",
+ "bs58",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -9167,7 +9163,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47d251c8f3dc015f320b4161daac7f108156c837428e5a8cc61136d25beb11d6"
 dependencies = [
- "bs58 0.5.1",
+ "bs58",
  "ed25519-dalek",
  "rand 0.8.5",
  "serde",
@@ -9320,7 +9316,7 @@ name = "solana-storage-proto"
 version = "0.1.7"
 dependencies = [
  "bincode",
- "bs58 0.4.0",
+ "bs58",
  "enum-iterator",
  "prost 0.11.9",
  "protobuf-src",
@@ -9338,7 +9334,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45ed614e38d7327a6a399a17afb3b56c9b7b53fb7222eecdacd9bb73bf8a94d9"
 dependencies = [
  "bincode",
- "bs58 0.5.1",
+ "bs58",
  "prost 0.11.9",
  "protobuf-src",
  "serde",
@@ -9793,7 +9789,7 @@ dependencies = [
  "base64 0.22.1",
  "bincode",
  "borsh 1.5.7",
- "bs58 0.5.1",
+ "bs58",
  "lazy_static",
  "log",
  "serde",
@@ -9832,7 +9828,7 @@ checksum = "d5ac91c8f0465c566164044ad7b3d18d15dfabab1b8b4a4a01cb83c047efdaae"
 dependencies = [
  "base64 0.22.1",
  "bincode",
- "bs58 0.5.1",
+ "bs58",
  "serde",
  "serde_derive",
  "serde_json",

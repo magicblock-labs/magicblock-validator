@@ -26,10 +26,12 @@ magicblock-ledger = { workspace = true }
 magicblock-gateway-types = { workspace = true }
 
 solana-account-decoder = { workspace = true }
+solana-rpc-client-api = { workspace = true }
 solana-signature = { workspace = true }
 solana-transaction = { workspace = true }
 
 serde = { workspace = true }
 json = { workspace = true }
+bs58 = { workspace = true }
  
 log = { workspace = true }
