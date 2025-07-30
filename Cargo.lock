@@ -3662,7 +3662,7 @@ dependencies = [
  "magicblock-bank",
  "magicblock-committor-service",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=374603f739a1b218b6b6f49dcd7f0ba60d662c7c)",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-processor",
@@ -3822,7 +3822,7 @@ dependencies = [
  "log",
  "lru 0.16.0",
  "magicblock-committor-program",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=374603f739a1b218b6b6f49dcd7f0ba60d662c7c)",
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
@@ -3867,6 +3867,7 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program"
 version = "1.0.0"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=374603f739a1b218b6b6f49dcd7f0ba60d662c7c#374603f739a1b218b6b6f49dcd7f0ba60d662c7c"
 dependencies = [
  "bincode",
  "borsh 1.5.5",
