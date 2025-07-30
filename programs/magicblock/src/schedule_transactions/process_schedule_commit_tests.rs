@@ -204,31 +204,30 @@ fn extend_transaction_accounts_from_ix_adding_magic_context(
 }
 
 fn assert_first_commit(
-    scheduled_commits: &[ScheduledCommit],
+    scheduled_l1_messages: &[ScheduledL1Message],
     payer: &Pubkey,
     committees: &[Pubkey],
     expected_request_undelegation: bool,
 ) {
-    let commit = &scheduled_commits[0];
+    let scheduled_l1_message = &scheduled_l1_messages[0];
     let test_clock = get_clock();
     assert_matches!(
-        commit,
-        ScheduledCommit {
+        scheduled_l1_message,
+        ScheduledL1Message {
             id,
             slot,
-            accounts,
-            payer: p,
+            payer: actual_payer,
             blockhash: _,
-            commit_sent_transaction,
-            request_undelegation,
+            action_sent_transaction,
+            l1_message,
         } => {
             assert!(id >= &0);
             assert_eq!(slot, &test_clock.slot);
-            assert_eq!(p, payer);
-            assert_eq!(accounts.iter().map(|ca| ca.pubkey).collect::<Vec<_>>().as_slice(), committees);
+            assert_eq!(actual_payer, payer);
+            assert_eq!(l1_message.get_committed_pubkeys().unwrap().as_slice(), committees);
             let instruction = MagicBlockInstruction::ScheduledCommitSent(*id);
-            assert_eq!(commit_sent_transaction.data(0), instruction.try_to_vec().unwrap());
-            assert_eq!(*request_undelegation, expected_request_undelegation);
+            assert_eq!(action_sent_transaction.data(0), instruction.try_to_vec().unwrap());
+            assert_eq!(l1_message.is_undelegate(), expected_request_undelegation);
         }
     );
 }
@@ -309,20 +308,14 @@ mod tests {
             );
 
             // At this point the intended commits were accepted and moved to the global
-            let scheduled_commits = assert_accepted_actions(
+            let scheduled_messages = assert_accepted_actions(
                 &processed_accepted,
                 &payer.pubkey(),
                 1,
             );
 
-            let scheduled_commits = scheduled_commits
-                .into_iter()
-                .map(|el| el.try_into())
-                .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
-                .expect("only commit action");
-
             assert_first_commit(
-                &scheduled_commits,
+                &scheduled_messages,
                 &payer.pubkey(),
                 &[committee],
                 false,
@@ -406,12 +399,6 @@ mod tests {
                 &payer.pubkey(),
                 1,
             );
-
-            let scheduled_commits = scheduled_commits
-                .into_iter()
-                .map(|el| el.try_into())
-                .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
-                .expect("only commit action");
 
             assert_first_commit(
                 &scheduled_commits,
@@ -519,11 +506,11 @@ mod tests {
                 1,
             );
 
-            let scheduled_commits = scheduled_commits
-                .into_iter()
-                .map(|el| el.try_into())
-                .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
-                .expect("only commit action");
+            // let scheduled_commits = scheduled_commits
+            //     .into_iter()
+            //     .map(|el| el.try_into())
+            //     .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
+            //     .expect("only commit action");
 
             assert_first_commit(
                 &scheduled_commits,
@@ -634,11 +621,11 @@ mod tests {
                 1,
             );
 
-            let scheduled_commits = scheduled_commits
-                .into_iter()
-                .map(|el| el.try_into())
-                .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
-                .expect("only commit action");
+            // let scheduled_commits = scheduled_commits
+            //     .into_iter()
+            //     .map(|el| el.try_into())
+            //     .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
+            //     .expect("only commit action");
 
             assert_first_commit(
                 &scheduled_commits,

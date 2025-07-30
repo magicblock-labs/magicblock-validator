@@ -83,6 +83,24 @@ impl ScheduledL1Message {
             l1_message: action,
         })
     }
+
+    pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccountV2>> {
+        self.l1_message.get_committed_accounts()
+    }
+
+    pub fn get_committed_accounts_mut(
+        &mut self,
+    ) -> Option<&mut Vec<CommittedAccountV2>> {
+        self.l1_message.get_committed_accounts_mut()
+    }
+
+    pub fn get_committed_pubkeys(&self) -> Option<Vec<Pubkey>> {
+        self.l1_message.get_committed_pubkeys()
+    }
+
+    pub fn is_undelegate(&self) -> bool {
+        self.l1_message.is_undelegate()
+    }
 }
 
 // L1Message user wants to send to base layer
@@ -117,6 +135,42 @@ impl MagicL1Message {
                 Ok(MagicL1Message::CommitAndUndelegate(commit_and_undelegate))
             }
         }
+    }
+
+    pub fn is_undelegate(&self) -> bool {
+        match &self {
+            MagicL1Message::L1Actions(_) => false,
+            MagicL1Message::Commit(_) => false,
+            MagicL1Message::CommitAndUndelegate(_) => true,
+        }
+    }
+
+    pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccountV2>> {
+        match self {
+            MagicL1Message::L1Actions(_) => None,
+            MagicL1Message::Commit(t) => Some(t.get_committed_accounts()),
+            MagicL1Message::CommitAndUndelegate(t) => {
+                Some(t.get_committed_accounts())
+            }
+        }
+    }
+
+    pub fn get_committed_accounts_mut(
+        &mut self,
+    ) -> Option<&mut Vec<CommittedAccountV2>> {
+        match self {
+            MagicL1Message::L1Actions(_) => None,
+            MagicL1Message::Commit(t) => Some(t.get_committed_accounts_mut()),
+            MagicL1Message::CommitAndUndelegate(t) => {
+                Some(t.get_committed_accounts_mut())
+            }
+        }
+    }
+
+    pub fn get_committed_pubkeys(&self) -> Option<Vec<Pubkey>> {
+        self.get_committed_accounts().map(|accounts| {
+            accounts.iter().map(|account| account.pubkey).collect()
+        })
     }
 }
 

@@ -10,7 +10,6 @@ use magicblock_committor_service::{
         BroadcastedMessageExecutionResult, ExecutionOutputWrapper,
     },
     types::{ScheduledL1MessageWrapper, TriggerType},
-    utils::ScheduledMessageExt,
     L1MessageCommittor,
 };
 use magicblock_processor::execute_transaction::execute_legacy_transaction;

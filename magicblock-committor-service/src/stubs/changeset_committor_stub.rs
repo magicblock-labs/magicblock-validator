@@ -25,7 +25,6 @@ use crate::{
     },
     service_ext::{L1MessageCommitorExtResult, L1MessageCommittorExt},
     types::{ScheduledL1MessageWrapper, TriggerType},
-    utils::ScheduledMessageExt,
     L1MessageCommittor,
 };
 
@@ -34,6 +33,12 @@ pub struct ChangesetCommittorStub {
     reserved_pubkeys_for_committee: Arc<Mutex<HashMap<Pubkey, Pubkey>>>,
     #[allow(clippy::type_complexity)]
     committed_changesets: Arc<Mutex<HashMap<u64, ScheduledL1MessageWrapper>>>,
+}
+
+impl ChangesetCommittorStub {
+    pub fn len(&self) -> usize {
+        self.committed_changesets.lock().unwrap().len()
+    }
 }
 
 impl L1MessageCommittor for ChangesetCommittorStub {
@@ -127,6 +132,7 @@ impl L1MessageCommittorExt for ChangesetCommittorStub {
         l1_messages: Vec<ScheduledL1MessageWrapper>,
     ) -> L1MessageCommitorExtResult<Vec<BroadcastedMessageExecutionResult>>
     {
+        self.commit_l1_messages(l1_messages.clone());
         let res = l1_messages
             .into_iter()
             .map(|message| {

@@ -29,7 +29,7 @@ use crate::{
     },
     persist::{CommitStatus, L1MessagesPersisterIface},
     types::{ScheduledL1MessageWrapper, TriggerType},
-    utils::{persist_status_update_by_message_set, ScheduledMessageExt},
+    utils::persist_status_update_by_message_set,
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";

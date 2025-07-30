@@ -10,7 +10,6 @@ use super::{
     db::CommitStatusRow, error::CommitPersistResult, utils::now, CommitStatus,
     CommitStrategy, CommitType, CommittsDb, MessageSignatures,
 };
-use crate::utils::ScheduledMessageExt;
 
 const POISONED_MUTEX_MSG: &str = "Commitor Persister lock poisoned";
 

@@ -29,7 +29,7 @@ use solana_sdk::{
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {
-    let url = "http://localhost:8899".to_string();
+    let url = "http://localhost:9002".to_string();
     let rpc_client =
         RpcClient::new_with_commitment(url, CommitmentConfig::confirmed());
 

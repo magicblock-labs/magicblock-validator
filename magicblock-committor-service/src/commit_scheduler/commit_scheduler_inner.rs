@@ -4,7 +4,7 @@ use log::warn;
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use solana_pubkey::Pubkey;
 
-use crate::{types::ScheduledL1MessageWrapper, utils::ScheduledMessageExt};
+use crate::types::ScheduledL1MessageWrapper;
 
 pub(crate) const POISONED_INNER_MSG: &str =
     "Mutex on CommitSchedulerInner is poisoned.";

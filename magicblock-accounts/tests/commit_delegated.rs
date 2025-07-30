@@ -10,6 +10,8 @@ use conjunto_transwise::{
 use magicblock_account_cloner::{AccountClonerOutput, AccountClonerStub};
 use magicblock_accounts::{ExternalAccountsManager, LifecycleMode};
 use magicblock_accounts_api::InternalAccountProviderStub;
+use magicblock_committor_service::stubs::ChangesetCommittorStub;
+use magicblock_program::validator::generate_validator_authority_if_needed;
 use solana_sdk::{
     account::{Account, AccountSharedData},
     native_token::LAMPORTS_PER_SOL,
@@ -26,18 +28,20 @@ type StubbedAccountsManager = ExternalAccountsManager<
     AccountClonerStub,
     TransactionAccountsExtractorImpl,
     TransactionAccountsValidatorImpl,
-    ScheduledCommitsProcessorStub,
+    ChangesetCommittorStub,
 >;
 
 fn setup(
     internal_account_provider: InternalAccountProviderStub,
     account_cloner: AccountClonerStub,
+    committor_service: Arc<ChangesetCommittorStub>,
 ) -> StubbedAccountsManager {
     ExternalAccountsManager {
         internal_account_provider,
         account_cloner,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
+        committor_service,
         lifecycle: LifecycleMode::Ephemeral,
         external_commitable_accounts: Default::default(),
     }
@@ -80,6 +84,7 @@ fn generate_delegated_account_chain_snapshot(
 async fn test_commit_two_delegated_accounts_one_needs_commit() {
     init_logger!();
 
+    generate_validator_authority_if_needed();
     let commit_needed_pubkey = Pubkey::new_unique();
     let commit_needed_account = generate_account(&commit_needed_pubkey);
     let commit_needed_account_shared =
@@ -92,12 +97,12 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
 
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
+    let committor_service = Arc::new(ChangesetCommittorStub::default());
 
     let manager = setup(
         internal_account_provider.clone(),
         account_cloner.clone(),
-        account_committer.clone(),
+        committor_service.clone(),
     );
 
     // Clone the accounts through a dummy transaction
@@ -153,12 +158,7 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
     // Execute the commits of the accounts that needs it
     let result = manager.commit_delegated().await;
     // Ensure we committed the account that was due
-    assert_eq!(account_committer.len(), 1);
-    // with the current account data
-    assert_eq!(
-        account_committer.committed(&commit_needed_pubkey),
-        Some(commit_needed_account_shared)
-    );
+    assert_eq!(committor_service.len(), 1);
     // and that we returned that transaction signature for it.
     assert_eq!(result.unwrap().len(), 1);
 

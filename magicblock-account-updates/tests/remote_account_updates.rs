@@ -21,7 +21,7 @@ async fn setup() -> (
 ) {
     // Create account updates worker and client
     let mut worker = RemoteAccountUpdatesWorker::new(
-        vec![RpcProviderConfig::devnet().ws_url().into(); 2],
+        vec![RpcProviderConfig::devnet().ws_url().into(); 1],
         Some(solana_sdk::commitment_config::CommitmentLevel::Confirmed),
         Duration::from_secs(50 * 60),
     );

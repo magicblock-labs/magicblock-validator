@@ -27,7 +27,6 @@ use magicblock_committor_service::{
     service_ext::L1MessageCommittorExt,
     transactions::MAX_PROCESS_PER_TX,
     types::{ScheduledL1MessageWrapper, TriggerType},
-    utils::ScheduledMessageExt,
 };
 use magicblock_core::magic_program;
 use magicblock_program::{
