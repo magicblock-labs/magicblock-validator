@@ -8,7 +8,10 @@ use magicblock_gateway_types::{
 };
 use solana_account_decoder::{encode_ui_account, UiAccount, UiAccountEncoding};
 
-use crate::notification::WebsocketNotification;
+use crate::{
+    requests::payload::NotificationPayload,
+    state::subscriptions::SubscriptionID, Slot,
+};
 
 pub(crate) trait Encoder: Ord + Eq + Clone {
     type Data;
@@ -30,6 +33,19 @@ impl From<&AccountEncoder> for UiAccountEncoding {
             AccountEncoder::Base64 => Self::Base64,
             AccountEncoder::Base64Zstd => Self::Base64Zstd,
             AccountEncoder::JsonParsed => Self::JsonParsed,
+        }
+    }
+}
+
+impl From<&UiAccountEncoding> for AccountEncoder {
+    fn from(value: &UiAccountEncoding) -> Self {
+        match value {
+            UiAccountEncoding::Base58 | UiAccountEncoding::Binary => {
+                Self::Base58
+            }
+            UiAccountEncoding::Base64 => Self::Base64,
+            UiAccountEncoding::Base64Zstd => Self::Base64Zstd,
+            UiAccountEncoding::JsonParsed => Self::JsonParsed,
         }
     }
 }
@@ -74,18 +90,23 @@ pub struct ProgramAccountEncoder {
 impl Encoder for AccountEncoder {
     type Data = (Pubkey, AccountSharedData);
 
-    fn encode(&self, slot: u64, data: &Self::Data, id: u64) -> Option<Bytes> {
+    fn encode(
+        &self,
+        slot: Slot,
+        data: &Self::Data,
+        id: SubscriptionID,
+    ) -> Option<Bytes> {
         let encoded =
             encode_ui_account(&data.0, &data.1, self.into(), None, None);
         let method = "accountNotification";
-        WebsocketNotification::encode(encoded, slot, method, id)
+        NotificationPayload::encode(encoded, slot, method, id)
     }
 }
 
 impl Encoder for ProgramAccountEncoder {
     type Data = (Pubkey, AccountSharedData);
 
-    fn encode(&self, slot: u64, data: &Self::Data, id: u64) -> Option<Bytes> {
+    fn encode(&self, slot: Slot, data: &Self::Data, id: u64) -> Option<Bytes> {
         #[derive(Serialize)]
         struct AccountWithPubkey {
             pubkey: String,
@@ -104,7 +125,7 @@ impl Encoder for ProgramAccountEncoder {
             account,
         };
         let method = "programNotification";
-        WebsocketNotification::encode(value, slot, method, id)
+        NotificationPayload::encode(value, slot, method, id)
     }
 }
 
@@ -114,7 +135,12 @@ pub(crate) struct TransactionResultEncoder;
 impl Encoder for TransactionResultEncoder {
     type Data = TransactionResult;
 
-    fn encode(&self, slot: u64, data: &Self::Data, id: u64) -> Option<Bytes> {
+    fn encode(
+        &self,
+        slot: Slot,
+        data: &Self::Data,
+        id: SubscriptionID,
+    ) -> Option<Bytes> {
         #[derive(Serialize)]
         struct SignatureResult {
             err: Option<String>,
@@ -122,7 +148,7 @@ impl Encoder for TransactionResultEncoder {
         let method = "signatureNotification";
         let err = data.as_ref().map_err(|e| e.to_string()).err();
         let result = SignatureResult { err };
-        WebsocketNotification::encode(result, slot, method, id)
+        NotificationPayload::encode(result, slot, method, id)
     }
 }
 
@@ -135,7 +161,12 @@ pub(crate) enum TransactionLogsEncoder {
 impl Encoder for TransactionLogsEncoder {
     type Data = TransactionStatus;
 
-    fn encode(&self, slot: u64, data: &Self::Data, id: u64) -> Option<Bytes> {
+    fn encode(
+        &self,
+        slot: Slot,
+        data: &Self::Data,
+        id: SubscriptionID,
+    ) -> Option<Bytes> {
         let TransactionProcessingResult::Execution(execution) = &data.result
         else {
             return None;
@@ -159,7 +190,7 @@ impl Encoder for TransactionLogsEncoder {
             err: execution.result.as_ref().map_err(|e| e.to_string()).err(),
             logs: &execution.logs,
         };
-        WebsocketNotification::encode(result, slot, method, id)
+        NotificationPayload::encode(result, slot, method, id)
     }
 }
 
@@ -169,7 +200,12 @@ pub(crate) struct SlotEncoder;
 impl Encoder for SlotEncoder {
     type Data = ();
 
-    fn encode(&self, slot: u64, _: &Self::Data, id: u64) -> Option<Bytes> {
+    fn encode(
+        &self,
+        slot: Slot,
+        _: &Self::Data,
+        id: SubscriptionID,
+    ) -> Option<Bytes> {
         #[derive(Serialize)]
         struct SlotUpdate {
             slot: u64,
@@ -182,6 +218,6 @@ impl Encoder for SlotEncoder {
             parent: slot.saturating_sub(1),
             root: slot,
         };
-        WebsocketNotification::encode_no_context(update, method, id)
+        NotificationPayload::encode_no_context(update, method, id)
     }
 }

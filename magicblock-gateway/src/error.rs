@@ -41,7 +41,7 @@ impl From<json::Error> for RpcError {
 }
 
 impl RpcError {
-    pub(crate) fn invalid_params<E: Error>(error: E) -> Self {
+    pub(crate) fn invalid_params<E: ToString>(error: E) -> Self {
         Self {
             code: INVALID_PARAMS,
             message: format!("invalid request params: {}", error.to_string()),

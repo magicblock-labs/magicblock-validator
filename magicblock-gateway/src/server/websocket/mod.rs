@@ -28,7 +28,7 @@ pub struct WebsocketServer {
 }
 
 impl WebsocketServer {
-    async fn run(mut self) {
+    pub async fn run(mut self) {
         loop {
             tokio::select! {
                 Ok((stream, _)) = self.socket.accept() => {
