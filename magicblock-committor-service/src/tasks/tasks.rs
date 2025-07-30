@@ -9,7 +9,6 @@ use magicblock_committor_program::{
         },
         write_buffer::{create_write_ix, CreateWriteIxArgs},
     },
-    instruction_chunks::chunk_realloc_ixs,
     ChangesetChunks, Chunks,
 };
 use magicblock_program::magic_scheduled_l1_message::{
