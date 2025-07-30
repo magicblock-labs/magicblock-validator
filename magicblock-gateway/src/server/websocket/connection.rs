@@ -3,7 +3,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use fastwebsockets::{CloseCode, Frame, Payload, WebSocket, WebSocketError};
+use fastwebsockets::{
+    CloseCode, Frame, OpCode, Payload, WebSocket, WebSocketError,
+};
 use hyper::{body::Bytes, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
 use log::debug;
@@ -15,7 +17,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     error::RpcError,
-    requests::JsonRequest,
+    requests::{
+        payload::{ResponseErrorPayload, ResponsePayload},
+        JsonRequest,
+    },
     server::{websocket::dispatch::WsConnectionChannel, Shutdown},
     state::SharedState,
 };
@@ -56,11 +61,15 @@ impl ConnectionHandler {
 
     pub(super) async fn run(mut self) {
         const MAX_INACTIVE_INTERVAL: Duration = Duration::from_secs(60);
-        let last_activity = Instant::now();
+        let mut last_activity = Instant::now();
         let mut ping = time::interval(Duration::from_secs(30));
         loop {
             tokio::select! {
                 biased; Ok(frame) = self.ws.read_frame() => {
+                    last_activity = Instant::now();
+                    if frame.opcode != OpCode::Text {
+                        continue;
+                    }
                     let parsed = json::from_slice::<JsonRequest>(&frame.payload)
                         .map_err(RpcError::parse_error);
                     let request = match parsed {
@@ -90,25 +99,14 @@ impl ConnectionHandler {
     }
 
     async fn report_success(&mut self, result: WsDispatchResult) -> bool {
-        let msg = json::json! {{
-            "jsonrpc": "2.0",
-            "result": result.result,
-            "id": result.id
-        }};
-        let payload = json::to_vec(&msg)
-            .expect("vec serialization for Value is infallible");
-        self.send(payload).await.is_ok()
+        let payload =
+            ResponsePayload::encode_no_context(&result.id, result.result);
+        self.send(payload.0).await.is_ok()
     }
 
     async fn report_failure(&mut self, error: RpcError) -> bool {
-        let msg = json::json! {{
-            "jsonrpc": "2.0",
-            "error": error,
-            "id": None::<()>,
-        }};
-        let payload = json::to_vec(&msg)
-            .expect("vec serialization for Value is infallible");
-        self.send(payload).await.is_ok()
+        let payload = ResponseErrorPayload::encode(None, error);
+        self.send(payload.into_body().0).await.is_ok()
     }
 
     #[inline]
