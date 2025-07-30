@@ -3,7 +3,6 @@ use magicblock_program::{
 };
 use solana_pubkey::Pubkey;
 
-
 // TODO: should be removed once cranks are supported
 // Ideally even now OffChain/"Manual" commits should be triggered via Tx
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

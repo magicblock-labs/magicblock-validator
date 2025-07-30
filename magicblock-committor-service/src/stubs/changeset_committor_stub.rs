@@ -1,16 +1,12 @@
 use std::{
     collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use magicblock_committor_program::Changeset;
 use magicblock_program::SentCommit;
 use solana_pubkey::Pubkey;
-use solana_sdk::{hash::Hash, signature::Signature, transaction::Transaction};
+use solana_sdk::{signature::Signature, transaction::Transaction};
 use tokio::sync::{oneshot, oneshot::Receiver};
 
 use crate::{
@@ -19,10 +15,7 @@ use crate::{
     },
     error::CommittorServiceResult,
     message_executor::ExecutionOutput,
-    persist::{
-        CommitStatus, CommitStatusRow, CommitStatusSignatures, CommitStrategy,
-        CommitType, L1MessagePersister, MessageSignatures,
-    },
+    persist::{CommitStatusRow, L1MessagePersister, MessageSignatures},
     service_ext::{L1MessageCommitorExtResult, L1MessageCommittorExt},
     types::{ScheduledL1MessageWrapper, TriggerType},
     L1MessageCommittor,
@@ -106,8 +99,8 @@ impl L1MessageCommittor for ChangesetCommittorStub {
 
     fn get_commit_signatures(
         &self,
-        commit_id: u64,
-        pubkey: Pubkey,
+        _commit_id: u64,
+        _pubkey: Pubkey,
     ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
     {
         let (tx, rx) = oneshot::channel();

@@ -76,8 +76,13 @@ pub fn serialize_and_encode_base64(
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
+
     use dlp::args::{CommitStateArgs, CommitStateFromBufferArgs};
     use lazy_static::lazy_static;
+    use magicblock_committor_program::instruction_builder::close_buffer::{
+        create_close_ix, CreateCloseIxArgs,
+    };
     use solana_pubkey::Pubkey;
     use solana_sdk::{
         address_lookup_table::state::LOOKUP_TABLE_MAX_ADDRESSES,
@@ -88,16 +93,22 @@ mod test {
         signer::Signer,
         transaction::VersionedTransaction,
     };
-    use magicblock_committor_program::instruction_builder::close_buffer::{create_close_ix, CreateCloseIxArgs};
+
     use super::*;
     use crate::{
         compute_budget::{Budget, ComputeBudget},
+        error::{
+            CommittorServiceError::{
+                FailedToCompileTransactionMessage, FailedToCreateTransaction,
+            },
+            CommittorServiceResult,
+        },
         pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
     };
-    use crate::error::CommittorServiceError::{FailedToCompileTransactionMessage, FailedToCreateTransaction};
-    use crate::error::CommittorServiceResult;
 
-    fn get_lookup_tables(ixs: &[Instruction]) -> Vec<AddressLookupTableAccount> {
+    fn get_lookup_tables(
+        ixs: &[Instruction],
+    ) -> Vec<AddressLookupTableAccount> {
         let pubkeys = ixs
             .iter()
             .flat_map(|ix| ix.accounts.iter().map(|acc| acc.pubkey))
@@ -109,7 +120,6 @@ mod test {
         };
         vec![lookup_table]
     }
-
 
     // -----------------
     // Helpers
@@ -124,7 +134,6 @@ mod test {
         ixs: &[Instruction],
         opts: &TransactionOpts,
     ) -> CommittorServiceResult<usize> {
-        use CommittorServiceError::*;
         use TransactionOpts::*;
         let lookup_tables = match opts {
             NoLookupTable => vec![],
@@ -137,22 +146,22 @@ mod test {
             &lookup_tables,
             Hash::default(),
         )
-            .map_err(|err| {
-                FailedToCompileTransactionMessage(
-                    "Calculating transaction size".to_string(),
-                    err,
-                )
-            })?;
+        .map_err(|err| {
+            FailedToCompileTransactionMessage(
+                "Calculating transaction size".to_string(),
+                err,
+            )
+        })?;
         let versioned_tx = VersionedTransaction::try_new(
             VersionedMessage::V0(versioned_msg),
             &[&auth],
         )
-            .map_err(|err| {
-                FailedToCreateTransaction(
-                    "Calculating transaction size".to_string(),
-                    err,
-                )
-            })?;
+        .map_err(|err| {
+            FailedToCreateTransaction(
+                "Calculating transaction size".to_string(),
+                err,
+            )
+        })?;
 
         let encoded = serialize_and_encode_base64(&versioned_tx);
         Ok(encoded.len())
@@ -480,14 +489,14 @@ mod test {
         pub(crate) static ref MAX_FINALIZE_PER_TX: u8 = {
             max_chunks_per_transaction("Max finalize per tx", |auth_pubkey| {
                 let pubkey = Pubkey::new_unique();
-                vec![super::finalize_ix(auth_pubkey, &pubkey)]
+                vec![finalize_ix(auth_pubkey, &pubkey)]
             })
         };
         pub(crate) static ref MAX_FINALIZE_PER_TX_USING_LOOKUP: u8 = {
             max_chunks_per_transaction_using_lookup_table(
                 "Max finalize per tx using lookup",
                 |auth_pubkey, committee, _| {
-                    vec![super::finalize_ix(auth_pubkey, &committee)]
+                    vec![finalize_ix(auth_pubkey, &committee)]
                 },
                 Some(40),
             )

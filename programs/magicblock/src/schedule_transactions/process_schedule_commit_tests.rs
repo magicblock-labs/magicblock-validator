@@ -235,10 +235,7 @@ fn assert_first_commit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        magic_scheduled_l1_message::MagicL1Message,
-        utils::instruction_utils::InstructionUtils,
-    };
+    use crate::utils::instruction_utils::InstructionUtils;
 
     #[test]
     fn test_schedule_commit_single_account_success() {

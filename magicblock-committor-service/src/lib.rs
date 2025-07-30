@@ -1,4 +1,3 @@
-mod commit_info;
 mod compute_budget;
 pub mod config;
 mod consts;
@@ -21,7 +20,6 @@ pub mod transaction_preperator;
 pub mod utils;
 // TODO(edwin) pub(crate)
 
-pub use commit_info::CommitInfo;
 pub use compute_budget::ComputeBudgetConfig;
 pub use magicblock_committor_program::{
     ChangedAccount, Changeset, ChangesetMeta,
