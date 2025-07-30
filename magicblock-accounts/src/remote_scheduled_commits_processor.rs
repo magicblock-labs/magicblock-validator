@@ -21,6 +21,7 @@ use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     account::{Account, ReadableAccount},
     pubkey::Pubkey,
+    system_program,
 };
 use tokio::sync::{broadcast, oneshot};
 
@@ -88,28 +89,26 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
                 let pubkey = account.pubkey;
                 let ephemeral_pubkey =
                     AccountChainSnapshot::ephemeral_balance_pda(&pubkey);
-
                 self.feepayers.insert(FeePayerAccount {
                     pubkey,
                     delegated_pda: ephemeral_pubkey,
                 });
 
-                match self.bank.get_account(&ephemeral_pubkey) {
+                // We commit escrow, its data kept under FeePayer's address
+                match self.bank.get_account(&pubkey) {
                     Some(account_data) => {
-                        let ephemeral_owner =
-                            AccountChainSnapshot::ephemeral_balance_pda_owner();
                         account.pubkey = ephemeral_pubkey;
                         account.account = Account {
                             lamports: account_data.lamports(),
                             data: account_data.data().to_vec(),
-                            owner: ephemeral_owner,
+                            owner: system_program::id(),
                             executable: account_data.executable(),
                             rent_epoch: account_data.rent_epoch(),
                         };
                         true
                     }
                     None => {
-                        // TODO(edwin): shouldn't be possible panic?
+                        // TODO(edwin): shouldn't be possible.. Should be a panic
                         error!(
                             "Scheduled commit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
                             pubkey
