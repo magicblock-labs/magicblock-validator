@@ -30,7 +30,6 @@ pub trait MessageExecutor: Send + Sync + 'static {
     async fn execute<P: L1MessagesPersisterIface>(
         &self,
         l1_message: ScheduledL1Message,
-        commit_ids: HashMap<Pubkey, u64>,
         persister: Option<P>,
     ) -> MessageExecutorResult<ExecutionOutput>;
 }

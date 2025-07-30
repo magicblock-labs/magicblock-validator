@@ -496,7 +496,7 @@ mod tests {
             .update_status_by_commit(
                 100,
                 &pubkey,
-                CommitStatus::BufferAndChunkInitialized(100),
+                CommitStatus::BufferAndChunkInitialized,
             )
             .unwrap();
 
@@ -506,7 +506,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             updated.commit_status,
-            CommitStatus::BufferAndChunkInitialized(100)
+            CommitStatus::BufferAndChunkInitialized
         );
     }
 
@@ -542,13 +542,10 @@ mod tests {
 
         let process_sig = Signature::new_unique();
         let finalize_sig = Signature::new_unique();
-        let status = CommitStatus::Succeeded((
-            100,
-            CommitStatusSignatures {
-                process_signature: process_sig,
-                finalize_signature: Some(finalize_sig),
-            },
-        ));
+        let status = CommitStatus::Succeeded(CommitStatusSignatures {
+            process_signature: process_sig,
+            finalize_signature: Some(finalize_sig),
+        });
 
         persister
             .update_status_by_commit(100, &pubkey, status)

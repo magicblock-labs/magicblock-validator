@@ -549,7 +549,7 @@ fn extract_committor_row(
             process_signature: s,
             finalize_signature: finalized_signature,
         });
-        CommitStatus::try_from((commit_status.as_str(), commit_id, sigs))?
+        CommitStatus::try_from((commit_status.as_str(), sigs))?
     };
 
     let last_retried_at: u64 = {
@@ -685,13 +685,10 @@ mod tests {
         let row = create_test_row(1, 100); // Set commit_id to 100
         db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
-        let new_status = CommitStatus::Succeeded((
-            100,
-            CommitStatusSignatures {
-                process_signature: Signature::new_unique(),
-                finalize_signature: None,
-            },
-        ));
+        let new_status = CommitStatus::Succeeded(CommitStatusSignatures {
+            process_signature: Signature::new_unique(),
+            finalize_signature: None,
+        });
         db.update_status_by_commit(100, &row.pubkey, &new_status)
             .unwrap();
 
@@ -720,13 +717,10 @@ mod tests {
         let finalize_sig = Signature::new_unique();
 
         let mut row = create_test_row(1, 100);
-        row.commit_status = CommitStatus::Succeeded((
-            100,
-            CommitStatusSignatures {
-                process_signature: process_sig,
-                finalize_signature: Some(finalize_sig),
-            },
-        ));
+        row.commit_status = CommitStatus::Succeeded(CommitStatusSignatures {
+            process_signature: process_sig,
+            finalize_signature: Some(finalize_sig),
+        });
         db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
         let sigs = db

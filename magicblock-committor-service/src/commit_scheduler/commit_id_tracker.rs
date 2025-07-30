@@ -14,9 +14,9 @@ use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 
 #[async_trait::async_trait]
-pub trait CommitIdTracker {
-    async fn next_commit_ids(
-        &mut self,
+pub trait CommitIdFetcher: Send + Sync + 'static {
+    async fn fetch_commit_ids(
+        &self,
         pubkeys: &[Pubkey],
     ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>>;
 
@@ -112,8 +112,8 @@ impl CommitIdTrackerImpl {
                     error!("invalid pubkey index in pda_accounts: {i}");
                     Pubkey::new_unique()
                 };
-                let account = account
-                    .ok_or(Error::MetadataNotFoundError(pda_accounts[i]))?;
+                let account =
+                    account.ok_or(Error::MetadataNotFoundError(pubkey))?;
                 let metadata =
                     DelegationMetadata::try_from_bytes_with_discriminator(
                         &account.data,
@@ -128,12 +128,13 @@ impl CommitIdTrackerImpl {
     }
 }
 
+/// CommitFetcher implementation that also caches most used 1000 keys
 #[async_trait::async_trait]
-impl CommitIdTracker for CommitIdTrackerImpl {
+impl CommitIdFetcher for CommitIdTrackerImpl {
     /// Returns next ids for requested pubkeys
     /// If key isn't in cache, it will be requested
-    async fn next_commit_ids(
-        &mut self,
+    async fn fetch_commit_ids(
+        &self,
         pubkeys: &[Pubkey],
     ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>> {
         const NUM_FETCH_RETRIES: NonZeroUsize =

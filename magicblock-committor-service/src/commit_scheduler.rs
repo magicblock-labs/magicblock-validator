@@ -1,4 +1,4 @@
-mod commit_id_tracker;
+pub mod commit_id_tracker;
 pub(crate) mod commit_scheduler_inner;
 mod commit_scheduler_worker;
 pub(crate) mod db; // TODO(edwin): define visibility
@@ -40,18 +40,19 @@ impl<D: DB> CommitScheduler<D> {
     ) -> Self {
         let db = Arc::new(db);
 
+        let commit_id_tracker =
+            Arc::new(CommitIdTrackerImpl::new(rpc_client.clone()));
         let executor_factory = L1MessageExecutorFactory {
-            rpc_client: rpc_client.clone(),
+            rpc_client,
             table_mania,
             compute_budget_config,
+            commit_id_tracker,
         };
-        let commit_id_tracker = CommitIdTrackerImpl::new(rpc_client);
 
         let (sender, receiver) = mpsc::channel(1000);
         let worker = CommitSchedulerWorker::new(
             db.clone(),
             executor_factory,
-            commit_id_tracker,
             l1_message_persister,
             receiver,
         );

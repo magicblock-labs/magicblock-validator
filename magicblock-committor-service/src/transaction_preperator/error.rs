@@ -7,8 +7,8 @@ pub enum Error {
     // VersionError(PreparatorVersion),
     #[error("Failed to fit in single TX")]
     FailedToFitError,
-    #[error("Missing commit id for pubkey: {0}")]
-    MissingCommitIdError(Pubkey),
+    #[error("TaskBuilderError: {0}")]
+    TaskBuilderError(#[from] crate::tasks::task_builder::Error),
     #[error("DeliveryPreparationError: {0}")]
     DeliveryPreparationError(
         #[from] crate::transaction_preperator::delivery_preparator::Error,
@@ -20,16 +20,6 @@ impl From<crate::tasks::task_strategist::Error> for Error {
         match value {
             crate::tasks::task_strategist::Error::FailedToFitError => {
                 Self::FailedToFitError
-            }
-        }
-    }
-}
-
-impl From<crate::tasks::task_builder::Error> for Error {
-    fn from(value: crate::tasks::task_builder::Error) -> Self {
-        match value {
-            crate::tasks::task_builder::Error::MissingCommitIdError(pubkey) => {
-                Self::MissingCommitIdError(pubkey)
             }
         }
     }

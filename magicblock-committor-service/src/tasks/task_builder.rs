@@ -1,38 +1,92 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
-use dlp::args::Context;
+use dlp::{args::Context, state::DelegationMetadata};
+use log::error;
 use magicblock_program::magic_scheduled_l1_message::{
     CommitType, CommittedAccountV2, MagicL1Message, ScheduledL1Message,
     UndelegateType,
 };
+use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 
-use crate::tasks::tasks::{
-    ArgsTask, CommitTask, FinalizeTask, L1ActionTask, L1Task, UndelegateTask,
+use crate::{
+    commit_scheduler::commit_id_tracker::CommitIdFetcher,
+    tasks::tasks::{
+        ArgsTask, CommitTask, FinalizeTask, L1ActionTask, L1Task,
+        UndelegateTask,
+    },
 };
 
+#[async_trait::async_trait]
 pub trait TasksBuilder {
     // Creates tasks for commit stage
-    fn commit_tasks(
+    async fn commit_tasks<C: CommitIdFetcher>(
+        commit_id_fetcher: &Arc<C>,
         l1_message: &ScheduledL1Message,
-        commit_ids: &HashMap<Pubkey, u64>,
     ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>>;
 
     // Create tasks for finalize stage
-    fn finalize_tasks(
+    async fn finalize_tasks(
+        rpc_client: &MagicblockRpcClient,
         l1_message: &ScheduledL1Message,
-        rent_reimbursement: &Pubkey,
-    ) -> Vec<Box<dyn L1Task>>;
+    ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>>;
 }
 
 /// V1 Task builder
 /// V1: Actions are part of finalize tx
 pub struct TaskBuilderV1;
+
+impl TaskBuilderV1 {
+    async fn fetch_rent_reimbursements(
+        rpc_client: &MagicblockRpcClient,
+        pubkeys: &[Pubkey],
+    ) -> Result<Vec<Pubkey>, FinalizedTasksBuildError> {
+        let pdas = pubkeys
+            .iter()
+            .map(|pubkey| {
+                dlp::pda::delegation_metadata_pda_from_delegated_account(pubkey)
+            })
+            .collect::<Vec<_>>();
+
+        let metadatas = rpc_client.get_multiple_accounts(&pdas, None).await?;
+
+        let rent_reimbursments = pdas
+            .into_iter()
+            .enumerate()
+            .map(|(i, pda)| {
+                let account = if let Some(account) = metadatas.get(i) {
+                    account
+                } else {
+                    return Err(
+                        FinalizedTasksBuildError::MetadataNotFoundError(pda),
+                    );
+                };
+
+                let account = account.as_ref().ok_or(
+                    FinalizedTasksBuildError::MetadataNotFoundError(pda),
+                )?;
+                let metadata =
+                    DelegationMetadata::try_from_bytes_with_discriminator(
+                        &account.data,
+                    )
+                    .map_err(|_| {
+                        FinalizedTasksBuildError::InvalidAccountDataError(pda)
+                    })?;
+
+                Ok::<_, FinalizedTasksBuildError>(metadata.rent_payer)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(rent_reimbursments)
+    }
+}
+
+#[async_trait::async_trait]
 impl TasksBuilder for TaskBuilderV1 {
     /// Returns [`Task`]s for Commit stage
-    fn commit_tasks(
+    async fn commit_tasks<C: CommitIdFetcher>(
+        commit_id_fetcher: &Arc<C>,
         l1_message: &ScheduledL1Message,
-        commit_ids: &HashMap<Pubkey, u64>,
     ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>> {
         let (accounts, allow_undelegation) = match &l1_message.l1_message {
             MagicL1Message::L1Actions(actions) => {
@@ -46,6 +100,7 @@ impl TasksBuilder for TaskBuilderV1 {
                         Box::new(ArgsTask::L1Action(task)) as Box<dyn L1Task>
                     })
                     .collect();
+
                 return Ok(tasks);
             }
             MagicL1Message::Commit(t) => (t.get_committed_accounts(), false),
@@ -54,29 +109,36 @@ impl TasksBuilder for TaskBuilderV1 {
             }
         };
 
+        let committed_pubkeys = accounts
+            .iter()
+            .map(|account| account.pubkey)
+            .collect::<Vec<_>>();
+        let commit_ids = commit_id_fetcher
+            .fetch_commit_ids(&committed_pubkeys)
+            .await?;
+
         let tasks = accounts
             .into_iter()
             .map(|account| {
-                if let Some(commit_id) = commit_ids.get(&account.pubkey) {
-                    Ok(Box::new(ArgsTask::Commit(CommitTask {
-                        commit_id: *commit_id + 1,
-                        allow_undelegation,
-                        committed_account: account.clone(),
-                    })) as Box<dyn L1Task>)
-                } else {
-                    Err(Error::MissingCommitIdError(account.pubkey))
-                }
+                let commit_id = commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
+                let task = ArgsTask::Commit(CommitTask {
+                    commit_id: *commit_id + 1,
+                    allow_undelegation,
+                    committed_account: account.clone(),
+                });
+
+                Box::new(task) as Box<dyn L1Task>
             })
-            .collect::<Result<_, _>>()?;
+            .collect();
 
         Ok(tasks)
     }
 
     /// Returns [`Task`]s for Finalize stage
-    fn finalize_tasks(
+    async fn finalize_tasks(
+        rpc_client: &MagicblockRpcClient,
         l1_message: &ScheduledL1Message,
-        rent_reimbursement: &Pubkey,
-    ) -> Vec<Box<dyn L1Task>> {
+    ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>> {
         // Helper to create a finalize task
         fn finalize_task(account: &CommittedAccountV2) -> Box<dyn L1Task> {
             Box::new(ArgsTask::Finalize(FinalizeTask {
@@ -123,26 +185,29 @@ impl TasksBuilder for TaskBuilderV1 {
         }
 
         match &l1_message.l1_message {
-            MagicL1Message::L1Actions(_) => vec![],
-            MagicL1Message::Commit(commit) => process_commit(commit),
+            MagicL1Message::L1Actions(_) => Ok(vec![]),
+            MagicL1Message::Commit(commit) => Ok(process_commit(commit)),
             MagicL1Message::CommitAndUndelegate(t) => {
                 let mut tasks = process_commit(&t.commit_action);
+
+                // Get rent reimbursments for undelegated accounts
                 let accounts = t.get_committed_accounts();
+                let pubkeys = accounts
+                    .iter()
+                    .map(|account| account.pubkey)
+                    .collect::<Vec<_>>();
+                let rent_reimbursments =
+                    Self::fetch_rent_reimbursements(rpc_client, &pubkeys)
+                        .await?;
+                tasks.extend(accounts.iter().zip(rent_reimbursments).map(
+                    |(account, rent_reimbursement)| {
+                        undelegate_task(account, &rent_reimbursement)
+                    },
+                ));
 
                 match &t.undelegate_action {
-                    UndelegateType::Standalone => {
-                        tasks.extend(
-                            accounts.iter().map(|a| {
-                                undelegate_task(a, rent_reimbursement)
-                            }),
-                        );
-                    }
+                    UndelegateType::Standalone => Ok(tasks),
                     UndelegateType::WithL1Actions(actions) => {
-                        tasks.extend(
-                            accounts.iter().map(|a| {
-                                undelegate_task(a, rent_reimbursement)
-                            }),
-                        );
                         tasks.extend(actions.iter().map(|action| {
                             let task = L1ActionTask {
                                 context: Context::Undelegate,
@@ -151,19 +216,33 @@ impl TasksBuilder for TaskBuilderV1 {
                             Box::new(ArgsTask::L1Action(task))
                                 as Box<dyn L1Task>
                         }));
+
+                        Ok(tasks)
                     }
                 }
-
-                tasks
             }
         }
     }
 }
 
 #[derive(thiserror::Error, Debug)]
+pub enum FinalizedTasksBuildError {
+    #[error("Metadata not found for: {0}")]
+    MetadataNotFoundError(Pubkey),
+    #[error("InvalidAccountDataError for: {0}")]
+    InvalidAccountDataError(Pubkey),
+    #[error("MagicBlockRpcClientError: {0}")]
+    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+}
+
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Missing commit id for pubkey: {0}")]
-    MissingCommitIdError(Pubkey),
+    #[error("CommitIdFetchError: {0}")]
+    CommitTasksBuildError(
+        #[from] crate::commit_scheduler::commit_id_tracker::Error,
+    ),
+    #[error("FinalizedTasksBuildError: {0}")]
+    FinalizedTasksBuildError(#[from] FinalizedTasksBuildError),
 }
 
 pub type TaskBuilderResult<T, E = Error> = Result<T, E>;

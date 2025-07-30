@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Formatter};
+use std::{collections::HashMap, fmt::Formatter, sync::Arc};
 
 use async_trait::async_trait;
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
@@ -10,6 +10,7 @@ use solana_sdk::{
 };
 
 use crate::{
+    commit_scheduler::commit_id_tracker::CommitIdFetcher,
     persist::L1MessagesPersisterIface,
     tasks::{
         task_builder::{TaskBuilderV1, TasksBuilder},
@@ -48,7 +49,6 @@ pub trait TransactionPreparator: Send + Sync + 'static {
         &self,
         authority: &Keypair,
         l1_message: &ScheduledL1Message,
-        commit_ids: &HashMap<Pubkey, u64>,
         l1_messages_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
 
@@ -58,7 +58,6 @@ pub trait TransactionPreparator: Send + Sync + 'static {
     async fn prepare_finalize_tx<P: L1MessagesPersisterIface>(
         &self,
         authority: &Keypair,
-        rent_reimbursement: &Pubkey,
         l1_message: &ScheduledL1Message,
         l1_messages_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
@@ -67,23 +66,32 @@ pub trait TransactionPreparator: Send + Sync + 'static {
 /// [`TransactionPreparatorV1`] first version of preparator
 /// It omits future commit_bundle/finalize_bundle logic
 /// It creates TXs using current per account commit/finalize
-pub struct TransactionPreparatorV1 {
+pub struct TransactionPreparatorV1<C: CommitIdFetcher> {
+    rpc_client: MagicblockRpcClient,
+    commit_id_fetcher: Arc<C>,
     delivery_preparator: DeliveryPreparator,
     compute_budget_config: ComputeBudgetConfig,
 }
 
-impl TransactionPreparatorV1 {
+impl<C> TransactionPreparatorV1<C>
+where
+    C: CommitIdFetcher,
+{
     pub fn new(
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
+        commit_id_fetcher: Arc<C>,
     ) -> Self {
         let delivery_preparator = DeliveryPreparator::new(
-            rpc_client,
+            rpc_client.clone(),
             table_mania,
             compute_budget_config.clone(),
         );
+
         Self {
+            rpc_client,
+            commit_id_fetcher,
             delivery_preparator,
             compute_budget_config,
         }
@@ -91,7 +99,10 @@ impl TransactionPreparatorV1 {
 }
 
 #[async_trait]
-impl TransactionPreparator for TransactionPreparatorV1 {
+impl<C> TransactionPreparator for TransactionPreparatorV1<C>
+where
+    C: CommitIdFetcher,
+{
     fn version(&self) -> PreparatorVersion {
         PreparatorVersion::V1
     }
@@ -102,11 +113,12 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         &self,
         authority: &Keypair,
         l1_message: &ScheduledL1Message,
-        commit_ids: &HashMap<Pubkey, u64>,
         l1_messages_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
         // create tasks
-        let tasks = TaskBuilderV1::commit_tasks(l1_message, commit_ids)?;
+        let tasks =
+            TaskBuilderV1::commit_tasks(&self.commit_id_fetcher, l1_message)
+                .await?;
         // optimize to fit tx size. aka Delivery Strategy
         let tx_strategy = TaskStrategist::build_strategy(
             tasks,
@@ -140,13 +152,12 @@ impl TransactionPreparator for TransactionPreparatorV1 {
     async fn prepare_finalize_tx<P: L1MessagesPersisterIface>(
         &self,
         authority: &Keypair,
-        rent_reimbursement: &Pubkey,
         l1_message: &ScheduledL1Message,
         l1_messages_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
         // create tasks
         let tasks =
-            TaskBuilderV1::finalize_tasks(l1_message, rent_reimbursement);
+            TaskBuilderV1::finalize_tasks(&self.rpc_client, l1_message).await?;
         // optimize to fit tx size. aka Delivery Strategy
         let tx_strategy = TaskStrategist::build_strategy(
             tasks,

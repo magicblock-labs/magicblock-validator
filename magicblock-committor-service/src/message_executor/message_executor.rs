@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use log::warn;
 use magicblock_program::{
@@ -18,6 +18,7 @@ use solana_sdk::{
 };
 
 use crate::{
+    commit_scheduler::commit_id_tracker::CommitIdFetcher,
     message_executor::{
         error::{Error, InternalError, MessageExecutorResult},
         ExecutionOutput, MessageExecutor,
@@ -26,7 +27,10 @@ use crate::{
     transaction_preperator::transaction_preparator::{
         TransactionPreparator, TransactionPreparatorV1,
     },
-    utils::{persist_status_update, persist_status_update_set},
+    utils::{
+        persist_status_update, persist_status_update_by_message_set,
+        persist_status_update_set,
+    },
     ComputeBudgetConfig,
 };
 
@@ -40,18 +44,12 @@ impl<T> L1MessageExecutor<T>
 where
     T: TransactionPreparator,
 {
-    pub fn new_v1(
+    pub fn new(
         rpc_client: MagicblockRpcClient,
-        table_mania: TableMania,
-        compute_budget_config: ComputeBudgetConfig,
-    ) -> L1MessageExecutor<TransactionPreparatorV1> {
+        transaction_preparator: T,
+    ) -> Self {
         let authority = validator_authority();
-        let transaction_preparator = TransactionPreparatorV1::new(
-            rpc_client.clone(),
-            table_mania,
-            compute_budget_config,
-        );
-        L1MessageExecutor::<TransactionPreparatorV1> {
+        Self {
             authority,
             rpc_client,
             transaction_preparator,
@@ -61,17 +59,16 @@ where
     async fn execute_inner<P: L1MessagesPersisterIface>(
         &self,
         l1_message: ScheduledL1Message,
-        commit_ids: &HashMap<Pubkey, u64>,
         persister: &Option<P>,
     ) -> MessageExecutorResult<ExecutionOutput> {
         // Update tasks status to Pending
-        let update_status = CommitStatus::Pending;
-        persist_status_update_set(&persister, &commit_ids, update_status);
+        // let update_status = CommitStatus::Pending;
+        // persist_status_update_set(&persister, &commit_ids, update_status);
 
         // Commit stage
-        let commit_signature = self
-            .execute_commit_stage(&l1_message, commit_ids, persister)
-            .await?;
+        let commit_signature =
+            self.execute_commit_stage(&l1_message, persister).await?;
+
         // Finalize stage
         // At the moment validator finalizes right away
         // In the future there will be a challenge window
@@ -88,17 +85,11 @@ where
     async fn execute_commit_stage<P: L1MessagesPersisterIface>(
         &self,
         l1_message: &ScheduledL1Message,
-        commit_ids: &HashMap<Pubkey, u64>,
         persister: &Option<P>,
     ) -> MessageExecutorResult<Signature> {
         let prepared_message = self
             .transaction_preparator
-            .prepare_commit_tx(
-                &self.authority,
-                l1_message,
-                commit_ids,
-                persister,
-            )
+            .prepare_commit_tx(&self.authority, l1_message, persister)
             .await
             .map_err(Error::FailedCommitPreparationError)?;
 
@@ -113,15 +104,9 @@ where
         commit_signature: Signature,
         persister: &Option<P>,
     ) -> MessageExecutorResult<Signature> {
-        let rent_reimbursement = self.authority.pubkey();
         let prepared_message = self
             .transaction_preparator
-            .prepare_finalize_tx(
-                &self.authority,
-                &rent_reimbursement,
-                l1_message,
-                persister,
-            )
+            .prepare_finalize_tx(&self.authority, l1_message, persister)
             .await
             .map_err(Error::FailedFinalizePreparationError)?;
 
@@ -176,61 +161,49 @@ where
     fn persist_result<P: L1MessagesPersisterIface>(
         persistor: &Option<P>,
         result: &MessageExecutorResult<ExecutionOutput>,
-        commit_ids: &HashMap<Pubkey, u64>,
+        message_id: u64,
+        pubkeys: &[Pubkey],
     ) {
         match result {
             Ok(value) => {
-                commit_ids.iter().for_each(|(pubkey, commit_id)| {
-                    let signatures = CommitStatusSignatures {
-                        process_signature: value.commit_signature,
-                        finalize_signature: Some(value.commit_signature)
-                    };
-                    let update_status = CommitStatus::Succeeded((*commit_id, signatures));
-                    persist_status_update(persistor, pubkey, *commit_id, update_status)
-                });
+                let signatures = CommitStatusSignatures {
+                    process_signature: value.commit_signature,
+                    finalize_signature: Some(value.commit_signature)
+                };
+                let update_status = CommitStatus::Succeeded(signatures);
+                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
             Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::FailedToFitError)) => {
-                commit_ids.iter().for_each(|(pubkey, commit_id)| {
-                    let update_status = CommitStatus::PartOfTooLargeBundleToProcess(*commit_id);
-                    persist_status_update(persistor, pubkey, *commit_id, update_status)
-                });
+                let update_status = CommitStatus::PartOfTooLargeBundleToProcess;
+                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
-            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::MissingCommitIdError(_))) => {
-                commit_ids.iter().for_each(|(pubkey, commit_id)| {
-                    // Invalid task
-                    let update_status = CommitStatus::Failed;
-                    persist_status_update(persistor, pubkey, *commit_id, update_status)
-                });
+            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::TaskBuilderError(_))) => {
+                let update_status = CommitStatus::Failed;
+                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             },
             Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::DeliveryPreparationError(_))) => {
                 // Persisted internally
             },
             Err(Error::FailedToCommitError {err: _, signature}) => {
                 // Commit is a single TX, so if it fails, all of commited accounts marked FailedProcess
-                commit_ids.iter().for_each(|(pubkey, commit_id)| {
-                    // Invalid task
-                    let status_signature = signature.map(|sig| CommitStatusSignatures {
-                        process_signature: sig,
-                        finalize_signature: None
-                    });
-                    let update_status = CommitStatus::FailedProcess((*commit_id, status_signature));
-                    persist_status_update(persistor, pubkey, *commit_id, update_status)
+                let status_signature = signature.map(|sig| CommitStatusSignatures {
+                    process_signature: sig,
+                    finalize_signature: None
                 });
+                let update_status = CommitStatus::FailedProcess(status_signature);
+                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
             Err(Error::FailedFinalizePreparationError(_)) => {
                 // Not supported in persistor
             },
             Err(Error::FailedToFinalizeError {err: _, commit_signature, finalize_signature}) => {
                 // Finalize is a single TX, so if it fails, all of commited accounts marked FailedFinalize
-                commit_ids.iter().for_each(|(pubkey, commit_id)| {
-                    // Invalid task
-                    let status_signature = CommitStatusSignatures {
-                        process_signature: *commit_signature,
-                        finalize_signature: *finalize_signature
-                    };
-                    let update_status = CommitStatus::FailedFinalize((*commit_id, status_signature));
-                    persist_status_update(persistor, pubkey, *commit_id, update_status)
-                });
+                let status_signature = CommitStatusSignatures {
+                    process_signature: *commit_signature,
+                    finalize_signature: *finalize_signature
+                };
+                let update_status = CommitStatus::FailedFinalize( status_signature);
+                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
         }
     }
@@ -246,13 +219,15 @@ where
     async fn execute<P: L1MessagesPersisterIface>(
         &self,
         l1_message: ScheduledL1Message,
-        commit_ids: HashMap<Pubkey, u64>,
         persister: Option<P>,
     ) -> MessageExecutorResult<ExecutionOutput> {
-        let result = self
-            .execute_inner(l1_message, &commit_ids, &persister)
-            .await;
-        Self::persist_result(&persister, &result, &commit_ids);
+        let message_id = l1_message.id;
+        let pubkeys = l1_message.get_committed_pubkeys();
+
+        let result = self.execute_inner(l1_message, &persister).await;
+        if let Some(pubkeys) = pubkeys {
+            Self::persist_result(&persister, &result, message_id, &pubkeys);
+        }
 
         result
     }

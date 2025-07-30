@@ -15,27 +15,27 @@ pub enum CommitStatus {
     /// The buffer and chunks account were initialized, but could either not
     /// be retrieved or deserialized. It is recommended to fully re-initialize
     /// them on retry.
-    BufferAndChunkPartiallyInitialized(u64),
+    BufferAndChunkPartiallyInitialized,
     /// The buffer and chunks accounts were initialized and could be
     /// deserialized, however we did not complete writing to them
     /// We can reuse them on retry, but need to rewrite all chunks.
-    BufferAndChunkInitialized(u64),
+    BufferAndChunkInitialized,
     /// The buffer and chunks accounts were initialized and all data was
     /// written to them (for data accounts).
     /// This means on retry we can skip that step and just try to process
     /// these buffers to complete the commit.
-    BufferAndChunkFullyInitialized(u64),
+    BufferAndChunkFullyInitialized,
     /// The commit is part of a bundle that contains too many commits to be included
     /// in a single transaction. Thus we cannot commit any of them.
-    PartOfTooLargeBundleToProcess(u64),
+    PartOfTooLargeBundleToProcess,
     /// The commit was properly initialized and added to a chunk of instructions to process
     /// commits via a transaction. For large commits the buffer and chunk accounts were properly
     /// prepared and haven't been closed.
-    FailedProcess((u64, Option<CommitStatusSignatures>)),
+    FailedProcess(Option<CommitStatusSignatures>),
     /// The commit was properly processed but the requested finalize transaction failed.
-    FailedFinalize((u64, CommitStatusSignatures)),
+    FailedFinalize(CommitStatusSignatures),
     /// The commit was successfully processed and finalized.
-    Succeeded((u64, CommitStatusSignatures)),
+    Succeeded(CommitStatusSignatures),
 }
 
 impl fmt::Display for CommitStatus {
@@ -45,36 +45,36 @@ impl fmt::Display for CommitStatus {
             CommitStatus::Failed => {
                 write!(f, "Failed")
             }
-            CommitStatus::BufferAndChunkPartiallyInitialized(bundle_id) => {
-                write!(f, "BufferAndChunkPartiallyInitialized({})", bundle_id)
+            CommitStatus::BufferAndChunkPartiallyInitialized => {
+                write!(f, "BufferAndChunkPartiallyInitialized")
             }
-            CommitStatus::BufferAndChunkInitialized(bundle_id) => {
-                write!(f, "BufferAndChunkInitialized({})", bundle_id)
+            CommitStatus::BufferAndChunkInitialized => {
+                write!(f, "BufferAndChunkInitialized")
             }
-            CommitStatus::BufferAndChunkFullyInitialized(bundle_id) => {
-                write!(f, "BufferAndChunkFullyInitialized({})", bundle_id)
+            CommitStatus::BufferAndChunkFullyInitialized => {
+                write!(f, "BufferAndChunkFullyInitialized")
             }
-            CommitStatus::PartOfTooLargeBundleToProcess(bundle_id) => {
-                write!(f, "PartOfTooLargeBundleToProcess({})", bundle_id)
+            CommitStatus::PartOfTooLargeBundleToProcess => {
+                write!(f, "PartOfTooLargeBundleToProcess")
             }
-            CommitStatus::FailedProcess((bundle_id, sigs)) => {
-                write!(f, "FailedProcess({}, {:?})", bundle_id, sigs)
+            CommitStatus::FailedProcess(sigs) => {
+                write!(f, "FailedProcess({:?})", sigs)
             }
-            CommitStatus::FailedFinalize((bundle_id, sigs)) => {
-                write!(f, "FailedFinalize({}, {:?})", bundle_id, sigs)
+            CommitStatus::FailedFinalize(sigs) => {
+                write!(f, "FailedFinalize({:?})", sigs)
             }
-            CommitStatus::Succeeded((bundle_id, sigs)) => {
-                write!(f, "Succeeded({}, {:?})", bundle_id, sigs)
+            CommitStatus::Succeeded(sigs) => {
+                write!(f, "Succeeded({:?})", sigs)
             }
         }
     }
 }
 
-impl TryFrom<(&str, u64, Option<CommitStatusSignatures>)> for CommitStatus {
+impl TryFrom<(&str, Option<CommitStatusSignatures>)> for CommitStatus {
     type Error = CommitPersistError;
 
     fn try_from(
-        (status, commit_id, sigs): (&str, u64, Option<CommitStatusSignatures>),
+        (status, sigs): (&str, Option<CommitStatusSignatures>),
     ) -> Result<Self, Self::Error> {
         let get_sigs = || {
             if let Some(sigs) = sigs.clone() {
@@ -91,20 +91,18 @@ impl TryFrom<(&str, u64, Option<CommitStatusSignatures>)> for CommitStatus {
             "Pending" => Ok(Pending),
             "Failed" => Ok(Failed),
             "BufferAndChunkPartiallyInitialized" => {
-                Ok(BufferAndChunkPartiallyInitialized(commit_id))
+                Ok(BufferAndChunkPartiallyInitialized)
             }
-            "BufferAndChunkInitialized" => {
-                Ok(BufferAndChunkInitialized(commit_id))
-            }
+            "BufferAndChunkInitialized" => Ok(BufferAndChunkInitialized),
             "BufferAndChunkFullyInitialized" => {
-                Ok(BufferAndChunkFullyInitialized(commit_id))
+                Ok(BufferAndChunkFullyInitialized)
             }
             "PartOfTooLargeBundleToProcess" => {
-                Ok(PartOfTooLargeBundleToProcess(commit_id))
+                Ok(PartOfTooLargeBundleToProcess)
             }
-            "FailedProcess" => Ok(FailedProcess((commit_id, sigs))),
-            "FailedFinalize" => Ok(FailedFinalize((commit_id, get_sigs()?))),
-            "Succeeded" => Ok(Succeeded((commit_id, get_sigs()?))),
+            "FailedProcess" => Ok(FailedProcess(sigs)),
+            "FailedFinalize" => Ok(FailedFinalize(get_sigs()?)),
+            "Succeeded" => Ok(Succeeded(get_sigs()?)),
             _ => {
                 Err(CommitPersistError::InvalidCommitStatus(status.to_string()))
             }
@@ -129,41 +127,24 @@ impl CommitStatus {
         match self {
             Pending => "Pending",
             Failed => "Failed",
-            BufferAndChunkPartiallyInitialized(_) => {
+            BufferAndChunkPartiallyInitialized => {
                 "BufferAndChunkPartiallyInitialized"
             }
-            BufferAndChunkInitialized(_) => "BufferAndChunkInitialized",
-            BufferAndChunkFullyInitialized(_) => {
-                "BufferAndChunkFullyInitialized"
-            }
-            PartOfTooLargeBundleToProcess(_) => "PartOfTooLargeBundleToProcess",
+            BufferAndChunkInitialized => "BufferAndChunkInitialized",
+            BufferAndChunkFullyInitialized => "BufferAndChunkFullyInitialized",
+            PartOfTooLargeBundleToProcess => "PartOfTooLargeBundleToProcess",
             FailedProcess(_) => "FailedProcess",
             FailedFinalize(_) => "FailedFinalize",
             Succeeded(_) => "Succeeded",
         }
     }
 
-    pub fn bundle_id(&self) -> Option<u64> {
-        use CommitStatus::*;
-        match self {
-            BufferAndChunkPartiallyInitialized(bundle_id)
-            | BufferAndChunkInitialized(bundle_id)
-            | BufferAndChunkFullyInitialized(bundle_id)
-            | PartOfTooLargeBundleToProcess(bundle_id)
-            | FailedProcess((bundle_id, _))
-            | FailedFinalize((bundle_id, _))
-            | Succeeded((bundle_id, _)) => Some(*bundle_id),
-            Pending => None,
-            Failed => None,
-        }
-    }
-
     pub fn signatures(&self) -> Option<CommitStatusSignatures> {
         use CommitStatus::*;
         match self {
-            FailedProcess((_, sigs)) => sigs.as_ref().cloned(),
-            FailedFinalize((_, sigs)) => Some(sigs.clone()),
-            Succeeded((_, sigs)) => Some(sigs.clone()),
+            FailedProcess(sigs) => sigs.as_ref().cloned(),
+            FailedFinalize(sigs) => Some(sigs.clone()),
+            Succeeded(sigs) => Some(sigs.clone()),
             _ => None,
         }
     }

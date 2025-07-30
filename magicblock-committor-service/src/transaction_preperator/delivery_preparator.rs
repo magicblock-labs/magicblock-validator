@@ -97,9 +97,7 @@ impl DeliveryPreparator {
         };
 
         // Persist as failed until rewritten
-        let update_status = CommitStatus::BufferAndChunkPartiallyInitialized(
-            preparation_info.commit_id,
-        );
+        let update_status = CommitStatus::BufferAndChunkPartiallyInitialized;
         persist_status_update(
             persister,
             &preparation_info.pubkey,
@@ -115,8 +113,7 @@ impl DeliveryPreparator {
         )
         .await?;
         // Persist initialization success
-        let update_status =
-            CommitStatus::BufferAndChunkInitialized(preparation_info.commit_id);
+        let update_status = CommitStatus::BufferAndChunkInitialized;
         persist_status_update(
             persister,
             &preparation_info.pubkey,
@@ -128,9 +125,7 @@ impl DeliveryPreparator {
         self.write_buffer_with_retries(authority, &preparation_info, 5)
             .await?;
         // Persist that buffer account initiated successfully
-        let update_status = CommitStatus::BufferAndChunkFullyInitialized(
-            preparation_info.commit_id,
-        );
+        let update_status = CommitStatus::BufferAndChunkFullyInitialized;
         persist_status_update(
             persister,
             &preparation_info.pubkey,

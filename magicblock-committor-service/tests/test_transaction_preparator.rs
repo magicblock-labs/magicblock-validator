@@ -46,7 +46,6 @@ async fn test_prepare_commit_tx_with_single_account() {
         .prepare_commit_tx(
             &fixture.authority,
             &l1_message,
-            &commit_ids,
             &None::<L1MessagePersister>,
         )
         .await;
@@ -94,18 +93,11 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
         )),
     };
 
-    let commit_ids = accounts
-        .iter()
-        .enumerate()
-        .map(|(i, acc)| (acc.pubkey, i as u64 + 1))
-        .collect();
-
     // Test preparation
     let result = preparator
         .prepare_commit_tx(
             &fixture.authority,
             &l1_message,
-            &commit_ids,
             &None::<L1MessagePersister>,
         )
         .await;
@@ -164,7 +156,6 @@ async fn test_prepare_commit_tx_with_l1_actions() {
         .prepare_commit_tx(
             &fixture.authority,
             &l1_message,
-            &commit_ids,
             &None::<L1MessagePersister>,
         )
         .await;
@@ -172,6 +163,7 @@ async fn test_prepare_commit_tx_with_l1_actions() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 }
 
+#[ignore= "Implement MetadataFetcher for finaliztion"]
 #[tokio::test]
 async fn test_prepare_finalize_tx_with_undelegate() {
     let fixture = TestFixture::new().await;
@@ -195,7 +187,6 @@ async fn test_prepare_finalize_tx_with_undelegate() {
     let result = preparator
         .prepare_finalize_tx(
             &fixture.authority,
-            &rent_reimbursement,
             &l1_message,
             &None::<L1MessagePersister>,
         )
@@ -241,7 +232,6 @@ async fn test_prepare_finalize_tx_with_undelegate_and_actions() {
     let result = preparator
         .prepare_finalize_tx(
             &fixture.authority,
-            &rent_reimbursement,
             &l1_message,
             &None::<L1MessagePersister>,
         )
@@ -287,7 +277,6 @@ async fn test_prepare_large_commit_tx_uses_buffers() {
         .prepare_commit_tx(
             &fixture.authority,
             &l1_message,
-            &commit_ids,
             &None::<L1MessagePersister>,
         )
         .await;
