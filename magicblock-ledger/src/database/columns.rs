@@ -129,6 +129,9 @@ pub trait Column {
     // first item in the key.
     fn as_index(slot: Slot) -> Self::Index;
     fn slot(index: Self::Index) -> Slot;
+    fn keep_all_on_compaction() -> bool {
+        false
+    }
 }
 
 pub trait ColumnName {
@@ -651,6 +654,9 @@ impl Column for AccountModDatas {
     fn as_index(slot: Slot) -> Self::Index {
         slot
     }
+    fn keep_all_on_compaction() -> bool {
+        true
+    }
 }
 
 impl TypedColumn for AccountModDatas {
@@ -665,8 +671,3 @@ impl TypedColumn for AccountModDatas {
 pub fn should_enable_compression<C: 'static + Column + ColumnName>() -> bool {
     C::NAME == TransactionStatus::NAME
 }
-
-// -----------------
-// Column Queries
-// -----------------
-pub(crate) const DIRTY_COUNT: i64 = -1;
