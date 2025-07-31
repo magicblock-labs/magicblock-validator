@@ -32,6 +32,7 @@ members = [
   "magicblock-rpc",
   "magicblock-rpc-client",
   "magicblock-table-mania",
+  "magicblock-task-scheduler",
   "magicblock-tokens",
   "magicblock-transaction-status",
   "magicblock-validator",
@@ -58,6 +59,7 @@ license = "Business Source License 1.1"
 edition = "2021"
 
 [workspace.dependencies]
+cargo-lock = "10.0.0"
 anyhow = "1.0.86"
 assert_matches = "1.5.0"
 async-trait = "0.1.77"
@@ -68,7 +70,7 @@ borsh-derive = "1.5.1"
 bs58 = "0.4.0"
 byteorder = "1.5.0"
 cargo-expand = "1"
-cargo-lock = "10.0.0"
+chrono = "0.4"
 clap = "4.5.40"
 conjunto-transwise = { git = "https://github.com/magicblock-labs/conjunto.git", rev = "bf82b45" }
 console-subscriber = "0.2.0"
@@ -122,7 +124,9 @@ magicblock-config = { path = "./magicblock-config" }
 magicblock-config-helpers = { path = "./magicblock-config-helpers" }
 magicblock-config-macro = { path = "./magicblock-config-macro" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = ["no-entrypoint"] }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = [
+  "no-entrypoint",
+] }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-metrics = { path = "./magicblock-metrics" }
@@ -135,6 +139,7 @@ magicblock-pubsub = { path = "./magicblock-pubsub" }
 magicblock-rpc = { path = "./magicblock-rpc" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
+magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
 magicblock-tokens = { path = "./magicblock-tokens" }
 magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
@@ -144,15 +149,18 @@ num-format = "0.4.4"
 num-traits = "0.2"
 num_cpus = "1.16.0"
 paste = "1.0"
+priority-queue = "2.5.0"
 proc-macro2 = "1.0"
 prometheus = "0.13.4"
 # Needs to match https://crates.io/crates/solana-storage-bigtable/2.1.13/dependencies
 prost = "0.11.9"
 protobuf-src = "1.1"
 quote = "1.0"
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.31.0"
 rand = "0.8.5"
 rayon = "1.10.0"
-rusqlite = { version = "0.34.0", features = ["bundled"] } # bundled sqlite 3.44
+rusqlite = { version = "0.37.0", features = ["bundled"] } # bundled sqlite 3.44
 rustc_version = "0.4"
 semver = "1.0.22"
 serde = "1.0.217"
@@ -216,6 +224,7 @@ tonic-build = "0.9.2"
 tonic-health = "0.9.2"
 trybuild = "1.0"
 url = "2.5.0"
+uuid = "1.0"
 vergen = "8.3.1"
 
 [patch.crates-io]

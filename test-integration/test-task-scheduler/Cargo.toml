@@ -1,0 +1,16 @@
+[package]
+name = "test-task-scheduler"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = { workspace = true }
+log = { workspace = true }
+magicblock-task-scheduler = { path = "../../magicblock-task-scheduler" }
+magicblock-program = { path = "../../programs/magicblock" }
+magicblock-config = { path = "../../magicblock-config" }
+schedule-task-program = { path = "../programs/schedule-task" }
+solana-sdk = { workspace = true }
+solana-rpc-client = { workspace = true }
+tokio = { workspace = true }
+integration-test-tools = { workspace = true }

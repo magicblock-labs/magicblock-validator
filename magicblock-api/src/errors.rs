@@ -90,4 +90,12 @@ pub enum ApiError {
     #[error("Accounts Database couldn't be initialized"
     )]
     AccountsDbError(#[from] AccountsDbError),
+
+    #[error("TaskSchedulerServiceError")]
+    TaskSchedulerServiceError(
+        #[from] magicblock_task_scheduler::TaskSchedulerError,
+    ),
+
+    #[error("Failed to sanitize transaction: {0}")]
+    FailedToSanitizeTransaction(#[from] solana_sdk::transaction::TransactionError),
 }
