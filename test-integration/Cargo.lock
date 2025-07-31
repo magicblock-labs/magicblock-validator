@@ -1747,21 +1747,21 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=e7daea58d672a22f1d221ef7c1607b14f900f029#e7daea58d672a22f1d221ef7c1607b14f900f029"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=63f624f#63f624f3e24007a77a06c1c223e07d6a351244f1"
 dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk-attribute-commit",
  "ephemeral-rollups-sdk-attribute-delegate",
  "ephemeral-rollups-sdk-attribute-ephemeral",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=374603f739a1b218b6b6f49dcd7f0ba60d662c7c)",
- "magicblock-program 0.1.2 (git+https://github.com/magicblock-labs/magicblock-validator.git?rev=3b4312b05188d9a4256b906e5dcf8327c2a3c9dd)",
+ "magicblock-program 0.1.2 (git+https://github.com/magicblock-labs/magicblock-validator.git?rev=aed2b895daf720507ded57d63b277b0e95435f10)",
  "solana-program",
 ]
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=e7daea58d672a22f1d221ef7c1607b14f900f029#e7daea58d672a22f1d221ef7c1607b14f900f029"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=63f624f#63f624f3e24007a77a06c1c223e07d6a351244f1"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1770,7 +1770,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=e7daea58d672a22f1d221ef7c1607b14f900f029#e7daea58d672a22f1d221ef7c1607b14f900f029"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=63f624f#63f624f3e24007a77a06c1c223e07d6a351244f1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1780,7 +1780,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=e7daea58d672a22f1d221ef7c1607b14f900f029#e7daea58d672a22f1d221ef7c1607b14f900f029"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=63f624f#63f624f3e24007a77a06c1c223e07d6a351244f1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3762,7 +3762,7 @@ dependencies = [
 [[package]]
 name = "magicblock-core"
 version = "0.1.2"
-source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=3b4312b05188d9a4256b906e5dcf8327c2a3c9dd#3b4312b05188d9a4256b906e5dcf8327c2a3c9dd"
+source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=aed2b895daf720507ded57d63b277b0e95435f10#aed2b895daf720507ded57d63b277b0e95435f10"
 dependencies = [
  "solana-sdk",
 ]
@@ -3875,7 +3875,7 @@ dependencies = [
 [[package]]
 name = "magicblock-metrics"
 version = "0.1.2"
-source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=3b4312b05188d9a4256b906e5dcf8327c2a3c9dd#3b4312b05188d9a4256b906e5dcf8327c2a3c9dd"
+source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=aed2b895daf720507ded57d63b277b0e95435f10#aed2b895daf720507ded57d63b277b0e95435f10"
 dependencies = [
  "http-body-util",
  "hyper 1.6.0",
@@ -3950,12 +3950,12 @@ dependencies = [
 [[package]]
 name = "magicblock-program"
 version = "0.1.2"
-source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=3b4312b05188d9a4256b906e5dcf8327c2a3c9dd#3b4312b05188d9a4256b906e5dcf8327c2a3c9dd"
+source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=aed2b895daf720507ded57d63b277b0e95435f10#aed2b895daf720507ded57d63b277b0e95435f10"
 dependencies = [
  "bincode",
  "lazy_static",
- "magicblock-core 0.1.2 (git+https://github.com/magicblock-labs/magicblock-validator.git?rev=3b4312b05188d9a4256b906e5dcf8327c2a3c9dd)",
- "magicblock-metrics 0.1.2 (git+https://github.com/magicblock-labs/magicblock-validator.git?rev=3b4312b05188d9a4256b906e5dcf8327c2a3c9dd)",
+ "magicblock-core 0.1.2 (git+https://github.com/magicblock-labs/magicblock-validator.git?rev=aed2b895daf720507ded57d63b277b0e95435f10)",
+ "magicblock-metrics 0.1.2 (git+https://github.com/magicblock-labs/magicblock-validator.git?rev=aed2b895daf720507ded57d63b277b0e95435f10)",
  "num-derive",
  "num-traits",
  "serde",

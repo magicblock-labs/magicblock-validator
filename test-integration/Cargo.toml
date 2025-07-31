@@ -28,7 +28,7 @@ anyhow = "1.0.86"
 borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
 cleanass = "0.0.1"
 #ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/rust/sdk" }
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "e7daea58d672a22f1d221ef7c1607b14f900f029" }
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "63f624f" }
 integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
