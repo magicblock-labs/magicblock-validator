@@ -5,6 +5,7 @@ use crate::{
     magicblock_instruction::MagicBlockInstruction,
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
+    schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
         process_accept_scheduled_commits, process_schedule_commit,
         ProcessScheduleCommitOptions,
@@ -59,6 +60,12 @@ declare_process_instruction!(
                     transaction_context,
                     id,
                 )
+            }
+            MagicBlockInstruction::ScheduleTask(args) => {
+                process_schedule_task(signers, invoke_context, args)
+            }
+            MagicBlockInstruction::CancelTask { task_id } => {
+                process_cancel_task(signers, invoke_context, task_id)
             }
         }
     }

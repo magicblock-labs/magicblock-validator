@@ -10,7 +10,7 @@ use magicblock_config::{
     GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategyConfig,
     LedgerResumeStrategyType, LifecycleMode, MagicBlockConfig, MetricsConfig,
     MetricsServiceConfig, PrepareLookupTables, ProgramConfig, RemoteCluster,
-    RemoteConfig, RpcConfig, ValidatorConfig,
+    RemoteConfig, RpcConfig, TaskSchedulerConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -106,6 +106,7 @@ fn test_load_local_dev_with_programs_toml() {
                 },
                 ..Default::default()
             },
+            task_scheduler: TaskSchedulerConfig::default(),
         }
     )
 }
@@ -146,6 +147,9 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_PORT", "1234");
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
     env::set_var("CLONE_AUTO_AIRDROP_LAMPORTS", "123");
+    env::set_var("TASK_SCHEDULER_DB_PATH", "tasks.db");
+    env::set_var("TASK_SCHEDULER_RESET_DB", "true");
+    env::set_var("TASK_SCHEDULER_MILLIS_PER_TICK", "1000");
 
     let config = parse_config_with_file(&config_file_dir);
 
@@ -209,6 +213,11 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                     ..Default::default()
                 },
                 system_metrics_tick_interval_secs: 10,
+            },
+            task_scheduler: TaskSchedulerConfig {
+                db_path: "tasks.db".to_string(),
+                reset_db: true,
+                millis_per_tick: 1000,
             },
         }
     );
