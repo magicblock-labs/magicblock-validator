@@ -1,0 +1,19 @@
+[accounts]
+remote.url = "http://0.0.0.0:7799"
+lifecycle = "ephemeral"
+commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
+
+[validator]
+millis_per_slot = 50
+sigverify = true
+
+[rpc]
+port = 8899
+
+[geyser_grpc]
+port = 10001
+
+[task_scheduler]
+millis_per_tick = 25
+db_path = "test-integration/target/test.db"
+reset_db = true

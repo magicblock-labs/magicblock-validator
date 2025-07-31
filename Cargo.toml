@@ -31,6 +31,7 @@ members = [
   "magicblock-rpc",
   "magicblock-rpc-client",
   "magicblock-table-mania",
+  "magicblock-task-scheduler",
   "magicblock-tokens",
   "magicblock-transaction-status",
   "magicblock-validator",
@@ -67,6 +68,7 @@ bs58 = "0.4.0"
 byteorder = "1.5.0"
 cargo-lock = "10.0.0"
 cargo-expand = "1"
+chrono = "0.4"
 clap = "4.5.40"
 convert_case = "0.8.0"
 conjunto-transwise = { git = "https://github.com/magicblock-labs/conjunto.git", rev = "bf82b45" }
@@ -130,6 +132,7 @@ magicblock-pubsub = { path = "./magicblock-pubsub" }
 magicblock-rpc = { path = "./magicblock-rpc" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
+magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
 magicblock-tokens = { path = "./magicblock-tokens" }
 magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-version = { path = "./magicblock-version" }
@@ -138,6 +141,7 @@ num-format = "0.4.4"
 num-traits = "0.2"
 num_cpus = "1.16.0"
 paste = "1.0"
+priority-queue = "2.5.0"
 proc-macro2 = "1.0"
 prometheus = "0.13.4"
 # Needs to match https://crates.io/crates/solana-storage-bigtable/2.1.13/dependencies
@@ -146,8 +150,10 @@ protobuf-src = "1.1"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10.0"
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.31.0"
 rustc_version = "0.4"
-rusqlite = { version = "0.34.0", features = ["bundled"] } # bundled sqlite 3.44
+rusqlite = { version = "0.37.0", features = ["bundled"] } # bundled sqlite 3.44
 semver = "1.0.22"
 serde = "1.0.217"
 serde_derive = "1.0"
@@ -210,6 +216,7 @@ tonic-build = "0.9.2"
 tonic-health = "0.9.2"
 trybuild = "1.0"
 url = "2.5.0"
+uuid = "1.0"
 vergen = "8.3.1"
 
 [patch.crates-io]

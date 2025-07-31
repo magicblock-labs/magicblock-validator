@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "programs/flexi-counter",
+  "programs/schedule-task",
   "programs/schedulecommit",
   "programs/schedulecommit-security",
   "programs/sysvars",
@@ -17,6 +18,7 @@ members = [
   "test-tools",
   "test-pubsub",
   "test-config",
+  "test-task-scheduler",
 ]
 resolver = "2"
 
@@ -27,10 +29,13 @@ edition = "2021"
 [workspace.dependencies]
 anyhow = "1.0.86"
 borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
+bincode = "1.3.3"
+chrono = "0.4"
 cleanass = "0.0.1"
 ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "c1fcb91" }
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
+lazy_static = "1.4.0"
 log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
 magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [
@@ -44,6 +49,7 @@ magicblock-committor-program = { path = "../magicblock-committor-program", featu
 ] }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
+magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
 paste = "1.0"
@@ -61,14 +67,14 @@ solana-pubsub-client = "2.2"
 solana-rpc-client = "2.2"
 solana-rpc-client-api = "2.2"
 solana-sdk = "2.2"
+solana-transaction = "2.2"
 solana-transaction-status = "2.2"
 teepee = "0.0.1"
 tempfile = "3.10.1"
 test-config = { path = "test-config" }
 test-tools-core = { path = "../test-tools-core" }
-toml = "0.8.13"
-lazy_static = "1.4.0"
 tokio = "1.0"
+toml = "0.8.13"
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency
