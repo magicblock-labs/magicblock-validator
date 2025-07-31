@@ -59,6 +59,7 @@ pub fn setup_offline_validator(
             reset,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
+            ..Default::default()
         },
         accounts: accounts_config.clone(),
         programs,
@@ -105,6 +106,7 @@ pub fn setup_validator_with_local_remote(
             reset,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
+            ..Default::default()
         },
         accounts: accounts_config.clone(),
         programs,
