@@ -25,9 +25,3 @@ pub use magicblock_committor_program::{
     ChangedAccount, Changeset, ChangesetMeta,
 };
 pub use service::{BaseIntentCommittor, CommittorService};
-pub fn changeset_for_slot(slot: u64) -> Changeset {
-    Changeset {
-        slot,
-        ..Changeset::default()
-    }
-}

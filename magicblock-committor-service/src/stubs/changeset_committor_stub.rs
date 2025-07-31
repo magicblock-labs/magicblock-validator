@@ -53,7 +53,10 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         rx
     }
 
-    fn commit_base_intent(&self, base_intents: Vec<ScheduledBaseIntentWrapper>) {
+    fn commit_base_intent(
+        &self,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) {
         let mut changesets = self.committed_changesets.lock().unwrap();
         base_intents.into_iter().for_each(|intent| {
             changesets.insert(intent.inner.id, intent);

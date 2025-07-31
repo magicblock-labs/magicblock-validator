@@ -53,7 +53,12 @@ where
         // Update tasks status to Pending
         if let Some(pubkeys) = base_intent.get_committed_pubkeys() {
             let update_status = CommitStatus::Pending;
-            persist_status_update_by_message_set(&persister, base_intent.id, &pubkeys, update_status);
+            persist_status_update_by_message_set(
+                &persister,
+                base_intent.id,
+                &pubkeys,
+                update_status,
+            );
         }
 
         // Commit stage

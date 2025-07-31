@@ -5804,6 +5804,7 @@ dependencies = [
  "magicblock-committor-program",
  "magicblock-committor-service",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=374603f739a1b218b6b6f49dcd7f0ba60d662c7c)",
+ "magicblock-program 0.1.2",
  "magicblock-rpc-client",
  "program-flexi-counter",
  "solana-account",

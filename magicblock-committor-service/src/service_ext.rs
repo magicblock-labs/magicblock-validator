@@ -75,7 +75,9 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
             };
 
             if let Err(_) = sender.send(execution_result) {
-                error!("Failed to send BaseIntent execution result to listener");
+                error!(
+                    "Failed to send BaseIntent execution result to listener"
+                );
             }
         }
     }
@@ -103,9 +105,9 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittorExt
                             vacant.insert(sender);
                             Ok(receiver)
                         }
-                        Entry::Occupied(_) => Err(
-                            Error::RepeatingMessageError(intent.inner.id),
-                        ),
+                        Entry::Occupied(_) => {
+                            Err(Error::RepeatingMessageError(intent.inner.id))
+                        }
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()?
@@ -129,7 +131,10 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
         self.inner.reserve_pubkeys_for_committee(committee, owner)
     }
 
-    fn commit_base_intent(&self, base_intents: Vec<ScheduledBaseIntentWrapper>) {
+    fn commit_base_intent(
+        &self,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) {
         self.inner.commit_base_intent(base_intents)
     }
 

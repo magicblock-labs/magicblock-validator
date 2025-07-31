@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent, FeePayerAccount,
 };
@@ -17,4 +19,12 @@ pub struct ScheduledBaseIntentWrapper {
     pub feepayers: Vec<FeePayerAccount>,
     pub excluded_pubkeys: Vec<Pubkey>,
     pub trigger_type: TriggerType,
+}
+
+impl Deref for ScheduledBaseIntentWrapper {
+    type Target = ScheduledBaseIntent;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
 }

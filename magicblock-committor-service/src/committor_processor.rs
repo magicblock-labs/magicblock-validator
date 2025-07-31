@@ -135,8 +135,7 @@ impl CommittorProcessor {
             .iter()
             .map(|l1_message| l1_message.inner.clone())
             .collect::<Vec<_>>();
-        if let Err(err) = self.persister.start_base_intents(&intents)
-        {
+        if let Err(err) = self.persister.start_base_intents(&intents) {
             // We will still try to perform the commits, but the fact that we cannot
             // persist the intent is very serious and we should probably restart the
             // valiator
