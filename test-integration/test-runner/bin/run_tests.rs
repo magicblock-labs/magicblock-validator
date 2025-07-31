@@ -399,17 +399,15 @@ fn run_magicblock_api_tests(
     if !should_run_test("magicblock_api") {
         return Ok(success_output());
     }
-    let loaded_chain_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
 
-    let mut ephem_validator = match start_validator(
-        "validator-api-offline.devnet.toml",
-        ValidatorCluster::Ephem,
-        &loaded_chain_accounts,
+    let mut devnet_validator = match start_validator(
+        "schedulecommit-conf.devnet.toml",
+        ValidatorCluster::Chain(None),
+        &LoadedAccounts::default(),
     ) {
         Some(validator) => validator,
         None => {
-            panic!("Failed to start ephemeral validator properly");
+            panic!("Failed to start devnet validator properly");
         }
     };
 
@@ -418,11 +416,11 @@ fn run_magicblock_api_tests(
 
     let output = run_test(test_dir, Default::default()).map_err(|err| {
         eprintln!("Failed to magicblock api tests: {:?}", err);
-        cleanup_validator(&mut ephem_validator, "ephemeral");
+        cleanup_validator(&mut devnet_validator, "devnet");
         err
     })?;
 
-    cleanup_validator(&mut ephem_validator, "ephemeral");
+    cleanup_validator(&mut devnet_validator, "devnet");
     Ok(output)
 }
 

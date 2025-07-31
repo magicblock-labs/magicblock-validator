@@ -24,20 +24,8 @@ snapshot-frequency = 1024
 millis_per_slot = 50
 sigverify = true
 
-[[program]]
-id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
-path = "../schedulecommit/elfs/dlp.so"
-
-[[program]]
-id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
-path = "../target/deploy/program_schedulecommit.so"
-
-[[program]]
-id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
-path = "../target/deploy/program_schedulecommit_security.so"
-
 [rpc]
-port = 7849
+port = 8899
 
 [geyser_grpc]
 port = 10001

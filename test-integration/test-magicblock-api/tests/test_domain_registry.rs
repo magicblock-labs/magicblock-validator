@@ -1,6 +1,3 @@
-use integration_test_tools::validator::{
-    start_test_validator_with_config, TestRunnerPaths,
-};
 use integration_test_tools::IntegrationTestContext;
 use lazy_static::lazy_static;
 use magicblock_api::domain_registry_manager::DomainRegistryManager;
@@ -11,8 +8,6 @@ use mdp::state::{features::FeaturesSet, record::ErRecord};
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::signature::{Keypair, Signer};
-use std::path::PathBuf;
-use std::process::Child;
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     sync::Arc,
@@ -22,22 +17,7 @@ lazy_static! {
     static ref VALIDATOR_KEYPAIR: Arc<Keypair> = Arc::new(Keypair::new());
 }
 
-const DEVNET_URL: &str = "http://127.0.0.1:7799";
-
-fn test_registration() {
-    let validator_info = get_validator_info();
-    let domain_manager = DomainRegistryManager::new(DEVNET_URL);
-    domain_manager
-        .handle_registration(&VALIDATOR_KEYPAIR, validator_info.clone())
-        .expect("Failed to register");
-
-    let actual = domain_manager
-        .fetch_validator_info(&validator_info.pda().0)
-        .expect("Failed to fetch ")
-        .expect("ValidatorInfo doesn't exist");
-
-    assert_eq!(actual, validator_info);
-}
+const DEVNET_URL: &str = "http://localhost:7799";
 
 fn get_validator_info() -> ErRecord {
     ErRecord::V0(RecordV0 {
@@ -52,6 +32,20 @@ fn get_validator_info() -> ErRecord {
         ),
         addr: SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 0), 1010).to_string(),
     })
+}
+
+fn test_registration() {
+    let validator_info = get_validator_info();
+    let domain_manager = DomainRegistryManager::new(DEVNET_URL);
+    domain_manager
+        .handle_registration(&VALIDATOR_KEYPAIR, validator_info.clone())
+        .expect("Failed to register");
+
+    let actual = domain_manager
+        .fetch_validator_info(&validator_info.pda().0)
+        .expect("Failed to fetch validator info");
+
+    assert_eq!(actual, Some(validator_info.clone()));
 }
 
 fn test_sync() {
@@ -71,10 +65,9 @@ fn test_sync() {
 
     let actual = domain_manager
         .fetch_validator_info(&validator_info.pda().0)
-        .expect("Failed to fetch ")
-        .expect("ValidatorInfo doesn't exist");
+        .expect("Failed to fetch validator info");
 
-    assert_eq!(actual, validator_info);
+    assert_eq!(actual, Some(validator_info.clone()));
 }
 
 fn test_unregister() {
@@ -88,54 +81,11 @@ fn test_unregister() {
         .fetch_validator_info(&pda)
         .expect("Failed to fetch validator info");
 
-    assert!(actual.is_none())
+    assert!(actual.is_none());
 }
 
-struct TestValidator {
-    process: Child,
-}
-
-impl TestValidator {
-    fn start() -> Self {
-        let manifest_dir_raw = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        let manifest_dir = PathBuf::from(&manifest_dir_raw);
-
-        let config_path =
-            manifest_dir.join("../configs/schedulecommit-conf.devnet.toml");
-        let workspace_dir = manifest_dir.join("../");
-        let root_dir = workspace_dir.join("../");
-
-        let paths = TestRunnerPaths {
-            config_path,
-            root_dir,
-            workspace_dir,
-        };
-        let process = start_test_validator_with_config(
-            &paths,
-            None,
-            &Default::default(),
-            "CHAIN",
-        )
-        .expect("Failed to start devnet process");
-
-        Self { process }
-    }
-}
-
-impl Drop for TestValidator {
-    fn drop(&mut self) {
-        self.process
-            .kill()
-            .expect("Failed to stop solana-test-validator");
-        self.process
-            .wait()
-            .expect("Failed to wait for solana-test-validator");
-    }
-}
-
-fn main() {
-    let _devnet = TestValidator::start();
-
+#[test]
+fn test_domain_registry() {
     let client = RpcClient::new_with_commitment(
         DEVNET_URL,
         CommitmentConfig::confirmed(),
@@ -146,16 +96,9 @@ fn main() {
         5000000000,
         CommitmentConfig::confirmed(),
     )
-    .expect("Failed to airdrop");
+    .expect("Airdrop failed");
 
-    println!("Testing validator info registration...");
     test_registration();
-
-    println!("Testing validator info sync...");
     test_sync();
-
-    println!("Testing validator info unregistration...");
     test_unregister();
-
-    println!("Passed")
 }

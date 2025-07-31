@@ -10332,6 +10332,7 @@ dependencies = [
 name = "test-magicblock-api"
 version = "0.0.0"
 dependencies = [
+ "cleanass",
  "integration-test-tools",
  "isocountry",
  "lazy_static",
