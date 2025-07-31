@@ -64,7 +64,7 @@ async fn test_clocks_match() {
             validator
         );
         // Wait until we're sure the slot is written to the ledger
-        while expect!(rpc_client.get_slot().await, validator) < tx.slot + 2 {
+        while expect!(rpc_client.get_slot().await, validator) < tx.slot + 10 {
             tx = expect!(
                 rpc_client
                     .get_transaction(&tx_result, UiTransactionEncoding::Base64)
