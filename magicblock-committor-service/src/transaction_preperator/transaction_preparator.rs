@@ -1,7 +1,7 @@
 use std::{fmt::Formatter, sync::Arc};
 
 use async_trait::async_trait;
-use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
+use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_sdk::{
@@ -9,8 +9,8 @@ use solana_sdk::{
 };
 
 use crate::{
-    commit_scheduler::commit_id_tracker::CommitIdFetcher,
-    persist::L1MessagesPersisterIface,
+    intent_executor::commit_id_fetcher::CommitIdFetcher,
+    persist::IntentPersister,
     tasks::{
         task_builder::{TaskBuilderV1, TasksBuilder},
         task_strategist::TaskStrategist,
@@ -41,24 +41,24 @@ impl std::fmt::Display for PreparatorVersion {
 pub trait TransactionPreparator: Send + Sync + 'static {
     fn version(&self) -> PreparatorVersion;
 
-    /// Returns [`VersionedMessage`] corresponding to [`ScheduledL1Message`] tasks
+    /// Returns [`VersionedMessage`] corresponding to [`ScheduledBaseIntent`] tasks
     /// Handles all necessary preparations for Message to be valid
     /// NOTE: [`VersionedMessage`] contains dummy recent_block_hash that should be replaced
-    async fn prepare_commit_tx<P: L1MessagesPersisterIface>(
+    async fn prepare_commit_tx<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        l1_message: &ScheduledL1Message,
-        l1_messages_persister: &Option<P>,
+        base_intent: &ScheduledBaseIntent,
+        intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
 
-    /// Returns [`VersionedMessage`] corresponding to [`ScheduledL1Message`] tasks
+    /// Returns [`VersionedMessage`] corresponding to [`ScheduledBaseIntent`] tasks
     /// Handles all necessary preparations for Message to be valid
     // NOTE: [`VersionedMessage`] contains dummy recent_block_hash that should be replaced
-    async fn prepare_finalize_tx<P: L1MessagesPersisterIface>(
+    async fn prepare_finalize_tx<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        l1_message: &ScheduledL1Message,
-        l1_messages_persister: &Option<P>,
+        base_intent: &ScheduledBaseIntent,
+        intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
 }
 
@@ -108,24 +108,24 @@ where
 
     /// In V1: prepares TX with commits for every account in message
     /// For pure actions message - outputs Tx that runs actions
-    async fn prepare_commit_tx<P: L1MessagesPersisterIface>(
+    async fn prepare_commit_tx<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        l1_message: &ScheduledL1Message,
-        l1_messages_persister: &Option<P>,
+        base_intent: &ScheduledBaseIntent,
+        intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
         // create tasks
         let tasks = TaskBuilderV1::commit_tasks(
             &self.commit_id_fetcher,
-            l1_message,
-            l1_messages_persister,
+            base_intent,
+            intent_persister,
         )
         .await?;
         // optimize to fit tx size. aka Delivery Strategy
         let tx_strategy = TaskStrategist::build_strategy(
             tasks,
             &authority.pubkey(),
-            l1_messages_persister,
+            intent_persister,
         )?;
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
@@ -133,7 +133,7 @@ where
             .prepare_for_delivery(
                 authority,
                 &tx_strategy,
-                l1_messages_persister,
+                intent_persister,
             )
             .await?;
 
@@ -151,20 +151,20 @@ where
     }
 
     /// In V1: prepares single TX with finalize, undelegation + actions
-    async fn prepare_finalize_tx<P: L1MessagesPersisterIface>(
+    async fn prepare_finalize_tx<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        l1_message: &ScheduledL1Message,
-        l1_messages_persister: &Option<P>,
+        base_intent: &ScheduledBaseIntent,
+        intent_presister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
         // create tasks
         let tasks =
-            TaskBuilderV1::finalize_tasks(&self.rpc_client, l1_message).await?;
+            TaskBuilderV1::finalize_tasks(&self.rpc_client, base_intent).await?;
         // optimize to fit tx size. aka Delivery Strategy
         let tx_strategy = TaskStrategist::build_strategy(
             tasks,
             &authority.pubkey(),
-            l1_messages_persister,
+            intent_presister,
         )?;
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
@@ -172,7 +172,7 @@ where
             .prepare_for_delivery(
                 authority,
                 &tx_strategy,
-                l1_messages_persister,
+                intent_presister,
             )
             .await?;
 

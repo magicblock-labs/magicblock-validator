@@ -6,10 +6,10 @@ use borsh::BorshDeserialize;
 use futures_util::StreamExt;
 use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
-    persist::L1MessagePersister,
+    persist::IntentPersisterImpl,
     tasks::{
         task_strategist::{TaskStrategist, TransactionStrategy},
-        tasks::{ArgsTask, BufferTask, L1Task},
+        tasks::{ArgsTask, BaseTask, BufferTask},
     },
 };
 use solana_sdk::signer::Signer;
@@ -35,7 +35,7 @@ async fn test_prepare_10kb_buffer() {
         .prepare_for_delivery(
             &fixture.authority,
             &strategy,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .await;
 
@@ -87,7 +87,7 @@ async fn test_prepare_multiple_buffers() {
         .iter()
         .map(|data| {
             let task = BufferTask::Commit(create_commit_task(data.as_slice()));
-            Box::new(task) as Box<dyn L1Task>
+            Box::new(task) as Box<dyn BaseTask>
         })
         .collect();
     let strategy = TransactionStrategy {
@@ -100,7 +100,7 @@ async fn test_prepare_multiple_buffers() {
         .prepare_for_delivery(
             &fixture.authority,
             &strategy,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .await;
 
@@ -158,7 +158,7 @@ async fn test_lookup_tables() {
         .iter()
         .map(|data| {
             let task = ArgsTask::Commit(create_commit_task(data.as_slice()));
-            Box::new(task) as Box<dyn L1Task>
+            Box::new(task) as Box<dyn BaseTask>
         })
         .collect::<Vec<_>>();
 
@@ -175,7 +175,7 @@ async fn test_lookup_tables() {
         .prepare_for_delivery(
             &fixture.authority,
             &strategy,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .await;
     assert!(result.is_ok(), "Failed to prepare lookup tables");

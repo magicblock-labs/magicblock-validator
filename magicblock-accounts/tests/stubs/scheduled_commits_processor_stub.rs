@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use magicblock_accounts::{errors::AccountsResult, ScheduledCommitsProcessor};
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::L1MessageCommittor;
+use magicblock_committor_service::BaseIntentCommittor;
 
 #[derive(Default)]
 pub struct ScheduledCommitsProcessorStub {}

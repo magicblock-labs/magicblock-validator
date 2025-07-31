@@ -1,5 +1,5 @@
 use log::*;
-use magicblock_committor_service::{L1MessageCommittor, ComputeBudgetConfig};
+use magicblock_committor_service::{BaseIntentCommittor, ComputeBudgetConfig};
 use magicblock_rpc_client::MagicblockRpcClient;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -659,7 +659,7 @@ async fn ix_commit_local(
 
     let ephemeral_blockhash = Hash::default();
     let reqid = service
-        .commit_l1_messages(changeset.clone(), ephemeral_blockhash, finalize)
+        .commit_base_intent(changeset.clone(), ephemeral_blockhash, finalize)
         .await
         .unwrap()
         .unwrap();

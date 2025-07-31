@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use magicblock_committor_service::{
-    persist::L1MessagePersister,
+    persist::IntentPersisterImpl,
     transaction_preperator::transaction_preparator::TransactionPreparator,
 };
-use magicblock_program::magic_scheduled_l1_message::{
-    CommitAndUndelegate, CommitType, CommittedAccountV2, L1Action,
-    MagicL1Message, ProgramArgs, ScheduledL1Message, ShortAccountMeta,
+use magicblock_program::magic_scheduled_base_intent::{
+    BaseAction, CommitAndUndelegate, CommitType, CommittedAccountV2,
+    MagicBaseIntent, ProgramArgs, ScheduledBaseIntent, ShortAccountMeta,
     UndelegateType,
 };
 use solana_pubkey::Pubkey;
@@ -27,13 +27,13 @@ async fn test_prepare_commit_tx_with_single_account() {
     // Create test data
     let account_data = vec![1, 2, 3, 4, 5];
     let committed_account = create_committed_account(&account_data);
-    let l1_message = ScheduledL1Message {
+    let l1_message = ScheduledBaseIntent {
         id: 1,
         slot: 0,
         blockhash: Hash::default(),
         action_sent_transaction: Transaction::default(),
         payer: fixture.authority.pubkey(),
-        l1_message: MagicL1Message::Commit(CommitType::Standalone(vec![
+        base_intent: MagicBaseIntent::Commit(CommitType::Standalone(vec![
             committed_account.clone(),
         ])),
     };
@@ -46,7 +46,7 @@ async fn test_prepare_commit_tx_with_single_account() {
         .prepare_commit_tx(
             &fixture.authority,
             &l1_message,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .await;
 
@@ -82,13 +82,13 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
         },
     ];
 
-    let l1_message = ScheduledL1Message {
+    let l1_message = ScheduledBaseIntent {
         id: 1,
         slot: 0,
         blockhash: Hash::default(),
         action_sent_transaction: Transaction::default(),
         payer: fixture.authority.pubkey(),
-        l1_message: MagicL1Message::Commit(CommitType::Standalone(
+        base_intent: MagicBaseIntent::Commit(CommitType::Standalone(
             accounts.clone(),
         )),
     };
@@ -98,7 +98,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
         .prepare_commit_tx(
             &fixture.authority,
             &l1_message,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .await;
 
@@ -122,7 +122,7 @@ async fn test_prepare_commit_tx_with_l1_actions() {
         },
     };
 
-    let l1_action = L1Action {
+    let l1_action = BaseAction {
         compute_units: 30_000,
         destination_program: system_program::id(),
         escrow_authority: fixture.authority.pubkey(),
@@ -136,15 +136,15 @@ async fn test_prepare_commit_tx_with_l1_actions() {
         }],
     };
 
-    let l1_message = ScheduledL1Message {
+    let l1_message = ScheduledBaseIntent {
         id: 1,
         slot: 0,
         blockhash: Hash::default(),
         action_sent_transaction: Transaction::default(),
         payer: fixture.authority.pubkey(),
-        l1_message: MagicL1Message::Commit(CommitType::WithL1Actions {
+        base_intent: MagicBaseIntent::Commit(CommitType::WithBaseActions {
             committed_accounts: vec![account.clone()],
-            l1_actions: vec![l1_action],
+            base_actions: vec![l1_action],
         }),
     };
 
@@ -156,7 +156,7 @@ async fn test_prepare_commit_tx_with_l1_actions() {
         .prepare_commit_tx(
             &fixture.authority,
             &l1_message,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .await;
 
@@ -171,16 +171,18 @@ async fn test_prepare_finalize_tx_with_undelegate() {
 
     // Create test data
     let rent_reimbursement = Pubkey::new_unique();
-    let l1_message = ScheduledL1Message {
+    let l1_message = ScheduledBaseIntent {
         id: 1,
         slot: 0,
         blockhash: Hash::default(),
         action_sent_transaction: Transaction::default(),
         payer: fixture.authority.pubkey(),
-        l1_message: MagicL1Message::CommitAndUndelegate(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(vec![]),
-            undelegate_action: UndelegateType::Standalone,
-        }),
+        base_intent: MagicBaseIntent::CommitAndUndelegate(
+            CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![]),
+                undelegate_action: UndelegateType::Standalone,
+            },
+        ),
     };
 
     // Test preparation
@@ -188,7 +190,7 @@ async fn test_prepare_finalize_tx_with_undelegate() {
         .prepare_finalize_tx(
             &fixture.authority,
             &l1_message,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .await;
 
@@ -202,7 +204,7 @@ async fn test_prepare_finalize_tx_with_undelegate_and_actions() {
 
     // Create test data
     let rent_reimbursement = Pubkey::new_unique();
-    let l1_action = L1Action {
+    let l1_action = BaseAction {
         compute_units: 30_000,
         destination_program: system_program::id(),
         escrow_authority: fixture.authority.pubkey(),
@@ -216,16 +218,20 @@ async fn test_prepare_finalize_tx_with_undelegate_and_actions() {
         }],
     };
 
-    let l1_message = ScheduledL1Message {
+    let l1_message = ScheduledBaseIntent {
         id: 1,
         slot: 0,
         blockhash: Hash::default(),
         action_sent_transaction: Transaction::default(),
         payer: fixture.authority.pubkey(),
-        l1_message: MagicL1Message::CommitAndUndelegate(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(vec![]),
-            undelegate_action: UndelegateType::WithL1Actions(vec![l1_action]),
-        }),
+        base_intent: MagicBaseIntent::CommitAndUndelegate(
+            CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![]),
+                undelegate_action: UndelegateType::WithBaseActions(vec![
+                    l1_action,
+                ]),
+            },
+        ),
     };
 
     // Test preparation
@@ -233,7 +239,7 @@ async fn test_prepare_finalize_tx_with_undelegate_and_actions() {
         .prepare_finalize_tx(
             &fixture.authority,
             &l1_message,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .await;
 
@@ -258,13 +264,13 @@ async fn test_prepare_large_commit_tx_uses_buffers() {
         },
     };
 
-    let l1_message = ScheduledL1Message {
+    let l1_message = ScheduledBaseIntent {
         id: 1,
         slot: 0,
         blockhash: Hash::default(),
         action_sent_transaction: Transaction::default(),
         payer: fixture.authority.pubkey(),
-        l1_message: MagicL1Message::Commit(CommitType::Standalone(vec![
+        base_intent: MagicBaseIntent::Commit(CommitType::Standalone(vec![
             committed_account.clone(),
         ])),
     };
@@ -277,7 +283,7 @@ async fn test_prepare_large_commit_tx_uses_buffers() {
         .prepare_commit_tx(
             &fixture.authority,
             &l1_message,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .await;
 

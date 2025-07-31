@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
+use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 use solana_sdk::pubkey::Pubkey;
 
 use super::{
@@ -13,16 +13,16 @@ use super::{
 
 const POISONED_MUTEX_MSG: &str = "Commitor Persister lock poisoned";
 
-/// Records lifespan pf L1Message
-pub trait L1MessagesPersisterIface: Send + Sync + Clone + 'static {
-    /// Starts persisting L1Message
-    fn start_l1_messages(
+/// Records lifespan pf BaseIntent
+pub trait IntentPersister: Send + Sync + Clone + 'static {
+    /// Starts persisting BaseIntent
+    fn start_base_intents(
         &self,
-        l1_message: &[ScheduledL1Message],
+        base_intent: &[ScheduledBaseIntent],
     ) -> CommitPersistResult<()>;
-    fn start_l1_message(
+    fn start_base_intent(
         &self,
-        l1_message: &ScheduledL1Message,
+        base_intent: &ScheduledBaseIntent,
     ) -> CommitPersistResult<()>;
     fn set_commit_id(
         &self,
@@ -66,14 +66,14 @@ pub trait L1MessagesPersisterIface: Send + Sync + Clone + 'static {
 }
 
 #[derive(Clone)]
-pub struct L1MessagePersister {
+pub struct IntentPersisterImpl {
     // DB that tracks lifespan of Commit intents
     commits_db: Arc<Mutex<CommittsDb>>,
     // TODO: add something like
     // actions_db: Arc<Mutex<ActionsDb>>
 }
 
-impl L1MessagePersister {
+impl IntentPersisterImpl {
     pub fn try_new<P>(db_file: P) -> CommitPersistResult<Self>
     where
         P: AsRef<Path>,
@@ -87,15 +87,15 @@ impl L1MessagePersister {
     }
 
     pub fn create_commit_rows(
-        l1_message: &ScheduledL1Message,
+        base_intent: &ScheduledBaseIntent,
     ) -> Vec<CommitStatusRow> {
-        let Some(committed_accounts) = l1_message.get_committed_accounts()
+        let Some(committed_accounts) = base_intent.get_committed_accounts()
         else {
             // We don't persist standalone actions
             return vec![];
         };
 
-        let undelegate = l1_message.is_undelegate();
+        let undelegate = base_intent.is_undelegate();
         let created_at = now();
         committed_accounts
             .iter()
@@ -115,12 +115,12 @@ impl L1MessagePersister {
 
                 // Create a commit status row for this account
                 CommitStatusRow {
-                    message_id: l1_message.id,
+                    message_id: base_intent.id,
                     commit_id: 0, // Not known at creation, set later
                     pubkey: account.pubkey,
                     delegated_account_owner: account.account.owner,
-                    slot: l1_message.slot,
-                    ephemeral_blockhash: l1_message.blockhash,
+                    slot: base_intent.slot,
+                    ephemeral_blockhash: base_intent.blockhash,
                     undelegate,
                     lamports: account.account.lamports,
                     data,
@@ -136,10 +136,10 @@ impl L1MessagePersister {
     }
 }
 
-impl L1MessagesPersisterIface for L1MessagePersister {
-    fn start_l1_messages(
+impl IntentPersister for IntentPersisterImpl {
+    fn start_base_intents(
         &self,
-        l1_message: &[ScheduledL1Message],
+        l1_message: &[ScheduledBaseIntent],
     ) -> CommitPersistResult<()> {
         let commit_rows = l1_message
             .iter()
@@ -154,9 +154,9 @@ impl L1MessagesPersisterIface for L1MessagePersister {
         Ok(())
     }
 
-    fn start_l1_message(
+    fn start_base_intent(
         &self,
-        l1_message: &ScheduledL1Message,
+        l1_message: &ScheduledBaseIntent,
     ) -> CommitPersistResult<()> {
         let commit_row = Self::create_commit_rows(l1_message);
         self.commits_db
@@ -253,23 +253,23 @@ impl L1MessagesPersisterIface for L1MessagePersister {
 }
 
 /// Blanket implementation for Option
-impl<T: L1MessagesPersisterIface> L1MessagesPersisterIface for Option<T> {
-    fn start_l1_messages(
+impl<T: IntentPersister> IntentPersister for Option<T> {
+    fn start_base_intents(
         &self,
-        l1_messages: &[ScheduledL1Message],
+        l1_messages: &[ScheduledBaseIntent],
     ) -> CommitPersistResult<()> {
         match self {
-            Some(persister) => persister.start_l1_messages(l1_messages),
+            Some(persister) => persister.start_base_intents(l1_messages),
             None => Ok(()),
         }
     }
 
-    fn start_l1_message(
+    fn start_base_intent(
         &self,
-        l1_message: &ScheduledL1Message,
+        l1_message: &ScheduledBaseIntent,
     ) -> CommitPersistResult<()> {
         match self {
-            Some(persister) => persister.start_l1_message(l1_message),
+            Some(persister) => persister.start_base_intent(l1_message),
             None => Ok(()),
         }
     }
@@ -371,8 +371,8 @@ impl<T: L1MessagesPersisterIface> L1MessagesPersisterIface for Option<T> {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_program::magic_scheduled_l1_message::{
-        CommitType, CommittedAccountV2, MagicL1Message,
+    use magicblock_program::magic_scheduled_base_intent::{
+        CommitType, CommittedAccountV2, MagicBaseIntent,
     };
     use solana_sdk::{
         account::Account, hash::Hash, pubkey::Pubkey, signature::Signature,
@@ -383,13 +383,13 @@ mod tests {
     use super::*;
     use crate::persist::{types, CommitStatusSignatures};
 
-    fn create_test_persister() -> (L1MessagePersister, NamedTempFile) {
+    fn create_test_persister() -> (IntentPersisterImpl, NamedTempFile) {
         let temp_file = NamedTempFile::new().unwrap();
-        let persister = L1MessagePersister::try_new(temp_file.path()).unwrap();
+        let persister = IntentPersisterImpl::try_new(temp_file.path()).unwrap();
         (persister, temp_file)
     }
 
-    fn create_test_message(id: u64) -> ScheduledL1Message {
+    fn create_test_message(id: u64) -> ScheduledBaseIntent {
         let account1 = Account {
             lamports: 1000,
             owner: Pubkey::new_unique(),
@@ -405,13 +405,13 @@ mod tests {
             rent_epoch: 0,
         };
 
-        ScheduledL1Message {
+        ScheduledBaseIntent {
             id,
             slot: 100,
             blockhash: Hash::new_unique(),
             action_sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
-            l1_message: MagicL1Message::Commit(CommitType::Standalone(vec![
+            base_intent: MagicBaseIntent::Commit(CommitType::Standalone(vec![
                 CommittedAccountV2 {
                     pubkey: Pubkey::new_unique(),
                     account: account1,
@@ -427,7 +427,7 @@ mod tests {
     #[test]
     fn test_create_commit_rows() {
         let message = create_test_message(1);
-        let rows = L1MessagePersister::create_commit_rows(&message);
+        let rows = IntentPersisterImpl::create_commit_rows(&message);
 
         assert_eq!(rows.len(), 2);
 
@@ -446,10 +446,10 @@ mod tests {
         let (persister, _temp_file) = create_test_persister();
         let message = create_test_message(1);
 
-        persister.start_l1_message(&message).unwrap();
+        persister.start_base_intent(&message).unwrap();
 
         let expected_statuses =
-            L1MessagePersister::create_commit_rows(&message);
+            IntentPersisterImpl::create_commit_rows(&message);
         let statuses = persister.get_commit_statuses_by_message(1).unwrap();
 
         assert_eq!(statuses.len(), 2);
@@ -463,7 +463,7 @@ mod tests {
         let message1 = create_test_message(1);
         let message2 = create_test_message(2);
 
-        persister.start_l1_messages(&[message1, message2]).unwrap();
+        persister.start_base_intents(&[message1, message2]).unwrap();
 
         let statuses1 = persister.get_commit_statuses_by_message(1).unwrap();
         let statuses2 = persister.get_commit_statuses_by_message(2).unwrap();
@@ -475,7 +475,7 @@ mod tests {
     fn test_update_status() {
         let (persister, _temp_file) = create_test_persister();
         let message = create_test_message(1);
-        persister.start_l1_message(&message).unwrap();
+        persister.start_base_intent(&message).unwrap();
 
         let pubkey = message.get_committed_pubkeys().unwrap()[0];
 
@@ -514,7 +514,7 @@ mod tests {
     fn test_set_commit_strategy() {
         let (persister, _temp_file) = create_test_persister();
         let message = create_test_message(1);
-        persister.start_l1_message(&message).unwrap();
+        persister.start_base_intent(&message).unwrap();
 
         let pubkey = message.get_committed_pubkeys().unwrap()[0];
         persister.set_commit_id(1, &pubkey, 100).unwrap();
@@ -534,7 +534,7 @@ mod tests {
     fn test_get_signatures() {
         let (persister, _temp_file) = create_test_persister();
         let message = create_test_message(1);
-        persister.start_l1_message(&message).unwrap();
+        persister.start_base_intent(&message).unwrap();
 
         let statuses = persister.get_commit_statuses_by_message(1).unwrap();
         let pubkey = statuses[0].pubkey;
@@ -562,12 +562,12 @@ mod tests {
     #[test]
     fn test_empty_accounts_not_persisted() {
         let (persister, _temp_file) = create_test_persister();
-        let message = ScheduledL1Message {
-            l1_message: MagicL1Message::L1Actions(vec![]), // No committed accounts
+        let message = ScheduledBaseIntent {
+            base_intent: MagicBaseIntent::BaseActions(vec![]), // No committed accounts
             ..create_test_message(1)
         };
 
-        persister.start_l1_message(&message).unwrap();
+        persister.start_base_intent(&message).unwrap();
 
         let statuses = persister.get_commit_statuses_by_message(1).unwrap();
         assert_eq!(statuses.len(), 0); // No rows should be persisted

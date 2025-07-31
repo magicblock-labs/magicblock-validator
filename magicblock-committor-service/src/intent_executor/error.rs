@@ -34,4 +34,4 @@ pub enum Error {
     ),
 }
 
-pub type MessageExecutorResult<T, E = Error> = Result<T, E>;
+pub type IntentExecutorResult<T, E = Error> = Result<T, E>;

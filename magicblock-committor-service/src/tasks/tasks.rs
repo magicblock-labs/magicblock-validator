@@ -11,8 +11,8 @@ use magicblock_committor_program::{
     },
     ChangesetChunks, Chunks,
 };
-use magicblock_program::magic_scheduled_l1_message::{
-    CommittedAccountV2, L1Action,
+use magicblock_program::magic_scheduled_base_intent::{
+    BaseAction, CommittedAccountV2,
 };
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::{AccountMeta, Instruction};
@@ -37,7 +37,7 @@ pub struct TaskPreparationInfo {
 }
 
 /// A trait representing a task that can be executed on Base layer
-pub trait L1Task: Send + Sync {
+pub trait BaseTask: Send + Sync {
     /// Gets all pubkeys that involved in Task's instruction
     fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
         self.instruction(validator)
@@ -51,7 +51,9 @@ pub trait L1Task: Send + Sync {
     fn instruction(&self, validator: &Pubkey) -> Instruction;
 
     /// Optimizes Task strategy if possible, otherwise returns itself
-    fn optimize(self: Box<Self>) -> Result<Box<dyn L1Task>, Box<dyn L1Task>>;
+    fn optimize(
+        self: Box<Self>,
+    ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>>;
 
     /// Returns [`TaskPreparationInfo`] if task needs to be prepared before executing,
     /// otherwise returns None
@@ -93,7 +95,7 @@ pub struct FinalizeTask {
 #[derive(Clone)]
 pub struct L1ActionTask {
     pub context: Context,
-    pub action: L1Action,
+    pub action: BaseAction,
 }
 
 /// Task that will be executed on Base layer via arguments
@@ -105,7 +107,7 @@ pub enum ArgsTask {
     L1Action(L1ActionTask),
 }
 
-impl L1Task for ArgsTask {
+impl BaseTask for ArgsTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match self {
             Self::Commit(value) => {
@@ -158,7 +160,9 @@ impl L1Task for ArgsTask {
         }
     }
 
-    fn optimize(self: Box<Self>) -> Result<Box<dyn L1Task>, Box<dyn L1Task>> {
+    fn optimize(
+        self: Box<Self>,
+    ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
         match *self {
             Self::Commit(value) => Ok(Box::new(BufferTask::Commit(value))),
             Self::L1Action(_) | Self::Finalize(_) | Self::Undelegate(_) => {
@@ -198,7 +202,7 @@ pub enum BufferTask {
     // Action in the future
 }
 
-impl L1Task for BufferTask {
+impl BaseTask for BufferTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         let Self::Commit(value) = self;
         let commit_id_slice = value.commit_id.to_le_bytes();
@@ -223,7 +227,9 @@ impl L1Task for BufferTask {
     }
 
     /// No further optimizations
-    fn optimize(self: Box<Self>) -> Result<Box<dyn L1Task>, Box<dyn L1Task>> {
+    fn optimize(
+        self: Box<Self>,
+    ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
         Err(self)
     }
 

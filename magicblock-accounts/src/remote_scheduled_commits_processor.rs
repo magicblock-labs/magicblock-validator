@@ -6,15 +6,15 @@ use log::{debug, error, info};
 use magicblock_account_cloner::{AccountClonerOutput, CloneOutputMap};
 use magicblock_bank::bank::Bank;
 use magicblock_committor_service::{
-    commit_scheduler::{
-        BroadcastedMessageExecutionResult, ExecutionOutputWrapper,
+    intent_execution_manager::{
+        BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
     },
-    types::{ScheduledL1MessageWrapper, TriggerType},
-    L1MessageCommittor,
+    types::{ScheduledBaseIntentWrapper, TriggerType},
+    BaseIntentCommittor,
 };
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
-    magic_scheduled_l1_message::{CommittedAccountV2, ScheduledL1Message},
+    magic_scheduled_base_intent::{CommittedAccountV2, ScheduledBaseIntent},
     register_scheduled_commit_sent, FeePayerAccount, TransactionScheduler,
 };
 use magicblock_transaction_status::TransactionStatusSender;
@@ -30,14 +30,14 @@ use crate::{errors::AccountsResult, ScheduledCommitsProcessor};
 const POISONED_RWLOCK_MSG: &str =
     "RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned";
 
-pub struct RemoteScheduledCommitsProcessor<C: L1MessageCommittor> {
+pub struct RemoteScheduledCommitsProcessor<C: BaseIntentCommittor> {
     transaction_scheduler: TransactionScheduler,
     cloned_accounts: CloneOutputMap,
     bank: Arc<Bank>,
     committor: Arc<C>,
 }
 
-impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
+impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
     pub fn new(
         bank: Arc<Bank>,
         cloned_accounts: CloneOutputMap,
@@ -59,14 +59,14 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
         }
     }
 
-    fn preprocess_message(
+    fn preprocess_intent(
         &self,
-        mut l1_message: ScheduledL1Message,
-    ) -> ScheduledL1MessageWrapper {
-        let Some(committed_accounts) = l1_message.get_committed_accounts_mut()
+        mut base_intent: ScheduledBaseIntent,
+    ) -> ScheduledBaseIntentWrapper {
+        let Some(committed_accounts) = base_intent.get_committed_accounts_mut()
         else {
-            return ScheduledL1MessageWrapper {
-                scheduled_l1_message: l1_message,
+            return ScheduledBaseIntentWrapper {
+                inner: base_intent,
                 excluded_pubkeys: Vec::new(),
                 feepayers: Vec::new(),
                 trigger_type: TriggerType::OnChain,
@@ -156,8 +156,8 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
             }
         });
 
-        ScheduledL1MessageWrapper {
-            scheduled_l1_message: l1_message,
+        ScheduledBaseIntentWrapper {
+            inner: base_intent,
             feepayers: processor.feepayers.into_iter().collect(),
             excluded_pubkeys: processor.excluded_pubkeys.into_iter().collect(),
             trigger_type: TriggerType::OnChain,
@@ -167,19 +167,19 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
     async fn result_processor(
         bank: Arc<Bank>,
         result_subscriber: oneshot::Receiver<
-            broadcast::Receiver<BroadcastedMessageExecutionResult>,
+            broadcast::Receiver<BroadcastedIntentExecutionResult>,
         >,
         transaction_status_sender: TransactionStatusSender,
     ) {
         const SUBSCRIPTION_ERR_MSG: &str =
-            "Failed to get subscription of results of L1Messages execution";
+            "Failed to get subscription of results of BaseIntents execution";
 
         let mut result_receiver =
             result_subscriber.await.expect(SUBSCRIPTION_ERR_MSG);
         while let Ok(execution_result) = result_receiver.recv().await {
             match execution_result {
                 Ok(value) => {
-                    Self::process_message_result(
+                    Self::process_intent_result(
                         &bank,
                         &transaction_status_sender,
                         value,
@@ -194,7 +194,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
         }
     }
 
-    async fn process_message_result(
+    async fn process_intent_result(
         bank: &Arc<Bank>,
         transaction_status_sender: &TransactionStatusSender,
         execution_outcome: ExecutionOutputWrapper,
@@ -221,7 +221,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
             }
         } else {
             info!(
-                "OffChain triggered L1Message executed: {}",
+                "OffChain triggered BaseIntent executed: {}",
                 execution_outcome.sent_commit.message_id
             );
         }
@@ -229,23 +229,23 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsProcessor<C> {
 }
 
 #[async_trait]
-impl<C: L1MessageCommittor> ScheduledCommitsProcessor
+impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
     for RemoteScheduledCommitsProcessor<C>
 {
     async fn process(&self) -> AccountsResult<()> {
-        let scheduled_l1_messages =
+        let scheduled_base_intent =
             self.transaction_scheduler.take_scheduled_actions();
 
-        if scheduled_l1_messages.is_empty() {
+        if scheduled_base_intent.is_empty() {
             return Ok(());
         }
 
-        let scheduled_l1_messages_wrapped = scheduled_l1_messages
+        let scheduled_base_intent_wrapped = scheduled_base_intent
             .into_iter()
-            .map(|message| self.preprocess_message(message))
+            .map(|intent| self.preprocess_intent(intent))
             .collect();
         self.committor
-            .commit_l1_messages(scheduled_l1_messages_wrapped);
+            .commit_base_intent(scheduled_base_intent_wrapped);
 
         Ok(())
     }

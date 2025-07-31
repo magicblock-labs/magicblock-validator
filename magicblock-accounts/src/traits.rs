@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use magicblock_metrics::metrics::HistogramTimer;
-use magicblock_program::magic_scheduled_l1_message::CommittedAccountV2;
+use magicblock_program::magic_scheduled_base_intent::CommittedAccountV2;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
     account::{Account, AccountSharedData, ReadableAccount},

@@ -4,19 +4,19 @@ use solana_pubkey::Pubkey;
 use solana_sdk::{signature::Keypair, signer::Signer};
 
 use crate::{
-    persist::L1MessagesPersisterIface,
+    persist::IntentPersister,
     tasks::{
         task_visitors::persistor_visitor::{
             PersistorContext, PersistorVisitor,
         },
-        tasks::{ArgsTask, FinalizeTask, L1Task},
+        tasks::{ArgsTask, BaseTask, FinalizeTask},
         utils::TransactionUtils,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
 
 pub struct TransactionStrategy {
-    pub optimized_tasks: Vec<Box<dyn L1Task>>,
+    pub optimized_tasks: Vec<Box<dyn BaseTask>>,
     pub lookup_tables_keys: Vec<Pubkey>,
 }
 
@@ -24,8 +24,8 @@ pub struct TaskStrategist;
 impl TaskStrategist {
     /// Returns [`TaskDeliveryStrategy`] for every [`Task`]
     /// Returns Error if all optimizations weren't enough
-    pub fn build_strategy<P: L1MessagesPersisterIface>(
-        mut tasks: Vec<Box<dyn L1Task>>,
+    pub fn build_strategy<P: IntentPersister>(
+        mut tasks: Vec<Box<dyn BaseTask>>,
         validator: &Pubkey,
         persistor: &Option<P>,
     ) -> TaskStrategistResult<TransactionStrategy> {
@@ -78,7 +78,7 @@ impl TaskStrategist {
     /// Attempt to use ALTs for ALL keys in tx
     /// Returns `true` if ALTs make tx fit, otherwise `false`
     /// TODO: optimize to use only necessary amount of pubkeys
-    pub fn attempt_lookup_tables(tasks: &[Box<dyn L1Task>]) -> bool {
+    pub fn attempt_lookup_tables(tasks: &[Box<dyn BaseTask>]) -> bool {
         let placeholder = Keypair::new();
         // Gather all involved keys in tx
         let budgets = TransactionUtils::tasks_compute_units(&tasks);
@@ -117,7 +117,7 @@ impl TaskStrategist {
 
     pub fn collect_lookup_table_keys(
         authority: &Pubkey,
-        tasks: &[Box<dyn L1Task>],
+        tasks: &[Box<dyn BaseTask>],
     ) -> Vec<Pubkey> {
         let budgets = TransactionUtils::tasks_compute_units(&tasks);
         let budget_instructions =
@@ -133,9 +133,9 @@ impl TaskStrategist {
 
     /// Optimizes set of [`TaskDeliveryStrategy`] to fit [`MAX_ENCODED_TRANSACTION_SIZE`]
     /// Returns size of tx after optimizations
-    fn optimize_strategy(tasks: &mut [Box<dyn L1Task>]) -> usize {
+    fn optimize_strategy(tasks: &mut [Box<dyn BaseTask>]) -> usize {
         // Get initial transaction size
-        let calculate_tx_length = |tasks: &[Box<dyn L1Task>]| {
+        let calculate_tx_length = |tasks: &[Box<dyn BaseTask>]| {
             match TransactionUtils::assemble_tasks_tx(
                 &Keypair::new(), // placeholder
                 &tasks,
@@ -179,7 +179,7 @@ impl TaskStrategist {
                 let tmp_task = ArgsTask::Finalize(FinalizeTask {
                     delegated_account: Pubkey::new_unique(),
                 });
-                let tmp_task = Box::new(tmp_task) as Box<dyn L1Task>;
+                let tmp_task = Box::new(tmp_task) as Box<dyn BaseTask>;
                 std::mem::replace(&mut tasks[index], tmp_task)
             };
             match task.optimize() {
@@ -222,15 +222,15 @@ pub type TaskStrategistResult<T, E = Error> = Result<T, E>;
 #[cfg(test)]
 mod tests {
     use dlp::args::Context;
-    use magicblock_program::magic_scheduled_l1_message::{
-        CommittedAccountV2, L1Action, ProgramArgs,
+    use magicblock_program::magic_scheduled_base_intent::{
+        BaseAction, CommittedAccountV2, ProgramArgs,
     };
     use solana_account::Account;
     use solana_sdk::system_program;
 
     use super::*;
     use crate::{
-        persist::L1MessagePersister,
+        persist::IntentPersisterImpl,
         tasks::tasks::{
             CommitTask, L1ActionTask, TaskStrategy, UndelegateTask,
         },
@@ -258,7 +258,7 @@ mod tests {
     fn create_test_l1_action_task(len: usize) -> ArgsTask {
         ArgsTask::L1Action(L1ActionTask {
             context: Context::Commit,
-            action: L1Action {
+            action: BaseAction {
                 destination_program: Pubkey::new_unique(),
                 escrow_authority: Pubkey::new_unique(),
                 account_metas_per_program: vec![],
@@ -291,12 +291,12 @@ mod tests {
     fn test_build_strategy_with_single_small_task() {
         let validator = Pubkey::new_unique();
         let task = create_test_commit_task(1, 100);
-        let tasks = vec![Box::new(task) as Box<dyn L1Task>];
+        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
             &validator,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .expect("Should build strategy");
 
@@ -309,12 +309,12 @@ mod tests {
         let validator = Pubkey::new_unique();
 
         let task = create_test_commit_task(1, 1000); // Large task
-        let tasks = vec![Box::new(task) as Box<dyn L1Task>];
+        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
             &validator,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .expect("Should build strategy with buffer optimization");
 
@@ -335,14 +335,14 @@ mod tests {
         let tasks = (0..NUM_COMMITS)
             .map(|i| {
                 let task = create_test_commit_task(i, 500); // Large task
-                Box::new(task) as Box<dyn L1Task>
+                Box::new(task) as Box<dyn BaseTask>
             })
             .collect();
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
             &validator,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .expect("Should build strategy with buffer optimization");
 
@@ -363,14 +363,14 @@ mod tests {
             .map(|i| {
                 // Large task
                 let task = create_test_commit_task(i, 10000);
-                Box::new(task) as Box<dyn L1Task>
+                Box::new(task) as Box<dyn BaseTask>
             })
             .collect();
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
             &validator,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .expect("Should build strategy with buffer optimization");
 
@@ -390,14 +390,14 @@ mod tests {
             .map(|i| {
                 // Large task
                 let task = create_test_commit_task(i, 1000);
-                Box::new(task) as Box<dyn L1Task>
+                Box::new(task) as Box<dyn BaseTask>
             })
             .collect();
 
         let result = TaskStrategist::build_strategy(
             tasks,
             &validator,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         );
         assert!(matches!(result, Err(Error::FailedToFitError)));
     }
@@ -406,9 +406,9 @@ mod tests {
     fn test_optimize_strategy_prioritizes_largest_tasks() {
         let validator = Pubkey::new_unique();
         let mut tasks = vec![
-            Box::new(create_test_commit_task(1, 100)) as Box<dyn L1Task>,
-            Box::new(create_test_commit_task(2, 1000)) as Box<dyn L1Task>, // Larger task
-            Box::new(create_test_commit_task(3, 1000)) as Box<dyn L1Task>, // Larger task
+            Box::new(create_test_commit_task(1, 100)) as Box<dyn BaseTask>,
+            Box::new(create_test_commit_task(2, 1000)) as Box<dyn BaseTask>, // Larger task
+            Box::new(create_test_commit_task(3, 1000)) as Box<dyn BaseTask>, // Larger task
         ];
 
         let final_size = TaskStrategist::optimize_strategy(&mut tasks);
@@ -421,16 +421,16 @@ mod tests {
     fn test_mixed_task_types_with_optimization() {
         let validator = Pubkey::new_unique();
         let tasks = vec![
-            Box::new(create_test_commit_task(1, 1000)) as Box<dyn L1Task>,
-            Box::new(create_test_finalize_task()) as Box<dyn L1Task>,
-            Box::new(create_test_l1_action_task(500)) as Box<dyn L1Task>,
-            Box::new(create_test_undelegate_task()) as Box<dyn L1Task>,
+            Box::new(create_test_commit_task(1, 1000)) as Box<dyn BaseTask>,
+            Box::new(create_test_finalize_task()) as Box<dyn BaseTask>,
+            Box::new(create_test_l1_action_task(500)) as Box<dyn BaseTask>,
+            Box::new(create_test_undelegate_task()) as Box<dyn BaseTask>,
         ];
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
             &validator,
-            &None::<L1MessagePersister>,
+            &None::<IntentPersisterImpl>,
         )
         .expect("Should build strategy");
 

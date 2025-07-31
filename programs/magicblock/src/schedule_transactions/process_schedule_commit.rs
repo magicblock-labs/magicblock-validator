@@ -9,9 +9,9 @@ use solana_sdk::{
 };
 
 use crate::{
-    magic_scheduled_l1_message::{
-        CommitAndUndelegate, CommitType, CommittedAccountV2, MagicL1Message,
-        ScheduledL1Message, UndelegateType,
+    magic_scheduled_base_intent::{
+        CommitAndUndelegate, CommitType, CommittedAccountV2, MagicBaseIntent,
+        ScheduledBaseIntent, UndelegateType,
     },
     schedule_transactions,
     schedule_transactions::{
@@ -205,22 +205,22 @@ pub(crate) fn process_schedule_commit(
 
     let commit_sent_sig = commit_sent_transaction.signatures[0];
 
-    let l1_message = if opts.request_undelegation {
-        MagicL1Message::CommitAndUndelegate(CommitAndUndelegate {
+    let base_intent = if opts.request_undelegation {
+        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
             commit_action: CommitType::Standalone(committed_accounts),
             undelegate_action: UndelegateType::Standalone,
         })
     } else {
-        MagicL1Message::Commit(CommitType::Standalone(committed_accounts))
+        MagicBaseIntent::Commit(CommitType::Standalone(committed_accounts))
     };
 
-    let scheduled_l1_message = ScheduledL1Message {
+    let scheduled_base_intent = ScheduledBaseIntent {
         id: commit_id,
         slot: clock.slot,
         blockhash,
         action_sent_transaction: commit_sent_transaction,
         payer: *payer_pubkey,
-        l1_message,
+        base_intent,
     };
 
     // NOTE: this is only protected by all the above checks however if the
@@ -230,10 +230,10 @@ pub(crate) fn process_schedule_commit(
         transaction_context,
         MAGIC_CONTEXT_IDX,
     )?;
-    TransactionScheduler::schedule_l1_message(
+    TransactionScheduler::schedule_base_intent(
         invoke_context,
         context_acc,
-        scheduled_l1_message,
+        scheduled_base_intent,
     )
     .map_err(|err| {
         ic_msg!(

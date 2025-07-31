@@ -16,22 +16,22 @@ use tokio::{
 };
 
 use crate::{
-    commit_scheduler::{
-        commit_scheduler_inner::{CommitSchedulerInner, POISONED_INNER_MSG},
+    intent_execution_manager::{
         db::DB,
+        intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
         Error,
     },
-    message_executor::{
-        error::MessageExecutorResult,
-        message_executor_factory::MessageExecutorFactory, ExecutionOutput,
-        MessageExecutor,
+    intent_executor::{
+        error::IntentExecutorResult,
+        intent_executor_factory::IntentExecutorFactory, ExecutionOutput,
+        IntentExecutor,
     },
-    persist::L1MessagesPersisterIface,
-    types::{ScheduledL1MessageWrapper, TriggerType},
+    persist::IntentPersister,
+    types::{ScheduledBaseIntentWrapper, TriggerType},
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
-/// Max number of executors that can send messages in parallel to L1
+/// Max number of executors that can send messages in parallel to Base layer
 const MAX_EXECUTORS: u8 = 50;
 
 // TODO(edwin): rename
@@ -44,57 +44,57 @@ pub struct ExecutionOutputWrapper {
     pub trigger_type: TriggerType,
 }
 
-pub type BroadcastedError = (u64, Arc<crate::message_executor::error::Error>);
+pub type BroadcastedError = (u64, Arc<crate::intent_executor::error::Error>);
 
-pub type BroadcastedMessageExecutionResult =
-    MessageExecutorResult<ExecutionOutputWrapper, BroadcastedError>;
+pub type BroadcastedIntentExecutionResult =
+    IntentExecutorResult<ExecutionOutputWrapper, BroadcastedError>;
 
 /// Struct that exposes only `subscribe` method of `broadcast::Sender` for better isolation
 pub struct ResultSubscriber(
-    broadcast::Sender<BroadcastedMessageExecutionResult>,
+    broadcast::Sender<BroadcastedIntentExecutionResult>,
 );
 impl ResultSubscriber {
     pub fn subscribe(
         &self,
-    ) -> broadcast::Receiver<BroadcastedMessageExecutionResult> {
+    ) -> broadcast::Receiver<BroadcastedIntentExecutionResult> {
         self.0.subscribe()
     }
 }
 
-pub(crate) struct CommitSchedulerWorker<D, P, F> {
+pub(crate) struct IntentExecutionEngine<D, P, F> {
     db: Arc<D>,
     executor_factory: F,
-    l1_messages_persister: Option<P>,
-    receiver: mpsc::Receiver<ScheduledL1MessageWrapper>,
+    intents_persister: Option<P>,
+    receiver: mpsc::Receiver<ScheduledBaseIntentWrapper>,
 
-    inner: Arc<Mutex<CommitSchedulerInner>>,
+    inner: Arc<Mutex<IntentScheduler>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
 }
 
-impl<D, P, F, E> CommitSchedulerWorker<D, P, F>
+impl<D, P, F, E> IntentExecutionEngine<D, P, F>
 where
     D: DB,
-    P: L1MessagesPersisterIface,
-    F: MessageExecutorFactory<Executor = E> + Send + Sync + 'static,
-    E: MessageExecutor,
+    P: IntentPersister,
+    F: IntentExecutorFactory<Executor = E> + Send + Sync + 'static,
+    E: IntentExecutor,
 {
     pub fn new(
         db: Arc<D>,
         executor_factory: F,
-        l1_messages_persister: Option<P>,
-        receiver: mpsc::Receiver<ScheduledL1MessageWrapper>,
+        intents_persister: Option<P>,
+        receiver: mpsc::Receiver<ScheduledBaseIntentWrapper>,
     ) -> Self {
         Self {
             db,
-            l1_messages_persister,
+            intents_persister,
             executor_factory,
             receiver,
             running_executors: FuturesUnordered::new(),
             executors_semaphore: Arc::new(Semaphore::new(
                 MAX_EXECUTORS as usize,
             )),
-            inner: Arc::new(Mutex::new(CommitSchedulerInner::new())),
+            inner: Arc::new(Mutex::new(IntentScheduler::new())),
         }
     }
 
@@ -107,24 +107,24 @@ where
     }
 
     /// Main loop that:
-    /// 1. Handles & schedules incoming message
+    /// 1. Handles & schedules incoming intents
     /// 2. Finds available executor
-    /// 3. Spawns execution of scheduled message
+    /// 3. Spawns execution of scheduled intent
     async fn main_loop(
         mut self,
-        result_sender: broadcast::Sender<BroadcastedMessageExecutionResult>,
+        result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
         loop {
-            let l1_message = match self.next_scheduled_message().await {
+            let intent = match self.next_scheduled_intent().await {
                 Ok(value) => value,
                 Err(err) => {
-                    error!("Failed to get next message: {}", err);
+                    error!("Failed to get next intent: {}", err);
                     break;
                 }
             };
-            let Some(l1_message) = l1_message else {
-                // Messages are blocked, skipping
-                info!("Could not schedule any messages, as all of them are blocked!");
+            let Some(intent) = intent else {
+                // intents are blocked, skipping
+                info!("Could not schedule any intents, as all of them are blocked!");
                 continue;
             };
 
@@ -138,13 +138,13 @@ where
 
             // Spawn executor
             let executor = self.executor_factory.create_instance();
-            let persister = self.l1_messages_persister.clone();
+            let persister = self.intents_persister.clone();
             let inner = self.inner.clone();
 
             let handle = tokio::spawn(Self::execute(
                 executor,
                 persister,
-                l1_message,
+                intent,
                 inner,
                 permit,
                 result_sender.clone(),
@@ -154,23 +154,23 @@ where
         }
     }
 
-    /// Returns [`ScheduledL1MessageWrapper`] or None if all messages are blocked
-    async fn next_scheduled_message(
+    /// Returns [`ScheduledBaseIntentWrapper`] or None if all intents are blocked
+    async fn next_scheduled_intent(
         &mut self,
-    ) -> Result<Option<ScheduledL1MessageWrapper>, Error> {
-        // Limit on number of messages that can be stored in scheduler
+    ) -> Result<Option<ScheduledBaseIntentWrapper>, Error> {
+        // Limit on number of intents that can be stored in scheduler
         const SCHEDULER_CAPACITY: usize = 1000;
 
         let can_receive = || {
-            let num_blocked_messages = self
+            let num_blocked_intents = self
                 .inner
                 .lock()
                 .expect(POISONED_INNER_MSG)
-                .messages_blocked();
-            if num_blocked_messages < SCHEDULER_CAPACITY {
+                .intents_blocked();
+            if num_blocked_intents < SCHEDULER_CAPACITY {
                 true
             } else {
-                warn!("Scheduler capacity exceeded: {}", num_blocked_messages);
+                warn!("Scheduler capacity exceeded: {}", num_blocked_intents);
                 false
             }
         };
@@ -178,43 +178,43 @@ where
         let running_executors = &mut self.running_executors;
         let receiver = &mut self.receiver;
         let db = &self.db;
-        let message = tokio::select! {
-            // Notify polled first to prioritize unblocked messages over new one
+        let intent = tokio::select! {
+            // Notify polled first to prioritize unblocked intents over new one
             biased;
             Some(result) = running_executors.next() => {
                 if let Err(err) = result {
                     error!("Executor failed to complete: {}", err);
                 };
-                trace!("Worker executed L1Message, fetching new available one");
-                self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_message()
+                trace!("Worker executed BaseIntent, fetching new available one");
+                self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_intent()
             },
-            result = Self::get_new_message(receiver, db), if can_receive() => {
-                let l1_message = result?;
-                self.inner.lock().expect(POISONED_INNER_MSG).schedule(l1_message)
+            result = Self::get_new_intent(receiver, db), if can_receive() => {
+                let intent = result?;
+                self.inner.lock().expect(POISONED_INNER_MSG).schedule(intent)
             },
             else => {
                 // Shouldn't be possible
                 // If no executors spawned -> we can receive
                 // If can't receive -> there are running executors
-                unreachable!("next_scheduled_message")
+                unreachable!("next_scheduled_intent")
             }
         };
 
-        Ok(message)
+        Ok(intent)
     }
 
-    /// Returns [`ScheduledL1Message`] from external channel
-    async fn get_new_message(
-        receiver: &mut mpsc::Receiver<ScheduledL1MessageWrapper>,
+    /// Returns [`ScheduledBaseIntentWrapper`] from external channel
+    async fn get_new_intent(
+        receiver: &mut mpsc::Receiver<ScheduledBaseIntentWrapper>,
         db: &Arc<D>,
-    ) -> Result<ScheduledL1MessageWrapper, Error> {
+    ) -> Result<ScheduledBaseIntentWrapper, Error> {
         match receiver.try_recv() {
             Ok(val) => Ok(val),
             Err(TryRecvError::Empty) => {
                 // Worker either cleaned-up congested channel and now need to clean-up DB
                 // or we're just waiting on empty channel
-                if let Some(l1_message) = db.pop_l1_message().await? {
-                    Ok(l1_message)
+                if let Some(base_intent) = db.pop_base_intent().await? {
+                    Ok(base_intent)
                 } else {
                     receiver.recv().await.ok_or(Error::ChannelClosed)
                 }
@@ -223,66 +223,65 @@ where
         }
     }
 
-    /// Wrapper on [`L1MessageExecutor`] that handles its results and drops execution permit
+    /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit
     async fn execute(
         executor: E,
         persister: Option<P>,
-        l1_message: ScheduledL1MessageWrapper,
-        inner_scheduler: Arc<Mutex<CommitSchedulerInner>>,
+        intent: ScheduledBaseIntentWrapper,
+        inner_scheduler: Arc<Mutex<IntentScheduler>>,
         execution_permit: OwnedSemaphorePermit,
-        result_sender: broadcast::Sender<BroadcastedMessageExecutionResult>,
+        result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
         let result = executor
-            .execute(l1_message.scheduled_l1_message.clone(), persister)
+            .execute(intent.inner.clone(), persister)
             .await
-            .inspect_err(|err| error!("Failed to execute L1Message: {:?}", err))
-            .map(|raw_result| {
-                Self::map_execution_outcome(&l1_message, raw_result)
+            .inspect_err(|err| {
+                error!("Failed to execute BaseIntent: {:?}", err)
             })
-            .map_err(|err| (l1_message.scheduled_l1_message.id, Arc::new(err)));
+            .map(|raw_result| Self::map_execution_outcome(&intent, raw_result))
+            .map_err(|err| (intent.inner.id, Arc::new(err)));
 
         // Broadcast result to subscribers
         if let Err(err) = result_sender.send(result) {
             error!("Failed to broadcast result: {}", err);
         }
-        // Remove executed task from Scheduler to unblock other messages
+        // Remove executed task from Scheduler to unblock other intents
         inner_scheduler
             .lock()
             .expect(POISONED_INNER_MSG)
-            .complete(&l1_message.scheduled_l1_message);
+            .complete(&intent.inner);
 
         // Free worker
         drop(execution_permit);
     }
 
-    /// Maps output of `L1MessageExecutor` to final result
+    /// Maps output of `IntentExecutor` to final result
     fn map_execution_outcome(
-        l1_message: &ScheduledL1MessageWrapper,
+        intent: &ScheduledBaseIntentWrapper,
         raw_outcome: ExecutionOutput,
     ) -> ExecutionOutputWrapper {
-        let ScheduledL1MessageWrapper {
-            scheduled_l1_message,
+        let ScheduledBaseIntentWrapper {
+            inner,
             feepayers,
             excluded_pubkeys,
             trigger_type,
-        } = l1_message;
-        let included_pubkeys = if let Some(included_pubkeys) =
-            scheduled_l1_message.get_committed_pubkeys()
-        {
-            included_pubkeys
-        } else {
-            // Case with standalone actions
-            vec![]
-        };
-        let requested_undelegation = scheduled_l1_message.is_undelegate();
+        } = intent;
+        let included_pubkeys =
+            if let Some(included_pubkeys) = inner.get_committed_pubkeys() {
+                included_pubkeys
+            } else {
+                // Case with standalone actions
+                vec![]
+            };
+        let requested_undelegation = inner.is_undelegate();
         let chain_signatures =
             vec![raw_outcome.commit_signature, raw_outcome.finalize_signature];
 
         let sent_commit = SentCommit {
-            message_id: scheduled_l1_message.id,
-            slot: scheduled_l1_message.slot,
-            blockhash: scheduled_l1_message.blockhash,
-            payer: scheduled_l1_message.payer,
+            message_id: inner.id,
+            slot: inner.slot,
+            blockhash: inner.blockhash,
+            payer: inner.payer,
             included_pubkeys,
             excluded_pubkeys: excluded_pubkeys.clone(),
             feepayers: HashSet::from_iter(feepayers.iter().cloned()),
@@ -291,11 +290,9 @@ where
         };
 
         ExecutionOutputWrapper {
-            id: scheduled_l1_message.id,
+            id: inner.id,
             output: raw_outcome,
-            action_sent_transaction: scheduled_l1_message
-                .action_sent_transaction
-                .clone(),
+            action_sent_transaction: inner.action_sent_transaction.clone(),
             trigger_type: *trigger_type,
             sent_commit,
         }
@@ -315,47 +312,49 @@ mod tests {
     };
 
     use async_trait::async_trait;
-    use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
+    use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
     use solana_pubkey::{pubkey, Pubkey};
     use solana_sdk::{signature::Signature, signer::SignerError};
     use tokio::{sync::mpsc, time::sleep};
 
     use super::*;
     use crate::{
-        commit_scheduler::{
-            commit_id_tracker::{CommitIdFetcher, CommitIdTrackerResult},
-            commit_scheduler_inner::create_test_message,
+        intent_execution_manager::{
             db::{DummyDB, DB},
+            intent_scheduler::create_test_intent,
         },
-        message_executor::error::{
-            Error as ExecutorError, InternalError, MessageExecutorResult,
+        intent_executor::{
+            commit_id_fetcher::{CommitIdFetcher, CommitIdTrackerResult},
+            error::{
+                Error as ExecutorError, IntentExecutorResult, InternalError,
+            },
         },
-        persist::L1MessagePersister,
+        persist::IntentPersisterImpl,
     };
 
-    type MockCommitSchedulerWorker = CommitSchedulerWorker<
+    type MockIntentExecutionEngine = IntentExecutionEngine<
         DummyDB,
-        L1MessagePersister,
-        MockMessageExecutorFactory,
+        IntentPersisterImpl,
+        MockIntentExecutorFactory,
     >;
-    fn setup_worker(
+    fn setup_engine(
         should_fail: bool,
     ) -> (
-        mpsc::Sender<ScheduledL1MessageWrapper>,
-        MockCommitSchedulerWorker,
+        mpsc::Sender<ScheduledBaseIntentWrapper>,
+        MockIntentExecutionEngine,
     ) {
         let (sender, receiver) = mpsc::channel(1000);
 
         let db = Arc::new(DummyDB::new());
         let executor_factory = if !should_fail {
-            MockMessageExecutorFactory::new()
+            MockIntentExecutorFactory::new()
         } else {
-            MockMessageExecutorFactory::new_failing()
+            MockIntentExecutorFactory::new_failing()
         };
-        let worker = CommitSchedulerWorker::new(
+        let worker = IntentExecutionEngine::new(
             db.clone(),
             executor_factory,
-            None::<L1MessagePersister>,
+            None::<IntentPersisterImpl>,
             receiver,
         );
 
@@ -364,12 +363,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_processes_messages() {
-        let (sender, worker) = setup_worker(false);
+        let (sender, worker) = setup_engine(false);
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
         // Send a test message
-        let msg = create_test_message(
+        let msg = create_test_intent(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
         );
@@ -384,14 +383,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_handles_conflicting_messages() {
-        let (sender, worker) = setup_worker(false);
+        let (sender, worker) = setup_engine(false);
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
         // Send two conflicting messages
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
-        let msg1 = create_test_message(1, &[pubkey]);
-        let msg2 = create_test_message(2, &[pubkey]);
+        let msg1 = create_test_intent(1, &[pubkey]);
+        let msg2 = create_test_intent(2, &[pubkey]);
 
         sender.send(msg1.clone()).await.unwrap();
         sender.send(msg2.clone()).await.unwrap();
@@ -409,12 +408,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_handles_executor_failure() {
-        let (sender, worker) = setup_worker(true);
+        let (sender, worker) = setup_engine(true);
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
         // Send a test message that will fail
-        let msg = create_test_message(
+        let msg = create_test_intent(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
         );
@@ -434,14 +433,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_falls_back_to_db_when_channel_empty() {
-        let (_sender, worker) = setup_worker(false);
+        let (_sender, worker) = setup_engine(false);
 
         // Add a message to the DB
-        let msg = create_test_message(
+        let msg = create_test_intent(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
         );
-        worker.db.store_l1_message(msg.clone()).await.unwrap();
+        worker.db.store_base_intent(msg.clone()).await.unwrap();
 
         // Start worker
         let result_subscriber = worker.spawn();
@@ -458,7 +457,7 @@ mod tests {
     async fn test_high_throughput_message_processing() {
         const NUM_MESSAGES: usize = 20;
 
-        let (sender, mut worker) = setup_worker(false);
+        let (sender, mut worker) = setup_engine(false);
 
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
@@ -471,7 +470,7 @@ mod tests {
 
         // Send a flood of messages
         for i in 0..NUM_MESSAGES {
-            let msg = create_test_message(
+            let msg = create_test_intent(
                 i as u64,
                 &[pubkey!("1111111111111111111111111111111111111111111")],
             );
@@ -499,14 +498,14 @@ mod tests {
     /// Tests that errors from executor propagated gracefully
     #[tokio::test]
     async fn test_multiple_failures() {
-        let (sender, worker) = setup_worker(true); // Worker that always fails
+        let (sender, worker) = setup_engine(true); // Worker that always fails
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
         // Send several messages that will fail
         const NUM_FAILURES: usize = 10;
         for i in 0..NUM_FAILURES {
-            let msg = create_test_message(
+            let msg = create_test_intent(
                 i as u64,
                 &[pubkey!("1111111111111111111111111111111111111111111")],
             );
@@ -524,7 +523,7 @@ mod tests {
     async fn test_non_blocking_messages() {
         const NUM_MESSAGES: u64 = 200;
 
-        let (sender, mut worker) = setup_worker(false);
+        let (sender, mut worker) = setup_engine(false);
 
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
@@ -539,7 +538,7 @@ mod tests {
         let mut received_ids = HashSet::new();
         for i in 0..NUM_MESSAGES {
             let unique_pubkey = Pubkey::new_unique(); // Each message gets unique key
-            let msg = create_test_message(i, &[unique_pubkey]);
+            let msg = create_test_intent(i, &[unique_pubkey]);
 
             received_ids.insert(i);
             sender.send(msg).await.unwrap();
@@ -582,7 +581,7 @@ mod tests {
         // 30% blocking messages
         const BLOCKING_RATIO: f32 = 0.3;
 
-        let (sender, mut worker) = setup_worker(false);
+        let (sender, mut worker) = setup_engine(false);
 
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
@@ -605,7 +604,7 @@ mod tests {
                 vec![Pubkey::new_unique()]
             };
 
-            let msg = create_test_message(i as u64, &pubkeys);
+            let msg = create_test_intent(i as u64, &pubkeys);
             sender.send(msg).await.unwrap();
         }
 
@@ -627,13 +626,13 @@ mod tests {
     }
 
     // Mock implementations for testing
-    pub struct MockMessageExecutorFactory {
+    pub struct MockIntentExecutorFactory {
         should_fail: bool,
         active_tasks: Option<Arc<AtomicUsize>>,
         max_concurrent: Option<Arc<AtomicUsize>>,
     }
 
-    impl MockMessageExecutorFactory {
+    impl MockIntentExecutorFactory {
         pub fn new() -> Self {
             Self {
                 should_fail: false,
@@ -660,11 +659,11 @@ mod tests {
         }
     }
 
-    impl MessageExecutorFactory for MockMessageExecutorFactory {
-        type Executor = MockMessageExecutor;
+    impl IntentExecutorFactory for MockIntentExecutorFactory {
+        type Executor = MockIntentExecutor;
 
         fn create_instance(&self) -> Self::Executor {
-            MockMessageExecutor {
+            MockIntentExecutor {
                 should_fail: self.should_fail,
                 active_tasks: self.active_tasks.clone(),
                 max_concurrent: self.max_concurrent.clone(),
@@ -672,13 +671,13 @@ mod tests {
         }
     }
 
-    pub struct MockMessageExecutor {
+    pub struct MockIntentExecutor {
         should_fail: bool,
         active_tasks: Option<Arc<AtomicUsize>>,
         max_concurrent: Option<Arc<AtomicUsize>>,
     }
 
-    impl MockMessageExecutor {
+    impl MockIntentExecutor {
         fn on_task_started(&self) {
             if let (Some(active), Some(max)) =
                 (&self.active_tasks, &self.max_concurrent)
@@ -710,12 +709,12 @@ mod tests {
     }
 
     #[async_trait]
-    impl MessageExecutor for MockMessageExecutor {
-        async fn execute<P: L1MessagesPersisterIface>(
+    impl IntentExecutor for MockIntentExecutor {
+        async fn execute<P: IntentPersister>(
             &self,
-            l1_message: ScheduledL1Message,
+            base_intent: ScheduledBaseIntent,
             _persister: Option<P>,
-        ) -> MessageExecutorResult<ExecutionOutput> {
+        ) -> IntentExecutorResult<ExecutionOutput> {
             self.on_task_started();
 
             // Simulate some work

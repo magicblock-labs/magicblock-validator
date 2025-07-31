@@ -1,6 +1,6 @@
 use log::warn;
 use magicblock_program::{
-    magic_scheduled_l1_message::ScheduledL1Message,
+    magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
 };
 use magicblock_rpc_client::{
@@ -14,22 +14,22 @@ use solana_sdk::{
 };
 
 use crate::{
-    message_executor::{
-        error::{Error, InternalError, MessageExecutorResult},
-        ExecutionOutput, MessageExecutor,
+    intent_executor::{
+        error::{Error, IntentExecutorResult, InternalError},
+        ExecutionOutput, IntentExecutor,
     },
-    persist::{CommitStatus, CommitStatusSignatures, L1MessagesPersisterIface},
+    persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     transaction_preperator::transaction_preparator::TransactionPreparator,
     utils::persist_status_update_by_message_set,
 };
 
-pub struct L1MessageExecutor<T> {
+pub struct IntentExecutorImpl<T> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
     transaction_preparator: T,
 }
 
-impl<T> L1MessageExecutor<T>
+impl<T> IntentExecutorImpl<T>
 where
     T: TransactionPreparator,
 {
@@ -45,24 +45,24 @@ where
         }
     }
 
-    async fn execute_inner<P: L1MessagesPersisterIface>(
+    async fn execute_inner<P: IntentPersister>(
         &self,
-        l1_message: ScheduledL1Message,
+        base_intent: ScheduledBaseIntent,
         persister: &Option<P>,
-    ) -> MessageExecutorResult<ExecutionOutput> {
+    ) -> IntentExecutorResult<ExecutionOutput> {
         // Update tasks status to Pending
         // let update_status = CommitStatus::Pending;
         // persist_status_update_set(&persister, &commit_ids, update_status);
 
         // Commit stage
         let commit_signature =
-            self.execute_commit_stage(&l1_message, persister).await?;
+            self.execute_commit_stage(&base_intent, persister).await?;
 
         // Finalize stage
         // At the moment validator finalizes right away
         // In the future there will be a challenge window
         let finalize_signature = self
-            .execute_finalize_stage(&l1_message, commit_signature, persister)
+            .execute_finalize_stage(&base_intent, commit_signature, persister)
             .await?;
 
         Ok(ExecutionOutput {
@@ -71,11 +71,11 @@ where
         })
     }
 
-    async fn execute_commit_stage<P: L1MessagesPersisterIface>(
+    async fn execute_commit_stage<P: IntentPersister>(
         &self,
-        l1_message: &ScheduledL1Message,
+        l1_message: &ScheduledBaseIntent,
         persister: &Option<P>,
-    ) -> MessageExecutorResult<Signature> {
+    ) -> IntentExecutorResult<Signature> {
         let prepared_message = self
             .transaction_preparator
             .prepare_commit_tx(&self.authority, l1_message, persister)
@@ -87,12 +87,12 @@ where
         )
     }
 
-    async fn execute_finalize_stage<P: L1MessagesPersisterIface>(
+    async fn execute_finalize_stage<P: IntentPersister>(
         &self,
-        l1_message: &ScheduledL1Message,
+        l1_message: &ScheduledBaseIntent,
         commit_signature: Signature,
         persister: &Option<P>,
-    ) -> MessageExecutorResult<Signature> {
+    ) -> IntentExecutorResult<Signature> {
         let prepared_message = self
             .transaction_preparator
             .prepare_finalize_tx(&self.authority, l1_message, persister)
@@ -112,7 +112,7 @@ where
     async fn send_prepared_message(
         &self,
         mut prepared_message: VersionedMessage,
-    ) -> MessageExecutorResult<Signature, (InternalError, Option<Signature>)>
+    ) -> IntentExecutorResult<Signature, (InternalError, Option<Signature>)>
     {
         let latest_blockhash = self
             .rpc_client
@@ -147,9 +147,9 @@ where
         Ok(result.into_signature())
     }
 
-    fn persist_result<P: L1MessagesPersisterIface>(
+    fn persist_result<P: IntentPersister>(
         persistor: &Option<P>,
-        result: &MessageExecutorResult<ExecutionOutput>,
+        result: &IntentExecutorResult<ExecutionOutput>,
         message_id: u64,
         pubkeys: &[Pubkey],
     ) {
@@ -206,17 +206,17 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T> MessageExecutor for L1MessageExecutor<T>
+impl<T> IntentExecutor for IntentExecutorImpl<T>
 where
     T: TransactionPreparator,
 {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`
-    async fn execute<P: L1MessagesPersisterIface>(
+    async fn execute<P: IntentPersister>(
         &self,
-        l1_message: ScheduledL1Message,
+        l1_message: ScheduledBaseIntent,
         persister: Option<P>,
-    ) -> MessageExecutorResult<ExecutionOutput> {
+    ) -> IntentExecutorResult<ExecutionOutput> {
         let message_id = l1_message.id;
         let pubkeys = l1_message.get_committed_pubkeys();
 

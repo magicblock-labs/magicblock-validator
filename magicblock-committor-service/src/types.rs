@@ -1,5 +1,5 @@
 use magicblock_program::{
-    magic_scheduled_l1_message::ScheduledL1Message, FeePayerAccount,
+    magic_scheduled_base_intent::ScheduledBaseIntent, FeePayerAccount,
 };
 use solana_pubkey::Pubkey;
 
@@ -12,8 +12,8 @@ pub enum TriggerType {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ScheduledL1MessageWrapper {
-    pub scheduled_l1_message: ScheduledL1Message,
+pub struct ScheduledBaseIntentWrapper {
+    pub inner: ScheduledBaseIntent,
     pub feepayers: Vec<FeePayerAccount>,
     pub excluded_pubkeys: Vec<Pubkey>,
     pub trigger_type: TriggerType,

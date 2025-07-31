@@ -11,32 +11,32 @@ use solana_pubkey::Pubkey;
 use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
 
 use crate::{
-    commit_scheduler::BroadcastedMessageExecutionResult,
     error::CommittorServiceResult,
+    intent_execution_manager::BroadcastedIntentExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
-    types::ScheduledL1MessageWrapper,
-    L1MessageCommittor,
+    types::ScheduledBaseIntentWrapper,
+    BaseIntentCommittor,
 };
 
 const POISONED_MUTEX_MSG: &str =
     "CommittorServiceExt pending messages mutex poisoned!";
 
 #[async_trait]
-pub trait L1MessageCommittorExt: L1MessageCommittor {
-    /// Schedules l1 messages and waits for their results
-    async fn commit_l1_messages_waiting(
+pub trait BaseIntentCommittorExt: BaseIntentCommittor {
+    /// Schedules Base Intents and waits for their results
+    async fn schedule_base_intents_waiting(
         &self,
-        l1_messages: Vec<ScheduledL1MessageWrapper>,
-    ) -> L1MessageCommitorExtResult<Vec<BroadcastedMessageExecutionResult>>;
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>;
 }
 
-type MessageResultListener = oneshot::Sender<BroadcastedMessageExecutionResult>;
+type MessageResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 pub struct CommittorServiceExt<CC> {
     inner: Arc<CC>,
     pending_messages: Arc<Mutex<HashMap<u64, MessageResultListener>>>,
 }
 
-impl<CC: L1MessageCommittor> CommittorServiceExt<CC> {
+impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
     pub fn new(inner: Arc<CC>) -> Self {
         let pending_messages = Arc::new(Mutex::new(HashMap::new()));
         let results_subscription = inner.subscribe_for_results();
@@ -53,7 +53,7 @@ impl<CC: L1MessageCommittor> CommittorServiceExt<CC> {
 
     async fn dispatcher(
         results_subscription: oneshot::Receiver<
-            broadcast::Receiver<BroadcastedMessageExecutionResult>,
+            broadcast::Receiver<BroadcastedIntentExecutionResult>,
         >,
         pending_message: Arc<Mutex<HashMap<u64, MessageResultListener>>>,
     ) {
@@ -75,39 +75,37 @@ impl<CC: L1MessageCommittor> CommittorServiceExt<CC> {
             };
 
             if let Err(_) = sender.send(execution_result) {
-                error!("Failed to send L1Message execution result to listener");
+                error!("Failed to send BaseIntent execution result to listener");
             }
         }
     }
 }
 
 #[async_trait]
-impl<CC: L1MessageCommittor> L1MessageCommittorExt for CommittorServiceExt<CC> {
-    async fn commit_l1_messages_waiting(
+impl<CC: BaseIntentCommittor> BaseIntentCommittorExt
+    for CommittorServiceExt<CC>
+{
+    async fn schedule_base_intents_waiting(
         &self,
-        l1_messages: Vec<ScheduledL1MessageWrapper>,
-    ) -> L1MessageCommitorExtResult<Vec<BroadcastedMessageExecutionResult>>
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
     {
         let receivers = {
             let mut pending_messages =
                 self.pending_messages.lock().expect(POISONED_MUTEX_MSG);
 
-            l1_messages
+            base_intents
                 .iter()
-                .map(|l1_message| {
+                .map(|intent| {
                     let (sender, receiver) = oneshot::channel();
-                    match pending_messages
-                        .entry(l1_message.scheduled_l1_message.id)
-                    {
+                    match pending_messages.entry(intent.inner.id) {
                         Entry::Vacant(vacant) => {
                             vacant.insert(sender);
                             Ok(receiver)
                         }
-                        Entry::Occupied(_) => {
-                            Err(Error::RepeatingMessageError(
-                                l1_message.scheduled_l1_message.id,
-                            ))
-                        }
+                        Entry::Occupied(_) => Err(
+                            Error::RepeatingMessageError(intent.inner.id),
+                        ),
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()?
@@ -122,7 +120,7 @@ impl<CC: L1MessageCommittor> L1MessageCommittorExt for CommittorServiceExt<CC> {
     }
 }
 
-impl<CC: L1MessageCommittor> L1MessageCommittor for CommittorServiceExt<CC> {
+impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
     fn reserve_pubkeys_for_committee(
         &self,
         committee: Pubkey,
@@ -131,13 +129,13 @@ impl<CC: L1MessageCommittor> L1MessageCommittor for CommittorServiceExt<CC> {
         self.inner.reserve_pubkeys_for_committee(committee, owner)
     }
 
-    fn commit_l1_messages(&self, l1_messages: Vec<ScheduledL1MessageWrapper>) {
-        self.inner.commit_l1_messages(l1_messages)
+    fn commit_base_intent(&self, base_intents: Vec<ScheduledBaseIntentWrapper>) {
+        self.inner.commit_base_intent(base_intents)
     }
 
     fn subscribe_for_results(
         &self,
-    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedMessageExecutionResult>>
+    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedIntentExecutionResult>>
     {
         self.inner.subscribe_for_results()
     }
@@ -159,7 +157,7 @@ impl<CC: L1MessageCommittor> L1MessageCommittor for CommittorServiceExt<CC> {
     }
 }
 
-impl<CC: L1MessageCommittor> Deref for CommittorServiceExt<CC> {
+impl<CC: BaseIntentCommittor> Deref for CommittorServiceExt<CC> {
     type Target = Arc<CC>;
 
     fn deref(&self) -> &Self::Target {
@@ -175,4 +173,4 @@ pub enum Error {
     RecvError(#[from] RecvError),
 }
 
-pub type L1MessageCommitorExtResult<T, E = Error> = Result<T, E>;
+pub type BaseIntentCommitorExtResult<T, E = Error> = Result<T, E>;

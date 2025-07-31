@@ -14,13 +14,13 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    commit_scheduler::BroadcastedMessageExecutionResult,
     committor_processor::CommittorProcessor,
     config::ChainConfig,
     error::CommittorServiceResult,
+    intent_execution_manager::BroadcastedIntentExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
-    types::ScheduledL1MessageWrapper,
+    types::ScheduledBaseIntentWrapper,
 };
 
 #[derive(Debug)]
@@ -48,9 +48,9 @@ pub enum CommittorMessage {
         /// Called once the pubkeys have been released
         respond_to: oneshot::Sender<()>,
     },
-    CommitChangeset {
-        /// The [`ScheduledL1Message`]s to commit
-        l1_messages: Vec<ScheduledL1MessageWrapper>,
+    ScheduleBaseIntents {
+        /// The [`ScheduledBaseIntent`]s to commit
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
     },
     GetCommitStatuses {
         respond_to:
@@ -68,7 +68,7 @@ pub enum CommittorMessage {
     },
     SubscribeForResults {
         respond_to: oneshot::Sender<
-            broadcast::Receiver<BroadcastedMessageExecutionResult>,
+            broadcast::Receiver<BroadcastedIntentExecutionResult>,
         >,
     },
 }
@@ -130,8 +130,8 @@ impl CommittorActor {
                     error!("Failed to send response {:?}", e);
                 }
             }
-            CommitChangeset { l1_messages } => {
-                self.processor.commit_l1_messages(l1_messages).await;
+            ScheduleBaseIntents { base_intents } => {
+                self.processor.schedule_base_intents(base_intents).await;
             }
             GetCommitStatuses {
                 message_id,
@@ -289,7 +289,7 @@ impl CommittorService {
     }
 }
 
-impl L1MessageCommittor for CommittorService {
+impl BaseIntentCommittor for CommittorService {
     fn reserve_pubkeys_for_committee(
         &self,
         committee: Pubkey,
@@ -304,8 +304,11 @@ impl L1MessageCommittor for CommittorService {
         rx
     }
 
-    fn commit_l1_messages(&self, l1_messages: Vec<ScheduledL1MessageWrapper>) {
-        self.try_send(CommittorMessage::CommitChangeset { l1_messages });
+    fn commit_base_intent(
+        &self,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) {
+        self.try_send(CommittorMessage::ScheduleBaseIntents { base_intents });
     }
 
     fn get_commit_statuses(
@@ -337,7 +340,7 @@ impl L1MessageCommittor for CommittorService {
 
     fn subscribe_for_results(
         &self,
-    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedMessageExecutionResult>>
+    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedIntentExecutionResult>>
     {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::SubscribeForResults { respond_to: tx });
@@ -345,7 +348,7 @@ impl L1MessageCommittor for CommittorService {
     }
 }
 
-pub trait L1MessageCommittor: Send + Sync + 'static {
+pub trait BaseIntentCommittor: Send + Sync + 'static {
     /// Reserves pubkeys used in most commits in a lookup table
     fn reserve_pubkeys_for_committee(
         &self,
@@ -354,12 +357,12 @@ pub trait L1MessageCommittor: Send + Sync + 'static {
     ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
     /// Commits the changeset and returns
-    fn commit_l1_messages(&self, l1_messages: Vec<ScheduledL1MessageWrapper>);
+    fn commit_base_intent(&self, l1_messages: Vec<ScheduledBaseIntentWrapper>);
 
-    /// Subscribes for results of L1Message execution
+    /// Subscribes for results of BaseIntent execution
     fn subscribe_for_results(
         &self,
-    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedMessageExecutionResult>>;
+    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedIntentExecutionResult>>;
 
     /// Gets statuses of accounts that were committed as part of a request with provided message_id
     fn get_commit_statuses(

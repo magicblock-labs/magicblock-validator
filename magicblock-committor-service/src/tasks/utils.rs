@@ -13,7 +13,7 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 
-use crate::tasks::{task_strategist::TaskStrategistResult, tasks::L1Task};
+use crate::tasks::{task_strategist::TaskStrategistResult, tasks::BaseTask};
 
 /// Returns [`Vec<AddressLookupTableAccount>`] where all TX accounts stored in ALT
 pub fn estimate_lookup_tables_for_tx(
@@ -45,7 +45,7 @@ impl TransactionUtils {
     }
 
     pub fn unique_involved_pubkeys(
-        tasks: &[Box<dyn L1Task>],
+        tasks: &[Box<dyn BaseTask>],
         validator: &Pubkey,
         budget_instructions: &[Instruction],
     ) -> Vec<Pubkey> {
@@ -66,7 +66,7 @@ impl TransactionUtils {
 
     pub fn tasks_instructions(
         validator: &Pubkey,
-        tasks: &[Box<dyn L1Task>],
+        tasks: &[Box<dyn BaseTask>],
     ) -> Vec<Instruction> {
         tasks
             .iter()
@@ -76,7 +76,7 @@ impl TransactionUtils {
 
     pub fn assemble_tasks_tx(
         authority: &Keypair,
-        tasks: &[Box<dyn L1Task>],
+        tasks: &[Box<dyn BaseTask>],
         compute_unit_price: u64,
         lookup_tables: &[AddressLookupTableAccount],
     ) -> TaskStrategistResult<VersionedTransaction> {
@@ -140,7 +140,7 @@ impl TransactionUtils {
         Ok(tx)
     }
 
-    pub fn tasks_compute_units(tasks: &[impl AsRef<dyn L1Task>]) -> u32 {
+    pub fn tasks_compute_units(tasks: &[impl AsRef<dyn BaseTask>]) -> u32 {
         tasks.iter().map(|task| task.as_ref().compute_units()).sum()
     }
 

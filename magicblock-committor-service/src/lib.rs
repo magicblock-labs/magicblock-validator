@@ -9,10 +9,10 @@ pub mod service_ext;
 pub mod transactions;
 pub mod types;
 
-pub mod commit_scheduler;
+pub mod intent_execution_manager;
 // TODO(edwin): define visibility
 mod committor_processor;
-pub mod message_executor;
+pub mod intent_executor;
 #[cfg(feature = "dev-context-only-utils")]
 pub mod stubs;
 pub mod tasks;
@@ -24,7 +24,7 @@ pub use compute_budget::ComputeBudgetConfig;
 pub use magicblock_committor_program::{
     ChangedAccount, Changeset, ChangesetMeta,
 };
-pub use service::{CommittorService, L1MessageCommittor};
+pub use service::{BaseIntentCommittor, CommittorService};
 pub fn changeset_for_slot(slot: u64) -> Changeset {
     Changeset {
         slot,

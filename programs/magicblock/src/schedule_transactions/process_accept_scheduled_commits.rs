@@ -45,7 +45,7 @@ pub fn process_accept_scheduled_commits(
                 );
                 InstructionError::InvalidAccountData
             })?;
-    if magic_context.scheduled_commits.is_empty() {
+    if magic_context.scheduled_base_intents.is_empty() {
         ic_msg!(
             invoke_context,
             "AcceptScheduledCommits: no scheduled commits to accept"
@@ -86,7 +86,7 @@ pub fn process_accept_scheduled_commits(
         scheduled_commits.len()
     );
     TransactionScheduler::default()
-        .accept_scheduled_l1_message(scheduled_commits);
+        .accept_scheduled_base_intent(scheduled_commits);
 
     // 4. Serialize and store the updated `MagicContext` account
     // Zero fill account before updating data

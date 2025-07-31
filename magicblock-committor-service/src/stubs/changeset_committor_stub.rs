@@ -10,22 +10,22 @@ use solana_sdk::{signature::Signature, transaction::Transaction};
 use tokio::sync::{oneshot, oneshot::Receiver};
 
 use crate::{
-    commit_scheduler::{
-        BroadcastedMessageExecutionResult, ExecutionOutputWrapper,
-    },
     error::CommittorServiceResult,
-    message_executor::ExecutionOutput,
-    persist::{CommitStatusRow, L1MessagePersister, MessageSignatures},
-    service_ext::{L1MessageCommitorExtResult, L1MessageCommittorExt},
-    types::{ScheduledL1MessageWrapper, TriggerType},
-    L1MessageCommittor,
+    intent_execution_manager::{
+        BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
+    },
+    intent_executor::ExecutionOutput,
+    persist::{CommitStatusRow, IntentPersisterImpl, MessageSignatures},
+    service_ext::{BaseIntentCommitorExtResult, BaseIntentCommittorExt},
+    types::{ScheduledBaseIntentWrapper, TriggerType},
+    BaseIntentCommittor,
 };
 
 #[derive(Default)]
 pub struct ChangesetCommittorStub {
     reserved_pubkeys_for_committee: Arc<Mutex<HashMap<Pubkey, Pubkey>>>,
     #[allow(clippy::type_complexity)]
-    committed_changesets: Arc<Mutex<HashMap<u64, ScheduledL1MessageWrapper>>>,
+    committed_changesets: Arc<Mutex<HashMap<u64, ScheduledBaseIntentWrapper>>>,
 }
 
 impl ChangesetCommittorStub {
@@ -34,7 +34,7 @@ impl ChangesetCommittorStub {
     }
 }
 
-impl L1MessageCommittor for ChangesetCommittorStub {
+impl BaseIntentCommittor for ChangesetCommittorStub {
     fn reserve_pubkeys_for_committee(
         &self,
         committee: Pubkey,
@@ -53,17 +53,17 @@ impl L1MessageCommittor for ChangesetCommittorStub {
         rx
     }
 
-    fn commit_l1_messages(&self, l1_messages: Vec<ScheduledL1MessageWrapper>) {
+    fn commit_base_intent(&self, base_intents: Vec<ScheduledBaseIntentWrapper>) {
         let mut changesets = self.committed_changesets.lock().unwrap();
-        l1_messages.into_iter().for_each(|message| {
-            changesets.insert(message.scheduled_l1_message.id, message);
+        base_intents.into_iter().for_each(|intent| {
+            changesets.insert(intent.inner.id, intent);
         });
     }
 
     fn subscribe_for_results(
         &self,
     ) -> Receiver<
-        tokio::sync::broadcast::Receiver<BroadcastedMessageExecutionResult>,
+        tokio::sync::broadcast::Receiver<BroadcastedIntentExecutionResult>,
     > {
         let (_, receiver) = oneshot::channel();
         receiver
@@ -72,7 +72,7 @@ impl L1MessageCommittor for ChangesetCommittorStub {
     fn get_commit_statuses(
         &self,
         message_id: u64,
-    ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
+    ) -> Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
         let (tx, rx) = oneshot::channel();
 
         let commit = self
@@ -80,16 +80,15 @@ impl L1MessageCommittor for ChangesetCommittorStub {
             .lock()
             .unwrap()
             .remove(&message_id);
-        let Some(l1_message) = commit else {
+        let Some(base_intent) = commit else {
             tx.send(Ok(vec![])).unwrap_or_else(|_| {
                 log::error!("Failed to send commit status response");
             });
             return rx;
         };
 
-        let status_rows = L1MessagePersister::create_commit_rows(
-            &l1_message.scheduled_l1_message,
-        );
+        let status_rows =
+            IntentPersisterImpl::create_commit_rows(&base_intent.inner);
         tx.send(Ok(status_rows)).unwrap_or_else(|_| {
             log::error!("Failed to send commit status response");
         });
@@ -119,18 +118,18 @@ impl L1MessageCommittor for ChangesetCommittorStub {
 }
 
 #[async_trait::async_trait]
-impl L1MessageCommittorExt for ChangesetCommittorStub {
-    async fn commit_l1_messages_waiting(
+impl BaseIntentCommittorExt for ChangesetCommittorStub {
+    async fn schedule_base_intents_waiting(
         &self,
-        l1_messages: Vec<ScheduledL1MessageWrapper>,
-    ) -> L1MessageCommitorExtResult<Vec<BroadcastedMessageExecutionResult>>
+        l1_messages: Vec<ScheduledBaseIntentWrapper>,
+    ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
     {
-        self.commit_l1_messages(l1_messages.clone());
+        self.commit_base_intent(l1_messages.clone());
         let res = l1_messages
             .into_iter()
             .map(|message| {
                 Ok(ExecutionOutputWrapper {
-                    id: message.scheduled_l1_message.id,
+                    id: message.inner.id,
                     output: ExecutionOutput {
                         commit_signature: Signature::new_unique(),
                         finalize_signature: Signature::new_unique(),
@@ -138,13 +137,11 @@ impl L1MessageCommittorExt for ChangesetCommittorStub {
                     action_sent_transaction: Transaction::default(),
                     trigger_type: TriggerType::OnChain,
                     sent_commit: SentCommit {
-                        message_id: message.scheduled_l1_message.id,
-                        slot: message.scheduled_l1_message.slot,
-                        blockhash: message.scheduled_l1_message.blockhash,
-                        payer: message.scheduled_l1_message.payer,
-                        requested_undelegation: message
-                            .scheduled_l1_message
-                            .is_undelegate(),
+                        message_id: message.inner.id,
+                        slot: message.inner.slot,
+                        blockhash: message.inner.blockhash,
+                        payer: message.inner.payer,
+                        requested_undelegation: message.inner.is_undelegate(),
                         ..SentCommit::default()
                     },
                 })

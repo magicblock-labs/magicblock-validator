@@ -19,7 +19,7 @@ use test_tools_core::init_logger;
 
 use crate::{
     magic_context::MagicContext,
-    magic_scheduled_l1_message::ScheduledL1Message,
+    magic_scheduled_base_intent::ScheduledBaseIntent,
     magicblock_instruction::MagicBlockInstruction,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     test_utils::{ensure_started_validator, process_instruction},
@@ -146,7 +146,7 @@ fn assert_non_accepted_actions<'a>(
     let accepted_scheduled_actions =
         TransactionScheduler::default().get_scheduled_actions_by_payer(payer);
     assert_eq!(
-        magic_context.scheduled_commits.len(),
+        magic_context.scheduled_base_intents.len(),
         expected_non_accepted_commits
     );
     assert_eq!(accepted_scheduled_actions.len(), 0);
@@ -158,7 +158,7 @@ fn assert_accepted_actions(
     processed_accepted: &[AccountSharedData],
     payer: &Pubkey,
     expected_scheduled_actions: usize,
-) -> Vec<ScheduledL1Message> {
+) -> Vec<ScheduledBaseIntent> {
     let magic_context_acc = find_magic_context_account(processed_accepted)
         .expect("magic context account not found");
     let magic_context =
@@ -167,7 +167,7 @@ fn assert_accepted_actions(
     let scheduled_actions =
         TransactionScheduler::default().get_scheduled_actions_by_payer(payer);
 
-    assert_eq!(magic_context.scheduled_commits.len(), 0);
+    assert_eq!(magic_context.scheduled_base_intents.len(), 0);
     assert_eq!(scheduled_actions.len(), expected_scheduled_actions);
 
     scheduled_actions
@@ -204,30 +204,30 @@ fn extend_transaction_accounts_from_ix_adding_magic_context(
 }
 
 fn assert_first_commit(
-    scheduled_l1_messages: &[ScheduledL1Message],
+    scheduled_base_intents: &[ScheduledBaseIntent],
     payer: &Pubkey,
     committees: &[Pubkey],
     expected_request_undelegation: bool,
 ) {
-    let scheduled_l1_message = &scheduled_l1_messages[0];
+    let scheduled_base_intent = &scheduled_base_intents[0];
     let test_clock = get_clock();
     assert_matches!(
-        scheduled_l1_message,
-        ScheduledL1Message {
+        scheduled_base_intent,
+        ScheduledBaseIntent {
             id,
             slot,
             payer: actual_payer,
             blockhash: _,
             action_sent_transaction,
-            l1_message,
+            base_intent,
         } => {
             assert!(id >= &0);
             assert_eq!(slot, &test_clock.slot);
             assert_eq!(actual_payer, payer);
-            assert_eq!(l1_message.get_committed_pubkeys().unwrap().as_slice(), committees);
+            assert_eq!(base_intent.get_committed_pubkeys().unwrap().as_slice(), committees);
             let instruction = MagicBlockInstruction::ScheduledCommitSent(*id);
             assert_eq!(action_sent_transaction.data(0), instruction.try_to_vec().unwrap());
-            assert_eq!(l1_message.is_undelegate(), expected_request_undelegation);
+            assert_eq!(base_intent.is_undelegate(), expected_request_undelegation);
         }
     );
 }
@@ -305,14 +305,14 @@ mod tests {
             );
 
             // At this point the intended commits were accepted and moved to the global
-            let scheduled_messages = assert_accepted_actions(
+            let scheduled_intents = assert_accepted_actions(
                 &processed_accepted,
                 &payer.pubkey(),
                 1,
             );
 
             assert_first_commit(
-                &scheduled_messages,
+                &scheduled_intents,
                 &payer.pubkey(),
                 &[committee],
                 false,
@@ -503,12 +503,6 @@ mod tests {
                 1,
             );
 
-            // let scheduled_commits = scheduled_commits
-            //     .into_iter()
-            //     .map(|el| el.try_into())
-            //     .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
-            //     .expect("only commit action");
-
             assert_first_commit(
                 &scheduled_commits,
                 &payer.pubkey(),
@@ -617,12 +611,6 @@ mod tests {
                 &payer.pubkey(),
                 1,
             );
-
-            // let scheduled_commits = scheduled_commits
-            //     .into_iter()
-            //     .map(|el| el.try_into())
-            //     .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
-            //     .expect("only commit action");
 
             assert_first_commit(
                 &scheduled_commits,

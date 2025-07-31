@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use log::error;
 use solana_pubkey::Pubkey;
 
-use crate::persist::{CommitStatus, L1MessagesPersisterIface};
+use crate::persist::{CommitStatus, IntentPersister};
 
-pub(crate) fn persist_status_update<P: L1MessagesPersisterIface>(
+pub(crate) fn persist_status_update<P: IntentPersister>(
     persister: &Option<P>,
     pubkey: &Pubkey,
     commit_id: u64,
@@ -23,7 +23,7 @@ pub(crate) fn persist_status_update<P: L1MessagesPersisterIface>(
     }
 }
 
-pub(crate) fn persist_status_update_set<P: L1MessagesPersisterIface>(
+pub(crate) fn persist_status_update_set<P: IntentPersister>(
     persister: &Option<P>,
     commit_ids_map: &HashMap<Pubkey, u64>,
     update_status: CommitStatus,
@@ -41,9 +41,7 @@ pub(crate) fn persist_status_update_set<P: L1MessagesPersisterIface>(
         }
     });
 }
-pub(crate) fn persist_status_update_by_message_set<
-    P: L1MessagesPersisterIface,
->(
+pub(crate) fn persist_status_update_by_message_set<P: IntentPersister>(
     persister: &Option<P>,
     message_id: u64,
     pubkeys: &[Pubkey],

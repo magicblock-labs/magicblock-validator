@@ -8,11 +8,11 @@ use solana_sdk::{
 };
 
 use crate::{
-    args::MagicL1MessageArgs,
-    magic_scheduled_l1_message::{ConstructionContext, ScheduledL1Message},
+    args::MagicBaseIntentArgs,
+    magic_scheduled_base_intent::{ConstructionContext, ScheduledBaseIntent},
     schedule_transactions::{
         check_magic_context_id,
-        schedule_l1_message_processor::schedule_l1_message_processor,
+        schedule_base_intent_processor::schedule_base_intent_processor,
         MESSAGE_ID,
     },
     utils::accounts::{
@@ -26,10 +26,10 @@ const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 const ACTION_ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
 const ACTIONS_SUPPORTED: bool = false;
 
-pub(crate) fn process_schedule_l1_message(
+pub(crate) fn process_schedule_base_intent(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
-    args: MagicL1MessageArgs,
+    args: MagicBaseIntentArgs,
 ) -> Result<(), InstructionError> {
     // TODO: remove once actions are supported
     if !ACTIONS_SUPPORTED {
@@ -104,7 +104,7 @@ pub(crate) fn process_schedule_l1_message(
         transaction_context,
         invoke_context,
     );
-    let scheduled_action = ScheduledL1Message::try_new(
+    let scheduled_action = ScheduledBaseIntent::try_new(
         &args,
         message_id,
         clock.slot,
@@ -113,7 +113,7 @@ pub(crate) fn process_schedule_l1_message(
     )?;
     // TODO: move all logic to some Processor
     // Rn this just locks accounts
-    schedule_l1_message_processor(&construction_context, &args)?;
+    schedule_base_intent_processor(&construction_context, &args)?;
 
     let action_sent_signature =
         scheduled_action.action_sent_transaction.signatures[0];
@@ -122,7 +122,7 @@ pub(crate) fn process_schedule_l1_message(
         transaction_context,
         MAGIC_CONTEXT_IDX,
     )?;
-    TransactionScheduler::schedule_l1_message(
+    TransactionScheduler::schedule_base_intent(
         invoke_context,
         context_acc,
         scheduled_action,

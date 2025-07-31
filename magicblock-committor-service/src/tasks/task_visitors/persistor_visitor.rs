@@ -1,7 +1,7 @@
 use log::error;
 
 use crate::{
-    persist::{CommitStrategy, L1MessagesPersisterIface},
+    persist::{CommitStrategy, IntentPersister},
     tasks::{
         tasks::{ArgsTask, BufferTask},
         visitor::Visitor,
@@ -20,7 +20,7 @@ pub struct PersistorVisitor<'a, P> {
 
 impl<'a, P> Visitor for PersistorVisitor<'a, P>
 where
-    P: L1MessagesPersisterIface,
+    P: IntentPersister,
 {
     fn visit_args_task(&mut self, task: &ArgsTask) {
         match self.context {

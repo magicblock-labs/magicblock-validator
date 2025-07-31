@@ -7,7 +7,7 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 
-use crate::magic_scheduled_l1_message::ScheduledL1Message;
+use crate::magic_scheduled_base_intent::ScheduledBaseIntent;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FeePayerAccount {
@@ -17,7 +17,7 @@ pub struct FeePayerAccount {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MagicContext {
-    pub scheduled_commits: Vec<ScheduledL1Message>,
+    pub scheduled_base_intents: Vec<ScheduledBaseIntent>,
 }
 
 impl MagicContext {
@@ -35,13 +35,15 @@ impl MagicContext {
 
     pub(crate) fn add_scheduled_action(
         &mut self,
-        l1_message: ScheduledL1Message,
+        base_intent: ScheduledBaseIntent,
     ) {
-        self.scheduled_commits.push(l1_message);
+        self.scheduled_base_intents.push(base_intent);
     }
 
-    pub(crate) fn take_scheduled_commits(&mut self) -> Vec<ScheduledL1Message> {
-        mem::take(&mut self.scheduled_commits)
+    pub(crate) fn take_scheduled_commits(
+        &mut self,
+    ) -> Vec<ScheduledBaseIntent> {
+        mem::take(&mut self.scheduled_base_intents)
     }
 
     pub fn has_scheduled_commits(data: &[u8]) -> bool {

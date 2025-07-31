@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{account::Account, pubkey::Pubkey};
 
-use crate::args::MagicL1MessageArgs;
+use crate::args::MagicBaseIntentArgs;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MagicBlockInstruction {
@@ -67,7 +67,7 @@ pub enum MagicBlockInstruction {
     /// We implement it this way so we can log the signature of this transaction
     /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
     ScheduledCommitSent(u64),
-    ScheduleL1Message(MagicL1MessageArgs),
+    ScheduleBaseIntent(MagicBaseIntentArgs),
 }
 
 // TODO: why that exists?
@@ -81,7 +81,7 @@ impl MagicBlockInstruction {
             ScheduleCommitAndUndelegate => 2,
             AcceptScheduleCommits => 3,
             ScheduledCommitSent(_) => 4,
-            ScheduleL1Message(_) => 5,
+            ScheduleBaseIntent(_) => 5,
         }
     }
 

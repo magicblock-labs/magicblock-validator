@@ -13,12 +13,13 @@ use solana_sdk::{
 };
 
 use crate::{
-    magic_context::MagicContext, magic_scheduled_l1_message::ScheduledL1Message,
+    magic_context::MagicContext,
+    magic_scheduled_base_intent::ScheduledBaseIntent,
 };
 
 #[derive(Clone)]
 pub struct TransactionScheduler {
-    scheduled_l1_message: Arc<RwLock<Vec<ScheduledL1Message>>>,
+    scheduled_base_intents: Arc<RwLock<Vec<ScheduledBaseIntent>>>,
 }
 
 impl Default for TransactionScheduler {
@@ -27,20 +28,20 @@ impl Default for TransactionScheduler {
             /// This vec tracks commits that went through the entire process of first
             /// being scheduled into the MagicContext, and then being moved
             /// over to this global.
-            static ref SCHEDULED_ACTION: Arc<RwLock<Vec<ScheduledL1Message >>> =
+            static ref SCHEDULED_ACTION: Arc<RwLock<Vec<ScheduledBaseIntent >>> =
                 Default::default();
         }
         Self {
-            scheduled_l1_message: SCHEDULED_ACTION.clone(),
+            scheduled_base_intents: SCHEDULED_ACTION.clone(),
         }
     }
 }
 
 impl TransactionScheduler {
-    pub fn schedule_l1_message(
+    pub fn schedule_base_intent(
         invoke_context: &InvokeContext,
         context_account: &RefCell<AccountSharedData>,
-        action: ScheduledL1Message,
+        action: ScheduledBaseIntent,
     ) -> Result<(), InstructionError> {
         let context_data = &mut context_account.borrow_mut();
         let mut context =
@@ -57,22 +58,22 @@ impl TransactionScheduler {
         Ok(())
     }
 
-    pub fn accept_scheduled_l1_message(
+    pub fn accept_scheduled_base_intent(
         &self,
-        commits: Vec<ScheduledL1Message>,
+        base_intents: Vec<ScheduledBaseIntent>,
     ) {
-        self.scheduled_l1_message
+        self.scheduled_base_intents
             .write()
             .expect("scheduled_action lock poisoned")
-            .extend(commits);
+            .extend(base_intents);
     }
 
     pub fn get_scheduled_actions_by_payer(
         &self,
         payer: &Pubkey,
-    ) -> Vec<ScheduledL1Message> {
+    ) -> Vec<ScheduledBaseIntent> {
         let commits = self
-            .scheduled_l1_message
+            .scheduled_base_intents
             .read()
             .expect("scheduled_action lock poisoned");
 
@@ -83,9 +84,9 @@ impl TransactionScheduler {
             .collect::<Vec<_>>()
     }
 
-    pub fn take_scheduled_actions(&self) -> Vec<ScheduledL1Message> {
+    pub fn take_scheduled_actions(&self) -> Vec<ScheduledBaseIntent> {
         let mut lock = self
-            .scheduled_l1_message
+            .scheduled_base_intents
             .write()
             .expect("scheduled_action lock poisoned");
         mem::take(&mut *lock)
@@ -93,7 +94,7 @@ impl TransactionScheduler {
 
     pub fn scheduled_actions_len(&self) -> usize {
         let lock = self
-            .scheduled_l1_message
+            .scheduled_base_intents
             .read()
             .expect("scheduled_action lock poisoned");
 
@@ -102,7 +103,7 @@ impl TransactionScheduler {
 
     pub fn clear_scheduled_actions(&self) {
         let mut lock = self
-            .scheduled_l1_message
+            .scheduled_base_intents
             .write()
             .expect("scheduled_action lock poisoned");
         lock.clear();

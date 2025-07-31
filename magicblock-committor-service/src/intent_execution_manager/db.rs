@@ -1,31 +1,32 @@
 use std::{collections::VecDeque, sync::Mutex};
 
-/// DB for storing messages that overflow committor channel
+/// DB for storing intents that overflow committor channel
 use async_trait::async_trait;
 
-use crate::types::ScheduledL1MessageWrapper;
+use crate::types::ScheduledBaseIntentWrapper;
 
 const POISONED_MUTEX_MSG: &str = "Mutex poisoned";
 
 #[async_trait]
 pub trait DB: Send + Sync + 'static {
-    async fn store_l1_message(
+    async fn store_base_intent(
         &self,
-        l1_message: ScheduledL1MessageWrapper,
+        base_intent: ScheduledBaseIntentWrapper,
     ) -> DBResult<()>;
-    async fn store_l1_messages(
+    async fn store_base_intents(
         &self,
-        l1_messages: Vec<ScheduledL1MessageWrapper>,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) -> DBResult<()>;
-    /// Return message with smallest bundle_id
-    async fn pop_l1_message(
+
+    /// Returns intent with smallest id
+    async fn pop_base_intent(
         &self,
-    ) -> DBResult<Option<ScheduledL1MessageWrapper>>;
+    ) -> DBResult<Option<ScheduledBaseIntentWrapper>>;
     fn is_empty(&self) -> bool;
 }
 
 pub(crate) struct DummyDB {
-    db: Mutex<VecDeque<ScheduledL1MessageWrapper>>,
+    db: Mutex<VecDeque<ScheduledBaseIntentWrapper>>,
 }
 
 impl DummyDB {
@@ -38,31 +39,31 @@ impl DummyDB {
 
 #[async_trait]
 impl DB for DummyDB {
-    async fn store_l1_message(
+    async fn store_base_intent(
         &self,
-        l1_message: ScheduledL1MessageWrapper,
+        base_intent: ScheduledBaseIntentWrapper,
     ) -> DBResult<()> {
         self.db
             .lock()
             .expect(POISONED_MUTEX_MSG)
-            .push_back(l1_message);
+            .push_back(base_intent);
         Ok(())
     }
 
-    async fn store_l1_messages(
+    async fn store_base_intents(
         &self,
-        l1_messages: Vec<ScheduledL1MessageWrapper>,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) -> DBResult<()> {
         self.db
             .lock()
             .expect(POISONED_MUTEX_MSG)
-            .extend(l1_messages.into_iter());
+            .extend(base_intents.into_iter());
         Ok(())
     }
 
-    async fn pop_l1_message(
+    async fn pop_base_intent(
         &self,
-    ) -> DBResult<Option<ScheduledL1MessageWrapper>> {
+    ) -> DBResult<Option<ScheduledBaseIntentWrapper>> {
         Ok(self.db.lock().expect(POISONED_MUTEX_MSG).pop_front())
     }
 

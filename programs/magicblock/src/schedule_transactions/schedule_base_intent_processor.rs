@@ -1,24 +1,26 @@
 use solana_sdk::instruction::InstructionError;
 
 use crate::{
-    args::MagicL1MessageArgs,
-    magic_scheduled_l1_message::{CommitType, ConstructionContext},
+    args::MagicBaseIntentArgs,
+    magic_scheduled_base_intent::{CommitType, ConstructionContext},
     utils::account_actions::set_account_owner_to_delegation_program,
 };
 
-pub fn schedule_l1_message_processor<'a, 'ic>(
+pub fn schedule_base_intent_processor<'a, 'ic>(
     construction_context: &ConstructionContext<'a, 'ic>,
-    args: &MagicL1MessageArgs,
+    args: &MagicBaseIntentArgs,
 ) -> Result<(), InstructionError> {
     let commited_accounts_ref = match args {
-        MagicL1MessageArgs::Commit(commit_type) => {
+        MagicBaseIntentArgs::Commit(commit_type) => {
             let accounts_indices = commit_type.committed_accounts_indices();
             CommitType::extract_commit_accounts(
                 accounts_indices,
                 construction_context.transaction_context,
             )?
         }
-        MagicL1MessageArgs::CommitAndUndelegate(commit_and_undelegate_type) => {
+        MagicBaseIntentArgs::CommitAndUndelegate(
+            commit_and_undelegate_type,
+        ) => {
             let accounts_indices =
                 commit_and_undelegate_type.committed_accounts_indices();
             CommitType::extract_commit_accounts(
@@ -26,7 +28,7 @@ pub fn schedule_l1_message_processor<'a, 'ic>(
                 construction_context.transaction_context,
             )?
         }
-        MagicL1MessageArgs::L1Actions(_) => return Ok(()),
+        MagicBaseIntentArgs::BaseActions(_) => return Ok(()),
     };
 
     // TODO: proper explanation

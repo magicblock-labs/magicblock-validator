@@ -11,17 +11,17 @@ use solana_sdk::{
 use tokio::sync::broadcast;
 
 use crate::{
-    commit_scheduler::{
-        db::DummyDB, BroadcastedMessageExecutionResult, CommitScheduler,
-    },
     compute_budget::ComputeBudgetConfig,
     config::ChainConfig,
     error::CommittorServiceResult,
+    intent_execution_manager::{
+        db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
+    },
     persist::{
-        CommitStatusRow, L1MessagePersister, L1MessagesPersisterIface,
+        CommitStatusRow, IntentPersister, IntentPersisterImpl,
         MessageSignatures,
     },
-    types::ScheduledL1MessageWrapper,
+    types::ScheduledBaseIntentWrapper,
 };
 
 pub(crate) struct CommittorProcessor {
@@ -29,8 +29,8 @@ pub(crate) struct CommittorProcessor {
     pub(crate) table_mania: TableMania,
     pub(crate) authority: Keypair,
     pub(crate) compute_budget_config: ComputeBudgetConfig,
-    persister: L1MessagePersister,
-    commits_scheduler: CommitScheduler<DummyDB>,
+    persister: IntentPersisterImpl,
+    commits_scheduler: IntentExecutionManager<DummyDB>,
 }
 
 impl CommittorProcessor {
@@ -60,10 +60,10 @@ impl CommittorProcessor {
         );
 
         // Create commit persister
-        let persister = L1MessagePersister::try_new(persist_file)?;
+        let persister = IntentPersisterImpl::try_new(persist_file)?;
 
         // Create commit scheduler
-        let commits_scheduler = CommitScheduler::new(
+        let commits_scheduler = IntentExecutionManager::new(
             magic_block_rpc_client.clone(),
             DummyDB::new(),
             Some(persister.clone()),
@@ -127,15 +127,16 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
-    pub async fn commit_l1_messages(
+    pub async fn schedule_base_intents(
         &self,
-        l1_messages: Vec<ScheduledL1MessageWrapper>,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) {
-        let l1_messages_inner = l1_messages
+        let intents = base_intents
             .iter()
-            .map(|l1_message| l1_message.scheduled_l1_message.clone())
+            .map(|l1_message| l1_message.inner.clone())
             .collect::<Vec<_>>();
-        if let Err(err) = self.persister.start_l1_messages(&l1_messages_inner) {
+        if let Err(err) = self.persister.start_base_intents(&intents)
+        {
             // We will still try to perform the commits, but the fact that we cannot
             // persist the intent is very serious and we should probably restart the
             // valiator
@@ -145,16 +146,16 @@ impl CommittorProcessor {
             );
         };
 
-        if let Err(err) = self.commits_scheduler.schedule(l1_messages).await {
+        if let Err(err) = self.commits_scheduler.schedule(base_intents).await {
             // CommittorService broken
             panic!("Failed to schedule L1 message: {}", err);
         }
     }
 
-    /// Creates a subscription for results of L1Message execution
+    /// Creates a subscription for results of BaseIntent execution
     pub fn subscribe_for_results(
         &self,
-    ) -> broadcast::Receiver<BroadcastedMessageExecutionResult> {
+    ) -> broadcast::Receiver<BroadcastedIntentExecutionResult> {
         self.commits_scheduler.subscribe_for_results()
     }
 }

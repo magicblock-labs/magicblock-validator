@@ -20,18 +20,18 @@ use log::*;
 use magicblock_account_cloner::{AccountCloner, AccountClonerOutput};
 use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_committor_service::{
-    commit_scheduler::{
-        BroadcastedMessageExecutionResult, ExecutionOutputWrapper,
+    intent_execution_manager::{
+        BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
     },
-    message_executor::ExecutionOutput,
-    service_ext::L1MessageCommittorExt,
+    intent_executor::ExecutionOutput,
+    service_ext::BaseIntentCommittorExt,
     transactions::MAX_PROCESS_PER_TX,
-    types::{ScheduledL1MessageWrapper, TriggerType},
+    types::{ScheduledBaseIntentWrapper, TriggerType},
 };
 use magicblock_core::magic_program;
 use magicblock_program::{
-    magic_scheduled_l1_message::{
-        CommitType, CommittedAccountV2, MagicL1Message, ScheduledL1Message,
+    magic_scheduled_base_intent::{
+        CommitType, CommittedAccountV2, MagicBaseIntent, ScheduledBaseIntent,
     },
     validator::validator_authority_id,
 };
@@ -100,7 +100,7 @@ where
     ACL: AccountCloner,
     TAE: TransactionAccountsExtractor,
     TAV: TransactionAccountsValidator,
-    CC: L1MessageCommittorExt,
+    CC: BaseIntentCommittorExt,
 {
     pub internal_account_provider: IAP,
     pub account_cloner: ACL,
@@ -118,7 +118,7 @@ where
     ACL: AccountCloner,
     TAE: TransactionAccountsExtractor,
     TAV: TransactionAccountsValidator,
-    CC: L1MessageCommittorExt,
+    CC: BaseIntentCommittorExt,
 {
     pub async fn ensure_accounts(
         &self,
@@ -285,14 +285,14 @@ where
             return Ok(vec![]);
         }
 
-        // Convert committees to L1Messages s
+        // Convert committees to BaseIntents s
         let scheduled_l1_messages =
             self.create_scheduled_l1_message(accounts_to_be_committed);
 
-        // Commit L1Messages
+        // Commit BaseIntents
         let results = self
             .committor_service
-            .commit_l1_messages_waiting(scheduled_l1_messages.clone())
+            .schedule_base_intents_waiting(scheduled_l1_messages.clone())
             .await?;
 
         // Process results
@@ -307,8 +307,8 @@ where
     fn process_l1_messages_results(
         &self,
         now: &Duration,
-        results: Vec<BroadcastedMessageExecutionResult>,
-        scheduled_l1_messages: &[ScheduledL1MessageWrapper],
+        results: Vec<BroadcastedIntentExecutionResult>,
+        scheduled_l1_messages: &[ScheduledBaseIntentWrapper],
     ) -> Vec<ExecutionOutput> {
         // Filter failed l1 messages, log failed ones
         let outputs = results
@@ -327,13 +327,9 @@ where
         let pubkeys_with_hashes = scheduled_l1_messages
             .iter()
             // Filter out unsuccessful messages
-            .filter(|message| {
-                outputs.contains_key(&message.scheduled_l1_message.id)
-            })
+            .filter(|message| outputs.contains_key(&message.inner.id))
             // Extract accounts that got committed
-            .filter_map(|message| {
-                message.scheduled_l1_message.get_committed_accounts()
-            })
+            .filter_map(|message| message.inner.get_committed_accounts())
             .flatten()
             // Calculate hash of committed accounts
             .map(|committed_account| {
@@ -374,7 +370,7 @@ where
     fn create_scheduled_l1_message(
         &self,
         accounts_to_be_committed: Vec<(Pubkey, Pubkey, Option<Hash>)>,
-    ) -> Vec<ScheduledL1MessageWrapper> {
+    ) -> Vec<ScheduledBaseIntentWrapper> {
         // NOTE: the scheduled commits use the slot at which the commit was scheduled
         // However frequent commits run async and could be running before a slot is completed
         // Thus they really commit in between two slots instead of at the end of a particular slot.
@@ -418,20 +414,20 @@ where
                     .cloned()
                     .map(|committee| CommittedAccountV2::from(committee))
                     .collect();
-                ScheduledL1Message {
+                ScheduledBaseIntent {
                     // isn't important but shall be unique
                     id: MESSAGE_ID.fetch_sub(1, Ordering::Relaxed),
                     slot,
                     blockhash,
                     action_sent_transaction: Transaction::default(),
                     payer: validator_authority_id(),
-                    l1_message: MagicL1Message::Commit(CommitType::Standalone(
-                        committees,
-                    )),
+                    base_intent: MagicBaseIntent::Commit(
+                        CommitType::Standalone(committees),
+                    ),
                 }
             })
-            .map(|scheduled_l1_message| ScheduledL1MessageWrapper {
-                scheduled_l1_message,
+            .map(|scheduled_l1_message| ScheduledBaseIntentWrapper {
+                inner: scheduled_l1_message,
                 excluded_pubkeys: vec![],
                 feepayers: vec![],
                 trigger_type: TriggerType::OffChain,

@@ -26,10 +26,10 @@ use solana_sdk::{
 use tokio::time::sleep;
 
 use crate::{
-    persist::{CommitStatus, L1MessagesPersisterIface},
+    persist::{CommitStatus, IntentPersister},
     tasks::{
         task_strategist::TransactionStrategy,
-        tasks::{L1Task, TaskPreparationInfo},
+        tasks::{BaseTask, TaskPreparationInfo},
     },
     utils::persist_status_update,
     ComputeBudgetConfig,
@@ -59,7 +59,7 @@ impl DeliveryPreparator {
     }
 
     /// Prepares buffers and necessary pieces for optimized TX
-    pub async fn prepare_for_delivery<P: L1MessagesPersisterIface>(
+    pub async fn prepare_for_delivery<P: IntentPersister>(
         &self,
         authority: &Keypair,
         strategy: &TransactionStrategy,
@@ -84,10 +84,10 @@ impl DeliveryPreparator {
     }
 
     /// Prepares necessary parts for TX if needed, otherwise returns immediately
-    pub async fn prepare_task<P: L1MessagesPersisterIface>(
+    pub async fn prepare_task<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        task: &Box<dyn L1Task>,
+        task: &Box<dyn BaseTask>,
         persister: &Option<P>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let Some(preparation_info) = task.preparation_info(&authority.pubkey())
@@ -139,7 +139,7 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        _task: &dyn L1Task,
+        _task: &dyn BaseTask,
         preparation_info: &TaskPreparationInfo,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_instructions = chunk_realloc_ixs(

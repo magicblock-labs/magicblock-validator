@@ -2,18 +2,18 @@ use std::sync::Arc;
 
 use dlp::{args::Context, state::DelegationMetadata};
 use log::error;
-use magicblock_program::magic_scheduled_l1_message::{
-    CommitType, CommittedAccountV2, MagicL1Message, ScheduledL1Message,
+use magicblock_program::magic_scheduled_base_intent::{
+    CommitType, CommittedAccountV2, MagicBaseIntent, ScheduledBaseIntent,
     UndelegateType,
 };
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 
 use crate::{
-    commit_scheduler::commit_id_tracker::CommitIdFetcher,
-    persist::L1MessagesPersisterIface,
+    intent_executor::commit_id_fetcher::CommitIdFetcher,
+    persist::IntentPersister,
     tasks::tasks::{
-        ArgsTask, CommitTask, FinalizeTask, L1ActionTask, L1Task,
+        ArgsTask, BaseTask, CommitTask, FinalizeTask, L1ActionTask,
         UndelegateTask,
     },
 };
@@ -21,17 +21,17 @@ use crate::{
 #[async_trait::async_trait]
 pub trait TasksBuilder {
     // Creates tasks for commit stage
-    async fn commit_tasks<C: CommitIdFetcher, P: L1MessagesPersisterIface>(
+    async fn commit_tasks<C: CommitIdFetcher, P: IntentPersister>(
         commit_id_fetcher: &Arc<C>,
-        l1_message: &ScheduledL1Message,
+        l1_message: &ScheduledBaseIntent,
         persister: &Option<P>,
-    ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>>;
+    ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 
     // Create tasks for finalize stage
     async fn finalize_tasks(
         rpc_client: &MagicblockRpcClient,
-        l1_message: &ScheduledL1Message,
-    ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>>;
+        l1_message: &ScheduledBaseIntent,
+    ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 }
 
 /// V1 Task builder
@@ -86,13 +86,13 @@ impl TaskBuilderV1 {
 #[async_trait::async_trait]
 impl TasksBuilder for TaskBuilderV1 {
     /// Returns [`Task`]s for Commit stage
-    async fn commit_tasks<C: CommitIdFetcher, P: L1MessagesPersisterIface>(
+    async fn commit_tasks<C: CommitIdFetcher, P: IntentPersister>(
         commit_id_fetcher: &Arc<C>,
-        l1_message: &ScheduledL1Message,
+        l1_message: &ScheduledBaseIntent,
         persister: &Option<P>,
-    ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>> {
-        let (accounts, allow_undelegation) = match &l1_message.l1_message {
-            MagicL1Message::L1Actions(actions) => {
+    ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
+        let (accounts, allow_undelegation) = match &l1_message.base_intent {
+            MagicBaseIntent::BaseActions(actions) => {
                 let tasks = actions
                     .into_iter()
                     .map(|el| {
@@ -100,14 +100,14 @@ impl TasksBuilder for TaskBuilderV1 {
                             context: Context::Standalone,
                             action: el.clone(),
                         };
-                        Box::new(ArgsTask::L1Action(task)) as Box<dyn L1Task>
+                        Box::new(ArgsTask::L1Action(task)) as Box<dyn BaseTask>
                     })
                     .collect();
 
                 return Ok(tasks);
             }
-            MagicL1Message::Commit(t) => (t.get_committed_accounts(), false),
-            MagicL1Message::CommitAndUndelegate(t) => {
+            MagicBaseIntent::Commit(t) => (t.get_committed_accounts(), false),
+            MagicBaseIntent::CommitAndUndelegate(t) => {
                 (t.commit_action.get_committed_accounts(), true)
             }
         };
@@ -139,7 +139,7 @@ impl TasksBuilder for TaskBuilderV1 {
                     committed_account: account.clone(),
                 });
 
-                Box::new(task) as Box<dyn L1Task>
+                Box::new(task) as Box<dyn BaseTask>
             })
             .collect();
 
@@ -149,10 +149,10 @@ impl TasksBuilder for TaskBuilderV1 {
     /// Returns [`Task`]s for Finalize stage
     async fn finalize_tasks(
         rpc_client: &MagicblockRpcClient,
-        l1_message: &ScheduledL1Message,
-    ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>> {
+        l1_message: &ScheduledBaseIntent,
+    ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
-        fn finalize_task(account: &CommittedAccountV2) -> Box<dyn L1Task> {
+        fn finalize_task(account: &CommittedAccountV2) -> Box<dyn BaseTask> {
             Box::new(ArgsTask::Finalize(FinalizeTask {
                 delegated_account: account.pubkey,
             }))
@@ -162,7 +162,7 @@ impl TasksBuilder for TaskBuilderV1 {
         fn undelegate_task(
             account: &CommittedAccountV2,
             rent_reimbursement: &Pubkey,
-        ) -> Box<dyn L1Task> {
+        ) -> Box<dyn BaseTask> {
             Box::new(ArgsTask::Undelegate(UndelegateTask {
                 delegated_account: account.pubkey,
                 owner_program: account.account.owner,
@@ -171,14 +171,14 @@ impl TasksBuilder for TaskBuilderV1 {
         }
 
         // Helper to process commit types
-        fn process_commit(commit: &CommitType) -> Vec<Box<dyn L1Task>> {
+        fn process_commit(commit: &CommitType) -> Vec<Box<dyn BaseTask>> {
             match commit {
                 CommitType::Standalone(accounts) => {
                     accounts.iter().map(finalize_task).collect()
                 }
-                CommitType::WithL1Actions {
+                CommitType::WithBaseActions {
                     committed_accounts,
-                    l1_actions,
+                    base_actions: l1_actions,
                 } => {
                     let mut tasks = committed_accounts
                         .iter()
@@ -189,17 +189,17 @@ impl TasksBuilder for TaskBuilderV1 {
                             context: Context::Commit,
                             action: action.clone(),
                         };
-                        Box::new(ArgsTask::L1Action(task)) as Box<dyn L1Task>
+                        Box::new(ArgsTask::L1Action(task)) as Box<dyn BaseTask>
                     }));
                     tasks
                 }
             }
         }
 
-        match &l1_message.l1_message {
-            MagicL1Message::L1Actions(_) => Ok(vec![]),
-            MagicL1Message::Commit(commit) => Ok(process_commit(commit)),
-            MagicL1Message::CommitAndUndelegate(t) => {
+        match &l1_message.base_intent {
+            MagicBaseIntent::BaseActions(_) => Ok(vec![]),
+            MagicBaseIntent::Commit(commit) => Ok(process_commit(commit)),
+            MagicBaseIntent::CommitAndUndelegate(t) => {
                 let mut tasks = process_commit(&t.commit_action);
 
                 // Get rent reimbursments for undelegated accounts
@@ -219,14 +219,14 @@ impl TasksBuilder for TaskBuilderV1 {
 
                 match &t.undelegate_action {
                     UndelegateType::Standalone => Ok(tasks),
-                    UndelegateType::WithL1Actions(actions) => {
+                    UndelegateType::WithBaseActions(actions) => {
                         tasks.extend(actions.iter().map(|action| {
                             let task = L1ActionTask {
                                 context: Context::Undelegate,
                                 action: action.clone(),
                             };
                             Box::new(ArgsTask::L1Action(task))
-                                as Box<dyn L1Task>
+                                as Box<dyn BaseTask>
                         }));
 
                         Ok(tasks)
@@ -251,7 +251,7 @@ pub enum FinalizedTasksBuildError {
 pub enum Error {
     #[error("CommitIdFetchError: {0}")]
     CommitTasksBuildError(
-        #[from] crate::commit_scheduler::commit_id_tracker::Error,
+        #[from] crate::intent_executor::commit_id_fetcher::Error,
     ),
     #[error("FinalizedTasksBuildError: {0}")]
     FinalizedTasksBuildError(#[from] FinalizedTasksBuildError),

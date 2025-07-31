@@ -14,8 +14,8 @@ use solana_sdk::{
 
 use crate::{
     args::{
-        ActionArgs, CommitAndUndelegateArgs, CommitTypeArgs, L1ActionArgs,
-        MagicL1MessageArgs, UndelegateTypeArgs,
+        ActionArgs, BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
+        MagicBaseIntentArgs, UndelegateTypeArgs,
     },
     instruction_utils::InstructionUtils,
     utils::accounts::{
@@ -51,105 +51,105 @@ impl<'a, 'ic> ConstructionContext<'a, 'ic> {
 
 /// Scheduled action to be executed on base layer
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScheduledL1Message {
+pub struct ScheduledBaseIntent {
     pub id: u64,
     pub slot: Slot,
     pub blockhash: Hash,
     pub action_sent_transaction: Transaction,
     pub payer: Pubkey,
     // Scheduled action
-    pub l1_message: MagicL1Message,
+    pub base_intent: MagicBaseIntent,
 }
 
-impl ScheduledL1Message {
+impl ScheduledBaseIntent {
     pub fn try_new<'a>(
-        args: &MagicL1MessageArgs,
+        args: &MagicBaseIntentArgs,
         commit_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
         context: &ConstructionContext<'a, '_>,
-    ) -> Result<ScheduledL1Message, InstructionError> {
-        let action = MagicL1Message::try_from_args(args, &context)?;
+    ) -> Result<ScheduledBaseIntent, InstructionError> {
+        let action = MagicBaseIntent::try_from_args(args, &context)?;
 
         let blockhash = context.invoke_context.environment_config.blockhash;
         let action_sent_transaction =
             InstructionUtils::scheduled_commit_sent(commit_id, blockhash);
-        Ok(ScheduledL1Message {
+        Ok(ScheduledBaseIntent {
             id: commit_id,
             slot,
             blockhash,
             payer: *payer_pubkey,
             action_sent_transaction,
-            l1_message: action,
+            base_intent: action,
         })
     }
 
     pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccountV2>> {
-        self.l1_message.get_committed_accounts()
+        self.base_intent.get_committed_accounts()
     }
 
     pub fn get_committed_accounts_mut(
         &mut self,
     ) -> Option<&mut Vec<CommittedAccountV2>> {
-        self.l1_message.get_committed_accounts_mut()
+        self.base_intent.get_committed_accounts_mut()
     }
 
     pub fn get_committed_pubkeys(&self) -> Option<Vec<Pubkey>> {
-        self.l1_message.get_committed_pubkeys()
+        self.base_intent.get_committed_pubkeys()
     }
 
     pub fn is_undelegate(&self) -> bool {
-        self.l1_message.is_undelegate()
+        self.base_intent.is_undelegate()
     }
 }
 
-// L1Message user wants to send to base layer
+// BaseIntent user wants to send to base layer
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MagicL1Message {
+pub enum MagicBaseIntent {
     /// Actions without commitment or undelegation
-    L1Actions(Vec<L1Action>),
+    BaseActions(Vec<BaseAction>),
     Commit(CommitType),
     CommitAndUndelegate(CommitAndUndelegate),
 }
 
-impl MagicL1Message {
+impl MagicBaseIntent {
     pub fn try_from_args<'a>(
-        args: &MagicL1MessageArgs,
+        args: &MagicBaseIntentArgs,
         context: &ConstructionContext<'a, '_>,
-    ) -> Result<MagicL1Message, InstructionError> {
+    ) -> Result<MagicBaseIntent, InstructionError> {
         match args {
-            MagicL1MessageArgs::L1Actions(l1_actions) => {
-                let l1_actions = l1_actions
+            MagicBaseIntentArgs::BaseActions(base_actions) => {
+                let base_actions = base_actions
                     .iter()
-                    .map(|args| L1Action::try_from_args(args, context))
-                    .collect::<Result<Vec<L1Action>, InstructionError>>()?;
-                Ok(MagicL1Message::L1Actions(l1_actions))
+                    .map(|args| BaseAction::try_from_args(args, context))
+                    .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
+                Ok(MagicBaseIntent::BaseActions(base_actions))
             }
-            MagicL1MessageArgs::Commit(type_) => {
+            MagicBaseIntentArgs::Commit(type_) => {
                 let commit = CommitType::try_from_args(type_, context)?;
-                Ok(MagicL1Message::Commit(commit))
+                Ok(MagicBaseIntent::Commit(commit))
             }
-            MagicL1MessageArgs::CommitAndUndelegate(type_) => {
+            MagicBaseIntentArgs::CommitAndUndelegate(type_) => {
                 let commit_and_undelegate =
                     CommitAndUndelegate::try_from_args(type_, context)?;
-                Ok(MagicL1Message::CommitAndUndelegate(commit_and_undelegate))
+                Ok(MagicBaseIntent::CommitAndUndelegate(commit_and_undelegate))
             }
         }
     }
 
     pub fn is_undelegate(&self) -> bool {
         match &self {
-            MagicL1Message::L1Actions(_) => false,
-            MagicL1Message::Commit(_) => false,
-            MagicL1Message::CommitAndUndelegate(_) => true,
+            MagicBaseIntent::BaseActions(_) => false,
+            MagicBaseIntent::Commit(_) => false,
+            MagicBaseIntent::CommitAndUndelegate(_) => true,
         }
     }
 
     pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccountV2>> {
         match self {
-            MagicL1Message::L1Actions(_) => None,
-            MagicL1Message::Commit(t) => Some(t.get_committed_accounts()),
-            MagicL1Message::CommitAndUndelegate(t) => {
+            MagicBaseIntent::BaseActions(_) => None,
+            MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts()),
+            MagicBaseIntent::CommitAndUndelegate(t) => {
                 Some(t.get_committed_accounts())
             }
         }
@@ -159,9 +159,9 @@ impl MagicL1Message {
         &mut self,
     ) -> Option<&mut Vec<CommittedAccountV2>> {
         match self {
-            MagicL1Message::L1Actions(_) => None,
-            MagicL1Message::Commit(t) => Some(t.get_committed_accounts_mut()),
-            MagicL1Message::CommitAndUndelegate(t) => {
+            MagicBaseIntent::BaseActions(_) => None,
+            MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts_mut()),
+            MagicBaseIntent::CommitAndUndelegate(t) => {
                 Some(t.get_committed_accounts_mut())
             }
         }
@@ -235,7 +235,7 @@ pub struct ShortAccountMeta {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct L1Action {
+pub struct BaseAction {
     pub compute_units: u32,
     pub destination_program: Pubkey,
     pub escrow_authority: Pubkey,
@@ -243,11 +243,11 @@ pub struct L1Action {
     pub account_metas_per_program: Vec<ShortAccountMeta>,
 }
 
-impl L1Action {
+impl BaseAction {
     pub fn try_from_args<'a>(
-        args: &L1ActionArgs,
+        args: &BaseActionArgs,
         context: &ConstructionContext<'a, '_>,
-    ) -> Result<L1Action, InstructionError> {
+    ) -> Result<BaseAction, InstructionError> {
         let destination_program_pubkey = *get_instruction_pubkey_with_idx(
             context.transaction_context,
             args.destination_program as u16,
@@ -260,14 +260,14 @@ impl L1Action {
             ic_msg!(
                 context.invoke_context,
                 &format!(
-                    "L1Action: destination_program must be an executable. got: {}",
+                    "BaseAction: destination_program must be an executable. got: {}",
                     destination_program_pubkey
                 )
             );
             return Err(InstructionError::AccountNotExecutable);
         }
 
-        // Since action on L1 performed on behalf of some escrow
+        // Since action on Base layer performed on behalf of some escrow
         // We need to ensure that action was authorized by legit owner
         let authority_pubkey = get_instruction_pubkey_with_idx(
             context.transaction_context,
@@ -277,7 +277,7 @@ impl L1Action {
             ic_msg!(
                 context.invoke_context,
                 &format!(
-                    "L1Action: authority pubkey must sign transaction: {}",
+                    "BaseAction: authority pubkey must sign transaction: {}",
                     authority_pubkey
                 )
             );
@@ -296,7 +296,7 @@ impl L1Action {
             })
             .collect::<Result<Vec<ShortAccountMeta>, InstructionError>>()?;
 
-        Ok(L1Action {
+        Ok(BaseAction {
             compute_units: args.compute_units,
             destination_program: destination_program_pubkey,
             escrow_authority: *authority_pubkey,
@@ -328,9 +328,9 @@ pub enum CommitType {
     /// TODO: feels like ShortMeta isn't needed
     Standalone(Vec<CommittedAccountV2>), // accounts to commit
     /// Commits accounts and runs actions
-    WithL1Actions {
+    WithBaseActions {
         committed_accounts: Vec<CommittedAccountV2>,
-        l1_actions: Vec<L1Action>,
+        base_actions: Vec<BaseAction>,
     },
 }
 
@@ -422,9 +422,9 @@ impl CommitType {
 
                 Ok(CommitType::Standalone(committed_accounts))
             }
-            CommitTypeArgs::WithL1Actions {
+            CommitTypeArgs::WithBaseActions {
                 committed_accounts,
-                l1_actions,
+                base_actions,
             } => {
                 let committed_accounts_ref = Self::extract_commit_accounts(
                     committed_accounts,
@@ -432,10 +432,10 @@ impl CommitType {
                 )?;
                 Self::validate_accounts(&committed_accounts_ref, context)?;
 
-                let l1_actions = l1_actions
+                let base_actions = base_actions
                     .iter()
-                    .map(|args| L1Action::try_from_args(args, context))
-                    .collect::<Result<Vec<L1Action>, InstructionError>>()?;
+                    .map(|args| BaseAction::try_from_args(args, context))
+                    .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|el| {
@@ -449,9 +449,9 @@ impl CommitType {
                     })
                     .collect();
 
-                Ok(CommitType::WithL1Actions {
+                Ok(CommitType::WithBaseActions {
                     committed_accounts,
-                    l1_actions,
+                    base_actions,
                 })
             }
         }
@@ -460,7 +460,7 @@ impl CommitType {
     pub fn get_committed_accounts(&self) -> &Vec<CommittedAccountV2> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
-            Self::WithL1Actions {
+            Self::WithBaseActions {
                 committed_accounts, ..
             } => committed_accounts,
         }
@@ -471,7 +471,7 @@ impl CommitType {
     ) -> &mut Vec<CommittedAccountV2> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
-            Self::WithL1Actions {
+            Self::WithBaseActions {
                 committed_accounts, ..
             } => committed_accounts,
         }
@@ -482,7 +482,7 @@ impl CommitType {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UndelegateType {
     Standalone,
-    WithL1Actions(Vec<L1Action>),
+    WithBaseActions(Vec<BaseAction>),
 }
 
 impl UndelegateType {
@@ -492,14 +492,14 @@ impl UndelegateType {
     ) -> Result<UndelegateType, InstructionError> {
         match args {
             UndelegateTypeArgs::Standalone => Ok(UndelegateType::Standalone),
-            UndelegateTypeArgs::WithL1Actions { l1_actions } => {
-                let l1_actions = l1_actions
+            UndelegateTypeArgs::WithBaseActions { base_actions } => {
+                let base_actions = base_actions
                     .iter()
-                    .map(|l1_actions| {
-                        L1Action::try_from_args(l1_actions, context)
+                    .map(|base_action| {
+                        BaseAction::try_from_args(base_action, context)
                     })
-                    .collect::<Result<Vec<L1Action>, InstructionError>>()?;
-                Ok(UndelegateType::WithL1Actions(l1_actions))
+                    .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
+                Ok(UndelegateType::WithBaseActions(base_actions))
             }
         }
     }

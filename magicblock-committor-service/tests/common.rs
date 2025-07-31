@@ -6,9 +6,8 @@ use std::{
     },
 };
 
-use async_trait::async_trait;
 use magicblock_committor_service::{
-    commit_scheduler::commit_id_tracker::{
+    intent_executor::commit_id_fetcher::{
         CommitIdFetcher, CommitIdTrackerResult,
     },
     tasks::tasks::CommitTask,
@@ -16,22 +15,16 @@ use magicblock_committor_service::{
         delivery_preparator::DeliveryPreparator,
         transaction_preparator::TransactionPreparatorV1,
     },
-    types::{ScheduledL1MessageWrapper, TriggerType},
     ComputeBudgetConfig,
 };
-use magicblock_program::magic_scheduled_l1_message::{
-    CommittedAccountV2, ScheduledL1Message,
-};
+use magicblock_program::magic_scheduled_base_intent::CommittedAccountV2;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::{CommitmentConfig, CommitmentLevel},
-    signature::Keypair,
-    signer::Signer,
-    system_program,
+    commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
 };
 
 // Helper function to create a test RPC client

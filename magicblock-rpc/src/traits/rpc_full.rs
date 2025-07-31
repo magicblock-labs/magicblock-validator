@@ -187,7 +187,7 @@ pub trait Full {
 }
 
 // ideally
-// 1. We add all of ScheduledL1Message on baselayer
+// 1. We add all of ScheduledBaseIntent on baselayer
 // 2. We finalize them:
 //      1. Runs committs per account
 //      2. Runs actions(undelegate one actions)
