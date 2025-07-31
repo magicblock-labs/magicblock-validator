@@ -79,3 +79,13 @@ pub(crate) fn fund_magic_context(bank: &Bank) {
         vec![0; magic_program::MAGIC_CONTEXT_SIZE],
     );
 }
+
+// Make rent-exempt to allow the PDA to receive rent
+pub(crate) fn fund_task_context(bank: &Bank) {
+    fund_account_with_data(
+        bank,
+        &magic_program::TASK_CONTEXT_PUBKEY,
+        u64::MAX,
+        vec![0; magic_program::TASK_CONTEXT_SIZE],
+    );
+}

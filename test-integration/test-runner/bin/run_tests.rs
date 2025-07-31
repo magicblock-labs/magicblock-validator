@@ -26,11 +26,13 @@ pub fn main() {
         // If any test run panics (i.e. not just a failing test) then we bail
         return;
     };
+
     let Ok(issues_frequent_commits_output) =
         run_issues_frequent_commmits_tests(&manifest_dir)
     else {
         return;
     };
+
     let Ok(cloning_output) = run_cloning_tests(&manifest_dir) else {
         return;
     };
@@ -50,6 +52,7 @@ pub fn main() {
     else {
         return;
     };
+
     let Ok(magicblock_pubsub_output) =
         run_magicblock_pubsub_tests(&manifest_dir)
     else {
@@ -57,6 +60,11 @@ pub fn main() {
     };
 
     let Ok(config_output) = run_config_tests(&manifest_dir) else {
+        return;
+    };
+
+    let Ok(task_scheduler_output) = run_task_scheduler_tests(&manifest_dir)
+    else {
         return;
     };
 
@@ -74,6 +82,7 @@ pub fn main() {
     assert_cargo_tests_passed(committor_output, "committor");
     assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
     assert_cargo_tests_passed(config_output, "config");
+    assert_cargo_tests_passed(task_scheduler_output, "task_scheduler");
 }
 
 fn should_run_test(test_name: &str) -> bool {
@@ -503,6 +512,58 @@ fn run_config_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
         }
     };
     cleanup_devnet_only(&mut devnet_validator);
+    Ok(output)
+}
+
+fn run_task_scheduler_tests(
+    manifest_dir: &str,
+) -> Result<Output, Box<dyn Error>> {
+    if !should_run_test("task_scheduler") {
+        return Ok(success_output());
+    }
+    eprintln!("======== RUNNING TASK SCHEDULER TESTS ========");
+
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+
+    // Initialize only a devnet cluster for config tests
+    let mut devnet_validator = match start_validator(
+        "schedule-task.devnet.toml",
+        ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start magicblock validator properly");
+        }
+    };
+    let mut ephem_validator = match start_validator(
+        "schedule-task.ephem.toml",
+        ValidatorCluster::Ephem,
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            cleanup_devnet_only(&mut devnet_validator);
+            panic!("Failed to start ephemeral validator properly");
+        }
+    };
+
+    let test_task_scheduler_dir =
+        format!("{}/../{}", manifest_dir, "test-task-scheduler");
+    eprintln!(
+        "Running task scheduler tests in {}",
+        test_task_scheduler_dir
+    );
+    let output = match run_test(test_task_scheduler_dir, Default::default()) {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("Failed to run task scheduler tests: {:?}", err);
+            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+            return Err(err.into());
+        }
+    };
+    cleanup_validators(&mut ephem_validator, &mut devnet_validator);
     Ok(output)
 }
 

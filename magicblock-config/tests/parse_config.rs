@@ -5,7 +5,7 @@ use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategyConfig, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
     MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteConfig,
-    RpcConfig, ValidatorConfig,
+    RpcConfig, TaskSchedulerConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use url::Url;
@@ -119,6 +119,7 @@ fn test_local_dev_with_programs_toml() {
                 },
                 ..Default::default()
             },
+            task_scheduler: TaskSchedulerConfig::default(),
         }
     )
 }
