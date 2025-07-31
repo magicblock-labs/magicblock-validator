@@ -11,10 +11,10 @@ use magicblock_account_fetcher::AccountFetcherStub;
 use magicblock_account_updates::AccountUpdatesStub;
 use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_committor_service::stubs::ChangesetCommittorStub;
+use magicblock_config::AccountsCloneConfig;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     bpf_loader_upgradeable::get_program_data_address,
-    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     sysvar::clock,
@@ -37,7 +37,6 @@ fn setup_custom(
     tokio::task::JoinHandle<()>,
 ) {
     // Default configuration
-    let payer_init_lamports = Some(1_000 * LAMPORTS_PER_SOL);
     // Create account cloner worker and client
     let cloner_worker = RemoteAccountClonerWorker::new(
         internal_account_provider,
@@ -47,21 +46,22 @@ fn setup_custom(
         changeset_committor,
         allowed_program_ids,
         blacklisted_accounts,
-        payer_init_lamports,
         ValidatorCollectionMode::NoFees,
         permissions,
         Pubkey::new_unique(),
         1024,
+        AccountsCloneConfig::default(),
     );
     let cloner_client = RemoteAccountClonerClient::new(&cloner_worker);
     // Run the worker in a separate task
     let cancellation_token = CancellationToken::new();
     let cloner_worker_handle = {
         let cloner_cancellation_token = cancellation_token.clone();
-        tokio::spawn(
+        tokio::spawn(async move {
             cloner_worker
-                .start_clone_request_processing(cloner_cancellation_token),
-        )
+                .start_clone_request_processing(cloner_cancellation_token)
+                .await
+        })
     };
     // Ready to run
     (cloner_client, cancellation_token, cloner_worker_handle)
@@ -226,7 +226,7 @@ async fn test_clone_allow_feepayer_account_when_ephemeral() {
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
     assert_eq!(account_fetcher.get_fetch_count(&feepayer_account), 1);
     assert!(account_updates.has_account_monitoring(&feepayer_account));
-    assert!(account_dumper.was_dumped_as_feepayer_account(&feepayer_account));
+    assert!(account_dumper.was_dumped_as_undelegated_account(&feepayer_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -286,7 +286,7 @@ async fn test_clone_fails_stale_undelegated_account_when_ephemeral() {
     );
     // Account(s) involved
     let undelegated_account = Pubkey::new_unique();
-    account_updates.set_first_subscribed_slot(undelegated_account, 50); // Accounts subscribe is more recent than fetchable state
+    account_updates.set_last_known_update_slot(clock::ID, 50); // Accounts subscribe is more recent than fetchable state
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     // Run test
     let result = cloner.clone_account(&undelegated_account).await;
@@ -774,7 +774,7 @@ async fn test_clone_allow_feepayer_account_when_replica() {
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
     assert_eq!(account_fetcher.get_fetch_count(&feepayer_account), 1);
     assert!(!account_updates.has_account_monitoring(&feepayer_account));
-    assert!(account_dumper.was_dumped_as_feepayer_account(&feepayer_account));
+    assert!(account_dumper.was_dumped_as_undelegated_account(&feepayer_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());

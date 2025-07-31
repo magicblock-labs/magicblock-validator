@@ -4,10 +4,10 @@ use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LifecycleMode, MetricsConfig,
-    MetricsServiceConfig, Payer, PayerParams, ProgramConfig, RemoteConfig,
-    RpcConfig, ValidatorConfig,
+    MetricsServiceConfig, ProgramConfig, RemoteConfig, RpcConfig,
+    ValidatorConfig,
 };
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey};
+use solana_sdk::pubkey;
 use url::Url;
 
 #[test]
@@ -97,7 +97,8 @@ fn test_local_dev_with_programs_toml() {
             }],
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                port: 7799
+                port: 7799,
+                max_ws_connections: 16384
             },
             validator: ValidatorConfig {
                 millis_per_slot: 14,
@@ -131,9 +132,10 @@ fn test_custom_remote_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                remote: RemoteConfig::Custom(
-                    Url::parse("http://localhost:8899").unwrap()
-                ),
+                remote: RemoteConfig {
+                    url: Some(Url::parse("http://localhost:8899").unwrap()),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -150,10 +152,13 @@ fn test_custom_ws_remote_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                remote: RemoteConfig::CustomWithWs(
-                    Url::parse("http://localhost:8899").unwrap(),
-                    Url::parse("ws://localhost:9001").unwrap()
-                ),
+                remote: RemoteConfig {
+                    url: Some(Url::parse("http://localhost:8899").unwrap()),
+                    ws_url: Some(vec![
+                        Url::parse("ws://localhost:9001").unwrap()
+                    ]),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -169,18 +174,10 @@ fn test_accounts_payer() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                payer: Payer::new(PayerParams {
-                    init_lamports: None,
-                    init_sol: Some(2_000),
-                }),
                 ..Default::default()
             },
             ..Default::default()
         }
-    );
-    assert_eq!(
-        config.accounts.payer.try_init_lamports().unwrap(),
-        Some(2_000 * LAMPORTS_PER_SOL)
     );
 }
 
@@ -192,15 +189,11 @@ fn test_validator_with_base_fees() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                payer: Payer::new(PayerParams {
-                    init_lamports: None,
-                    init_sol: None,
-                }),
                 ..Default::default()
             },
             validator: ValidatorConfig {
                 base_fees: Some(1_000),
-                fdqn: Some("magicblock.er.com".to_string()),
+                fqdn: Some("magicblock.er.com".to_string()),
                 country_code: CountryCode::for_alpha2("US").unwrap(),
                 ..Default::default()
             },
@@ -214,7 +207,7 @@ fn test_validator_with_base_fees() {
 fn test_custom_invalid_remote() {
     let toml = r#"
 [accounts]
-remote = "http://localhost::8899"
+remote.url = "http://localhost::8899"
 "#;
 
     let res = toml::from_str::<EphemeralConfig>(toml);
@@ -232,27 +225,4 @@ path = "/tmp/program.so"
     let res = toml::from_str::<EphemeralConfig>(toml);
     eprintln!("{:?}", res);
     assert!(res.is_err());
-}
-
-#[test]
-fn test_accounts_payer_specifies_both_lamports_and_sol() {
-    let toml = r#"
-[accounts]
-payer = { init_sol = 2000, init_lamports = 300_000 }
-"#;
-
-    let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
-    assert!(config.accounts.payer.try_init_lamports().is_err());
-}
-
-#[test]
-fn test_custom_remote_with_multiple_ws() {
-    let toml = r#"
-[accounts]
-remote = { http = "http://localhost:8899", ws = ["ws://awesomews1.com:933", "wss://awesomews2.com:944"] }
-"#;
-
-    let res = toml::from_str::<EphemeralConfig>(toml);
-    println!("{res:?}");
-    assert!(res.is_ok());
 }

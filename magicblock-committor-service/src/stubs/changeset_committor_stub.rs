@@ -3,11 +3,15 @@ use std::{
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
-
+use std::time::Instant;
 use magicblock_program::SentCommit;
 use solana_pubkey::Pubkey;
 use solana_sdk::{signature::Signature, transaction::Transaction};
-use tokio::sync::{oneshot, oneshot::Receiver};
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
+    EncodedTransactionWithStatusMeta,
+};
+use tokio::sync::oneshot;
 
 use crate::{
     error::CommittorServiceResult,
@@ -39,15 +43,16 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         &self,
         committee: Pubkey,
         owner: Pubkey,
-    ) -> Receiver<CommittorServiceResult<()>> {
-        let (tx, rx) = oneshot::channel::<CommittorServiceResult<()>>();
-
+    ) -> oneshot::Receiver<CommittorServiceResult<Instant>> {
+        let initiated = Instant::now();
+        let (tx, rx) =
+           oneshot::channel::<CommittorServiceResult<Instant>>();
         self.reserved_pubkeys_for_committee
             .lock()
             .unwrap()
             .insert(committee, owner);
 
-        tx.send(Ok(())).unwrap_or_else(|_| {
+        tx.send(Ok(initiated)).unwrap_or_else(|_| {
             log::error!("Failed to send response");
         });
         rx
@@ -65,7 +70,7 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
 
     fn subscribe_for_results(
         &self,
-    ) -> Receiver<
+    ) -> oneshot::Receiver<
         tokio::sync::broadcast::Receiver<BroadcastedIntentExecutionResult>,
     > {
         let (_, receiver) = oneshot::channel();
@@ -75,7 +80,7 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
     fn get_commit_statuses(
         &self,
         message_id: u64,
-    ) -> Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
+    ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
         let (tx, rx) = oneshot::channel();
 
         let commit = self
@@ -115,6 +120,32 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         tx.send(Ok(Some(message_signature))).unwrap_or_else(|_| {
             log::error!("Failed to send bundle signatures response");
         });
+
+        rx
+    }
+
+    fn get_transaction(
+        &self,
+        _: &Signature,
+    ) -> oneshot::Receiver<
+        CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
+    > {
+        let (tx, rx) = oneshot::channel();
+        if let Err(err) =
+            tx.send(Ok(EncodedConfirmedTransactionWithStatusMeta {
+                slot: 0,
+                transaction: EncodedTransactionWithStatusMeta {
+                    transaction: EncodedTransaction::LegacyBinary(
+                        "".to_string(),
+                    ),
+                    meta: None,
+                    version: None,
+                },
+                block_time: None,
+            }))
+        {
+            log::error!("Failed to send get transaction response");
+        };
 
         rx
     }

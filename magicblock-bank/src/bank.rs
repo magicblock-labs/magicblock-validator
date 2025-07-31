@@ -14,9 +14,8 @@ use std::{
 };
 
 use log::{debug, info, trace};
-use magicblock_accounts_db::{
-    config::AccountsDbConfig, error::AccountsDbError, AccountsDb, StWLock,
-};
+use magicblock_accounts_db::{error::AccountsDbError, AccountsDb, StWLock};
+use magicblock_config::AccountsDbConfig;
 use magicblock_core::traits::FinalityProvider;
 use solana_accounts_db::{
     accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
@@ -122,7 +121,7 @@ use crate::{
         TransactionBalances, TransactionBalancesSet,
     },
     transaction_simulation::TransactionSimulationResult,
-    LAMPORTS_PER_SIGNATURE,
+    DEFAULT_LAMPORTS_PER_SIGNATURE,
 };
 
 pub type BankStatusCache = StatusCache<Result<()>>;
@@ -447,7 +446,8 @@ impl Bank {
             accounts_update_notifier,
             millis_per_slot,
         );
-        bank.fee_rate_governor.lamports_per_signature = LAMPORTS_PER_SIGNATURE;
+        bank.fee_rate_governor.lamports_per_signature =
+            DEFAULT_LAMPORTS_PER_SIGNATURE;
 
         bank.transaction_debug_keys = debug_keys;
         bank.runtime_config = runtime_config;

@@ -1,17 +1,25 @@
-use std::{cmp::min, ops::ControlFlow, sync::Arc, time::Duration};
+use std::{cmp::min, sync::Arc, time::Duration};
 
-use log::{error, warn};
+use log::{error, info, warn};
 use magicblock_core::traits::FinalityProvider;
 use tokio::{
-    task::{JoinError, JoinHandle},
+    task::{JoinError, JoinHandle, JoinSet},
     time::interval,
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{errors::LedgerResult, Ledger};
+use crate::{
+    database::columns::{
+        AddressSignatures, Blockhash, Blocktime, PerfSamples, SlotSignatures,
+        Transaction, TransactionMemos, TransactionStatus,
+    },
+    errors::LedgerResult,
+    Ledger,
+};
 
 pub const DEFAULT_TRUNCATION_TIME_INTERVAL: Duration =
-    Duration::from_secs(10 * 60);
+    Duration::from_secs(2 * 60);
+const PERCENTAGE_TO_TRUNCATE: u8 = 10;
 
 struct LedgerTrunctationWorker<T> {
     finality_provider: Arc<T>,
@@ -39,6 +47,9 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
     }
 
     pub async fn run(self) {
+        self.ledger
+            .initialize_lowest_cleanup_slot()
+            .expect("Lowest cleanup slot initialization");
         let mut interval = interval(self.truncation_time_interval);
         loop {
             tokio::select! {
@@ -46,34 +57,62 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
                     return;
                 }
                 _ = interval.tick() => {
-                    const TRUNCATE_TO_PERCENTAGE: u64 = 90;
+                    // Note: since we clean 10%, tomstones will take around 10% as well
+                    const FILLED_PERCENTAGE_LIMIT: u8 = 100 - PERCENTAGE_TO_TRUNCATE;
 
-                    match self.should_truncate() {
-                        Ok(true) => {
-                            if let Some((from_slot, to_slot)) = self.next_truncation_range() {
-                                let to_size = ( self.ledger_size / 100 ) * TRUNCATE_TO_PERCENTAGE;
-                                Self::truncate_to_size(&self.ledger, to_size, from_slot, to_slot);
-                            } else {
-                                warn!("Failed to get truncation range! Ledger size exceeded desired threshold");
-                            }
-                        },
-                        Ok(false) => (),
-                        Err(err) => error!("Failed to check truncation condition: {err}"),
+                    let current_size = match self.ledger.storage_size() {
+                        Ok(value) => value,
+                        Err(err) => {
+                            error!("Failed to check truncation condition: {err}");
+                            continue;
+                        }
+                    };
+
+                    // Check if we should truncate
+                    if current_size < (self.ledger_size / 100) * FILLED_PERCENTAGE_LIMIT as u64 {
+                        continue;
+                    }
+
+                    info!("Ledger size: {current_size}");
+                    match self.estimate_truncation_range(current_size) {
+                        Ok(Some((from_slot, to_slot))) => Self::truncate_slot_range(&self.ledger, from_slot, to_slot).await,
+                        Ok(None) => warn!("Could not estimate truncation range"),
+                        Err(err) => error!("Failed to estimate truncation range: {:?}", err),
                     }
                 }
             }
         }
     }
 
-    fn should_truncate(&self) -> LedgerResult<bool> {
-        // Once size percentage reached, we start truncation
-        const FILLED_PERCENTAGE_LIMIT: u64 = 98;
-        Ok(self.ledger.storage_size()?
-            >= (self.ledger_size / 100) * FILLED_PERCENTAGE_LIMIT)
+    /// Returns range to truncate [from_slot, to_slot]
+    fn estimate_truncation_range(
+        &self,
+        current_ledger_size: u64,
+    ) -> LedgerResult<Option<(u64, u64)>> {
+        let (from_slot, to_slot) =
+            if let Some(val) = self.available_truncation_range() {
+                val
+            } else {
+                return Ok(None);
+            };
+
+        let num_slots = self.ledger.count_blockhashes()?;
+        if num_slots == 0 {
+            info!("No slot were written yet. Nothing to truncate!");
+            return Ok(None);
+        }
+
+        let slot_size = current_ledger_size / num_slots as u64;
+        let size_to_truncate =
+            (current_ledger_size / 100) * PERCENTAGE_TO_TRUNCATE as u64;
+        let num_slots_to_truncate = size_to_truncate / slot_size;
+
+        let to_slot = min(from_slot + num_slots_to_truncate, to_slot);
+        Ok(Some((from_slot, to_slot)))
     }
 
     /// Returns [from_slot, to_slot] range that's safe to truncate
-    fn next_truncation_range(&self) -> Option<(u64, u64)> {
+    fn available_truncation_range(&self) -> Option<(u64, u64)> {
         let lowest_cleanup_slot = self.ledger.get_lowest_cleanup_slot();
         let latest_final_slot = self.finality_provider.get_latest_final_slot();
 
@@ -83,10 +122,16 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
                 // This could not happen because of Truncator
                 warn!("Slots after latest final slot have been truncated!");
             }
+
+            info!(
+                "Lowest cleanup slot ge than latest final slot. {}, {}",
+                lowest_cleanup_slot, latest_final_slot
+            );
             return None;
         }
-        // Nothing to clean
-        if latest_final_slot - 1 == lowest_cleanup_slot {
+        // Nothing to truncate
+        if latest_final_slot == lowest_cleanup_slot + 1 {
+            info!("Nothing to truncate");
             return None;
         }
 
@@ -103,9 +148,8 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
 
     /// Utility function for splitting truncation into smaller chunks
     /// Cleans slots [from_slot; to_slot] inclusive range
-    pub fn truncate_to_size(
+    pub async fn truncate_slot_range(
         ledger: &Arc<Ledger>,
-        size: u64,
         from_slot: u64,
         to_slot: u64,
     ) {
@@ -116,9 +160,13 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
             warn!("LedgerTruncator: Nani?");
             return;
         }
+
+        info!(
+            "LedgerTruncator: truncating slot range [{from_slot}; {to_slot}]"
+        );
         (from_slot..=to_slot)
             .step_by(SINGLE_TRUNCATION_LIMIT)
-            .try_for_each(|cur_from_slot| {
+            .for_each(|cur_from_slot| {
                 let num_slots_to_truncate = min(
                     to_slot - cur_from_slot + 1,
                     SINGLE_TRUNCATION_LIMIT as u64,
@@ -127,30 +175,76 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
                     cur_from_slot + num_slots_to_truncate - 1;
 
                 if let Err(err) =
-                    ledger.truncate_slots(cur_from_slot, truncate_to_slot)
+                    ledger.delete_slot_range(cur_from_slot, truncate_to_slot)
                 {
                     warn!(
                         "Failed to truncate slots {}-{}: {}",
                         cur_from_slot, truncate_to_slot, err
                     );
-
-                    return ControlFlow::Continue(());
-                }
-
-                match ledger.storage_size() {
-                    Ok(current_size) => {
-                        if current_size <= size {
-                            ControlFlow::Break(())
-                        } else {
-                            ControlFlow::Continue(())
-                        }
-                    }
-                    Err(err) => {
-                        warn!("Failed to fetch Ledger size: {err}");
-                        ControlFlow::Continue(())
-                    }
                 }
             });
+        // Flush memtables with tombstones prior to compaction
+        if let Err(err) = ledger.flush() {
+            error!("Failed to flush ledger: {err}");
+        }
+
+        Self::compact_slot_range(ledger, from_slot, to_slot).await;
+    }
+
+    /// Synchronous utility function that triggers and awaits compaction on all the columns
+    pub async fn compact_slot_range(
+        ledger: &Arc<Ledger>,
+        from_slot: u64,
+        to_slot: u64,
+    ) {
+        if to_slot < from_slot {
+            warn!("LedgerTruncator: Nani2?");
+            return;
+        }
+
+        // Compaction can be run concurrently for different cf
+        // but it utilizes rocksdb threads, in order not to drain
+        // our tokio rt threads, we split the effort in just 3 tasks
+        let mut join_set = JoinSet::new();
+        join_set.spawn({
+            let ledger = ledger.clone();
+            async move {
+                ledger.compact_slot_range_cf::<Blocktime>(
+                    Some(from_slot),
+                    Some(to_slot + 1),
+                );
+                ledger.compact_slot_range_cf::<Blockhash>(
+                    Some(from_slot),
+                    Some(to_slot + 1),
+                );
+                ledger.compact_slot_range_cf::<PerfSamples>(
+                    Some(from_slot),
+                    Some(to_slot + 1),
+                );
+                ledger.compact_slot_range_cf::<SlotSignatures>(
+                    Some((from_slot, u32::MIN)),
+                    Some((to_slot + 1, u32::MAX)),
+                );
+            }
+        });
+
+        // Can not compact with specific range
+        join_set.spawn({
+            let ledger = ledger.clone();
+            async move {
+                ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
+                ledger.compact_slot_range_cf::<Transaction>(None, None);
+            }
+        });
+        join_set.spawn({
+            let ledger = ledger.clone();
+            async move {
+                ledger.compact_slot_range_cf::<TransactionMemos>(None, None);
+                ledger.compact_slot_range_cf::<AddressSignatures>(None, None);
+            }
+        });
+
+        let _ = join_set.join_all().await;
     }
 }
 

@@ -8,8 +8,12 @@ use futures_util::future::BoxFuture;
 use magicblock_account_dumper::AccountDumperError;
 use magicblock_account_fetcher::AccountFetcherError;
 use magicblock_account_updates::AccountUpdatesError;
-use magicblock_committor_service::error::CommittorServiceResult;
+use magicblock_committor_service::{
+    error::{CommittorServiceError, CommittorServiceResult},
+    BaseIntentCommittor,
+};
 use magicblock_core::magic_program;
+use magicblock_rpc_client::MagicblockRpcClient;
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
 use tokio::sync::oneshot::{self, Sender};
@@ -17,10 +21,13 @@ use tokio::sync::oneshot::{self, Sender};
 #[derive(Debug, Clone, Error)]
 pub enum AccountClonerError {
     #[error(transparent)]
-    SendError(#[from] tokio::sync::mpsc::error::SendError<Pubkey>),
+    SendError(#[from] flume::SendError<Pubkey>),
 
     #[error(transparent)]
     RecvError(#[from] tokio::sync::oneshot::error::RecvError),
+
+    #[error("JoinError ({0})")]
+    JoinError(String),
 
     #[error(transparent)]
     AccountFetcherError(#[from] AccountFetcherError),
@@ -31,8 +38,8 @@ pub enum AccountClonerError {
     #[error(transparent)]
     AccountDumperError(#[from] AccountDumperError),
 
-    #[error("CommittorSerivceError {0}")]
-    CommittorSerivceError(String),
+    #[error("CommittorServiceError {0}")]
+    CommittorServiceError(String),
 
     #[error("ProgramDataDoesNotExist")]
     ProgramDataDoesNotExist,
@@ -70,20 +77,59 @@ pub enum AccountClonerUnclonableReason {
     DelegatedAccountsNotClonedWhileHydrating,
 }
 
-pub async fn map_committor_request_result<T>(
+pub async fn map_committor_request_result<T, CC: BaseIntentCommittor>(
     res: oneshot::Receiver<CommittorServiceResult<T>>,
+    intent_committor: Arc<CC>,
 ) -> AccountClonerResult<T> {
-    res.await
-        .map_err(|err| {
-            // Send request error
-            AccountClonerError::CommittorSerivceError(format!(
-                "error sending request {err:?}"
-            ))
-        })?
-        .map_err(|err| {
+    match res.await.map_err(|err| {
+        // Send request error
+        AccountClonerError::CommittorServiceError(format!(
+            "error sending request {err:?}"
+        ))
+    })? {
+        Ok(val) => Ok(val),
+        Err(err) => {
             // Commit error
-            AccountClonerError::CommittorSerivceError(format!("{:?}", err))
-        })
+            match err {
+                CommittorServiceError::TableManiaError(table_mania_err) => {
+                    let Some(sig) = table_mania_err.signature() else {
+                        return Err(AccountClonerError::CommittorServiceError(
+                            format!("{:?}", table_mania_err),
+                        ));
+                    };
+                    let (logs, cus) = if let Ok(Ok(transaction)) =
+                        intent_committor.get_transaction(&sig).await
+                    {
+                        let cus = MagicblockRpcClient::get_cus_from_transaction(
+                            &transaction,
+                        );
+                        let logs =
+                            MagicblockRpcClient::get_logs_from_transaction(
+                                &transaction,
+                            );
+                        (logs, cus)
+                    } else {
+                        (None, None)
+                    };
+
+                    let cus_str = cus
+                        .map(|cus| format!("{:?}", cus))
+                        .unwrap_or("N/A".to_string());
+                    let logs_str = logs
+                        .map(|logs| format!("{:#?}", logs))
+                        .unwrap_or("N/A".to_string());
+                    Err(AccountClonerError::CommittorServiceError(format!(
+                        "{:?}\nCUs: {cus_str}\nLogs: {logs_str}",
+                        table_mania_err
+                    )))
+                }
+                _ => Err(AccountClonerError::CommittorServiceError(format!(
+                    "{:?}",
+                    err
+                ))),
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +139,15 @@ pub struct AccountClonerPermissions {
     pub allow_cloning_undelegated_accounts: bool,
     pub allow_cloning_delegated_accounts: bool,
     pub allow_cloning_program_accounts: bool,
+}
+
+impl AccountClonerPermissions {
+    pub fn can_clone(&self) -> bool {
+        self.allow_cloning_feepayer_accounts
+            || self.allow_cloning_undelegated_accounts
+            || self.allow_cloning_delegated_accounts
+            || self.allow_cloning_program_accounts
+    }
 }
 
 #[derive(Debug, Clone)]

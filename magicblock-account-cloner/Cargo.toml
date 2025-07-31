@@ -9,12 +9,15 @@ edition.workspace = true
 
 [dependencies]
 conjunto-transwise = { workspace = true }
+flume = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 magicblock-account-fetcher = { workspace = true }
 magicblock-account-updates = { workspace = true }
 magicblock-account-dumper = { workspace = true }
 magicblock-accounts-api = { workspace = true }
+magicblock-rpc-client = { workspace = true }
+magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-metrics = { workspace = true }

@@ -4,7 +4,7 @@ use std::{
     ops::Deref,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        RwLock, RwLockReadGuard, RwLockWriteGuard,
+        Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
 };
 
@@ -30,6 +30,7 @@ use solana_sdk::{
 use crate::{
     derive_keypair,
     error::{TableManiaError, TableManiaResult},
+    TableManiaComputeBudget,
 };
 
 // -----------------
@@ -57,12 +58,15 @@ impl RefcountedPubkeys {
     /// found in any other table.
     fn insert_many(&mut self, pubkeys: &[Pubkey]) {
         for pubkey in pubkeys {
-            debug_assert!(
-                !self.pubkeys.contains_key(pubkey),
-                "Pubkey {} already exists in the table",
-                pubkey
-            );
-            self.pubkeys.insert(*pubkey, AtomicUsize::new(1));
+            if let Some(pubkey_rc) = self.pubkeys.get_mut(pubkey) {
+                debug!(
+                    "Pubkey {} exists in the table. Not inserting, but increasing ref count instead",
+                    pubkey
+                );
+                pubkey_rc.fetch_add(1, Ordering::Relaxed);
+            } else {
+                self.pubkeys.insert(*pubkey, AtomicUsize::new(1));
+            }
         }
     }
 
@@ -105,6 +109,15 @@ impl RefcountedPubkeys {
             .values()
             .any(|rc_pubkey| rc_pubkey.load(Ordering::SeqCst) > 0)
     }
+
+    /// Returns the refcount of a pubkey if it exists in this table
+    /// - *pubkey* to query refcount for
+    /// - *returns* `Some(refcount)` if the pubkey exists, `None` otherwise
+    fn get_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
+        self.pubkeys
+            .get(pubkey)
+            .map(|count| count.load(Ordering::Relaxed))
+    }
 }
 
 impl Deref for RefcountedPubkeys {
@@ -115,9 +128,9 @@ impl Deref for RefcountedPubkeys {
     }
 }
 
-/// Determined via trial and error. The keys themselves take up
-/// 27 * 32 bytes = 864 bytes.
-pub const MAX_ENTRIES_AS_PART_OF_EXTEND: u64 = 27;
+/// Determined via trial and error, last updated when we added compute budget instructions.
+/// The keys themselves take up 24 * 32 = 768 bytes
+pub const MAX_ENTRIES_AS_PART_OF_EXTEND: u64 = 24;
 
 // -----------------
 // LookupTableRc
@@ -134,7 +147,7 @@ pub enum LookupTableRc {
         creation_slot: u64,
         creation_sub_slot: u64,
         init_signature: Signature,
-        extend_signatures: Vec<Signature>,
+        extend_signatures: Mutex<Vec<Signature>>,
     },
     Deactivated {
         derived_auth: Keypair,
@@ -158,12 +171,14 @@ impl fmt::Display for LookupTableRc {
             } => {
                 let comma_separated_pubkeys = pubkeys
                     .read()
-                    .expect("pubkeys mutex poisoned")
+                    .expect("pubkeys rwlock poisoned")
                     .iter()
                     .map(|(key, _)| key.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
                 let comma_separated_sigs = extend_signatures
+                    .lock()
+                    .expect("extend_signatures mutex poisoned")
                     .iter()
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>()
@@ -208,6 +223,37 @@ impl fmt::Display for LookupTableRc {
 }
 
 impl LookupTableRc {
+    pub fn init_signature(&self) -> Option<Signature> {
+        match self {
+            Self::Active { init_signature, .. } => Some(*init_signature),
+            Self::Deactivated { .. } => None,
+        }
+    }
+
+    pub fn extend_signatures(&self) -> Option<Vec<Signature>> {
+        match self {
+            Self::Active {
+                extend_signatures, ..
+            } => Some(
+                extend_signatures
+                    .lock()
+                    .expect("extend_signatures mutex poisoned")
+                    .clone(),
+            ),
+            Self::Deactivated { .. } => None,
+        }
+    }
+
+    pub fn deactivate_signature(&self) -> Option<Signature> {
+        match self {
+            Self::Active { .. } => None,
+            Self::Deactivated {
+                deactivate_signature,
+                ..
+            } => Some(*deactivate_signature),
+        }
+    }
+
     pub fn derived_auth(&self) -> &Keypair {
         match self {
             Self::Active { derived_auth, .. } => derived_auth,
@@ -225,7 +271,7 @@ impl LookupTableRc {
     pub fn pubkeys(&self) -> Option<RwLockReadGuard<'_, RefcountedPubkeys>> {
         match self {
             Self::Active { pubkeys, .. } => {
-                Some(pubkeys.read().expect("pubkeys mutex poisoned"))
+                Some(pubkeys.read().expect("pubkeys rwlock poisoned"))
             }
             Self::Deactivated { .. } => None,
         }
@@ -236,7 +282,7 @@ impl LookupTableRc {
     ) -> Option<RwLockWriteGuard<'_, RefcountedPubkeys>> {
         match self {
             Self::Active { pubkeys, .. } => {
-                Some(pubkeys.write().expect("pubkeys mutex poisoned"))
+                Some(pubkeys.write().expect("pubkeys rwlock poisoned"))
             }
             Self::Deactivated { .. } => None,
         }
@@ -279,6 +325,12 @@ impl LookupTableRc {
         })
     }
 
+    /// Returns the refcount of a pubkey if it exists in this table
+    /// - *pubkey* to query refcount for
+    /// - *returns* `Some(refcount)` if the pubkey exists, `None` otherwise
+    pub fn get_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
+        self.pubkeys()?.get_refcount(pubkey)
+    }
     /// Returns `true` if the we requested to deactivate this table.
     /// NOTE: this doesn't mean that the deactivation period passed, thus
     ///       the table could still be considered _deactivating_ on chain.
@@ -356,6 +408,7 @@ impl LookupTableRc {
         latest_slot: Slot,
         sub_slot: Slot,
         pubkeys: &[Pubkey],
+        compute_budget: &TableManiaComputeBudget,
     ) -> TableManiaResult<Self> {
         check_max_pubkeys(pubkeys)?;
 
@@ -377,7 +430,14 @@ impl LookupTableRc {
             pubkeys[..end].to_vec(),
         );
 
-        let ixs = vec![create_ix, extend_ix];
+        let (compute_budget_ix, compute_unit_price_ix) =
+            compute_budget.instructions();
+        let ixs = vec![
+            compute_budget_ix,
+            compute_unit_price_ix,
+            create_ix,
+            extend_ix,
+        ];
         let latest_blockhash = rpc_client.get_latest_blockhash().await?;
         let tx = Transaction::new_signed_with_payer(
             &ixs,
@@ -412,7 +472,7 @@ impl LookupTableRc {
             creation_slot: latest_slot,
             creation_sub_slot: sub_slot,
             init_signature: signature,
-            extend_signatures: vec![],
+            extend_signatures: vec![].into(),
         })
     }
 
@@ -431,19 +491,26 @@ impl LookupTableRc {
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         extra_pubkeys: &[Pubkey],
+        compute_budget: &TableManiaComputeBudget,
     ) -> TableManiaResult<()> {
         use LookupTableRc::*;
 
         check_max_pubkeys(extra_pubkeys)?;
 
-        let pubkeys = match self {
-            Active { pubkeys, .. } => pubkeys,
+        let (pubkeys, extend_signatures) = match self {
+            Active {
+                pubkeys,
+                extend_signatures,
+                ..
+            } => (pubkeys, extend_signatures),
             Deactivated { .. } => {
                 return Err(TableManiaError::CannotExtendDeactivatedTable(
                     *self.table_address(),
                 ));
             }
         };
+        let (compute_budget_ix, compute_unit_price_ix) =
+            compute_budget.instructions();
         let extend_ix = alt::instruction::extend_lookup_table(
             *self.table_address(),
             self.derived_auth().pubkey(),
@@ -451,7 +518,7 @@ impl LookupTableRc {
             extra_pubkeys.to_vec(),
         );
 
-        let ixs = vec![extend_ix];
+        let ixs = vec![compute_budget_ix, compute_unit_price_ix, extend_ix];
         let latest_blockhash = rpc_client.get_latest_blockhash().await?;
         let tx = Transaction::new_signed_with_payer(
             &ixs,
@@ -479,6 +546,10 @@ impl LookupTableRc {
                 .write()
                 .expect("pubkeys rwlock poisoned")
                 .insert_many(extra_pubkeys);
+            extend_signatures
+                .lock()
+                .expect("extend_signatures mutex poisoned")
+                .push(signature);
         }
 
         Ok(())
@@ -499,6 +570,7 @@ impl LookupTableRc {
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         pubkeys: &[Pubkey],
+        compute_budget: &TableManiaComputeBudget,
     ) -> TableManiaResult<Vec<Pubkey>> {
         let Some(len) = self.pubkeys().map(|x| x.len()) else {
             return Err(TableManiaError::CannotExtendDeactivatedTable(
@@ -517,7 +589,9 @@ impl LookupTableRc {
             pubkeys
         };
 
-        let res = self.extend(rpc_client, authority, storing).await;
+        let res = self
+            .extend(rpc_client, authority, storing, compute_budget)
+            .await;
         res.map(|_| storing.to_vec())
     }
 
@@ -529,12 +603,16 @@ impl LookupTableRc {
         &mut self,
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
+        compute_budget: &TableManiaComputeBudget,
     ) -> TableManiaResult<()> {
         let deactivate_ix = alt::instruction::deactivate_lookup_table(
             *self.table_address(),
             self.derived_auth().pubkey(),
         );
-        let ixs = vec![deactivate_ix];
+
+        let (compute_budget_ix, compute_unit_price_ix) =
+            compute_budget.instructions();
+        let ixs = vec![compute_budget_ix, compute_unit_price_ix, deactivate_ix];
         let latest_blockhash = rpc_client.get_latest_blockhash().await?;
         let tx = Transaction::new_signed_with_payer(
             &ixs,
@@ -568,11 +646,19 @@ impl LookupTableRc {
         Ok(())
     }
 
+    /// Checks if this lookup table has been requested to be deactivated.
+    /// Does not check if the deactivation period has passed. For that use
+    /// [Self::is_deactivated_on_chain] instead.
+    pub fn is_deactivated(&self) -> bool {
+        use LookupTableRc::*;
+        matches!(self, Deactivated { .. })
+    }
+
     /// Checks if this lookup table is deactivated via the following:
     ///
     /// 1. was [Self::deactivate] called
     /// 2. is the [LookupTable::Deactivated::deactivation_slot] far enough in the past
-    pub async fn is_deactivated(
+    pub async fn is_deactivated_on_chain(
         &self,
         rpc_client: &MagicblockRpcClient,
         current_slot: Option<Slot>,
@@ -625,9 +711,10 @@ impl LookupTableRc {
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         current_slot: Option<Slot>,
-    ) -> TableManiaResult<bool> {
-        if !self.is_deactivated(rpc_client, current_slot).await {
-            return Ok(false);
+        compute_budget: &TableManiaComputeBudget,
+    ) -> TableManiaResult<(bool, Option<Signature>)> {
+        if !self.is_deactivated_on_chain(rpc_client, current_slot).await {
+            return Ok((false, None));
         }
 
         let close_ix = alt::instruction::close_lookup_table(
@@ -635,7 +722,10 @@ impl LookupTableRc {
             self.derived_auth().pubkey(),
             authority.pubkey(),
         );
-        let ixs = vec![close_ix];
+
+        let (compute_budget_ix, compute_unit_price_ix) =
+            compute_budget.instructions();
+        let ixs = vec![compute_budget_ix, compute_unit_price_ix, close_ix];
         let latest_blockhash = rpc_client.get_latest_blockhash().await?;
         let tx = Transaction::new_signed_with_payer(
             &ixs,
@@ -658,7 +748,8 @@ impl LookupTableRc {
                 error, signature
             );
         }
-        self.is_closed(rpc_client).await
+        let is_closed = self.is_closed(rpc_client).await?;
+        Ok((is_closed, Some(signature)))
     }
 
     pub async fn get_meta(

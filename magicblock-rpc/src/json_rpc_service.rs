@@ -16,6 +16,7 @@ use magicblock_bank::bank::Bank;
 use magicblock_ledger::Ledger;
 use solana_perf::thread::renice_this_thread;
 use solana_sdk::{hash::Hash, signature::Keypair};
+use tokio::runtime::Runtime;
 
 use crate::{
     handlers::{
@@ -35,6 +36,7 @@ use crate::{
 pub struct JsonRpcService {
     rpc_addr: SocketAddr,
     rpc_niceness_adj: i8,
+    runtime: Arc<Runtime>,
     request_processor: JsonRpcRequestProcessor,
     startup_verification_complete: Arc<AtomicBool>,
     max_request_body_size: usize,
@@ -59,6 +61,7 @@ impl JsonRpcService {
             .max_request_body_size
             .unwrap_or(MAX_REQUEST_BODY_SIZE);
 
+        let runtime = get_runtime(&config);
         let rpc_niceness_adj = config.rpc_niceness_adj;
 
         let startup_verification_complete =
@@ -79,6 +82,7 @@ impl JsonRpcService {
             rpc_addr,
             rpc_niceness_adj,
             max_request_body_size,
+            runtime,
             request_processor,
             startup_verification_complete,
             rpc_thread_handle: Default::default(),
@@ -96,10 +100,10 @@ impl JsonRpcService {
             self.startup_verification_complete.clone();
         let request_processor = self.request_processor.clone();
         let rpc_addr = self.rpc_addr;
+        let runtime = self.runtime.handle().clone();
         let max_request_body_size = self.max_request_body_size;
 
         let close_handle_rc = self.close_handle.clone();
-        let handle = tokio::runtime::Handle::current();
         let thread_handle = thread::Builder::new()
             .name("solJsonRpcSvc".to_string())
             .spawn(move || {
@@ -119,17 +123,18 @@ impl JsonRpcService {
                 let server = ServerBuilder::with_meta_extractor(
                     io,
                     move |_req: &hyper::Request<hyper::Body>| {
-                       request_processor.clone()
+                        request_processor.clone()
                     },
                 )
-                .event_loop_executor(handle)
-                .cors(DomainsValidation::AllowOnly(vec![
-                    AccessControlAllowOrigin::Any,
-                ]))
-                .cors_max_age(86400)
-                .request_middleware(request_middleware)
-                .max_request_body_size(max_request_body_size)
-                .start_http(&rpc_addr);
+                    .event_loop_executor(runtime)
+                    .threads(1)
+                    .cors(DomainsValidation::AllowOnly(vec![
+                        AccessControlAllowOrigin::Any,
+                    ]))
+                    .cors_max_age(86400)
+                    .request_middleware(request_middleware)
+                    .max_request_body_size(max_request_body_size)
+                    .start_http(&rpc_addr);
 
 
                 match server {
@@ -180,4 +185,28 @@ impl JsonRpcService {
     pub fn rpc_addr(&self) -> &SocketAddr {
         &self.rpc_addr
     }
+}
+
+fn get_runtime(config: &JsonRpcConfig) -> Arc<tokio::runtime::Runtime> {
+    let rpc_threads = 1.max(config.rpc_threads);
+    let rpc_niceness_adj = config.rpc_niceness_adj;
+
+    // Comment from Solana implementation:
+    // sadly, some parts of our current rpc implemention block the jsonrpc's
+    // _socket-listening_ event loop for too long, due to (blocking) long IO or intesive CPU,
+    // causing no further processing of incoming requests and ultimatily innocent clients timing-out.
+    // So create a (shared) multi-threaded event_loop for jsonrpc and set its .threads() to 1,
+    // so that we avoid the single-threaded event loops from being created automatically by
+    // jsonrpc for threads when .threads(N > 1) is given.
+    Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(rpc_threads)
+            .on_thread_start(move || {
+                renice_this_thread(rpc_niceness_adj).unwrap()
+            })
+            .thread_name("solRpcEl")
+            .enable_all()
+            .build()
+            .expect("Runtime"),
+    )
 }

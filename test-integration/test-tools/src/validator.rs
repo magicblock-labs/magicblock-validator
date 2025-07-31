@@ -1,4 +1,5 @@
 use std::{
+    fs,
     net::TcpStream,
     path::{Path, PathBuf},
     process::{self, Child},
@@ -6,9 +7,14 @@ use std::{
     time::Duration,
 };
 
+use magicblock_config::{EphemeralConfig, ProgramConfig};
+use tempfile::TempDir;
+
 use crate::{
     loaded_accounts::LoadedAccounts,
+    tmpdir::resolve_tmp_dir,
     toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
+    workspace_paths::path_relative_to_workspace,
 };
 
 pub fn start_magic_block_validator_with_config(
@@ -128,6 +134,10 @@ pub fn start_test_validator_with_config(
 
     args.extend(account_args);
 
+    let mut script = "#!/bin/bash\nsolana-test-validator".to_string();
+    for arg in &args {
+        script.push_str(&format!(" \\\n  {}", arg));
+    }
     let mut command = process::Command::new("solana-test-validator");
     command
         .args(args)
@@ -136,6 +146,7 @@ pub fn start_test_validator_with_config(
         .current_dir(root_dir);
 
     eprintln!("Starting test validator with {:?}", command);
+    eprintln!("{}", script);
     let validator = command.spawn().expect("Failed to start validator");
     wait_for_validator(validator, port)
 }
@@ -165,6 +176,48 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
     None
 }
 
+pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
+
+/// Stringifies the config and writes it to a temporary config file.
+/// Then uses that config to start the validator.
+pub fn start_magicblock_validator_with_config_struct(
+    config: EphemeralConfig,
+    loaded_chain_accounts: &LoadedAccounts,
+) -> (TempDir, Option<process::Child>) {
+    let workspace_dir = resolve_workspace_dir();
+    let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
+    let release = std::env::var("RELEASE").is_ok();
+    let config_path = temp_dir.join("config.toml");
+    let config_toml = config.to_string();
+    fs::write(&config_path, config_toml).unwrap();
+
+    let root_dir = Path::new(&workspace_dir)
+        .join("..")
+        .canonicalize()
+        .unwrap()
+        .to_path_buf();
+    let paths = TestRunnerPaths {
+        config_path,
+        root_dir,
+        workspace_dir,
+    };
+    (
+        default_tmpdir,
+        start_magic_block_validator_with_config(
+            &paths,
+            "TEST",
+            loaded_chain_accounts,
+            release,
+        ),
+    )
+}
+
+pub fn cleanup(validator: &mut Child) {
+    let _ = validator.kill().inspect_err(|e| {
+        eprintln!("ERR: Failed to kill validator: {:?}", e);
+    });
+}
+
 /// Directories
 pub struct TestRunnerPaths {
     pub config_path: PathBuf,
@@ -179,6 +232,25 @@ pub fn resolve_workspace_dir() -> PathBuf {
         .canonicalize()
         .unwrap()
         .to_path_buf()
+}
+
+pub fn resolve_programs(
+    programs: Option<Vec<ProgramConfig>>,
+) -> Vec<ProgramConfig> {
+    programs
+        .map(|programs| {
+            programs
+                .into_iter()
+                .map(|program| ProgramConfig {
+                    id: program.id,
+                    path: path_relative_to_workspace(&format!(
+                        "target/deploy/{}",
+                        program.path
+                    )),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 // -----------------

@@ -1,5 +1,5 @@
 [accounts]
-remote = "devnet"
+remote.cluster = "devnet"
 lifecycle = "offline"
 commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
 
@@ -31,7 +31,7 @@ path = "../schedulecommit/elfs/dlp.so"
 
 # NOTE: `cargo build-sbf` needs to run from the root to build the program
 [[program]]
-id = "corabpNrkBEqbTZP7xfJgSWTdBmVdLf1PARWXZbcMcS"
+id = "CoMtrr6j336NSB5PAoAWpLe5hPgkcShWKbPgHhZxaxh"
 path = "../../target/deploy/magicblock_committor_program.so"
 
 [[program]]

@@ -5,7 +5,7 @@ use solana_sdk::{
     clock::Slot, signature::Keypair, signer::Signer,
 };
 
-use crate::LookupTable;
+use crate::lookup_table_rc::LookupTableRc;
 
 pub struct FindOpenTablesOutcome {
     pub addresses_searched: Vec<Pubkey>,
@@ -23,7 +23,7 @@ pub async fn find_open_tables(
         (min_slot..max_slot).fold(Vec::new(), |mut addresses, slot| {
             for sub_slot in 0..sub_slots_per_slot {
                 let derived_auth =
-                    LookupTable::derive_keypair(authority, slot, sub_slot);
+                    LookupTableRc::derive_keypair(authority, slot, sub_slot);
                 let (table_address, _) =
                     derive_lookup_table_address(&derived_auth.pubkey(), slot);
                 addresses.push(table_address);

@@ -1,9 +1,9 @@
 use std::{path::Path, sync::Arc};
 
-use config::AccountsDbConfig;
 use error::AccountsDbError;
 use index::AccountsDbIndex;
 use log::{error, warn};
+use magicblock_config::AccountsDbConfig;
 use parking_lot::RwLock;
 use snapshot::SnapshotEngine;
 use solana_account::{
@@ -48,7 +48,7 @@ impl AccountsDb {
         ))?;
         let storage = AccountsStorage::new(config, &directory)
             .inspect_err(log_err!("storage creation"))?;
-        let index = AccountsDbIndex::new(config, &directory)
+        let index = AccountsDbIndex::new(config.index_map_size, &directory)
             .inspect_err(log_err!("index creation"))?;
         let snapshot_engine =
             SnapshotEngine::new(directory, config.max_snapshots as usize)
@@ -106,6 +106,10 @@ impl AccountsDb {
                 // For borrowed variants everything is already written and we just increment the
                 // atomic counter. New readers will see the latest update.
                 acc.commit();
+                // check whether the account's owner has changed
+                if !acc.owner_changed {
+                    return;
+                }
                 // and perform some index bookkeeping to ensure correct owner
                 let _ = self
                     .index
@@ -116,20 +120,20 @@ impl AccountsDb {
                     ));
             }
             AccountSharedData::Owned(acc) => {
-                let datalen = account.data().len();
-                // we multiply by 2 for shadow buffer and add extra space for metadata
-                let size = AccountSharedData::serialized_size_aligned(datalen)
-                    * 2
-                    + AccountSharedData::SERIALIZED_META_SIZE;
+                let datalen = account.data().len() as u32;
+                let block_size = self.storage.block_size() as u32;
+                let size = AccountSharedData::serialized_size_aligned(
+                    datalen, block_size,
+                ) as usize;
 
                 let blocks = self.storage.get_block_count(size);
                 // TODO(bmuddha) perf optimization: use reallocs sparringly
                 // https://github.com/magicblock-labs/magicblock-validator/issues/327
                 let allocation = match self.index.try_recycle_allocation(blocks)
                 {
-                    // if we could recycle some "hole" in database, use it
+                    // if we could recycle some "hole" in the database, use it
                     Ok(recycled) => {
-                        // bookkeeping for deallocated(free hole) space
+                        // bookkeeping for the deallocated (free hole) space
                         self.storage.decrement_deallocations(recycled.blocks);
                         self.storage.recycle(recycled)
                     }
@@ -143,13 +147,14 @@ impl AccountsDb {
                 };
 
                 // SAFETY:
-                // Allocation object is obtained by obtaining valid offset from storage, which
+                // Allocation object is constructed by obtaining a valid offset from storage, which
                 // is unoccupied by other accounts, points to valid memory within mmap and is
                 // properly aligned to 8 bytes, so the contract of serialize_to_mmap is satisfied
                 unsafe {
                     AccountSharedData::serialize_to_mmap(
                         acc,
                         allocation.storage.as_ptr(),
+                        block_size * allocation.blocks,
                     )
                 };
                 // update accounts index
@@ -382,7 +387,6 @@ impl AccountsDb {
     }
 }
 
-pub mod config;
 pub mod error;
 mod index;
 mod snapshot;

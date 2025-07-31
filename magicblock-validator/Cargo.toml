@@ -1,14 +1,15 @@
 [package]
-name = "test-bins"
+name = "magicblock-validator"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 license.workspace = true
 edition.workspace = true
-default-run = "rpc"
+default-run = "magicblock-validator"
 
 [dependencies]
+clap = { workspace = true, features = ["derive", "env"] }
 console-subscriber = { workspace = true, optional = true }
 env_logger = { workspace = true }
 log = { workspace = true }
@@ -17,10 +18,7 @@ magicblock-config = { workspace = true }
 solana-sdk = { workspace = true }
 test-tools = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
-
-[[bin]]
-name = "rpc"
-path = "src/rpc.rs"
+git-version = { workspace = true }
 
 [features]
 default = []

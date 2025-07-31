@@ -30,9 +30,7 @@ use magicblock_accounts::{
     ScheduledCommitsProcessor,
 };
 use magicblock_accounts_api::BankAccountProvider;
-use magicblock_accounts_db::{
-    config::AccountsDbConfig, error::AccountsDbError,
-};
+use magicblock_accounts_db::error::AccountsDbError;
 use magicblock_bank::{
     bank::Bank,
     genesis_utils::create_genesis_config_with_leader,
@@ -44,7 +42,9 @@ use magicblock_committor_service::{
     config::ChainConfig, service_ext::CommittorServiceExt, CommittorService,
     ComputeBudgetConfig,
 };
-use magicblock_config::{EphemeralConfig, LifecycleMode, ProgramConfig};
+use magicblock_config::{
+    AccountsDbConfig, EphemeralConfig, LifecycleMode, ProgramConfig,
+};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
@@ -151,13 +151,16 @@ pub struct MagicValidator {
     remote_account_fetcher_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_updates_worker: Option<RemoteAccountUpdatesWorker>,
     remote_account_updates_handle: Option<tokio::task::JoinHandle<()>>,
+    #[allow(clippy::type_complexity)]
     remote_account_cloner_worker: Option<
-        RemoteAccountClonerWorker<
-            BankAccountProvider,
-            RemoteAccountFetcherClient,
-            RemoteAccountUpdatesClient,
-            AccountDumperBank,
-            CommittorService,
+        Arc<
+            RemoteAccountClonerWorker<
+                BankAccountProvider,
+                RemoteAccountFetcherClient,
+                RemoteAccountUpdatesClient,
+                AccountDumperBank,
+                CommittorService,
+            >,
         >,
     >,
     remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
@@ -191,7 +194,11 @@ impl MagicValidator {
             genesis_config,
             validator_pubkey,
             ..
-        } = create_genesis_config_with_leader(u64::MAX, &validator_pubkey);
+        } = create_genesis_config_with_leader(
+            u64::MAX,
+            &validator_pubkey,
+            config.validator_config.validator.base_fees,
+        );
 
         let ledger = Self::init_ledger(
             config.validator_config.ledger.path.as_ref(),
@@ -314,6 +321,9 @@ impl MagicValidator {
             "Committor service persists to: {}",
             committor_persist_path.display()
         );
+
+        let clone_permissions =
+            accounts_config.lifecycle.to_account_cloner_permissions();
         let committor_service = Arc::new(CommittorService::try_start(
             identity_keypair.insecure_clone(),
             committor_persist_path,
@@ -338,15 +348,15 @@ impl MagicValidator {
             committor_service.clone(),
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
-            accounts_config.payer_init_lamports,
             if config.validator_config.validator.base_fees.is_none() {
                 ValidatorCollectionMode::NoFees
             } else {
                 ValidatorCollectionMode::Fees
             },
-            accounts_config.lifecycle.to_account_cloner_permissions(),
+            clone_permissions,
             identity_keypair.pubkey(),
             config.validator_config.accounts.max_monitored_accounts,
+            config.validator_config.accounts.clone.clone(),
         );
 
         let remote_scheduled_commits_processor =
@@ -367,6 +377,7 @@ impl MagicValidator {
         let pubsub_config = PubsubConfig::from_rpc(
             config.validator_config.rpc.addr,
             config.validator_config.rpc.port,
+            config.validator_config.rpc.max_ws_connections,
         );
         validator::init_validator_authority(identity_keypair);
 
@@ -396,7 +407,9 @@ impl MagicValidator {
             remote_account_fetcher_handle: None,
             remote_account_updates_worker: Some(remote_account_updates_worker),
             remote_account_updates_handle: None,
-            remote_account_cloner_worker: Some(remote_account_cloner_worker),
+            remote_account_cloner_worker: Some(Arc::new(
+                remote_account_cloner_worker,
+            )),
             remote_account_cloner_handle: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
@@ -615,7 +628,7 @@ impl MagicValidator {
 
     async fn register_validator_on_chain(
         &self,
-        fdqn: impl ToString,
+        fqdn: impl ToString,
     ) -> ApiResult<()> {
         let url = cluster_from_remote(&self.config.accounts.remote);
         let country_code =
@@ -629,7 +642,7 @@ impl MagicValidator {
             features: FeaturesSet::default(),
             load_average: 0, // not implemented
             country_code,
-            addr: fdqn.to_string(),
+            addr: fqdn.to_string(),
         });
 
         DomainRegistryManager::handle_registration_static(
@@ -691,7 +704,7 @@ impl MagicValidator {
     pub async fn start(&mut self) -> ApiResult<()> {
         if matches!(self.config.accounts.lifecycle, LifecycleMode::Ephemeral) {
             self.ensure_validator_funded_on_chain().await?;
-            if let Some(ref fdqn) = self.config.validator.fdqn {
+            if let Some(ref fdqn) = self.config.validator.fqdn {
                 self.register_validator_on_chain(fdqn).await?;
             }
         }
@@ -773,7 +786,7 @@ impl MagicValidator {
     }
 
     fn start_remote_account_updates_worker(&mut self) {
-        if let Some(mut remote_account_updates_worker) =
+        if let Some(remote_account_updates_worker) =
             self.remote_account_updates_worker.take()
         {
             let cancellation_token = self.token.clone();
@@ -793,12 +806,25 @@ impl MagicValidator {
             debug!("Reserving common pubkeys for committor service");
             map_committor_request_result(
                 self.committor_service.reserve_common_pubkeys(),
+                self.committor_service.clone(),
             )
             .await?;
 
             if !self.config.ledger.reset {
-                remote_account_cloner_worker.hydrate().await?;
-                info!("Validator hydration complete (bank hydrate, replay, account clone)");
+                let remote_account_cloner_worker =
+                    remote_account_cloner_worker.clone();
+                tokio::spawn(async move {
+                    let _ = remote_account_cloner_worker
+                        .hydrate()
+                        .await
+                        .inspect_err(|err| {
+                            error!(
+                                "Failed to hydrate validator accounts: {:?}",
+                                err
+                            );
+                        });
+                    info!("Validator hydration complete (bank hydrate, replay, account clone)");
+                });
             }
 
             let cancellation_token = self.token.clone();
@@ -822,7 +848,7 @@ impl MagicValidator {
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
 
-        if self.config.validator.fdqn.is_some()
+        if self.config.validator.fqdn.is_some()
             && matches!(
                 self.config.accounts.lifecycle,
                 LifecycleMode::Ephemeral
@@ -835,7 +861,9 @@ impl MagicValidator {
 
         // we have two memory mapped databases, flush them to disk before exitting
         self.bank.flush();
-        self.ledger.flush();
+        if let Err(err) = self.ledger.shutdown(false) {
+            error!("Failed to shutdown ledger: {:?}", err);
+        }
     }
 
     pub fn join(self) {

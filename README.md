@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img height="50x" src="https://www.magicblock.xyz/magicblock-band.png" />
+  <img height="50x" src="https://magicblock-labs.github.io/README/img/magicblock-band.png" />
 
 
   <h1>Ephemeral Validator</h1>
@@ -11,7 +11,7 @@
 
   <p>
     <a href="https://docs.magicblock.gg/Accelerate/ephemeral_rollups"><img alt="Documentation" src="https://img.shields.io/badge/docs-tutorials-blueviolet" /></a>
-    <a href="https://github.com/magicblock-labs/bolt/issues"><img alt="Issues" src="https://img.shields.io/github/issues/magicblock-labs/ephemeral-validator?color=blueviolet" /></a>
+    <a href="https://github.com/magicblock-labs/magicblock-validator/issues"><img alt="Issues" src="https://img.shields.io/github/issues/magicblock-labs/magicblock-validator?color=blueviolet" /></a>
     <a href="https://discord.com/invite/MBkdC3gxcv"><img alt="Discord Chat" src="https://img.shields.io/discord/943797222162726962?color=blueviolet" /></a>
   </p>
 
@@ -47,9 +47,8 @@ $ rustup component add rustfmt
 ### **2. Download the source code.**
 
 ```bash
-$ git clone https://github.com/magicblock-labs/ephemeral-conjunto.git
-$ git clone https://github.com/magicblock-labs/ephemeral-validator.git
-$ cd ephemeral-validator
+$ git clone https://github.com/magicblock-labs/magicblock-validator.git
+$ cd magicblock-validator
 ```
 
 ### **3. Build.**

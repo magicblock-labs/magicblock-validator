@@ -2,12 +2,15 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use async_trait::async_trait;
 use futures_util::future::join_all;
 use log::error;
 use solana_pubkey::Pubkey;
+use solana_sdk::signature::Signature;
+use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
 
 use crate::{
@@ -127,7 +130,7 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
         &self,
         committee: Pubkey,
         owner: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+    ) -> oneshot::Receiver<CommittorServiceResult<Instant>> {
         self.inner.reserve_pubkeys_for_committee(committee, owner)
     }
 
@@ -159,6 +162,15 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
     ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
     {
         self.inner.get_commit_signatures(commit_id, pubkey)
+    }
+
+    fn get_transaction(
+        &self,
+        signature: &Signature,
+    ) -> oneshot::Receiver<
+        CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
+    > {
+        self.inner.get_transaction(signature)
     }
 }
 

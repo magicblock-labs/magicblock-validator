@@ -16,6 +16,7 @@ members = [
   "test-table-mania",
   "test-tools",
   "test-pubsub",
+  "test-config",
 ]
 resolver = "2"
 
@@ -32,8 +33,10 @@ ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-ro
 integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
-magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [ "dev-tools" ] }
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false}
+magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [
+  "dev-tools",
+] }
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 magicblock-committor-program = { path = "../magicblock-committor-program", features = [
@@ -52,7 +55,7 @@ program-schedulecommit-security = { path = "programs/schedulecommit-security" }
 rayon = "1.10.0"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "7bdfefc" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "176540a" }
 solana-program = "2.2"
 solana-program-test = "2.2"
 solana-pubkey = { version = "2.2" }
@@ -63,6 +66,7 @@ solana-sdk = "2.2"
 solana-transaction-status = "2.2"
 teepee = "0.0.1"
 tempfile = "3.10.1"
+test-config = { path = "test-config" }
 test-tools-core = { path = "../test-tools-core" }
 toml = "0.8.13"
 lazy_static = "1.4.0"
@@ -74,4 +78,4 @@ tokio = "1.0"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "7bdfefc" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "176540a" }

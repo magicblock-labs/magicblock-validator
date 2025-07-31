@@ -19,7 +19,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::RemoteAccountUpdatesShard;
+use crate::{RemoteAccountUpdatesShard, RemoteAccountUpdatesShardError};
 
 const INFLIGHT_ACCOUNT_FETCHES_LIMIT: usize = 1024;
 
@@ -88,7 +88,7 @@ impl RemoteAccountUpdatesWorker {
     }
 
     pub async fn start_monitoring_request_processing(
-        &mut self,
+        mut self,
         cancellation_token: CancellationToken,
     ) {
         // Maintain a runner for each config passed as parameter
@@ -96,15 +96,22 @@ impl RemoteAccountUpdatesWorker {
         let mut monitored_accounts = HashSet::new();
         // Initialize all the runners for all configs
         for (index, url) in self.ws_urls.iter().enumerate() {
-            runners.push(
-                self.create_runner_from_config(
+            let result = self
+                .create_runner_from_config(
                     index,
                     url.clone(),
                     self.commitment,
                     &monitored_accounts,
                 )
-                .await,
-            );
+                .await;
+            let runner = match result {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("failed to start monitoring runner {index}: {e}");
+                    continue;
+                }
+            };
+            runners.push(runner);
         }
         // Useful states
         let mut current_refresh_index = 0;
@@ -135,12 +142,20 @@ impl RemoteAccountUpdatesWorker {
                         .get(current_refresh_index)
                         .unwrap()
                         .clone();
-                    let new_runner = self.create_runner_from_config(
+                    let result = self.create_runner_from_config(
                         current_refresh_index,
                         url,
                         self.commitment,
                         &monitored_accounts
                     ).await;
+
+                    let new_runner = match result {
+                        Ok(r) => r,
+                        Err(e) => {
+                            warn!("failed to recreate shard runner {current_refresh_index}: {e}");
+                            continue;
+                        }
+                    };
                     let old_runner = std::mem::replace(&mut runners[current_refresh_index], new_runner);
                     // We hope it ultimately joins, but we don't care to wait for it, just let it be
                     self.cancel_and_join_runner(old_runner);
@@ -164,7 +179,8 @@ impl RemoteAccountUpdatesWorker {
         url: String,
         commitment: Option<CommitmentLevel>,
         monitored_accounts: &HashSet<Pubkey>,
-    ) -> RemoteAccountUpdatesWorkerRunner {
+    ) -> Result<RemoteAccountUpdatesWorkerRunner, RemoteAccountUpdatesShardError>
+    {
         let (monitoring_request_sender, monitoring_request_receiver) =
             channel(INFLIGHT_ACCOUNT_FETCHES_LIMIT);
         let first_subscribed_slots = self.first_subscribed_slots.clone();
@@ -173,22 +189,18 @@ impl RemoteAccountUpdatesWorker {
         let cancellation_token = CancellationToken::new();
         let shard_id = runner_id.clone();
         let shard_cancellation_token = cancellation_token.clone();
-        let join_handle = tokio::spawn(async move {
-            let mut shard = RemoteAccountUpdatesShard::new(
-                shard_id.clone(),
-                url,
-                commitment,
-                monitoring_request_receiver,
-                first_subscribed_slots,
-                last_known_update_slots,
-            );
-            if let Err(error) = shard
-                .start_monitoring_request_processing(shard_cancellation_token)
-                .await
-            {
-                error!("Runner shard has failed: {}: {:?}", shard_id, error);
-            }
-        });
+        let shard = RemoteAccountUpdatesShard::new(
+            shard_id.clone(),
+            url,
+            commitment,
+            monitoring_request_receiver,
+            first_subscribed_slots,
+            last_known_update_slots,
+        )
+        .await?;
+        let join_handle = tokio::spawn(
+            shard.start_monitoring_request_processing(shard_cancellation_token),
+        );
         let runner = RemoteAccountUpdatesWorkerRunner {
             id: runner_id,
             monitoring_request_sender,
@@ -200,7 +212,7 @@ impl RemoteAccountUpdatesWorker {
             self.notify_runner_of_monitoring_request(&runner, *pubkey, false)
                 .await;
         }
-        runner
+        Ok(runner)
     }
 
     async fn notify_runner_of_monitoring_request(

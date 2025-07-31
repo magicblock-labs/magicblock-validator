@@ -1,8 +1,7 @@
 [accounts]
-remote = "http://localhost:7799"
+remote.url = "http://localhost:7799"
 lifecycle = "ephemeral"
 commit = { frequency_millis = 50_000 }
-payer = { init_sol = 1_000 }
 
 [accounts.db]
 # path to root directory where database files are stored

@@ -6,12 +6,9 @@ pub mod instruction_chunks;
 pub mod pdas;
 mod state;
 
-// #[cfg(not(feature = "no-entrypoint"))]
-mod utils;
-
-// #[cfg(not(feature = "no-entrypoint"))]
 pub mod instruction_builder;
 mod processor;
+mod utils;
 
 // #[cfg(not(feature = "no-entrypoint"))]
 pub use processor::process;
@@ -27,4 +24,4 @@ pub use state::{
 #[cfg(not(feature = "no-entrypoint"))]
 solana_program::entrypoint!(process);
 
-declare_id!("corabpNrkBEqbTZP7xfJgSWTdBmVdLf1PARWXZbcMcS");
+declare_id!("CoMtrr6j336NSB5PAoAWpLe5hPgkcShWKbPgHhZxaxh");

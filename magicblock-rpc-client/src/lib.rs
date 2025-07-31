@@ -9,7 +9,8 @@ use solana_rpc_client::{
 };
 use solana_rpc_client_api::{
     client_error::ErrorKind as RpcClientErrorKind,
-    config::RpcSendTransactionConfig, request::RpcError,
+    config::{RpcSendTransactionConfig, RpcTransactionConfig},
+    request::RpcError,
 };
 use solana_sdk::{
     account::Account,
@@ -21,7 +22,9 @@ use solana_sdk::{
     signature::Signature,
     transaction::TransactionError,
 };
-use solana_transaction_status_client_types::UiTransactionEncoding;
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
+};
 use tokio::task::JoinSet;
 
 /// The encoding to use when sending transactions
@@ -508,5 +511,56 @@ impl MagicblockRpcClient {
             processed_err: processed_status.err(),
             confirmed_err: confirmed_status.and_then(|status| status.err()),
         })
+    }
+
+    pub async fn get_transaction(
+        &self,
+        signature: &Signature,
+        config: Option<RpcTransactionConfig>,
+    ) -> MagicBlockRpcClientResult<EncodedConfirmedTransactionWithStatusMeta>
+    {
+        let config = config.unwrap_or_else(|| RpcTransactionConfig {
+            commitment: Some(self.commitment()),
+            ..Default::default()
+        });
+        self.client
+            .get_transaction_with_config(signature, config)
+            .await
+            .map_err(MagicBlockRpcClientError::RpcClientError)
+    }
+
+    pub fn get_logs_from_transaction(
+        tx: &EncodedConfirmedTransactionWithStatusMeta,
+    ) -> Option<Vec<String>> {
+        tx.transaction.meta.as_ref()?.log_messages.clone().into()
+    }
+
+    pub async fn get_transaction_logs(
+        &self,
+        signature: &Signature,
+        config: Option<RpcTransactionConfig>,
+    ) -> MagicBlockRpcClientResult<Option<Vec<String>>> {
+        let tx = self.get_transaction(signature, config).await?;
+        Ok(Self::get_logs_from_transaction(&tx))
+    }
+
+    pub fn get_cus_from_transaction(
+        tx: &EncodedConfirmedTransactionWithStatusMeta,
+    ) -> Option<u64> {
+        tx.transaction
+            .meta
+            .as_ref()?
+            .compute_units_consumed
+            .clone()
+            .into()
+    }
+
+    pub async fn get_transaction_cus(
+        &self,
+        signature: &Signature,
+        config: Option<RpcTransactionConfig>,
+    ) -> MagicBlockRpcClientResult<Option<u64>> {
+        let tx = self.get_transaction(signature, config).await?;
+        Ok(Self::get_cus_from_transaction(&tx))
     }
 }

@@ -1,5 +1,5 @@
 [accounts]
-remote = "devnet"
+remote.cluster = "devnet"
 lifecycle = "programs-replica"
 
 [rpc]
@@ -9,5 +9,5 @@ port = 8899
 [validator]
 millis_per_slot = 50
 base_fees = 1000
-fdqn = "magicblock.er.com"
+fqdn = "magicblock.er.com"
 country_code = "US"

@@ -1,33 +1,45 @@
 use std::str::FromStr;
 
-use magicblock_accounts_db::config::AccountsDbConfig;
+use clap::{Args, ValueEnum};
+use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
-use strum_macros::EnumString;
+use solana_sdk::pubkey::Pubkey;
+use strum::{Display, EnumString};
 use url::Url;
 
-use crate::errors::{ConfigError, ConfigResult};
+use crate::accounts_db::AccountsDbConfig;
 
 // -----------------
 // AccountsConfig
 // -----------------
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[clap_prefix("accounts")]
+#[clap_from_serde]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
+)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct AccountsConfig {
     #[serde(default)]
+    #[command(flatten)]
     pub remote: RemoteConfig,
+    #[derive_env_var]
+    #[arg(help = "The lifecycle mode to use.")]
     #[serde(default)]
     pub lifecycle: LifecycleMode,
     #[serde(default)]
+    #[command(flatten)]
     pub commit: CommitStrategy,
-    #[serde(default)]
-    pub payer: Payer,
+    #[clap_from_serde_skip]
+    #[arg(help = "The list of allowed programs to load.")]
     #[serde(default)]
     pub allowed_programs: Vec<AllowedProgram>,
-
     #[serde(default)]
+    #[command(flatten)]
     pub db: AccountsDbConfig,
-
+    #[serde(default)]
+    #[command(flatten)]
+    pub clone: AccountsCloneConfig,
+    #[arg(help = "The max number of accounts to monitor.")]
     #[serde(default = "default_max_monitored_accounts")]
     pub max_monitored_accounts: usize,
 }
@@ -38,9 +50,9 @@ impl Default for AccountsConfig {
             remote: Default::default(),
             lifecycle: Default::default(),
             commit: Default::default(),
-            payer: Default::default(),
             allowed_programs: Default::default(),
             db: Default::default(),
+            clone: Default::default(),
             max_monitored_accounts: default_max_monitored_accounts(),
         }
     }
@@ -48,9 +60,54 @@ impl Default for AccountsConfig {
 // -----------------
 // RemoteConfig
 // -----------------
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[clap_prefix("remote")]
+#[clap_from_serde]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    Args,
+    Mergeable,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteConfig {
+    #[arg(help = "The predefined cluster to use.")]
+    #[serde(default)]
+    pub cluster: RemoteCluster,
+    #[derive_env_var]
+    #[arg(help = "The URL to use for the custom cluster.")]
+    #[serde(default)]
+    #[clap_from_serde_skip]
+    pub url: Option<Url>,
+    #[derive_env_var]
+    #[clap_from_serde_skip]
+    #[arg(help = "The WebSocket URLs to use for the custom cluster.")]
+    #[serde(default)]
+    pub ws_url: Option<Vec<Url>>,
+}
+
+// -----------------
+// RemoteConfigType
+// -----------------
+#[derive(
+    Debug,
+    Display,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    ValueEnum,
+)]
 #[serde(rename_all = "kebab-case")]
-pub enum RemoteConfig {
+#[strum(serialize_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
+pub enum RemoteCluster {
     #[default]
     Devnet,
     #[serde(alias = "mainnet-beta")]
@@ -59,25 +116,29 @@ pub enum RemoteConfig {
     #[serde(alias = "local")]
     #[serde(alias = "localhost")]
     Development,
-    #[serde(untagged)]
-    Custom(Url),
-    #[serde(untagged)]
-    CustomWithWs(Url, Url),
-    #[serde(untagged)]
-    CustomWithMultipleWs {
-        http: Url,
-        ws: Vec<Url>,
-    },
+    Custom,
+    CustomWithWs,
+    CustomWithMultipleWs,
 }
 
 // -----------------
 // LifecycleMode
 // -----------------
 #[derive(
-    Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, EnumString,
+    Debug,
+    Clone,
+    Display,
+    Default,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    EnumString,
+    ValueEnum,
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
 pub enum LifecycleMode {
     Replica,
     #[default]
@@ -89,13 +150,17 @@ pub enum LifecycleMode {
 // -----------------
 // CommitStrategy
 // -----------------
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[clap_prefix("commit")]
+#[clap_from_serde]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args)]
 #[serde(deny_unknown_fields)]
 pub struct CommitStrategy {
+    #[derive_env_var]
     #[serde(default = "default_frequency_millis")]
     pub frequency_millis: u64,
     /// The compute unit price offered when we send the commit account transaction
     /// This is in micro lamports and defaults to `1_000_000` (1 Lamport)
+    #[derive_env_var]
     #[serde(default = "default_compute_unit_price")]
     pub compute_unit_price: u64,
 }
@@ -124,43 +189,51 @@ impl Default for CommitStrategy {
 }
 
 // -----------------
-// Payer
+// AccountsCloneConfig
 // -----------------
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Debug,
+    Clone,
+    Display,
+    Default,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    EnumString,
+    ValueEnum,
+)]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
+pub enum PrepareLookupTables {
+    Always,
+    #[default]
+    Never,
+}
+
+#[clap_prefix("clone")]
+#[clap_from_serde]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    Args,
+    Mergeable,
+)]
 #[serde(deny_unknown_fields)]
-pub struct Payer {
-    /// The payer init balance in lamports.
-    /// Read it via [Self::try_init_lamports].
-    pub init_lamports: Option<u64>,
-    /// The payer init balance in SOL.
-    /// Read it via [Self::try_init_lamports].
-    init_sol: Option<u64>,
+pub struct AccountsCloneConfig {
+    #[serde(default)]
+    pub prepare_lookup_tables: PrepareLookupTables,
 }
 
-pub struct PayerParams {
-    pub init_lamports: Option<u64>,
-    pub init_sol: Option<u64>,
-}
-
-impl Payer {
-    pub fn new(params: PayerParams) -> Self {
-        Self {
-            init_lamports: params.init_lamports,
-            init_sol: params.init_sol,
-        }
-    }
-    pub fn try_init_lamports(&self) -> ConfigResult<Option<u64>> {
-        if self.init_lamports.is_some() && self.init_sol.is_some() {
-            return Err(ConfigError::CannotSpecifyBothInitLamportAndInitSol);
-        }
-        Ok(match self.init_lamports {
-            Some(lamports) => Some(lamports),
-            None => self.init_sol.map(|sol| sol * LAMPORTS_PER_SOL),
-        })
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, Args,
+)]
 #[serde(deny_unknown_fields)]
 pub struct AllowedProgram {
     #[serde(
@@ -168,6 +241,15 @@ pub struct AllowedProgram {
         serialize_with = "pubkey_serialize"
     )]
     pub id: Pubkey,
+}
+
+impl FromStr for AllowedProgram {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let id = Pubkey::from_str(s)
+            .map_err(|e| format!("Invalid program id {s}: {e}"))?;
+        Ok(AllowedProgram { id })
+    }
 }
 
 fn pubkey_deserialize<'de, D>(deserializer: D) -> Result<Pubkey, D::Error>
@@ -183,4 +265,167 @@ where
     S: serde::Serializer,
 {
     key.to_string().serialize(serializer)
+}
+
+#[cfg(test)]
+mod tests {
+    use magicblock_config_helpers::Merge;
+
+    use super::*;
+    use crate::BlockSize;
+
+    #[test]
+    fn test_merge_with_default() {
+        let mut config = AccountsConfig {
+            remote: RemoteConfig {
+                cluster: RemoteCluster::Custom,
+                url: Some(Url::parse("http://0.0.0.0:7799").unwrap()),
+                ws_url: None,
+            },
+            lifecycle: LifecycleMode::Ephemeral,
+            commit: CommitStrategy {
+                frequency_millis: 123,
+                compute_unit_price: 123,
+            },
+            allowed_programs: vec![AllowedProgram {
+                id: Pubkey::from_str(
+                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4",
+                )
+                .unwrap(),
+            }],
+            db: AccountsDbConfig::default(),
+            clone: AccountsCloneConfig::default(),
+            max_monitored_accounts: 123,
+        };
+        let original_config = config.clone();
+        let other = AccountsConfig::default();
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_merge_default_with_non_default() {
+        let mut config = AccountsConfig::default();
+        let other = AccountsConfig {
+            remote: RemoteConfig {
+                cluster: RemoteCluster::Custom,
+                url: Some(Url::parse("http://0.0.0.0:7799").unwrap()),
+                ws_url: None,
+            },
+            lifecycle: LifecycleMode::Ephemeral,
+            commit: CommitStrategy {
+                frequency_millis: 123,
+                compute_unit_price: 123,
+            },
+            allowed_programs: vec![AllowedProgram {
+                id: Pubkey::from_str(
+                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4",
+                )
+                .unwrap(),
+            }],
+            db: AccountsDbConfig::default(),
+            clone: AccountsCloneConfig::default(),
+            max_monitored_accounts: 123,
+        };
+
+        config.merge(other.clone());
+
+        assert_eq!(config, other);
+    }
+
+    #[test]
+    fn test_merge_non_default() {
+        let mut config = AccountsConfig {
+            remote: RemoteConfig {
+                cluster: RemoteCluster::Custom,
+                url: Some(Url::parse("http://0.0.0.0:7999").unwrap()),
+                ws_url: Some(vec![Url::parse("wss://0.0.0.0:7999").unwrap()]),
+            },
+            lifecycle: LifecycleMode::Offline,
+            commit: CommitStrategy {
+                frequency_millis: 1234,
+                compute_unit_price: 1234,
+            },
+            allowed_programs: vec![AllowedProgram {
+                id: Pubkey::from_str(
+                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4",
+                )
+                .unwrap(),
+            }],
+            db: AccountsDbConfig {
+                db_size: 1233,
+                block_size: BlockSize::Block512,
+                index_map_size: 1233,
+                max_snapshots: 1233,
+                snapshot_frequency: 1233,
+            },
+            clone: AccountsCloneConfig::default(),
+            max_monitored_accounts: 1233,
+        };
+        let original_config = config.clone();
+        let other = AccountsConfig {
+            remote: RemoteConfig {
+                cluster: RemoteCluster::Custom,
+                url: Some(Url::parse("http://0.0.0.0:7799").unwrap()),
+                ws_url: None,
+            },
+            lifecycle: LifecycleMode::Ephemeral,
+            commit: CommitStrategy {
+                frequency_millis: 123,
+                compute_unit_price: 123,
+            },
+            allowed_programs: vec![AllowedProgram {
+                id: Pubkey::from_str(
+                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4",
+                )
+                .unwrap(),
+            }],
+            db: AccountsDbConfig::default(),
+            clone: AccountsCloneConfig::default(),
+            max_monitored_accounts: 123,
+        };
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_clone_config_default() {
+        let config = AccountsCloneConfig::default();
+        assert_eq!(config.prepare_lookup_tables, PrepareLookupTables::Never);
+    }
+
+    #[test]
+    fn test_clone_config_merge() {
+        let mut config = AccountsConfig::default();
+        let other = AccountsConfig {
+            clone: AccountsCloneConfig {
+                prepare_lookup_tables: PrepareLookupTables::Always,
+            },
+            ..Default::default()
+        };
+
+        config.merge(other.clone());
+        assert_eq!(
+            config.clone.prepare_lookup_tables,
+            PrepareLookupTables::Always
+        );
+    }
+
+    #[test]
+    fn test_clone_config_serde() {
+        let toml_str = r#"
+[clone]
+prepare_lookup_tables = "always"
+"#;
+
+        let config: AccountsConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.clone.prepare_lookup_tables,
+            PrepareLookupTables::Always
+        );
+    }
 }

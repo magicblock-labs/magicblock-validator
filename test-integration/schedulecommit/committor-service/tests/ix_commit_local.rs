@@ -229,21 +229,15 @@ async fn init_and_delegate_account_on_chain(
     }
     debug!("Reallocs done");
 
-    // 1. Create the transaction first
-    let transaction = Transaction::new_signed_with_payer(
-        &[delegate_ix],
-        Some(&counter_auth.pubkey()),
-        &[&counter_auth],
-        latest_block_hash,
-    );
-
-    // Get the signature before sending
-    let tx_signature = transaction.signatures[0]; // The first signature is the transaction ID
-
-    // 2. Send and confirm
-    match rpc_client
+    // 4. Delegate account
+    rpc_client
         .send_and_confirm_transaction_with_spinner_and_config(
-            &transaction,
+            &Transaction::new_signed_with_payer(
+                &[delegate_ix],
+                Some(&counter_auth.pubkey()),
+                &[&counter_auth],
+                latest_block_hash,
+            ),
             CommitmentConfig::confirmed(),
             RpcSendTransactionConfig {
                 skip_preflight: true,
@@ -251,14 +245,7 @@ async fn init_and_delegate_account_on_chain(
             },
         )
         .await
-    {
-        Ok(_) => println!("Transaction successful: {}", tx_signature),
-        Err(e) => {
-            println!("Transaction failed but signature is: {}", tx_signature);
-            println!("Error: {:?}", e);
-            // You can now use tx_signature to look up the transaction details
-        }
-    }
+        .expect("Failed to delegate");
     debug!("Delegated account: {:?}", pda);
     let pda_acc = get_account!(rpc_client, pda, "pda");
 
@@ -362,6 +349,42 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
         &[1024, 2048],
         1,
         expect_strategies(&[(CommitStrategy::FromBuffer, 2)]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_two_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512],
+        1,
+        expect_strategies(&[(CommitStrategy::Args, 2)]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_three_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512, 512],
+        1,
+        expect_strategies(&[(CommitStrategy::Args, 3)]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_six_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512, 512, 512, 512, 512],
+        1,
+        expect_strategies(&[(CommitStrategy::Args, 6)]),
         false,
     )
     .await;

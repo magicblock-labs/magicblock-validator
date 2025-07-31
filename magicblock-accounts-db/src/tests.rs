@@ -5,13 +5,11 @@ use std::{
     sync::Arc,
 };
 
+use magicblock_config::AccountsDbConfig;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 
-use crate::{
-    config::AccountsDbConfig, error::AccountsDbError, storage::ADB_FILE,
-    AccountsDb, StWLock,
-};
+use crate::{error::AccountsDbError, storage::ADB_FILE, AccountsDb, StWLock};
 
 const LAMPORTS: u64 = 4425;
 const SPACE: usize = 73;
@@ -76,7 +74,7 @@ fn test_modify_account() {
 #[test]
 fn test_account_resize() {
     let tenv = init_test_env();
-    let huge_data = [42; SPACE * 2];
+    let huge_data = [42; SPACE * 4];
     let AccountWithPubkey {
         pubkey,
         account: mut uncommitted,
@@ -89,7 +87,7 @@ fn test_account_resize() {
     );
     assert_eq!(
         uncommitted.data().len(),
-        SPACE * 2,
+        SPACE * 4,
         "account should have been resized to double of SPACE"
     );
 
@@ -123,7 +121,7 @@ fn test_alloc_reuse() {
         pubkey,
         account: mut acc1,
     } = tenv.account();
-    let huge_data = [42; SPACE * 2];
+    let huge_data = [42; SPACE * 4];
 
     let old_addr = acc1.data().as_ptr();
 
@@ -424,7 +422,7 @@ fn test_owner_change() {
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER]);
     assert!(matches!(result, Err(AccountsDbError::NotFound)));
     let result = tenv.get_program_accounts(&OWNER, |_| true);
-    assert!(matches!(result, Err(AccountsDbError::NotFound)));
+    assert!(result.map(|pks| pks.is_empty()).unwrap_or_default());
 
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER, new_owner]);
     assert!(matches!(result, Ok(1)));
@@ -566,7 +564,7 @@ pub fn init_db() -> (AccountsDb, PathBuf) {
         .try_init();
     let directory = tempfile::tempdir()
         .expect("failed to create temporary directory")
-        .into_path();
+        .keep();
     let config = AccountsDbConfig::temp_for_tests(SNAPSHOT_FREQUENCY);
     let lock = StWLock::default();
 

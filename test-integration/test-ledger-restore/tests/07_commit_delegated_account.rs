@@ -1,4 +1,5 @@
 use cleanass::assert_eq;
+use integration_test_tools::validator::cleanup;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
@@ -15,10 +16,11 @@ use solana_sdk::{
     signer::Signer,
 };
 use test_ledger_restore::{
-    assert_counter_commits_on_chain, cleanup, confirm_tx_with_payer_chain,
+    assert_counter_commits_on_chain, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
     fetch_counter_owner_chain, get_programs_with_flexi_counter,
-    setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
+    wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 const COUNTER: &str = "Counter of Payer";
@@ -168,6 +170,8 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
 
     let (_, mut validator, ctx) =
         setup_validator_with_local_remote(ledger_path, Some(programs), false);
+
+    wait_for_cloned_accounts_hydration();
 
     let counter_ephem = fetch_counter_ephem(payer, &mut validator);
     assert_eq!(

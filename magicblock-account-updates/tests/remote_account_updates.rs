@@ -19,8 +19,9 @@ async fn setup() -> (
     CancellationToken,
     tokio::task::JoinHandle<()>,
 ) {
+    let _ = env_logger::builder().is_test(true).try_init();
     // Create account updates worker and client
-    let mut worker = RemoteAccountUpdatesWorker::new(
+    let worker = RemoteAccountUpdatesWorker::new(
         vec![RpcProviderConfig::devnet().ws_url().into(); 1],
         Some(solana_sdk::commitment_config::CommitmentLevel::Confirmed),
         Duration::from_secs(50 * 60),
@@ -30,14 +31,12 @@ async fn setup() -> (
     let cancellation_token = CancellationToken::new();
     let worker_handle = {
         let cancellation_token = cancellation_token.clone();
-        tokio::spawn(async move {
-            worker
-                .start_monitoring_request_processing(cancellation_token)
-                .await
-        })
+        tokio::spawn(
+            worker.start_monitoring_request_processing(cancellation_token),
+        )
     };
     // wait a bit for websocket connections to establish
-    sleep(Duration::from_millis(5_000)).await;
+    sleep(Duration::from_millis(2_000)).await;
     // Ready to run
     (client, cancellation_token, worker_handle)
 }
@@ -90,8 +89,8 @@ async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
         .ensure_account_monitoring(&sysvar_clock)
         .await
         .is_ok());
-    // Wait for a few slots to happen on-chain
     sleep(Duration::from_millis(3_000)).await;
+    // Wait for a few slots to happen on-chain
     // Check that we detected the accounts changes
     assert!(client.get_last_known_update_slot(&sysvar_rent).is_none()); // Rent doesn't change
     assert!(client.get_last_known_update_slot(&sysvar_sh).is_some());
