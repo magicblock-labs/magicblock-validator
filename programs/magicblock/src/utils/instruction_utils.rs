@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use magicblock_magic_program_api::{
+    args::ScheduleTaskArgs,
     instruction::{
         AccountModification, AccountModificationForInstruction,
         MagicBlockInstruction,
@@ -181,6 +182,71 @@ impl InstructionUtils {
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::ModifyAccounts(account_mods),
+            account_metas,
+        )
+    }
+
+    // -----------------
+    // Schedule Task
+    // -----------------
+    pub fn schedule_task(
+        payer: &Keypair,
+        args: ScheduleTaskArgs,
+        pdas: Vec<Pubkey>,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::schedule_task_instruction(&payer.pubkey(), args, pdas);
+        Self::into_transaction(payer, ix, recent_blockhash)
+    }
+
+    pub fn schedule_task_instruction(
+        payer: &Pubkey,
+        args: ScheduleTaskArgs,
+        pdas: Vec<Pubkey>,
+    ) -> Instruction {
+        use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
+
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        }
+
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleTask(args),
+            account_metas,
+        )
+    }
+
+    // -----------------
+    // Cancel Task
+    // -----------------
+    pub fn cancel_task(
+        authority: &Keypair,
+        task_id: u64,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::cancel_task_instruction(&authority.pubkey(), task_id);
+        Self::into_transaction(authority, ix, recent_blockhash)
+    }
+
+    pub fn cancel_task_instruction(
+        authority: &Pubkey,
+        task_id: u64,
+    ) -> Instruction {
+        use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
+
+        let account_metas = vec![
+            AccountMeta::new(*authority, true),
+            AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
+        ];
+
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CancelTask { task_id },
             account_metas,
         )
     }

@@ -4,6 +4,7 @@ use magicblock_bank::bank::Bank;
 use magicblock_magic_program_api::{
     self, MAGIC_CONTEXT_PUBKEY, MAGIC_CONTEXT_SIZE,
 };
+use magicblock_program::{TASK_CONTEXT_PUBKEY, TASK_CONTEXT_SIZE};
 use solana_sdk::{
     account::Account, clock::Epoch, pubkey::Pubkey, signature::Keypair,
     signer::Signer, system_program,
@@ -78,5 +79,15 @@ pub(crate) fn fund_magic_context(bank: &Bank) {
         &MAGIC_CONTEXT_PUBKEY,
         u64::MAX,
         vec![0; MAGIC_CONTEXT_SIZE],
+    );
+}
+
+// Make rent-exempt to allow the PDA to receive rent
+pub(crate) fn fund_task_context(bank: &Bank) {
+    fund_account_with_data(
+        bank,
+        &TASK_CONTEXT_PUBKEY,
+        u64::MAX,
+        vec![0; TASK_CONTEXT_SIZE],
     );
 }

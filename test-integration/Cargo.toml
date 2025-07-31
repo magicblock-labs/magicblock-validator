@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "programs/flexi-counter",
+  "programs/schedule-task",
   "programs/schedulecommit",
   "programs/schedulecommit-security",
   "programs/sysvars",
@@ -18,6 +19,7 @@ members = [
   "test-pubsub",
   "test-config",
   "test-schedule-intent",
+  "test-task-scheduler",
 ]
 resolver = "2"
 
@@ -26,9 +28,12 @@ version = "0.0.0"
 edition = "2021"
 
 [workspace.dependencies]
+magicblock-config = { path = "../magicblock-config" }
 anyhow = "1.0.86"
 async-trait = "0.1.77"
 borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
+bincode = "1.3.3"
+chrono = "0.4"
 cleanass = "0.0.1"
 ctrlc = "3.4.7"
 ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "54fe6f8" }
@@ -45,10 +50,11 @@ magicblock-committor-program = { path = "../magicblock-committor-program", featu
   "no-entrypoint",
 ] }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
-magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = ["no-entrypoint"] }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = [
+  "no-entrypoint",
+] }
 magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
@@ -68,6 +74,7 @@ solana-pubsub-client = "2.2"
 solana-rpc-client = "2.2"
 solana-rpc-client-api = "2.2"
 solana-sdk = "2.2"
+solana-transaction = "2.2"
 solana-transaction-status = "2.2"
 teepee = "0.0.1"
 tempfile = "3.10.1"

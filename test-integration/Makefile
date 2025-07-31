@@ -8,18 +8,21 @@ FLEXI_COUNTER_DIR := $(DIR)programs/flexi-counter
 SCHEDULECOMMIT_DIR := $(DIR)programs/schedulecommit
 SCHEDULECOMMIT_SECURITY_DIR := $(DIR)programs/schedulecommit-security
 COMMITTOR_PROGRAM_DIR := $(DIR)../magicblock-committor-program
+SCHEDULE_TASK_PROGRAM_DIR := $(DIR)programs/schedule-task
 
 FLEXI_COUNTER_SRC := $(shell find $(FLEXI_COUNTER_DIR) -name '*.rs' -o -name '*.toml')
 SCHEDULECOMMIT_SRC := $(shell find $(SCHEDULECOMMIT_DIR) -name '*.rs' -o -name '*.toml')
 SCHEDULECOMMIT_SECURITY_SRC := $(shell find $(SCHEDULECOMMIT_SECURITY_DIR) -name '*.rs' -o -name '*.toml')
 COMMITTOR_PROGRAM_SRC := $(shell find $(COMMITTOR_PROGRAM_DIR) -name '*.rs' -o -name '*.toml')
+SCHEDULE_TASK_PROGRAM_SRC := $(shell find $(SCHEDULE_TASK_PROGRAM_DIR) -name '*.rs' -o -name '*.toml')
 
 FLEXI_COUNTER_SO := $(DEPLOY_DIR)/program_flexi_counter.so
 SCHEDULECOMMIT_SO := $(DEPLOY_DIR)/program_schedulecommit.so
 SCHEDULECOMMIT_SECURITY_SO := $(DEPLOY_DIR)/program_schedulecommit_security.so
 COMMITTOR_PROGRAM_SO := $(ROOT_DEPLOY_DIR)/magicblock_committor_program.so
+SCHEDULE_TASK_PROGRAM_SO := $(DEPLOY_DIR)/program_schedule_task.so
 
-PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
+PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO) $(SCHEDULE_TASK_PROGRAM_SO)
 
 list:
 	@cat Makefile | grep "^[a-z].*:" | sed 's/:.*//g'
@@ -144,6 +147,8 @@ $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
 	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml
 $(COMMITTOR_PROGRAM_SO): $(COMMITTOR_PROGRAM_SRC)
 	cargo build-sbf --manifest-path $(COMMITTOR_PROGRAM_DIR)/Cargo.toml
+$(SCHEDULE_TASK_PROGRAM_SO): $(SCHEDULE_TASK_PROGRAM_SRC)
+	cargo build-sbf --manifest-path $(SCHEDULE_TASK_PROGRAM_DIR)/Cargo.toml
 
 deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 	solana program deploy \
