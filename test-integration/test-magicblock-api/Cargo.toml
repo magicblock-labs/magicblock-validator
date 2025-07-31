@@ -3,7 +3,11 @@ name = "test-magicblock-api"
 version.workspace = true
 edition.workspace = true
 
+[dependencies]
+integration-test-tools = { workspace = true }
+
 [dev-dependencies]
+cleanass = { workspace = true }
 magicblock-api = { workspace = true }
 magicblock-config = { workspace = true }
 tokio = { workspace = true }
@@ -13,10 +17,4 @@ solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
-integration-test-tools = { workspace = true }
 isocountry = { workspace = true }
-
-[[test]]
-name = "test-domain-registry"
-path = "tests/test_domain_registry.rs"
-harness = false
