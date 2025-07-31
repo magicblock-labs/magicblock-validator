@@ -20,10 +20,7 @@ pub fn advance_slot_and_update_ledger(
     let next_slot = bank.advance_slot();
 
     // Update ledger with previous block's metas
-    let ledger_result = ledger.write_block(
-        prev_slot,
-        bank.clock().unix_timestamp,
-        prev_blockhash,
-    );
+    let ledger_result =
+        ledger.write_block(prev_slot, bank.slot_timestamp(), prev_blockhash);
     (ledger_result, next_slot)
 }
