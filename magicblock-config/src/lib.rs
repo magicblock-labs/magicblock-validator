@@ -252,7 +252,7 @@ mod tests {
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
                 replay: ReplayConfig {
-                    hydration_concurrency: 20,
+                    account_hydration_concurrency: 20,
                 },
             },
             programs: vec![ProgramConfig {
@@ -340,7 +340,7 @@ mod tests {
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
                 replay: ReplayConfig {
-                    hydration_concurrency: 20,
+                    account_hydration_concurrency: 20,
                 },
             },
             programs: vec![ProgramConfig {
@@ -425,7 +425,7 @@ mod tests {
                 path: Some("ledger2.example.com".to_string()),
                 size: 100000,
                 replay: ReplayConfig {
-                    hydration_concurrency: 20,
+                    account_hydration_concurrency: 20,
                 },
             },
             programs: vec![ProgramConfig {
@@ -503,7 +503,7 @@ mod tests {
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
                 replay: ReplayConfig {
-                    hydration_concurrency: 20,
+                    account_hydration_concurrency: 20,
                 },
             },
             programs: vec![ProgramConfig {
@@ -560,7 +560,7 @@ mod tests {
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
                 replay: ReplayConfig {
-                    hydration_concurrency: 20,
+                    account_hydration_concurrency: 20,
                 },
             },
             programs: vec![],

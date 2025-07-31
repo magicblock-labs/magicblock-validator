@@ -58,23 +58,23 @@ impl Default for LedgerConfig {
     }
 }
 
-#[clap_prefix("replay")]
+#[clap_prefix("ledger-replay")]
 #[clap_from_serde]
 #[derive(
     Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
 )]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct ReplayConfig {
     /// The number of threads to use for cloning accounts.
     #[derive_env_var]
     #[serde(default = "default_cloning_concurrency")]
-    pub hydration_concurrency: usize,
+    pub account_hydration_concurrency: usize,
 }
 
 impl Default for ReplayConfig {
     fn default() -> Self {
         Self {
-            hydration_concurrency: default_cloning_concurrency(),
+            account_hydration_concurrency: default_cloning_concurrency(),
         }
     }
 }
@@ -137,7 +137,7 @@ mod tests {
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
             replay: ReplayConfig {
-                hydration_concurrency: 20,
+                account_hydration_concurrency: 20,
             },
         };
         let original_config = config.clone();
@@ -157,7 +157,7 @@ mod tests {
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
             replay: ReplayConfig {
-                hydration_concurrency: 20,
+                account_hydration_concurrency: 20,
             },
         };
 
@@ -174,7 +174,7 @@ mod tests {
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
             replay: ReplayConfig {
-                hydration_concurrency: 20,
+                account_hydration_concurrency: 20,
             },
         };
         let original_config = config.clone();
@@ -184,7 +184,7 @@ mod tests {
             path: Some("ledger2.example.com".to_string()),
             size: 10000,
             replay: ReplayConfig {
-                hydration_concurrency: 150,
+                account_hydration_concurrency: 150,
             },
         };
 
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn test_replay_merge_with_default() {
         let mut config = ReplayConfig {
-            hydration_concurrency: 20,
+            account_hydration_concurrency: 20,
         };
         let original_config = config.clone();
         let other = ReplayConfig::default();
@@ -210,7 +210,7 @@ mod tests {
     fn test_replay_merge_default_with_non_default() {
         let mut config = ReplayConfig::default();
         let other = ReplayConfig {
-            hydration_concurrency: 20,
+            account_hydration_concurrency: 20,
         };
 
         config.merge(other.clone());
@@ -221,11 +221,11 @@ mod tests {
     #[test]
     fn test_replay_merge_non_default() {
         let mut config = ReplayConfig {
-            hydration_concurrency: 20,
+            account_hydration_concurrency: 20,
         };
         let original_config = config.clone();
         let other = ReplayConfig {
-            hydration_concurrency: 150,
+            account_hydration_concurrency: 150,
         };
 
         config.merge(other);

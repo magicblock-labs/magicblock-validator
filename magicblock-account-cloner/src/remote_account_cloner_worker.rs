@@ -303,7 +303,7 @@ where
         let result = stream
             .map(Ok::<_, AccountClonerError>)
             .try_for_each_concurrent(
-                self.replay_config.hydration_concurrency,
+                self.replay_config.account_hydration_concurrency,
                 |(pubkey, owner)| async move {
                     trace!("Hydrating '{}'", pubkey);
                     let res = self

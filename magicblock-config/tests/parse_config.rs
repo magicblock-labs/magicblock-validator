@@ -316,14 +316,14 @@ path = "/tmp/program.so"
 fn test_replay_toml() {
     let toml = r#"
 [ledger]
-replay.hydration_concurrency = 20
+replay.account-hydration-concurrency = 20
 "#;
 
     let res = toml::from_str::<EphemeralConfig>(toml).unwrap();
     assert_eq!(
         res.ledger.replay,
         ReplayConfig {
-            hydration_concurrency: 20,
+            account_hydration_concurrency: 20,
         }
     );
 }
