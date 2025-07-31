@@ -1,4 +1,4 @@
-use log::warn;
+use log::{info, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
@@ -51,12 +51,15 @@ where
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         // Update tasks status to Pending
-        // let update_status = CommitStatus::Pending;
-        // persist_status_update_set(&persister, &commit_ids, update_status);
+        if let Some(pubkeys) = base_intent.get_committed_pubkeys() {
+            let update_status = CommitStatus::Pending;
+            persist_status_update_by_message_set(&persister, base_intent.id, &pubkeys, update_status);
+        }
 
         // Commit stage
         let commit_signature =
             self.execute_commit_stage(&base_intent, persister).await?;
+        info!("Commit stage succeeded: {}", commit_signature);
 
         // Finalize stage
         // At the moment validator finalizes right away
@@ -64,6 +67,7 @@ where
         let finalize_signature = self
             .execute_finalize_stage(&base_intent, commit_signature, persister)
             .await?;
+        info!("Finalize stage succeeded: {}", finalize_signature);
 
         Ok(ExecutionOutput {
             commit_signature,
