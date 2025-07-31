@@ -1,0 +1,26 @@
+[package]
+name = "schedule-task-program"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bincode = { workspace = true }
+borsh = { workspace = true }
+ephemeral-rollups-sdk = { workspace = true }
+serde = { workspace = true }
+solana-program = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+custom-heap = []
+custom-panic = []
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+default = []
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(target_os, values("solana"))',
+] }
