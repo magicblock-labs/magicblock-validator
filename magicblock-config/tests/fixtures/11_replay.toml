@@ -1,2 +1,2 @@
 [ledger.replay]
-hydration_concurrency = 20
+account-hydration-concurrency = 20

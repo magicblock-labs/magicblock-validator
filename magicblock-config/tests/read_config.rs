@@ -49,7 +49,7 @@ fn test_load_replay_toml() {
     assert_eq!(
         config.ledger.replay,
         ReplayConfig {
-            hydration_concurrency: 20,
+            account_hydration_concurrency: 20,
         }
     );
 }
@@ -141,7 +141,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_ENABLED", "false");
     env::set_var("METRICS_PORT", "1234");
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
-    env::set_var("REPLAY_HYDRATION_CONCURRENCY", "20");
+    env::set_var("LEDGER_REPLAY_ACCOUNT_HYDRATION_CONCURRENCY", "20");
 
     let config = parse_config_with_file(&config_file_dir);
 
@@ -192,7 +192,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 path: Some("/hello/world".to_string()),
                 size: 123123,
                 replay: ReplayConfig {
-                    hydration_concurrency: 20,
+                    account_hydration_concurrency: 20,
                 },
             },
             metrics: MetricsConfig {
