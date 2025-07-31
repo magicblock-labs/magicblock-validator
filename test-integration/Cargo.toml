@@ -28,7 +28,8 @@ edition = "2021"
 anyhow = "1.0.86"
 borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
 cleanass = "0.0.1"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "c1fcb91" }
+#ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/rust/sdk" }
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "63f624f" }
 integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
@@ -41,10 +42,12 @@ magicblock-core = { path = "../magicblock-core" }
 magicblock-committor-program = { path = "../magicblock-committor-program", features = [
   "no-entrypoint",
 ] }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }
+#magicblock-delegation-program = { path = "../../delegation-program" }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "374603f739a1b218b6b6f49dcd7f0ba60d662c7c", features = ["no-entrypoint"] }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
+magicblock-program = { path = "../programs/magicblock" }
 paste = "1.0"
 program-flexi-counter = { path = "./programs/flexi-counter" }
 program-schedulecommit = { path = "programs/schedulecommit" }

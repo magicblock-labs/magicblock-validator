@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Fits a u64 into an i64, by mapping the range [0, i64::MAX] to itself, and
 /// mapping the range [i64::MAX + 1, u64::MAX - 1] into the negative range of i64.
 /// NOTE: this fails for u64::MAX
+/// TODO(edwin): just store bit-copy in i64
 pub(crate) fn u64_into_i64(n: u64) -> i64 {
     if n > i64::MAX as u64 {
         -((n - i64::MAX as u64) as i64)

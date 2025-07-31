@@ -16,7 +16,7 @@ use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::{AccountUpdates, AccountUpdatesResult};
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::ChangesetCommittor;
+use magicblock_committor_service::BaseIntentCommittor;
 use magicblock_config::{AccountsCloneConfig, PrepareLookupTables};
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
@@ -97,7 +97,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC> {
     account_fetcher: AFE,
     account_updates: AUP,
     account_dumper: ADU,
-    changeset_committor: Option<Arc<CC>>,
+    changeset_committor: Arc<CC>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     validator_charges_fees: ValidatorCollectionMode,
@@ -133,7 +133,7 @@ where
     AFE: AccountFetcher,
     AUP: AccountUpdates,
     ADU: AccountDumper,
-    CC: ChangesetCommittor,
+    CC: BaseIntentCommittor,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -141,7 +141,7 @@ where
         account_fetcher: AFE,
         account_updates: AUP,
         account_dumper: ADU,
-        changeset_committor: Option<Arc<CC>>,
+        changeset_committor: Arc<CC>,
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
         validator_charges_fees: ValidatorCollectionMode,
@@ -714,34 +714,31 @@ where
 
                 // Allow the committer service to reserve pubkeys in lookup tables
                 // that could be needed when we commit this account
-                if let Some(committor) = self.changeset_committor.as_ref() {
-                    if self.clone_config.prepare_lookup_tables
-                        == PrepareLookupTables::Always
-                    {
-                        let committor = Arc::clone(committor);
-                        let pubkey = *pubkey;
-                        let owner = delegation_record.owner;
-                        tokio::spawn(async move {
-                            match map_committor_request_result(
-                                committor.reserve_pubkeys_for_committee(
-                                    pubkey, owner,
-                                ),
-                                committor,
-                            )
-                            .await
-                            {
-                                Ok(initiated) => {
-                                    trace!(
-                                    "Reserving lookup keys for {pubkey} took {:?}",
-                                    initiated.elapsed()
-                                );
-                                }
-                                Err(err) => {
-                                    error!("Failed to reserve lookup keys for {pubkey}: {err:?}");
-                                }
-                            };
-                        });
-                    }
+                if self.clone_config.prepare_lookup_tables
+                    == PrepareLookupTables::Always
+                {
+                    let committor = self.changeset_committor.clone();
+                    let pubkey = *pubkey;
+                    let owner = delegation_record.owner;
+                    tokio::spawn(async move {
+                        match map_committor_request_result(
+                            committor
+                                .reserve_pubkeys_for_committee(pubkey, owner),
+                            committor,
+                        )
+                        .await
+                        {
+                            Ok(initiated) => {
+                                trace!(
+                                "Reserving lookup keys for {pubkey} took {:?}",
+                                initiated.elapsed()
+                            );
+                            }
+                            Err(err) => {
+                                error!("Failed to reserve lookup keys for {pubkey}: {err:?}");
+                            }
+                        };
+                    });
                 }
 
                 self.do_clone_delegated_account(
