@@ -7,7 +7,7 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
     signer::Signer, system_instruction, transaction::Transaction,
 };
-use solana_transaction_status_client_types::UiTransactionEncoding;
+use solana_transaction_status::UiTransactionEncoding;
 use test_magicblock_api::{cleanup, start_magicblock_validator_with_config};
 
 const EPHEM_URL: &str = "http://localhost:8899";
