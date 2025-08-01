@@ -8,7 +8,7 @@ use solana_sdk::{
 /// This would make table management even slower, but is an option to consider for the future.
 /// The multiplier is based on the observation that [CREATE_AND_EXTEND_TABLE_CUS] were _safe_ at
 /// 16K-17K CUs which we slightly exceed if we multiply by this multiplier.
-const SAFETY_MULTIPLIER: u32 = 7;
+const SAFETY_MULTIPLIER: u32 = 12;
 
 /// Compute units required to create and extend a lookup table, with the initial
 /// pubkeys. This is the same no matter how many pubkeys are added to the table
