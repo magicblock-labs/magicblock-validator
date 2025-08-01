@@ -6,10 +6,10 @@ use std::{
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsConfig, CommitStrategy, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LifecycleMode, MagicBlockConfig, MetricsConfig,
-    MetricsServiceConfig, ProgramConfig, RemoteCluster, RemoteConfig,
-    RpcConfig, ValidatorConfig,
+    AccountsConfig, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
+    LedgerConfig, LedgerResumeStrategy, LifecycleMode, MagicBlockConfig,
+    MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteCluster,
+    RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -50,7 +50,7 @@ fn test_load_local_dev_with_programs_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 600_000,
                     compute_unit_price: 0,
                 },
@@ -117,11 +117,13 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("VALIDATOR_COUNTRY_CODE", "CY");
     env::set_var("VALIDATOR_FQDN", "magicblock.er.com");
     env::set_var("LEDGER_RESET", "false");
+    env::set_var("LEDGER_SKIP_REPLAY", "true");
     env::set_var("LEDGER_PATH", "/hello/world");
     env::set_var("METRICS_ENABLED", "false");
     env::set_var("METRICS_PORT", "1234");
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
     env::set_var("LEDGER_SIZE", "123123");
+    env::set_var("LEDGER_RESUME_STRATEGY", "resume-only");
 
     let config = parse_config_with_file(&config_file_dir);
 
@@ -130,7 +132,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
         EphemeralConfig {
             accounts: AccountsConfig {
                 lifecycle: LifecycleMode::Ephemeral,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 123,
                     compute_unit_price: 1,
                 },
@@ -164,7 +166,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 ..Default::default()
             },
             ledger: LedgerConfig {
-                reset: false,
+                resume_strategy: LedgerResumeStrategy::ResumeOnly,
                 path: Some("/hello/world".to_string()),
                 size: 123123
             },
