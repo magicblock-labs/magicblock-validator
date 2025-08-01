@@ -7,6 +7,7 @@ use mdp::state::version::v0::RecordV0;
 use mdp::state::{features::FeaturesSet, record::ErRecord};
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
+use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::signature::{Keypair, Signer};
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
@@ -93,7 +94,7 @@ fn test_domain_registry() {
     IntegrationTestContext::airdrop(
         &client,
         &VALIDATOR_KEYPAIR.pubkey(),
-        5000000000,
+        LAMPORTS_PER_SOL,
         CommitmentConfig::confirmed(),
     )
     .expect("Airdrop failed");

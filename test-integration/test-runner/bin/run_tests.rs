@@ -416,11 +416,11 @@ fn run_magicblock_api_tests(
 
     let output = run_test(test_dir, Default::default()).map_err(|err| {
         eprintln!("Failed to magicblock api tests: {:?}", err);
-        cleanup_validator(&mut devnet_validator, "devnet");
+        cleanup_devnet_only(&mut devnet_validator);
         err
     })?;
 
-    cleanup_validator(&mut devnet_validator, "devnet");
+    cleanup_devnet_only(&mut devnet_validator);
     Ok(output)
 }
 

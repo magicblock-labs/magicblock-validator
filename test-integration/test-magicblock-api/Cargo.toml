@@ -16,5 +16,5 @@ magic-domain-program = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
-solana-transaction-status-client-types = { workspace = true }
+solana-transaction-status = { workspace = true }
 isocountry = { workspace = true }

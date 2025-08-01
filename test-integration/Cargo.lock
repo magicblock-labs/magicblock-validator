@@ -10343,7 +10343,6 @@ dependencies = [
  "magicblock-config",
  "program-flexi-counter",
  "solana-rpc-client",
- "solana-rpc-client-api",
  "solana-sdk",
  "solana-transaction-status",
  "tempfile",
@@ -10363,7 +10362,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
- "solana-transaction-status-client-types",
+ "solana-transaction-status",
  "tokio",
 ]
 
