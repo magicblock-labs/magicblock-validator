@@ -46,6 +46,7 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+magicblock-delegation-program = { workspace = true }
 
 libloading = "0.7.4"
 borsh = "1.5.3"

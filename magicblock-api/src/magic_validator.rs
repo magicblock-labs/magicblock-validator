@@ -11,6 +11,7 @@ use std::{
 };
 
 use conjunto_transwise::RpcProviderConfig;
+use dlp::instruction_builder::validator_claim_fees;
 use log::*;
 use magicblock_account_cloner::{
     map_committor_request_result, standard_blacklisted_accounts,
@@ -83,6 +84,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
+    transaction::Transaction,
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -106,6 +108,8 @@ use crate::{
         init_system_metrics_ticker,
     },
 };
+
+const CLAIM_FEES_INTERVAL_SECS: u64 = 60 * 60;
 
 // -----------------
 // MagicValidatorConfig
@@ -168,6 +172,7 @@ pub struct MagicValidator {
     geyser_rpc_service: Arc<GeyserRpcService>,
     pubsub_config: PubsubConfig,
     pub transaction_status_sender: TransactionStatusSender,
+    claim_fees_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl MagicValidator {
@@ -412,6 +417,7 @@ impl MagicValidator {
             accounts_manager,
             transaction_listener,
             transaction_status_sender,
+            claim_fees_task: None,
         })
     }
 
@@ -696,6 +702,52 @@ impl MagicValidator {
         }
     }
 
+    async fn claim_fees(config: EphemeralConfig) -> ApiResult<()> {
+        info!("Claiming validator fees");
+
+        // building the config
+        let url = cluster_from_remote(&config.accounts.remote);
+        let rpc_client = RpcClient::new_with_commitment(
+            url.url().to_string(),
+            CommitmentConfig::confirmed(),
+        );
+
+        // setting the keypair and validator pubkey
+        let keypair_ref = &validator_authority();
+        let validator = keypair_ref.pubkey();
+
+        let ix = validator_claim_fees(validator, None);
+
+        let latest_blockhash =
+            rpc_client.get_latest_blockhash().await.map_err(|err| {
+                ApiError::FailedToGetBlockhash(format!(
+                    "Failed to get blockhash: {:?}",
+                    err
+                ))
+            })?;
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&validator),
+            &[keypair_ref],
+            latest_blockhash,
+        );
+
+        rpc_client
+            .send_and_confirm_transaction(&tx)
+            .await
+            .map_err(|err| {
+                ApiError::FailedToSendTransaction(format!(
+                    "Failed to send transaction: {:?}",
+                    err
+                ))
+            })?;
+
+        info!("Successfully claimed validator fees");
+
+        Ok(())
+    }
+
     pub async fn start(&mut self) -> ApiResult<()> {
         if matches!(self.config.accounts.lifecycle, LifecycleMode::Ephemeral) {
             self.ensure_validator_funded_on_chain().await?;
@@ -703,6 +755,26 @@ impl MagicValidator {
                 self.register_validator_on_chain(fqdn).await?;
             }
         }
+
+        let claim_fees_token = self.token.clone();
+        let claim_fees_interval = Duration::from_secs(CLAIM_FEES_INTERVAL_SECS);
+        let config = self.config.clone();
+
+        self.claim_fees_task = Some(tokio::spawn(async move {
+            log::info!("Starting claim fees task");
+            loop {
+                log::info!("Claiming fees");
+                if let Err(err) =
+                    MagicValidator::claim_fees(config.clone()).await
+                {
+                    log::error!("Failed to claim fees: {:?}", err);
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(claim_fees_interval) => {}
+                    _ = claim_fees_token.cancelled() => break,
+                }
+            }
+        }));
 
         self.maybe_process_ledger()?;
 
@@ -846,6 +918,10 @@ impl MagicValidator {
         PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
         self.ledger_truncator.stop();
+
+        if let Some(handle) = self.claim_fees_task.take() {
+            handle.abort();
+        }
 
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
