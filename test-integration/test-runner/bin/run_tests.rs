@@ -399,14 +399,28 @@ fn run_magicblock_api_tests(
     if !should_run_test("magicblock_api") {
         return Ok(success_output());
     }
+
+    let mut devnet_validator = match start_validator(
+        "schedulecommit-conf.devnet.toml",
+        ValidatorCluster::Chain(None),
+        &LoadedAccounts::default(),
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+
     let test_dir = format!("{}/../{}", manifest_dir, "test-magicblock-api");
     eprintln!("Running magicblock-api tests in {}", test_dir);
 
     let output = run_test(test_dir, Default::default()).map_err(|err| {
         eprintln!("Failed to magicblock api tests: {:?}", err);
+        cleanup_devnet_only(&mut devnet_validator);
         err
     })?;
 
+    cleanup_devnet_only(&mut devnet_validator);
     Ok(output)
 }
 
