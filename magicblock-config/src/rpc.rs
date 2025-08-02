@@ -21,9 +21,6 @@ pub struct RpcConfig {
     #[arg(help = "The port the RPC will listen on.")]
     #[serde(default = "default_port")]
     pub port: u16,
-    #[arg(help = "The max number of WebSocket connections to accept.")]
-    #[serde(default = "default_max_ws_connections")]
-    pub max_ws_connections: usize,
 }
 
 impl RpcConfig {
@@ -34,11 +31,6 @@ impl RpcConfig {
         if self.port == default_port() && other.port != default_port() {
             self.port = other.port;
         }
-        if self.max_ws_connections == default_max_ws_connections()
-            && other.max_ws_connections != default_max_ws_connections()
-        {
-            self.max_ws_connections = other.max_ws_connections;
-        }
     }
 }
 
@@ -47,7 +39,6 @@ impl Default for RpcConfig {
         Self {
             addr: default_addr(),
             port: default_port(),
-            max_ws_connections: default_max_ws_connections(),
         }
     }
 }
@@ -104,7 +95,6 @@ mod tests {
         let mut config = RpcConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
             port: 9090,
-            max_ws_connections: 8008,
         };
         let original_config = config.clone();
         let other = RpcConfig::default();
@@ -120,7 +110,6 @@ mod tests {
         let other = RpcConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
             port: 9090,
-            max_ws_connections: 8008,
         };
 
         config.merge(other.clone());
@@ -133,13 +122,11 @@ mod tests {
         let mut config = RpcConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 1, 127)),
             port: 9091,
-            max_ws_connections: 8009,
         };
         let original_config = config.clone();
         let other = RpcConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
             port: 9090,
-            max_ws_connections: 8008,
         };
 
         config.merge(other);
