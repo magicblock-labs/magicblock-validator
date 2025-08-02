@@ -9,8 +9,6 @@ use tokio::sync::{
     oneshot,
 };
 
-pub use solana_transaction_error::TransactionError;
-
 use crate::Slot;
 
 pub type TxnStatusRx = MpmcReceiver<TransactionStatus>;
