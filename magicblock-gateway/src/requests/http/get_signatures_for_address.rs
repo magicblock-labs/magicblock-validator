@@ -6,7 +6,7 @@ use solana_transaction_status_client_types::TransactionConfirmationStatus;
 use crate::{
     error::RpcError,
     requests::{
-        params::{SerdePubkey, SerdeSignature},
+        params::{Serde32Bytes, SerdeSignature},
         payload::ResponsePayload,
         JsonRequest,
     },
@@ -27,8 +27,8 @@ impl HttpDispatcher {
             .params
             .ok_or_else(|| RpcError::invalid_request("missing params"));
         unwrap!(mut params, request.id);
-        let (address, config) = parse_params!(params, SerdePubkey, Config);
-        let address = address.ok_or_else(|| {
+        let (address, config) = parse_params!(params, Serde32Bytes, Config);
+        let address = address.map(Into::into).ok_or_else(|| {
             RpcError::invalid_params("missing or invalid address")
         });
         unwrap!(address, request.id);
@@ -36,7 +36,7 @@ impl HttpDispatcher {
         let signatures = self
             .ledger
             .get_confirmed_signatures_for_address(
-                address.0,
+                address,
                 Slot::MAX,
                 config.before.map(|s| s.0),
                 config.until.map(|s| s.0),

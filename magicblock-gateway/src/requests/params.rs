@@ -1,7 +1,7 @@
 use std::fmt;
 
 use json::{Deserialize, Serialize};
-use magicblock_gateway_types::accounts::Pubkey;
+use magicblock_gateway_types::{accounts::Pubkey, blocks::BlockHash};
 use serde::{
     de::{self, Visitor},
     Deserializer, Serializer,
@@ -12,9 +12,33 @@ use solana_signature::{Signature, SIGNATURE_BYTES};
 pub struct SerdeSignature(pub Signature);
 
 #[derive(Clone)]
-pub struct SerdePubkey(pub Pubkey);
+pub struct Serde32Bytes(pub [u8; 32]);
 
-impl Serialize for SerdePubkey {
+impl From<Serde32Bytes> for Pubkey {
+    fn from(value: Serde32Bytes) -> Self {
+        Self::from(value.0)
+    }
+}
+
+impl From<Serde32Bytes> for BlockHash {
+    fn from(value: Serde32Bytes) -> Self {
+        Self::from(value.0)
+    }
+}
+
+impl From<Pubkey> for Serde32Bytes {
+    fn from(value: Pubkey) -> Self {
+        Self(value.to_bytes())
+    }
+}
+
+impl From<BlockHash> for Serde32Bytes {
+    fn from(value: BlockHash) -> Self {
+        Self(value.to_bytes())
+    }
+}
+
+impl Serialize for Serde32Bytes {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -31,15 +55,15 @@ impl Serialize for SerdePubkey {
     }
 }
 
-impl<'de> Deserialize<'de> for SerdePubkey {
+impl<'de> Deserialize<'de> for Serde32Bytes {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        struct SerdePubkeyVisitor;
+        struct Serde32BytesVisitor;
 
-        impl Visitor<'_> for SerdePubkeyVisitor {
-            type Value = SerdePubkey;
+        impl Visitor<'_> for Serde32BytesVisitor {
+            type Value = Serde32Bytes;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str(
@@ -58,10 +82,10 @@ impl<'de> Deserialize<'de> for SerdePubkey {
                 if decoded_len != 32 {
                     return Err(de::Error::custom("expected 32 bytes"));
                 }
-                Ok(SerdePubkey(Pubkey::new_from_array(buffer)))
+                Ok(Serde32Bytes(buffer))
             }
         }
-        deserializer.deserialize_str(SerdePubkeyVisitor)
+        deserializer.deserialize_str(Serde32BytesVisitor)
     }
 }
 

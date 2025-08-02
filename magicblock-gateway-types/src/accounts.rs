@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use solana_account::cow::AccountSeqLock;
+use solana_account_decoder::{encode_ui_account, UiAccount, UiAccountEncoding};
 use tokio::sync::{
     mpsc::{Receiver, Sender},
     Notify,
@@ -36,10 +37,10 @@ pub struct AccountWithSlot {
 }
 
 impl AccountsToEnsure {
-    fn lol(self) {
-        let acc = self.accounts;
-        let iter = IntoIterator::into_iter(acc);
-        for i in iter {}
+    pub fn new(accounts: Vec<Pubkey>) -> Self {
+        let ready = Arc::default();
+        let accounts = accounts.into_boxed_slice();
+        Self { accounts, ready }
     }
 }
 
@@ -68,6 +69,13 @@ impl LockedAccount {
             account,
             pubkey,
         }
+    }
+
+    #[inline]
+    pub fn ui_encode(&self, encoding: UiAccountEncoding) -> UiAccount {
+        self.read_locked(|pk, acc| {
+            encode_ui_account(pk, acc, encoding, None, None)
+        })
     }
 
     #[inline]

@@ -5,7 +5,7 @@ use solana_rpc_client_api::config::RpcProgramAccountsConfig;
 
 use crate::{
     error::RpcError,
-    requests::{params::SerdePubkey, payload::ResponsePayload, JsonRequest},
+    requests::{params::Serde32Bytes, payload::ResponsePayload, JsonRequest},
     server::http::dispatch::HttpDispatcher,
     unwrap,
     utils::{AccountWithPubkey, JsonBody, ProgramFilters},
@@ -21,8 +21,8 @@ impl HttpDispatcher {
             .ok_or_else(|| RpcError::invalid_request("missing params"));
         unwrap!(mut params, request.id);
         let (program, config) =
-            parse_params!(params, SerdePubkey, RpcProgramAccountsConfig);
-        let program = program.ok_or_else(|| {
+            parse_params!(params, Serde32Bytes, RpcProgramAccountsConfig);
+        let program = program.map(Into::into).ok_or_else(|| {
             RpcError::invalid_params("missing or invalid pubkey")
         });
         unwrap!(program, request.id);
@@ -30,9 +30,7 @@ impl HttpDispatcher {
         let filters = ProgramFilters::from(config.filters);
         let accounts = self
             .accountsdb
-            .get_program_accounts(&program.0, move |a| {
-                filters.matches(a.data())
-            })
+            .get_program_accounts(&program, move |a| filters.matches(a.data()))
             .map_err(RpcError::internal);
         unwrap!(accounts, request.id);
         let encoding = config

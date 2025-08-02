@@ -58,7 +58,7 @@ impl RpcError {
     pub(crate) fn transaction_verification<E: Error>(error: E) -> Self {
         Self {
             code: TRANSACTION_VERIFICATION,
-            message: error.to_string(),
+            message: format!("transaction verification error: {error}"),
         }
     }
 
