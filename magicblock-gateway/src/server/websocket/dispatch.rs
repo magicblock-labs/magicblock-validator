@@ -1,13 +1,13 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use crate::{
     error::RpcError,
+    parse_params,
     requests::JsonRpcMethod,
     state::{
         signatures::SignaturesExpirer,
         subscriptions::{CleanUp, SubscriptionID, SubscriptionsDb},
         transactions::TransactionsCache,
-        SharedState,
     },
     RpcResult,
 };
@@ -20,48 +20,72 @@ use tokio::sync::mpsc;
 pub(crate) type ConnectionTx = mpsc::Sender<Bytes>;
 
 pub(crate) struct WsDispatcher {
-    subscriptions: SubscriptionsDb,
-    unsubs: HashMap<SubscriptionID, CleanUp>,
-    signatures: SignaturesExpirer,
-    transactions: Arc<TransactionsCache>,
-    chan: WsConnectionChannel,
+    pub(crate) subscriptions: SubscriptionsDb,
+    pub(crate) unsubs: HashMap<SubscriptionID, CleanUp>,
+    pub(crate) signatures: SignaturesExpirer,
+    pub(crate) transactions: TransactionsCache,
+    pub(crate) chan: WsConnectionChannel,
 }
 
 impl WsDispatcher {
-    pub(crate) fn new(state: SharedState, chan: WsConnectionChannel) -> Self {
+    pub(crate) fn new(
+        subscriptions: SubscriptionsDb,
+        transactions: TransactionsCache,
+        chan: WsConnectionChannel,
+    ) -> Self {
         Self {
-            subscriptions: state.subscriptions,
+            subscriptions,
             unsubs: Default::default(),
             signatures: SignaturesExpirer::init(),
-            transactions: state.transactions,
+            transactions,
             chan,
         }
     }
     pub(crate) async fn dispatch(
-        &self,
-        request: JsonRequest,
+        &mut self,
+        request: &mut JsonRequest,
     ) -> RpcResult<WsDispatchResult> {
         use JsonRpcMethod::*;
-        match request.method {
-            AccountSubscribe => {}
-            AccountUnsubscribe => {}
-            ProgramSubscribe => {}
-            ProgramUnsubscribe => {}
-            SlotSubscribe => {}
-            SlotUnsubsribe => {}
-            LogsSubscribe => {}
-            LogsUnsubscribe => {}
+        let result = match request.method {
+            AccountSubscribe => self.account_subscribe(request).await,
+            ProgramSubscribe => self.program_subscribe(request).await,
+            SignatureSubscribe => self.signature_subscribe(request).await,
+            SlotSubscribe => self.slot_subscribe(),
+            LogsSubscribe => self.logs_subscribe(request),
+            AccountUnsubscribe | ProgramUnsubscribe | LogsUnsubscribe
+            | SlotUnsubsribe => self.unsubscribe(request),
             unknown => return Err(RpcError::method_not_found(unknown)),
-        }
-        todo!()
+        }?;
+        Ok(WsDispatchResult {
+            id: request.id.take(),
+            result,
+        })
     }
 
+    #[inline]
     pub(crate) async fn cleanup(&mut self) {
-        let signature = self.signatures.step().await;
-        self.subscriptions.signatures.remove_async(&signature);
+        let signature = self.signatures.expire().await;
+        self.subscriptions.signatures.remove_async(&signature).await;
+    }
+
+    fn unsubscribe(
+        &mut self,
+        request: &mut JsonRequest,
+    ) -> RpcResult<SubResult> {
+        let mut params = request
+            .params
+            .take()
+            .ok_or_else(|| RpcError::invalid_request("missing params"))?;
+
+        let id = parse_params!(params, SubscriptionID).ok_or_else(|| {
+            RpcError::invalid_params("missing or invalid subscription id")
+        })?;
+        let success = self.unsubs.remove(&id).is_some();
+        Ok(SubResult::Unsub(success))
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct WsConnectionChannel {
     pub(crate) id: ConnectionID,
     pub(crate) tx: ConnectionTx,
@@ -70,7 +94,7 @@ pub(crate) struct WsConnectionChannel {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub(crate) enum SubResult {
-    SubId(u64),
+    SubId(SubscriptionID),
     Unsub(bool),
 }
 

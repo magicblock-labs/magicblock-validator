@@ -11,7 +11,11 @@ use magicblock_config::{AccountsDbConfig, BlockSize};
 use memmap2::MmapMut;
 use solana_account::AccountSharedData;
 
-use crate::{error::AccountsDbError, log_err, AdbResult};
+use crate::{
+    error::AccountsDbError,
+    index::{Blocks, Offset},
+    log_err, AdbResult,
+};
 
 /// Extra space in database storage file reserved for metadata
 /// Currently most of it is unused, but still reserved for future extensions
@@ -154,7 +158,7 @@ impl AccountsStorage {
     }
 
     #[inline(always)]
-    pub(crate) fn read_account(&self, offset: u32) -> AccountSharedData {
+    pub(crate) fn read_account(&self, offset: Offset) -> AccountSharedData {
         let memptr = self.offset(offset).as_ptr();
         // SAFETY:
         // offset is obtained from index and later transformed by storage (to translate to actual
@@ -177,7 +181,7 @@ impl AccountsStorage {
         }
     }
 
-    pub(crate) fn offset(&self, offset: u32) -> NonNull<u8> {
+    pub(crate) fn offset(&self, offset: Offset) -> NonNull<u8> {
         // SAFETY:
         // offset is calculated from existing allocation within the map, thus
         // jumping to that offset will land us somewhere within those bounds
@@ -193,15 +197,15 @@ impl AccountsStorage {
         self.meta.slot.store(val, Relaxed)
     }
 
-    pub(crate) fn increment_deallocations(&self, val: u32) {
+    pub(crate) fn increment_deallocations(&self, val: Blocks) {
         self.meta.deallocated.fetch_add(val, Relaxed);
     }
 
-    pub(crate) fn decrement_deallocations(&self, val: u32) {
+    pub(crate) fn decrement_deallocations(&self, val: Blocks) {
         self.meta.deallocated.fetch_sub(val, Relaxed);
     }
 
-    pub(crate) fn get_block_count(&self, size: usize) -> u32 {
+    pub(crate) fn get_block_count(&self, size: usize) -> Blocks {
         let block_size = self.block_size();
         let blocks = size.div_ceil(block_size);
         blocks as u32
@@ -295,7 +299,7 @@ impl StorageMeta {
             "database file should be larger than {MIN_DB_SIZE} bytes in length"
         );
         let db_size = calculate_db_size(config);
-        let total_blocks = (db_size / config.block_size as usize) as u32;
+        let total_blocks = (db_size / config.block_size as usize) as Blocks;
         // grow the backing file as necessary
         adjust_database_file_size(file, db_size as u64)?;
 
@@ -348,7 +352,8 @@ impl StorageMeta {
         let mut total_blocks =
             unsafe { (ptr.add(TOTALBLOCKS_OFFSET) as *const u32).read() };
         // check whether the size of database file has been readjusted
-        let adjusted_total_blocks = (store.len() / block_size as usize) as u32;
+        let adjusted_total_blocks =
+            (store.len() / block_size as usize) as Blocks;
         if adjusted_total_blocks != total_blocks {
             // if so, use the adjusted number of total blocks
             total_blocks = adjusted_total_blocks;
@@ -403,14 +408,14 @@ fn calculate_db_size(config: &AccountsDbConfig) -> usize {
 #[cfg_attr(test, derive(Clone, Copy))]
 pub(crate) struct Allocation {
     pub(crate) storage: NonNull<u8>,
-    pub(crate) offset: u32,
-    pub(crate) blocks: u32,
+    pub(crate) offset: Offset,
+    pub(crate) blocks: Blocks,
 }
 
 #[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 pub(crate) struct ExistingAllocation {
-    pub(crate) offset: u32,
-    pub(crate) blocks: u32,
+    pub(crate) offset: Offset,
+    pub(crate) blocks: Blocks,
 }
 
 #[cfg(test)]

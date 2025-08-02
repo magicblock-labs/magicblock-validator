@@ -1,6 +1,6 @@
 use tokio::sync::Notify;
 
-mod http;
+pub(crate) mod http;
 pub(crate) mod websocket;
 
 #[derive(Default)]

@@ -1,7 +1,9 @@
 use std::{path::Path, sync::Arc};
 
 use error::AccountsDbError;
-use index::AccountsDbIndex;
+use index::{
+    iterator::OffsetPubkeyIter, utils::AccountOffsetFinder, AccountsDbIndex,
+};
 use log::{error, warn};
 use magicblock_config::AccountsDbConfig;
 use parking_lot::RwLock;
@@ -195,26 +197,30 @@ impl AccountsDb {
         &self,
         program: &Pubkey,
         filter: F,
-    ) -> AdbResult<Vec<(Pubkey, AccountSharedData)>>
+    ) -> AdbResult<AccountsScanner<F>>
     where
-        F: Fn(&AccountSharedData) -> bool,
+        F: Fn(&AccountSharedData) -> bool + 'static,
     {
         // TODO(bmuddha): perf optimization in scanning logic
         // https://github.com/magicblock-labs/magicblock-validator/issues/328
 
-        let iter = self
+        let iterator = self
             .index
             .get_program_accounts_iter(program)
             .inspect_err(log_err!("program accounts retrieval"))?;
-        let mut accounts = Vec::with_capacity(4);
-        for (offset, pubkey) in iter {
-            let account = self.storage.read_account(offset);
+        Ok(AccountsScanner {
+            iterator,
+            storage: &self.storage,
+            filter,
+        })
+    }
 
-            if filter(&account) {
-                accounts.push((pubkey, account));
-            }
-        }
-        Ok(accounts)
+    pub fn reader(&self) -> AdbResult<AccountsReader<'_>> {
+        let offset = self.index.offset_finder()?;
+        Ok(AccountsReader {
+            offset,
+            storage: &self.storage,
+        })
     }
 
     /// Check whether account with given pubkey exists in the database
@@ -277,36 +283,17 @@ impl AccountsDb {
         }
     }
 
-    /// Returns slot of latest snapshot or None
-    /// Parses path to extract slot
-    pub fn get_latest_snapshot_slot(&self) -> Option<u64> {
-        self.snapshot_engine
-            .with_snapshots(|snapshots| -> Option<u64> {
-                let latest_path = snapshots.back()?;
-                SnapSlot::try_from_path(latest_path)
-                    .map(|snap_slot: SnapSlot| snap_slot.slot())
-                    .or_else(|| {
-                        error!(
-                            "Failed to parse the path into SnapSlot: {}",
-                            latest_path.display()
-                        );
-                        None
-                    })
-            })
-    }
-
     /// Return slot of oldest maintained snapshot or None
     /// Parses path to extract slot
     pub fn get_oldest_snapshot_slot(&self) -> Option<u64> {
         self.snapshot_engine
             .with_snapshots(|snapshots| -> Option<u64> {
-                let latest_path = snapshots.front()?;
-                SnapSlot::try_from_path(latest_path)
+                let path = snapshots.front()?;
+                SnapSlot::try_from_path(path)
                     .map(|snap_slot: SnapSlot| snap_slot.slot())
                     .or_else(|| {
                         error!(
-                            "Failed to parse the path into SnapSlot: {}",
-                            latest_path.display()
+                            "Failed to parse the path into SnapSlot: {path:?}",
                         );
                         None
                     })
@@ -379,6 +366,44 @@ impl AccountsDb {
 // write access to it is synchronized via atomic operations
 unsafe impl Sync for AccountsDb {}
 unsafe impl Send for AccountsDb {}
+
+/// Iterator to scan program accounts applying filtering logic on them
+pub struct AccountsScanner<'db, F> {
+    storage: &'db AccountsStorage,
+    filter: F,
+    iterator: OffsetPubkeyIter<'db>,
+}
+
+impl<F> Iterator for AccountsScanner<'_, F>
+where
+    F: Fn(&AccountSharedData) -> bool,
+{
+    type Item = (Pubkey, AccountSharedData);
+    fn next(&mut self) -> Option<Self::Item> {
+        let (offset, pubkey) = self.iterator.next()?;
+        let account = self.storage.read_account(offset);
+        (self.filter)(&account).then_some((pubkey, account))
+    }
+}
+
+/// Versatile and reusable account reader, can be used to perform multiple account queries
+/// from the database more efficiently, avoiding the cost of index/cursor setups
+pub struct AccountsReader<'db> {
+    offset: AccountOffsetFinder<'db>,
+    storage: &'db AccountsStorage,
+}
+
+impl AccountsReader<'_> {
+    /// Find the account specified by the pubkey and pass it to the reader function
+    pub fn read<F, R>(&self, pubkey: &Pubkey, reader: F) -> Option<R>
+    where
+        F: Fn(AccountSharedData) -> R,
+    {
+        let offset = self.offset.find(pubkey)?;
+        let account = self.storage.read_account(offset);
+        Some(reader(account))
+    }
+}
 
 #[cfg(test)]
 impl AccountsDb {

@@ -2,27 +2,43 @@ use std::{convert::Infallible, sync::Arc};
 
 use hyper::{body::Incoming, Request, Response};
 use magicblock_accounts_db::AccountsDb;
+use magicblock_gateway_types::accounts::Pubkey;
 use magicblock_ledger::Ledger;
 
 use crate::{
     error::RpcError,
     requests::{
-        self,
-        http::utils::{extract_bytes, parse_body, JsonBody},
+        http::{extract_bytes, parse_body},
         payload::ResponseErrorPayload,
     },
-    state::transactions::TransactionsCache,
+    state::{
+        blocks::BlocksCache, transactions::TransactionsCache, SharedState,
+    },
     unwrap,
+    utils::JsonBody,
 };
 
 pub(crate) struct HttpDispatcher {
+    pub(crate) identity: Pubkey,
     pub(crate) accountsdb: Arc<AccountsDb>,
     pub(crate) ledger: Arc<Ledger>,
-    pub(crate) transactions: Arc<TransactionsCache>,
+    pub(crate) transactions: TransactionsCache,
+    pub(crate) blocks: Arc<BlocksCache>,
 }
 
 impl HttpDispatcher {
-    pub(crate) async fn dispatch(
+    pub(super) fn new(state: &SharedState) -> Arc<Self> {
+        Self {
+            identity: state.identity,
+            accountsdb: state.accountsdb.clone(),
+            ledger: state.ledger.clone(),
+            transactions: state.transactions.clone(),
+            blocks: state.blocks.clone(),
+        }
+        .into()
+    }
+
+    pub(super) async fn dispatch(
         self: Arc<Self>,
         request: Request<Incoming>,
     ) -> Result<Response<JsonBody>, Infallible> {
@@ -31,46 +47,31 @@ impl HttpDispatcher {
 
         use crate::requests::JsonRpcMethod::*;
         let response = match request.method {
-            GetAccountInfo => requests::http::get_account_info::handle(
-                request,
-                &self.accountsdb,
-            ),
-            GetMultipleAccounts => {
-                todo!()
-            }
-            GetProgramAccounts => {
-                todo!()
-            }
+            GetAccountInfo => self.get_account_info(request),
+            GetBalance => self.get_balance(request),
+            GetMultipleAccounts => self.get_multiple_accounts(request),
+            GetProgramAccounts => self.get_program_accounts(request),
             SendTransaction => {
                 todo!()
             }
             SimulateTransaction => {
                 todo!()
             }
-            GetTransaction => {
-                todo!()
-            }
-            GetSignatureStatuses => {
-                todo!()
-            }
-            GetSignaturesForAddress => {
-                todo!()
-            }
+            GetTransaction => self.get_transaction(request),
+            GetSignatureStatuses => self.get_signature_statuses(request),
+            GetSignaturesForAddress => self.get_signatures_for_address(request),
             GetTokenAccountsByOwner => {
-                todo!()
+                self.get_token_accounts_by_owner(request)
             }
             GetTokenAccountsByDelegate => {
-                todo!()
+                self.get_token_accounts_by_delegate(request)
             }
-            GetSlot => {
-                todo!()
-            }
-            GetBlock => {
-                todo!()
-            }
-            GetBlocks => {
-                todo!()
-            }
+            GetSlot => self.get_slot(request),
+            GetBlock => self.get_block(request),
+            GetBlocks => self.get_blocks(request),
+            GetLatestBlockhash => self.get_latest_blockhash(request),
+            GetBlockHeight => self.get_block_height(request),
+            GetIdentity => self.get_identity(request),
             unknown => {
                 let error = RpcError::method_not_found(unknown);
                 return Ok(ResponseErrorPayload::encode(

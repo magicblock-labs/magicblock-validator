@@ -156,18 +156,21 @@ serde_json = "1.0"
 serde_derive = "1.0"
 json = { package = "sonic-rs", version = "0.5.3" }
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2476dab" }
+# solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2476dab" }
+solana-account = { path = "../solana-account" }
 solana-accounts-db = { version = "2.2" }
 solana-account-decoder = { version = "2.2" }
 solana-address-lookup-table-program = { version = "2.2" }
 solana-bpf-loader-program = { version = "2.2" }
-solana-compute-budget-program = { version = "2.2" }
 solana-compute-budget-instruction = { version = "2.2" }
+solana-compute-budget-program = { version = "2.2" }
 solana-cost-model = { version = "2.2" }
 solana-frozen-abi-macro = { version = "2.2" }
 solana-geyser-plugin-interface = { version = "2.2", package = "agave-geyser-plugin-interface" }
 solana-geyser-plugin-manager = { version = "2.2" }
+solana-hash = { version = "2.2" }
 solana-inline-spl = { version = "2.2" }
+solana-keypair = { version = "2.2" }
 solana-log-collector = { version = "2.2" }
 solana-measure = { version = "2.2" }
 solana-message = { version = "2.2" }
@@ -223,6 +226,7 @@ vergen = "8.3.1"
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2476dab" }
+# solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2476dab" }
+solana-account = { path = "../solana-account" }
 solana-storage-proto = { path = "./storage-proto" }
 solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git" }

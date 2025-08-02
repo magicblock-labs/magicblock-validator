@@ -9,12 +9,18 @@ pub(crate) struct JsonRequest {
     pub(crate) params: Option<Array>,
 }
 
-#[derive(json::Deserialize, Debug)]
+#[derive(json::Deserialize, Debug, Copy, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum JsonRpcMethod {
+    AccountSubscribe,
+    AccountUnsubscribe,
     GetAccountInfo,
+    GetBalance,
     GetBlock,
+    GetBlockHeight,
     GetBlocks,
+    GetIdentity,
+    GetLatestBlockhash,
     GetMultipleAccounts,
     GetProgramAccounts,
     GetSignatureStatuses,
@@ -23,16 +29,14 @@ pub(crate) enum JsonRpcMethod {
     GetTokenAccountsByDelegate,
     GetTokenAccountsByOwner,
     GetTransaction,
-    SendTransaction,
-    SimulateTransaction,
-    SignatureSubscribe,
-    SignatureUnsubscribe,
-    AccountSubscribe,
-    AccountUnsubscribe,
-    ProgramSubscribe,
-    ProgramUnsubscribe,
     LogsSubscribe,
     LogsUnsubscribe,
+    ProgramSubscribe,
+    ProgramUnsubscribe,
+    SendTransaction,
+    SignatureSubscribe,
+    SignatureUnsubscribe,
+    SimulateTransaction,
     SlotSubscribe,
     SlotUnsubsribe,
 }
@@ -43,6 +47,7 @@ impl Display for JsonRpcMethod {
     }
 }
 
+#[macro_export]
 macro_rules! parse_params {
     ($input: expr, $ty1: ty) => {
         $input.pop().and_then(|v| json::from_value::<$ty1>(&v).ok())

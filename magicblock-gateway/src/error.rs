@@ -41,10 +41,10 @@ impl From<json::Error> for RpcError {
 }
 
 impl RpcError {
-    pub(crate) fn invalid_params<E: ToString>(error: E) -> Self {
+    pub(crate) fn invalid_params<E: Display>(error: E) -> Self {
         Self {
             code: INVALID_PARAMS,
-            message: format!("invalid request params: {}", error.to_string()),
+            message: format!("invalid request params: {error}"),
         }
     }
 
@@ -62,10 +62,10 @@ impl RpcError {
         }
     }
 
-    pub(crate) fn invalid_request<E: ToString>(error: E) -> Self {
+    pub(crate) fn invalid_request<E: Display>(error: E) -> Self {
         Self {
             code: INVALID_REQUEST,
-            message: format!("invalid request: {}", error.to_string()),
+            message: format!("invalid request: {error}"),
         }
     }
 
@@ -79,14 +79,14 @@ impl RpcError {
     pub(crate) fn parse_error<E: Error>(error: E) -> Self {
         Self {
             code: PARSE_ERROR,
-            message: error.to_string(),
+            message: format!("error parsing request body: {error}"),
         }
     }
 
     pub(crate) fn internal<E: Error>(error: E) -> Self {
         Self {
             code: INTERNAL_ERROR,
-            message: error.to_string(),
+            message: format!("internal server error: {error}"),
         }
     }
 }

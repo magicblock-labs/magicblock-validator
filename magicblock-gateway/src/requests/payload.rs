@@ -1,8 +1,9 @@
-use crate::{error::RpcError, state::subscriptions::SubscriptionID, Slot};
+use crate::{
+    error::RpcError, state::subscriptions::SubscriptionID, utils::JsonBody,
+    Slot,
+};
 use hyper::{body::Bytes, Response};
 use json::{Serialize, Value};
-
-use super::http::utils::JsonBody;
 
 #[derive(Serialize)]
 pub(crate) struct NotificationPayload<T> {
