@@ -11,7 +11,7 @@ const INTERNAL_ERROR: i16 = -32603;
 const PARSE_ERROR: i16 = -32700;
 
 #[derive(Serialize, Debug)]
-pub(crate) struct RpcError {
+pub struct RpcError {
     code: i16,
     message: String,
 }

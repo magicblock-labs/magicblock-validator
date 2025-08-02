@@ -22,8 +22,9 @@ scc = { workspace = true }
 parking_lot = { workspace = true }
 
 magicblock-accounts-db = { workspace = true }
-magicblock-ledger = { workspace = true }
+magicblock-config = { workspace = true }
 magicblock-gateway-types = { workspace = true }
+magicblock-ledger = { workspace = true }
 
 solana-account-decoder = { workspace = true }
 solana-message = { workspace = true }
