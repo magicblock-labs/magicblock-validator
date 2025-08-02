@@ -1,10 +1,9 @@
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
-use solana_message::inner_instruction::InnerInstructions;
 use solana_pubkey::Pubkey;
-use solana_rpc_client_api::config::RpcSimulateTransactionConfig;
 use solana_signature::Signature;
 use solana_transaction::sanitized::SanitizedTransaction;
-use solana_transaction_context::{TransactionAccount, TransactionReturnData};
+use solana_transaction_context::TransactionReturnData;
+use solana_transaction_status_client_types::InnerInstructions;
 use tokio::sync::{
     mpsc::{Receiver, Sender},
     oneshot,
@@ -30,13 +29,15 @@ pub struct TransactionStatus {
 
 pub struct ProcessableTransaction {
     pub transaction: SanitizedTransaction,
-    pub simulation: Option<Box<RpcSimulateTransactionConfig>>,
-    pub result_tx: Option<oneshot::Sender<TransactionProcessingResult>>,
+    pub mode: TransactionProcessingMode,
 }
 
-pub enum TransactionProcessingResult {
-    Execution(TransactionExecutionResult),
-    Simulation(TransactionSimulationResult),
+pub enum TransactionProcessingMode {
+    Simulation {
+        inner_instructions: bool,
+        result_tx: oneshot::Sender<TransactionSimulationResult>,
+    },
+    Execution(Option<oneshot::Sender<TransactionResult>>),
 }
 
 pub struct TransactionExecutionResult {
@@ -48,8 +49,7 @@ pub struct TransactionExecutionResult {
 pub struct TransactionSimulationResult {
     pub result: TransactionResult,
     pub logs: Box<[String]>,
-    pub post_simulation_accounts: Box<[TransactionAccount]>,
     pub units_consumed: u64,
-    pub return_data: Option<Box<TransactionReturnData>>,
+    pub return_data: Option<TransactionReturnData>,
     pub inner_instructions: Option<Box<[InnerInstructions]>>,
 }
