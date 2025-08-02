@@ -15,14 +15,23 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    error::RpcError, requests::JsonRequest, state::SharedState, RpcResult,
+    error::RpcError,
+    requests::JsonRequest,
+    state::{subscriptions::SubscriptionsDb, transactions::TransactionsCache},
+    RpcResult,
 };
 
 use super::Shutdown;
 
 pub struct WebsocketServer {
     socket: TcpListener,
-    state: SharedState,
+    state: ConnectionState,
+}
+
+#[derive(Clone)]
+struct ConnectionState {
+    subscriptions: SubscriptionsDb,
+    transactions: TransactionsCache,
     cancel: CancellationToken,
     shutdown: Arc<Shutdown>,
 }
@@ -34,21 +43,18 @@ impl WebsocketServer {
                 Ok((stream, _)) = self.socket.accept() => {
                     self.handle(stream);
                 },
-                _ = self.cancel.cancelled() => break,
+                _ = self.state.cancel.cancelled() => break,
             }
         }
-        self.shutdown.0.notified().await;
+        self.state.shutdown.0.notified().await;
     }
 
     fn handle(&mut self, stream: TcpStream) {
         let state = self.state.clone();
-        let cancel = self.cancel.child_token();
-        let sd = self.shutdown.clone();
 
         let io = TokioIo::new(stream);
-        let handler = service_fn(move |request| {
-            handle_upgrade(request, state.clone(), cancel.clone(), sd.clone())
-        });
+        let handler =
+            service_fn(move |request| handle_upgrade(request, state.clone()));
 
         tokio::spawn(async move {
             let builder = http1::Builder::new();
@@ -63,9 +69,7 @@ impl WebsocketServer {
 
 async fn handle_upgrade(
     request: Request<Incoming>,
-    state: SharedState,
-    cancel: CancellationToken,
-    sd: Arc<Shutdown>,
+    state: ConnectionState,
 ) -> RpcResult<Response<Empty<Bytes>>> {
     let (response, ws) = upgrade(request).map_err(RpcError::internal)?;
     tokio::spawn(async move {
@@ -73,7 +77,7 @@ async fn handle_upgrade(
             warn!("failed http upgrade to ws connection");
             return;
         };
-        let handler = ConnectionHandler::new(ws, state, cancel, sd);
+        let handler = ConnectionHandler::new(ws, state);
         handler.run().await
     });
     Ok(response)
