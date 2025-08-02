@@ -1,8 +1,9 @@
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use solana_message::inner_instruction::InnerInstructions;
 use solana_pubkey::Pubkey;
+use solana_rpc_client_api::config::RpcSimulateTransactionConfig;
 use solana_signature::Signature;
-use solana_transaction::versioned::VersionedTransaction;
+use solana_transaction::sanitized::SanitizedTransaction;
 use solana_transaction_context::{TransactionAccount, TransactionReturnData};
 use tokio::sync::{
     mpsc::{Receiver, Sender},
@@ -28,8 +29,8 @@ pub struct TransactionStatus {
 }
 
 pub struct ProcessableTransaction {
-    pub transaction: VersionedTransaction,
-    pub simulate: bool,
+    pub transaction: SanitizedTransaction,
+    pub simulation: Option<Box<RpcSimulateTransactionConfig>>,
     pub result_tx: Option<oneshot::Sender<TransactionProcessingResult>>,
 }
 
