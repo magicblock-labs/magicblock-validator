@@ -1,9 +1,8 @@
 use hyper::Response;
 use json::Serialize;
-use magicblock_gateway_types::blocks::BlockHash;
 
 use crate::{
-    requests::{payload::ResponsePayload, JsonRequest},
+    requests::{params::Serde32Bytes, payload::ResponsePayload, JsonRequest},
     server::http::dispatch::HttpDispatcher,
     utils::JsonBody,
     Slot,
@@ -18,11 +17,11 @@ impl HttpDispatcher {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct BlockHashResponse {
-            blockhash: BlockHash,
+            blockhash: Serde32Bytes,
             last_valid_block_height: Slot,
         }
         let response = BlockHashResponse {
-            blockhash: info.hash,
+            blockhash: info.hash.into(),
             last_valid_block_height: info.validity,
         };
         ResponsePayload::encode(&request.id, response, info.slot)
