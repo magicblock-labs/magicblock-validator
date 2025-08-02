@@ -8,8 +8,8 @@ use tokio::sync::{
     Notify,
 };
 
-pub use solana_account::{AccountSharedData, ReadableAccount};
-pub use solana_pubkey::Pubkey;
+use solana_account::AccountSharedData;
+use solana_pubkey::Pubkey;
 
 use crate::Slot;
 

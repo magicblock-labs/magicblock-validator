@@ -1,6 +1,5 @@
 use error::RpcError;
 use magicblock_config::RpcConfig;
-use magicblock_gateway_types::RpcChannelEndpoints;
 use server::{http::HttpServer, websocket::WebsocketServer};
 use state::SharedState;
 use tokio_util::sync::CancellationToken;
@@ -11,6 +10,7 @@ mod processor;
 mod requests;
 pub mod server;
 mod state;
+pub mod types;
 mod utils;
 
 type RpcResult<T> = Result<T, RpcError>;
