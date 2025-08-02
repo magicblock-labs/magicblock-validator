@@ -1,10 +1,6 @@
 use std::sync::Arc;
 
 use log::info;
-use magicblock_gateway_types::{
-    accounts::AccountUpdateRx, blocks::BlockUpdateRx,
-    transactions::TxnStatusRx, RpcChannelEndpoints,
-};
 use tokio_util::sync::CancellationToken;
 
 use crate::state::{
