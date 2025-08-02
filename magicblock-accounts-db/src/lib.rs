@@ -411,6 +411,11 @@ impl AccountsReader<'_> {
         let account = self.storage.read_account(offset);
         Some(reader(account))
     }
+
+    /// Check whether given account exists in the AccountsDB
+    pub fn contains(&self, pubkey: &Pubkey) -> bool {
+        self.offset.find(pubkey).is_some()
+    }
 }
 
 #[cfg(test)]

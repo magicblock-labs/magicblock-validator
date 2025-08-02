@@ -1,11 +1,10 @@
 use hyper::Response;
-use json::Serialize;
+use solana_rpc_client_api::response::RpcBlockhash;
 
 use crate::{
-    requests::{params::Serde32Bytes, payload::ResponsePayload, JsonRequest},
+    requests::{payload::ResponsePayload, JsonRequest},
     server::http::dispatch::HttpDispatcher,
     utils::JsonBody,
-    Slot,
 };
 
 impl HttpDispatcher {
@@ -14,16 +13,8 @@ impl HttpDispatcher {
         request: JsonRequest,
     ) -> Response<JsonBody> {
         let info = self.blocks.get_latest();
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct BlockHashResponse {
-            blockhash: Serde32Bytes,
-            last_valid_block_height: Slot,
-        }
-        let response = BlockHashResponse {
-            blockhash: info.hash.into(),
-            last_valid_block_height: info.validity,
-        };
-        ResponsePayload::encode(&request.id, response, info.slot)
+        let slot = info.slot;
+        let response = RpcBlockhash::from(info);
+        ResponsePayload::encode(&request.id, response, slot)
     }
 }

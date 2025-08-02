@@ -234,7 +234,6 @@ mod tests {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
-                max_ws_connections: 8008,
             },
             geyser_grpc: GeyserGrpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
@@ -323,7 +322,6 @@ mod tests {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
-                max_ws_connections: 8008,
             },
             geyser_grpc: GeyserGrpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
@@ -409,7 +407,6 @@ mod tests {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(1, 0, 0, 127)),
                 port: 9091,
-                max_ws_connections: 8008,
             },
             geyser_grpc: GeyserGrpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(1, 0, 0, 127)),
@@ -488,7 +485,6 @@ mod tests {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
-                max_ws_connections: 8008,
             },
             geyser_grpc: GeyserGrpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
