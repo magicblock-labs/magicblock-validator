@@ -3986,6 +3986,8 @@ dependencies = [
 name = "magicblock-gateway"
 version = "0.1.7"
 dependencies = [
+ "base64 0.21.7",
+ "bincode",
  "bs58",
  "fastwebsockets",
  "futures 0.3.31",
@@ -4000,6 +4002,7 @@ dependencies = [
  "scc",
  "serde",
  "solana-account-decoder",
+ "solana-message",
  "solana-rpc-client-api",
  "solana-signature",
  "solana-transaction",
@@ -4020,6 +4023,7 @@ dependencies = [
  "solana-hash",
  "solana-message",
  "solana-pubkey",
+ "solana-rpc-client-api",
  "solana-signature",
  "solana-transaction",
  "solana-transaction-context",

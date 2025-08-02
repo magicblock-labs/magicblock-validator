@@ -1,11 +1,20 @@
+use std::ops::Range;
+
+use base64::{prelude::BASE64_STANDARD, Engine};
 use http_body_util::BodyExt;
 use hyper::{
     body::{Bytes, Incoming},
     Request,
 };
-use magicblock_gateway_types::accounts::Pubkey;
+use magicblock_gateway_types::accounts::{
+    AccountSharedData, AccountsToEnsure, Pubkey,
+};
+use solana_transaction::versioned::VersionedTransaction;
+use solana_transaction_status::UiTransactionEncoding;
 
-use crate::{error::RpcError, RpcResult};
+use crate::{
+    error::RpcError, server::http::dispatch::HttpDispatcher, RpcResult,
+};
 
 use super::JsonRequest;
 
@@ -51,9 +60,62 @@ pub(crate) async fn extract_bytes(
     Ok(data)
 }
 
+impl HttpDispatcher {
+    #[inline]
+    async fn read_account_with_ensure(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Option<AccountSharedData> {
+        let mut ensured = false;
+        loop {
+            let account = self.accountsdb.get_account(pubkey).ok();
+            if account.is_some() || ensured {
+                break account;
+            }
+            let to_ensure = AccountsToEnsure::new(vec![*pubkey]);
+            let ready = to_ensure.ready.clone();
+            let _ = self.ensure_accounts_tx.send(to_ensure).await;
+            ready.notified().await;
+            ensured = true;
+        }
+    }
+
+    fn decode_transaction(
+        &self,
+        txn: &str,
+        encoding: UiTransactionEncoding,
+    ) -> RpcResult<VersionedTransaction> {
+        let decoded = match encoding {
+            UiTransactionEncoding::Base58 => {
+                bs58::decode(txn).into_vec().map_err(RpcError::parse_error)
+            }
+            UiTransactionEncoding::Base64 => {
+                BASE64_STANDARD.decode(txn).map_err(RpcError::parse_error)
+            }
+            _ => {
+                return Err(RpcError::invalid_params(
+                    "invalid transaction encoding",
+                ))
+            }
+        }?;
+        bincode::deserialize(&decoded).map_err(RpcError::invalid_params)
+    }
+}
+
 const SPL_MINT_OFFSET: usize = 0;
 const SPL_OWNER_OFFSET: usize = 32;
+const SPL_DECIMALS_OFFSET: usize = 40;
 const SPL_DELEGATE_OFFSET: usize = 73;
+
+const SPL_MINT_RANGE: Range<usize> =
+    SPL_MINT_OFFSET..SPL_MINT_OFFSET + size_of::<Pubkey>();
+const SPL_OWNER_RANGE: Range<usize> =
+    SPL_OWNER_OFFSET..SPL_OWNER_OFFSET + size_of::<Pubkey>();
+const SPL_TOKEN_AMOUNT_RANGE: Range<usize> =
+    SPL_DECIMALS_OFFSET..SPL_DECIMALS_OFFSET + size_of::<u64>();
+const SPL_DELEGATE_RANGE: Range<usize> =
+    SPL_DELEGATE_OFFSET..SPL_DELEGATE_OFFSET + size_of::<Pubkey>();
+
 const TOKEN_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const TOKEN_2022_PROGRAM_ID: Pubkey =
@@ -78,5 +140,6 @@ pub(crate) mod get_token_account_balance;
 pub(crate) mod get_token_accounts_by_delegate;
 pub(crate) mod get_token_accounts_by_owner;
 pub(crate) mod get_transaction;
+pub(crate) mod is_blockhash_valid;
 pub(crate) mod send_transaction;
 pub(crate) mod simulate_transaction;

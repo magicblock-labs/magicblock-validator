@@ -6,15 +6,13 @@ use std::{
 
 use hyper::body::{Body, Bytes, Frame, SizeHint};
 use json::Serialize;
-use magicblock_gateway_types::accounts::{
-    LockedAccount, Pubkey, ReadableAccount,
-};
+use magicblock_gateway_types::accounts::LockedAccount;
 use solana_account_decoder::{
     encode_ui_account, UiAccount, UiAccountEncoding, UiDataSliceConfig,
 };
 use solana_rpc_client_api::filter::RpcFilterType;
 
-use crate::requests::params::SerdePubkey;
+use crate::requests::params::Serde32Bytes;
 
 #[macro_export]
 macro_rules! unwrap {
@@ -137,7 +135,7 @@ impl From<Option<Vec<RpcFilterType>>> for ProgramFilters {
 }
 #[derive(Serialize)]
 pub(crate) struct AccountWithPubkey {
-    pubkey: SerdePubkey,
+    pubkey: Serde32Bytes,
     account: UiAccount,
 }
 
@@ -147,7 +145,7 @@ impl AccountWithPubkey {
         encoding: UiAccountEncoding,
         slice: Option<UiDataSliceConfig>,
     ) -> Self {
-        let pubkey = SerdePubkey(account.pubkey);
+        let pubkey = account.pubkey.into();
         let account = account.read_locked(|pk, acc| {
             encode_ui_account(pk, acc, encoding, None, slice)
         });

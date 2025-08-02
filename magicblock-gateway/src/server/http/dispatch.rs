@@ -2,7 +2,11 @@ use std::{convert::Infallible, sync::Arc};
 
 use hyper::{body::Incoming, Request, Response};
 use magicblock_accounts_db::AccountsDb;
-use magicblock_gateway_types::accounts::Pubkey;
+use magicblock_gateway_types::{
+    accounts::{EnsureAccountsTx, Pubkey},
+    transactions::TxnExecutionTx,
+    RpcChannelEndpoints,
+};
 use magicblock_ledger::Ledger;
 
 use crate::{
@@ -24,16 +28,23 @@ pub(crate) struct HttpDispatcher {
     pub(crate) ledger: Arc<Ledger>,
     pub(crate) transactions: TransactionsCache,
     pub(crate) blocks: Arc<BlocksCache>,
+    pub(crate) ensure_accounts_tx: EnsureAccountsTx,
+    pub(crate) transaction_execution_tx: TxnExecutionTx,
 }
 
 impl HttpDispatcher {
-    pub(super) fn new(state: &SharedState) -> Arc<Self> {
+    pub(super) fn new(
+        state: &SharedState,
+        channels: &RpcChannelEndpoints,
+    ) -> Arc<Self> {
         Self {
             identity: state.identity,
             accountsdb: state.accountsdb.clone(),
             ledger: state.ledger.clone(),
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
+            ensure_accounts_tx: channels.ensure_accounts_tx.clone(),
+            transaction_execution_tx: channels.transaction_execution_tx.clone(),
         }
         .into()
     }
@@ -47,9 +58,9 @@ impl HttpDispatcher {
 
         use crate::requests::JsonRpcMethod::*;
         let response = match request.method {
-            GetAccountInfo => self.get_account_info(request),
-            GetBalance => self.get_balance(request),
-            GetMultipleAccounts => self.get_multiple_accounts(request),
+            GetAccountInfo => self.get_account_info(request).await,
+            GetBalance => self.get_balance(request).await,
+            GetMultipleAccounts => self.get_multiple_accounts(request).await,
             GetProgramAccounts => self.get_program_accounts(request),
             SendTransaction => {
                 todo!()
@@ -69,9 +80,11 @@ impl HttpDispatcher {
             GetSlot => self.get_slot(request),
             GetBlock => self.get_block(request),
             GetBlocks => self.get_blocks(request),
+            GetBlocksWithLimit => self.get_blocks_with_limit(request),
             GetLatestBlockhash => self.get_latest_blockhash(request),
             GetBlockHeight => self.get_block_height(request),
             GetIdentity => self.get_identity(request),
+            IsBlockhashValid => self.is_blockhash_valid(request),
             unknown => {
                 let error = RpcError::method_not_found(unknown);
                 return Ok(ResponseErrorPayload::encode(

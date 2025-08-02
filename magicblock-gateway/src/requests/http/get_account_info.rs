@@ -1,18 +1,18 @@
 use hyper::Response;
 use magicblock_gateway_types::accounts::LockedAccount;
-use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
+use solana_account_decoder::UiAccountEncoding;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
 use crate::{
     error::RpcError,
-    requests::{params::SerdePubkey, payload::ResponsePayload, JsonRequest},
+    requests::{params::Serde32Bytes, payload::ResponsePayload, JsonRequest},
     server::http::dispatch::HttpDispatcher,
     unwrap,
     utils::JsonBody,
 };
 
 impl HttpDispatcher {
-    pub(crate) fn get_account_info(
+    pub(crate) async fn get_account_info(
         &self,
         request: JsonRequest,
     ) -> Response<JsonBody> {
@@ -21,24 +21,16 @@ impl HttpDispatcher {
             .ok_or_else(|| RpcError::invalid_request("missing params"));
         unwrap!(mut params, request.id);
         let (pubkey, config) =
-            parse_params!(params, SerdePubkey, RpcAccountInfoConfig);
-        let pubkey = pubkey.ok_or_else(|| {
+            parse_params!(params, Serde32Bytes, RpcAccountInfoConfig);
+        let pubkey = pubkey.map(Into::into).ok_or_else(|| {
             RpcError::invalid_params("missing or invalid pubkey")
         });
         unwrap!(pubkey, request.id);
         let config = config.unwrap_or_default();
         let slot = self.accountsdb.slot();
-        let account = self.accountsdb.get_account(&pubkey.0).ok().map(|acc| {
-            let locked = LockedAccount::new(pubkey.0, acc);
-            locked.read_locked(|pk, acc| {
-                encode_ui_account(
-                    pk,
-                    acc,
-                    config.encoding.unwrap_or(UiAccountEncoding::Base58),
-                    None,
-                    None,
-                )
-            })
+        let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
+        let account = self.read_account_with_ensure(&pubkey).await.map(|acc| {
+            LockedAccount::new(pubkey, acc).ui_encode(encoding);
         });
         ResponsePayload::encode(&request.id, account, slot)
     }

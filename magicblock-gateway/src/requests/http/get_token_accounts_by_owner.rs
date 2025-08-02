@@ -13,7 +13,7 @@ use crate::{
     error::RpcError,
     requests::{
         http::{SPL_MINT_OFFSET, SPL_OWNER_OFFSET, TOKEN_PROGRAM_ID},
-        params::SerdePubkey,
+        params::Serde32Bytes,
         payload::ResponsePayload,
         JsonRequest,
     },
@@ -33,7 +33,7 @@ impl HttpDispatcher {
         unwrap!(mut params, request.id);
         let (owner, filter, config) = parse_params!(
             params,
-            SerdePubkey,
+            Serde32Bytes,
             RpcTokenAccountsFilter,
             RpcAccountInfoConfig
         );
@@ -70,7 +70,7 @@ impl HttpDispatcher {
         };
         filters.push(ProgramFilter::MemCmp {
             offset: SPL_OWNER_OFFSET,
-            bytes: owner.0.to_bytes().to_vec(),
+            bytes: owner.0.to_vec(),
         });
         let accounts = self
             .accountsdb

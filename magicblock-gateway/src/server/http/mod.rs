@@ -6,6 +6,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn,
 };
+use magicblock_gateway_types::RpcChannelEndpoints;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 
@@ -23,15 +24,16 @@ pub(crate) struct HttpServer {
 impl HttpServer {
     pub(crate) async fn new(
         addr: SocketAddr,
-        state: SharedState,
+        state: &SharedState,
         cancel: CancellationToken,
+        channels: &RpcChannelEndpoints,
     ) -> RpcResult<Self> {
         let socket =
             TcpListener::bind(addr).await.map_err(RpcError::internal)?;
 
         Ok(Self {
             socket,
-            dispatcher: HttpDispatcher::new(&state),
+            dispatcher: HttpDispatcher::new(state, channels),
             cancel,
             shutdown: Default::default(),
         })
