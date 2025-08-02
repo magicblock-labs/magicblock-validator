@@ -393,6 +393,12 @@ pub struct AccountsReader<'db> {
     storage: &'db AccountsStorage,
 }
 
+/// SAFETY:
+/// AccountsReader is not only used to get readable access to the
+/// underlying database, and never outlives the the backing storage
+unsafe impl Send for AccountsReader<'_> {}
+unsafe impl Sync for AccountsReader<'_> {}
+
 impl AccountsReader<'_> {
     /// Find the account specified by the pubkey and pass it to the reader function
     pub fn read<F, R>(&self, pubkey: &Pubkey, reader: F) -> Option<R>

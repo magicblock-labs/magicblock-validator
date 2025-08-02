@@ -3,7 +3,7 @@ use json::Deserialize;
 use crate::{
     encoder::TransactionLogsEncoder,
     error::RpcError,
-    requests::{params::SerdePubkey, JsonRequest},
+    requests::{params::Serde32Bytes, JsonRequest},
     server::websocket::dispatch::{SubResult, WsDispatcher},
     RpcResult,
 };
@@ -22,7 +22,7 @@ impl WsDispatcher {
         enum LogFilter {
             #[serde(alias = "allWithVotes")]
             All,
-            Mentions([SerdePubkey; 1]),
+            Mentions([Serde32Bytes; 1]),
         }
 
         let filter = parse_params!(params, LogFilter);
@@ -32,7 +32,7 @@ impl WsDispatcher {
         let encoder = match filter {
             LogFilter::All => TransactionLogsEncoder::All,
             LogFilter::Mentions([pubkey]) => {
-                TransactionLogsEncoder::Mentions(pubkey.0)
+                TransactionLogsEncoder::Mentions(pubkey.into())
             }
         };
         let handle = self
