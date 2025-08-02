@@ -1,12 +1,10 @@
 use solana_account_decoder::UiAccountEncoding;
-use solana_rpc_client_api::config::{
-    RpcAccountInfoConfig, RpcProgramAccountsConfig,
-};
+use solana_rpc_client_api::config::RpcProgramAccountsConfig;
 
 use crate::{
     encoder::{AccountEncoder, ProgramAccountEncoder},
     error::RpcError,
-    requests::{params::SerdePubkey, JsonRequest},
+    requests::{params::Serde32Bytes, JsonRequest},
     server::websocket::dispatch::{SubResult, WsDispatcher},
     utils::ProgramFilters,
     RpcResult,
@@ -23,8 +21,8 @@ impl WsDispatcher {
             .ok_or_else(|| RpcError::invalid_request("missing params"))?;
 
         let (pubkey, config) =
-            parse_params!(params, SerdePubkey, RpcProgramAccountsConfig);
-        let pubkey = pubkey.ok_or_else(|| {
+            parse_params!(params, Serde32Bytes, RpcProgramAccountsConfig);
+        let pubkey = pubkey.map(Into::into).ok_or_else(|| {
             RpcError::invalid_params("missing or invalid pubkey")
         })?;
         let config = config.unwrap_or_default();
@@ -37,7 +35,7 @@ impl WsDispatcher {
         let encoder = ProgramAccountEncoder { encoder, filters };
         let handle = self
             .subscriptions
-            .subscribe_to_program(pubkey.0, encoder, self.chan.clone())
+            .subscribe_to_program(pubkey, encoder, self.chan.clone())
             .await;
         self.unsubs.insert(handle.id, handle.cleanup);
         Ok(SubResult::SubId(handle.id))
