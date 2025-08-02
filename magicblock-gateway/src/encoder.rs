@@ -1,16 +1,16 @@
 use hyper::body::Bytes;
 use json::Serialize;
 use magicblock_gateway_types::{
-    accounts::{AccountSharedData, Pubkey, ReadableAccount},
-    transactions::{
-        TransactionProcessingResult, TransactionResult, TransactionStatus,
-    },
+    accounts::{AccountSharedData, LockedAccount, Pubkey, ReadableAccount},
+    transactions::{TransactionResult, TransactionStatus},
 };
-use solana_account_decoder::{encode_ui_account, UiAccount, UiAccountEncoding};
+use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
 
 use crate::{
-    requests::payload::NotificationPayload,
-    state::subscriptions::SubscriptionID, Slot,
+    requests::{params::SerdeSignature, payload::NotificationPayload},
+    state::subscriptions::SubscriptionID,
+    utils::{AccountWithPubkey, ProgramFilters},
+    Slot,
 };
 
 pub(crate) trait Encoder: Ord + Eq + Clone {
@@ -37,8 +37,8 @@ impl From<&AccountEncoder> for UiAccountEncoding {
     }
 }
 
-impl From<&UiAccountEncoding> for AccountEncoder {
-    fn from(value: &UiAccountEncoding) -> Self {
+impl From<UiAccountEncoding> for AccountEncoder {
+    fn from(value: UiAccountEncoding) -> Self {
         match value {
             UiAccountEncoding::Base58 | UiAccountEncoding::Binary => {
                 Self::Base58
@@ -51,44 +51,13 @@ impl From<&UiAccountEncoding> for AccountEncoder {
 }
 
 #[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
-pub enum ProgramFilter {
-    DataSize(usize),
-    MemCmp { offset: usize, bytes: Vec<u8> },
-}
-
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
-pub struct ProgramFilters(Vec<ProgramFilter>);
-
-impl ProgramFilter {
-    fn matches(&self, data: &[u8]) -> bool {
-        match self {
-            Self::DataSize(len) => data.len() == *len,
-            Self::MemCmp { offset, bytes } => {
-                if let Some(slice) = data.get(*offset..*offset + bytes.len()) {
-                    slice == bytes
-                } else {
-                    false
-                }
-            }
-        }
-    }
-}
-
-impl ProgramFilters {
-    #[inline]
-    pub fn matches(&self, data: &[u8]) -> bool {
-        self.0.iter().all(|f| f.matches(data))
-    }
-}
-
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub struct ProgramAccountEncoder {
     pub encoder: AccountEncoder,
     pub filters: ProgramFilters,
 }
 
 impl Encoder for AccountEncoder {
-    type Data = (Pubkey, AccountSharedData);
+    type Data = LockedAccount;
 
     fn encode(
         &self,
@@ -96,34 +65,20 @@ impl Encoder for AccountEncoder {
         data: &Self::Data,
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        let encoded =
-            encode_ui_account(&data.0, &data.1, self.into(), None, None);
+        let encoded = data.read_locked(|pk, acc| {
+            encode_ui_account(pk, acc, self.into(), None, None)
+        });
         let method = "accountNotification";
         NotificationPayload::encode(encoded, slot, method, id)
     }
 }
 
 impl Encoder for ProgramAccountEncoder {
-    type Data = (Pubkey, AccountSharedData);
+    type Data = LockedAccount;
 
     fn encode(&self, slot: Slot, data: &Self::Data, id: u64) -> Option<Bytes> {
-        #[derive(Serialize)]
-        struct AccountWithPubkey {
-            pubkey: String,
-            account: UiAccount,
-        }
-        self.filters.matches(data.1.data()).then_some(())?;
-        let account = encode_ui_account(
-            &data.0,
-            &data.1,
-            (&self.encoder).into(),
-            None,
-            None,
-        );
-        let value = AccountWithPubkey {
-            pubkey: data.0.to_string(),
-            account,
-        };
+        self.filters.matches(data.account.data()).then_some(())?;
+        let value = AccountWithPubkey::new(data, (&self.encoder).into(), None);
         let method = "programNotification";
         NotificationPayload::encode(value, slot, method, id)
     }
@@ -167,10 +122,7 @@ impl Encoder for TransactionLogsEncoder {
         data: &Self::Data,
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        let TransactionProcessingResult::Execution(execution) = &data.result
-        else {
-            return None;
-        };
+        let execution = &data.result;
         if let Self::Mentions(pubkey) = self {
             execution
                 .accounts
@@ -180,13 +132,13 @@ impl Encoder for TransactionLogsEncoder {
         }
         #[derive(Serialize)]
         struct TransactionLogs<'a> {
-            signature: String,
+            signature: SerdeSignature,
             err: Option<String>,
             logs: &'a [String],
         }
         let method = "logsNotification";
         let result = TransactionLogs {
-            signature: data.signature.to_string(),
+            signature: SerdeSignature(data.signature),
             err: execution.result.as_ref().map_err(|e| e.to_string()).err(),
             logs: &execution.logs,
         };

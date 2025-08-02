@@ -192,11 +192,15 @@ fn test_get_program_accounts() {
     let accounts = tenv.get_program_accounts(&OWNER, |_| true);
     assert!(accounts.is_ok(), "program account should be in database");
     let mut accounts = accounts.unwrap();
-    assert_eq!(accounts.len(), 1, "one program account has been inserted");
     assert_eq!(
-        accounts.pop().unwrap().1,
+        accounts.next().unwrap().1,
         acc.account,
         "returned program account should match inserted one"
+    );
+    assert_eq!(
+        accounts.next(),
+        None,
+        "only one program account should have been inserted"
     );
 }
 
@@ -414,7 +418,7 @@ fn test_owner_change() {
         .get_program_accounts(&OWNER, |_| true)
         .expect("failed to get program accounts");
     let expected = (acc.pubkey, acc.account.clone());
-    assert_eq!(accounts.pop(), Some(expected));
+    assert_eq!(accounts.next(), Some(expected));
 
     let new_owner = Pubkey::new_unique();
     acc.account.set_owner(new_owner);
@@ -422,14 +426,14 @@ fn test_owner_change() {
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER]);
     assert!(matches!(result, Err(AccountsDbError::NotFound)));
     let result = tenv.get_program_accounts(&OWNER, |_| true);
-    assert!(result.map(|pks| pks.is_empty()).unwrap_or_default());
+    assert!(result.map(|pks| pks.count() == 0).unwrap_or_default());
 
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER, new_owner]);
     assert!(matches!(result, Ok(1)));
-    accounts = tenv
+    let mut accounts = tenv
         .get_program_accounts(&new_owner, |_| true)
         .expect("failed to get program accounts");
-    assert_eq!(accounts.pop().map(|(k, _)| k), Some(acc.pubkey));
+    assert_eq!(accounts.next().map(|(k, _)| k), Some(acc.pubkey));
 }
 
 #[test]

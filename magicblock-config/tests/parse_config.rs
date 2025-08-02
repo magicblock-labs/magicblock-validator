@@ -7,7 +7,7 @@ use magicblock_config::{
     MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteConfig,
     RpcConfig, ValidatorConfig,
 };
-use solana_sdk::pubkey;
+use solana_pubkey::pubkey;
 use url::Url;
 
 #[test]
