@@ -27,6 +27,7 @@ pub(crate) enum JsonRpcMethod {
     GetSignatureStatuses,
     GetSignaturesForAddress,
     GetSlot,
+    GetTokenAccountBalance,
     GetTokenAccountsByDelegate,
     GetTokenAccountsByOwner,
     GetTransaction,

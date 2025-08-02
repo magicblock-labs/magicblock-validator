@@ -31,14 +31,10 @@ pub struct PubsubConfig {
 }
 
 impl PubsubConfig {
-    pub fn from_rpc(
-        rpc_addr: IpAddr,
-        rpc_port: u16,
-        max_connections: usize,
-    ) -> Self {
+    pub fn from_rpc(rpc_addr: IpAddr, rpc_port: u16) -> Self {
         Self {
             socket: SocketAddr::new(rpc_addr, rpc_port + 1),
-            max_connections,
+            max_connections: 16384,
         }
     }
 }
