@@ -1,5 +1,4 @@
 use hyper::Response;
-use magicblock_gateway_types::accounts::LockedAccount;
 use solana_account_decoder::UiAccountEncoding;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
@@ -7,6 +6,7 @@ use crate::{
     error::RpcError,
     requests::{params::Serde32Bytes, payload::ResponsePayload, JsonRequest},
     server::http::dispatch::HttpDispatcher,
+    types::accounts::LockedAccount,
     unwrap,
     utils::JsonBody,
 };

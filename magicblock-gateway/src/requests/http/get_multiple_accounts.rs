@@ -1,9 +1,6 @@
 use std::convert::identity;
 
 use hyper::Response;
-use magicblock_gateway_types::accounts::{
-    AccountsToEnsure, LockedAccount, Pubkey,
-};
 use solana_account_decoder::UiAccountEncoding;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
