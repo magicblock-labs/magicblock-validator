@@ -16,6 +16,9 @@ use crate::{
     AdbResult,
 };
 
+pub type Offset = u32;
+pub type Blocks = u32;
+
 const WEMPTY: WriteFlags = WriteFlags::empty();
 
 const ACCOUNTS_INDEX: &str = "accounts-idx";
@@ -123,7 +126,10 @@ impl AccountsDbIndex {
 
     /// Retrieve the offset at which account can be read from main storage
     #[inline(always)]
-    pub(crate) fn get_account_offset(&self, pubkey: &Pubkey) -> AdbResult<u32> {
+    pub(crate) fn get_account_offset(
+        &self,
+        pubkey: &Pubkey,
+    ) -> AdbResult<Offset> {
         let txn = self.env.begin_ro_txn()?;
         let Some(offset) = self.accounts.get(&txn, pubkey)? else {
             return Err(AccountsDbError::NotFound);
@@ -137,7 +143,7 @@ impl AccountsDbIndex {
             //
             // We read the data stored by corresponding put in `insert_account`,
             // thus it should be of valid length and contain valid value
-            unsafe { (offset.as_ptr() as *const u32).read_unaligned() };
+            unsafe { (offset.as_ptr() as *const Offset).read_unaligned() };
         Ok(offset)
     }
 
@@ -168,9 +174,9 @@ impl AccountsDbIndex {
         let mut dealloc = None;
 
         // merge offset and block count into one single u64 and cast it to [u8; 8]
-        let index_value = bytes!(#pack, offset, u32, blocks, u32);
+        let index_value = bytes!(#pack, offset, Offset, blocks, Blocks);
         // concatenate offset where account is stored with pubkey of that account
-        let offset_and_pubkey = bytes!(#pack, offset, u32, *pubkey, Pubkey);
+        let offset_and_pubkey = bytes!(#pack, offset, Offset, *pubkey, Pubkey);
 
         // optimisitically try to insert account to index, assuming that it doesn't exist
         let inserted =
@@ -206,7 +212,7 @@ impl AccountsDbIndex {
         // and put it into deallocation index, so the space can be recycled later
         let key = allocation.blocks.to_le_bytes();
         let value =
-            bytes!(#pack, allocation.offset, u32, allocation.blocks, u32);
+            bytes!(#pack, allocation.offset, Offset, allocation.blocks, Blocks);
         self.deallocations.put(txn, key, value)?;
 
         // now we can overwrite the index record
@@ -226,7 +232,7 @@ impl AccountsDbIndex {
         // locate the account entry
         let result = cursor
             .get(Some(pubkey.as_ref()), None, MDB_SET_OP)
-            .map(|(_, v)| bytes!(#unpack, v, u32, u32));
+            .map(|(_, v)| bytes!(#unpack, v, Offset, Blocks));
         let (offset, blocks) = match result {
             Ok(r) => r,
             Err(lmdb::Error::NotFound) => return Ok(()),
@@ -241,7 +247,7 @@ impl AccountsDbIndex {
         self.deallocations.put(
             &mut txn,
             blocks.to_le_bytes(),
-            bytes!(#pack, offset, u32, blocks, u32),
+            bytes!(#pack, offset, Offset, blocks, Blocks),
         )?;
 
         // we also need to cleanup `programs` index
@@ -279,7 +285,7 @@ impl AccountsDbIndex {
         )?;
         // track new owner of the account via programs' index
         let offset_and_pubkey =
-            bytes!(#pack, allocation.offset, u32, *pubkey, Pubkey);
+            bytes!(#pack, allocation.offset, Offset, *pubkey, Pubkey);
         self.programs.put(&mut txn, owner, offset_and_pubkey)?;
         // track the reverse relation between account and its owner
         self.owners.put(&mut txn, pubkey, owner)?;
@@ -292,9 +298,9 @@ impl AccountsDbIndex {
         pubkey: &Pubkey,
         old_owner: Option<Pubkey>,
         txn: &mut RwTransaction,
-        offset: u32,
+        offset: Offset,
     ) -> lmdb::Result<()> {
-        let val = bytes!(#pack, offset, u32, *pubkey, Pubkey);
+        let val = bytes!(#pack, offset, Offset, *pubkey, Pubkey);
         if let Some(owner) = old_owner {
             return self.programs.del(txn, owner, Some(&val));
         }
@@ -344,6 +350,12 @@ impl AccountsDbIndex {
         OffsetPubkeyIter::new(&self.programs, txn, None)
     }
 
+    /// Obtain a wrapped cursor to query account offsets repeatedly
+    pub(crate) fn offset_finder(&self) -> AdbResult<AccountOffsetFinder> {
+        let txn = self.env.begin_ro_txn()?;
+        AccountOffsetFinder::new(&self.accounts, txn)
+    }
+
     /// Returns the number of accounts in the database
     pub(crate) fn get_accounts_count(&self) -> usize {
         let Ok(txn) = self.env.begin_ro_txn() else {
@@ -358,7 +370,7 @@ impl AccountsDbIndex {
     /// accounts' reallocations due to their resizing
     pub(crate) fn try_recycle_allocation(
         &self,
-        space: u32,
+        space: Blocks,
     ) -> AdbResult<ExistingAllocation> {
         let mut txn = self.env.begin_rw_txn()?;
         let mut cursor = self.deallocations.cursor_rw(&mut txn)?;
@@ -369,7 +381,7 @@ impl AccountsDbIndex {
         let (_, val) =
             cursor.get(Some(&space.to_le_bytes()), None, MDB_SET_RANGE_OP)?;
 
-        let (offset, blocks) = bytes!(#unpack, val, u32, u32);
+        let (offset, blocks) = bytes!(#unpack, val, Offset, Blocks);
         // delete the allocation record from recycleable list
         cursor.del(WEMPTY)?;
 
@@ -412,7 +424,7 @@ impl AccountsDbIndex {
 }
 
 pub(crate) mod iterator;
-mod utils;
+pub(super) mod utils;
 //mod standalone;
 mod table;
 #[cfg(test)]

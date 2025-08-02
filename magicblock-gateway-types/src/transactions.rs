@@ -1,3 +1,4 @@
+use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use solana_message::inner_instruction::InnerInstructions;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -10,26 +11,26 @@ use tokio::sync::{
 
 pub use solana_transaction_error::TransactionError;
 
-pub type TxnStatusRx = Receiver<TransactionStatus>;
-pub type TxnStatusTx = Sender<TransactionStatus>;
+use crate::Slot;
+
+pub type TxnStatusRx = MpmcReceiver<TransactionStatus>;
+pub type TxnStatusTx = MpmcSender<TransactionStatus>;
 
 pub type TxnExecutionRx = Receiver<ProcessableTransaction>;
 pub type TxnExecutionTx = Sender<ProcessableTransaction>;
-
-pub type TxnResultRx = Receiver<TransactionProcessingResult>;
-pub type TxnResultTx = Sender<TransactionProcessingResult>;
 
 pub type TransactionResult = solana_transaction_error::TransactionResult<()>;
 
 pub struct TransactionStatus {
     pub signature: Signature,
-    pub result: TransactionProcessingResult,
+    pub slot: Slot,
+    pub result: TransactionExecutionResult,
 }
 
 pub struct ProcessableTransaction {
     pub transaction: VersionedTransaction,
     pub simulate: bool,
-    pub result_tx: Option<oneshot::Sender<TransactionResult>>,
+    pub result_tx: Option<oneshot::Sender<TransactionProcessingResult>>,
 }
 
 pub enum TransactionProcessingResult {

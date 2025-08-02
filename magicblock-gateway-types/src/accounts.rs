@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use solana_account::cow::AccountSeqLock;
 use tokio::sync::{
     mpsc::{Receiver, Sender},
@@ -9,10 +10,12 @@ use tokio::sync::{
 pub use solana_account::{AccountSharedData, ReadableAccount};
 pub use solana_pubkey::Pubkey;
 
+use crate::Slot;
+
 /// Receiving end of account updates channel
-pub type AccountUpdateRx = Receiver<LockedAccount>;
+pub type AccountUpdateRx = MpmcReceiver<AccountWithSlot>;
 /// Sending end of account updates channel
-pub type AccountUpdateTx = Sender<LockedAccount>;
+pub type AccountUpdateTx = MpmcSender<AccountWithSlot>;
 
 /// Receiving end of the channel for messages to ensure accounts
 pub type EnsureAccountsRx = Receiver<AccountsToEnsure>;
@@ -25,6 +28,19 @@ pub struct AccountsToEnsure {
     pub accounts: Box<[Pubkey]>,
     /// Notification handle, to signal the waiters that accounts' presence check is complete
     pub ready: Arc<Notify>,
+}
+
+pub struct AccountWithSlot {
+    pub account: LockedAccount,
+    pub slot: Slot,
+}
+
+impl AccountsToEnsure {
+    fn lol(self) {
+        let acc = self.accounts;
+        let iter = IntoIterator::into_iter(acc);
+        for i in iter {}
+    }
 }
 
 /// Account state after transaction execution. The optional locking mechanism ensures that for
@@ -51,6 +67,40 @@ impl LockedAccount {
             lock,
             account,
             pubkey,
+        }
+    }
+
+    #[inline]
+    fn changed(&self) -> bool {
+        self.lock
+            .as_ref()
+            .map(|lock| lock.changed())
+            .unwrap_or_default()
+    }
+
+    pub fn read_locked<F, R>(&self, reader: F) -> R
+    where
+        F: Fn(&Pubkey, &AccountSharedData) -> R,
+    {
+        let result = reader(&self.pubkey, &self.account);
+        if !self.changed() {
+            return result;
+        }
+        let AccountSharedData::Borrowed(ref borrowed) = self.account else {
+            return result;
+        };
+        let Some(mut lock) = self.lock.clone() else {
+            return result;
+        };
+        let mut account = borrowed.reinit();
+        loop {
+            let result = reader(&self.pubkey, &account);
+            if lock.changed() {
+                account = borrowed.reinit();
+                lock.relock();
+                continue;
+            }
+            break result;
         }
     }
 }

@@ -13,7 +13,7 @@ use crate::{error::RpcError, state::SharedState, RpcResult};
 
 use super::Shutdown;
 
-struct HttpServer {
+pub(crate) struct HttpServer {
     socket: TcpListener,
     dispatcher: Arc<HttpDispatcher>,
     cancel: CancellationToken,
@@ -21,29 +21,23 @@ struct HttpServer {
 }
 
 impl HttpServer {
-    async fn new(
+    pub(crate) async fn new(
         addr: SocketAddr,
         state: SharedState,
         cancel: CancellationToken,
     ) -> RpcResult<Self> {
         let socket =
             TcpListener::bind(addr).await.map_err(RpcError::internal)?;
-        let shutdown = Arc::default();
 
-        let dispatcher = Arc::new(HttpDispatcher {
-            accountsdb: state.accountsdb.clone(),
-            ledger: state.ledger.clone(),
-            transactions: state.transactions.clone(),
-        });
         Ok(Self {
             socket,
-            dispatcher,
+            dispatcher: HttpDispatcher::new(&state),
             cancel,
-            shutdown,
+            shutdown: Default::default(),
         })
     }
 
-    async fn run(mut self) {
+    pub(crate) async fn run(mut self) {
         loop {
             tokio::select! {
                 biased; Ok((stream, _)) = self.socket.accept() => self.handle(stream),
@@ -81,4 +75,4 @@ impl HttpServer {
     }
 }
 
-mod dispatch;
+pub(crate) mod dispatch;
