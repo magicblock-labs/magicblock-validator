@@ -10,8 +10,11 @@ edition.workspace = true
 [dependencies]
 tokio = { workspace = true }
 
+flume = { workspace = true }
+
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
+solana-hash = { workspace = true }
 solana-message = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-signature = { workspace = true }

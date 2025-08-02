@@ -115,7 +115,7 @@ pub(crate) fn get_filtered_program_accounts(
     mut filters: Vec<RpcFilterType>,
 ) -> RpcCustomResult<Vec<(Pubkey, AccountSharedData)>> {
     optimize_filters(&mut filters);
-    let filter_closure = |account: &AccountSharedData| {
+    let filter_closure = move |account: &AccountSharedData| {
         filters
             .iter()
             .all(|filter_type| filter_allows(filter_type, account))
@@ -128,14 +128,16 @@ pub(crate) fn get_filtered_program_accounts(
         }
         // NOTE: this used to use an account index based filter but we changed it to basically
         // be the same as the else branch
-        Ok(bank.get_filtered_program_accounts(program_id, |account| {
-            // The program-id account index checks for Account owner on inclusion. However, due
-            // to the current AccountsDb implementation, an account may remain in storage as a
-            // zero-lamport AccountSharedData::Default() after being wiped and reinitialized in later
-            // updates. We include the redundant filters here to avoid returning these
-            // accounts.
-            filter_closure(account)
-        }))
+        Ok(
+            bank.get_filtered_program_accounts(program_id, move |account| {
+                // The program-id account index checks for Account owner on inclusion. However, due
+                // to the current AccountsDb implementation, an account may remain in storage as a
+                // zero-lamport AccountSharedData::Default() after being wiped and reinitialized in later
+                // updates. We include the redundant filters here to avoid returning these
+                // accounts.
+                filter_closure(account)
+            }),
+        )
     } else {
         // this path does not need to provide a mb limit because we only want to support secondary indexes
         Ok(bank.get_filtered_program_accounts(program_id, filter_closure))

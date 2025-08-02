@@ -3,7 +3,7 @@ use std::str::FromStr;
 use clap::{Args, ValueEnum};
 use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use strum::{Display, EnumString};
 use url::Url;
 

@@ -4,7 +4,7 @@ use clap::Args;
 use errors::{ConfigError, ConfigResult};
 use magicblock_config_macro::Mergeable;
 use serde::{Deserialize, Serialize};
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 
 mod accounts;
 mod accounts_db;
@@ -159,9 +159,8 @@ fn program_config_parser(s: &str) -> Result<ProgramConfig, String> {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
+    use super::Pubkey;
     use isocountry::CountryCode;
-    use magicblock_config_helpers::Merge;
-    use solana_sdk::pubkey::Pubkey;
     use url::Url;
 
     use super::*;

@@ -8,7 +8,7 @@ use magicblock_config::{
     LifecycleMode, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
     ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
 };
-use solana_sdk::pubkey;
+use solana_pubkey::pubkey;
 use url::Url;
 
 #[test]

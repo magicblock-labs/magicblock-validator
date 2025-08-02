@@ -4184,7 +4184,8 @@ dependencies = [
  "magicblock-config-helpers",
  "magicblock-config-macro",
  "serde",
- "solana-sdk",
+ "solana-keypair",
+ "solana-pubkey",
  "strum",
  "test-tools-core",
  "thiserror 1.0.69",
@@ -6906,7 +6907,6 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=2476dab#2476dabe33b5377f99321dd06be8ad525d3119f2"
 dependencies = [
  "bincode",
  "qualifier_attr",
