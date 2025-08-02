@@ -43,7 +43,7 @@ impl SignaturesExpirer {
         self.cache.push_back(sig);
     }
 
-    pub(crate) async fn step(&mut self) -> Signature {
+    pub(crate) async fn expire(&mut self) -> Signature {
         loop {
             'expire: {
                 let Some(s) = self.cache.front() else {

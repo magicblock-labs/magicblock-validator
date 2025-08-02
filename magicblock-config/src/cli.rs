@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Error, Parser};
-use solana_sdk::signature::Keypair;
+use solana_keypair::Keypair;
 
 use crate::EphemeralConfig;
 

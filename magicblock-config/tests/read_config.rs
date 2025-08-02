@@ -11,7 +11,7 @@ use magicblock_config::{
     MetricsServiceConfig, ProgramConfig, RemoteCluster, RemoteConfig,
     RpcConfig, ValidatorConfig,
 };
-use solana_sdk::pubkey;
+use solana_pubkey::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
 use url::Url;
 

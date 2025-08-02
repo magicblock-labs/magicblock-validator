@@ -11,7 +11,8 @@ edition.workspace = true
 bs58 = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 serde = { workspace = true, features = ["derive"] }
-solana-sdk = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-keypair = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 url = { workspace = true, features = ["serde"] }

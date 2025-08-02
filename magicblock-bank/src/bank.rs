@@ -1006,13 +1006,14 @@ impl Bank {
         filter: F,
     ) -> Vec<TransactionAccount>
     where
-        F: Fn(&AccountSharedData) -> bool + Send + Sync,
+        F: Fn(&AccountSharedData) -> bool + Send + Sync + 'static,
     {
         self.accounts_db
             .get_program_accounts(program_id, filter)
             .inspect_err(|err| {
                 log::error!("failed to load program accounts: {err}")
             })
+            .map(Iterator::collect::<Vec<_>>)
             .unwrap_or_default()
     }
 
