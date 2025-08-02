@@ -1,14 +1,11 @@
 use hyper::body::Bytes;
 use json::Serialize;
-use magicblock_gateway_types::{
-    accounts::{AccountSharedData, LockedAccount, Pubkey, ReadableAccount},
-    transactions::{TransactionResult, TransactionStatus},
-};
 use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
 
 use crate::{
     requests::{params::SerdeSignature, payload::NotificationPayload},
     state::subscriptions::SubscriptionID,
+    types::accounts::LockedAccount,
     utils::{AccountWithPubkey, ProgramFilters},
     Slot,
 };

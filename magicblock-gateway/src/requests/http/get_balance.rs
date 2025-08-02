@@ -1,5 +1,4 @@
 use hyper::Response;
-use magicblock_gateway_types::accounts::ReadableAccount;
 
 use crate::{
     error::RpcError,

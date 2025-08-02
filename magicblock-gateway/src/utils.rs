@@ -6,7 +6,6 @@ use std::{
 
 use hyper::body::{Body, Bytes, Frame, SizeHint};
 use json::Serialize;
-use magicblock_gateway_types::accounts::LockedAccount;
 use solana_account_decoder::{
     encode_ui_account, UiAccount, UiAccountEncoding, UiDataSliceConfig,
 };
