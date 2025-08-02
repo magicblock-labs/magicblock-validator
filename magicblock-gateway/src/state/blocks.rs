@@ -2,6 +2,7 @@ use std::ops::Deref;
 
 use magicblock_gateway_types::blocks::{BlockHash, BlockMeta, BlockUpdate};
 use parking_lot::RwLock;
+use solana_rpc_client_api::response::RpcBlockhash;
 
 use crate::Slot;
 
@@ -60,4 +61,13 @@ pub(crate) struct BlockHashInfo {
     pub(crate) hash: BlockHash,
     pub(crate) validity: Slot,
     pub(crate) slot: Slot,
+}
+
+impl From<BlockHashInfo> for RpcBlockhash {
+    fn from(value: BlockHashInfo) -> Self {
+        Self {
+            blockhash: value.hash.to_string(),
+            last_valid_block_height: value.validity,
+        }
+    }
 }

@@ -22,3 +22,4 @@ solana-rpc-client-api = { workspace = true }
 solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
 solana-transaction-context = { workspace = true }
+solana-transaction-status-client-types = { workspace = true }

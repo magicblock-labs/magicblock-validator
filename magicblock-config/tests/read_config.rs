@@ -85,7 +85,6 @@ fn test_load_local_dev_with_programs_toml() {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 7799,
-                max_ws_connections: 16384
             },
             geyser_grpc: GeyserGrpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
@@ -179,7 +178,6 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 1, 0, 1)),
                 port: 123,
-                max_ws_connections: 16384
             },
             geyser_grpc: GeyserGrpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 1, 0, 1)),

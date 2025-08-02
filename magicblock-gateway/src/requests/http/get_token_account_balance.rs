@@ -39,7 +39,7 @@ impl HttpDispatcher {
             .get(SPL_MINT_RANGE)
             .map(Pubkey::try_from)
             .transpose()
-            .map_err(|e| RpcError::invalid_params(e));
+            .map_err(RpcError::invalid_params);
         unwrap!(mint, request.id);
         let mint = mint
             .ok_or_else(|| RpcError::invalid_params("invalid token account"));

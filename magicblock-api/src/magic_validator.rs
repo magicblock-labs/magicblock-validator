@@ -397,7 +397,6 @@ impl MagicValidator {
         let pubsub_config = PubsubConfig::from_rpc(
             config.validator_config.rpc.addr,
             config.validator_config.rpc.port,
-            config.validator_config.rpc.max_ws_connections,
         );
         validator::init_validator_authority(identity_keypair);
 

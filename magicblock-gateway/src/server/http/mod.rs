@@ -7,7 +7,10 @@ use hyper_util::{
     server::conn,
 };
 use magicblock_gateway_types::RpcChannelEndpoints;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::oneshot::{error::RecvError, Receiver},
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{error::RpcError, state::SharedState, RpcResult};
@@ -19,6 +22,7 @@ pub(crate) struct HttpServer {
     dispatcher: Arc<HttpDispatcher>,
     cancel: CancellationToken,
     shutdown: Arc<Shutdown>,
+    shutdown_rx: Receiver<()>,
 }
 
 impl HttpServer {
@@ -30,12 +34,14 @@ impl HttpServer {
     ) -> RpcResult<Self> {
         let socket =
             TcpListener::bind(addr).await.map_err(RpcError::internal)?;
+        let (shutdown, shutdown_rx) = Shutdown::new();
 
         Ok(Self {
             socket,
             dispatcher: HttpDispatcher::new(state, channels),
             cancel,
-            shutdown: Default::default(),
+            shutdown,
+            shutdown_rx,
         })
     }
 
@@ -46,7 +52,8 @@ impl HttpServer {
                 _ = self.cancel.cancelled() => break,
             }
         }
-        self.shutdown.0.notified().await;
+        drop(self.shutdown);
+        let _ = self.shutdown_rx.await;
     }
 
     fn handle(&mut self, stream: TcpStream) {

@@ -6,6 +6,7 @@ use hyper::{
     body::{Bytes, Incoming},
     Request,
 };
+use json::Serialize;
 use magicblock_gateway_types::accounts::{
     AccountSharedData, AccountsToEnsure, Pubkey,
 };
@@ -13,10 +14,11 @@ use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_status::UiTransactionEncoding;
 
 use crate::{
-    error::RpcError, server::http::dispatch::HttpDispatcher, RpcResult,
+    error::RpcError, server::http::dispatch::HttpDispatcher,
+    state::blocks::BlockHashInfo, RpcResult, Slot,
 };
 
-use super::JsonRequest;
+use super::{params::Serde32Bytes, JsonRequest};
 
 pub(crate) enum Data {
     Empty,

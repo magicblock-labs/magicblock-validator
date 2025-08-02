@@ -62,15 +62,14 @@ impl HttpDispatcher {
             GetBalance => self.get_balance(request).await,
             GetMultipleAccounts => self.get_multiple_accounts(request).await,
             GetProgramAccounts => self.get_program_accounts(request),
-            SendTransaction => {
-                todo!()
-            }
-            SimulateTransaction => {
-                todo!()
-            }
+            SendTransaction => self.send_transaction(request).await,
+            SimulateTransaction => self.simulate_transaction(request).await,
             GetTransaction => self.get_transaction(request),
             GetSignatureStatuses => self.get_signature_statuses(request),
             GetSignaturesForAddress => self.get_signatures_for_address(request),
+            GetTokenAccountBalance => {
+                self.get_token_account_balance(request).await
+            }
             GetTokenAccountsByOwner => {
                 self.get_token_accounts_by_owner(request)
             }

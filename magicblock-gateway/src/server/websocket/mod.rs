@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use connection::ConnectionHandler;
 use fastwebsockets::upgrade::upgrade;
@@ -11,13 +11,20 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use log::warn;
-use tokio::net::{TcpListener, TcpStream};
+use magicblock_gateway_types::RpcChannelEndpoints;
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::oneshot::Receiver,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     error::RpcError,
     requests::JsonRequest,
-    state::{subscriptions::SubscriptionsDb, transactions::TransactionsCache},
+    state::{
+        subscriptions::SubscriptionsDb, transactions::TransactionsCache,
+        SharedState,
+    },
     RpcResult,
 };
 
@@ -26,6 +33,7 @@ use super::Shutdown;
 pub struct WebsocketServer {
     socket: TcpListener,
     state: ConnectionState,
+    shutdown: Receiver<()>,
 }
 
 #[derive(Clone)]
@@ -37,7 +45,28 @@ struct ConnectionState {
 }
 
 impl WebsocketServer {
-    pub async fn run(mut self) {
+    pub(crate) async fn new(
+        addr: SocketAddr,
+        state: &SharedState,
+        cancel: CancellationToken,
+    ) -> RpcResult<Self> {
+        let socket =
+            TcpListener::bind(addr).await.map_err(RpcError::internal)?;
+        let (shutdown, rx) = Shutdown::new();
+        let state = ConnectionState {
+            subscriptions: state.subscriptions.clone(),
+            transactions: state.transactions.clone(),
+            cancel,
+            shutdown,
+        };
+        Ok(Self {
+            socket,
+            state,
+            shutdown: rx,
+        })
+    }
+
+    pub(crate) async fn run(mut self) {
         loop {
             tokio::select! {
                 Ok((stream, _)) = self.socket.accept() => {
@@ -46,7 +75,8 @@ impl WebsocketServer {
                 _ = self.state.cancel.cancelled() => break,
             }
         }
-        self.state.shutdown.0.notified().await;
+        drop(self.state);
+        let _ = self.shutdown.await;
     }
 
     fn handle(&mut self, stream: TcpStream) {
