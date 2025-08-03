@@ -1,0 +1,26 @@
+[package]
+name = "magicblock-validator-admin"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+
+magicblock-config = { workspace = true }
+magicblock-delegation-program = { workspace = true, features = [
+    "instruction-builder",
+] }
+magicblock-program = { workspace = true }
+magicblock-rpc-client = { workspace = true }
+
+solana-rpc-client = { workspace = true }
+solana-sdk = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["full"] }
