@@ -2,10 +2,10 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
-    GeyserGrpcConfig, LedgerConfig, LifecycleMode, MetricsConfig,
-    MetricsServiceConfig, ProgramConfig, RemoteConfig, RpcConfig,
-    ValidatorConfig,
+    AccountsConfig, AllowedProgram, CommitStrategyConfig, EphemeralConfig,
+    GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
+    MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteConfig,
+    RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use url::Url;
@@ -67,7 +67,7 @@ fn test_all_goes_toml() {
                 ..Default::default()
             },
             ledger: LedgerConfig {
-                reset: false,
+                resume_strategy: LedgerResumeStrategy::Replay,
                 ..Default::default()
             },
             ..Default::default()
@@ -84,7 +84,7 @@ fn test_local_dev_with_programs_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 600_000,
                     compute_unit_price: 0,
                 },

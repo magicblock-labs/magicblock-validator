@@ -1,16 +1,17 @@
 use std::path::PathBuf;
 
 use clap::{Error, Parser};
+use magicblock_config_helpers::Merge;
 use solana_sdk::signature::Keypair;
 
 use crate::EphemeralConfig;
 
 #[derive(Debug, Clone, Parser)]
 pub struct MagicBlockConfig {
-    #[clap(help = "Path to the config file")]
+    #[arg(help = "Path to the config file")]
     pub config_file: Option<PathBuf>,
 
-    #[clap(
+    #[arg(
         short,
         long,
         help = "The keypair to use for the validator. DO NOT PROVIDE THIS VALUE VIA THE CLI IN PROD! The default keypair has the pubkey mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev.",
@@ -19,7 +20,7 @@ pub struct MagicBlockConfig {
     )]
     pub validator_keypair: String,
 
-    #[clap(
+    #[arg(
         long,
         help = "The comma separated list of geyser cache features to disable. Valid values are 'accounts' and 'transactions'.",
         env = "GEYSER_CACHE_DISABLE",
@@ -27,7 +28,7 @@ pub struct MagicBlockConfig {
     )]
     pub geyser_cache_disable: String,
 
-    #[clap(
+    #[arg(
         long,
         help = "The comma separated list of geyser notifications features to disable. Valid values are 'accounts' and 'transactions'.",
         env = "GEYSER_DISABLE",
@@ -35,7 +36,7 @@ pub struct MagicBlockConfig {
     )]
     pub geyser_disable: String,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     pub config: EphemeralConfig,
 }
 

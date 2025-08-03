@@ -17,3 +17,9 @@ quote = { workspace = true }
 syn = { workspace = true, features = ["full", "visit-mut"] }
 clap = { workspace = true, features = ["derive", "env"] }
 serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+magicblock-config-helpers = { workspace = true }
+trybuild = { workspace = true }
+macrotest = { workspace = true }
+cargo-expand = { workspace = true }

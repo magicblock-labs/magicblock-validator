@@ -1,11 +1,13 @@
 use clap::{Args, ValueEnum};
-use magicblock_config_macro::{clap_from_serde, clap_prefix};
+use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
 use strum::Display;
 
 #[clap_prefix("db")]
 #[clap_from_serde]
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
+)]
 #[serde(rename_all = "kebab-case")]
 pub struct AccountsDbConfig {
     /// size of the main storage, we have to preallocate in advance
@@ -64,7 +66,7 @@ impl Default for AccountsDbConfig {
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
-#[clap(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
 #[repr(u32)]
 pub enum BlockSize {
     Block128 = 128,

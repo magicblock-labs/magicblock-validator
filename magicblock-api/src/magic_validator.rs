@@ -41,8 +41,8 @@ use magicblock_committor_service::{
     config::ChainConfig, CommittorService, ComputeBudgetConfig,
 };
 use magicblock_config::{
-    AccountsDbConfig, EphemeralConfig, LifecycleMode, PrepareLookupTables,
-    ProgramConfig,
+    AccountsDbConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
+    LifecycleMode, PrepareLookupTables, ProgramConfig,
 };
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
@@ -201,14 +201,12 @@ impl MagicValidator {
             config.validator_config.validator.base_fees,
         );
 
-        let ledger = Self::init_ledger(
-            config.validator_config.ledger.path.as_ref(),
-            config.validator_config.ledger.reset,
-        )?;
+        let (ledger, last_slot) =
+            Self::init_ledger(&config.validator_config.ledger)?;
         Self::sync_validator_keypair_with_ledger(
             ledger.ledger_path(),
             &identity_keypair,
-            config.validator_config.ledger.reset,
+            &config.validator_config.ledger.resume_strategy,
         )?;
 
         // SAFETY:
@@ -228,7 +226,7 @@ impl MagicValidator {
             config.validator_config.validator.millis_per_slot,
             validator_pubkey,
             ledger_parent_path,
-            ledger.get_max_blockhash().map(|(slot, _)| slot)?,
+            last_slot,
         )?;
 
         let ledger_truncator = LedgerTruncator::new(
@@ -243,7 +241,7 @@ impl MagicValidator {
         let faucet_keypair = funded_faucet(
             &bank,
             ledger.ledger_path().as_path(),
-            config.validator_config.ledger.reset,
+            &config.validator_config.ledger.resume_strategy,
         )?;
 
         load_programs_into_bank(
@@ -526,28 +524,28 @@ impl MagicValidator {
     }
 
     fn init_ledger(
-        ledger_path: Option<&String>,
-        reset: bool,
-    ) -> ApiResult<Arc<Ledger>> {
-        let ledger_path = match ledger_path {
+        ledger_config: &LedgerConfig,
+    ) -> ApiResult<(Arc<Ledger>, Slot)> {
+        let ledger_path = match &ledger_config.path {
             Some(ledger_path) => PathBuf::from(ledger_path),
             None => {
                 let ledger_path = TempDir::new()?;
                 ledger_path.path().to_path_buf()
             }
         };
-        let ledger = ledger::init(ledger_path, reset)?;
+        let (ledger, last_slot) =
+            ledger::init(ledger_path, &ledger_config.resume_strategy)?;
         let ledger_shared = Arc::new(ledger);
         init_persister(ledger_shared.clone());
-        Ok(ledger_shared)
+        Ok((ledger_shared, last_slot))
     }
 
     fn sync_validator_keypair_with_ledger(
         ledger_path: &Path,
         validator_keypair: &Keypair,
-        reset_ledger: bool,
+        resume_strategy: &LedgerResumeStrategy,
     ) -> ApiResult<()> {
-        if reset_ledger {
+        if !resume_strategy.is_resuming() {
             write_validator_keypair_to_ledger(ledger_path, validator_keypair)?;
         } else {
             let ledger_validator_keypair =
@@ -587,7 +585,7 @@ impl MagicValidator {
     // Start/Stop
     // -----------------
     fn maybe_process_ledger(&self) -> ApiResult<()> {
-        if self.config.ledger.reset {
+        if !self.config.ledger.resume_strategy.is_replaying() {
             return Ok(());
         }
         let slot_to_continue_at = process_ledger(&self.ledger, &self.bank)?;
@@ -886,7 +884,7 @@ impl MagicValidator {
                 }
             }
 
-            if !self.config.ledger.reset {
+            if self.config.ledger.resume_strategy.is_replaying() {
                 let remote_account_cloner_worker =
                     remote_account_cloner_worker.clone();
                 tokio::spawn(async move {

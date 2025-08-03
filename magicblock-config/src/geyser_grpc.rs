@@ -11,6 +11,8 @@ helpers::socket_addr_config! {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
+    use magicblock_config_helpers::Merge;
+
     use super::*;
 
     #[test]

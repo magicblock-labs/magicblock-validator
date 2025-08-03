@@ -4,7 +4,7 @@ use std::{path::Path, process::Child};
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
-use magicblock_config::ProgramConfig;
+use magicblock_config::{LedgerResumeStrategy, ProgramConfig};
 use program_flexi_counter::{
     instruction::{create_add_ix, create_init_ix, create_mul_ix},
     state::FlexiCounter,
@@ -85,7 +85,7 @@ fn write(
         ledger_path,
         Some(programs),
         Some(SLOT_MS),
-        true,
+        LedgerResumeStrategy::Reset,
     );
 
     expect!(ctx.wait_for_slot_ephem(1), validator);
@@ -240,7 +240,7 @@ fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
         ledger_path,
         Some(programs),
         Some(SLOT_MS),
-        false,
+        LedgerResumeStrategy::Replay,
     );
 
     let counter1_decoded = fetch_counter_ephem(payer1, &mut validator);
