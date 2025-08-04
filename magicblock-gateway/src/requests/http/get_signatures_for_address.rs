@@ -13,29 +13,23 @@ impl HttpDispatcher {
     ) -> HandlerResult {
         let (address, config) =
             parse_params!(request.params()?, Serde32Bytes, Config);
-        let address = address.map(Into::into).ok_or_else(|| {
-            RpcError::invalid_params("missing or invalid address")
-        })?;
+        let address = some_or_err!(address);
         let config = config.unwrap_or_default();
-        let signatures = self
-            .ledger
-            .get_confirmed_signatures_for_address(
-                address,
-                Slot::MAX,
-                config.before.map(|s| s.0),
-                config.until.map(|s| s.0),
-                config.limit.unwrap_or(DEFAULT_SIGNATURES_LIMIT),
-            )
-            .map_err(RpcError::internal)?;
+        let signatures = self.ledger.get_confirmed_signatures_for_address(
+            address,
+            Slot::MAX,
+            config.before.map(|s| s.0),
+            config.until.map(|s| s.0),
+            config.limit.unwrap_or(DEFAULT_SIGNATURES_LIMIT),
+        )?;
         let signatures = signatures
             .infos
             .into_iter()
             .map(|x| {
-                let mut item: RpcConfirmedTransactionStatusWithSignature =
-                    x.into();
-                item.confirmation_status =
-                    Some(TransactionConfirmationStatus::Finalized);
-                item
+                let mut i = RpcConfirmedTransactionStatusWithSignature::from(x);
+                i.confirmation_status
+                    .replace(TransactionConfirmationStatus::Finalized);
+                i
             })
             .collect::<Vec<_>>();
         Ok(ResponsePayload::encode_no_context(&request.id, signatures))

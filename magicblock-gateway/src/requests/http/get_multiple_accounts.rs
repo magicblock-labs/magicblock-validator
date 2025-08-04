@@ -14,8 +14,7 @@ impl HttpDispatcher {
             Vec<Serde32Bytes>,
             RpcAccountInfoConfig
         );
-        let pubkeys = pubkeys
-            .ok_or_else(|| RpcError::invalid_params("missing pubkeys"))?;
+        let pubkeys: Vec<_> = some_or_err!(pubkeys);
         // SAFETY: Pubkey has the same memory layout and size as Serde32Bytes
         let pubkeys: Vec<Pubkey> = unsafe { std::mem::transmute(pubkeys) };
         let config = config.unwrap_or_default();
@@ -24,8 +23,7 @@ impl HttpDispatcher {
         let mut ensured = false;
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         loop {
-            let reader =
-                self.accountsdb.reader().map_err(RpcError::internal)?;
+            let reader = self.accountsdb.reader()?;
             for (pubkey, account) in pubkeys.iter().zip(&mut accounts) {
                 if account.is_some() {
                     continue;
