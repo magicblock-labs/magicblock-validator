@@ -26,6 +26,7 @@ magicblock-bank = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-gateway = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-perf-service = { workspace = true }
