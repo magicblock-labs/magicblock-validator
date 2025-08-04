@@ -1,8 +1,9 @@
-use crate::helpers::serde_defaults::bool_true;
 use clap::{Args, ValueEnum};
 use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
 use strum::Display;
+
+use crate::helpers::serde_defaults::bool_true;
 
 // Default desired ledger size 100 GiB
 pub const DEFAULT_LEDGER_SIZE_BYTES: u64 = 100 * 1024 * 1024 * 1024;
