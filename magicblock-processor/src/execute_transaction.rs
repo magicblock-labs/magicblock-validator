@@ -46,9 +46,9 @@ pub fn execute_sanitized_transaction(
     // same mutex once we enable them again
     // Work tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/181
     //
-    // NOTE(bmuddha): this lock is also held in AccountsDB and
-    // during snapshotting it will acquire write guard, effectively
-    // halting all txn executions for the duration of lock
+    // NOTE(bmuddha): this lock is also held in AccountsDB, and during
+    // the snapshotting AccountsDB will acquire write guard, effectively
+    // halting all of the txn executions for the duration of the lock
     let _execution_guard = TRANSACTION_INDEX_LOCK.read();
 
     let batch = bank.prepare_sanitized_batch(txs);
