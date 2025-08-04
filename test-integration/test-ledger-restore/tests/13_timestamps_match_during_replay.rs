@@ -1,5 +1,5 @@
 use cleanass::assert_eq;
-use magicblock_config::TEST_SNAPSHOT_FREQUENCY;
+use magicblock_config::{LedgerResumeStrategy, TEST_SNAPSHOT_FREQUENCY};
 use solana_transaction_status::UiTransactionEncoding;
 use std::{path::Path, process::Child};
 
@@ -31,8 +31,12 @@ fn restore_preserves_timestamps() {
 }
 
 fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, true);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::Reset,
+    );
 
     // First airdrop followed by wait until account is flushed
     let signature = expect!(ctx.airdrop_ephem(pubkey, 1_111_111), validator);
@@ -64,8 +68,12 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
 fn read(ledger_path: &Path, signature: Signature, block_time: i64) -> Child {
     // Measure time
     let _ = std::time::Instant::now();
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, false);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::Replay,
+    );
     eprintln!(
         "Validator started in {:?}",
         std::time::Instant::now().elapsed()
