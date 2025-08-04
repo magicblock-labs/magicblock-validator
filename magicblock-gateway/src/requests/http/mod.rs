@@ -6,19 +6,17 @@ use hyper::{
     body::{Bytes, Incoming},
     Request,
 };
-use json::Serialize;
-use magicblock_gateway_types::accounts::{
-    AccountSharedData, AccountsToEnsure, Pubkey,
-};
+use prelude::AccountsToEnsure;
+use solana_account::AccountSharedData;
+use solana_pubkey::Pubkey;
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_status::UiTransactionEncoding;
 
 use crate::{
-    error::RpcError, server::http::dispatch::HttpDispatcher,
-    state::blocks::BlockHashInfo, RpcResult, Slot,
+    error::RpcError, server::http::dispatch::HttpDispatcher, RpcResult,
 };
 
-use super::{params::Serde32Bytes, JsonRequest};
+use super::JsonRequest;
 
 pub(crate) enum Data {
     Empty,
@@ -104,6 +102,26 @@ impl HttpDispatcher {
     }
 }
 
+mod prelude {
+    pub(super) use crate::{
+        error::RpcError,
+        requests::{
+            params::{Serde32Bytes, SerdeSignature},
+            payload::ResponsePayload,
+            JsonRequest,
+        },
+        server::http::dispatch::HttpDispatcher,
+        types::accounts::{AccountsToEnsure, LockedAccount},
+        unwrap,
+        utils::{AccountWithPubkey, JsonBody},
+        Slot,
+    };
+    pub(super) use hyper::Response;
+    pub(super) use solana_account::ReadableAccount;
+    pub(super) use solana_account_decoder::UiAccountEncoding;
+    pub(super) use solana_pubkey::Pubkey;
+}
+
 const SPL_MINT_OFFSET: usize = 0;
 const SPL_OWNER_OFFSET: usize = 32;
 const SPL_DECIMALS_OFFSET: usize = 40;
@@ -120,8 +138,6 @@ const SPL_DELEGATE_RANGE: Range<usize> =
 
 const TOKEN_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-const TOKEN_2022_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 pub(crate) mod get_account_info;
 pub(crate) mod get_balance;

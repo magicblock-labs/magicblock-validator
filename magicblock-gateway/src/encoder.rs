@@ -1,11 +1,16 @@
 use hyper::body::Bytes;
 use json::Serialize;
+use solana_account::ReadableAccount;
 use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
+use solana_pubkey::Pubkey;
 
 use crate::{
     requests::{params::SerdeSignature, payload::NotificationPayload},
     state::subscriptions::SubscriptionID,
-    types::accounts::LockedAccount,
+    types::{
+        accounts::LockedAccount,
+        transactions::{TransactionResult, TransactionStatus},
+    },
     utils::{AccountWithPubkey, ProgramFilters},
     Slot,
 };

@@ -3,6 +3,7 @@ use magicblock_config::RpcConfig;
 use server::{http::HttpServer, websocket::WebsocketServer};
 use state::SharedState;
 use tokio_util::sync::CancellationToken;
+use types::RpcChannelEndpoints;
 
 mod encoder;
 pub mod error;

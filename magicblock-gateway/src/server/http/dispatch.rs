@@ -1,13 +1,13 @@
 use std::{convert::Infallible, sync::Arc};
 
-use hyper::{body::Incoming, Request, Response};
-use magicblock_accounts_db::AccountsDb;
-use magicblock_gateway_types::{
-    accounts::{EnsureAccountsTx, Pubkey},
-    transactions::TxnExecutionTx,
+use crate::types::{
+    accounts::EnsureAccountsTx, transactions::TxnExecutionTx,
     RpcChannelEndpoints,
 };
+use hyper::{body::Incoming, Request, Response};
+use magicblock_accounts_db::AccountsDb;
 use magicblock_ledger::Ledger;
+use solana_pubkey::Pubkey;
 
 use crate::{
     error::RpcError,

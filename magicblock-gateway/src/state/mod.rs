@@ -3,8 +3,8 @@ use std::sync::Arc;
 use blocks::BlocksCache;
 use cache::ExpiringCache;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_gateway_types::accounts::Pubkey;
 use magicblock_ledger::Ledger;
+use solana_pubkey::Pubkey;
 use subscriptions::SubscriptionsDb;
 use transactions::TransactionsCache;
 

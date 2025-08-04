@@ -1,10 +1,12 @@
 use std::ops::Deref;
 
-use magicblock_gateway_types::blocks::{BlockHash, BlockMeta, BlockUpdate};
 use parking_lot::RwLock;
 use solana_rpc_client_api::response::RpcBlockhash;
 
-use crate::Slot;
+use crate::{
+    types::blocks::{BlockHash, BlockMeta, BlockUpdate},
+    Slot,
+};
 
 use super::ExpiringCache;
 

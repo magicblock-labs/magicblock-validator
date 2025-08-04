@@ -1,9 +1,5 @@
 use hyper::Response;
 use log::warn;
-use magicblock_gateway_types::{
-    accounts::AccountsToEnsure,
-    transactions::{ProcessableTransaction, TransactionProcessingMode},
-};
 use solana_message::SimpleAddressLoader;
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig,
@@ -16,13 +12,11 @@ use solana_transaction::{
 use solana_transaction_status::UiTransactionEncoding;
 use tokio::sync::oneshot;
 
-use crate::{
-    error::RpcError,
-    requests::{payload::ResponsePayload, JsonRequest},
-    server::http::dispatch::HttpDispatcher,
-    unwrap,
-    utils::JsonBody,
+use crate::types::transactions::{
+    ProcessableTransaction, TransactionProcessingMode,
 };
+
+use super::prelude::*;
 
 impl HttpDispatcher {
     pub(crate) async fn simulate_transaction(

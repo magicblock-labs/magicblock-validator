@@ -1,15 +1,8 @@
-use hyper::Response;
-use magicblock_gateway_types::accounts::{LockedAccount, ReadableAccount};
-use solana_account_decoder::UiAccountEncoding;
 use solana_rpc_client_api::config::RpcProgramAccountsConfig;
 
-use crate::{
-    error::RpcError,
-    requests::{params::Serde32Bytes, payload::ResponsePayload, JsonRequest},
-    server::http::dispatch::HttpDispatcher,
-    unwrap,
-    utils::{AccountWithPubkey, JsonBody, ProgramFilters},
-};
+use crate::utils::ProgramFilters;
+
+use super::prelude::*;
 
 impl HttpDispatcher {
     pub(crate) fn get_program_accounts(

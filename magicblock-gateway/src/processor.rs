@@ -3,11 +3,17 @@ use std::sync::Arc;
 use log::info;
 use tokio_util::sync::CancellationToken;
 
-use crate::state::{
-    blocks::BlocksCache,
-    subscriptions::SubscriptionsDb,
-    transactions::{SignatureStatus, TransactionsCache},
-    SharedState,
+use crate::{
+    state::{
+        blocks::BlocksCache,
+        subscriptions::SubscriptionsDb,
+        transactions::{SignatureStatus, TransactionsCache},
+        SharedState,
+    },
+    types::{
+        accounts::AccountUpdateRx, blocks::BlockUpdateRx,
+        transactions::TxnStatusRx, RpcChannelEndpoints,
+    },
 };
 
 pub(crate) struct EventProcessor {

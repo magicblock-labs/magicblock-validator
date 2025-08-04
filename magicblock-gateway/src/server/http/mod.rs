@@ -6,14 +6,15 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn,
 };
-use magicblock_gateway_types::RpcChannelEndpoints;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::oneshot::{error::RecvError, Receiver},
+    sync::oneshot::Receiver,
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{error::RpcError, state::SharedState, RpcResult};
+use crate::{
+    error::RpcError, state::SharedState, types::RpcChannelEndpoints, RpcResult,
+};
 
 use super::Shutdown;
 

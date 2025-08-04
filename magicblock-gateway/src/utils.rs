@@ -11,7 +11,7 @@ use solana_account_decoder::{
 };
 use solana_rpc_client_api::filter::RpcFilterType;
 
-use crate::requests::params::Serde32Bytes;
+use crate::{requests::params::Serde32Bytes, types::accounts::LockedAccount};
 
 #[macro_export]
 macro_rules! unwrap {

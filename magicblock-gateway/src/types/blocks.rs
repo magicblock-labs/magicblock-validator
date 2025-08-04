@@ -1,6 +1,7 @@
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
-pub use solana_hash::Hash as BlockHash;
+use solana_hash::Hash;
 
+pub type BlockHash = Hash;
 use crate::Slot;
 
 /// Receiving end of block updates channel
