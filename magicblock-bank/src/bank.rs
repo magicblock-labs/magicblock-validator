@@ -17,10 +17,7 @@ use log::{debug, info, trace};
 use magicblock_accounts_db::{error::AccountsDbError, AccountsDb, StWLock};
 use magicblock_config::AccountsDbConfig;
 use magicblock_core::traits::FinalityProvider;
-use solana_accounts_db::{
-    accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
-    blockhash_queue::BlockhashQueue,
-};
+use solana_accounts_db::blockhash_queue::BlockhashQueue;
 use solana_bpf_loader_program::syscalls::{
     create_program_runtime_environment_v1,
     create_program_runtime_environment_v2,
@@ -28,13 +25,11 @@ use solana_bpf_loader_program::syscalls::{
 use solana_compute_budget_instruction::instructions_processor::process_compute_budget_instructions;
 use solana_cost_model::cost_tracker::CostTracker;
 use solana_fee::FeeFeatures;
-use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_measure::measure_us;
 use solana_program_runtime::{
     loaded_programs::{BlockRelation, ForkGraph, ProgramCacheEntry},
     sysvar_cache::SysvarCache,
 };
-use solana_rpc::slot_status_notifier::SlotStatusNotifierInterface;
 use solana_sdk::{
     account::{
         from_account, Account, AccountSharedData, InheritableAccountFields,
@@ -63,7 +58,7 @@ use solana_sdk::{
     packet::PACKET_DATA_SIZE,
     precompiles::get_precompiles,
     pubkey::Pubkey,
-    rent_collector::RentCollector,
+    rent::Rent,
     rent_debits::RentDebits,
     signature::Signature,
     slot_hashes::SlotHashes,
@@ -110,7 +105,6 @@ use crate::{
         inherit_specially_retained_account_fields, update_sysvar_data,
     },
     builtins::{BuiltinPrototype, BUILTINS},
-    geyser::AccountsUpdateNotifier,
     status_cache::StatusCache,
     transaction_batch::TransactionBatch,
     transaction_logs::{
@@ -152,10 +146,13 @@ impl ForkGraph for SimpleForkGraph {
 //#[derive(Debug)]
 pub struct Bank {
     /// Shared reference to accounts database
-    pub accounts_db: AccountsDb,
+    pub accounts_db: Arc<AccountsDb>,
 
     /// Bank epoch
     epoch: Epoch,
+
+    /// Rent related info
+    rent: Rent,
 
     /// Validator Identity
     identity_id: Pubkey,
@@ -248,11 +245,6 @@ pub struct Bank {
     /// genesis time, used for computed clock
     genesis_creation_time: UnixTimestamp,
 
-    /// The number of slots per year, used for inflation
-    /// which is provided via the genesis config
-    /// NOTE: this is not currenlty configured correctly, use [Self::millis_per_slot] instead
-    slots_per_year: f64,
-
     /// Milliseconds per slot which is provided directly when the bank is created
     pub millis_per_slot: u64,
 
@@ -263,9 +255,6 @@ pub struct Bank {
     // For TransactionProcessingCallback
     // -----------------
     pub feature_set: Arc<FeatureSet>,
-
-    /// latest rent collector, knows the epoch
-    rent_collector: RentCollector,
 
     /// FIFO queue of `recent_blockhash` items
     blockhash_queue: RwLock<BlockhashQueue>,
@@ -281,15 +270,6 @@ pub struct Bank {
     // Cost
     // -----------------
     cost_tracker: RwLock<CostTracker>,
-
-    // Everything below is a BS and should be removed
-    // -----------------
-    // Geyser
-    // -----------------
-    slot_status_notifier: Option<SlotStatusNotifierImpl>,
-    accounts_update_notifier: Option<AccountsUpdateNotifier>,
-    // for compatibility, some RPC code needs that flag, which we set to true immediately
-    accounts_verified: Arc<AtomicBool>,
 }
 
 // -----------------
@@ -423,8 +403,6 @@ impl Bank {
         debug_keys: Option<Arc<HashSet<Pubkey>>>,
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
-        accounts_update_notifier: Option<AccountsUpdateNotifier>,
-        slot_status_notifier: Option<SlotStatusNotifierImpl>,
         millis_per_slot: u64,
         identity_id: Pubkey,
         lock: StWLock,
@@ -444,18 +422,15 @@ impl Bank {
             accounts_db.set_slot(adb_init_slot);
         }
         accounts_db.ensure_at_most(adb_init_slot)?;
+        let accounts_db = Arc::new(accounts_db);
 
-        let mut bank = Self::default_with_accounts(
-            accounts_db,
-            accounts_update_notifier,
-            millis_per_slot,
-        );
+        let mut bank =
+            Self::default_with_accounts(accounts_db, millis_per_slot);
         bank.fee_rate_governor.lamports_per_signature =
             DEFAULT_LAMPORTS_PER_SIGNATURE;
 
         bank.transaction_debug_keys = debug_keys;
         bank.runtime_config = runtime_config;
-        bank.slot_status_notifier = slot_status_notifier;
 
         bank.process_genesis_config(genesis_config, identity_id);
 
@@ -467,7 +442,6 @@ impl Bank {
 
         // We don't really have epochs so we use the validator start time
         bank.update_clock(genesis_config.creation_time, None);
-        bank.update_rent();
         bank.update_fees();
         bank.update_epoch_schedule();
         bank.update_last_restart_slot();
@@ -477,14 +451,11 @@ impl Bank {
         // it via bank.transaction_processor.sysvar_cache.write().unwrap().set_clock(), etc.
         bank.fill_missing_sysvar_cache_entries();
 
-        bank.accounts_verified.store(true, Ordering::Relaxed);
-
         Ok(bank)
     }
 
     pub(super) fn default_with_accounts(
-        adb: AccountsDb,
-        accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        accounts_db: Arc<AccountsDb>,
         millis_per_slot: u64,
     ) -> Self {
         // NOTE: this was not part of the original implementation
@@ -511,8 +482,9 @@ impl Bank {
         feature_set.activate(&curve25519_restrict_msm_length::ID, 0);
 
         let mut bank = Self {
-            accounts_db: adb,
+            accounts_db,
             epoch: Epoch::default(),
+            rent: Rent::default(),
             epoch_schedule: EpochSchedule::default(),
             is_delta: AtomicBool::default(),
             runtime_config: Arc::<RuntimeConfig>::default(),
@@ -549,23 +521,16 @@ impl Bank {
             ticks_per_slot: u64::default(),
             ns_per_slot: u128::default(),
             genesis_creation_time: UnixTimestamp::default(),
-            slots_per_year: f64::default(),
 
             // For TransactionProcessingCallback
             blockhash_queue: RwLock::new(BlockhashQueue::new(max_age as usize)),
             feature_set: Arc::<FeatureSet>::new(feature_set),
-            rent_collector: RentCollector::default(),
 
             // Cost
             cost_tracker: RwLock::<CostTracker>::default(),
 
             // Synchronization
             hash: RwLock::<Hash>::default(),
-
-            // Geyser
-            slot_status_notifier: Option::<SlotStatusNotifierImpl>::default(),
-            accounts_update_notifier,
-            accounts_verified: Arc::default(),
         };
 
         bank.transaction_processor = {
@@ -685,7 +650,6 @@ impl Bank {
         self.ns_per_slot = genesis_config.ns_per_slot();
         self.genesis_creation_time = genesis_config.creation_time;
         self.max_tick_height = (self.slot() + 1) * self.ticks_per_slot;
-        self.slots_per_year = genesis_config.slots_per_year();
 
         self.epoch_schedule = genesis_config.epoch_schedule.clone();
         self.identity_id = identity_id;
@@ -767,12 +731,6 @@ impl Bank {
                 &blockhash,
                 self.fee_rate_governor.lamports_per_signature,
             );
-        }
-
-        // Notify Geyser Service
-        if let Some(slot_status_notifier) = &self.slot_status_notifier {
-            slot_status_notifier
-                .notify_slot_rooted(next_slot, Some(next_slot - 1));
         }
 
         // Update loaded programs cache as otherwise we cannot deploy new programs
@@ -874,10 +832,6 @@ impl Bank {
     /// fn store the single `account` with `pubkey`.
     pub fn store_account(&self, pubkey: Pubkey, account: AccountSharedData) {
         self.accounts_db.insert_account(&pubkey, &account);
-        if let Some(notifier) = &self.accounts_update_notifier {
-            let slot = self.slot();
-            notifier.notify_account_update(slot, &account, &None, &pubkey, 0);
-        }
     }
 
     /// Returns all the accounts this bank can load
@@ -889,12 +843,8 @@ impl Bank {
     }
 
     pub fn store_accounts(&self, accounts: Vec<(Pubkey, AccountSharedData)>) {
-        let slot = self.slot();
         for (pubkey, acc) in accounts {
             self.accounts_db.insert_account(&pubkey, &acc);
-            if let Some(notifier) = &self.accounts_update_notifier {
-                notifier.notify_account_update(slot, &acc, &None, &pubkey, 0);
-            }
         }
     }
 
@@ -1080,12 +1030,6 @@ impl Bank {
         self.set_clock_in_sysvar_cache(clock);
     }
 
-    fn update_rent(&self) {
-        self.update_sysvar_account(&sysvar::rent::id(), |account| {
-            update_sysvar_data(&self.rent_collector.rent, account)
-        });
-    }
-
     #[allow(deprecated)]
     fn update_fees(&self) {
         if !self
@@ -1191,7 +1135,7 @@ impl Bank {
         &self,
         data_len: usize,
     ) -> u64 {
-        self.rent_collector.rent.minimum_balance(data_len).max(1)
+        self.rent.minimum_balance(data_len).max(1)
     }
 
     pub fn is_blockhash_valid_for_age(&self, hash: &Hash) -> bool {
@@ -2306,14 +2250,6 @@ impl Bank {
         let data_size_delta =
             calculate_data_size_delta(old_data_size, new_data_size);
         self.update_accounts_data_size_delta_off_chain(data_size_delta);
-    }
-
-    // -----------------
-    // Health
-    // -----------------
-    /// Returns true when startup accounts hash verification has completed or never had to run in background.
-    pub fn get_startup_verification_complete(&self) -> &Arc<AtomicBool> {
-        &self.accounts_verified
     }
 
     // -----------------

@@ -79,7 +79,6 @@ async fn main() {
         init_geyser_config(&mb_config, geyser_grpc_config);
     let config = MagicValidatorConfig {
         validator_config: mb_config.config,
-        init_geyser_service_config,
     };
 
     debug!("{:#?}", config);

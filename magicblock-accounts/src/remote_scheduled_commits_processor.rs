@@ -20,7 +20,6 @@ use magicblock_program::{
     register_scheduled_commit_sent, FeePayerAccount, Pubkey, SentCommit,
     TransactionScheduler,
 };
-use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     account::ReadableAccount, hash::Hash, transaction::Transaction,
 };
@@ -33,7 +32,6 @@ pub struct RemoteScheduledCommitsProcessor {
     transaction_scheduler: TransactionScheduler,
     cloned_accounts: CloneOutputMap,
     bank: Arc<Bank>,
-    transaction_status_sender: Option<TransactionStatusSender>,
 }
 
 #[async_trait]
@@ -191,14 +189,9 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
 }
 
 impl RemoteScheduledCommitsProcessor {
-    pub fn new(
-        bank: Arc<Bank>,
-        cloned_accounts: CloneOutputMap,
-        transaction_status_sender: Option<TransactionStatusSender>,
-    ) -> Self {
+    pub fn new(bank: Arc<Bank>, cloned_accounts: CloneOutputMap) -> Self {
         Self {
             bank,
-            transaction_status_sender,
             cloned_accounts,
             transaction_scheduler: TransactionScheduler::default(),
         }
