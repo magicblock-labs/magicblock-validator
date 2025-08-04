@@ -117,7 +117,14 @@ impl<'id, T: Serialize> ResponsePayload<'id, PayloadResult<T>> {
 }
 
 impl<'id, T: Serialize> ResponsePayload<'id, T> {
-    pub(crate) fn encode_no_context(id: &'id Value, result: T) -> JsonBody {
+    pub(crate) fn encode_no_context(
+        id: &'id Value,
+        result: T,
+    ) -> Response<JsonBody> {
+        Response::new(Self::encode_no_context_raw(id, result))
+    }
+
+    pub(crate) fn encode_no_context_raw(id: &'id Value, result: T) -> JsonBody {
         let this = Self {
             jsonrpc: "2.0",
             id,

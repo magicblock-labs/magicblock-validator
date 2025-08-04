@@ -5,17 +5,12 @@ use super::prelude::*;
 impl HttpDispatcher {
     pub(crate) fn get_signature_statuses(
         &self,
-        request: JsonRequest,
-    ) -> Response<JsonBody> {
-        let params = request
-            .params
-            .ok_or_else(|| RpcError::invalid_request("missing params"));
-        unwrap!(mut params, request.id);
-        let signatures = parse_params!(params, Vec<SerdeSignature>);
+        request: &mut JsonRequest,
+    ) -> HandlerResult {
+        let signatures = parse_params!(request.params()?, Vec<SerdeSignature>);
         let signatures = signatures.ok_or_else(|| {
             RpcError::invalid_params("missing or invalid signatures")
-        });
-        unwrap!(signatures, request.id);
+        })?;
         let mut statuses = Vec::with_capacity(signatures.len());
         for signature in signatures {
             if let Some(status) = self.transactions.get(&signature.0) {
@@ -48,6 +43,6 @@ impl HttpDispatcher {
             }));
         }
         let slot = self.accountsdb.slot();
-        ResponsePayload::encode(&request.id, statuses, slot)
+        Ok(ResponsePayload::encode(&request.id, statuses, slot))
     }
 }

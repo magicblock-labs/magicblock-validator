@@ -14,26 +14,20 @@ use super::prelude::*;
 impl HttpDispatcher {
     pub(crate) fn get_token_accounts_by_owner(
         &self,
-        request: JsonRequest,
-    ) -> Response<JsonBody> {
-        let params = request
-            .params
-            .ok_or_else(|| RpcError::invalid_request("missing params"));
-        unwrap!(mut params, request.id);
+        request: &mut JsonRequest,
+    ) -> HandlerResult {
         let (owner, filter, config) = parse_params!(
-            params,
+            request.params()?,
             Serde32Bytes,
             RpcTokenAccountsFilter,
             RpcAccountInfoConfig
         );
         let owner = owner.ok_or_else(|| {
             RpcError::invalid_params("missing or invalid owner")
-        });
-        unwrap!(owner, request.id);
+        })?;
         let filter = filter.ok_or_else(|| {
             RpcError::invalid_params("missing or invalid filter")
-        });
-        unwrap!(filter, request.id);
+        })?;
         let config = config.unwrap_or_default();
         let slot = self.accountsdb.slot();
         let mut filters = ProgramFilters::default();
@@ -42,8 +36,7 @@ impl HttpDispatcher {
             RpcTokenAccountsFilter::Mint(pubkey) => {
                 let bytes = bs58::decode(pubkey)
                     .into_vec()
-                    .map_err(RpcError::parse_error);
-                unwrap!(bytes, request.id);
+                    .map_err(RpcError::parse_error)?;
                 let filter = ProgramFilter::MemCmp {
                     offset: SPL_MINT_OFFSET,
                     bytes,
@@ -51,10 +44,8 @@ impl HttpDispatcher {
                 filters.push(filter);
             }
             RpcTokenAccountsFilter::ProgramId(pubkey) => {
-                let pubkey =
-                    Pubkey::from_str(&pubkey).map_err(RpcError::parse_error);
-                unwrap!(pubkey, request.id);
-                program = pubkey;
+                program =
+                    Pubkey::from_str(&pubkey).map_err(RpcError::parse_error)?;
             }
         };
         filters.push(ProgramFilter::MemCmp {
@@ -64,8 +55,7 @@ impl HttpDispatcher {
         let accounts = self
             .accountsdb
             .get_program_accounts(&program, move |a| filters.matches(a.data()))
-            .map_err(RpcError::internal);
-        unwrap!(accounts, request.id);
+            .map_err(RpcError::internal)?;
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         let slice = config.data_slice;
         let accounts = accounts
@@ -75,6 +65,6 @@ impl HttpDispatcher {
                 AccountWithPubkey::new(&locked, encoding, slice)
             })
             .collect::<Vec<_>>();
-        ResponsePayload::encode(&request.id, accounts, slot)
+        Ok(ResponsePayload::encode(&request.id, accounts, slot))
     }
 }
