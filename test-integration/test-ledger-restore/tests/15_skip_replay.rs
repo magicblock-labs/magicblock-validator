@@ -38,8 +38,7 @@ fn write(
         None,
         None,
         LedgerResumeStrategy::Reset,
-        true,
-        &Default::default(),
+        false,
     );
 
     let mut signatures = Vec::with_capacity(keypairs.len());
@@ -74,8 +73,7 @@ fn read(
         None,
         None,
         LedgerResumeStrategy::ResumeOnly,
-        true,
-        &Default::default(),
+        false,
     );
 
     // Current slot of the new validator should be at least the last slot of the previous validator

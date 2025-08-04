@@ -118,7 +118,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("VALIDATOR_FQDN", "magicblock.er.com");
     env::set_var("LEDGER_SIZE", "123123");
     env::set_var("LEDGER_RESUME_STRATEGY", "resume-only");
-    env::set_var("LEDGER_ENFORCE_KEYPAIR_MATCH", "false");
+    env::set_var("LEDGER_SKIP_KEYPAIR_MATCH_CHECK", "true");
     env::set_var("LEDGER_PATH", "/hello/world");
     env::set_var("METRICS_ENABLED", "false");
     env::set_var("METRICS_PORT", "1234");
@@ -166,7 +166,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             },
             ledger: LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::ResumeOnly,
-                enforce_keypair_match: false,
+                skip_keypair_match_check: true,
                 path: Some("/hello/world".to_string()),
                 size: 123123
             },

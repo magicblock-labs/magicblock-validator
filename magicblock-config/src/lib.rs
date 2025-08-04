@@ -243,7 +243,7 @@ mod tests {
             },
             ledger: LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Replay,
-                enforce_keypair_match: false,
+                skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },
@@ -323,7 +323,7 @@ mod tests {
             },
             ledger: LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Replay,
-                enforce_keypair_match: false,
+                skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },
@@ -400,7 +400,7 @@ mod tests {
             },
             ledger: LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::ResumeOnly,
-                enforce_keypair_match: false,
+                skip_keypair_match_check: true,
                 path: Some("ledger2.example.com".to_string()),
                 size: 100000,
             },
@@ -470,7 +470,7 @@ mod tests {
             },
             ledger: LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Replay,
-                enforce_keypair_match: false,
+                skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },

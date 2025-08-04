@@ -199,7 +199,7 @@ impl MagicValidator {
         let (ledger, last_slot) =
             Self::init_ledger(&config.validator_config.ledger)?;
 
-        if config.validator_config.ledger.enforce_keypair_match {
+        if !config.validator_config.ledger.skip_keypair_match_check {
             Self::sync_validator_keypair_with_ledger(
                 ledger.ledger_path(),
                 &identity_keypair,

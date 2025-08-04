@@ -64,7 +64,7 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
         ledger_path,
         Some(programs),
         true,
-        true,
+        false,
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
@@ -123,7 +123,7 @@ fn update_counter_between_restarts(payer: &Keypair) -> Child {
         &ledger_path,
         None,
         true,
-        true,
+        false,
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
@@ -164,7 +164,7 @@ fn read(ledger_path: &Path, payer: &Keypair) -> Child {
         ledger_path,
         Some(programs),
         false,
-        true,
+        false,
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 

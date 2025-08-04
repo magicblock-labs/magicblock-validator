@@ -3,8 +3,6 @@ use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
 use strum::Display;
 
-use crate::helpers::serde_defaults::bool_true;
-
 // Default desired ledger size 100 GiB
 pub const DEFAULT_LEDGER_SIZE_BYTES: u64 = 100 * 1024 * 1024 * 1024;
 
@@ -27,8 +25,8 @@ pub struct LedgerConfig {
     #[arg(
         help = "Whether to check that the validator keypair matches the one in the ledger."
     )]
-    #[serde(default = "bool_true")]
-    pub enforce_keypair_match: bool,
+    #[serde(default)]
+    pub skip_keypair_match_check: bool,
     /// The file system path onto which the ledger should be written at
     /// If left empty it will be auto-generated to a temporary folder
     #[derive_env_var]
@@ -49,7 +47,7 @@ impl Default for LedgerConfig {
     fn default() -> Self {
         Self {
             resume_strategy: LedgerResumeStrategy::default(),
-            enforce_keypair_match: bool_true(),
+            skip_keypair_match_check: false,
             path: Default::default(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         }
@@ -106,7 +104,7 @@ mod tests {
     fn test_merge_with_default() {
         let mut config = LedgerConfig {
             resume_strategy: LedgerResumeStrategy::Replay,
-            enforce_keypair_match: false,
+            skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
@@ -123,7 +121,7 @@ mod tests {
         let mut config = LedgerConfig::default();
         let other = LedgerConfig {
             resume_strategy: LedgerResumeStrategy::Replay,
-            enforce_keypair_match: false,
+            skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
@@ -137,14 +135,14 @@ mod tests {
     fn test_merge_non_default() {
         let mut config = LedgerConfig {
             resume_strategy: LedgerResumeStrategy::Replay,
-            enforce_keypair_match: false,
+            skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
         let original_config = config.clone();
         let other = LedgerConfig {
             resume_strategy: LedgerResumeStrategy::ResumeOnly,
-            enforce_keypair_match: true,
+            skip_keypair_match_check: true,
             path: Some("ledger2.example.com".to_string()),
             size: 10000,
         };
@@ -159,7 +157,7 @@ mod tests {
         let toml_str = r#"
 [ledger]
 resume-strategy = "replay"
-enforce-keypair-match = false
+skip-keypair-match-check = true
 path = "ledger.example.com"
 size = 1000000000
 "#;
@@ -169,7 +167,7 @@ size = 1000000000
             config.ledger,
             LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Replay,
-                enforce_keypair_match: false,
+                skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             }
@@ -186,7 +184,7 @@ size = 1000000000
             config.ledger,
             LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::ResumeOnly,
-                enforce_keypair_match: true,
+                skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,
             }
@@ -203,7 +201,7 @@ size = 1000000000
             config.ledger,
             LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Reset,
-                enforce_keypair_match: true,
+                skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,
             }

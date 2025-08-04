@@ -65,8 +65,7 @@ fn write(
         None,
         None,
         LedgerResumeStrategy::Reset,
-        true,
-        &Default::default(),
+        false,
     );
 
     let mut slot = 5;
@@ -104,8 +103,7 @@ fn read(
         None,
         None,
         LedgerResumeStrategy::Replay,
-        true,
-        &Default::default(),
+        false,
     );
 
     let ephem_client = expect!(ctx.try_ephem_client(), validator);
@@ -187,7 +185,6 @@ fn _diagnose_read() {
         None,
         None,
         LedgerResumeStrategy::Replay,
-        true,
-        &Default::default(),
+        false,
     );
 }

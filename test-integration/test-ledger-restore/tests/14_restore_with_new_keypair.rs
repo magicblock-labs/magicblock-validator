@@ -51,7 +51,7 @@ fn write(ledger_path: &Path) -> (Child, u64) {
         ledger_path,
         None,
         true,
-        true,
+        false,
         &loaded_chain_accounts,
     );
 
@@ -109,7 +109,7 @@ fn read(ledger_path: &Path) -> Child {
         ledger_path,
         None,
         false,
-        false,
+        true,
         &loaded_chain_accounts,
     );
 

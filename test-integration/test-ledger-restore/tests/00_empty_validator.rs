@@ -28,7 +28,7 @@ fn write(ledger_path: &Path) -> (Child, u64) {
         ledger_path,
         None,
         true,
-        true,
+        false,
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
@@ -44,7 +44,7 @@ fn read(ledger_path: &Path) -> Child {
         ledger_path,
         None,
         false,
-        true,
+        false,
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 

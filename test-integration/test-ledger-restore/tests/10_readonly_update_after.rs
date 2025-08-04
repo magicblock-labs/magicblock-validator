@@ -149,7 +149,7 @@ fn write(
         ledger_path,
         Some(programs),
         true,
-        true,
+        false,
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
@@ -273,7 +273,7 @@ fn read(
         ledger_path,
         Some(programs),
         false,
-        true,
+        false,
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 

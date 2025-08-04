@@ -83,8 +83,7 @@ fn write(
         None,
         Some(SLOT_MS),
         LedgerResumeStrategy::Reset,
-        true,
-        &Default::default(),
+        false,
     );
 
     let mut slot = 1;
@@ -163,8 +162,7 @@ fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
         None,
         Some(SLOT_MS),
         LedgerResumeStrategy::Replay,
-        true,
-        &Default::default(),
+        false,
     );
 
     for keypair in keypairs {
