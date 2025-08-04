@@ -46,7 +46,7 @@ use magicblock_config::{
     AccountsDbConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
     LifecycleMode, PrepareLookupTables, ProgramConfig,
 };
-use magicblock_geyser_plugin::rpc::GeyserRpcService;
+use magicblock_gateway::{state::SharedState, types::link, JsonRpcServer};
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
@@ -58,12 +58,6 @@ use magicblock_processor::execute_transaction::TRANSACTION_INDEX_LOCK;
 use magicblock_program::{
     init_persister, validator, validator::validator_authority,
     TransactionScheduler,
-};
-use magicblock_pubsub::pubsub_service::{
-    PubsubConfig, PubsubService, PubsubServiceCloseHandle,
-};
-use magicblock_rpc::{
-    json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
 use magicblock_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
@@ -99,7 +93,6 @@ use crate::{
         fund_magic_context, fund_validator_identity, funded_faucet,
     },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
-    init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
     ledger::{
         self, read_validator_keypair_from_ledger,
         write_validator_keypair_to_ledger,
@@ -117,17 +110,12 @@ use crate::{
 #[derive(Default)]
 pub struct MagicValidatorConfig {
     pub validator_config: EphemeralConfig,
-    pub init_geyser_service_config: InitGeyserServiceConfig,
 }
 
 impl std::fmt::Debug for MagicValidatorConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MagicValidatorConfig")
             .field("validator_config", &self.validator_config)
-            .field(
-                "init_geyser_service_config",
-                &self.init_geyser_service_config,
-            )
             .finish()
     }
 }
@@ -143,8 +131,6 @@ pub struct MagicValidator {
     ledger: Arc<Ledger>,
     ledger_truncator: LedgerTruncator<Bank>,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
-    pubsub_handle: RwLock<Option<thread::JoinHandle<()>>>,
-    pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
     scheduled_commits_processor:
@@ -168,12 +154,8 @@ pub struct MagicValidator {
     remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
     committor_service: Option<Arc<CommittorService>>,
-    transaction_listener: GeyserTransactionNotifyListener,
-    rpc_service: JsonRpcService,
+    rpc_handle: JoinHandle<()>,
     _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
-    geyser_rpc_service: Arc<GeyserRpcService>,
-    pubsub_config: PubsubConfig,
-    pub transaction_status_sender: TransactionStatusSender,
     claim_fees_task: ClaimFeesTask,
 }
 
@@ -181,16 +163,12 @@ impl MagicValidator {
     // -----------------
     // Initialization
     // -----------------
-    pub fn try_from_config(
+    pub async fn try_from_config(
         config: MagicValidatorConfig,
         identity_keypair: Keypair,
     ) -> ApiResult<Self> {
         // TODO(thlorenz): this will need to be recreated on each start
         let token = CancellationToken::new();
-
-        let (geyser_manager, geyser_rpc_service) =
-            init_geyser_service(config.init_geyser_service_config)?;
-        let geyser_manager = Arc::new(RwLock::new(geyser_manager));
 
         let validator_pubkey = identity_keypair.pubkey();
         let magicblock_bank::genesis_utils::GenesisConfigInfo {
@@ -227,7 +205,6 @@ impl MagicValidator {
 
         let exit = Arc::<AtomicBool>::default();
         let bank = Self::init_bank(
-            Some(geyser_manager.clone()),
             &genesis_config,
             &config.validator_config.accounts.db,
             config.validator_config.validator.millis_per_slot,
@@ -257,12 +234,6 @@ impl MagicValidator {
         .map_err(|err| {
             ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
         })?;
-
-        let (transaction_sndr, transaction_listener) =
-            Self::init_transaction_listener(
-                &ledger,
-                Some(TransactionNotifier::new(geyser_manager)),
-            );
 
         let metrics_config = &config.validator_config.metrics;
         let metrics = if metrics_config.enabled {
@@ -302,21 +273,14 @@ impl MagicValidator {
             Duration::from_secs(60 * 50),
         );
 
-        let transaction_status_sender = TransactionStatusSender {
-            sender: transaction_sndr,
-        };
-
         let bank_account_provider = BankAccountProvider::new(bank.clone());
         let remote_account_fetcher_client =
             RemoteAccountFetcherClient::new(&remote_account_fetcher_worker);
         let remote_account_updates_client =
             RemoteAccountUpdatesClient::new(&remote_account_updates_worker);
-        let account_dumper_bank = AccountDumperBank::new(
-            bank.clone(),
-            Some(transaction_status_sender.clone()),
-        );
+        let account_dumper_bank = AccountDumperBank::new(bank.clone());
         let blacklisted_accounts = standard_blacklisted_accounts(
-            &identity_keypair.pubkey(),
+            &validator_pubkey,
             &faucet_keypair.pubkey(),
         );
 
@@ -364,7 +328,7 @@ impl MagicValidator {
                 ValidatorCollectionMode::Fees
             },
             clone_permissions,
-            identity_keypair.pubkey(),
+            validator_pubkey,
             config.validator_config.accounts.max_monitored_accounts,
             config.validator_config.accounts.clone.clone(),
             config
@@ -399,26 +363,27 @@ impl MagicValidator {
             config.validator_config.rpc.port,
         );
         validator::init_validator_authority(identity_keypair);
-
-        // Make sure we process the ledger before we're open to handle
-        // transactions via RPC
-        let rpc_service = Self::init_json_rpc_service(
-            bank.clone(),
+        let config = config.validator_config;
+        let (rpc_channels, validator_channels) = link();
+        let shared_state = SharedState::new(
+            validator_pubkey,
+            bank.accounts_db.clone(),
             ledger.clone(),
-            faucet_keypair,
-            &genesis_config,
-            accounts_manager.clone(),
-            transaction_status_sender.clone(),
-            &pubsub_config,
-            &config.validator_config,
-        )?;
+            config.validator.millis_per_slot,
+        );
+        let rpc = JsonRpcServer::new(
+            config.validator_config.rpc,
+            shared_state,
+            rpc_channels,
+            token.clone(),
+        )
+        .await?;
+        let rpc_handle = tokio::spawn(rpc.run());
 
         Ok(Self {
             config: config.validator_config,
             exit,
-            rpc_service,
             _metrics: metrics,
-            geyser_rpc_service,
             slot_ticker: None,
             commit_accounts_ticker: None,
             scheduled_commits_processor,
@@ -430,25 +395,20 @@ impl MagicValidator {
                 remote_account_cloner_worker,
             )),
             remote_account_cloner_handle: None,
-            pubsub_handle: Default::default(),
-            pubsub_close_handle: Default::default(),
             committor_service,
             sample_performance_service: None,
-            pubsub_config,
             token,
             bank,
             ledger,
             ledger_truncator,
             accounts_manager,
-            transaction_listener,
-            transaction_status_sender,
             claim_fees_task: ClaimFeesTask::new(),
+            rpc_handle,
         })
     }
 
     #[allow(clippy::too_many_arguments)]
     fn init_bank(
-        geyser_manager: Option<Arc<RwLock<GeyserPluginManager>>>,
         genesis_config: &GenesisConfig,
         accountsdb_config: &AccountsDbConfig,
         millis_per_slot: u64,
@@ -466,8 +426,6 @@ impl MagicValidator {
             None,
             None,
             false,
-            geyser_manager.clone().map(AccountsUpdateNotifier::new),
-            geyser_manager.map(SlotStatusNotifierImpl::new),
             millis_per_slot,
             validator_pubkey,
             lock,
@@ -506,45 +464,6 @@ impl MagicValidator {
         Arc::new(accounts_manager)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn init_json_rpc_service(
-        bank: Arc<Bank>,
-        ledger: Arc<Ledger>,
-        faucet_keypair: Keypair,
-        genesis_config: &GenesisConfig,
-        accounts_manager: Arc<AccountsManager>,
-        transaction_status_sender: TransactionStatusSender,
-        pubsub_config: &PubsubConfig,
-        config: &EphemeralConfig,
-    ) -> ApiResult<JsonRpcService> {
-        let rpc_socket_addr = SocketAddr::new(config.rpc.addr, config.rpc.port);
-        let rpc_json_config = JsonRpcConfig {
-            slot_duration: Duration::from_millis(
-                config.validator.millis_per_slot,
-            ),
-            genesis_creation_time: genesis_config.creation_time,
-            transaction_status_sender: Some(transaction_status_sender.clone()),
-            rpc_socket_addr: Some(rpc_socket_addr),
-            pubsub_socket_addr: Some(*pubsub_config.socket()),
-            enable_rpc_transaction_history: true,
-            disable_sigverify: !config.validator.sigverify,
-
-            ..Default::default()
-        };
-
-        JsonRpcService::try_init(
-            bank,
-            ledger.clone(),
-            faucet_keypair,
-            genesis_config.hash(),
-            accounts_manager,
-            rpc_json_config,
-        )
-        .map_err(|err| {
-            ApiError::FailedToInitJsonRpcService(format!("{:?}", err))
-        })
-    }
-
     fn init_ledger(
         ledger_config: &LedgerConfig,
     ) -> ApiResult<(Arc<Ledger>, Slot)> {
@@ -581,25 +500,6 @@ impl MagicValidator {
         }
 
         Ok(())
-    }
-
-    fn init_transaction_listener(
-        ledger: &Arc<Ledger>,
-        transaction_notifier: Option<TransactionNotifier>,
-    ) -> (
-        crossbeam_channel::Sender<TransactionStatusMessage>,
-        GeyserTransactionNotifyListener,
-    ) {
-        let (transaction_sndr, transaction_recvr) =
-            crossbeam_channel::unbounded();
-        (
-            transaction_sndr,
-            GeyserTransactionNotifyListener::new(
-                transaction_notifier,
-                transaction_recvr,
-                ledger.clone(),
-            ),
-        )
     }
 
     // -----------------

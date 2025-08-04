@@ -27,18 +27,11 @@ use crate::{AccountDumper, AccountDumperError, AccountDumperResult};
 
 pub struct AccountDumperBank {
     bank: Arc<Bank>,
-    transaction_status_sender: Option<TransactionStatusSender>,
 }
 
 impl AccountDumperBank {
-    pub fn new(
-        bank: Arc<Bank>,
-        transaction_status_sender: Option<TransactionStatusSender>,
-    ) -> Self {
-        Self {
-            bank,
-            transaction_status_sender,
-        }
+    pub fn new(bank: Arc<Bank>) -> Self {
+        Self { bank }
     }
 
     fn execute_transaction(

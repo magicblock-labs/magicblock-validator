@@ -1,9 +1,8 @@
-// NOTE: copied and slightly modified from bank.rs
+// NOTE: copied and heavily modified from bank.rs
 use std::{borrow::Cow, sync::Arc};
 
 use magicblock_accounts_db::{error::AccountsDbError, StWLock};
 use magicblock_config::AccountsDbConfig;
-use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_sdk::{
     genesis_config::GenesisConfig,
     pubkey::Pubkey,
@@ -19,8 +18,7 @@ use solana_svm::{
 use solana_timings::ExecuteTimings;
 
 use crate::{
-    bank::Bank, geyser::AccountsUpdateNotifier,
-    transaction_batch::TransactionBatch,
+    bank::Bank, transaction_batch::TransactionBatch,
     transaction_logs::TransactionLogCollectorFilter,
     EPHEM_DEFAULT_MILLIS_PER_SLOT,
 };
@@ -28,14 +26,10 @@ use crate::{
 impl Bank {
     pub fn new_for_tests(
         genesis_config: &GenesisConfig,
-        accounts_update_notifier: Option<AccountsUpdateNotifier>,
-        slot_status_notifier: Option<SlotStatusNotifierImpl>,
     ) -> std::result::Result<Bank, AccountsDbError> {
         Self::new_with_config_for_tests(
             genesis_config,
             Arc::new(RuntimeConfig::default()),
-            accounts_update_notifier,
-            slot_status_notifier,
             EPHEM_DEFAULT_MILLIS_PER_SLOT,
         )
     }
@@ -43,8 +37,6 @@ impl Bank {
     pub fn new_with_config_for_tests(
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
-        accounts_update_notifier: Option<AccountsUpdateNotifier>,
-        slot_status_notifier: Option<SlotStatusNotifierImpl>,
         millis_per_slot: u64,
     ) -> std::result::Result<Bank, magicblock_accounts_db::error::AccountsDbError>
     {
@@ -61,8 +53,6 @@ impl Bank {
             None,
             None,
             false,
-            accounts_update_notifier,
-            slot_status_notifier,
             millis_per_slot,
             Pubkey::new_unique(),
             // TODO(bmuddha): when we switch to multithreaded mode,
