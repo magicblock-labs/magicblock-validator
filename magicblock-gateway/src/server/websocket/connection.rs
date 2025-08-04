@@ -112,7 +112,7 @@ impl ConnectionHandler {
 
     async fn report_success(&mut self, result: WsDispatchResult) -> bool {
         let payload =
-            ResponsePayload::encode_no_context(&result.id, result.result);
+            ResponsePayload::encode_no_context_raw(&result.id, result.result);
         self.send(payload.0).await.is_ok()
     }
 

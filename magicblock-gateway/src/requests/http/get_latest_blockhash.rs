@@ -5,11 +5,11 @@ use super::prelude::*;
 impl HttpDispatcher {
     pub(crate) fn get_latest_blockhash(
         &self,
-        request: JsonRequest,
-    ) -> Response<JsonBody> {
+        request: &JsonRequest,
+    ) -> HandlerResult {
         let info = self.blocks.get_latest();
         let slot = info.slot;
         let response = RpcBlockhash::from(info);
-        ResponsePayload::encode(&request.id, response, slot)
+        Ok(ResponsePayload::encode(&request.id, response, slot))
     }
 }
