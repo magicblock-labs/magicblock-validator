@@ -1,8 +1,8 @@
+use magicblock_core::magic_program::instruction::MagicBlockInstruction;
 use solana_program_runtime::declare_process_instruction;
 use solana_sdk::program_utils::limited_deserialize;
 
 use crate::{
-    magicblock_instruction::MagicBlockInstruction,
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
     schedule_transactions::{

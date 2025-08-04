@@ -4133,7 +4133,9 @@ dependencies = [
 name = "magicblock-core"
 version = "0.1.7"
 dependencies = [
- "solana-sdk",
+ "bincode",
+ "serde",
+ "solana-program",
 ]
 
 [[package]]

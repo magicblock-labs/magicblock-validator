@@ -51,7 +51,11 @@ pub fn assert_is_signer(
 
 pub fn assert_program_id(program_id: &Pubkey) -> ProgramResult {
     if program_id != &crate::id() {
-        msg!("Err: invalid program id, expected: {}, got: {}", crate::id(), program_id);
+        msg!(
+            "Err: invalid program id, expected: {}, got: {}",
+            crate::id(),
+            program_id
+        );
         Err(ProgramError::IncorrectProgramId)
     } else {
         Ok(())

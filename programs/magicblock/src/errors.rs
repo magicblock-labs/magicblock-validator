@@ -1,6 +1,5 @@
 use num_derive::{FromPrimitive, ToPrimitive};
 use serde::Serialize;
-use solana_sdk::decode_error::DecodeError;
 use thiserror::Error;
 
 // -----------------
@@ -48,10 +47,4 @@ pub enum MagicBlockProgramError {
 
     #[error("Encountered an error when persisting account modification data.")]
     FailedToPersistAccountModData,
-}
-
-impl<T> DecodeError<T> for MagicBlockProgramError {
-    fn type_of() -> &'static str {
-        "MagicBlockProgramError"
-    }
 }

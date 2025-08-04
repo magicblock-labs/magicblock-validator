@@ -7,4 +7,4 @@ pub mod transactions;
 
 pub use cluster::*;
 pub use fetch::transaction_to_clone_pubkey_from_cluster;
-pub use magicblock_program::magicblock_instruction::AccountModification;
+pub use magicblock_program::instruction::AccountModification;

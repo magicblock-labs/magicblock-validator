@@ -5,6 +5,7 @@ use solana_program_runtime::{
     __private::{InstructionError, ReadableAccount},
     invoke_context::InvokeContext,
 };
+use solana_sdk::pubkey::Pubkey;
 
 use crate::{
     schedule_transactions,
@@ -12,7 +13,7 @@ use crate::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
     validator::validator_authority_id,
-    MagicContext, Pubkey, TransactionScheduler,
+    MagicContext, TransactionScheduler,
 };
 
 pub fn process_accept_scheduled_commits(

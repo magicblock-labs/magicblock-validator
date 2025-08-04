@@ -1,7 +1,7 @@
+use magicblock_core::magic_program::args::MagicBaseIntentArgs;
 use solana_sdk::instruction::InstructionError;
 
 use crate::{
-    args::MagicBaseIntentArgs,
     magic_scheduled_base_intent::{CommitType, ConstructionContext},
     utils::account_actions::set_account_owner_to_delegation_program,
 };

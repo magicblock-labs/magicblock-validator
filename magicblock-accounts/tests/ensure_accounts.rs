@@ -18,12 +18,12 @@ use magicblock_accounts::{
 };
 use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_committor_service::stubs::ChangesetCommittorStub;
+use magicblock_config::AccountsCloneConfig;
 use solana_sdk::pubkey::Pubkey;
 use stubs::scheduled_commits_processor_stub::ScheduledCommitsProcessorStub;
 use test_tools_core::init_logger;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use magicblock_config::AccountsCloneConfig;
 
 mod stubs;
 

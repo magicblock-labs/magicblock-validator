@@ -1,6 +1,6 @@
 use magicblock_program::{
-    instruction_utils::InstructionUtils,
-    magicblock_instruction::AccountModification, validator,
+    instruction::AccountModification, instruction_utils::InstructionUtils,
+    validator,
 };
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable, hash::Hash, pubkey::Pubkey,
@@ -14,7 +14,14 @@ pub fn transaction_to_clone_regular_account(
     recent_blockhash: Hash,
 ) -> Transaction {
     // Just a single mutation for regular accounts, just dump the data directly, while applying overrides
-    let mut account_modification = AccountModification::from((pubkey, account));
+    let mut account_modification = AccountModification {
+        pubkey: *pubkey,
+        lamports: Some(account.lamports),
+        owner: Some(account.owner),
+        rent_epoch: Some(account.rent_epoch),
+        data: Some(account.data.to_owned()),
+        executable: Some(account.executable),
+    };
     if let Some(overrides) = overrides {
         if let Some(lamports) = overrides.lamports {
             account_modification.lamports = Some(lamports);

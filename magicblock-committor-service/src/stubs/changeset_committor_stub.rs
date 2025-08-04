@@ -1,9 +1,9 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
-use std::time::Instant;
+
 use magicblock_program::SentCommit;
 use solana_pubkey::Pubkey;
 use solana_sdk::{signature::Signature, transaction::Transaction};
@@ -45,8 +45,7 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         owner: Pubkey,
     ) -> oneshot::Receiver<CommittorServiceResult<Instant>> {
         let initiated = Instant::now();
-        let (tx, rx) =
-           oneshot::channel::<CommittorServiceResult<Instant>>();
+        let (tx, rx) = oneshot::channel::<CommittorServiceResult<Instant>>();
         self.reserved_pubkeys_for_committee
             .lock()
             .unwrap()

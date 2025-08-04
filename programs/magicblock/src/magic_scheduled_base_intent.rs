@@ -1,5 +1,9 @@
 use std::{cell::RefCell, collections::HashSet};
 
+use magicblock_core::magic_program::args::{
+    ActionArgs, BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
+    MagicBaseIntentArgs, UndelegateTypeArgs,
+};
 use serde::{Deserialize, Serialize};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::{
@@ -9,20 +13,16 @@ use solana_program_runtime::{
 use solana_sdk::{
     account::{Account, AccountSharedData},
     clock::Slot,
+    pubkey::Pubkey,
     transaction::Transaction,
 };
 
 use crate::{
-    args::{
-        ActionArgs, BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
-        MagicBaseIntentArgs, UndelegateTypeArgs,
-    },
     instruction_utils::InstructionUtils,
     utils::accounts::{
         get_instruction_account_short_meta_with_idx,
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
-    Pubkey,
 };
 
 /// Context necessary for construction of Schedule Action

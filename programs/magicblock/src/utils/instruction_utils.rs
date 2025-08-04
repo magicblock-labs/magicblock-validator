@@ -1,21 +1,23 @@
 use std::collections::HashMap;
 
-use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
+use magicblock_core::magic_program::{
+    instruction::{
+        AccountModification, AccountModificationForInstruction,
+        MagicBlockInstruction,
+    },
+    MAGIC_CONTEXT_PUBKEY,
+};
 use solana_program_runtime::__private::Hash;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
 
 use crate::{
-    magicblock_instruction::{
-        AccountModification, AccountModificationForInstruction,
-        MagicBlockInstruction,
-    },
     mutate_accounts::set_account_mod_data,
     validator::{validator_authority, validator_authority_id},
-    Pubkey,
 };
 
 pub struct InstructionUtils;

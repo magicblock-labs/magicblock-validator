@@ -1,7 +1,6 @@
 use std::{path::Path, sync::Arc, time::Instant};
 
 use log::*;
-use magicblock_rpc_client::MagicblockRpcClient;
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signature};
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
@@ -18,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     committor_processor::CommittorProcessor,
     config::ChainConfig,
-    error::{CommittorServiceError, CommittorServiceResult},
+    error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},

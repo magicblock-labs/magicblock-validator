@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
+use magicblock_core::magic_program::{
+    instruction::MagicBlockInstruction, MAGIC_CONTEXT_PUBKEY,
+};
 use solana_sdk::{
     account::{
         create_account_shared_data_for_test, AccountSharedData, ReadableAccount,
@@ -20,7 +22,6 @@ use test_tools_core::init_logger;
 use crate::{
     magic_context::MagicContext,
     magic_scheduled_base_intent::ScheduledBaseIntent,
-    magicblock_instruction::MagicBlockInstruction,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     test_utils::{ensure_started_validator, process_instruction},
     utils::DELEGATION_PROGRAM_ID,

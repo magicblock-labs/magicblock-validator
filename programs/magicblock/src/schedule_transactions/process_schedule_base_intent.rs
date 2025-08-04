@@ -1,5 +1,6 @@
 use std::{collections::HashSet, sync::atomic::Ordering};
 
+use magicblock_core::magic_program::args::MagicBaseIntentArgs;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
@@ -8,7 +9,6 @@ use solana_sdk::{
 };
 
 use crate::{
-    args::MagicBaseIntentArgs,
     magic_scheduled_base_intent::{ConstructionContext, ScheduledBaseIntent},
     schedule_transactions::{
         check_magic_context_id,

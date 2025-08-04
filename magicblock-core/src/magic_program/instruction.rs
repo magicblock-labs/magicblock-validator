@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use solana_sdk::{account::Account, pubkey::Pubkey};
+use solana_program::pubkey::Pubkey;
 
-use crate::args::MagicBaseIntentArgs;
+use crate::magic_program::args::MagicBaseIntentArgs;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MagicBlockInstruction {
@@ -105,20 +105,20 @@ pub struct AccountModification {
     pub rent_epoch: Option<u64>,
 }
 
-impl From<(&Pubkey, &Account)> for AccountModification {
-    fn from(
-        (account_pubkey, account): (&Pubkey, &Account),
-    ) -> AccountModification {
-        AccountModification {
-            pubkey: *account_pubkey,
-            lamports: Some(account.lamports),
-            owner: Some(account.owner),
-            executable: Some(account.executable),
-            data: Some(account.data.clone()),
-            rent_epoch: Some(account.rent_epoch),
-        }
-    }
-}
+// impl From<(&Pubkey, &)> for AccountModification {
+//     fn from(
+//         (account_pubkey, account): (&Pubkey, &Accoun),
+//     ) -> AccountModification {
+//         AccountModification {
+//             pubkey: *account_pubkey,
+//             lamports: Some(account.lamports),
+//             owner: Some(account.owner),
+//             executable: Some(account.executable),
+//             data: Some(account.data.clone()),
+//             rent_epoch: Some(account.rent_epoch),
+//         }
+//     }
+// }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct AccountModificationForInstruction {
