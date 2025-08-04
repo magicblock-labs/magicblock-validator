@@ -8,11 +8,9 @@ use std::{
     },
 };
 
-use magicblock_gateway_types::{
-    accounts::{AccountWithSlot, Pubkey, ReadableAccount},
-    transactions::{TransactionResult, TransactionStatus},
-};
 use parking_lot::RwLock;
+use solana_account::ReadableAccount;
+use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 
 use crate::{
@@ -23,6 +21,10 @@ use crate::{
     server::websocket::{
         connection::ConnectionID,
         dispatch::{ConnectionTx, WsConnectionChannel},
+    },
+    types::{
+        accounts::AccountWithSlot,
+        transactions::{TransactionResult, TransactionStatus},
     },
     Slot,
 };

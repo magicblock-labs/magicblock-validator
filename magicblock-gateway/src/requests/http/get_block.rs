@@ -1,16 +1,8 @@
-use hyper::Response;
 use solana_rpc_client_api::config::RpcBlockConfig;
 use solana_transaction_status::{BlockEncodingOptions, ConfirmedBlock};
 use solana_transaction_status_client_types::UiTransactionEncoding;
 
-use crate::{
-    error::RpcError,
-    requests::{payload::ResponsePayload, JsonRequest},
-    server::http::dispatch::HttpDispatcher,
-    unwrap,
-    utils::JsonBody,
-    Slot,
-};
+use super::prelude::*;
 
 impl HttpDispatcher {
     pub(crate) fn get_block(&self, request: JsonRequest) -> Response<JsonBody> {
