@@ -4,7 +4,8 @@ use solana_transaction_status::UiTransactionEncoding;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
+    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    validator::cleanup,
 };
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use test_ledger_restore::{
@@ -36,6 +37,8 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
         None,
         None,
         LedgerResumeStrategy::Reset,
+        true,
+        &LoadedAccounts::default(),
     );
 
     // First airdrop followed by wait until account is flushed
@@ -73,6 +76,8 @@ fn read(ledger_path: &Path, signature: Signature, block_time: i64) -> Child {
         None,
         None,
         LedgerResumeStrategy::Replay,
+        true,
+        &Default::default(),
     );
     eprintln!(
         "Validator started in {:?}",

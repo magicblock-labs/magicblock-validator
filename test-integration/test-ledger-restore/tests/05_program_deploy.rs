@@ -131,6 +131,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
         ledger_path,
         None,
         None,
+        LedgerResumeStrategy::Reset,
         true,
         &Default::default(),
     );
