@@ -3930,6 +3930,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
+<<<<<<< master
 <<<<<<< ours
  "magicblock-delegation-program",
  "magicblock-geyser-plugin",
@@ -3937,6 +3938,10 @@ dependencies = [
  "magicblock-geyser-plugin",
 =======
 >>>>>>> theirs
+||||||| ancestor
+=======
+ "magicblock-gateway",
+>>>>>>> chore: magicblock-bank code cleanup
  "magicblock-ledger",
  "magicblock-metrics",
  "magicblock-perf-service",

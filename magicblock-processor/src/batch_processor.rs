@@ -156,7 +156,6 @@ fn execute_batches_internal(
 pub fn execute_batch(
     batch: &TransactionBatchWithIndexes,
     bank: &Arc<Bank>,
-    transaction_status_sender: Option<&TransactionStatusSender>,
     timings: &mut ExecuteTimings,
     log_messages_bytes_limit: Option<usize>,
 ) -> Result<()> {

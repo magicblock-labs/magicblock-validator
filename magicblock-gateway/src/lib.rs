@@ -10,7 +10,7 @@ pub mod error;
 mod processor;
 mod requests;
 pub mod server;
-mod state;
+pub mod state;
 pub mod types;
 mod utils;
 
