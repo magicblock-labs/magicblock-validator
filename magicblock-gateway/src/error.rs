@@ -40,6 +40,33 @@ impl From<json::Error> for RpcError {
     }
 }
 
+impl From<magicblock_ledger::errors::LedgerError> for RpcError {
+    fn from(value: magicblock_ledger::errors::LedgerError) -> Self {
+        Self::internal(value)
+    }
+}
+
+impl From<magicblock_accounts_db::error::AccountsDbError> for RpcError {
+    fn from(value: magicblock_accounts_db::error::AccountsDbError) -> Self {
+        Self::internal(value)
+    }
+}
+
+#[macro_export]
+macro_rules! some_or_err {
+    ($val: ident) => {
+        some_or_err!($val, stringify!($val))
+    };
+    ($val: expr, $label: expr) => {
+        $val.map(Into::into).ok_or_else(|| {
+            $crate::error::RpcError::invalid_params(concat!(
+                "missing or invalid ",
+                $label
+            ))
+        })?
+    };
+}
+
 impl RpcError {
     pub(crate) fn invalid_params<E: Display>(error: E) -> Self {
         Self {

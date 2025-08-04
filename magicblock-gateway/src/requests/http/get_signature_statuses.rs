@@ -8,9 +8,7 @@ impl HttpDispatcher {
         request: &mut JsonRequest,
     ) -> HandlerResult {
         let signatures = parse_params!(request.params()?, Vec<SerdeSignature>);
-        let signatures = signatures.ok_or_else(|| {
-            RpcError::invalid_params("missing or invalid signatures")
-        })?;
+        let signatures: Vec<_> = some_or_err!(signatures);
         let mut statuses = Vec::with_capacity(signatures.len());
         for signature in signatures {
             if let Some(status) = self.transactions.get(&signature.0) {
@@ -25,11 +23,8 @@ impl HttpDispatcher {
                     continue;
                 }
             }
-            let Some((slot, meta)) = self
-                .ledger
-                .get_transaction_status(signature.0, Slot::MAX)
-                .ok()
-                .flatten()
+            let Some((slot, meta)) =
+                self.ledger.get_transaction_status(signature.0, Slot::MAX)?
             else {
                 statuses.push(None);
                 continue;

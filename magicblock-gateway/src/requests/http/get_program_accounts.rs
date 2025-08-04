@@ -14,15 +14,13 @@ impl HttpDispatcher {
             Serde32Bytes,
             RpcProgramAccountsConfig
         );
-        let program = program.map(Into::into).ok_or_else(|| {
-            RpcError::invalid_params("missing or invalid pubkey")
-        })?;
+        let program = some_or_err!(program);
         let config = config.unwrap_or_default();
         let filters = ProgramFilters::from(config.filters);
-        let accounts = self
-            .accountsdb
-            .get_program_accounts(&program, move |a| filters.matches(a.data()))
-            .map_err(RpcError::internal)?;
+        let accounts =
+            self.accountsdb.get_program_accounts(&program, move |a| {
+                filters.matches(a.data())
+            })?;
         let encoding = config
             .account_config
             .encoding
