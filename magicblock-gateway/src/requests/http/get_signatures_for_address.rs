@@ -9,17 +9,13 @@ const DEFAULT_SIGNATURES_LIMIT: usize = 1_000;
 impl HttpDispatcher {
     pub(crate) fn get_signatures_for_address(
         &self,
-        request: JsonRequest,
-    ) -> Response<JsonBody> {
-        let params = request
-            .params
-            .ok_or_else(|| RpcError::invalid_request("missing params"));
-        unwrap!(mut params, request.id);
-        let (address, config) = parse_params!(params, Serde32Bytes, Config);
+        request: &mut JsonRequest,
+    ) -> HandlerResult {
+        let (address, config) =
+            parse_params!(request.params()?, Serde32Bytes, Config);
         let address = address.map(Into::into).ok_or_else(|| {
             RpcError::invalid_params("missing or invalid address")
-        });
-        unwrap!(address, request.id);
+        })?;
         let config = config.unwrap_or_default();
         let signatures = self
             .ledger
@@ -30,8 +26,7 @@ impl HttpDispatcher {
                 config.until.map(|s| s.0),
                 config.limit.unwrap_or(DEFAULT_SIGNATURES_LIMIT),
             )
-            .map_err(RpcError::internal);
-        unwrap!(signatures, request.id);
+            .map_err(RpcError::internal)?;
         let signatures = signatures
             .infos
             .into_iter()
@@ -43,10 +38,7 @@ impl HttpDispatcher {
                 item
             })
             .collect::<Vec<_>>();
-        Response::new(ResponsePayload::encode_no_context(
-            &request.id,
-            signatures,
-        ))
+        Ok(ResponsePayload::encode_no_context(&request.id, signatures))
     }
 }
 

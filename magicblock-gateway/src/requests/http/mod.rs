@@ -4,9 +4,9 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use http_body_util::BodyExt;
 use hyper::{
     body::{Bytes, Incoming},
-    Request,
+    Request, Response,
 };
-use prelude::AccountsToEnsure;
+use prelude::{AccountsToEnsure, JsonBody};
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 use solana_transaction::versioned::VersionedTransaction;
@@ -17,6 +17,8 @@ use crate::{
 };
 
 use super::JsonRequest;
+
+type HandlerResult = RpcResult<Response<JsonBody>>;
 
 pub(crate) enum Data {
     Empty,
@@ -103,6 +105,7 @@ impl HttpDispatcher {
 }
 
 mod prelude {
+    pub(super) use super::HandlerResult;
     pub(super) use crate::{
         error::RpcError,
         requests::{
@@ -112,11 +115,9 @@ mod prelude {
         },
         server::http::dispatch::HttpDispatcher,
         types::accounts::{AccountsToEnsure, LockedAccount},
-        unwrap,
         utils::{AccountWithPubkey, JsonBody},
         Slot,
     };
-    pub(super) use hyper::Response;
     pub(super) use solana_account::ReadableAccount;
     pub(super) use solana_account_decoder::UiAccountEncoding;
     pub(super) use solana_pubkey::Pubkey;
