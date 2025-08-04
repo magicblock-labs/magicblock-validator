@@ -8,9 +8,7 @@ impl HttpDispatcher {
     pub(crate) fn get_block(&self, request: &mut JsonRequest) -> HandlerResult {
         let (slot, config) =
             parse_params!(request.params()?, Slot, RpcBlockConfig);
-        let slot = slot.ok_or_else(|| {
-            RpcError::invalid_params("missing or invalid slot")
-        })?;
+        let slot = some_or_err!(slot);
         let config = config.unwrap_or_default();
 
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
@@ -20,7 +18,7 @@ impl HttpDispatcher {
             max_supported_transaction_version: config
                 .max_supported_transaction_version,
         };
-        let block = self.ledger.get_block(slot).map_err(RpcError::internal)?;
+        let block = self.ledger.get_block(slot)?;
         let block = block
             .map(ConfirmedBlock::from)
             .and_then(|b| b.encode_with_options(encoding, options).ok());

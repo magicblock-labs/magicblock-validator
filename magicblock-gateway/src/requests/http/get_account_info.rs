@@ -12,9 +12,7 @@ impl HttpDispatcher {
             Serde32Bytes,
             RpcAccountInfoConfig
         );
-        let pubkey = pubkey.map(Into::into).ok_or_else(|| {
-            RpcError::invalid_params("missing or invalid pubkey")
-        })?;
+        let pubkey = some_or_err!(pubkey);
         let config = config.unwrap_or_default();
         let slot = self.accountsdb.slot();
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);

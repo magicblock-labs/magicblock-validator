@@ -63,7 +63,6 @@ pub(crate) async fn extract_bytes(
 }
 
 impl HttpDispatcher {
-    #[inline]
     async fn read_account_with_ensure(
         &self,
         pubkey: &Pubkey,
@@ -114,6 +113,7 @@ mod prelude {
             JsonRequest,
         },
         server::http::dispatch::HttpDispatcher,
+        some_or_err,
         types::accounts::{AccountsToEnsure, LockedAccount},
         utils::{AccountWithPubkey, JsonBody},
         Slot,
@@ -130,12 +130,8 @@ const SPL_DELEGATE_OFFSET: usize = 73;
 
 const SPL_MINT_RANGE: Range<usize> =
     SPL_MINT_OFFSET..SPL_MINT_OFFSET + size_of::<Pubkey>();
-const SPL_OWNER_RANGE: Range<usize> =
-    SPL_OWNER_OFFSET..SPL_OWNER_OFFSET + size_of::<Pubkey>();
 const SPL_TOKEN_AMOUNT_RANGE: Range<usize> =
     SPL_DECIMALS_OFFSET..SPL_DECIMALS_OFFSET + size_of::<u64>();
-const SPL_DELEGATE_RANGE: Range<usize> =
-    SPL_DELEGATE_OFFSET..SPL_DELEGATE_OFFSET + size_of::<Pubkey>();
 
 const TOKEN_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");

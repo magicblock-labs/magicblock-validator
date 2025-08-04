@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use solana_rpc_client_api::config::{
     RpcAccountInfoConfig, RpcTokenAccountsFilter,
 };
@@ -22,12 +20,8 @@ impl HttpDispatcher {
             RpcTokenAccountsFilter,
             RpcAccountInfoConfig
         );
-        let delegate = delegate.ok_or_else(|| {
-            RpcError::invalid_params("missing or invalid owner")
-        })?;
-        let filter = filter.ok_or_else(|| {
-            RpcError::invalid_params("missing or invalid filter")
-        })?;
+        let delegate: Serde32Bytes = some_or_err!(delegate);
+        let filter = some_or_err!(filter);
         let config = config.unwrap_or_default();
         let slot = self.accountsdb.slot();
         let mut filters = ProgramFilters::default();
@@ -44,18 +38,17 @@ impl HttpDispatcher {
                 filters.push(filter);
             }
             RpcTokenAccountsFilter::ProgramId(pubkey) => {
-                program =
-                    Pubkey::from_str(&pubkey).map_err(RpcError::parse_error)?
+                program = pubkey.parse().map_err(RpcError::parse_error)?
             }
         };
         filters.push(ProgramFilter::MemCmp {
             offset: SPL_DELEGATE_OFFSET,
             bytes: delegate.0.to_vec(),
         });
-        let accounts = self
-            .accountsdb
-            .get_program_accounts(&program, move |a| filters.matches(a.data()))
-            .map_err(RpcError::internal)?;
+        let accounts =
+            self.accountsdb.get_program_accounts(&program, move |a| {
+                filters.matches(a.data())
+            })?;
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         let slice = config.data_slice;
         let accounts = accounts
