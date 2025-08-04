@@ -7,51 +7,44 @@ use super::prelude::*;
 impl HttpDispatcher {
     pub(crate) async fn get_token_account_balance(
         &self,
-        request: JsonRequest,
-    ) -> Response<JsonBody> {
-        let params = request
-            .params
-            .ok_or_else(|| RpcError::invalid_request("missing params"));
-        unwrap!(mut params, &request.id);
-        let pubkey = parse_params!(params, Serde32Bytes);
+        request: &mut JsonRequest,
+    ) -> HandlerResult {
+        let pubkey = parse_params!(request.params()?, Serde32Bytes);
         let pubkey = pubkey.map(Into::into).ok_or_else(|| {
             RpcError::invalid_params("missing or invalid pubkey")
-        });
-        unwrap!(pubkey, &request.id);
-        let token_account =
-            self.read_account_with_ensure(&pubkey).await.ok_or_else(|| {
+        })?;
+        let token_account = self
+            .read_account_with_ensure(&pubkey)
+            .await
+            .ok_or_else(|| {
                 RpcError::invalid_params("token account is not found")
-            });
-        unwrap!(token_account, request.id);
+            })?;
         let mint = token_account
             .data()
             .get(SPL_MINT_RANGE)
             .map(Pubkey::try_from)
             .transpose()
-            .map_err(RpcError::invalid_params);
-        unwrap!(mint, request.id);
+            .map_err(RpcError::invalid_params)?;
         let mint = mint
-            .ok_or_else(|| RpcError::invalid_params("invalid token account"));
-        unwrap!(mint, request.id);
+            .ok_or_else(|| RpcError::invalid_params("invalid token account"))?;
         let mint_account =
             self.read_account_with_ensure(&mint).await.ok_or_else(|| {
                 RpcError::invalid_params("mint account doesn't exist")
-            });
-        unwrap!(mint_account, request.id);
+            })?;
         let decimals = mint_account
             .data()
             .get(SPL_DECIMALS_OFFSET)
             .copied()
             .ok_or_else(|| {
                 RpcError::invalid_params("invalid token mint account")
-            });
-        unwrap!(decimals, request.id);
+            })?;
         let token_amount = {
-            let slice =
-                token_account.data().get(SPL_TOKEN_AMOUNT_RANGE).ok_or_else(
-                    || RpcError::invalid_params("invalid token account"),
-                );
-            unwrap!(slice, request.id);
+            let slice = token_account
+                .data()
+                .get(SPL_TOKEN_AMOUNT_RANGE)
+                .ok_or_else(|| {
+                    RpcError::invalid_params("invalid token account")
+                })?;
             let mut buffer = [0; size_of::<u64>()];
             buffer.copy_from_slice(slice);
             u64::from_le_bytes(buffer)
@@ -65,6 +58,6 @@ impl HttpDispatcher {
             decimals,
         };
         let slot = self.accountsdb.slot();
-        ResponsePayload::encode(&request.id, ui_token_amount, slot)
+        Ok(ResponsePayload::encode(&request.id, ui_token_amount, slot))
     }
 }

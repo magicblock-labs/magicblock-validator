@@ -13,36 +13,6 @@ use solana_rpc_client_api::filter::RpcFilterType;
 
 use crate::{requests::params::Serde32Bytes, types::accounts::LockedAccount};
 
-#[macro_export]
-macro_rules! unwrap {
-    ($result:expr) => {
-        match $result {
-            Ok(r) => r,
-            Err(error) => {
-                return Ok($crate::requests::payload::ResponseErrorPayload::encode(
-                    None, error,
-                ));
-            }
-        }
-    };
-    (@match $result: expr, $id:expr) => {
-        match $result {
-            Ok(r) => r,
-            Err(error) => {
-                return $crate::requests::payload::ResponseErrorPayload::encode(
-                    Some(&$id), error,
-                );
-            }
-        }
-    };
-    (mut $result: ident, $id:expr) => {
-        let mut $result = unwrap!(@match $result, $id);
-    };
-    ($result:ident, $id:expr) => {
-        let $result = unwrap!(@match $result, $id);
-    };
-}
-
 pub(crate) struct JsonBody(pub Vec<u8>);
 
 impl<S: Serialize> From<S> for JsonBody {

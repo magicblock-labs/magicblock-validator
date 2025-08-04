@@ -18,7 +18,6 @@ use crate::{
     state::{
         blocks::BlocksCache, transactions::TransactionsCache, SharedState,
     },
-    unwrap,
     utils::JsonBody,
 };
 
@@ -53,8 +52,19 @@ impl HttpDispatcher {
         self: Arc<Self>,
         request: Request<Incoming>,
     ) -> Result<Response<JsonBody>, Infallible> {
-        let body = unwrap!(extract_bytes(request).await);
-        let request = unwrap!(parse_body(body));
+        macro_rules! unwrap {
+            ($result:expr, $id: expr) => {
+                match $result {
+                    Ok(r) => r,
+                    Err(error) => {
+                        return Ok(ResponseErrorPayload::encode($id, error));
+                    }
+                }
+            };
+        }
+        let body = unwrap!(extract_bytes(request).await, None);
+        let mut request = unwrap!(parse_body(body), None);
+        let request = &mut request;
 
         use crate::requests::JsonRpcMethod::*;
         let response = match request.method {
@@ -84,14 +94,8 @@ impl HttpDispatcher {
             GetBlockHeight => self.get_block_height(request),
             GetIdentity => self.get_identity(request),
             IsBlockhashValid => self.is_blockhash_valid(request),
-            unknown => {
-                let error = RpcError::method_not_found(unknown);
-                return Ok(ResponseErrorPayload::encode(
-                    Some(&request.id),
-                    error,
-                ));
-            }
+            unknown => Err(RpcError::method_not_found(unknown)),
         };
-        Ok(response)
+        Ok(unwrap!(response, Some(&request.id)))
     }
 }

@@ -2,11 +2,21 @@ use std::fmt::Display;
 
 use json::{Array, Value};
 
+use crate::{error::RpcError, RpcResult};
+
 #[derive(json::Deserialize)]
 pub(crate) struct JsonRequest {
     pub(crate) id: Value,
     pub(crate) method: JsonRpcMethod,
     pub(crate) params: Option<Array>,
+}
+
+impl JsonRequest {
+    fn params(&mut self) -> RpcResult<&mut Array> {
+        self.params
+            .as_mut()
+            .ok_or_else(|| RpcError::invalid_request("missing params"))
+    }
 }
 
 #[derive(json::Deserialize, Debug, Copy, Clone)]

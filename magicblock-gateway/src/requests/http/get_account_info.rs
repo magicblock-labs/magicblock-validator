@@ -5,24 +5,22 @@ use super::prelude::*;
 impl HttpDispatcher {
     pub(crate) async fn get_account_info(
         &self,
-        request: JsonRequest,
-    ) -> Response<JsonBody> {
-        let params = request
-            .params
-            .ok_or_else(|| RpcError::invalid_request("missing params"));
-        unwrap!(mut params, request.id);
-        let (pubkey, config) =
-            parse_params!(params, Serde32Bytes, RpcAccountInfoConfig);
+        request: &mut JsonRequest,
+    ) -> HandlerResult {
+        let (pubkey, config) = parse_params!(
+            request.params()?,
+            Serde32Bytes,
+            RpcAccountInfoConfig
+        );
         let pubkey = pubkey.map(Into::into).ok_or_else(|| {
             RpcError::invalid_params("missing or invalid pubkey")
-        });
-        unwrap!(pubkey, request.id);
+        })?;
         let config = config.unwrap_or_default();
         let slot = self.accountsdb.slot();
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         let account = self.read_account_with_ensure(&pubkey).await.map(|acc| {
             LockedAccount::new(pubkey, acc).ui_encode(encoding);
         });
-        ResponsePayload::encode(&request.id, account, slot)
+        Ok(ResponsePayload::encode(&request.id, account, slot))
     }
 }

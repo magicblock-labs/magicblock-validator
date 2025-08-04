@@ -7,17 +7,15 @@ use super::prelude::*;
 impl HttpDispatcher {
     pub(crate) async fn get_multiple_accounts(
         &self,
-        request: JsonRequest,
-    ) -> Response<JsonBody> {
-        let params = request
-            .params
-            .ok_or_else(|| RpcError::invalid_request("missing params"));
-        unwrap!(mut params, request.id);
-        let (pubkeys, config) =
-            parse_params!(params, Vec<Serde32Bytes>, RpcAccountInfoConfig);
-        let pubkeys =
-            pubkeys.ok_or_else(|| RpcError::invalid_params("missing pubkeys"));
-        unwrap!(pubkeys, request.id);
+        request: &mut JsonRequest,
+    ) -> HandlerResult {
+        let (pubkeys, config) = parse_params!(
+            request.params()?,
+            Vec<Serde32Bytes>,
+            RpcAccountInfoConfig
+        );
+        let pubkeys = pubkeys
+            .ok_or_else(|| RpcError::invalid_params("missing pubkeys"))?;
         // SAFETY: Pubkey has the same memory layout and size as Serde32Bytes
         let pubkeys: Vec<Pubkey> = unsafe { std::mem::transmute(pubkeys) };
         let config = config.unwrap_or_default();
@@ -26,8 +24,8 @@ impl HttpDispatcher {
         let mut ensured = false;
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         loop {
-            let reader = self.accountsdb.reader().map_err(RpcError::internal);
-            unwrap!(reader, request.id);
+            let reader =
+                self.accountsdb.reader().map_err(RpcError::internal)?;
             for (pubkey, account) in pubkeys.iter().zip(&mut accounts) {
                 if account.is_some() {
                     continue;
@@ -49,16 +47,11 @@ impl HttpDispatcher {
             }
             let to_ensure = AccountsToEnsure::new(to_ensure);
             let ready = to_ensure.ready.clone();
-            let _check = self
-                .ensure_accounts_tx
-                .send(to_ensure)
-                .await
-                .map_err(RpcError::internal);
-            unwrap!(_check, request.id);
+            let _ = self.ensure_accounts_tx.send(to_ensure).await;
             ready.notified().await;
             ensured = true;
         }
 
-        ResponsePayload::encode(&request.id, accounts, slot)
+        Ok(ResponsePayload::encode(&request.id, accounts, slot))
     }
 }

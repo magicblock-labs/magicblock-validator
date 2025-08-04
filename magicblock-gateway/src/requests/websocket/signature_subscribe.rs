@@ -1,9 +1,6 @@
-use crate::{
-    error::RpcError,
-    requests::{params::SerdeSignature, JsonRequest},
-    server::websocket::dispatch::{SubResult, WsDispatcher},
-    RpcResult,
-};
+use crate::requests::params::SerdeSignature;
+
+use super::prelude::*;
 
 impl WsDispatcher {
     pub(crate) async fn signature_subscribe(

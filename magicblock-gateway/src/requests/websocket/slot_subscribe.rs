@@ -1,7 +1,4 @@
-use crate::{
-    server::websocket::dispatch::{SubResult, WsDispatcher},
-    RpcResult,
-};
+use super::prelude::*;
 
 impl WsDispatcher {
     pub(crate) fn slot_subscribe(&mut self) -> RpcResult<SubResult> {

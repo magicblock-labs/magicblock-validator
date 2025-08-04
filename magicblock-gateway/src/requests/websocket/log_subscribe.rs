@@ -1,12 +1,8 @@
 use json::Deserialize;
 
-use crate::{
-    encoder::TransactionLogsEncoder,
-    error::RpcError,
-    requests::{params::Serde32Bytes, JsonRequest},
-    server::websocket::dispatch::{SubResult, WsDispatcher},
-    RpcResult,
-};
+use crate::encoder::TransactionLogsEncoder;
+
+use super::prelude::*;
 
 impl WsDispatcher {
     pub(crate) fn logs_subscribe(
