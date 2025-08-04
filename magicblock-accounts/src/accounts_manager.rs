@@ -7,7 +7,6 @@ use conjunto_transwise::{
 use magicblock_account_cloner::{CloneOutputMap, RemoteAccountClonerClient};
 use magicblock_accounts_api::BankAccountProvider;
 use magicblock_bank::bank::Bank;
-use magicblock_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
 
@@ -32,7 +31,6 @@ impl AccountsManager {
         bank: &Arc<Bank>,
         cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
-        transaction_status_sender: Option<TransactionStatusSender>,
         validator_keypair: Keypair,
         config: AccountsConfig,
     ) -> AccountsResult<Self> {
@@ -52,7 +50,6 @@ impl AccountsManager {
         let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
             bank.clone(),
             cloned_accounts.clone(),
-            transaction_status_sender.clone(),
         );
 
         Ok(Self {
