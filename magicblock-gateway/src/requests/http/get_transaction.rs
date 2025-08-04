@@ -13,14 +13,11 @@ impl HttpDispatcher {
             SerdeSignature,
             RpcTransactionConfig
         );
-        let signature = signature.ok_or_else(|| {
-            RpcError::invalid_params("missing or invalid signature")
-        })?;
+        let signature: SerdeSignature = some_or_err!(signature);
         let config = config.unwrap_or_default();
         let transaction = self
             .ledger
-            .get_complete_transaction(signature.0, u64::MAX)
-            .map_err(RpcError::internal)?;
+            .get_complete_transaction(signature.0, u64::MAX)?;
 
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
         let txn = transaction.and_then(|tx| tx.encode(encoding, None).ok());

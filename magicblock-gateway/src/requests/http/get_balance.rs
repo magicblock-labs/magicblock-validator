@@ -6,9 +6,7 @@ impl HttpDispatcher {
         request: &mut JsonRequest,
     ) -> HandlerResult {
         let pubkey = parse_params!(request.params()?, Serde32Bytes);
-        let pubkey = pubkey.map(Into::into).ok_or_else(|| {
-            RpcError::invalid_params("missing or invalid pubkey")
-        })?;
+        let pubkey = some_or_err!(pubkey);
         let slot = self.accountsdb.slot();
         let account = self
             .read_account_with_ensure(&pubkey)
