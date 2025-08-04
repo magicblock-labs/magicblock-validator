@@ -18,6 +18,7 @@ use crate::common::{create_commit_task, generate_random_bytes, TestFixture};
 
 mod common;
 
+#[ignore = "TODO: startup validator"]
 #[tokio::test]
 async fn test_prepare_10kb_buffer() {
     let fixture = TestFixture::new().await;
@@ -73,6 +74,7 @@ async fn test_prepare_10kb_buffer() {
     );
 }
 
+#[ignore = "TODO: startup validator"]
 #[tokio::test]
 async fn test_prepare_multiple_buffers() {
     let fixture = TestFixture::new().await;
@@ -144,6 +146,7 @@ async fn test_prepare_multiple_buffers() {
     }
 }
 
+#[ignore = "TODO: startup validator"]
 #[tokio::test]
 async fn test_lookup_tables() {
     let fixture = TestFixture::new().await;

@@ -23,6 +23,7 @@ pub fn init_account_and_delegate_ixs(
 ) -> InitAccountAndDelegateIxs {
     use program_flexi_counter::instruction::*;
     use program_flexi_counter::state::*;
+
     let init_counter_ix = create_init_ix(payer, "COUNTER".to_string());
     let rent_exempt = Rent::default().minimum_balance(bytes as usize);
     let mut realloc_ixs = vec![];

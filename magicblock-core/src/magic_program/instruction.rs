@@ -73,7 +73,7 @@ pub enum MagicBlockInstruction {
 // TODO: why that exists?
 #[allow(unused)]
 impl MagicBlockInstruction {
-    pub(crate) fn index(&self) -> u8 {
+    pub fn index(&self) -> u8 {
         use MagicBlockInstruction::*;
         match self {
             ModifyAccounts(_) => 0,
@@ -85,12 +85,12 @@ impl MagicBlockInstruction {
         }
     }
 
-    pub(crate) fn discriminant(&self) -> [u8; 4] {
+    pub fn discriminant(&self) -> [u8; 4] {
         let idx = self.index();
         [idx, 0, 0, 0]
     }
 
-    pub(crate) fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
+    pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
         bincode::serialize(self)
     }
 }
@@ -104,21 +104,6 @@ pub struct AccountModification {
     pub data: Option<Vec<u8>>,
     pub rent_epoch: Option<u64>,
 }
-
-// impl From<(&Pubkey, &)> for AccountModification {
-//     fn from(
-//         (account_pubkey, account): (&Pubkey, &Accoun),
-//     ) -> AccountModification {
-//         AccountModification {
-//             pubkey: *account_pubkey,
-//             lamports: Some(account.lamports),
-//             owner: Some(account.owner),
-//             executable: Some(account.executable),
-//             data: Some(account.data.clone()),
-//             rent_epoch: Some(account.rent_epoch),
-//         }
-//     }
-// }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct AccountModificationForInstruction {
