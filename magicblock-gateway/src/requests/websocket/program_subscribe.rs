@@ -3,12 +3,10 @@ use solana_rpc_client_api::config::RpcProgramAccountsConfig;
 
 use crate::{
     encoder::{AccountEncoder, ProgramAccountEncoder},
-    error::RpcError,
-    requests::{params::Serde32Bytes, JsonRequest},
-    server::websocket::dispatch::{SubResult, WsDispatcher},
     utils::ProgramFilters,
-    RpcResult,
 };
+
+use super::prelude::*;
 
 impl WsDispatcher {
     pub(crate) async fn program_subscribe(
