@@ -11,7 +11,6 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use log::warn;
-use magicblock_gateway_types::RpcChannelEndpoints;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::oneshot::Receiver,
