@@ -35,6 +35,15 @@ impl Default for LoadedAccounts {
 }
 
 impl LoadedAccounts {
+    pub fn new_with_new_validator_authority() -> Self {
+        Self {
+            validator_authority_kp: Keypair::new(),
+            luzid_authority: pubkey!(
+                "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm"
+            ),
+        }
+    }
+
     /// This use the test authority used in the delegation program as the validator
     /// authority.
     /// https://github.com/magicblock-labs/delegation-program/blob/7fc0ae9a59e48bea5b046b173ea0e34fd433c3c7/tests/fixtures/accounts.rs#L46

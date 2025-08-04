@@ -1,4 +1,5 @@
 use cleanass::assert_eq;
+use integration_test_tools::loaded_accounts::LoadedAccounts;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{
@@ -144,8 +145,13 @@ fn write(
 ) -> (Child, u64) {
     let programs = get_programs_with_flexi_counter();
 
-    let (_, mut validator, ctx) =
-        setup_validator_with_local_remote(ledger_path, Some(programs), true);
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
+        ledger_path,
+        Some(programs),
+        true,
+        false,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     // Airdrop to payers on chain
     expect!(
@@ -263,8 +269,13 @@ fn read(
     let payer_readonly = &payer_readonly_kp.pubkey();
     let programs = get_programs_with_flexi_counter();
 
-    let (_, mut validator, _) =
-        setup_validator_with_local_remote(ledger_path, Some(programs), false);
+    let (_, mut validator, _) = setup_validator_with_local_remote(
+        ledger_path,
+        Some(programs),
+        false,
+        false,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     wait_for_cloned_accounts_hydration();
 
