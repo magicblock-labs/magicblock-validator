@@ -240,6 +240,7 @@ mod tests {
                 fqdn: Some("validator.example.com".to_string()),
                 base_fees: Some(1000000000),
                 country_code: CountryCode::for_alpha2("FR").unwrap(),
+                claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Replay,
@@ -319,6 +320,7 @@ mod tests {
                 fqdn: Some("validator.example.com".to_string()),
                 base_fees: Some(1000000000),
                 country_code: CountryCode::for_alpha2("FR").unwrap(),
+                claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Replay,
@@ -395,6 +397,7 @@ mod tests {
                 fqdn: Some("validator2.example.com".to_string()),
                 base_fees: Some(9999),
                 country_code: CountryCode::for_alpha2("DE").unwrap(),
+                claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::ResumeOnly,
@@ -464,6 +467,7 @@ mod tests {
                 fqdn: Some("validator.example.com".to_string()),
                 base_fees: Some(1000000000),
                 country_code: CountryCode::for_alpha2("FR").unwrap(),
+                claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Replay,

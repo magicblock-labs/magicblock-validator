@@ -15,6 +15,7 @@ isocountry = "0.3.2"
 magicblock-config = { workspace = true }
 magicblock-delegation-program = { workspace = true }
 magicblock-program = { path = "../../programs/magicblock" }
+magicblock-validator-admin = { path = "../../magicblock-validator-admin"}
 
 [[test]]
 name = "test-domain-registry"

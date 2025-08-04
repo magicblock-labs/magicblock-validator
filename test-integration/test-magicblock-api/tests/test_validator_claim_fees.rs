@@ -9,6 +9,7 @@ use integration_test_tools::{
 };
 use lazy_static::lazy_static;
 use magicblock_program::validator;
+use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
@@ -18,6 +19,8 @@ use solana_sdk::{
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::Arc;
+use std::thread::sleep;
+use std::time::Duration;
 
 // Test constants
 const DEVNET_URL: &str = "http://127.0.0.1:7799";
@@ -36,14 +39,13 @@ lazy_static! {
     });
 }
 
-/// Test that claim fees instruction 
+/// Test that claim fees instruction
 fn test_claim_fees_instruction() {
     println!("Testing claim fees instruction creation...");
 
     let validator_pubkey = VALIDATOR_KEYPAIR.pubkey();
     let instruction = validator_claim_fees(validator_pubkey, None);
 
-    
     assert!(
         !instruction.accounts.is_empty(),
         "Instruction should have accounts"
@@ -75,36 +77,18 @@ fn test_init_validator_fees_vault() {
         validator_pubkey,
     );
 
-    match rpc_client.get_latest_blockhash() {
-        Ok(blockhash) => {
-            let transaction = Transaction::new_signed_with_payer(
-                &[init_instruction],
-                Some(&validator_pubkey),
-                &[&validator_keypair],
-                blockhash,
-            );
+    let blockhash = rpc_client.get_latest_blockhash().unwrap();
+    let transaction = Transaction::new_signed_with_payer(
+        &[init_instruction],
+        Some(&validator_pubkey),
+        &[&validator_keypair],
+        blockhash,
+    );
 
-            println!("✓ Vault initialization transaction created");
-
-            match rpc_client.send_and_confirm_transaction(&transaction) {
-                Ok(signature) => {
-                    println!(
-                        "✓ Successfully initialized validator fees vault!"
-                    );
-                    println!("  Transaction signature: {}", signature);
-                }
-                Err(e) => {
-                    println!(
-                        "⚠ Failed to initialize vault: {}",
-                        e
-                    );
-                }
-            }
-        }
-        Err(e) => {
-            println!("✗ Could not connect to RPC: {:?}", e);
-        }
-    }
+    rpc_client
+        .send_and_confirm_transaction(&transaction)
+        .unwrap();
+    println!("✓ Successfully initialized validator fees vault!");
 }
 
 /// Add test fees to the vault
@@ -122,42 +106,42 @@ fn test_add_fees_to_vault() {
 
     println!("  Target vault: {}", validator_fees_vault);
 
-    match rpc_client.request_airdrop(&validator_fees_vault, TEST_FEE_AMOUNT) {
-        Ok(signature) => {
-            println!(
-                "✓ Added {} lamports ({:.9} SOL) test fees to vault",
-                TEST_FEE_AMOUNT,
-                TEST_FEE_AMOUNT as f64 / 1_000_000_000.0
-            );
-            println!("  Airdrop signature: {}", signature);
+    rpc_client
+        .request_airdrop(&validator_fees_vault, TEST_FEE_AMOUNT)
+        .unwrap();
+    sleep(Duration::from_millis(SETUP_WAIT_MS));
 
-            std::thread::sleep(std::time::Duration::from_millis(SETUP_WAIT_MS));
-
-            // Verify the balance
-            match rpc_client.get_balance(&validator_fees_vault) {
-                Ok(balance) => {
-                    println!(
-                        "✓ Vault now has: {} lamports ({:.9} SOL)",
-                        balance,
-                        balance as f64 / 1_000_000_000.0
-                    );
-                    assert!(
-                        balance >= TEST_FEE_AMOUNT,
-                        "Vault should have at least the test fee amount"
-                    );
-                }
-                Err(e) => {
-                    println!("✗ Could not verify vault balance: {}", e);
-                }
-            }
-        }
-        Err(e) => {
-            println!("✗ Failed to add test fees to vault: {}", e); 
-        }
-    }
+    let balance = rpc_client.get_balance(&validator_fees_vault).unwrap();
+    assert!(
+        balance >= TEST_FEE_AMOUNT,
+        "Vault should have at least the test fee amount"
+    );
+    println!("✓ Added {} lamports test fees to vault", TEST_FEE_AMOUNT);
 }
 
-/// Test the actual fee claiming transaction 
+/// Test the ClaimFeesTask struct
+fn test_claim_fees_task() {
+    println!("Testing ClaimFeesTask struct...");
+
+    
+    let mut task = ClaimFeesTask::new();
+
+    // Test that the task starts in the correct state
+    assert!(task.handle.is_none(), "Task should start with no handle");
+
+    println!("✓ ClaimFeesTask created successfully");
+
+    
+    let default_task = ClaimFeesTask::default();
+    assert!(
+        default_task.handle.is_none(),
+        "Default task should have no handle"
+    );
+
+    println!("✓ ClaimFeesTask default implementation works");
+}
+
+/// Test the actual fee claiming transaction
 fn test_claim_fees_transaction() {
     println!("Testing actual claim fees transaction...");
 
@@ -176,133 +160,29 @@ fn test_claim_fees_transaction() {
     println!("  Validator: {}", validator_pubkey);
     println!("  Fees vault: {}", validator_fees_vault);
 
-    // Record balances before claiming
-    let balance_before = match rpc_client.get_balance(&validator_fees_vault) {
-        Ok(balance) => {
-            println!(
-                "  Vault balance before: {} lamports ({:.9} SOL)",
-                balance,
-                balance as f64 / 1_000_000_000.0
-            );
-            balance
-        }
-        Err(e) => {
-            println!("✗ Could not get vault balance before claiming: {}", e);
-            0
-        }
-    };
-
-    let validator_balance_before =
-        match rpc_client.get_balance(&validator_pubkey) {
-            Ok(balance) => {
-                println!(
-                    "  Validator balance before: {} lamports ({:.9} SOL)",
-                    balance,
-                    balance as f64 / 1_000_000_000.0
-                );
-                balance
-            }
-            Err(e) => {
-                println!(
-                    "✗ Could not get validator balance before claiming: {}",
-                    e
-                );
-                0
-            }
-        };
-
-    // Create and send claim fees transaction
+    let balance_before = rpc_client.get_balance(&validator_fees_vault).unwrap();
     let instruction = validator_claim_fees(validator_pubkey, None);
+    let blockhash = rpc_client.get_latest_blockhash().unwrap();
+    let transaction = Transaction::new_signed_with_payer(
+        &[instruction],
+        Some(&validator_pubkey),
+        &[&validator_keypair],
+        blockhash,
+    );
 
-    match rpc_client.get_latest_blockhash() {
-        Ok(blockhash) => {
-            let transaction = Transaction::new_signed_with_payer(
-                &[instruction],
-                Some(&validator_pubkey),
-                &[&validator_keypair],
-                blockhash,
-            );
+    rpc_client
+        .send_and_confirm_transaction(&transaction)
+        .unwrap();
+    sleep(Duration::from_millis(CONFIRMATION_WAIT_MS));
 
-            println!("✓ Transaction created successfully");
+    let balance_after = rpc_client.get_balance(&validator_fees_vault).unwrap();
+    let vault_difference = balance_before.saturating_sub(balance_after);
 
-            match rpc_client.send_and_confirm_transaction(&transaction) {
-                Ok(signature) => {
-                    println!("✓ Successfully claimed validator fees!");
-                    println!("  Transaction signature: {}", signature);
-
-                    std::thread::sleep(std::time::Duration::from_millis(
-                        CONFIRMATION_WAIT_MS,
-                    ));
-
-                    // Record balances after claiming
-                    let balance_after = match rpc_client
-                        .get_balance(&validator_fees_vault)
-                    {
-                        Ok(balance) => {
-                            println!("  Vault balance after: {} lamports ({:.9} SOL)", 
-                                balance, balance as f64 / 1_000_000_000.0);
-                            balance
-                        }
-                        Err(e) => {
-                            println!("✗ Could not get vault balance after claiming: {}", e);
-                            0
-                        }
-                    };
-
-                    let validator_balance_after = match rpc_client
-                        .get_balance(&validator_pubkey)
-                    {
-                        Ok(balance) => {
-                            println!("  Validator balance after: {} lamports ({:.9} SOL)", 
-                                balance, balance as f64 / 1_000_000_000.0);
-                            balance
-                        }
-                        Err(e) => {
-                            println!("✗ Could not get validator balance after claiming: {}", e);
-                            0
-                        }
-                    };
-
-                    // Calculate and verify the changes
-                    let vault_difference =
-                        balance_before.saturating_sub(balance_after);
-                    let validator_difference = validator_balance_after
-                        .saturating_sub(validator_balance_before);
-
-                    println!("\nFEES CLAIMED SUMMARY:");
-                    println!(
-                        "   Fees claimed from vault: {} lamports ({:.9} SOL)",
-                        vault_difference,
-                        vault_difference as f64 / 1_000_000_000.0
-                    );
-                    println!(
-                        "   Validator received: {} lamports ({:.9} SOL)",
-                        validator_difference,
-                        validator_difference as f64 / 1_000_000_000.0
-                    );
-
-                    if vault_difference > 0 {
-                        println!(
-                            "✓ Successfully claimed {} lamports in fees!",
-                            vault_difference
-                        );
-                        assert!(
-                            vault_difference > 0,
-                            "Should have claimed some fees"
-                        );
-                    } else {
-                        println!("ℹ No fees were available to claim");
-                    }
-                }
-                Err(e) => {
-                    println!("✗ Failed to claim fees: {}", e); 
-                }
-            }
-        }
-        Err(e) => {
-            println!("✗ Could not connect to RPC: {:?}", e);
-        }
-    }
+    println!(
+        "✓ Successfully claimed {} lamports in fees!",
+        vault_difference
+    );
+    assert!(vault_difference > 0, "Should have claimed some fees");
 }
 
 /// Test RPC connectivity for fee claiming operations
@@ -314,16 +194,9 @@ fn test_claim_fees_rpc_connection() {
         CommitmentConfig::confirmed(),
     );
 
-    match rpc_client.get_latest_blockhash() {
-        Ok(_) => {
-            println!("✓ RPC connection successful");
-        }
-        Err(e) => {
-            println!("✗ RPC connection failed: {:?}", e);
-        }
-    }
+    rpc_client.get_latest_blockhash().unwrap();
+    println!("✓ RPC connection successful");
 }
-
 
 struct TestValidator {
     process: Child,
@@ -372,7 +245,7 @@ fn main() {
     // 1. Start test infrastructure
     let _devnet = TestValidator::start();
 
-    // 2. Initialize validator authority 
+    // 2. Initialize validator authority
     validator::init_validator_authority(
         VALIDATOR_KEYPAIR.as_ref().insecure_clone(),
     );
@@ -394,17 +267,20 @@ fn main() {
     println!("=== Test 1: Instruction Creation ===");
     test_claim_fees_instruction();
 
-    println!("\n=== Test 2: Vault Initialization ===");
-    test_init_validator_fees_vault();
-    std::thread::sleep(std::time::Duration::from_millis(SETUP_WAIT_MS));
+    println!("\n=== Test 2: ClaimFeesTask Struct ===");
+    test_claim_fees_task();
 
-    println!("\n=== Test 3: Add Test Fees ===");
+    println!("\n=== Test 3: Vault Initialization ===");
+    test_init_validator_fees_vault();
+    sleep(Duration::from_millis(SETUP_WAIT_MS));
+
+    println!("\n=== Test 4: Add Test Fees ===");
     test_add_fees_to_vault();
 
-    println!("\n=== Test 4: Claim Fees Transaction ===");
+    println!("\n=== Test 5: Claim Fees Transaction ===");
     test_claim_fees_transaction();
 
-    println!("\n=== Test 5: RPC Connection ===");
+    println!("\n=== Test 6: RPC Connection ===");
     test_claim_fees_rpc_connection();
 
     println!("\nAll tests completed successfully!");
