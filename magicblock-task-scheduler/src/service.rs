@@ -46,7 +46,7 @@ impl TaskSchedulerService {
         // Register tasks from the context
         if let Some(context_account) = bank.get_account(&TASK_CONTEXT_PUBKEY) {
             let task_context: TaskContext =
-                bincode::deserialize(&context_account.data())?;
+                bincode::deserialize(context_account.data())?;
             for task in task_context.tasks.values() {
                 if let Err(e) = Self::register_task(&db, task) {
                     // This happens if the task is already registered
