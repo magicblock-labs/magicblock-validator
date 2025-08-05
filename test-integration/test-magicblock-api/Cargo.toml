@@ -2,26 +2,28 @@
 name = "test-magicblock-api"
 version.workspace = true
 edition.workspace = true
-
-[dev-dependencies]
-magicblock-api = { workspace = true }
-tokio = { workspace = true }
-lazy_static = { workspace = true }
-magic-domain-program = { workspace = true }
-solana-rpc-client = { workspace = true }
-solana-sdk = { workspace = true }
+[dependencies]
 integration-test-tools = { workspace = true }
-isocountry = "0.3.2"
+[dev-dependencies]
+cleanass = { workspace = true }
+magicblock-api = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-delegation-program = { workspace = true }
 magicblock-program = { path = "../../programs/magicblock" }
-magicblock-validator-admin = { path = "../../magicblock-validator-admin"}
+magicblock-validator-admin = { path = "../../magicblock-validator-admin" }
+magic-domain-program = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+solana-transaction-status = { workspace = true }
+tokio = { workspace = true }
+lazy_static = { workspace = true }
+isocountry = { workspace = true }
 
 [[test]]
 name = "test-domain-registry"
 path = "tests/test_domain_registry.rs"
 harness = false
-
 [[test]]
 name = "test-validator-claim-fees"
 path = "tests/test_validator_claim_fees.rs"

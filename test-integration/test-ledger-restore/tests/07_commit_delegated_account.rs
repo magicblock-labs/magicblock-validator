@@ -1,4 +1,5 @@
 use cleanass::assert_eq;
+use integration_test_tools::loaded_accounts::LoadedAccounts;
 use integration_test_tools::validator::cleanup;
 use std::{path::Path, process::Child};
 
@@ -47,8 +48,13 @@ fn restore_ledger_containing_delegated_and_committed_account() {
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
     let programs = get_programs_with_flexi_counter();
 
-    let (_, mut validator, ctx) =
-        setup_validator_with_local_remote(ledger_path, Some(programs), true);
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
+        ledger_path,
+        Some(programs),
+        true,
+        false,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     // Airdrop to payer on chain
     expect!(
@@ -168,8 +174,13 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
 fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
     let programs = get_programs_with_flexi_counter();
 
-    let (_, mut validator, ctx) =
-        setup_validator_with_local_remote(ledger_path, Some(programs), false);
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
+        ledger_path,
+        Some(programs),
+        false,
+        false,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     wait_for_cloned_accounts_hydration();
 

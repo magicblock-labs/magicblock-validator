@@ -10373,6 +10373,7 @@ dependencies = [
 name = "test-magicblock-api"
 version = "0.0.0"
 dependencies = [
+ "cleanass",
  "integration-test-tools",
  "isocountry",
  "lazy_static",
@@ -10383,7 +10384,9 @@ dependencies = [
  "magicblock-program",
  "magicblock-validator-admin",
  "solana-rpc-client",
+ "solana-rpc-client-api",
  "solana-sdk",
+ "solana-transaction-status",
  "tokio",
 ]
 

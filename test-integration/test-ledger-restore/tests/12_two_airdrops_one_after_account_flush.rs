@@ -39,6 +39,7 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64) {
         None,
         None,
         LedgerResumeStrategy::Reset,
+        false,
     );
 
     // First airdrop followed by wait until account is flushed
@@ -75,6 +76,7 @@ fn read(ledger_path: &Path, pubkey: &Pubkey) -> Child {
         None,
         None,
         LedgerResumeStrategy::Replay,
+        false,
     );
     eprintln!(
         "Validator started in {:?}",
