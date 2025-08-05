@@ -35,5 +35,5 @@ fn default_db_path() -> String {
 }
 
 fn default_millis_per_tick() -> u64 {
-    25
+    50
 }
