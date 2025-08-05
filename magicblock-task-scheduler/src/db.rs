@@ -177,7 +177,7 @@ impl SchedulerDatabase {
              FROM tasks",
         )?;
 
-        let rows = stmt.query_map([], |row| Ok(row.get(0)?))?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
 
         Ok(rows.collect::<Result<Vec<u64>, rusqlite::Error>>()?)
     }
