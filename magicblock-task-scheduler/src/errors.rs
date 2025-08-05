@@ -8,9 +8,6 @@ pub enum TaskSchedulerError {
     #[error("Database error: {0}")]
     Database(#[from] r2d2_sqlite::rusqlite::Error),
 
-    #[error("Failed to remove database file: {0}")]
-    RemoveDatabaseFile(#[from] std::io::Error),
-
     #[error("Pubsub error: {0}")]
     Pubsub(
         #[from]
