@@ -710,9 +710,9 @@ impl MagicValidator {
             }
         }
 
-        self.claim_fees_task.start(self.config.clone());
-
         self.maybe_process_ledger()?;
+
+        self.claim_fees_task.start(self.config.clone());
 
         self.transaction_listener.run(true, self.bank.clone());
 
