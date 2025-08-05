@@ -31,11 +31,6 @@ pub struct DelegateArgs {
 
 pub const MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
 
-/// The counter has both mul and add instructions in order to facilitate tests where
-/// order matters. For example in the case of the following operations:
-/// +4, *2
-/// if the *2 operation runs before the add then we end up with 4 as a result instead of
-/// the correct result 8.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub enum ScheduleTaskInstruction {
     /// Creates a counter PDA.
