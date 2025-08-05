@@ -28,7 +28,6 @@ pub struct TaskSchedulerService {
     db: SchedulerDatabase,
     bank: Arc<Bank>,
     tick_interval: Duration,
-    started: bool,
 }
 
 impl TaskSchedulerService {
@@ -57,7 +56,6 @@ impl TaskSchedulerService {
             db,
             bank,
             tick_interval: Duration::from_millis(config.millis_per_tick),
-            started: false,
         })
     }
 
@@ -66,11 +64,6 @@ impl TaskSchedulerService {
         mut context_sub: Receiver<GeyserMessage>,
         token: CancellationToken,
     ) -> Result<(), TaskSchedulerError> {
-        if self.started {
-            return Err(TaskSchedulerError::AlreadyStarted);
-        }
-
-        self.started = true;
         let mut interval = tokio::time::interval(self.tick_interval);
         let db = self.db.clone();
         let bank = self.bank.clone();
@@ -90,16 +83,11 @@ impl TaskSchedulerService {
                                     continue;
                                 };
 
-                                let Ok(task_context) = bincode::deserialize::<TaskContext>(&account.account.data) else {
-                                    continue;
-                                };
-
-                                let Ok(task_ids) = db.get_task_ids() else {
-                                    continue;
-                                };
-
+                                let task_context: TaskContext =
+                                    bincode::deserialize(&account.account.data)?;
                                 debug!("Task context account updated: {:?}", task_context.tasks);
 
+                                let task_ids = db.get_task_ids()?;
                                 let tasks_to_register = task_context.tasks.values().filter(|task| !task_ids.contains(&task.id));
                                 let tasks_to_unregister = task_ids.iter().filter(|id| !task_context.tasks.contains_key(id));
 
@@ -111,30 +99,26 @@ impl TaskSchedulerService {
 
                                 for task_id in tasks_to_unregister {
                                     if let Err(e) = Self::unregister_task(&db, *task_id) {
-                                        error!("Failed to unregister task {}: {}", task_id, e);
+                                        error!("Failed to unregister task {task_id}: {e}");
                                     }
                                 }
                             }
                             None => {
-                                debug!("Task scheduler context subscription closed");
+                                error!("Context subscription closed");
                                 break;
                             }
                         }
                     }
                     _ = token.cancelled() => {
-                        debug!("Task scheduler cancelled");
                         break;
                     }
                 }
             }
+
+            Ok::<(), TaskSchedulerError>(())
         });
 
         Ok(())
-    }
-
-    pub fn shutdown(&mut self) {
-        self.started = false;
-        // The spawned task will be cancelled when the token is cancelled
     }
 
     fn tick(
@@ -235,8 +219,10 @@ impl TaskSchedulerService {
             executions_left: task.n_executions,
             next_execution_millis: 0, // Run ASAP
         };
+
         db.insert_task(&db_task)?;
-        debug!("Registered task {}", task.id);
+        debug!("Registered task {} from context", task.id);
+
         Ok(())
     }
 
@@ -245,16 +231,8 @@ impl TaskSchedulerService {
         task_id: u64,
     ) -> Result<(), TaskSchedulerError> {
         db.remove_task(task_id)?;
-        debug!("Unregistered task {}", task_id);
-        Ok(())
-    }
-}
+        debug!("Removed task {} from context", task_id);
 
-impl Drop for TaskSchedulerService {
-    fn drop(&mut self) {
-        if self.started {
-            // If we're being dropped while started, try to shut down gracefully
-            self.shutdown();
-        }
+        Ok(())
     }
 }
