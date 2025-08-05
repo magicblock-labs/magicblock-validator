@@ -1,16 +1,19 @@
-use crate::external_config::cluster_from_remote;
+use std::time::Duration;
+
 use dlp::instruction_builder::validator_claim_fees;
 use log::{error, info};
 use magicblock_config::EphemeralConfig;
 use magicblock_program::validator::validator_authority;
 use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::signature::Signer;
-use solana_sdk::transaction::Transaction;
-use std::time::Duration;
+use solana_sdk::{
+    commitment_config::CommitmentConfig, signature::Signer,
+    transaction::Transaction,
+};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+
+use crate::external_config::cluster_from_remote;
 
 pub struct ClaimFeesTask {
     pub handle: Option<JoinHandle<()>>,
@@ -85,7 +88,7 @@ async fn claim_fees(
     let latest_blockhash = rpc_client
         .get_latest_blockhash()
         .await
-        .map_err(|err| MagicBlockRpcClientError::GetLatestBlockhash(err))?;
+        .map_err(MagicBlockRpcClientError::GetLatestBlockhash)?;
 
     let tx = Transaction::new_signed_with_payer(
         &[ix],
@@ -97,7 +100,7 @@ async fn claim_fees(
     rpc_client
         .send_and_confirm_transaction(&tx)
         .await
-        .map_err(|err| MagicBlockRpcClientError::SendTransaction(err))?;
+        .map_err(MagicBlockRpcClientError::SendTransaction)?;
 
     info!("Successfully claimed validator fees");
 
