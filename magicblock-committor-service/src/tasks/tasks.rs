@@ -178,7 +178,7 @@ impl BaseTask for ArgsTask {
 
     fn compute_units(&self) -> u32 {
         match self {
-            Self::Commit(_) => 45_000,
+            Self::Commit(_) => 55_000,
             Self::L1Action(task) => task.action.compute_units,
             Self::Undelegate(_) => 50_000,
             Self::Finalize(_) => 40_000,
@@ -293,7 +293,7 @@ impl BaseTask for BufferTask {
 
     fn compute_units(&self) -> u32 {
         match self {
-            Self::Commit(_) => 45_000,
+            Self::Commit(_) => 55_000,
         }
     }
 
