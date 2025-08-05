@@ -14,6 +14,6 @@ port = 8899
 port = 10001
 
 [task_scheduler]
-millis_per_tick = 25
+millis_per_tick = 50
 db_path = "test-integration/target/test.db"
 reset_db = true

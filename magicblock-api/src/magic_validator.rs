@@ -406,6 +406,11 @@ impl MagicValidator {
         );
         validator::init_validator_authority(identity_keypair);
 
+        let task_scheduler_service = TaskSchedulerService::new(
+            &config.validator_config.task_scheduler,
+            bank.clone(),
+        )?;
+
         // Make sure we process the ledger before we're open to handle
         // transactions via RPC
         let rpc_service = Self::init_json_rpc_service(
@@ -417,11 +422,6 @@ impl MagicValidator {
             transaction_status_sender.clone(),
             &pubsub_config,
             &config.validator_config,
-        )?;
-
-        let task_scheduler_service = TaskSchedulerService::new(
-            &config.validator_config.task_scheduler,
-            bank.clone(),
         )?;
 
         Ok(Self {
