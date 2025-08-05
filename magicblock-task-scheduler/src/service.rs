@@ -28,20 +28,17 @@ pub struct TaskSchedulerService {
     db: SchedulerDatabase,
     bank: Arc<Bank>,
     tick_interval: Duration,
-    token: CancellationToken,
 }
 
 impl TaskSchedulerService {
     pub fn new(
-        db_path: &str,
-        bank: Arc<Bank>,
         config: &TaskSchedulerConfig,
-        token: CancellationToken,
+        bank: Arc<Bank>,
     ) -> Result<Self, TaskSchedulerError> {
         if config.reset_db {
-            std::fs::remove_file(db_path)?;
+            std::fs::remove_file(&config.db_path)?;
         }
-        let db = SchedulerDatabase::new(db_path)?;
+        let db = SchedulerDatabase::new(&config.db_path)?;
 
         // Register tasks from the context
         if let Some(context_account) = bank.get_account(&TASK_CONTEXT_PUBKEY) {
@@ -59,16 +56,15 @@ impl TaskSchedulerService {
             db,
             bank,
             tick_interval: Duration::from_millis(config.millis_per_tick),
-            token,
         })
     }
 
     pub async fn start(
         &mut self,
         mut context_sub: Receiver<GeyserMessage>,
+        token: CancellationToken,
     ) -> Result<(), TaskSchedulerError> {
         let mut interval = tokio::time::interval(self.tick_interval);
-        let token = self.token.clone();
         let db = self.db.clone();
         let bank = self.bank.clone();
 
