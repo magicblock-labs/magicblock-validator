@@ -43,4 +43,7 @@ pub enum TaskSchedulerError {
 
     #[error("Failed to execute transaction: {0}")]
     ExecuteTransaction(#[from] solana_sdk::transaction::TransactionError),
+
+    #[error("Task scheduler already started")]
+    AlreadyStarted,
 }
