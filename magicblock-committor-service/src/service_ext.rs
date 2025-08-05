@@ -116,6 +116,7 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittorExt
                 .collect::<Result<Vec<_>, _>>()?
         };
 
+        self.commit_base_intent(base_intents);
         let results = join_all(receivers.into_iter())
             .await
             .into_iter()

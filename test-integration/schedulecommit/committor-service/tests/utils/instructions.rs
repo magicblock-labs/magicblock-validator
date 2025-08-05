@@ -21,24 +21,23 @@ pub fn init_account_and_delegate_ixs(
     payer: Pubkey,
     bytes: u64,
 ) -> InitAccountAndDelegateIxs {
+    const MAX_ALLOC: u64 = magicblock_committor_program::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
+
     use program_flexi_counter::instruction::*;
     use program_flexi_counter::state::*;
 
     let init_counter_ix = create_init_ix(payer, "COUNTER".to_string());
     let rent_exempt = Rent::default().minimum_balance(bytes as usize);
-    let mut realloc_ixs = vec![];
-    if bytes
-        > magicblock_committor_program::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE
-            as u64
-    {
-        // TODO: we may have to chunk those
-        let reallocs = bytes
-            / magicblock_committor_program::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE
-                as u64;
-        for i in 0..reallocs {
-            realloc_ixs.push(create_realloc_ix(payer, bytes, i as u16));
-        }
-    }
+
+    let num_reallocs = (bytes + MAX_ALLOC -1) / MAX_ALLOC;
+    let realloc_ixs = if num_reallocs == 0 {
+        vec![]
+    } else {
+        (0..num_reallocs).map(|i| {
+            create_realloc_ix(payer, bytes, i as u16)
+        }).collect()
+    };
+
     let delegate_ix = create_delegate_ix(payer);
     let pda = FlexiCounter::pda(&payer).0;
     InitAccountAndDelegateIxs {

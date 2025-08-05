@@ -35,7 +35,7 @@ const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 const MAX_EXECUTORS: u8 = 50;
 
 // TODO(edwin): rename
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ExecutionOutputWrapper {
     pub id: u64,
     pub output: ExecutionOutput,
@@ -750,7 +750,7 @@ mod tests {
 
     #[async_trait]
     impl CommitIdFetcher for MockCommitIdTracker {
-        async fn fetch_commit_ids(
+        async fn fetch_next_commit_ids(
             &self,
             pubkeys: &[Pubkey],
         ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>> {

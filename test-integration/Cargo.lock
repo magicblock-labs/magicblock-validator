@@ -2997,7 +2997,7 @@ dependencies = [
  "log",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=374603f739a1b218b6b6f49dcd7f0ba60d662c7c)",
+ "magicblock-delegation-program 1.0.0",
  "rayon",
  "serde",
  "solana-pubkey",
@@ -3653,7 +3653,7 @@ dependencies = [
  "magicblock-bank",
  "magicblock-committor-service",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=374603f739a1b218b6b6f49dcd7f0ba60d662c7c)",
+ "magicblock-delegation-program 1.0.0",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-processor",
@@ -3801,7 +3801,7 @@ dependencies = [
  "log",
  "lru 0.16.0",
  "magicblock-committor-program",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=374603f739a1b218b6b6f49dcd7f0ba60d662c7c)",
+ "magicblock-delegation-program 1.0.0",
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
@@ -3864,22 +3864,6 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program"
 version = "1.0.0"
-dependencies = [
- "bincode",
- "borsh 1.5.7",
- "bytemuck",
- "num_enum",
- "paste",
- "solana-curve25519",
- "solana-program",
- "solana-security-txt",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "magicblock-delegation-program"
-version = "1.0.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=374603f739a1b218b6b6f49dcd7f0ba60d662c7c#374603f739a1b218b6b6f49dcd7f0ba60d662c7c"
 dependencies = [
  "bincode",
  "borsh 1.5.7",
@@ -5062,7 +5046,7 @@ version = "0.0.0"
 dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=374603f739a1b218b6b6f49dcd7f0ba60d662c7c)",
+ "magicblock-delegation-program 1.0.0",
  "solana-program",
 ]
 
@@ -5907,7 +5891,7 @@ dependencies = [
  "log",
  "magicblock-committor-program",
  "magicblock-committor-service",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=374603f739a1b218b6b6f49dcd7f0ba60d662c7c)",
+ "magicblock-delegation-program 1.0.0",
  "magicblock-program",
  "magicblock-rpc-client",
  "program-flexi-counter",

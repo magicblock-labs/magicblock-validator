@@ -15,7 +15,9 @@ use solana_pubkey::Pubkey;
 
 #[async_trait::async_trait]
 pub trait CommitIdFetcher: Send + Sync + 'static {
-    async fn fetch_commit_ids(
+    // Fetches correct next ids for pubkeys
+    // Those ids can be used as correct commit_id during Commit
+    async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
     ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>>;
@@ -43,7 +45,7 @@ impl CommitIdTrackerImpl {
     }
 
     /// Fetches commit_ids with some num of retries
-    pub async fn fetch_commit_ids_with_retries(
+    pub async fn rpc_fetch_commit_ids_with_retries(
         rpc_client: &MagicblockRpcClient,
         pubkeys: &[Pubkey],
         num_retries: NonZeroUsize,
@@ -54,7 +56,7 @@ impl CommitIdTrackerImpl {
 
         let mut last_err = Error::MetadataNotFoundError(pubkeys[0]);
         for i in 0..num_retries.get() {
-            match Self::fetch_commit_ids(rpc_client, pubkeys).await {
+            match Self::rpc_fetch_commit_ids(rpc_client, pubkeys).await {
                 Ok(value) => return Ok(value),
                 err @ Err(Error::InvalidAccountDataError(_)) => return err,
                 err @ Err(Error::MetadataNotFoundError(_)) => return err,
@@ -73,7 +75,7 @@ impl CommitIdTrackerImpl {
 
     /// Fetches commit_ids using RPC
     /// Note: remove duplicates prior to calling
-    pub async fn fetch_commit_ids(
+    pub async fn rpc_fetch_commit_ids(
         rpc_client: &MagicblockRpcClient,
         pubkeys: &[Pubkey],
     ) -> CommitIdTrackerResult<Vec<u64>> {
@@ -133,7 +135,7 @@ impl CommitIdTrackerImpl {
 impl CommitIdFetcher for CommitIdTrackerImpl {
     /// Returns next ids for requested pubkeys
     /// If key isn't in cache, it will be requested
-    async fn fetch_commit_ids(
+    async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
     ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>> {
@@ -172,7 +174,7 @@ impl CommitIdFetcher for CommitIdTrackerImpl {
         to_request.sort();
         to_request.dedup();
 
-        let remaining_ids = Self::fetch_commit_ids_with_retries(
+        let remaining_ids = Self::rpc_fetch_commit_ids_with_retries(
             &self.rpc_client,
             &to_request,
             NUM_FETCH_RETRIES,

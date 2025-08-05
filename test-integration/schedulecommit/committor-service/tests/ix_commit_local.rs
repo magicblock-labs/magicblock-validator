@@ -2,7 +2,7 @@ use log::*;
 use magicblock_committor_service::{BaseIntentCommittor, ComputeBudgetConfig};
 use magicblock_rpc_client::MagicblockRpcClient;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 use test_tools_core::init_logger;
 use tokio::task::JoinSet;
@@ -34,6 +34,7 @@ use solana_sdk::transaction::Transaction;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
+use magicblock_program::validator::{init_validator_authority, validator_authority};
 use utils::instructions::{
     init_account_and_delegate_ixs, init_validator_fees_vault_ix,
     InitAccountAndDelegateIxs,
@@ -54,6 +55,17 @@ fn expect_strategies(
         *expected_strategies.entry(*strategy).or_insert(0) += count;
     }
     expected_strategies
+}
+
+fn ensure_validator_authority() -> Keypair {
+    static ONCE: Once = Once::new();
+
+    ONCE.call_once(|| {
+        let validator_auth = utils::get_validator_auth();
+        init_validator_authority(validator_auth.insecure_clone());
+    });
+
+    validator_authority()
 }
 
 fn uses_lookup(expected: &ExpectedStrategies) -> bool {
@@ -290,9 +302,8 @@ async fn test_ix_commit_single_account_ten_kb() {
 
 async fn commit_single_account(bytes: usize, undelegate: bool) {
     init_logger!();
-    let slot = 10;
-    let validator_auth = utils::get_validator_auth();
 
+    let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     // Run each test with and without finalizing
@@ -305,9 +316,11 @@ async fn commit_single_account(bytes: usize, undelegate: bool) {
     let service = CommittorServiceExt::new(Arc::new(service));
 
     let counter_auth = Keypair::new();
-    let (pubkey, account) =
+    let (pubkey, mut account) =
         init_and_delegate_account_on_chain(&counter_auth, bytes as u64)
             .await;
+    account.owner = program_flexi_counter::id();
+    account.data = vec![101 as u8; bytes];
 
     let account = CommittedAccountV2 { pubkey, account };
     let base_intent = if undelegate {
@@ -325,7 +338,7 @@ async fn commit_single_account(bytes: usize, undelegate: bool) {
         trigger_type: TriggerType::OnChain,
         inner: ScheduledBaseIntent {
             id: 0,
-            slot,
+            slot: 10,
             blockhash: Hash::new_unique(),
             action_sent_transaction: Transaction::default(),
             payer: counter_auth.pubkey(),
@@ -556,9 +569,8 @@ async fn commit_multiple_accounts(
     undelegate_all: bool,
 ) {
     init_logger!();
-    let slot = 10;
-    let validator_auth = utils::get_validator_auth();
 
+    let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     {
@@ -567,7 +579,7 @@ async fn commit_multiple_accounts(
             ":memory:",
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
         )
-        .unwrap();
+            .unwrap();
         let service = CommittorServiceExt::new(Arc::new(service));
 
         let committees =
@@ -585,11 +597,14 @@ async fn commit_multiple_accounts(
 
             let bytes = *bytes;
             join_set.spawn(async move {
-                let (pda, pda_acc) = init_and_delegate_account_on_chain(
+                let (pda, mut pda_acc) = init_and_delegate_account_on_chain(
                     &counter_auth,
                     bytes as u64,
                 )
-                .await;
+                    .await;
+
+                pda_acc.owner = program_flexi_counter::id();
+                pda_acc.data = vec![idx as u8; bytes];
 
                 let request_undelegation = (undelegate_all || idx % 2 == 0);
                 (pda, pda_acc, request_undelegation)
@@ -601,6 +616,7 @@ async fn commit_multiple_accounts(
                 |(_, _, request_undelegation)| !request_undelegation,
             );
 
+        let mut base_intents = vec![];
         let committed_accounts = committed
             .into_iter()
             .map(|(pda, pda_acc, _)| CommittedAccountV2 {
@@ -609,21 +625,25 @@ async fn commit_multiple_accounts(
             })
             .collect::<Vec<_>>();
 
-        let commit_intent = ScheduledBaseIntentWrapper {
-            excluded_pubkeys: vec![],
-            feepayers: vec![],
-            trigger_type: TriggerType::OnChain,
-            inner: ScheduledBaseIntent {
-                id: 1,
-                slot: 0,
-                blockhash: Hash::new_unique(),
-                action_sent_transaction: Transaction::default(),
-                payer: Pubkey::new_unique(),
-                base_intent: MagicBaseIntent::Commit(CommitType::Standalone(
-                    committed_accounts,
-                )),
-            },
-        };
+        if !committed_accounts.is_empty() {
+            let commit_intent = ScheduledBaseIntentWrapper {
+                excluded_pubkeys: vec![],
+                feepayers: vec![],
+                trigger_type: TriggerType::OnChain,
+                inner: ScheduledBaseIntent {
+                    id: 0,
+                    slot: 0,
+                    blockhash: Hash::new_unique(),
+                    action_sent_transaction: Transaction::default(),
+                    payer: Pubkey::new_unique(),
+                    base_intent: MagicBaseIntent::Commit(CommitType::Standalone(
+                        committed_accounts,
+                    )),
+                },
+            };
+
+            base_intents.push(commit_intent);
+        }
 
         let committed_and_undelegated_accounts = commmitted_and_undelegated
             .into_iter()
@@ -633,30 +653,35 @@ async fn commit_multiple_accounts(
             })
             .collect::<Vec<_>>();
 
-        let commit_and_undelegate_intent = ScheduledBaseIntentWrapper {
-            excluded_pubkeys: vec![],
-            feepayers: vec![],
-            trigger_type: TriggerType::OnChain,
-            inner: ScheduledBaseIntent {
-                id: 1,
-                slot: 0,
-                blockhash: Hash::new_unique(),
-                action_sent_transaction: Transaction::default(),
-                payer: Pubkey::new_unique(),
-                base_intent: MagicBaseIntent::CommitAndUndelegate(
-                    CommitAndUndelegate {
-                        commit_action: CommitType::Standalone(
-                            committed_and_undelegated_accounts,
-                        ),
-                        undelegate_action: UndelegateType::Standalone,
-                    },
-                ),
-            },
-        };
+        if !committed_and_undelegated_accounts.is_empty() {
+            let commit_and_undelegate_intent = ScheduledBaseIntentWrapper {
+                excluded_pubkeys: vec![],
+                feepayers: vec![],
+                trigger_type: TriggerType::OnChain,
+                inner: ScheduledBaseIntent {
+                    id: 1,
+                    slot: 0,
+                    blockhash: Hash::new_unique(),
+                    action_sent_transaction: Transaction::default(),
+                    payer: Pubkey::new_unique(),
+                    base_intent: MagicBaseIntent::CommitAndUndelegate(
+                        CommitAndUndelegate {
+                            commit_action: CommitType::Standalone(
+                                committed_and_undelegated_accounts,
+                            ),
+                            undelegate_action: UndelegateType::Standalone,
+                        },
+                    ),
+                },
+            };
+
+            base_intents.push(commit_and_undelegate_intent);
+        }
+
 
         ix_commit_local(
             service,
-            vec![commit_intent, commit_and_undelegate_intent],
+            base_intents
         )
         .await;
     }

@@ -207,7 +207,7 @@ impl BaseTask for BufferTask {
         let Self::Commit(value) = self;
         let commit_id_slice = value.commit_id.to_le_bytes();
         let (commit_buffer_pubkey, _) =
-            magicblock_committor_program::pdas::chunks_pda(
+            magicblock_committor_program::pdas::buffer_pda(
                 validator,
                 &value.committed_account.pubkey,
                 &commit_id_slice,

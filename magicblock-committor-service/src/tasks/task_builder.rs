@@ -117,7 +117,7 @@ impl TasksBuilder for TaskBuilderV1 {
             .map(|account| account.pubkey)
             .collect::<Vec<_>>();
         let commit_ids = commit_id_fetcher
-            .fetch_commit_ids(&committed_pubkeys)
+            .fetch_next_commit_ids(&committed_pubkeys)
             .await?;
 
         // Persist commit ids for commitees
@@ -132,9 +132,9 @@ impl TasksBuilder for TaskBuilderV1 {
         let tasks = accounts
             .into_iter()
             .map(|account| {
-                let commit_id = commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
+                let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
                 let task = ArgsTask::Commit(CommitTask {
-                    commit_id: *commit_id + 1,
+                    commit_id,
                     allow_undelegation,
                     committed_account: account.clone(),
                 });

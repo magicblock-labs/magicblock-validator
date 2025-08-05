@@ -228,10 +228,10 @@ fn process_delegate(
         DelegateAccounts {
             payer,
             pda: delegate_account_pda,
+            owner_program,
             buffer,
             delegation_record,
             delegation_metadata,
-            owner_program,
             delegation_program,
             system_program,
         },

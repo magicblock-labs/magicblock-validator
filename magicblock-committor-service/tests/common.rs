@@ -96,7 +96,7 @@ pub struct MockCommitIdFetcher;
 
 #[async_trait::async_trait]
 impl CommitIdFetcher for MockCommitIdFetcher {
-    async fn fetch_commit_ids(
+    async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
     ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>> {

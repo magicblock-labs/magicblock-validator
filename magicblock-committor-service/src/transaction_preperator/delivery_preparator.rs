@@ -124,7 +124,6 @@ impl DeliveryPreparator {
         // Writing chunks with some retries. Stol
         self.write_buffer_with_retries(authority, &preparation_info, 5)
             .await?;
-        println!("asd2");
         // Persist that buffer account initiated successfully
         let update_status = CommitStatus::BufferAndChunkFullyInitialized;
         persist_status_update(
