@@ -36,7 +36,7 @@ pub struct SchedulerDatabase {
 impl SchedulerDatabase {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, TaskSchedulerError> {
         let manager = SqliteConnectionManager::file(path);
-        let pool = Pool::new(manager).unwrap();
+        let pool = Pool::new(manager)?;
 
         let conn = pool.get()?;
 
