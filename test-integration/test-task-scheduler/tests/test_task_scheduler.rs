@@ -15,7 +15,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-const DB_PATH: &str = "../../target/test.db";
+const DB_PATH: &str = "../target/test.db";
 
 #[test]
 fn test_task_scheduler() {
