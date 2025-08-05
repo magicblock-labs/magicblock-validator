@@ -116,8 +116,7 @@ magicblock-config = { path = "./magicblock-config" }
 magicblock-config-helpers = { path = "./magicblock-config-helpers" }
 magicblock-config-macro = { path = "./magicblock-config-macro" }
 magicblock-core = { path = "./magicblock-core" }
-#magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "374603f739a1b218b6b6f49dcd7f0ba60d662c7c", features = ["no-entrypoint"] }
-magicblock-delegation-program = { path = "../delegation-program", features = ["no-entrypoint"] }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "6edfe00", features = ["no-entrypoint"] }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
