@@ -4418,7 +4418,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.15",
- "uuid",
 ]
 
 [[package]]

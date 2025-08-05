@@ -35,6 +35,7 @@ impl TaskSchedulerService {
         config: &TaskSchedulerConfig,
         bank: Arc<Bank>,
     ) -> Result<Self, TaskSchedulerError> {
+        debug!("Initializing task scheduler service");
         if config.reset_db {
             std::fs::remove_file(&config.db_path)?;
         }
