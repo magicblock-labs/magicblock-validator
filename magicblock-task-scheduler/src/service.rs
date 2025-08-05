@@ -37,7 +37,9 @@ impl TaskSchedulerService {
     ) -> Result<Self, TaskSchedulerError> {
         debug!("Initializing task scheduler service");
         if config.reset_db {
-            std::fs::remove_file(&config.db_path)?;
+            if let Err(e) = std::fs::remove_file(&config.db_path) {
+                warn!("Failed to remove database file: {}", e);
+            }
         }
         let db = SchedulerDatabase::new(&config.db_path)?;
 
