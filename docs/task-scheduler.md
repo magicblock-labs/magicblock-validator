@@ -1,45 +1,5 @@
 # Task Scheduler API
 
-## Overview
-The task scheduler allows developers to schedule transactions for periodic execution on the MagicBlock validator.
-
-## Usage Examples
-
-### Scheduling a Periodic Task
-```rust
-use magicblock_program::magicblock_instruction;
-
-let transaction = magicblock_instruction::schedule_task(
-    &payer,
-    task_id,
-    TaskTrigger::Periodic(start_time, interval_microseconds),
-    vec![unsigned_transaction],
-    remaining_budget,
-    recent_blockhash,
-);
-```
-
-### Canceling a Task
-```rust
-let transaction = magicblock_instruction::cancel_task(
-    &authority,
-    task_id,
-    recent_blockhash,
-);
-```
-
-### Updating a Task
-```rust
-let transaction = magicblock_instruction::update_task(
-    &authority,
-    task_id,
-    Some(new_trigger),
-    Some(new_transactions),
-    Some(new_budget),
-    recent_blockhash,
-);
-```
-
 ## Architecture
 
 ### Components
@@ -65,8 +25,8 @@ The task scheduler can be configured via the validator configuration:
 ```toml
 [task_scheduler]
 db_path = "/path/to/scheduler.db"
-tick_interval_ms = 100
-max_tasks_per_tick = 10
+reset_db = false
+millis_per_tick = 100
 ```
 
 ## Security Considerations
