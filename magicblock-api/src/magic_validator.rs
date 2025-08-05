@@ -420,10 +420,8 @@ impl MagicValidator {
         )?;
 
         let task_scheduler_service = TaskSchedulerService::new(
-            &config.validator_config.task_scheduler.db_path,
-            bank.clone(),
             &config.validator_config.task_scheduler,
-            token.clone(),
+            bank.clone(),
         )?;
 
         Ok(Self {
@@ -805,7 +803,9 @@ impl MagicValidator {
             .geyser_rpc_service
             .accounts_subscribe(1, TASK_CONTEXT_PUBKEY)
             .await;
-        self.task_scheduler_service.start(context_sub).await?;
+        self.task_scheduler_service
+            .start(context_sub, self.token.clone())
+            .await?;
 
         self.sample_performance_service
             .replace(SamplePerformanceService::new(
