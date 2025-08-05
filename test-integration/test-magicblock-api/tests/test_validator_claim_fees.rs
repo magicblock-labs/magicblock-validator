@@ -124,7 +124,7 @@ fn test_claim_fees_task() {
     println!("Testing ClaimFeesTask struct...");
 
     
-    let mut task = ClaimFeesTask::new();
+    let task = ClaimFeesTask::new();
 
     // Test that the task starts in the correct state
     assert!(task.handle.is_none(), "Task should start with no handle");
@@ -239,7 +239,8 @@ impl Drop for TestValidator {
     }
 }
 
-fn main() {
+#[test]
+fn test_validator_claim_fees() {
     println!("Starting Validator Fee Claiming Integration Test\n");
 
     // 1. Start test infrastructure

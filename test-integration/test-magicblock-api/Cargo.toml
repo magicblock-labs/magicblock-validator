@@ -19,12 +19,3 @@ solana-transaction-status = { workspace = true }
 tokio = { workspace = true }
 lazy_static = { workspace = true }
 isocountry = { workspace = true }
-
-[[test]]
-name = "test-domain-registry"
-path = "tests/test_domain_registry.rs"
-harness = false
-[[test]]
-name = "test-validator-claim-fees"
-path = "tests/test_validator_claim_fees.rs"
-harness = false
