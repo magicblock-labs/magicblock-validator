@@ -1,4 +1,5 @@
 use cleanass::{assert, assert_eq};
+use magicblock_config::LedgerResumeStrategy;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{
@@ -59,8 +60,13 @@ fn write(
     pubkey2: &Pubkey,
     separate_slot: bool,
 ) -> (Child, Signature, Signature, u64) {
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, true);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::Reset,
+        false,
+    );
 
     let mut slot = 5;
     expect!(ctx.wait_for_slot_ephem(slot), validator);
@@ -92,8 +98,13 @@ fn read(
     airdrop_sig1: Option<&Signature>,
     airdrop_sig2: Option<&Signature>,
 ) -> Child {
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, false);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::Replay,
+        false,
+    );
 
     let ephem_client = expect!(ctx.try_ephem_client(), validator);
     let acc1 = expect!(ephem_client.get_account(pubkey1), validator);
@@ -169,6 +180,11 @@ fn _diagnose_read() {
     eprintln!("{}", pubkey1);
     eprintln!("{}", pubkey2);
 
-    let (_, mut _validator, _ctx) =
-        setup_offline_validator(&ledger_path, None, None, false);
+    let (_, mut _validator, _ctx) = setup_offline_validator(
+        &ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::Replay,
+        false,
+    );
 }

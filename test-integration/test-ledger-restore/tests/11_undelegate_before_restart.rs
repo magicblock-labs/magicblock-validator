@@ -1,5 +1,6 @@
 use cleanass::assert;
 use integration_test_tools::conversions::get_rpc_transwise_error_msg;
+use integration_test_tools::loaded_accounts::LoadedAccounts;
 use integration_test_tools::validator::cleanup;
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
 use integration_test_tools::{expect_err, unwrap, IntegrationTestContext};
@@ -59,8 +60,13 @@ fn restore_ledger_with_account_undelegated_before_restart() {
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
     let programs = get_programs_with_flexi_counter();
 
-    let (_, mut validator, ctx) =
-        setup_validator_with_local_remote(ledger_path, Some(programs), true);
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
+        ledger_path,
+        Some(programs),
+        true,
+        false,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     // Airdrop to payer on chain
     expect!(
@@ -113,8 +119,13 @@ fn update_counter_between_restarts(payer: &Keypair) -> Child {
     // before restarting the validator
     let (_, ledger_path) =
         resolve_tmp_dir("FORCE_UNIQUE_TMP_DIR_AND_IGNORE_THIS_ENV_VAR");
-    let (_, mut validator, ctx) =
-        setup_validator_with_local_remote(&ledger_path, None, true);
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
+        &ledger_path,
+        None,
+        true,
+        false,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 3, true);
     let sig = confirm_tx_with_payer_ephem(ix, payer, &mut validator);
@@ -149,8 +160,13 @@ fn update_counter_between_restarts(payer: &Keypair) -> Child {
 fn read(ledger_path: &Path, payer: &Keypair) -> Child {
     let programs = get_programs_with_flexi_counter();
 
-    let (_, mut validator, _) =
-        setup_validator_with_local_remote(ledger_path, Some(programs), false);
+    let (_, mut validator, _) = setup_validator_with_local_remote(
+        ledger_path,
+        Some(programs),
+        false,
+        false,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     let ix = create_add_ix(payer.pubkey(), 1);
     let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);

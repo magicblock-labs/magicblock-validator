@@ -30,6 +30,7 @@ borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
 cleanass = "0.0.1"
 ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "ec0308c" }
 integration-test-tools = { path = "test-tools" }
+isocountry = "0.3.2"
 log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
 magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [

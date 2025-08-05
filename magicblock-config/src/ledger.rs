@@ -1,8 +1,7 @@
-use clap::Args;
+use clap::{Args, ValueEnum};
 use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
-
-use crate::helpers::serde_defaults::bool_true;
+use strum::Display;
 
 // Default desired ledger size 100 GiB
 pub const DEFAULT_LEDGER_SIZE_BYTES: u64 = 100 * 1024 * 1024 * 1024;
@@ -14,12 +13,20 @@ pub const DEFAULT_LEDGER_SIZE_BYTES: u64 = 100 * 1024 * 1024 * 1024;
 )]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct LedgerConfig {
-    /// If a previous ledger is found it is removed before starting the validator
-    /// This can be disabled by setting [Self::reset] to `false`.
+    /// The strategy to use for resuming the ledger.
+    /// Reset will remove the existing ledger.
+    /// Resume only will remove the ledger and resume from the last slot.
+    /// Replay and resume will preserve the existing ledger and replay it and then resume.
     #[derive_env_var]
-    #[arg(help = "Whether to reset the ledger before starting the validator.")]
-    #[serde(default = "bool_true")]
-    pub reset: bool,
+    #[serde(default)]
+    pub resume_strategy: LedgerResumeStrategy,
+    /// Checks that the validator keypair matches the one in the ledger.
+    #[derive_env_var]
+    #[arg(
+        help = "Whether to check that the validator keypair matches the one in the ledger."
+    )]
+    #[serde(default)]
+    pub skip_keypair_match_check: bool,
     /// The file system path onto which the ledger should be written at
     /// If left empty it will be auto-generated to a temporary folder
     #[derive_env_var]
@@ -39,10 +46,46 @@ pub struct LedgerConfig {
 impl Default for LedgerConfig {
     fn default() -> Self {
         Self {
-            reset: bool_true(),
+            resume_strategy: LedgerResumeStrategy::default(),
+            skip_keypair_match_check: false,
             path: Default::default(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         }
+    }
+}
+
+#[derive(
+    Debug,
+    Display,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    ValueEnum,
+)]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
+pub enum LedgerResumeStrategy {
+    #[default]
+    Reset,
+    ResumeOnly,
+    Replay,
+}
+
+impl LedgerResumeStrategy {
+    pub fn is_resuming(&self) -> bool {
+        self != &Self::Reset
+    }
+
+    pub fn is_removing_ledger(&self) -> bool {
+        self != &Self::Replay
+    }
+
+    pub fn is_replaying(&self) -> bool {
+        self == &Self::Replay
     }
 }
 
@@ -55,11 +98,13 @@ mod tests {
     use magicblock_config_helpers::Merge;
 
     use super::*;
+    use crate::EphemeralConfig;
 
     #[test]
     fn test_merge_with_default() {
         let mut config = LedgerConfig {
-            reset: false,
+            resume_strategy: LedgerResumeStrategy::Replay,
+            skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
@@ -75,7 +120,8 @@ mod tests {
     fn test_merge_default_with_non_default() {
         let mut config = LedgerConfig::default();
         let other = LedgerConfig {
-            reset: false,
+            resume_strategy: LedgerResumeStrategy::Replay,
+            skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
@@ -88,13 +134,15 @@ mod tests {
     #[test]
     fn test_merge_non_default() {
         let mut config = LedgerConfig {
-            reset: false,
+            resume_strategy: LedgerResumeStrategy::Replay,
+            skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
         let original_config = config.clone();
         let other = LedgerConfig {
-            reset: true,
+            resume_strategy: LedgerResumeStrategy::ResumeOnly,
+            skip_keypair_match_check: true,
             path: Some("ledger2.example.com".to_string()),
             size: 10000,
         };
@@ -102,5 +150,61 @@ mod tests {
         config.merge(other);
 
         assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_serde() {
+        let toml_str = r#"
+[ledger]
+resume-strategy = "replay"
+skip-keypair-match-check = true
+path = "ledger.example.com"
+size = 1000000000
+"#;
+
+        let config: EphemeralConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.ledger,
+            LedgerConfig {
+                resume_strategy: LedgerResumeStrategy::Replay,
+                skip_keypair_match_check: true,
+                path: Some("ledger.example.com".to_string()),
+                size: 1000000000,
+            }
+        );
+
+        let toml_str = r#"
+[ledger]
+resume-strategy = "resume-only"
+size = 1000000000
+"#;
+
+        let config: EphemeralConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.ledger,
+            LedgerConfig {
+                resume_strategy: LedgerResumeStrategy::ResumeOnly,
+                skip_keypair_match_check: false,
+                path: None,
+                size: 1000000000,
+            }
+        );
+
+        let toml_str = r#"
+[ledger]
+resume-strategy = "reset"
+size = 1000000000
+"#;
+
+        let config: EphemeralConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.ledger,
+            LedgerConfig {
+                resume_strategy: LedgerResumeStrategy::Reset,
+                skip_keypair_match_check: false,
+                path: None,
+                size: 1000000000,
+            }
+        );
     }
 }

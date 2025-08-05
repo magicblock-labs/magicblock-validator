@@ -10,8 +10,8 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode,
-    ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
+    AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
+    LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
     DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::state::FlexiCounter;
@@ -37,7 +37,8 @@ pub fn setup_offline_validator(
     ledger_path: &Path,
     programs: Option<Vec<ProgramConfig>>,
     millis_per_slot: Option<u64>,
-    reset: bool,
+    resume_strategy: LedgerResumeStrategy,
+    skip_keypair_match_check: bool,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let mut accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Offline,
@@ -56,9 +57,11 @@ pub fn setup_offline_validator(
 
     let config = EphemeralConfig {
         ledger: LedgerConfig {
-            reset,
+            resume_strategy,
+            skip_keypair_match_check,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
+            ..Default::default()
         },
         accounts: accounts_config.clone(),
         programs,
@@ -86,6 +89,8 @@ pub fn setup_validator_with_local_remote(
     ledger_path: &Path,
     programs: Option<Vec<ProgramConfig>>,
     reset: bool,
+    skip_keypair_match_check: bool,
+    loaded_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let mut accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Ephemeral,
@@ -100,11 +105,18 @@ pub fn setup_validator_with_local_remote(
 
     let programs = resolve_programs(programs);
 
+    let resume_strategy = if reset {
+        LedgerResumeStrategy::Reset
+    } else {
+        LedgerResumeStrategy::Replay
+    };
     let config = EphemeralConfig {
         ledger: LedgerConfig {
-            reset,
+            resume_strategy,
+            skip_keypair_match_check,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
+            ..Default::default()
         },
         accounts: accounts_config.clone(),
         programs,
@@ -112,10 +124,7 @@ pub fn setup_validator_with_local_remote(
     };
 
     let (default_tmpdir_config, Some(mut validator)) =
-        start_magicblock_validator_with_config_struct(
-            config,
-            &LoadedAccounts::with_delegation_program_test_authority(),
-        )
+        start_magicblock_validator_with_config_struct(config, &loaded_accounts)
     else {
         panic!("validator should set up correctly");
     };

@@ -10,6 +10,7 @@ macro_rules! socket_addr_config {
             ::serde::Deserialize,
             ::serde::Serialize,
             ::clap::Args,
+            ::magicblock_config_macro::Mergeable,
         )]
         #[serde(deny_unknown_fields)]
         pub struct $struct_name {
@@ -39,15 +40,6 @@ macro_rules! socket_addr_config {
         impl $struct_name {
             pub fn socket_addr(&self) -> ::std::net::SocketAddr {
                 ::std::net::SocketAddr::new(self.addr, self.port)
-            }
-
-            pub fn merge(&mut self, other: $struct_name) {
-                if self.addr == default_addr() && other.addr != default_addr() {
-                    self.addr = other.addr;
-                }
-                if self.port == default_port() && other.port != default_port() {
-                    self.port = other.port;
-                }
             }
         }
 

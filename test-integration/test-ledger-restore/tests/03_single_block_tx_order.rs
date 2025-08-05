@@ -1,4 +1,5 @@
 use cleanass::{assert, assert_eq};
+use magicblock_config::LedgerResumeStrategy;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{
@@ -77,8 +78,13 @@ fn write(
         assert!(confirmed, cleanup(validator));
     }
 
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, Some(SLOT_MS), true);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        Some(SLOT_MS),
+        LedgerResumeStrategy::Reset,
+        false,
+    );
 
     let mut slot = 1;
     expect!(ctx.wait_for_slot_ephem(slot), validator);
@@ -151,8 +157,13 @@ fn write(
 }
 
 fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, Some(SLOT_MS), false);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        Some(SLOT_MS),
+        LedgerResumeStrategy::Replay,
+        false,
+    );
 
     for keypair in keypairs {
         let acc = expect!(
