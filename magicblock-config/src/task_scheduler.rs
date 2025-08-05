@@ -31,7 +31,7 @@ impl Default for TaskSchedulerConfig {
 }
 
 fn default_db_path() -> String {
-    "task_scheduler.db".to_string()
+    "target/task_scheduler.db".to_string()
 }
 
 fn default_millis_per_tick() -> u64 {

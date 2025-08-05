@@ -76,28 +76,36 @@ impl TaskSchedulerService {
                             error!("Error in scheduler tick: {}", e);
                         }
                     }
-                    Some(ref notification) = context_sub.recv() => {
-                        let GrpcMessage::Account(account) = notification.as_ref() else {
-                            continue;
-                        };
+                    notification = context_sub.recv() => {
+                        match notification {
+                            Some(ref notification) => {
+                                let GrpcMessage::Account(account) = notification.as_ref() else {
+                                    continue;
+                                };
 
-                        let task_context: TaskContext =
-                            bincode::deserialize(&account.account.data)?;
-                        debug!("Task context account updated: {:?}", task_context.tasks);
+                                let task_context: TaskContext =
+                                    bincode::deserialize(&account.account.data)?;
+                                debug!("Task context account updated: {:?}", task_context.tasks);
 
-                        let task_ids = db.get_task_ids()?;
-                        let tasks_to_register = task_context.tasks.values().filter(|task| !task_ids.contains(&task.id));
-                        let tasks_to_unregister = task_ids.iter().filter(|id| !task_context.tasks.contains_key(id));
+                                let task_ids = db.get_task_ids()?;
+                                let tasks_to_register = task_context.tasks.values().filter(|task| !task_ids.contains(&task.id));
+                                let tasks_to_unregister = task_ids.iter().filter(|id| !task_context.tasks.contains_key(id));
 
-                        for task in tasks_to_register {
-                            if let Err(e) = Self::register_task(&db, task) {
-                                error!("Failed to register task {}: {}", task.id, e);
+                                for task in tasks_to_register {
+                                    if let Err(e) = Self::register_task(&db, task) {
+                                        error!("Failed to register task {}: {}", task.id, e);
+                                    }
+                                }
+
+                                for task_id in tasks_to_unregister {
+                                    if let Err(e) = Self::unregister_task(&db, *task_id) {
+                                        error!("Failed to unregister task {task_id}: {e}");
+                                    }
+                                }
                             }
-                        }
-
-                        for task_id in tasks_to_unregister {
-                            if let Err(e) = Self::unregister_task(&db, *task_id) {
-                                error!("Failed to unregister task {task_id}: {e}");
+                            None => {
+                                error!("Context subscription closed");
+                                break;
                             }
                         }
                     }
