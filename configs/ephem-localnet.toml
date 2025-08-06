@@ -1,7 +1,7 @@
 [accounts]
 remote.url = "http://localhost:7799"
 lifecycle = "ephemeral"
-commit = { frequency_millis = 50_000 }
+commit = { frequency-millis = 50_000 }
 
 [accounts.db]
 # path to root directory where database files are stored
@@ -27,4 +27,4 @@ addr = "0.0.0.0"
 port = 8899
 
 [validator]
-millis_per_slot = 50
+millis-per-slot = 50
