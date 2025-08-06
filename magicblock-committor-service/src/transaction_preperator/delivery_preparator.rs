@@ -35,10 +35,6 @@ use crate::{
     ComputeBudgetConfig,
 };
 
-pub struct DeliveryPreparationResult {
-    lookup_tables: Vec<AddressLookupTableAccount>,
-}
-
 pub struct DeliveryPreparator {
     rpc_client: MagicblockRpcClient,
     table_mania: TableMania,

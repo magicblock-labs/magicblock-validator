@@ -23,6 +23,7 @@ pub(crate) fn persist_status_update<P: IntentPersister>(
     }
 }
 
+#[allow(unused)]
 pub(crate) fn persist_status_update_set<P: IntentPersister>(
     persister: &Option<P>,
     commit_ids_map: &HashMap<Pubkey, u64>,

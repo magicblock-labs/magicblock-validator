@@ -11,7 +11,6 @@ use solana_sdk::{
 use tokio::sync::broadcast;
 
 use crate::{
-    compute_budget::ComputeBudgetConfig,
     config::ChainConfig,
     error::CommittorServiceResult,
     intent_execution_manager::{
@@ -28,7 +27,6 @@ pub(crate) struct CommittorProcessor {
     pub(crate) magicblock_rpc_client: MagicblockRpcClient,
     pub(crate) table_mania: TableMania,
     pub(crate) authority: Keypair,
-    pub(crate) compute_budget_config: ComputeBudgetConfig,
     persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
 }
@@ -77,7 +75,6 @@ impl CommittorProcessor {
             table_mania,
             commits_scheduler,
             persister,
-            compute_budget_config: chain_config.compute_budget_config,
         })
     }
 

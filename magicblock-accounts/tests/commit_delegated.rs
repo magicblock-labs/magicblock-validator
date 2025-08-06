@@ -41,7 +41,7 @@ fn setup(
         account_cloner,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
-        committor_service,
+        committor_service: Some(committor_service),
         lifecycle: LifecycleMode::Ephemeral,
         external_commitable_accounts: Default::default(),
     }

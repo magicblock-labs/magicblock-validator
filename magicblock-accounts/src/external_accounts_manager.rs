@@ -106,7 +106,7 @@ where
     pub account_cloner: ACL,
     pub transaction_accounts_extractor: TAE,
     pub transaction_accounts_validator: TAV,
-    pub committor_service: Arc<CC>,
+    pub committor_service: Option<Arc<CC>>,
     pub lifecycle: LifecycleMode,
     pub external_commitable_accounts:
         RwLock<HashMap<Pubkey, ExternalCommitableAccount>>,
@@ -264,6 +264,10 @@ where
     pub async fn commit_delegated(
         &self,
     ) -> AccountsResult<Vec<ExecutionOutput>> {
+        let Some(committor_service) = &self.committor_service else {
+            return Ok(vec![]);
+        };
+
         let now = get_epoch();
         // Find all accounts that are due to be committed let accounts_to_be_committed = self
         let accounts_to_be_committed = self
@@ -290,8 +294,7 @@ where
             self.create_scheduled_l1_message(accounts_to_be_committed);
 
         // Commit BaseIntents
-        let results = self
-            .committor_service
+        let results = committor_service
             .schedule_base_intents_waiting(scheduled_l1_messages.clone())
             .await?;
 

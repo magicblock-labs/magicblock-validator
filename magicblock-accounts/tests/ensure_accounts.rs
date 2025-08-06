@@ -50,7 +50,7 @@ fn setup_with_lifecycle(
         account_fetcher,
         account_updates,
         account_dumper,
-        changeset_committor_stub.clone(),
+        Some(changeset_committor_stub.clone()),
         None,
         HashSet::new(),
         ValidatorCollectionMode::NoFees,
@@ -75,7 +75,7 @@ fn setup_with_lifecycle(
         account_cloner: remote_account_cloner_client,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
-        committor_service: changeset_committor_stub,
+        committor_service: Some(changeset_committor_stub),
         lifecycle,
         external_commitable_accounts: Default::default(),
     };

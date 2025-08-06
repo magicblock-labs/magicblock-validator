@@ -26,7 +26,7 @@ pub type AccountsManager = ExternalAccountsManager<
 impl AccountsManager {
     pub fn try_new(
         bank: &Arc<Bank>,
-        committor_service: Arc<CommittorServiceExt<CommittorService>>,
+        committor_service: Option<Arc<CommittorServiceExt<CommittorService>>>,
         remote_account_cloner_client: RemoteAccountClonerClient,
         config: AccountsConfig,
     ) -> AccountsResult<Self> {

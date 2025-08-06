@@ -97,7 +97,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC> {
     account_fetcher: AFE,
     account_updates: AUP,
     account_dumper: ADU,
-    changeset_committor: Arc<CC>,
+    changeset_committor: Option<Arc<CC>>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     validator_charges_fees: ValidatorCollectionMode,
@@ -141,7 +141,7 @@ where
         account_fetcher: AFE,
         account_updates: AUP,
         account_dumper: ADU,
-        changeset_committor: Arc<CC>,
+        changeset_committor: Option<Arc<CC>>,
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
         validator_charges_fees: ValidatorCollectionMode,
@@ -714,31 +714,33 @@ where
 
                 // Allow the committer service to reserve pubkeys in lookup tables
                 // that could be needed when we commit this account
-                if self.clone_config.prepare_lookup_tables
-                    == PrepareLookupTables::Always
-                {
-                    let committor = self.changeset_committor.clone();
-                    let pubkey = *pubkey;
-                    let owner = delegation_record.owner;
-                    tokio::spawn(async move {
-                        match map_committor_request_result(
-                            committor
-                                .reserve_pubkeys_for_committee(pubkey, owner),
-                            committor,
-                        )
-                        .await
-                        {
-                            Ok(initiated) => {
-                                trace!(
-                                "Reserving lookup keys for {pubkey} took {:?}",
-                                initiated.elapsed()
-                            );
-                            }
-                            Err(err) => {
-                                error!("Failed to reserve lookup keys for {pubkey}: {err:?}");
-                            }
-                        };
-                    });
+                if let Some(committor) = self.changeset_committor.clone() {
+                    if self.clone_config.prepare_lookup_tables
+                        == PrepareLookupTables::Always
+                    {
+                        let pubkey = *pubkey;
+                        let owner = delegation_record.owner;
+                        tokio::spawn(async move {
+                            match map_committor_request_result(
+                                committor.reserve_pubkeys_for_committee(
+                                    pubkey, owner,
+                                ),
+                                committor,
+                            )
+                            .await
+                            {
+                                Ok(initiated) => {
+                                    trace!(
+                                    "Reserving lookup keys for {pubkey} took {:?}",
+                                    initiated.elapsed()
+                                );
+                                }
+                                Err(err) => {
+                                    error!("Failed to reserve lookup keys for {pubkey}: {err:?}");
+                                }
+                            };
+                        });
+                    }
                 }
 
                 self.do_clone_delegated_account(
