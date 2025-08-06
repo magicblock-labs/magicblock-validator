@@ -319,7 +319,7 @@ where
             .filter_map(|execution_result| match execution_result {
                 Ok(value) => Some(value),
                 Err(err) => {
-                    error!("Failed to send l1 message: {}", err.1);
+                    error!("Failed to send l1 message: {}", err.2);
                     None
                 }
             })
@@ -431,8 +431,6 @@ where
             })
             .map(|scheduled_l1_message| ScheduledBaseIntentWrapper {
                 inner: scheduled_l1_message,
-                excluded_pubkeys: vec![],
-                feepayers: vec![],
                 trigger_type: TriggerType::OffChain,
             })
             .collect()

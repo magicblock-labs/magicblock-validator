@@ -101,6 +101,10 @@ impl ScheduledBaseIntent {
     pub fn is_undelegate(&self) -> bool {
         self.base_intent.is_undelegate()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.base_intent.is_empty()
+    }
 }
 
 // BaseIntent user wants to send to base layer
@@ -172,6 +176,14 @@ impl MagicBaseIntent {
             accounts.iter().map(|account| account.pubkey).collect()
         })
     }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            MagicBaseIntent::BaseActions(actions) => actions.is_empty(),
+            MagicBaseIntent::Commit(t) => t.is_empty(),
+            MagicBaseIntent::CommitAndUndelegate(t) => t.is_empty(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -204,6 +216,10 @@ impl CommitAndUndelegate {
         &mut self,
     ) -> &mut Vec<CommittedAccountV2> {
         self.commit_action.get_committed_accounts_mut()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.commit_action.is_empty()
     }
 }
 
@@ -474,6 +490,17 @@ impl CommitType {
             Self::WithBaseActions {
                 committed_accounts, ..
             } => committed_accounts,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Standalone(committed_accounts) => {
+                committed_accounts.is_empty()
+            }
+            Self::WithBaseActions {
+                committed_accounts, ..
+            } => committed_accounts.is_empty(),
         }
     }
 }

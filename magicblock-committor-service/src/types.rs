@@ -1,9 +1,6 @@
 use std::ops::Deref;
 
-use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledBaseIntent, FeePayerAccount,
-};
-use solana_pubkey::Pubkey;
+use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 
 // TODO: should be removed once cranks are supported
 // Ideally even now OffChain/"Manual" commits should be triggered via Tx
@@ -16,8 +13,6 @@ pub enum TriggerType {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScheduledBaseIntentWrapper {
     pub inner: ScheduledBaseIntent,
-    pub feepayers: Vec<FeePayerAccount>,
-    pub excluded_pubkeys: Vec<Pubkey>,
     pub trigger_type: TriggerType,
 }
 

@@ -18,7 +18,6 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Signature,
 };
-use stubs::scheduled_commits_processor_stub::ScheduledCommitsProcessorStub;
 use test_tools_core::init_logger;
 
 mod stubs;

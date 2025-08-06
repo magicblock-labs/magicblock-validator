@@ -11,6 +11,8 @@ pub enum InternalError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("EmptyIntentError")]
+    EmptyIntentError,
     #[error("FailedToCommitError: {err}")]
     FailedToCommitError {
         #[source]

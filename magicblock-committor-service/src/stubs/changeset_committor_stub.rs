@@ -167,16 +167,7 @@ impl BaseIntentCommittorExt for ChangesetCommittorStub {
                         commit_signature: Signature::new_unique(),
                         finalize_signature: Signature::new_unique(),
                     },
-                    action_sent_transaction: Transaction::default(),
                     trigger_type: TriggerType::OnChain,
-                    sent_commit: SentCommit {
-                        message_id: message.inner.id,
-                        slot: message.inner.slot,
-                        blockhash: message.inner.blockhash,
-                        payer: message.inner.payer,
-                        requested_undelegation: message.inner.is_undelegate(),
-                        ..SentCommit::default()
-                    },
                 })
             })
             .collect::<Vec<_>>();

@@ -571,8 +571,6 @@ pub(crate) fn create_test_intent(
 
     ScheduledBaseIntentWrapper {
         inner: intent,
-        feepayers: vec![],
-        excluded_pubkeys: vec![],
         trigger_type: TriggerType::OffChain,
     }
 }

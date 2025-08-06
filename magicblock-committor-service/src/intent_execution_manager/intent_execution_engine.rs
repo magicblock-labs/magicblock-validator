@@ -1,12 +1,7 @@
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use log::{error, info, trace, warn};
-use magicblock_program::SentCommit;
-use solana_sdk::transaction::Transaction;
 use tokio::{
     sync::{
         broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
@@ -39,12 +34,11 @@ const MAX_EXECUTORS: u8 = 50;
 pub struct ExecutionOutputWrapper {
     pub id: u64,
     pub output: ExecutionOutput,
-    pub action_sent_transaction: Transaction,
-    pub sent_commit: SentCommit,
     pub trigger_type: TriggerType,
 }
 
-pub type BroadcastedError = (u64, Arc<crate::intent_executor::error::Error>);
+pub type BroadcastedError =
+    (u64, TriggerType, Arc<crate::intent_executor::error::Error>);
 
 pub type BroadcastedIntentExecutionResult =
     IntentExecutorResult<ExecutionOutputWrapper, BroadcastedError>;
@@ -238,8 +232,14 @@ where
             .inspect_err(|err| {
                 error!("Failed to execute BaseIntent: {:?}", err)
             })
-            .map(|raw_result| Self::map_execution_outcome(&intent, raw_result))
-            .map_err(|err| (intent.inner.id, Arc::new(err)));
+            .map(|output| ExecutionOutputWrapper {
+                id: intent.id,
+                trigger_type: intent.trigger_type,
+                output,
+            })
+            .map_err(|err| {
+                (intent.inner.id, intent.trigger_type, Arc::new(err))
+            });
 
         // Broadcast result to subscribers
         if let Err(err) = result_sender.send(result) {
@@ -254,56 +254,13 @@ where
         // Free worker
         drop(execution_permit);
     }
-
-    /// Maps output of `IntentExecutor` to final result
-    fn map_execution_outcome(
-        intent: &ScheduledBaseIntentWrapper,
-        raw_outcome: ExecutionOutput,
-    ) -> ExecutionOutputWrapper {
-        let ScheduledBaseIntentWrapper {
-            inner,
-            feepayers,
-            excluded_pubkeys,
-            trigger_type,
-        } = intent;
-        let included_pubkeys =
-            if let Some(included_pubkeys) = inner.get_committed_pubkeys() {
-                included_pubkeys
-            } else {
-                // Case with standalone actions
-                vec![]
-            };
-        let requested_undelegation = inner.is_undelegate();
-        let chain_signatures =
-            vec![raw_outcome.commit_signature, raw_outcome.finalize_signature];
-
-        let sent_commit = SentCommit {
-            message_id: inner.id,
-            slot: inner.slot,
-            blockhash: inner.blockhash,
-            payer: inner.payer,
-            included_pubkeys,
-            excluded_pubkeys: excluded_pubkeys.clone(),
-            feepayers: HashSet::from_iter(feepayers.iter().cloned()),
-            requested_undelegation,
-            chain_signatures,
-        };
-
-        ExecutionOutputWrapper {
-            id: inner.id,
-            output: raw_outcome,
-            action_sent_transaction: inner.action_sent_transaction.clone(),
-            trigger_type: *trigger_type,
-            sent_commit,
-        }
-    }
 }
 
 /// Worker tests
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::HashMap,
+        collections::{HashMap, HashSet},
         sync::{
             atomic::{AtomicUsize, Ordering},
             Arc,
@@ -421,10 +378,11 @@ mod tests {
 
         // Verify the failure was properly reported
         let result = result_receiver.recv().await.unwrap();
-        let Err((id, err)) = result else {
+        let Err((id, trigger_type, err)) = result else {
             panic!();
         };
         assert_eq!(id, 1);
+        assert_eq!(trigger_type, TriggerType::OffChain);
         assert_eq!(
             err.to_string(),
             "FailedToCommitError: SignerError: custom error: oops"

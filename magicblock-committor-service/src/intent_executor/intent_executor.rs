@@ -50,6 +50,10 @@ where
         base_intent: ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
+        if base_intent.is_empty() {
+            return Err(Error::EmptyIntentError);
+        }
+
         // Update tasks status to Pending
         if let Some(pubkeys) = base_intent.get_committed_pubkeys() {
             let update_status = CommitStatus::Pending;
@@ -171,6 +175,10 @@ where
                 let update_status = CommitStatus::Succeeded(signatures);
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
+            Err(Error::EmptyIntentError) => {
+                let update_status = CommitStatus::Failed;
+                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
+            }
             Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::FailedToFitError)) => {
                 let update_status = CommitStatus::PartOfTooLargeBundleToProcess;
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
@@ -223,13 +231,13 @@ where
     /// Returns `ExecutionOutput` or an `Error`
     async fn execute<P: IntentPersister>(
         &self,
-        l1_message: ScheduledBaseIntent,
+        base_intent: ScheduledBaseIntent,
         persister: Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let message_id = l1_message.id;
-        let pubkeys = l1_message.get_committed_pubkeys();
+        let message_id = base_intent.id;
+        let pubkeys = base_intent.get_committed_pubkeys();
 
-        let result = self.execute_inner(l1_message, &persister).await;
+        let result = self.execute_inner(base_intent, &persister).await;
         if let Some(pubkeys) = pubkeys {
             Self::persist_result(&persister, &result, message_id, &pubkeys);
         }
