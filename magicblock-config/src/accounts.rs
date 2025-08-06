@@ -73,7 +73,7 @@ impl Default for AccountsConfig {
     Args,
     Mergeable,
 )]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct RemoteConfig {
     #[arg(help = "The predefined cluster to use.")]
     #[serde(default)]
@@ -155,7 +155,7 @@ pub enum LifecycleMode {
 #[derive(
     Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
 )]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct CommitStrategyConfig {
     #[derive_env_var]
     #[serde(default = "default_frequency_millis")]
@@ -227,7 +227,7 @@ pub enum PrepareLookupTables {
     Args,
     Mergeable,
 )]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct AccountsCloneConfig {
     #[serde(default)]
     pub prepare_lookup_tables: PrepareLookupTables,
@@ -429,8 +429,8 @@ mod tests {
     fn test_clone_config_serde() {
         let toml_str = r#"
 [clone]
-prepare_lookup_tables = "always"
-auto_airdrop_lamports = 123
+prepare-lookup-tables = "always"
+auto-airdrop-lamports = 123
 "#;
 
         let config: AccountsConfig = toml::from_str(toml_str).unwrap();
