@@ -21,7 +21,7 @@ max-snapshots = 7
 snapshot-frequency = 1024
 
 [validator]
-base_fees = 1000
+base-fees = 1000
 
 [rpc]
 port = 8899
