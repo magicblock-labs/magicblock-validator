@@ -1,5 +1,5 @@
 use cleanass::assert_eq;
-use magicblock_config::{LedgerResumeStrategy, TEST_SNAPSHOT_FREQUENCY};
+use magicblock_config::LedgerResumeStrategy;
 use solana_transaction_status::UiTransactionEncoding;
 use std::{path::Path, process::Child};
 
@@ -14,6 +14,8 @@ use test_ledger_restore::{
 // In this test we ensure that the timestamps of the blocks in the restored
 // ledger match the timestamps of the blocks in the original ledger.
 
+const SNAPSHOT_FREQUENCY: u64 = 2;
+
 #[test]
 fn restore_preserves_timestamps() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
@@ -24,7 +26,7 @@ fn restore_preserves_timestamps() {
         write(&ledger_path, &pubkey);
     validator.kill().unwrap();
 
-    assert!(slot > TEST_SNAPSHOT_FREQUENCY);
+    assert!(slot > SNAPSHOT_FREQUENCY);
 
     let mut validator = read(&ledger_path, signature, block_time);
     validator.kill().unwrap();
@@ -42,12 +44,8 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
     // First airdrop followed by wait until account is flushed
     let signature = expect!(ctx.airdrop_ephem(pubkey, 1_111_111), validator);
 
-    // NOTE: This slows the test down a lot (500 * 50ms = 25s) and will
-    // be improved once we can configure `FLUSH_ACCOUNTS_SLOT_FREQ`
-    expect!(
-        ctx.wait_for_delta_slot_ephem(TEST_SNAPSHOT_FREQUENCY),
-        validator
-    );
+    // Snapshot frequency is set to 2 slots for the offline validator
+    expect!(ctx.wait_for_delta_slot_ephem(SNAPSHOT_FREQUENCY), validator);
 
     let slot = wait_for_ledger_persist(&mut validator);
 

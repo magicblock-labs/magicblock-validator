@@ -1,5 +1,5 @@
 use cleanass::assert_eq;
-use magicblock_config::{LedgerResumeStrategy, TEST_SNAPSHOT_FREQUENCY};
+use magicblock_config::LedgerResumeStrategy;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{
@@ -18,6 +18,8 @@ use test_ledger_restore::{
 // The ledger restore will start from a slot after the first airdrop was
 // flushed.
 
+const SNAPSHOT_FREQUENCY: u64 = 2;
+
 #[test]
 fn restore_ledger_with_two_airdrops_with_account_flush_in_between() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
@@ -27,7 +29,7 @@ fn restore_ledger_with_two_airdrops_with_account_flush_in_between() {
     let (mut validator, slot) = write(&ledger_path, &pubkey);
     validator.kill().unwrap();
 
-    assert!(slot > TEST_SNAPSHOT_FREQUENCY);
+    assert!(slot > SNAPSHOT_FREQUENCY);
 
     let mut validator = read(&ledger_path, &pubkey);
     validator.kill().unwrap();
@@ -49,12 +51,8 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64) {
             expect!(ctx.fetch_ephem_account_balance(pubkey), validator);
         assert_eq!(lamports, 1_111_111, cleanup(&mut validator));
 
-        // NOTE: This slows the test down a lot (500 * 50ms = 25s) and will
-        // be improved once we can configure `FLUSH_ACCOUNTS_SLOT_FREQ`
-        expect!(
-            ctx.wait_for_delta_slot_ephem(TEST_SNAPSHOT_FREQUENCY),
-            validator
-        );
+        // Snapshot frequency is set to 2 slots for the offline validator
+        expect!(ctx.wait_for_delta_slot_ephem(SNAPSHOT_FREQUENCY), validator);
     }
     // Second airdrop
     {

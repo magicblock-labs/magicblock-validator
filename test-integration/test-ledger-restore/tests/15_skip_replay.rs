@@ -1,5 +1,5 @@
 use cleanass::{assert, assert_eq};
-use magicblock_config::{LedgerResumeStrategy, TEST_SNAPSHOT_FREQUENCY};
+use magicblock_config::LedgerResumeStrategy;
 use solana_transaction_status::UiTransactionEncoding;
 use std::{path::Path, process::Child};
 
@@ -11,6 +11,8 @@ use solana_sdk::{
     signer::Signer,
 };
 use test_ledger_restore::{setup_offline_validator, TMP_DIR_LEDGER};
+
+const SNAPSHOT_FREQUENCY: u64 = 2;
 
 // In this test we ensure that we can optionally skip the replay of the ledger
 // when restoring, restarting at the last slot.
@@ -52,12 +54,9 @@ fn write(
         assert_eq!(lamports, 1_111_111, cleanup(&mut validator));
     }
 
-    // NOTE: This slows the test down a lot (500 * 50ms = 25s) and will
-    // be improved once we can configure `FLUSH_ACCOUNTS_SLOT_FREQ`
-    let slot = expect!(
-        ctx.wait_for_delta_slot_ephem(TEST_SNAPSHOT_FREQUENCY),
-        validator
-    );
+    // Snapshot frequency is set to 2 slots for the offline validator
+    let slot =
+        expect!(ctx.wait_for_delta_slot_ephem(SNAPSHOT_FREQUENCY), validator);
 
     (validator, slot, signatures)
 }
