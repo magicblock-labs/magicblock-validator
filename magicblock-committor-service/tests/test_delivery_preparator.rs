@@ -3,7 +3,6 @@
 // ./magicblock-committor-program/bin/magicblock_committor_program.so
 
 use borsh::BorshDeserialize;
-use futures_util::StreamExt;
 use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
@@ -80,7 +79,7 @@ async fn test_prepare_multiple_buffers() {
     let fixture = TestFixture::new().await;
     let preparator = fixture.create_delivery_preparator();
 
-    let datas = vec![
+    let datas = [
         generate_random_bytes(10 * 1024),
         generate_random_bytes(10),
         generate_random_bytes(500 * 1024),
@@ -152,7 +151,7 @@ async fn test_lookup_tables() {
     let fixture = TestFixture::new().await;
     let preparator = fixture.create_delivery_preparator();
 
-    let datas = vec![
+    let datas = [
         generate_random_bytes(10),
         generate_random_bytes(20),
         generate_random_bytes(30),

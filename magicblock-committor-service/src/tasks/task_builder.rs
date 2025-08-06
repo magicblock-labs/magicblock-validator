@@ -94,7 +94,7 @@ impl TasksBuilder for TaskBuilderV1 {
         let (accounts, allow_undelegation) = match &l1_message.base_intent {
             MagicBaseIntent::BaseActions(actions) => {
                 let tasks = actions
-                    .into_iter()
+                    .iter()
                     .map(|el| {
                         let task = L1ActionTask {
                             context: Context::Standalone,
@@ -130,7 +130,7 @@ impl TasksBuilder for TaskBuilderV1 {
             });
 
         let tasks = accounts
-            .into_iter()
+            .iter()
             .map(|account| {
                 let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
                 let task = ArgsTask::Commit(CommitTask {

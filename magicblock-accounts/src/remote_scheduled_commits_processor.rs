@@ -95,7 +95,7 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
             bank: &'a Bank,
         }
 
-        impl<'a> Processor<'a> {
+        impl Processor<'_> {
             /// Handles case when committed account is feepayer
             /// Returns `true` if account should be retained, `false` otherwise
             fn process_feepayer(

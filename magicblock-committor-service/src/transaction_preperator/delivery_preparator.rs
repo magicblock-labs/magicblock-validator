@@ -64,7 +64,7 @@ impl DeliveryPreparator {
         let preparation_futures = strategy
             .optimized_tasks
             .iter()
-            .map(|task| self.prepare_task(authority, task, persister));
+            .map(|task| self.prepare_task(authority, task.as_ref(), persister));
 
         let task_preparations = join_all(preparation_futures);
         let alts_preparations =
@@ -83,7 +83,7 @@ impl DeliveryPreparator {
     pub async fn prepare_task<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        task: &Box<dyn BaseTask>,
+        task: &dyn BaseTask,
         persister: &Option<P>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let Some(preparation_info) = task.preparation_info(&authority.pubkey())
@@ -101,12 +101,8 @@ impl DeliveryPreparator {
         );
 
         // Initialize buffer account. Init + reallocs
-        self.initialize_buffer_account(
-            authority,
-            task.as_ref(),
-            &preparation_info,
-        )
-        .await?;
+        self.initialize_buffer_account(authority, task, &preparation_info)
+            .await?;
 
         // Persist initialization success
         let update_status = CommitStatus::BufferAndChunkInitialized;
@@ -133,6 +129,7 @@ impl DeliveryPreparator {
     }
 
     /// Initializes buffer account for future writes
+    #[allow(clippy::let_and_return)]
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
@@ -296,7 +293,7 @@ impl DeliveryPreparator {
         let message = Message::try_compile(
             &authority.pubkey(),
             instructions,
-            &vec![],
+            &[],
             latest_block_hash,
         )?;
         let transaction = VersionedTransaction::try_new(

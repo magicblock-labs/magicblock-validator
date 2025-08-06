@@ -72,6 +72,7 @@ impl TestFixture {
         }
     }
 
+    #[allow(dead_code)]
     pub fn create_delivery_preparator(&self) -> DeliveryPreparator {
         DeliveryPreparator::new(
             self.rpc_client.clone(),
@@ -80,6 +81,7 @@ impl TestFixture {
         )
     }
 
+    #[allow(dead_code)]
     pub fn create_transaction_preparator(
         &self,
     ) -> TransactionPreparatorV1<MockCommitIdFetcher> {
@@ -103,11 +105,12 @@ impl CommitIdFetcher for MockCommitIdFetcher {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
     }
 
-    fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<u64> {
+    fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
         None
     }
 }
 
+#[allow(dead_code)]
 pub fn generate_random_bytes(length: usize) -> Vec<u8> {
     use rand::Rng;
 
@@ -115,6 +118,7 @@ pub fn generate_random_bytes(length: usize) -> Vec<u8> {
     (0..length).map(|_| rng.gen()).collect()
 }
 
+#[allow(dead_code)]
 pub fn create_commit_task(data: &[u8]) -> CommitTask {
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
     CommitTask {
@@ -133,6 +137,7 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
     }
 }
 
+#[allow(dead_code)]
 pub fn create_committed_account(data: &[u8]) -> CommittedAccountV2 {
     CommittedAccountV2 {
         pubkey: Pubkey::new_unique(),

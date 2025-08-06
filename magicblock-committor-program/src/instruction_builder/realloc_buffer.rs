@@ -39,7 +39,7 @@ pub fn create_realloc_buffer_ixs(
 
     // B) We need to realloc multiple times
     // SAFETY; remaining size > consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE
-    create_realloc_buffer_ixs_to_add_remaining(&args, remaining_size as u64)
+    create_realloc_buffer_ixs_to_add_remaining(&args, remaining_size)
 }
 
 pub fn create_realloc_buffer_ixs_to_add_remaining(
@@ -47,9 +47,7 @@ pub fn create_realloc_buffer_ixs_to_add_remaining(
     remaining_size: u64,
 ) -> Vec<Instruction> {
     let remaining_invocation_count =
-        (remaining_size + MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64 - 1)
-            / MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
-
+        remaining_size.div_ceil(MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64);
     // Generate one instruction per needed allocation
     (1..=remaining_invocation_count)
         .map(|i| create_realloc_buffer_ix(args.clone(), i as u16))

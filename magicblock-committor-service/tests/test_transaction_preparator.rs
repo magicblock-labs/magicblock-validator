@@ -173,7 +173,6 @@ async fn test_prepare_finalize_tx_with_undelegate() {
     let preparator = fixture.create_transaction_preparator();
 
     // Create test data
-    let rent_reimbursement = Pubkey::new_unique();
     let l1_message = ScheduledBaseIntent {
         id: 1,
         slot: 0,
@@ -207,7 +206,6 @@ async fn test_prepare_finalize_tx_with_undelegate_and_actions() {
     let preparator = fixture.create_transaction_preparator();
 
     // Create test data
-    let rent_reimbursement = Pubkey::new_unique();
     let l1_action = BaseAction {
         compute_units: 30_000,
         destination_program: system_program::id(),

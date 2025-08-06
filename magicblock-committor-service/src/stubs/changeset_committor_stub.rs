@@ -4,9 +4,8 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
-use magicblock_program::SentCommit;
 use solana_pubkey::Pubkey;
-use solana_sdk::{signature::Signature, transaction::Transaction};
+use solana_sdk::signature::Signature;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta,
@@ -33,6 +32,7 @@ pub struct ChangesetCommittorStub {
 }
 
 impl ChangesetCommittorStub {
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.committed_changesets.lock().unwrap().len()
     }
@@ -130,7 +130,7 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
     > {
         let (tx, rx) = oneshot::channel();
-        if let Err(err) =
+        if let Err(_err) =
             tx.send(Ok(EncodedConfirmedTransactionWithStatusMeta {
                 slot: 0,
                 transaction: EncodedTransactionWithStatusMeta {

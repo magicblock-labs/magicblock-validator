@@ -143,8 +143,7 @@ impl IntentPersister for IntentPersisterImpl {
     ) -> CommitPersistResult<()> {
         let commit_rows = l1_message
             .iter()
-            .map(Self::create_commit_rows)
-            .flatten()
+            .flat_map(Self::create_commit_rows)
             .collect::<Vec<_>>();
         // Insert all commit rows into the database
         self.commits_db

@@ -161,7 +161,7 @@ fn get_parent_program_id(
             .map_or_else(|| "None".to_string(), |id| id.to_string())
     );
 
-    Ok(parent_program_id.map(Clone::clone))
+    Ok(parent_program_id.copied())
 }
 
 #[cfg(test)]
@@ -180,5 +180,5 @@ fn get_parent_program_id(
     .borrow()
     .owner();
 
-    Ok(Some(first_committee_owner.clone()))
+    Ok(Some(first_committee_owner))
 }

@@ -282,8 +282,7 @@ async fn init_write_and_close(changeset: Changeset) {
             }
             assert!(!chunks.is_complete());
 
-            let buffer_data =
-                get_buffer_data(&banks_client, &&buffer_pda).await;
+            let buffer_data = get_buffer_data(&banks_client, &buffer_pda).await;
             assert_eq!(
                 buffer_data[third_chunk.offset as usize
                     ..third_chunk.offset as usize
@@ -315,7 +314,7 @@ async fn init_write_and_close(changeset: Changeset) {
             }
             assert!(chunks.is_complete());
 
-            let buffer = get_buffer_data(&banks_client, &&buffer_pda).await;
+            let buffer = get_buffer_data(&banks_client, &buffer_pda).await;
             assert_eq!(buffer, commitable.data);
         }
 

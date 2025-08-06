@@ -670,7 +670,7 @@ mod tests {
     impl IntentExecutor for MockIntentExecutor {
         async fn execute<P: IntentPersister>(
             &self,
-            base_intent: ScheduledBaseIntent,
+            _base_intent: ScheduledBaseIntent,
             _persister: Option<P>,
         ) -> IntentExecutorResult<ExecutionOutput> {
             self.on_task_started();
@@ -700,12 +700,6 @@ mod tests {
 
     #[derive(Clone)]
     pub struct MockCommitIdTracker;
-    impl MockCommitIdTracker {
-        pub fn new() -> Self {
-            Self
-        }
-    }
-
     #[async_trait]
     impl CommitIdFetcher for MockCommitIdTracker {
         async fn fetch_next_commit_ids(

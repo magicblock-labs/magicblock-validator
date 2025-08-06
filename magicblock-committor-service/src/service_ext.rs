@@ -77,7 +77,7 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
                 continue;
             };
 
-            if let Err(_) = sender.send(execution_result) {
+            if sender.send(execution_result).is_err() {
                 error!(
                     "Failed to send BaseIntent execution result to listener"
                 );

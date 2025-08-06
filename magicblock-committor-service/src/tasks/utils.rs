@@ -81,10 +81,10 @@ impl TransactionUtils {
         lookup_tables: &[AddressLookupTableAccount],
     ) -> TaskStrategistResult<VersionedTransaction> {
         let budget_instructions = Self::budget_instructions(
-            Self::tasks_compute_units(&tasks),
+            Self::tasks_compute_units(tasks),
             compute_unit_price,
         );
-        let ixs = Self::tasks_instructions(&authority.pubkey(), &tasks);
+        let ixs = Self::tasks_instructions(&authority.pubkey(), tasks);
         Self::assemble_tx_raw(
             authority,
             &ixs,
@@ -100,21 +100,18 @@ impl TransactionUtils {
         lookup_tables: &[AddressLookupTableAccount],
     ) -> TaskStrategistResult<VersionedTransaction> {
         // This is needed because VersionedMessage::serialize uses unwrap() ¯\_(ツ)_/¯
-        instructions
-            .iter()
-            .map(|el| {
-                if el.data.len() > u16::MAX as usize {
-                    Err(crate::tasks::task_strategist::Error::FailedToFitError)
-                } else {
-                    Ok(())
-                }
-            })
-            .collect::<TaskStrategistResult<()>>()?;
+        instructions.iter().try_for_each(|el| {
+            if el.data.len() > u16::MAX as usize {
+                Err(crate::tasks::task_strategist::Error::FailedToFitError)
+            } else {
+                Ok(())
+            }
+        })?;
 
         let message = match Message::try_compile(
             &authority.pubkey(),
             &[budget_instructions, instructions].concat(),
-            &lookup_tables,
+            lookup_tables,
             Hash::new_unique(),
         ) {
             Ok(message) => Ok(message),

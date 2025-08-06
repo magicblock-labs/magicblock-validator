@@ -18,7 +18,7 @@ pub struct PersistorVisitor<'a, P> {
     pub context: PersistorContext,
 }
 
-impl<'a, P> Visitor for PersistorVisitor<'a, P>
+impl<P> Visitor for PersistorVisitor<'_, P>
 where
     P: IntentPersister,
 {

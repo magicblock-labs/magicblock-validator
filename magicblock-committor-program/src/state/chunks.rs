@@ -44,8 +44,7 @@ impl Chunks {
     }
 
     pub fn from_data_length(data_len: usize, chunk_size: u16) -> Self {
-        let chunk_count =
-            (data_len + chunk_size as usize - 1) / chunk_size as usize;
+        let chunk_count = data_len.div_ceil(chunk_size as usize);
         Self::new(chunk_count, chunk_size)
     }
 
@@ -54,7 +53,7 @@ impl Chunks {
     /// Each boolean is stored as a single bit, packing 8 booleans per byte.
     /// Returns the number of bytes needed to store all flags, rounding up if necessary.
     fn count_to_bitfield_bytes(count: usize) -> usize {
-        (count + BITS_PER_BYTE - 1) / BITS_PER_BYTE
+        count.div_ceil(BITS_PER_BYTE)
     }
 
     /// Returns how many bytes [`Chunks`] will occupy certain count

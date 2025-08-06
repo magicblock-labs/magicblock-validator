@@ -375,6 +375,7 @@ impl CommittsDb {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     fn get_commit_statuses_by_pubkey(
         &self,
         pubkey: &Pubkey,
@@ -435,7 +436,7 @@ impl CommittsDb {
         WHERE commit_id = ?1 AND pubkey = ?2
         LIMIT 1";
 
-        let mut stmt = self.conn.prepare(&query)?;
+        let mut stmt = self.conn.prepare(query)?;
         let mut rows = stmt.query(params![commit_id, pubkey.to_string()])?;
 
         let result = rows

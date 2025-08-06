@@ -353,7 +353,7 @@ where
                 )
                 .get_mut(&pubkey)
             {
-                acc.mark_as_committed(&now, &hash);
+                acc.mark_as_committed(now, &hash);
             }
             else {
                 // This should never happen
@@ -364,10 +364,7 @@ where
             }
         }
 
-        outputs
-            .into_iter()
-            .map(|(_, output)| output.output)
-            .collect()
+        outputs.into_values().map(|output| output.output).collect()
     }
 
     fn create_scheduled_l1_message(
@@ -410,12 +407,11 @@ where
 
         committees
             .chunks(MAX_PROCESS_PER_TX as usize)
-            .into_iter()
             .map(|committees| {
                 let committees = committees
                     .iter()
                     .cloned()
-                    .map(|committee| CommittedAccountV2::from(committee))
+                    .map(CommittedAccountV2::from)
                     .collect();
                 ScheduledBaseIntent {
                     // isn't important but shall be unique

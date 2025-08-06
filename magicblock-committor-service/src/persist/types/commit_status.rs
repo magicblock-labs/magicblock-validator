@@ -80,9 +80,9 @@ impl TryFrom<(&str, Option<CommitStatusSignatures>)> for CommitStatus {
             if let Some(sigs) = sigs.clone() {
                 Ok(sigs)
             } else {
-                return Err(CommitPersistError::CommitStatusNeedsSignatures(
+                Err(CommitPersistError::CommitStatusNeedsSignatures(
                     status.to_string(),
-                ));
+                ))
             }
         };
 

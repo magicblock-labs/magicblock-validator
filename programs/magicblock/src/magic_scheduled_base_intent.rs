@@ -62,14 +62,14 @@ pub struct ScheduledBaseIntent {
 }
 
 impl ScheduledBaseIntent {
-    pub fn try_new<'a>(
+    pub fn try_new(
         args: &MagicBaseIntentArgs,
         commit_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
-        context: &ConstructionContext<'a, '_>,
+        context: &ConstructionContext<'_, '_>,
     ) -> Result<ScheduledBaseIntent, InstructionError> {
-        let action = MagicBaseIntent::try_from_args(args, &context)?;
+        let action = MagicBaseIntent::try_from_args(args, context)?;
 
         let blockhash = context.invoke_context.environment_config.blockhash;
         let action_sent_transaction =
@@ -117,9 +117,9 @@ pub enum MagicBaseIntent {
 }
 
 impl MagicBaseIntent {
-    pub fn try_from_args<'a>(
+    pub fn try_from_args(
         args: &MagicBaseIntentArgs,
-        context: &ConstructionContext<'a, '_>,
+        context: &ConstructionContext<'_, '_>,
     ) -> Result<MagicBaseIntent, InstructionError> {
         match args {
             MagicBaseIntentArgs::BaseActions(base_actions) => {
@@ -193,9 +193,9 @@ pub struct CommitAndUndelegate {
 }
 
 impl CommitAndUndelegate {
-    pub fn try_from_args<'a>(
+    pub fn try_from_args(
         args: &CommitAndUndelegateArgs,
-        context: &ConstructionContext<'a, '_>,
+        context: &ConstructionContext<'_, '_>,
     ) -> Result<CommitAndUndelegate, InstructionError> {
         let commit_action =
             CommitType::try_from_args(&args.commit_type, context)?;
@@ -260,9 +260,9 @@ pub struct BaseAction {
 }
 
 impl BaseAction {
-    pub fn try_from_args<'a>(
+    pub fn try_from_args(
         args: &BaseActionArgs,
-        context: &ConstructionContext<'a, '_>,
+        context: &ConstructionContext<'_, '_>,
     ) -> Result<BaseAction, InstructionError> {
         let destination_program_pubkey = *get_instruction_pubkey_with_idx(
             context.transaction_context,
@@ -352,9 +352,9 @@ pub enum CommitType {
 
 impl CommitType {
     // TODO: move to processor
-    fn validate_accounts<'a>(
+    fn validate_accounts(
         accounts: &[CommittedAccountRef],
-        context: &ConstructionContext<'a, '_>,
+        context: &ConstructionContext<'_, '_>,
     ) -> Result<(), InstructionError> {
         accounts.iter().try_for_each(|(pubkey, account)| {
             let owner = *account.borrow().owner();
@@ -412,9 +412,9 @@ impl CommitType {
             .collect::<Result<_, InstructionError>>()
     }
 
-    pub fn try_from_args<'a>(
+    pub fn try_from_args(
         args: &CommitTypeArgs,
-        context: &ConstructionContext<'a, '_>,
+        context: &ConstructionContext<'_, '_>,
     ) -> Result<CommitType, InstructionError> {
         match args {
             CommitTypeArgs::Standalone(accounts) => {
@@ -513,9 +513,9 @@ pub enum UndelegateType {
 }
 
 impl UndelegateType {
-    pub fn try_from_args<'a>(
+    pub fn try_from_args(
         args: &UndelegateTypeArgs,
-        context: &ConstructionContext<'a, '_>,
+        context: &ConstructionContext<'_, '_>,
     ) -> Result<UndelegateType, InstructionError> {
         match args {
             UndelegateTypeArgs::Standalone => Ok(UndelegateType::Standalone),

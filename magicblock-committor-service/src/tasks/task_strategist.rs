@@ -65,7 +65,7 @@ impl TaskStrategist {
 
             // Get lookup table keys
             let lookup_tables_keys =
-                Self::collect_lookup_table_keys(&validator, &tasks);
+                Self::collect_lookup_table_keys(validator, &tasks);
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys,
@@ -81,11 +81,11 @@ impl TaskStrategist {
     pub fn attempt_lookup_tables(tasks: &[Box<dyn BaseTask>]) -> bool {
         let placeholder = Keypair::new();
         // Gather all involved keys in tx
-        let budgets = TransactionUtils::tasks_compute_units(&tasks);
+        let budgets = TransactionUtils::tasks_compute_units(tasks);
         let budget_instructions =
             TransactionUtils::budget_instructions(budgets, u64::default());
         let unique_involved_pubkeys = TransactionUtils::unique_involved_pubkeys(
-            &tasks,
+            tasks,
             &placeholder.pubkey(),
             &budget_instructions,
         );
@@ -94,7 +94,7 @@ impl TaskStrategist {
 
         // Create final tx
         let instructions =
-            TransactionUtils::tasks_instructions(&placeholder.pubkey(), &tasks);
+            TransactionUtils::tasks_instructions(&placeholder.pubkey(), tasks);
         let alt_tx = if let Ok(tx) = TransactionUtils::assemble_tx_raw(
             &placeholder,
             &instructions,
@@ -108,27 +108,22 @@ impl TaskStrategist {
         };
 
         let encoded_alt_tx = serialize_and_encode_base64(&alt_tx);
-        if encoded_alt_tx.len() <= MAX_ENCODED_TRANSACTION_SIZE {
-            true
-        } else {
-            false
-        }
+        encoded_alt_tx.len() <= MAX_ENCODED_TRANSACTION_SIZE
     }
 
     pub fn collect_lookup_table_keys(
         authority: &Pubkey,
         tasks: &[Box<dyn BaseTask>],
     ) -> Vec<Pubkey> {
-        let budgets = TransactionUtils::tasks_compute_units(&tasks);
+        let budgets = TransactionUtils::tasks_compute_units(tasks);
         let budget_instructions =
             TransactionUtils::budget_instructions(budgets, u64::default());
-        let unique_involved_pubkeys = TransactionUtils::unique_involved_pubkeys(
-            &tasks,
+
+        TransactionUtils::unique_involved_pubkeys(
+            tasks,
             authority,
             &budget_instructions,
-        );
-
-        unique_involved_pubkeys
+        )
     }
 
     /// Optimizes set of [`TaskDeliveryStrategy`] to fit [`MAX_ENCODED_TRANSACTION_SIZE`]
@@ -138,7 +133,7 @@ impl TaskStrategist {
         let calculate_tx_length = |tasks: &[Box<dyn BaseTask>]| {
             match TransactionUtils::assemble_tasks_tx(
                 &Keypair::new(), // placeholder
-                &tasks,
+                tasks,
                 u64::default(), // placeholder
                 &[],
             ) {
@@ -156,7 +151,7 @@ impl TaskStrategist {
         // Create heap size -> index
         // TODO(edwin): OPTIMIZATION. update ixs arr, since we know index, coul then reuse for tx creation
         let ixs =
-            TransactionUtils::tasks_instructions(&Pubkey::new_unique(), &tasks);
+            TransactionUtils::tasks_instructions(&Pubkey::new_unique(), tasks);
         let sizes = ixs
             .iter()
             .map(|ix| bincode::serialized_size(ix).map(|size| size as usize))
@@ -404,14 +399,12 @@ mod tests {
 
     #[test]
     fn test_optimize_strategy_prioritizes_largest_tasks() {
-        let validator = Pubkey::new_unique();
-        let mut tasks = vec![
+        let tasks = [
             Box::new(create_test_commit_task(1, 100)) as Box<dyn BaseTask>,
             Box::new(create_test_commit_task(2, 1000)) as Box<dyn BaseTask>, // Larger task
             Box::new(create_test_commit_task(3, 1000)) as Box<dyn BaseTask>, // Larger task
         ];
 
-        let final_size = TaskStrategist::optimize_strategy(&mut tasks);
         // The larger task should have been optimized first
         assert!(matches!(tasks[0].strategy(), TaskStrategy::Args));
         assert!(matches!(tasks[1].strategy(), TaskStrategy::Buffer));

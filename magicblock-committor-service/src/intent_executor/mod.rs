@@ -1,5 +1,6 @@
 pub mod commit_id_fetcher;
 pub mod error;
+#[allow(clippy::module_inception)]
 pub mod intent_executor;
 pub(crate) mod intent_executor_factory;
 
