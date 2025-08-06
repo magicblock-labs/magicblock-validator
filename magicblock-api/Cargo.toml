@@ -35,6 +35,7 @@ magicblock-program = { workspace = true }
 magicblock-pubsub = { workspace = true }
 magicblock-rpc = { workspace = true }
 magicblock-transaction-status = { workspace = true }
+magicblock-validator-admin = { workspace = true }
 magic-domain-program = { workspace = true }
 solana-geyser-plugin-interface = { workspace = true }
 solana-rpc-client = { workspace = true }
@@ -46,6 +47,7 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+magicblock-delegation-program = { workspace = true }
 
 libloading = "0.7.4"
 borsh = "1.5.3"

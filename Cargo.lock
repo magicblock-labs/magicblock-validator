@@ -3988,6 +3988,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
+ "magicblock-delegation-program",
  "magicblock-geyser-plugin",
  "magicblock-ledger",
  "magicblock-metrics",
@@ -3997,6 +3998,7 @@ dependencies = [
  "magicblock-pubsub",
  "magicblock-rpc",
  "magicblock-transaction-status",
+ "magicblock-validator-admin",
  "paste",
  "solana-geyser-plugin-manager",
  "solana-rpc",
@@ -4429,6 +4431,25 @@ dependencies = [
  "solana-sdk",
  "test-tools",
  "tokio",
+]
+
+[[package]]
+name = "magicblock-validator-admin"
+version = "0.1.7"
+dependencies = [
+ "anyhow",
+ "log",
+ "magicblock-accounts",
+ "magicblock-config",
+ "magicblock-delegation-program",
+ "magicblock-program",
+ "magicblock-rpc-client",
+ "solana-rpc-client",
+ "solana-sdk",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util 0.7.15",
+ "url 2.5.4",
 ]
 
 [[package]]
@@ -11190,7 +11211,10 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-sink",
+ "futures-util",
+ "hashbrown 0.15.4",
  "pin-project-lite",
+ "slab",
  "tokio",
 ]
 
