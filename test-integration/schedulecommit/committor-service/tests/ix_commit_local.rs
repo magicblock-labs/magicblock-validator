@@ -1,14 +1,13 @@
 use log::*;
-use magicblock_committor_service::{BaseIntentCommittor, ComputeBudgetConfig};
+use magicblock_committor_service::{ComputeBudgetConfig};
 use magicblock_rpc_client::MagicblockRpcClient;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet};
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 use test_tools_core::init_logger;
 use tokio::task::JoinSet;
 use utils::transactions::tx_logs_contain;
 
-use magicblock_committor_program::{ChangedAccount, Changeset};
 use magicblock_committor_service::service_ext::{
     BaseIntentCommittorExt, CommittorServiceExt,
 };
@@ -17,14 +16,13 @@ use magicblock_committor_service::types::{
 };
 use magicblock_committor_service::{
     config::ChainConfig,
-    persist::{CommitStatus, CommitStrategy},
     CommittorService,
 };
 use magicblock_program::magic_scheduled_base_intent::{
     CommitAndUndelegate, CommitType, CommittedAccountV2, MagicBaseIntent,
     ScheduledBaseIntent, UndelegateType,
 };
-use solana_account::{Account, AccountSharedData, ReadableAccount};
+use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -45,17 +43,6 @@ mod utils;
 // -----------------
 // Utilities and Setup
 // -----------------
-type ExpectedStrategies = HashMap<CommitStrategy, u8>;
-
-fn expect_strategies(
-    strategies: &[(CommitStrategy, u8)],
-) -> ExpectedStrategies {
-    let mut expected_strategies = HashMap::new();
-    for (strategy, count) in strategies {
-        *expected_strategies.entry(*strategy).or_insert(0) += count;
-    }
-    expected_strategies
-}
 
 fn ensure_validator_authority() -> Keypair {
     static ONCE: Once = Once::new();
@@ -66,10 +53,6 @@ fn ensure_validator_authority() -> Keypair {
     });
 
     validator_authority()
-}
-
-fn uses_lookup(expected: &ExpectedStrategies) -> bool {
-    expected.iter().any(|(strategy, _)| strategy.uses_lookup())
 }
 
 macro_rules! get_account {
@@ -333,8 +316,6 @@ async fn commit_single_account(bytes: usize, undelegate: bool) {
     };
 
     let intent = ScheduledBaseIntentWrapper {
-        excluded_pubkeys: vec![],
-        feepayers: vec![],
         trigger_type: TriggerType::OnChain,
         inner: ScheduledBaseIntent {
             id: 0,
@@ -360,8 +341,6 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
     init_logger!();
     commit_multiple_accounts(
         &[1024, 2048],
-        1,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 2)]),
         false,
     )
     .await;
@@ -372,8 +351,6 @@ async fn test_ix_commit_two_accounts_512kb() {
     init_logger!();
     commit_multiple_accounts(
         &[512, 512],
-        1,
-        expect_strategies(&[(CommitStrategy::Args, 2)]),
         false,
     )
     .await;
@@ -384,8 +361,6 @@ async fn test_ix_commit_three_accounts_512kb() {
     init_logger!();
     commit_multiple_accounts(
         &[512, 512, 512],
-        1,
-        expect_strategies(&[(CommitStrategy::Args, 3)]),
         false,
     )
     .await;
@@ -396,8 +371,6 @@ async fn test_ix_commit_six_accounts_512kb() {
     init_logger!();
     commit_multiple_accounts(
         &[512, 512, 512, 512, 512, 512],
-        1,
-        expect_strategies(&[(CommitStrategy::Args, 6)]),
         false,
     )
     .await;
@@ -408,8 +381,6 @@ async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
     init_logger!();
     commit_multiple_accounts(
         &[1024, 2 * 1024, 5 * 1024, 10 * 1024],
-        1,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 4)]),
         false,
     )
     .await;
@@ -418,8 +389,6 @@ async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_2() {
     commit_20_accounts_1kb(
-        2,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 20)]),
     )
     .await;
 }
@@ -427,8 +396,6 @@ async fn test_commit_20_accounts_1kb_bundle_size_2() {
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_3() {
     commit_5_accounts_1kb(
-        3,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
         false,
     )
     .await;
@@ -437,8 +404,6 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
     commit_5_accounts_1kb(
-        3,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
         true,
     )
     .await;
@@ -447,11 +412,6 @@ async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_4() {
     commit_5_accounts_1kb(
-        4,
-        expect_strategies(&[
-            (CommitStrategy::FromBuffer, 1),
-            (CommitStrategy::FromBufferWithLookupTable, 4),
-        ]),
         false,
     )
     .await;
@@ -460,11 +420,6 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
     commit_5_accounts_1kb(
-        4,
-        expect_strategies(&[
-            (CommitStrategy::FromBuffer, 1),
-            (CommitStrategy::FromBufferWithLookupTable, 4),
-        ]),
         true,
     )
     .await;
@@ -473,8 +428,6 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_3() {
     commit_20_accounts_1kb(
-        3,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 20)]),
     )
     .await;
 }
@@ -482,8 +435,6 @@ async fn test_commit_20_accounts_1kb_bundle_size_3() {
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_4() {
     commit_20_accounts_1kb(
-        4,
-        expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 20)]),
     )
     .await;
 }
@@ -491,81 +442,51 @@ async fn test_commit_20_accounts_1kb_bundle_size_4() {
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_6() {
     commit_20_accounts_1kb(
-        6,
-        expect_strategies(&[
-            (CommitStrategy::FromBufferWithLookupTable, 18),
-            // Two accounts don't make it into the bundles of size 6
-            (CommitStrategy::FromBuffer, 2),
-        ]),
     )
     .await;
 }
 
 #[tokio::test]
 async fn test_commit_8_accounts_1kb_bundle_size_8() {
-    commit_8_accounts_1kb(
-        8,
-        expect_strategies(&[
-            // Four accounts don't make it into the bundles of size 8, but
-            // that bundle also needs lookup tables
-            (CommitStrategy::FromBufferWithLookupTable, 8),
-        ]),
-    )
+    commit_8_accounts_1kb()
     .await;
 }
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_8() {
-    commit_20_accounts_1kb(
-        8,
-        expect_strategies(&[
-            // Four accounts don't make it into the bundles of size 8, but
-            // that bundle also needs lookup tables
-            (CommitStrategy::FromBufferWithLookupTable, 20),
-        ]),
-    )
+    commit_20_accounts_1kb()
     .await;
 }
 
 async fn commit_5_accounts_1kb(
-    bundle_size: usize,
-    expected_strategies: ExpectedStrategies,
     undelegate_all: bool,
 ) {
     init_logger!();
     let accs = (0..5).map(|_| 1024).collect::<Vec<_>>();
     commit_multiple_accounts(
         &accs,
-        bundle_size,
-        expected_strategies,
         undelegate_all,
     )
     .await;
 }
 
 async fn commit_8_accounts_1kb(
-    bundle_size: usize,
-    expected_strategies: ExpectedStrategies,
 ) {
     init_logger!();
     let accs = (0..8).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, bundle_size, expected_strategies, false)
+    commit_multiple_accounts(&accs, false)
         .await;
 }
 
 async fn commit_20_accounts_1kb(
-    bundle_size: usize,
-    expected_strategies: ExpectedStrategies,
 ) {
     init_logger!();
     let accs = (0..20).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, bundle_size, expected_strategies, false)
+    commit_multiple_accounts(&accs, false)
         .await;
 }
 
 async fn commit_multiple_accounts(
     bytess: &[usize],
-    bundle_size: usize,
-    expected_strategies: ExpectedStrategies,
     undelegate_all: bool,
 ) {
     init_logger!();
@@ -586,15 +507,9 @@ async fn commit_multiple_accounts(
             bytess.iter().map(|_| Keypair::new()).collect::<Vec<_>>();
 
         let mut join_set = JoinSet::new();
-        let mut bundle_id = 0;
-
         for (idx, (bytes, counter_auth)) in
             bytess.iter().zip(committees.into_iter()).enumerate()
         {
-            if idx % bundle_size == 0 {
-                bundle_id += 1;
-            }
-
             let bytes = *bytes;
             join_set.spawn(async move {
                 let (pda, mut pda_acc) = init_and_delegate_account_on_chain(
@@ -606,7 +521,7 @@ async fn commit_multiple_accounts(
                 pda_acc.owner = program_flexi_counter::id();
                 pda_acc.data = vec![idx as u8; bytes];
 
-                let request_undelegation = (undelegate_all || idx % 2 == 0);
+                let request_undelegation = undelegate_all || idx % 2 == 0;
                 (pda, pda_acc, request_undelegation)
             });
         }
@@ -627,8 +542,6 @@ async fn commit_multiple_accounts(
 
         if !committed_accounts.is_empty() {
             let commit_intent = ScheduledBaseIntentWrapper {
-                excluded_pubkeys: vec![],
-                feepayers: vec![],
                 trigger_type: TriggerType::OnChain,
                 inner: ScheduledBaseIntent {
                     id: 0,
@@ -655,8 +568,6 @@ async fn commit_multiple_accounts(
 
         if !committed_and_undelegated_accounts.is_empty() {
             let commit_and_undelegate_intent = ScheduledBaseIntentWrapper {
-                excluded_pubkeys: vec![],
-                feepayers: vec![],
                 trigger_type: TriggerType::OnChain,
                 inner: ScheduledBaseIntent {
                     id: 1,

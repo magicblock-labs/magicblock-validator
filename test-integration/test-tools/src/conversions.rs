@@ -1,6 +1,4 @@
-use magicblock_core::magic_program;
 use solana_rpc_client_api::client_error;
-use solana_sdk::pubkey::Pubkey;
 
 pub fn get_rpc_transwise_error_msg(err: &anyhow::Error) -> Option<String> {
     err.source()
