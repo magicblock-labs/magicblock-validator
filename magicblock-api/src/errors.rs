@@ -90,13 +90,4 @@ pub enum ApiError {
     #[error("Accounts Database couldn't be initialized"
     )]
     AccountsDbError(#[from] AccountsDbError),
-
-    #[error("Failed to claim fees: {0}")]
-    FailedToClaimFees(String),
-
-    #[error("Failed to get blockhash: {0}")]
-    FailedToGetBlockhash(String),
-
-    #[error("Failed to send transaction: {0}")]
-    FailedToSendTransaction(String),
 }

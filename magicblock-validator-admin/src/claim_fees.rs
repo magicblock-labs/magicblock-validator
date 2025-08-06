@@ -37,15 +37,16 @@ impl ClaimFeesTask {
         let token = self.token.clone();
         let handle = tokio::spawn(async move {
             info!("Starting claim fees task");
+            let mut interval = tokio::time::interval(Duration::from_secs(
+                config.validator.claim_fees_interval_secs,
+            ));
             loop {
-                if let Err(err) = claim_fees(config.clone()).await {
-                    error!("Failed to claim fees: {:?}", err);
-                }
-                let interval = Duration::from_secs(
-                    config.validator.claim_fees_interval_secs,
-                );
                 tokio::select! {
-                    _ = tokio::time::sleep(interval) => {}
+                    _ = interval.tick() => {
+                        if let Err(err) = claim_fees(config.clone()).await {
+                            error!("Failed to claim fees: {:?}", err);
+                        }
+                    },
                     _ = token.cancelled() => break,
                 }
             }
