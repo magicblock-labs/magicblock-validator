@@ -399,12 +399,13 @@ mod tests {
 
     #[test]
     fn test_optimize_strategy_prioritizes_largest_tasks() {
-        let tasks = [
+        let mut tasks = [
             Box::new(create_test_commit_task(1, 100)) as Box<dyn BaseTask>,
             Box::new(create_test_commit_task(2, 1000)) as Box<dyn BaseTask>, // Larger task
             Box::new(create_test_commit_task(3, 1000)) as Box<dyn BaseTask>, // Larger task
         ];
 
+        let _ = TaskStrategist::optimize_strategy(&mut tasks);
         // The larger task should have been optimized first
         assert!(matches!(tasks[0].strategy(), TaskStrategy::Args));
         assert!(matches!(tasks[1].strategy(), TaskStrategy::Buffer));
