@@ -38,12 +38,14 @@ pub fn main() {
         return;
     };
 
-    let Ok(restore_ledger_output) = run_restore_ledger_tests(&manifest_dir)
+    let Ok(restore_ledger_output) =
+        run_restore_ledger_tests(&manifest_dir, &config)
     else {
         return;
     };
 
-    let Ok(magicblock_api_output) = run_magicblock_api_tests(&manifest_dir)
+    let Ok(magicblock_api_output) =
+        run_magicblock_api_tests(&manifest_dir, &config)
     else {
         return;
     };
@@ -54,12 +56,12 @@ pub fn main() {
         return;
     };
     let Ok(magicblock_pubsub_output) =
-        run_magicblock_pubsub_tests(&manifest_dir)
+        run_magicblock_pubsub_tests(&manifest_dir, &config)
     else {
         return;
     };
 
-    let Ok(config_output) = run_config_tests(&manifest_dir) else {
+    let Ok(config_output) = run_config_tests(&manifest_dir, &config) else {
         return;
     };
 
@@ -116,16 +118,17 @@ fn success_output() -> Output {
 // -----------------
 fn run_restore_ledger_tests(
     manifest_dir: &str,
+    config: &TestConfigViaEnvVars,
 ) -> Result<Output, Box<dyn Error>> {
-    if !should_run_test("restore_ledger") {
+    const TEST_NAME: &str = "restore_ledger";
+    if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
-    eprintln!("======== RUNNING RESTORE LEDGER TESTS ========");
+
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
-    // The ledger tests manage their own ephem validator so all we start up here
-    // is devnet
-    let mut devnet_validator = match start_validator(
+
+    let start_devnet_validator = || match start_validator(
         "restore-ledger-conf.devnet.toml",
         ValidatorCluster::Chain(None),
         &loaded_chain_accounts,
@@ -135,22 +138,34 @@ fn run_restore_ledger_tests(
             panic!("Failed to start devnet validator properly");
         }
     };
-    let test_restore_ledger_dir =
-        format!("{}/../{}", manifest_dir, "test-ledger-restore");
-    eprintln!(
-        "Running restore ledger tests in {}",
-        test_restore_ledger_dir
-    );
-    let output = match run_test(test_restore_ledger_dir, Default::default()) {
-        Ok(output) => output,
-        Err(err) => {
-            eprintln!("Failed to run restore ledger tests: {:?}", err);
-            cleanup_devnet_only(&mut devnet_validator);
-            return Err(err.into());
-        }
-    };
-    cleanup_devnet_only(&mut devnet_validator);
-    Ok(output)
+
+    if config.run_test(TEST_NAME) {
+        eprintln!("======== RUNNING RESTORE LEDGER TESTS ========");
+
+        let mut devnet_validator = start_devnet_validator();
+
+        let test_restore_ledger_dir =
+            format!("{}/../{}", manifest_dir, "test-ledger-restore");
+        eprintln!(
+            "Running restore ledger tests in {}",
+            test_restore_ledger_dir
+        );
+        let output = match run_test(test_restore_ledger_dir, Default::default())
+        {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run restore ledger tests: {:?}", err);
+                cleanup_devnet_only(&mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+        cleanup_devnet_only(&mut devnet_validator);
+        Ok(output)
+    } else {
+        let devnet_validator =
+            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        wait_for_ctrlc(devnet_validator, None, success_output())
+    }
 }
 
 fn run_table_mania_and_committor_tests(
@@ -409,21 +424,20 @@ fn run_cloning_tests(
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
-        eprintln!("Setup validator(s)");
         wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
     }
 }
 
 fn run_magicblock_api_tests(
     manifest_dir: &str,
+    config: &TestConfigViaEnvVars,
 ) -> Result<Output, Box<dyn Error>> {
-    if !should_run_test("magicblock_api") {
+    const TEST_NAME: &str = "magicblock_api";
+    if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
 
-    eprintln!("======== RUNNING MAGICBLOCK API TESTS ========");
-
-    let mut devnet_validator = match start_validator(
+    let start_devnet_validator = || match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
         &LoadedAccounts::default(),
@@ -433,43 +447,57 @@ fn run_magicblock_api_tests(
             panic!("Failed to start devnet validator properly");
         }
     };
-    let mut ephem_validator = match start_validator(
+
+    let start_ephem_validator = || match start_validator(
         "validator-api-offline.devnet.toml",
         ValidatorCluster::Ephem,
         &LoadedAccounts::with_delegation_program_test_authority(),
     ) {
         Some(validator) => validator,
         None => {
-            devnet_validator
-                .kill()
-                .expect("Failed to kill devnet validator");
             panic!("Failed to start ephemeral validator properly");
         }
     };
 
-    let test_dir = format!("{}/../{}", manifest_dir, "test-magicblock-api");
-    eprintln!("Running magicblock-api tests in {}", test_dir);
+    if config.run_test(TEST_NAME) {
+        eprintln!("======== RUNNING MAGICBLOCK API TESTS ========");
 
-    let output = run_test(test_dir, Default::default()).map_err(|err| {
-        eprintln!("Failed to magicblock api tests: {:?}", err);
+        let mut devnet_validator = start_devnet_validator();
+        let mut ephem_validator = start_ephem_validator();
+
+        let test_dir = format!("{}/../{}", manifest_dir, "test-magicblock-api");
+        eprintln!("Running magicblock-api tests in {}", test_dir);
+
+        let output = run_test(test_dir, Default::default()).map_err(|err| {
+            eprintln!("Failed to magicblock api tests: {:?}", err);
+            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+            err
+        })?;
+
         cleanup_validators(&mut ephem_validator, &mut devnet_validator);
-        err
-    })?;
-
-    cleanup_validators(&mut ephem_validator, &mut devnet_validator);
-    Ok(output)
+        Ok(output)
+    } else {
+        let devnet_validator =
+            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let ephem_validator =
+            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
+        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+    }
 }
 
 fn run_magicblock_pubsub_tests(
     manifest_dir: &str,
+    config: &TestConfigViaEnvVars,
 ) -> Result<Output, Box<dyn Error>> {
-    if !should_run_test("pubsub") {
+    const TEST_NAME: &str = "pubsub";
+    if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
+
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
 
-    let mut ephem_validator = match start_validator(
+    let start_ephem_validator = || match start_validator(
         "validator-offline.devnet.toml",
         ValidatorCluster::Ephem,
         &loaded_chain_accounts,
@@ -480,29 +508,42 @@ fn run_magicblock_pubsub_tests(
         }
     };
 
-    let test_dir = format!("{}/../{}", manifest_dir, "test-pubsub");
-    eprintln!("Running magicblock pubsub tests in {}", test_dir);
+    if config.run_test(TEST_NAME) {
+        eprintln!("======== RUNNING MAGICBLOCK PUBSUB TESTS ========");
 
-    let output = run_test(test_dir, Default::default()).map_err(|err| {
-        eprintln!("Failed to magicblock pubsub tests: {:?}", err);
+        let mut ephem_validator = start_ephem_validator();
+
+        let test_dir = format!("{}/../{}", manifest_dir, "test-pubsub");
+        eprintln!("Running magicblock pubsub tests in {}", test_dir);
+
+        let output = run_test(test_dir, Default::default()).map_err(|err| {
+            eprintln!("Failed to magicblock pubsub tests: {:?}", err);
+            cleanup_validator(&mut ephem_validator, "ephemeral");
+            err
+        })?;
+
         cleanup_validator(&mut ephem_validator, "ephemeral");
-        err
-    })?;
-
-    cleanup_validator(&mut ephem_validator, "ephemeral");
-    Ok(output)
+        Ok(output)
+    } else {
+        let ephem_validator =
+            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
+        wait_for_ctrlc(None, ephem_validator, success_output())
+    }
 }
 
-fn run_config_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
-    if !should_run_test("config") {
+fn run_config_tests(
+    manifest_dir: &str,
+    config: &TestConfigViaEnvVars,
+) -> Result<Output, Box<dyn Error>> {
+    const TEST_NAME: &str = "config";
+    if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
-    eprintln!("======== RUNNING CONFIG TESTS ========");
+
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
 
-    // Initialize only a devnet cluster for config tests
-    let mut devnet_validator = match start_validator(
+    let start_devnet_validator = || match start_validator(
         "config-conf.devnet.toml",
         ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
         &loaded_chain_accounts,
@@ -513,18 +554,28 @@ fn run_config_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
         }
     };
 
-    let test_config_dir = format!("{}/../{}", manifest_dir, "test-config");
-    eprintln!("Running config tests in {}", test_config_dir);
-    let output = match run_test(test_config_dir, Default::default()) {
-        Ok(output) => output,
-        Err(err) => {
-            eprintln!("Failed to run config tests: {:?}", err);
-            cleanup_devnet_only(&mut devnet_validator);
-            return Err(err.into());
-        }
-    };
-    cleanup_devnet_only(&mut devnet_validator);
-    Ok(output)
+    if config.run_test(TEST_NAME) {
+        eprintln!("======== RUNNING CONFIG TESTS ========");
+
+        let mut devnet_validator = start_devnet_validator();
+
+        let test_config_dir = format!("{}/../{}", manifest_dir, "test-config");
+        eprintln!("Running config tests in {}", test_config_dir);
+        let output = match run_test(test_config_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run config tests: {:?}", err);
+                cleanup_devnet_only(&mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+        cleanup_devnet_only(&mut devnet_validator);
+        Ok(output)
+    } else {
+        let devnet_validator =
+            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        wait_for_ctrlc(devnet_validator, None, success_output())
+    }
 }
 
 // -----------------

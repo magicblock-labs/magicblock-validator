@@ -59,9 +59,21 @@ setup-cloning-both:
 test-restore-ledger:
 	RUN_TESTS=restore_ledger \
 	$(MAKE) test
+setup-restore-ledger-devnet:
+	RUN_TESTS=restore_ledger \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
 
 test-magicblock-api:
 	RUN_TESTS=magicblock_api \
+	$(MAKE) test
+setup-magicblock-api-devnet:
+	RUN_TESTS=magicblock_api \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-magicblock-api-both:
+	RUN_TESTS=magicblock_api \
+	SETUP_ONLY=both \
 	$(MAKE) test
 
 test-table-mania:
@@ -75,9 +87,17 @@ test-committor:
 test-pubsub:
 	RUN_TESTS=pubsub \
 	$(MAKE) test
+setup-pubsub-ephem:
+	RUN_TESTS=pubsub \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 
 test-config:
 	RUN_TESTS=config \
+	$(MAKE) test
+setup-config-devnet:
+	RUN_TESTS=config \
+	SETUP_ONLY=devnet \
 	$(MAKE) test
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
