@@ -186,4 +186,10 @@ impl Database {
     ) -> std::result::Result<Vec<LiveFile>, LedgerError> {
         self.backend.live_files_metadata()
     }
+
+    /// Stores oldest maintained slot in db
+    /// Used in CompactionFilter to decide if slot can be safely removed
+    pub fn set_oldest_slot(&self, slot: Slot) {
+        self.backend.set_oldest_slot(slot);
+    }
 }
