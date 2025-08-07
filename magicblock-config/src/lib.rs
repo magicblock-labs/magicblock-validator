@@ -556,7 +556,7 @@ mod tests {
             validator: ValidatorConfig::default(),
             ledger: LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Replay,
-                skip_keypair_match_check: false,
+                skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
                 replay: ReplayConfig {
