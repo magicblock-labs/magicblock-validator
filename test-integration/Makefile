@@ -39,9 +39,25 @@ test-force-mb: $(PROGRAMS_SO) test-ledger-restore
 test-schedulecommit:
 	RUN_TESTS=schedulecommit \
 	$(MAKE) test
+setup-schedulecommit-devnet:
+	RUN_TESTS=schedulecommit \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-schedulecommit-both:
+	RUN_TESTS=schedulecommit \
+	SETUP_ONLY=both \
+	$(MAKE) test
 
 test-issues-frequent-commits:
 	RUN_TESTS=issues_frequent_commmits \
+	$(MAKE) test
+setup-issues-frequent-commits-devnet:
+	RUN_TESTS=issues_frequent_commmits \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-issues-frequent-commits-both:
+	RUN_TESTS=issues_frequent_commmits \
+	SETUP_ONLY=both \
 	$(MAKE) test
 
 test-cloning:
@@ -79,9 +95,17 @@ setup-magicblock-api-both:
 test-table-mania:
 	RUN_TESTS=table_mania \
 	$(MAKE) test
+setup-table-mania-devnet:
+	RUN_TESTS=table_mania \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
 
 test-committor:
 	RUN_TESTS=committor \
+	$(MAKE) test
+setup-committor-devnet:
+	RUN_TESTS=committor \
+	SETUP_ONLY=devnet \
 	$(MAKE) test
 
 test-pubsub:
