@@ -14,11 +14,14 @@ use std::{
     process::{self, Output},
 };
 use teepee::Teepee;
-use test_runner::cleanup::{
-    cleanup_devnet_only, cleanup_validator, cleanup_validators,
+use test_runner::signal::wait_for_ctrlc;
+use test_runner::{
+    cleanup::{cleanup_devnet_only, cleanup_validator, cleanup_validators},
+    env_config::TestConfigViaEnvVars,
 };
 
 pub fn main() {
+    let config = TestConfigViaEnvVars::default();
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let Ok((security_output, scenarios_output)) =
         run_schedule_commit_tests(&manifest_dir)
@@ -31,7 +34,7 @@ pub fn main() {
     else {
         return;
     };
-    let Ok(cloning_output) = run_cloning_tests(&manifest_dir) else {
+    let Ok(cloning_output) = run_cloning_tests(&manifest_dir, &config) else {
         return;
     };
 
@@ -348,15 +351,19 @@ fn run_issues_frequent_commmits_tests(
     Ok(test_output)
 }
 
-fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
-    if !should_run_test("cloning") {
+fn run_cloning_tests(
+    manifest_dir: &str,
+    config: &TestConfigViaEnvVars,
+) -> Result<Output, Box<dyn Error>> {
+    const TEST_NAME: &str = "cloning";
+    if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
-    eprintln!("======== RUNNING CLONING TESTS ========");
+
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
 
-    let mut devnet_validator = match start_validator(
+    let start_devnet_validator = || match start_validator(
         "cloning-conf.devnet.toml",
         ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
         &loaded_chain_accounts,
@@ -366,31 +373,45 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
             panic!("Failed to start devnet validator properly");
         }
     };
-    let mut ephem_validator = match start_validator(
+
+    let start_ephem_validator = || match start_validator(
         "cloning-conf.ephem.toml",
         ValidatorCluster::Ephem,
         &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
-            devnet_validator
-                .kill()
-                .expect("Failed to kill devnet validator");
             panic!("Failed to start ephemeral validator properly");
         }
     };
-    let test_cloning_dir = format!("{}/../{}", manifest_dir, "test-cloning");
-    eprintln!("Running cloning tests in {}", test_cloning_dir);
-    let output = match run_test(test_cloning_dir, Default::default()) {
-        Ok(output) => output,
-        Err(err) => {
-            eprintln!("Failed to run cloning tests: {:?}", err);
-            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
-            return Err(err.into());
-        }
-    };
-    cleanup_validators(&mut ephem_validator, &mut devnet_validator);
-    Ok(output)
+
+    if config.run_test(TEST_NAME) {
+        eprintln!("======== RUNNING CLONING TESTS ========");
+
+        let mut devnet_validator = start_devnet_validator();
+        let mut ephem_validator = start_ephem_validator();
+
+        let test_cloning_dir =
+            format!("{}/../{}", manifest_dir, "test-cloning");
+        eprintln!("Running cloning tests in {}", test_cloning_dir);
+        let output = match run_test(test_cloning_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run cloning tests: {:?}", err);
+                cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+        Ok(output)
+    } else {
+        let devnet_validator =
+            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let ephem_validator =
+            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
+        eprintln!("Setup validator(s)");
+        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+    }
 }
 
 fn run_magicblock_api_tests(

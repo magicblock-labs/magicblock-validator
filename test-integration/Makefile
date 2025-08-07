@@ -47,6 +47,14 @@ test-issues-frequent-commits:
 test-cloning:
 	RUN_TESTS=cloning \
 	$(MAKE) test
+setup-cloning-devnet:
+	RUN_TESTS=cloning \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-cloning-both:
+	RUN_TESTS=cloning \
+	SETUP_ONLY=both \
+	$(MAKE) test
 
 test-restore-ledger:
 	RUN_TESTS=restore_ledger \
