@@ -251,6 +251,7 @@ size = 1000000000
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
+                replay: ReplayConfig::default(),
             }
         );
 
@@ -268,6 +269,7 @@ size = 1000000000
                 skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,
+                replay: ReplayConfig::default(),
             }
         );
 
@@ -285,6 +287,7 @@ size = 1000000000
                 skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,
+                replay: ReplayConfig::default(),
             }
         );
     }

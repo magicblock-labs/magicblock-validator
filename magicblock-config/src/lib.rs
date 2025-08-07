@@ -545,7 +545,8 @@ mod tests {
             geyser_grpc: GeyserGrpcConfig::default(),
             validator: ValidatorConfig::default(),
             ledger: LedgerConfig {
-                reset: false,
+                resume_strategy: LedgerResumeStrategy::Replay,
+                skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
                 replay: ReplayConfig {
