@@ -43,7 +43,7 @@ use magicblock_committor_service::{
 };
 use magicblock_config::{
     AccountsDbConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
-    LifecycleMode, ProgramConfig,
+    LifecycleMode, PrepareLookupTables, ProgramConfig,
 };
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
@@ -817,12 +817,16 @@ impl MagicValidator {
             self.remote_account_cloner_worker.take()
         {
             if let Some(committor_service) = &self.committor_service {
-                debug!("Reserving common pubkeys for committor service");
-                map_committor_request_result(
-                    committor_service.reserve_common_pubkeys(),
-                    committor_service.clone(),
-                )
-                .await?;
+                if self.config.accounts.clone.prepare_lookup_tables
+                    == PrepareLookupTables::Always
+                {
+                    debug!("Reserving common pubkeys for committor service");
+                    map_committor_request_result(
+                        committor_service.reserve_common_pubkeys(),
+                        committor_service.clone(),
+                    )
+                    .await?;
+                }
             }
 
             if self.config.ledger.resume_strategy.is_replaying() {
