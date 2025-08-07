@@ -61,7 +61,6 @@ pub fn setup_offline_validator(
             skip_keypair_match_check,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
-            ..Default::default()
         },
         accounts: accounts_config.clone(),
         programs,
