@@ -35,6 +35,7 @@ members = [
   "magicblock-transaction-status",
   "magicblock-validator",
   "magicblock-version",
+  "magicblock-validator-admin",
   "test-tools",
   "test-tools-core",
   "utils/expiring-hashmap",
@@ -132,6 +133,7 @@ magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
 magicblock-tokens = { path = "./magicblock-tokens" }
 magicblock-transaction-status = { path = "./magicblock-transaction-status" }
+magicblock-validator-admin = { path = "./magicblock-validator-admin" }
 magicblock-version = { path = "./magicblock-version" }
 num-derive = "0.4"
 num-format = "0.4.4"

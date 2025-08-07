@@ -3,6 +3,8 @@ use isocountry::CountryCode;
 use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_CLAIM_FEES_INTERVAL_SECS: u64 = 3600;
+
 #[clap_prefix("validator")]
 #[clap_from_serde]
 #[derive(
@@ -46,6 +48,15 @@ pub struct ValidatorConfig {
     )]
     #[serde(default = "default_country_code")]
     pub country_code: CountryCode,
+
+    /// The interval in seconds at which the validator will claim fees.
+    /// default: 3600 (1 hour)
+    #[derive_env_var]
+    #[arg(
+        help = "The interval in seconds at which the validator will claim fees."
+    )]
+    #[serde(default = "default_claim_fees_interval_secs")]
+    pub claim_fees_interval_secs: u64,
 }
 
 impl Default for ValidatorConfig {
@@ -56,6 +67,7 @@ impl Default for ValidatorConfig {
             fqdn: default_fqdn(),
             base_fees: default_base_fees(),
             country_code: default_country_code(),
+            claim_fees_interval_secs: default_claim_fees_interval_secs(),
         }
     }
 }
@@ -78,6 +90,10 @@ fn default_base_fees() -> Option<u64> {
 
 fn default_country_code() -> CountryCode {
     CountryCode::for_alpha2("US").unwrap()
+}
+
+fn default_claim_fees_interval_secs() -> u64 {
+    DEFAULT_CLAIM_FEES_INTERVAL_SECS
 }
 
 fn parse_country_code(s: &str) -> Result<CountryCode, String> {
@@ -104,6 +120,7 @@ mod tests {
             fqdn: Some("validator.example.com".to_string()),
             base_fees: Some(1000000000),
             country_code: CountryCode::for_alpha2("FR").unwrap(),
+            claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
         };
         let original_config = config.clone();
         let other = ValidatorConfig::default();
@@ -122,6 +139,7 @@ mod tests {
             fqdn: Some("validator.example.com".to_string()),
             base_fees: Some(1000000000),
             country_code: CountryCode::for_alpha2("FR").unwrap(),
+            claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
         };
 
         config.merge(other.clone());
@@ -137,6 +155,7 @@ mod tests {
             fqdn: Some("validator2.example.com".to_string()),
             base_fees: Some(9999),
             country_code: CountryCode::for_alpha2("DE").unwrap(),
+            claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
         };
         let original_config = config.clone();
         let other = ValidatorConfig {
@@ -145,6 +164,7 @@ mod tests {
             fqdn: Some("validator.example.com".to_string()),
             base_fees: Some(1000000000),
             country_code: CountryCode::for_alpha2("FR").unwrap(),
+            claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
         };
 
         config.merge(other);

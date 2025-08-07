@@ -67,6 +67,7 @@ use magicblock_rpc::{
 use magicblock_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
 };
+use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use mdp::state::{
     features::FeaturesSet,
     record::{CountryCode, ErRecord},
@@ -173,6 +174,7 @@ pub struct MagicValidator {
     geyser_rpc_service: Arc<GeyserRpcService>,
     pubsub_config: PubsubConfig,
     pub transaction_status_sender: TransactionStatusSender,
+    claim_fees_task: ClaimFeesTask,
 }
 
 impl MagicValidator {
@@ -435,6 +437,7 @@ impl MagicValidator {
             accounts_manager,
             transaction_listener,
             transaction_status_sender,
+            claim_fees_task: ClaimFeesTask::new(),
         })
     }
 
@@ -724,6 +727,8 @@ impl MagicValidator {
 
         self.maybe_process_ledger()?;
 
+        self.claim_fees_task.start(self.config.clone());
+
         self.transaction_listener.run(true, self.bank.clone());
 
         self.slot_ticker = Some(init_slot_ticker(
@@ -863,6 +868,8 @@ impl MagicValidator {
         PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
         self.ledger_truncator.stop();
+
+        self.claim_fees_task.stop();
 
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));

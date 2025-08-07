@@ -89,5 +89,5 @@ pub enum ApiError {
 
     #[error("Accounts Database couldn't be initialized"
     )]
-    AccountsDbError(#[from] AccountsDbError)
+    AccountsDbError(#[from] AccountsDbError),
 }
