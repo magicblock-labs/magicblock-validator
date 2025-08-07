@@ -1830,21 +1830,21 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=ec0308c#ec0308c179f3cf56c3662e5fc3bfbf371e1e7e98"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=69c555#69c555f788a6758bde55495e58d028f6e64e5cf4"
 dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk-attribute-commit",
  "ephemeral-rollups-sdk-attribute-delegate",
  "ephemeral-rollups-sdk-attribute-ephemeral",
- "magicblock-core 0.1.7 (git+https://github.com/magicblock-labs/magicblock-validator.git?rev=44f535a)",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=b149f8a)",
+ "magicblock-core 0.1.7 (git+https://github.com/magicblock-labs/magicblock-validator.git?rev=f08144)",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=00d720)",
  "solana-program",
 ]
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=ec0308c#ec0308c179f3cf56c3662e5fc3bfbf371e1e7e98"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=69c555#69c555f788a6758bde55495e58d028f6e64e5cf4"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1853,7 +1853,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=ec0308c#ec0308c179f3cf56c3662e5fc3bfbf371e1e7e98"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=69c555#69c555f788a6758bde55495e58d028f6e64e5cf4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1863,7 +1863,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=ec0308c#ec0308c179f3cf56c3662e5fc3bfbf371e1e7e98"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=69c555#69c555f788a6758bde55495e58d028f6e64e5cf4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3891,7 +3891,7 @@ dependencies = [
 [[package]]
 name = "magicblock-core"
 version = "0.1.7"
-source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=44f535a#44f535a4dedcec5b208d6546dd625fa0111b71fd"
+source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=f08144#f08144a02d9f4742a3db0a02211feeb03d0c77f2"
 dependencies = [
  "bincode",
  "serde",
@@ -3918,22 +3918,6 @@ dependencies = [
 name = "magicblock-delegation-program"
 version = "1.0.0"
 source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c#4af7f1cefe0915f0760ed5c38b25b7d41c31a474"
-dependencies = [
- "bincode",
- "borsh 1.5.7",
- "bytemuck",
- "num_enum",
- "paste",
- "solana-curve25519",
- "solana-program",
- "solana-security-txt",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "magicblock-delegation-program"
-version = "1.0.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=b149f8a#b149f8ae8f0d16b779e5974e65b5edbb94e520de"
 dependencies = [
  "bincode",
  "borsh 1.5.7",
