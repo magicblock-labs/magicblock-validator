@@ -5,6 +5,7 @@ use program_flexi_counter::instruction::{
     create_add_ix, create_delegate_ix, create_init_ix, create_intent_ix,
 };
 use program_flexi_counter::state::FlexiCounter;
+use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::rent::Rent;
@@ -28,7 +29,6 @@ fn test_schedule_intent() {
     schedule_intent(&ctx, &[&payer], vec![-100], false);
 }
 
-#[ignore]
 #[test]
 fn test_multiple_payers_multiple_counters() {
     // Init context
@@ -55,7 +55,7 @@ fn test_multiple_payers_multiple_counters() {
         &ctx,
         &[&payer1, &payer2, &payer3],
         vec![-50, 25, -75],
-        false,
+        true,
     );
 }
 
@@ -179,15 +179,23 @@ fn schedule_intent(
     );
 
     let rpc_client = ctx.try_ephem_client().unwrap();
-    let mut tx = Transaction::new_with_payer(&[ix], None);
-    let (sig, confirmed) =
-        IntegrationTestContext::send_and_confirm_transaction(
-            rpc_client,
-            &mut tx,
-            payers,
-            CommitmentConfig::confirmed(),
+    let blockhash = rpc_client.get_latest_blockhash().unwrap();
+    let tx = Transaction::new_signed_with_payer(&[ix], None, payers, blockhash);
+    let sig = rpc_client
+        .send_transaction_with_config(
+            &tx,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
         )
         .unwrap();
+    let confirmed = IntegrationTestContext::confirm_transaction(
+        &sig,
+        rpc_client,
+        CommitmentConfig::confirmed(),
+    )
+    .unwrap();
     assert!(confirmed);
 
     // Confirm was sent on Base Layer
@@ -203,7 +211,7 @@ fn schedule_intent(
         .iter()
         .map(|payer| {
             let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
-            ctx.fetch_ephem_account_struct::<FlexiCounter>(counter_pda)
+            ctx.fetch_chain_account_struct::<FlexiCounter>(counter_pda)
                 .unwrap()
         })
         .collect::<Vec<_>>();
@@ -226,8 +234,10 @@ fn schedule_intent(
     let transfer_destination_balance = ctx
         .fetch_chain_account_balance(&transfer_destination.pubkey())
         .unwrap();
+
+    let mutiplier = if is_undelegate { 2 } else { 1 };
     assert_eq!(
         transfer_destination_balance,
-        payers.len() as u64 * 1_000_000
+        mutiplier * payers.len() as u64 * 1_000_000
     );
 }
