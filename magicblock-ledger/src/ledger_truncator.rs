@@ -2,6 +2,7 @@ use std::{cmp::min, sync::Arc, time::Duration};
 
 use log::{error, info, warn};
 use magicblock_core::traits::FinalityProvider;
+use solana_measure::measure::Measure;
 use tokio::{
     task::{JoinError, JoinHandle, JoinSet},
     time::interval,
@@ -20,6 +21,7 @@ use crate::{
 pub const DEFAULT_TRUNCATION_TIME_INTERVAL: Duration =
     Duration::from_secs(2 * 60);
 const PERCENTAGE_TO_TRUNCATE: u8 = 10;
+const FILLED_PERCENTAGE_LIMIT: u8 = 100 - PERCENTAGE_TO_TRUNCATE;
 
 struct LedgerTrunctationWorker<T> {
     finality_provider: Arc<T>,
@@ -58,7 +60,6 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
                 }
                 _ = interval.tick() => {
                     // Note: since we clean 10%, tomstones will take around 10% as well
-                    const FILLED_PERCENTAGE_LIMIT: u8 = 100 - PERCENTAGE_TO_TRUNCATE;
 
                     let current_size = match self.ledger.storage_size() {
                         Ok(value) => value,
@@ -70,18 +71,92 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
 
                     // Check if we should truncate
                     if current_size < (self.ledger_size / 100) * FILLED_PERCENTAGE_LIMIT as u64 {
+                        info!("Skipping truncation, ledger size: {}", current_size);
                         continue;
                     }
 
                     info!("Ledger size: {current_size}");
-                    match self.estimate_truncation_range(current_size) {
-                        Ok(Some((from_slot, to_slot))) => Self::truncate_slot_range(&self.ledger, from_slot, to_slot).await,
-                        Ok(None) => warn!("Could not estimate truncation range"),
-                        Err(err) => error!("Failed to estimate truncation range: {:?}", err),
+                    if let Err(err) = self.truncate(current_size).await {
+                        error!("Failed to truncate ledger!: {:?}", err);
                     }
                 }
             }
         }
+    }
+
+    pub async fn truncate(&self, current_ledger_size: u64) -> LedgerResult<()> {
+        if current_ledger_size > self.ledger_size {
+            self.truncate_fat_ledger(current_ledger_size).await?;
+        } else {
+            match self.estimate_truncation_range(current_ledger_size)? {
+                Some((from_slot, to_slot)) => {
+                    Self::truncate_slot_range(&self.ledger, from_slot, to_slot)
+                        .await
+                }
+                None => warn!("Could not estimate truncation range"),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Truncates ledger that is over desired size
+    pub async fn truncate_fat_ledger(
+        &self,
+        current_ledger_size: u64,
+    ) -> LedgerResult<()> {
+        info!("Fat truncation");
+
+        // Calculate excessive size
+        let desired_size =
+            (self.ledger_size / 100) * FILLED_PERCENTAGE_LIMIT as u64;
+        let excess = current_ledger_size - desired_size;
+
+        let (highest_slot, _) = self.ledger.get_max_blockhash()?;
+        let lowest_slot = self.ledger.get_lowest_slot()?.unwrap_or(0);
+        info!(
+            "Fat truncation. lowest slot: {}, hightest slot: {}",
+            lowest_slot, highest_slot
+        );
+        if lowest_slot == highest_slot {
+            warn!("Nani3?");
+            return Ok(());
+        }
+
+        // Estimating number of slot we need to truncating
+        let num_slots = highest_slot - lowest_slot + 1;
+        let slot_size = current_ledger_size / num_slots;
+        let num_slots_to_truncate = excess / slot_size;
+
+        // Calculating up to which slot we're truncating
+        let truncate_to_slot = lowest_slot + num_slots_to_truncate - 1;
+        let finality_slot = self.finality_provider.get_latest_final_slot();
+        let truncate_to_slot = if truncate_to_slot >= finality_slot {
+            // Shouldn't really happen
+            warn!("LedgerTruncator: want to truncate past finality slot, finality slot:{}, truncating to: {}", finality_slot, truncate_to_slot);
+            if finality_slot == 0 {
+                // No truncation at that case
+                return Ok(());
+            } else {
+                // Not cleaning finality slot
+                finality_slot - 1
+            }
+        } else {
+            truncate_to_slot
+        };
+
+        info!(
+            "Fat truncation: truncating up to(inclusive): {}",
+            truncate_to_slot
+        );
+        self.ledger.set_lowest_cleanup_slot(truncate_to_slot);
+        if let Err(err) = self.ledger.flush() {
+            // We will still compact
+            error!("Failed to flush: {}", err);
+        }
+        Self::compact_slot_range(&self.ledger, 0, truncate_to_slot).await;
+
+        Ok(())
     }
 
     /// Returns range to truncate [from_slot, to_slot]
@@ -192,6 +267,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
     }
 
     /// Synchronous utility function that triggers and awaits compaction on all the columns
+    /// Compacts [from_slot; to_slot] inclusing ramge
     pub async fn compact_slot_range(
         ledger: &Arc<Ledger>,
         from_slot: u64,
@@ -205,6 +281,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         // Compaction can be run concurrently for different cf
         // but it utilizes rocksdb threads, in order not to drain
         // our tokio rt threads, we split the effort in just 3 tasks
+        let mut measure = Measure::start("Manual compaction");
         let mut join_set = JoinSet::new();
         join_set.spawn({
             let ledger = ledger.clone();
@@ -245,6 +322,8 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         });
 
         let _ = join_set.join_all().await;
+        measure.stop();
+        info!("Manual compaction took: {measure}");
     }
 }
 

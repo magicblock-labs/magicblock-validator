@@ -466,7 +466,6 @@ fn run_magicblock_api_tests(
     if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
-
     let start_devnet_validator = || match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
