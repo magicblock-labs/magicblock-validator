@@ -35,6 +35,7 @@ sigverify = true
 fqdn = "validator.example.com"
 base-fees = 1000000000
 country-code = "US"
+claim-fees-interval-secs = 10
 
 [ledger]
 resume-strategy = "replay"

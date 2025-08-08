@@ -258,6 +258,7 @@ fn test_everything_defined() {
                 base_fees: Some(1_000_000_000),
                 fqdn: Some("validator.example.com".to_string()),
                 country_code: CountryCode::for_alpha2("US").unwrap(),
+                claim_fees_interval_secs: 10,
             },
             ledger: LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Replay,
