@@ -234,7 +234,7 @@ pub struct AccountsCloneConfig {
     #[derive_env_var]
     #[arg(help = "If > 0, automatically airdrop this many lamports to target accounts when cloning.")]
     #[serde(default)]
-    pub auto_aidrop_lamports: u64,
+    pub auto_airdrop_lamports: u64,
 }
 
 #[derive(
