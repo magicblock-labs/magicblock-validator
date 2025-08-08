@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    cmp::max,
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::{Arc, RwLock},
     time::Duration,
@@ -546,6 +547,8 @@ where
                 }
 
                 // Fee payer accounts are non-delegated ones, so we keep track of them as well
+                let lamports =
+                    max(self.clone_config.auto_airdrop_lamports, *lamports);
                 self.track_not_delegated_account(*pubkey).await?;
                 match self.validator_charges_fees {
                     ValidatorCollectionMode::NoFees => self
@@ -553,7 +556,7 @@ where
                             pubkey,
                             // TODO(GabrielePicco): change account fetching to return the account
                             &Account {
-                                lamports: *lamports,
+                                lamports,
                                 owner: *owner,
                                 ..Default::default()
                             },

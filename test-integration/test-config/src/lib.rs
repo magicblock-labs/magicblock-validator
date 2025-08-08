@@ -52,6 +52,7 @@ pub fn start_validator_with_clone_config(
             lifecycle: LifecycleMode::Ephemeral,
             clone: AccountsCloneConfig {
                 prepare_lookup_tables,
+                auto_airdrop_lamports: 0
             },
             ..Default::default()
         },
