@@ -438,6 +438,6 @@ auto_aidrop_lamports = 123
             config.clone.prepare_lookup_tables,
             PrepareLookupTables::Always
         );
-        assert_eq!(config.clone.auto_aidrop_lamports, 123);
+        assert_eq!(config.clone.auto_airdrop_lamports, 123);
     }
 }
