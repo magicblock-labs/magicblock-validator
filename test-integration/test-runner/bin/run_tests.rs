@@ -405,7 +405,7 @@ fn run_magicblock_api_tests(
     let mut devnet_validator = match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
-        &LoadedAccounts::default(),
+        &LoadedAccounts::with_delegation_program_test_authority(),
     ) {
         Some(validator) => validator,
         None => {

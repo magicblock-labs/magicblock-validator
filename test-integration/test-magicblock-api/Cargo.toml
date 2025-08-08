@@ -2,8 +2,10 @@
 name = "test-magicblock-api"
 version.workspace = true
 edition.workspace = true
+
 [dependencies]
 integration-test-tools = { workspace = true }
+
 [dev-dependencies]
 cleanass = { workspace = true }
 magicblock-api = { workspace = true }
