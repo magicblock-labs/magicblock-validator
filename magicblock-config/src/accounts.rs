@@ -430,7 +430,7 @@ mod tests {
         let toml_str = r#"
 [clone]
 prepare_lookup_tables = "always"
-auto_aidrop_lamports = 123
+auto_airdrop_lamports = 123
 "#;
 
         let config: AccountsConfig = toml::from_str(toml_str).unwrap();
