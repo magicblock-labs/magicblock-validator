@@ -28,6 +28,7 @@ edition = "2021"
 anyhow = "1.0.86"
 borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
 cleanass = "0.0.1"
+ctrlc = "3.4.7"
 ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "c1fcb91" }
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"

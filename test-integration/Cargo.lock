@@ -1443,6 +1443,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc"
+version = "3.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46f93780a459b7d656ef7f071fe699c4d3d2cb201c4b24d085b6ddc505276e73"
+dependencies = [
+ "nix 0.30.1",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4406,6 +4416,18 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "memoffset",
+]
+
+[[package]]
+name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
+dependencies = [
+ "bitflags 2.9.1",
+ "cfg-if 1.0.1",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -7738,7 +7760,7 @@ dependencies = [
  "crossbeam-channel",
  "itertools 0.12.1",
  "log",
- "nix",
+ "nix 0.29.0",
  "rand 0.8.5",
  "serde",
  "serde_derive",
@@ -7826,7 +7848,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "log",
- "nix",
+ "nix 0.29.0",
  "rand 0.8.5",
  "rayon",
  "serde",
@@ -9020,7 +9042,7 @@ dependencies = [
  "itertools 0.12.1",
  "libc",
  "log",
- "nix",
+ "nix 0.29.0",
  "pem",
  "percentage",
  "quinn",
@@ -10406,6 +10428,7 @@ dependencies = [
 name = "test-runner"
 version = "0.0.0"
 dependencies = [
+ "ctrlc",
  "integration-test-tools",
  "teepee",
 ]
