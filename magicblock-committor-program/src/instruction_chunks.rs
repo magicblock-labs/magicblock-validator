@@ -1,5 +1,5 @@
 use crate::{
-    consts::MAX_INSTRUCTION_DATA_SIZE,
+    consts::{MAX_INSTRUCTION_DATA_SIZE, MAX_INSTRUCTION_LENGTH},
     instruction::{IX_INIT_SIZE, IX_REALLOC_SIZE},
 };
 
@@ -16,13 +16,12 @@ pub fn chunk_realloc_ixs<T: Clone>(
         start_size: u16,
     ) {
         let mut total_size = start_size;
-        loop {
-            total_size += IX_REALLOC_SIZE;
-            if total_size >= MAX_INSTRUCTION_DATA_SIZE {
-                return;
-            }
+        while total_size + IX_REALLOC_SIZE < MAX_INSTRUCTION_DATA_SIZE
+            && chunk.len() < MAX_INSTRUCTION_LENGTH as usize
+        {
             if let Some(realloc) = reallocs.pop() {
                 chunk.push(realloc);
+                total_size += IX_REALLOC_SIZE;
             } else {
                 return;
             }

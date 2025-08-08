@@ -16,7 +16,7 @@ use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::{AccountUpdates, AccountUpdatesResult};
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::ChangesetCommittor;
+use magicblock_committor_service::BaseIntentCommittor;
 use magicblock_config::{AccountsCloneConfig, PrepareLookupTables};
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
@@ -133,7 +133,7 @@ where
     AFE: AccountFetcher,
     AUP: AccountUpdates,
     ADU: AccountDumper,
-    CC: ChangesetCommittor,
+    CC: BaseIntentCommittor,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -714,11 +714,10 @@ where
 
                 // Allow the committer service to reserve pubkeys in lookup tables
                 // that could be needed when we commit this account
-                if let Some(committor) = self.changeset_committor.as_ref() {
+                if let Some(committor) = self.changeset_committor.clone() {
                     if self.clone_config.prepare_lookup_tables
                         == PrepareLookupTables::Always
                     {
-                        let committor = Arc::clone(committor);
                         let pubkey = *pubkey;
                         let owner = delegation_record.owner;
                         tokio::spawn(async move {

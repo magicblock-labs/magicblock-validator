@@ -1,4 +1,4 @@
-use magicblock_program::magicblock_instruction::AccountModification;
+use magicblock_program::instruction::AccountModification;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable::get_program_data_address,

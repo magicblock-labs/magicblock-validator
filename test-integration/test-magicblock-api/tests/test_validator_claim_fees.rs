@@ -123,7 +123,6 @@ fn test_add_fees_to_vault() {
 fn test_claim_fees_task() {
     println!("Testing ClaimFeesTask struct...");
 
-    
     let task = ClaimFeesTask::new();
 
     // Test that the task starts in the correct state
@@ -131,7 +130,6 @@ fn test_claim_fees_task() {
 
     println!("✓ ClaimFeesTask created successfully");
 
-    
     let default_task = ClaimFeesTask::default();
     assert!(
         default_task.handle.is_none(),

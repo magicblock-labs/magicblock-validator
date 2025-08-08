@@ -1,0 +1,194 @@
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    ops::Deref,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+
+use async_trait::async_trait;
+use futures_util::future::join_all;
+use log::error;
+use solana_pubkey::Pubkey;
+use solana_sdk::signature::Signature;
+use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
+
+use crate::{
+    error::CommittorServiceResult,
+    intent_execution_manager::BroadcastedIntentExecutionResult,
+    persist::{CommitStatusRow, MessageSignatures},
+    types::ScheduledBaseIntentWrapper,
+    BaseIntentCommittor,
+};
+
+const POISONED_MUTEX_MSG: &str =
+    "CommittorServiceExt pending messages mutex poisoned!";
+
+#[async_trait]
+pub trait BaseIntentCommittorExt: BaseIntentCommittor {
+    /// Schedules Base Intents and waits for their results
+    async fn schedule_base_intents_waiting(
+        &self,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>;
+}
+
+type MessageResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
+pub struct CommittorServiceExt<CC> {
+    inner: Arc<CC>,
+    pending_messages: Arc<Mutex<HashMap<u64, MessageResultListener>>>,
+}
+
+impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
+    pub fn new(inner: Arc<CC>) -> Self {
+        let pending_messages = Arc::new(Mutex::new(HashMap::new()));
+        let results_subscription = inner.subscribe_for_results();
+        tokio::spawn(Self::dispatcher(
+            results_subscription,
+            pending_messages.clone(),
+        ));
+
+        Self {
+            inner,
+            pending_messages,
+        }
+    }
+
+    async fn dispatcher(
+        results_subscription: oneshot::Receiver<
+            broadcast::Receiver<BroadcastedIntentExecutionResult>,
+        >,
+        pending_message: Arc<Mutex<HashMap<u64, MessageResultListener>>>,
+    ) {
+        let mut results_subscription = results_subscription.await.unwrap();
+        while let Ok(execution_result) = results_subscription.recv().await {
+            let id = match &execution_result {
+                Ok(value) => value.id,
+                Err(err) => err.0,
+            };
+
+            let sender = if let Some(sender) = pending_message
+                .lock()
+                .expect(POISONED_MUTEX_MSG)
+                .remove(&id)
+            {
+                sender
+            } else {
+                continue;
+            };
+
+            if sender.send(execution_result).is_err() {
+                error!(
+                    "Failed to send BaseIntent execution result to listener"
+                );
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl<CC: BaseIntentCommittor> BaseIntentCommittorExt
+    for CommittorServiceExt<CC>
+{
+    async fn schedule_base_intents_waiting(
+        &self,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
+    {
+        let receivers = {
+            let mut pending_messages =
+                self.pending_messages.lock().expect(POISONED_MUTEX_MSG);
+
+            base_intents
+                .iter()
+                .map(|intent| {
+                    let (sender, receiver) = oneshot::channel();
+                    match pending_messages.entry(intent.inner.id) {
+                        Entry::Vacant(vacant) => {
+                            vacant.insert(sender);
+                            Ok(receiver)
+                        }
+                        Entry::Occupied(_) => {
+                            Err(Error::RepeatingMessageError(intent.inner.id))
+                        }
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
+
+        self.commit_base_intent(base_intents);
+        let results = join_all(receivers.into_iter())
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, RecvError>>()?;
+
+        Ok(results)
+    }
+}
+
+impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
+    fn reserve_pubkeys_for_committee(
+        &self,
+        committee: Pubkey,
+        owner: Pubkey,
+    ) -> oneshot::Receiver<CommittorServiceResult<Instant>> {
+        self.inner.reserve_pubkeys_for_committee(committee, owner)
+    }
+
+    fn commit_base_intent(
+        &self,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) {
+        self.inner.commit_base_intent(base_intents)
+    }
+
+    fn subscribe_for_results(
+        &self,
+    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedIntentExecutionResult>>
+    {
+        self.inner.subscribe_for_results()
+    }
+
+    fn get_commit_statuses(
+        &self,
+        message_id: u64,
+    ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
+        self.inner.get_commit_statuses(message_id)
+    }
+
+    fn get_commit_signatures(
+        &self,
+        commit_id: u64,
+        pubkey: Pubkey,
+    ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
+    {
+        self.inner.get_commit_signatures(commit_id, pubkey)
+    }
+
+    fn get_transaction(
+        &self,
+        signature: &Signature,
+    ) -> oneshot::Receiver<
+        CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
+    > {
+        self.inner.get_transaction(signature)
+    }
+}
+
+impl<CC: BaseIntentCommittor> Deref for CommittorServiceExt<CC> {
+    type Target = Arc<CC>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Attempt to schedule already scheduled message id: {0}")]
+    RepeatingMessageError(u64),
+    #[error("RecvError: {0}")]
+    RecvError(#[from] RecvError),
+}
+
+pub type BaseIntentCommitorExtResult<T, E = Error> = Result<T, E>;

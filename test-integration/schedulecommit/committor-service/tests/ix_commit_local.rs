@@ -1,22 +1,28 @@
 use log::*;
-use magicblock_committor_service::error::CommittorServiceResult;
-use magicblock_committor_service::{ChangesetCommittor, ComputeBudgetConfig};
+use magicblock_committor_service::ComputeBudgetConfig;
 use magicblock_rpc_client::MagicblockRpcClient;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 use test_tools_core::init_logger;
-use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 use utils::transactions::tx_logs_contain;
 
-use magicblock_committor_program::{ChangedAccount, Changeset};
-use magicblock_committor_service::{
-    changeset_for_slot,
-    config::ChainConfig,
-    persist::{CommitStatus, CommitStrategy},
-    CommittorService,
+use magicblock_committor_service::service_ext::{
+    BaseIntentCommittorExt, CommittorServiceExt,
 };
-use solana_account::{Account, AccountSharedData, ReadableAccount};
+use magicblock_committor_service::types::{
+    ScheduledBaseIntentWrapper, TriggerType,
+};
+use magicblock_committor_service::{config::ChainConfig, CommittorService};
+use magicblock_program::magic_scheduled_base_intent::{
+    CommitAndUndelegate, CommitType, CommittedAccountV2, MagicBaseIntent,
+    ScheduledBaseIntent, UndelegateType,
+};
+use magicblock_program::validator::{
+    init_validator_authority, validator_authority,
+};
+use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -36,20 +42,16 @@ mod utils;
 // -----------------
 // Utilities and Setup
 // -----------------
-type ExpectedStrategies = HashMap<CommitStrategy, u8>;
 
-fn expect_strategies(
-    strategies: &[(CommitStrategy, u8)],
-) -> ExpectedStrategies {
-    let mut expected_strategies = HashMap::new();
-    for (strategy, count) in strategies {
-        *expected_strategies.entry(*strategy).or_insert(0) += count;
-    }
-    expected_strategies
-}
+fn ensure_validator_authority() -> Keypair {
+    static ONCE: Once = Once::new();
 
-fn uses_lookup(expected: &ExpectedStrategies) -> bool {
-    expected.iter().any(|(strategy, _)| strategy.uses_lookup())
+    ONCE.call_once(|| {
+        let validator_auth = utils::get_validator_auth();
+        init_validator_authority(validator_auth.insecure_clone());
+    });
+
+    validator_authority()
 }
 
 macro_rules! get_account {
@@ -253,85 +255,77 @@ async fn init_and_delegate_account_on_chain(
 // -----------------
 #[tokio::test]
 async fn test_ix_commit_single_account_100_bytes() {
-    commit_single_account(100, CommitStrategy::Args, false).await;
+    commit_single_account(100, false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_100_bytes_and_undelegate() {
-    commit_single_account(100, CommitStrategy::Args, true).await;
+    commit_single_account(100, true).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_800_bytes() {
-    commit_single_account(800, CommitStrategy::FromBuffer, false).await;
+    commit_single_account(800, false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_800_bytes_and_undelegate() {
-    commit_single_account(800, CommitStrategy::FromBuffer, true).await;
+    commit_single_account(800, true).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_one_kb() {
-    commit_single_account(1024, CommitStrategy::FromBuffer, false).await;
+    commit_single_account(1024, false).await;
 }
 #[tokio::test]
 async fn test_ix_commit_single_account_ten_kb() {
-    commit_single_account(10 * 1024, CommitStrategy::FromBuffer, false).await;
+    commit_single_account(10 * 1024, false).await;
 }
 
-async fn commit_single_account(
-    bytes: usize,
-    expected_strategy: CommitStrategy,
-    undelegate: bool,
-) {
+async fn commit_single_account(bytes: usize, undelegate: bool) {
     init_logger!();
-    let slot = 10;
-    let validator_auth = utils::get_validator_auth();
 
+    let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     // Run each test with and without finalizing
-    for (idx, finalize) in [false, true].into_iter().enumerate() {
-        let service = CommittorService::try_start(
-            validator_auth.insecure_clone(),
-            ":memory:",
-            ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
-        )
-        .unwrap();
+    let service = CommittorService::try_start(
+        validator_auth.insecure_clone(),
+        ":memory:",
+        ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+    )
+    .unwrap();
+    let service = CommittorServiceExt::new(Arc::new(service));
 
-        let (changeset, chain_lamports) = {
-            let mut changeset = changeset_for_slot(slot);
-            let mut chain_lamports = HashMap::new();
-            let counter_auth = Keypair::new();
-            let (pda, pda_acc) =
-                init_and_delegate_account_on_chain(&counter_auth, bytes as u64)
-                    .await;
-            let account = Account {
-                lamports: LAMPORTS_PER_SOL,
-                data: vec![8; bytes],
-                owner: program_flexi_counter::id(),
-                ..Account::default()
-            };
-            let account_shared = AccountSharedData::from(account);
-            let bundle_id = idx as u64;
-            changeset.add(pda, (account_shared, bundle_id));
-            if undelegate {
-                changeset.request_undelegation(pda);
-            }
-            chain_lamports.insert(pda, pda_acc.lamports());
-            (changeset, chain_lamports)
-        };
+    let counter_auth = Keypair::new();
+    let (pubkey, mut account) =
+        init_and_delegate_account_on_chain(&counter_auth, bytes as u64).await;
+    account.owner = program_flexi_counter::id();
+    account.data = vec![101 as u8; bytes];
 
-        ix_commit_local(
-            service,
-            changeset.clone(),
-            chain_lamports.clone(),
-            finalize,
-            expect_strategies(&[(expected_strategy, 1)]),
-        )
-        .await;
-    }
+    let account = CommittedAccountV2 { pubkey, account };
+    let base_intent = if undelegate {
+        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+            commit_action: CommitType::Standalone(vec![account]),
+            undelegate_action: UndelegateType::Standalone,
+        })
+    } else {
+        MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
+    };
+
+    let intent = ScheduledBaseIntentWrapper {
+        trigger_type: TriggerType::OnChain,
+        inner: ScheduledBaseIntent {
+            id: 0,
+            slot: 10,
+            blockhash: Hash::new_unique(),
+            action_sent_transaction: Transaction::default(),
+            payer: counter_auth.pubkey(),
+            base_intent,
+        },
+    };
+
+    ix_commit_local(service, vec![intent]).await;
 }
 
 // TODO(thlorenz): once delegation program supports larger commits
@@ -343,328 +337,204 @@ async fn commit_single_account(
 #[tokio::test]
 async fn test_ix_commit_two_accounts_1kb_2kb() {
     init_logger!();
-    commit_multiple_accounts(
-        &[1024, 2048],
-        1,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 2)]),
-        false,
-    )
-    .await;
+    commit_multiple_accounts(&[1024, 2048], false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_two_accounts_512kb() {
     init_logger!();
-    commit_multiple_accounts(
-        &[512, 512],
-        1,
-        expect_strategies(&[(CommitStrategy::Args, 2)]),
-        false,
-    )
-    .await;
+    commit_multiple_accounts(&[512, 512], false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_three_accounts_512kb() {
     init_logger!();
-    commit_multiple_accounts(
-        &[512, 512, 512],
-        1,
-        expect_strategies(&[(CommitStrategy::Args, 3)]),
-        false,
-    )
-    .await;
+    commit_multiple_accounts(&[512, 512, 512], false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_six_accounts_512kb() {
     init_logger!();
-    commit_multiple_accounts(
-        &[512, 512, 512, 512, 512, 512],
-        1,
-        expect_strategies(&[(CommitStrategy::Args, 6)]),
-        false,
-    )
-    .await;
+    commit_multiple_accounts(&[512, 512, 512, 512, 512, 512], false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
     init_logger!();
-    commit_multiple_accounts(
-        &[1024, 2 * 1024, 5 * 1024, 10 * 1024],
-        1,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 4)]),
-        false,
-    )
-    .await;
+    commit_multiple_accounts(&[1024, 2 * 1024, 5 * 1024, 10 * 1024], false)
+        .await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_2() {
-    commit_20_accounts_1kb(
-        2,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 20)]),
-    )
-    .await;
+    commit_20_accounts_1kb().await;
 }
 
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_3() {
-    commit_5_accounts_1kb(
-        3,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
-        false,
-    )
-    .await;
+    commit_5_accounts_1kb(false).await;
 }
 
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
-    commit_5_accounts_1kb(
-        3,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
-        true,
-    )
-    .await;
+    commit_5_accounts_1kb(true).await;
 }
 
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_4() {
-    commit_5_accounts_1kb(
-        4,
-        expect_strategies(&[
-            (CommitStrategy::FromBuffer, 1),
-            (CommitStrategy::FromBufferWithLookupTable, 4),
-        ]),
-        false,
-    )
-    .await;
+    commit_5_accounts_1kb(false).await;
 }
 
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
-    commit_5_accounts_1kb(
-        4,
-        expect_strategies(&[
-            (CommitStrategy::FromBuffer, 1),
-            (CommitStrategy::FromBufferWithLookupTable, 4),
-        ]),
-        true,
-    )
-    .await;
+    commit_5_accounts_1kb(true).await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_3() {
-    commit_20_accounts_1kb(
-        3,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 20)]),
-    )
-    .await;
+    commit_20_accounts_1kb().await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_4() {
-    commit_20_accounts_1kb(
-        4,
-        expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 20)]),
-    )
-    .await;
+    commit_20_accounts_1kb().await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_6() {
-    commit_20_accounts_1kb(
-        6,
-        expect_strategies(&[
-            (CommitStrategy::FromBufferWithLookupTable, 18),
-            // Two accounts don't make it into the bundles of size 6
-            (CommitStrategy::FromBuffer, 2),
-        ]),
-    )
-    .await;
+    commit_20_accounts_1kb().await;
 }
 
 #[tokio::test]
 async fn test_commit_8_accounts_1kb_bundle_size_8() {
-    commit_8_accounts_1kb(
-        8,
-        expect_strategies(&[
-            // Four accounts don't make it into the bundles of size 8, but
-            // that bundle also needs lookup tables
-            (CommitStrategy::FromBufferWithLookupTable, 8),
-        ]),
-    )
-    .await;
+    commit_8_accounts_1kb().await;
 }
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_8() {
-    commit_20_accounts_1kb(
-        8,
-        expect_strategies(&[
-            // Four accounts don't make it into the bundles of size 8, but
-            // that bundle also needs lookup tables
-            (CommitStrategy::FromBufferWithLookupTable, 20),
-        ]),
-    )
-    .await;
+    commit_20_accounts_1kb().await;
 }
 
-async fn commit_5_accounts_1kb(
-    bundle_size: usize,
-    expected_strategies: ExpectedStrategies,
-    undelegate_all: bool,
-) {
+async fn commit_5_accounts_1kb(undelegate_all: bool) {
     init_logger!();
     let accs = (0..5).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(
-        &accs,
-        bundle_size,
-        expected_strategies,
-        undelegate_all,
-    )
-    .await;
+    commit_multiple_accounts(&accs, undelegate_all).await;
 }
 
-async fn commit_8_accounts_1kb(
-    bundle_size: usize,
-    expected_strategies: ExpectedStrategies,
-) {
+async fn commit_8_accounts_1kb() {
     init_logger!();
     let accs = (0..8).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, bundle_size, expected_strategies, false)
-        .await;
+    commit_multiple_accounts(&accs, false).await;
 }
 
-async fn commit_20_accounts_1kb(
-    bundle_size: usize,
-    expected_strategies: ExpectedStrategies,
-) {
+async fn commit_20_accounts_1kb() {
     init_logger!();
     let accs = (0..20).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, bundle_size, expected_strategies, false)
-        .await;
+    commit_multiple_accounts(&accs, false).await;
 }
 
-async fn commit_multiple_accounts(
-    bytess: &[usize],
-    bundle_size: usize,
-    expected_strategies: ExpectedStrategies,
-    undelegate_all: bool,
-) {
+async fn commit_multiple_accounts(bytess: &[usize], undelegate_all: bool) {
     init_logger!();
-    let slot = 10;
-    let validator_auth = utils::get_validator_auth();
 
+    let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
-    for finalize in [false, true] {
-        let mut changeset = changeset_for_slot(slot);
-
+    {
         let service = CommittorService::try_start(
             validator_auth.insecure_clone(),
             ":memory:",
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
         )
         .unwrap();
+        let service = CommittorServiceExt::new(Arc::new(service));
 
         let committees =
             bytess.iter().map(|_| Keypair::new()).collect::<Vec<_>>();
 
-        let mut chain_lamports = HashMap::new();
-        let expected_strategies = expected_strategies.clone();
-
         let mut join_set = JoinSet::new();
-        let mut bundle_id = 0;
-
         for (idx, (bytes, counter_auth)) in
             bytess.iter().zip(committees.into_iter()).enumerate()
         {
-            if idx % bundle_size == 0 {
-                bundle_id += 1;
-            }
-
             let bytes = *bytes;
             join_set.spawn(async move {
-                let (pda, pda_acc) = init_and_delegate_account_on_chain(
+                let (pda, mut pda_acc) = init_and_delegate_account_on_chain(
                     &counter_auth,
                     bytes as u64,
                 )
                 .await;
 
-                let account = Account {
-                    lamports: LAMPORTS_PER_SOL,
-                    data: vec![idx as u8; bytes],
-                    owner: program_flexi_counter::id(),
-                    ..Account::default()
-                };
-                let account_shared = AccountSharedData::from(account);
-                let changed_account =
-                    ChangedAccount::from((account_shared, bundle_id as u64));
+                pda_acc.owner = program_flexi_counter::id();
+                pda_acc.data = vec![idx as u8; bytes];
 
-                // We can only undelegate accounts that are finalized
-                let request_undelegation =
-                    finalize && (undelegate_all || idx % 2 == 0);
-                (
-                    pda,
-                    pda_acc,
-                    changed_account,
-                    counter_auth.pubkey(),
-                    request_undelegation,
-                )
+                let request_undelegation = undelegate_all || idx % 2 == 0;
+                (pda, pda_acc, request_undelegation)
             });
         }
 
-        for (
-            pda,
-            pda_acc,
-            changed_account,
-            counter_pubkey,
-            request_undelegation,
-        ) in join_set.join_all().await
-        {
-            changeset.add(pda, changed_account);
-            if request_undelegation {
-                changeset.request_undelegation(counter_pubkey);
-            }
-            chain_lamports.insert(pda, pda_acc.lamports());
-        }
-
-        if uses_lookup(&expected_strategies) {
-            let mut join_set = JoinSet::new();
-            join_set.spawn(service.reserve_common_pubkeys());
-            let owners = changeset.owners();
-            for committee in changeset.account_keys().iter() {
-                join_set.spawn(map_to_unit(
-                    service.reserve_pubkeys_for_committee(
-                        **committee,
-                        *owners.get(committee).unwrap(),
-                    ),
-                ));
-            }
-            debug!(
-                "Registering lookup tables for {} committees",
-                changeset.account_keys().len()
+        let (committed, commmitted_and_undelegated): (Vec<_>, Vec<_>) =
+            join_set.join_all().await.into_iter().partition(
+                |(_, _, request_undelegation)| !request_undelegation,
             );
-            join_set.join_all().await;
+
+        let mut base_intents = vec![];
+        let committed_accounts = committed
+            .into_iter()
+            .map(|(pda, pda_acc, _)| CommittedAccountV2 {
+                pubkey: pda,
+                account: pda_acc,
+            })
+            .collect::<Vec<_>>();
+
+        if !committed_accounts.is_empty() {
+            let commit_intent = ScheduledBaseIntentWrapper {
+                trigger_type: TriggerType::OnChain,
+                inner: ScheduledBaseIntent {
+                    id: 0,
+                    slot: 0,
+                    blockhash: Hash::new_unique(),
+                    action_sent_transaction: Transaction::default(),
+                    payer: Pubkey::new_unique(),
+                    base_intent: MagicBaseIntent::Commit(
+                        CommitType::Standalone(committed_accounts),
+                    ),
+                },
+            };
+
+            base_intents.push(commit_intent);
         }
 
-        ix_commit_local(
-            service,
-            changeset.clone(),
-            chain_lamports.clone(),
-            finalize,
-            expected_strategies,
-        )
-        .await;
-    }
-}
+        let committed_and_undelegated_accounts = commmitted_and_undelegated
+            .into_iter()
+            .map(|(pda, pda_acc, _)| CommittedAccountV2 {
+                pubkey: pda,
+                account: pda_acc,
+            })
+            .collect::<Vec<_>>();
 
-async fn map_to_unit(
-    res: oneshot::Receiver<CommittorServiceResult<Instant>>,
-) -> Result<CommittorServiceResult<()>, oneshot::error::RecvError> {
-    res.await.map(|res| res.map(|_| ()))
+        if !committed_and_undelegated_accounts.is_empty() {
+            let commit_and_undelegate_intent = ScheduledBaseIntentWrapper {
+                trigger_type: TriggerType::OnChain,
+                inner: ScheduledBaseIntent {
+                    id: 1,
+                    slot: 0,
+                    blockhash: Hash::new_unique(),
+                    action_sent_transaction: Transaction::default(),
+                    payer: Pubkey::new_unique(),
+                    base_intent: MagicBaseIntent::CommitAndUndelegate(
+                        CommitAndUndelegate {
+                            commit_action: CommitType::Standalone(
+                                committed_and_undelegated_accounts,
+                            ),
+                            undelegate_action: UndelegateType::Standalone,
+                        },
+                    ),
+                },
+            };
+
+            base_intents.push(commit_and_undelegate_intent);
+        }
+
+        ix_commit_local(service, base_intents).await;
+    }
 }
 
 // TODO(thlorenz): once delegation program supports larger commits add the following
@@ -695,107 +565,72 @@ async fn map_to_unit(
 // Test Executor
 // -----------------
 async fn ix_commit_local(
-    service: CommittorService,
-    changeset: Changeset,
-    chain_lamports: HashMap<Pubkey, u64>,
-    finalize: bool,
-    expected_strategies: ExpectedStrategies,
+    service: CommittorServiceExt<CommittorService>,
+    base_intents: Vec<ScheduledBaseIntentWrapper>,
 ) {
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
-
-    let ephemeral_blockhash = Hash::default();
-    let reqid = service
-        .commit_changeset(changeset.clone(), ephemeral_blockhash, finalize)
+    let execution_outputs = service
+        .schedule_base_intents_waiting(base_intents.clone())
         .await
         .unwrap()
-        .unwrap();
-    let statuses = service.get_commit_statuses(reqid).await.unwrap().unwrap();
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Some commits failed");
+
+    // Assert that all completed
+    assert_eq!(execution_outputs.len(), base_intents.len());
     service.release_common_pubkeys().await.unwrap();
 
-    debug!(
-        "{}",
-        statuses
-            .iter()
-            .map(|x| x.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-    assert_eq!(statuses.len(), changeset.accounts.len());
-    assert!(CommitStatus::all_completed(
-        &statuses
-            .iter()
-            .map(|x| x.commit_status.clone())
-            .collect::<Vec<_>>()
-    ));
-    let mut strategies = ExpectedStrategies::new();
-    for res in statuses {
-        let change = changeset.accounts.get(&res.pubkey).cloned().unwrap();
-        let lamports = if finalize {
-            change.lamports()
-        } else {
-            // The commit state account will hold only the lamports needed
-            // to be rent exempt and debit the delegated account to reach the
-            // lamports of the account as changed in the ephemeral
-            change.lamports() - chain_lamports[&res.pubkey]
-        };
-
-        // Track the strategy used
-        let strategy = res.commit_status.commit_strategy();
-        let strategy_count = strategies.entry(strategy).or_insert(0);
-        *strategy_count += 1;
-
+    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    for (execution_output, intent) in
+        execution_outputs.into_iter().zip(base_intents)
+    {
         // Ensure that the signatures are pointing to the correct transactions
-        let signatures =
-            res.commit_status.signatures().expect("Missing signatures");
-
+        let signatures = execution_output.output;
+        // Execution output presents of complete stages, both commit & finalize
+        // Since finalization isn't optional and is a part of the flow
+        // Assert that both indeed happened
         assert!(
             tx_logs_contain(
                 &rpc_client,
-                &signatures.process_signature,
+                &signatures.commit_signature,
                 "CommitState"
             )
             .await
         );
+        assert!(
+            tx_logs_contain(
+                &rpc_client,
+                &signatures.finalize_signature,
+                "Finalize"
+            )
+            .await
+        );
 
-        // If we finalized the commit then the delegate account should have the
-        // committed state, otherwise it is still held in the commit state account
-        // NOTE: that we verify data/lamports via the get_account! condition
-        if finalize {
-            assert!(
-                signatures.finalize_signature.is_some(),
-                "Missing finalize signature"
-            );
+        let is_undelegate = intent.is_undelegate();
+        if is_undelegate {
+            // Undelegate is part of atomic Finalization Stage
             assert!(
                 tx_logs_contain(
                     &rpc_client,
-                    &signatures.finalize_signature.unwrap(),
-                    "Finalize"
+                    &signatures.finalize_signature,
+                    "Undelegate"
                 )
                 .await
             );
-            if res.undelegate {
-                assert!(
-                    signatures.undelegate_signature.is_some(),
-                    "Missing undelegate signature"
-                );
-                assert!(
-                    tx_logs_contain(
-                        &rpc_client,
-                        &signatures.undelegate_signature.unwrap(),
-                        "Undelegate"
-                    )
-                    .await
-                );
-            }
+        }
+        let committed_accounts = intent.get_committed_accounts().unwrap();
+
+        for account in committed_accounts {
+            let lamports = account.account.lamports;
             get_account!(
                 rpc_client,
-                res.pubkey,
+                account.pubkey,
                 "delegated state",
                 |acc: &Account, remaining_tries: u8| {
-                    let matches_data = acc.data() == change.data()
+                    let matches_data = acc.data() == account.account.data()
                         && acc.lamports() == lamports;
                     // When we finalize it is possible to also undelegate the account
-                    let expected_owner = if res.undelegate {
+                    let expected_owner = if is_undelegate {
                         program_flexi_counter::id()
                     } else {
                         dlp::id()
@@ -807,9 +642,9 @@ async fn ix_commit_local(
                         if !matches_data {
                             trace!(
                                 "Account ({}) data {} != {} || {} != {}",
-                                res.pubkey,
+                                account.pubkey,
                                 acc.data().len(),
-                                change.data().len(),
+                                account.account.data().len(),
                                 acc.lamports(),
                                 lamports
                             );
@@ -817,8 +652,8 @@ async fn ix_commit_local(
                         if !matches_undelegation {
                             trace!(
                                 "Account ({}) is {} but should be. Owner {} != {}",
-                                res.pubkey,
-                                if res.undelegate {
+                                account.pubkey,
+                                if is_undelegate {
                                     "not undelegated"
                                 } else {
                                     "undelegated"
@@ -830,37 +665,9 @@ async fn ix_commit_local(
                     }
                     matches_all
                 }
-            )
-        } else {
-            let commit_state_pda =
-                dlp::pda::commit_state_pda_from_delegated_account(&res.pubkey);
-            get_account!(
-                rpc_client,
-                commit_state_pda,
-                "commit state",
-                |acc: &Account, remaining_tries: u8| {
-                    if remaining_tries % 4 == 0 {
-                        trace!(
-                            "Commit state ({}) {} == {}? {} == {}?",
-                            commit_state_pda,
-                            acc.data().len(),
-                            change.data().len(),
-                            acc.lamports(),
-                            lamports
-                        );
-                    }
-                    acc.data() == change.data() && acc.lamports() == lamports
-                }
-            )
-        };
+            );
+        }
     }
-
-    // Compare the strategies used with the expected ones
-    debug!("Strategies used: {:?}", strategies);
-    assert_eq!(
-        strategies, expected_strategies,
-        "Strategies used do not match expected ones"
-    );
 
     let expect_empty_lookup_tables = false;
     // changeset.accounts.len() == changeset.accounts_to_undelegate.len();
