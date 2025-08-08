@@ -243,7 +243,6 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
                         }
                         _ => {
                             error!("Failed to commit: {:?}", err);
-                            todo!()
                         }
                     }
                 }
