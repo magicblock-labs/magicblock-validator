@@ -1,4 +1,5 @@
 use cleanass::assert_eq;
+use integration_test_tools::loaded_accounts::LoadedAccounts;
 use integration_test_tools::validator::cleanup;
 use std::{path::Path, process::Child};
 
@@ -50,8 +51,13 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
 
     // NOTE: in this test we preload the counter program in the ephemeral instead
     // of relying on it being cloned from the remote
-    let (_, mut validator, ctx) =
-        setup_validator_with_local_remote(ledger_path, Some(programs), true);
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
+        ledger_path,
+        Some(programs),
+        true,
+        false,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     // Airdrop to payer on chain
     expect!(
@@ -105,8 +111,13 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
 fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
     let programs = get_programs();
 
-    let (_, mut validator, _) =
-        setup_validator_with_local_remote(ledger_path, Some(programs), false);
+    let (_, mut validator, _) = setup_validator_with_local_remote(
+        ledger_path,
+        Some(programs),
+        false,
+        false,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     wait_for_cloned_accounts_hydration();
 

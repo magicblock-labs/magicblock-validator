@@ -2,18 +2,20 @@
 name = "test-magicblock-api"
 version.workspace = true
 edition.workspace = true
-
+[dependencies]
+integration-test-tools = { workspace = true }
 [dev-dependencies]
+cleanass = { workspace = true }
 magicblock-api = { workspace = true }
-tokio = { workspace = true }
-lazy_static = { workspace = true }
+magicblock-config = { workspace = true }
+magicblock-delegation-program = { workspace = true }
+magicblock-program = { path = "../../programs/magicblock" }
+magicblock-validator-admin = { path = "../../magicblock-validator-admin" }
 magic-domain-program = { workspace = true }
 solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
-integration-test-tools = { workspace = true }
-isocountry = "0.3.2"
-
-[[test]]
-name = "test-domain-registry"
-path = "tests/test_domain_registry.rs"
-harness = false
+solana-transaction-status = { workspace = true }
+tokio = { workspace = true }
+lazy_static = { workspace = true }
+isocountry = { workspace = true }

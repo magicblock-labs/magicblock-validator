@@ -1276,6 +1276,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "const_format"
+version = "0.2.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "126f97965c8ad46d6d9163268ff28432e8f6a1196a55578867832e3049df63dd"
+dependencies = [
+ "const_format_proc_macros",
+]
+
+[[package]]
+name = "const_format_proc_macros"
+version = "0.2.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d57c2eccfb16dbac1f4e61e206105db5820c9d26c3c472bc17c774259ef7744"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-xid",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3671,6 +3691,7 @@ dependencies = [
 name = "magicblock-accounts-db"
 version = "0.1.7"
 dependencies = [
+ "const_format",
  "lmdb-rkv",
  "log",
  "magicblock-config",
@@ -3709,6 +3730,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
+ "magicblock-delegation-program",
  "magicblock-geyser-plugin",
  "magicblock-ledger",
  "magicblock-metrics",
@@ -3718,6 +3740,7 @@ dependencies = [
  "magicblock-pubsub",
  "magicblock-rpc",
  "magicblock-transaction-status",
+ "magicblock-validator-admin",
  "paste",
  "solana-geyser-plugin-manager",
  "solana-rpc",
@@ -3813,6 +3836,7 @@ dependencies = [
  "bs58 0.4.0",
  "clap 4.5.41",
  "isocountry",
+ "magicblock-config-helpers",
  "magicblock-config-macro",
  "serde",
  "solana-sdk",
@@ -3821,6 +3845,10 @@ dependencies = [
  "toml 0.8.23",
  "url 2.5.4",
 ]
+
+[[package]]
+name = "magicblock-config-helpers"
+version = "0.1.7"
 
 [[package]]
 name = "magicblock-config-macro"
@@ -4102,6 +4130,25 @@ dependencies = [
  "solana-sdk",
  "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
  "solana-transaction-status",
+]
+
+[[package]]
+name = "magicblock-validator-admin"
+version = "0.1.7"
+dependencies = [
+ "anyhow",
+ "log",
+ "magicblock-accounts",
+ "magicblock-config",
+ "magicblock-delegation-program",
+ "magicblock-program",
+ "magicblock-rpc-client",
+ "solana-rpc-client",
+ "solana-sdk",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util 0.7.15",
+ "url 2.5.4",
 ]
 
 [[package]]
@@ -10326,13 +10373,20 @@ dependencies = [
 name = "test-magicblock-api"
 version = "0.0.0"
 dependencies = [
+ "cleanass",
  "integration-test-tools",
  "isocountry",
  "lazy_static",
  "magic-domain-program",
  "magicblock-api",
+ "magicblock-config",
+ "magicblock-delegation-program",
+ "magicblock-program",
+ "magicblock-validator-admin",
  "solana-rpc-client",
+ "solana-rpc-client-api",
  "solana-sdk",
+ "solana-transaction-status",
  "tokio",
 ]
 
@@ -10615,7 +10669,10 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-sink",
+ "futures-util",
+ "hashbrown 0.15.4",
  "pin-project-lite",
+ "slab",
  "tokio",
 ]
 

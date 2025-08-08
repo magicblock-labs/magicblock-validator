@@ -1033,6 +1033,10 @@ impl Bank {
         .unwrap_or_default()
     }
 
+    pub fn slot_timestamp(&self) -> UnixTimestamp {
+        self.clock().unix_timestamp
+    }
+
     fn update_clock(
         &self,
         epoch_start_timestamp: UnixTimestamp,

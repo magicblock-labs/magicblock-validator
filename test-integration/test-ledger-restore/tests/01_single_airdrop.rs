@@ -1,4 +1,5 @@
 use cleanass::{assert, assert_eq};
+use magicblock_config::LedgerResumeStrategy;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{
@@ -29,8 +30,13 @@ fn write_ledger(
     pubkey1: &Pubkey,
 ) -> (Child, Signature, u64) {
     // Launch a validator and airdrop to an account
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, true);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::Reset,
+        false,
+    );
 
     let sig = expect!(ctx.airdrop_ephem(pubkey1, 1_111_111), validator);
 
@@ -49,8 +55,13 @@ fn read_ledger(
     airdrop_sig1: Option<&Signature>,
 ) -> Child {
     // Launch another validator reusing ledger
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, false);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        None,
+        LedgerResumeStrategy::Replay,
+        false,
+    );
 
     let acc = expect!(
         expect!(ctx.try_ephem_client(), validator).get_account(pubkey1),

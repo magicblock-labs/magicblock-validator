@@ -2,6 +2,7 @@ use std::{fmt, fs, path::PathBuf, str::FromStr};
 
 use clap::Args;
 use errors::{ConfigError, ConfigResult};
+use magicblock_config_macro::Mergeable;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
@@ -27,7 +28,15 @@ pub use rpc::*;
 pub use validator::*;
 
 #[derive(
-    Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, Args,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    Args,
+    Mergeable,
 )]
 #[serde(deny_unknown_fields)]
 pub struct EphemeralConfig {
@@ -101,21 +110,6 @@ impl EphemeralConfig {
         Ok(config)
     }
 
-    pub fn merge(&mut self, other: EphemeralConfig) {
-        // If other differs from the default but not self, use the value from other
-        // Otherwise, use the value from self
-        self.accounts.merge(other.accounts);
-        self.rpc.merge(other.rpc);
-        self.geyser_grpc.merge(other.geyser_grpc.clone());
-        self.validator.merge(other.validator.clone());
-        self.ledger.merge(other.ledger.clone());
-        self.metrics.merge(other.metrics.clone());
-
-        if self.programs.is_empty() && !other.programs.is_empty() {
-            self.programs = other.programs.clone();
-        }
-    }
-
     pub fn post_parse(&mut self) {
         if self.accounts.remote.url.is_some() {
             match &self.accounts.remote.ws_url {
@@ -162,6 +156,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
     use isocountry::CountryCode;
+    use magicblock_config_helpers::Merge;
     use solana_sdk::pubkey::Pubkey;
     use url::Url;
 
@@ -211,7 +206,7 @@ mod tests {
                     .unwrap()]),
                 },
                 lifecycle: LifecycleMode::Offline,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 123,
                     compute_unit_price: 123,
                 },
@@ -245,9 +240,11 @@ mod tests {
                 fqdn: Some("validator.example.com".to_string()),
                 base_fees: Some(1000000000),
                 country_code: CountryCode::for_alpha2("FR").unwrap(),
+                claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                reset: false,
+                resume_strategy: LedgerResumeStrategy::Replay,
+                skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },
@@ -290,7 +287,7 @@ mod tests {
                     .unwrap()]),
                 },
                 lifecycle: LifecycleMode::Offline,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 123,
                     compute_unit_price: 123,
                 },
@@ -324,9 +321,11 @@ mod tests {
                 fqdn: Some("validator.example.com".to_string()),
                 base_fees: Some(1000000000),
                 country_code: CountryCode::for_alpha2("FR").unwrap(),
+                claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                reset: false,
+                resume_strategy: LedgerResumeStrategy::Replay,
+                skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },
@@ -366,7 +365,7 @@ mod tests {
                     .unwrap()]),
                 },
                 lifecycle: LifecycleMode::Offline,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 12365,
                     compute_unit_price: 123665,
                 },
@@ -400,9 +399,11 @@ mod tests {
                 fqdn: Some("validator2.example.com".to_string()),
                 base_fees: Some(9999),
                 country_code: CountryCode::for_alpha2("DE").unwrap(),
+                claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                reset: false,
+                resume_strategy: LedgerResumeStrategy::ResumeOnly,
+                skip_keypair_match_check: true,
                 path: Some("ledger2.example.com".to_string()),
                 size: 100000,
             },
@@ -435,7 +436,7 @@ mod tests {
                     .unwrap()]),
                 },
                 lifecycle: LifecycleMode::Offline,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 123,
                     compute_unit_price: 123,
                 },
@@ -469,9 +470,11 @@ mod tests {
                 fqdn: Some("validator.example.com".to_string()),
                 base_fees: Some(1000000000),
                 country_code: CountryCode::for_alpha2("FR").unwrap(),
+                claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                reset: false,
+                resume_strategy: LedgerResumeStrategy::Replay,
+                skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },
@@ -507,7 +510,7 @@ mod tests {
                     ws_url: None,
                 },
                 lifecycle: LifecycleMode::Offline,
-                commit: CommitStrategy {
+                commit: CommitStrategyConfig {
                     frequency_millis: 9_000_000_000_000,
                     compute_unit_price: 1_000_000,
                 },
