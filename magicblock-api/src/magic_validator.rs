@@ -537,7 +537,7 @@ impl MagicValidator {
             ledger::init(ledger_path, &ledger_config.resume_strategy)?;
         let ledger_shared = Arc::new(ledger);
         init_persister(ledger_shared.clone());
-        Ok((ledger_shared, last_slot + 1))
+        Ok((ledger_shared, last_slot))
     }
 
     fn sync_validator_keypair_with_ledger(
