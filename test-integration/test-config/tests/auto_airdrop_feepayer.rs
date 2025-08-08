@@ -33,7 +33,7 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
             lifecycle: LifecycleMode::Ephemeral,
             clone: AccountsCloneConfig {
                 // Set the auto airdrop lamports to 100_000 as requested
-                auto_aidrop_lamports: 100_000,
+                auto_airdrop_lamports: 100_000,
                 ..Default::default()
             },
             ..Default::default()
