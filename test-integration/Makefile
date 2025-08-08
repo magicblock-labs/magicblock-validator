@@ -49,14 +49,14 @@ setup-schedulecommit-both:
 	$(MAKE) test
 
 test-issues-frequent-commits:
-	RUN_TESTS=issues_frequent_commmits \
+	RUN_TESTS=issues_frequent_commits \
 	$(MAKE) test
 setup-issues-frequent-commits-devnet:
-	RUN_TESTS=issues_frequent_commmits \
+	RUN_TESTS=issues_frequent_commits \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 setup-issues-frequent-commits-both:
-	RUN_TESTS=issues_frequent_commmits \
+	RUN_TESTS=issues_frequent_commits \
 	SETUP_ONLY=both \
 	$(MAKE) test
 
