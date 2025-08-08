@@ -29,13 +29,13 @@ pub fn init_account_and_delegate_ixs(
     let init_counter_ix = create_init_ix(payer, "COUNTER".to_string());
     let rent_exempt = Rent::default().minimum_balance(bytes as usize);
 
-    let num_reallocs = (bytes + MAX_ALLOC -1) / MAX_ALLOC;
+    let num_reallocs = (bytes + MAX_ALLOC - 1) / MAX_ALLOC;
     let realloc_ixs = if num_reallocs == 0 {
         vec![]
     } else {
-        (0..num_reallocs).map(|i| {
-            create_realloc_ix(payer, bytes, i as u16)
-        }).collect()
+        (0..num_reallocs)
+            .map(|i| create_realloc_ix(payer, bytes, i as u16))
+            .collect()
     };
 
     let delegate_ix = create_delegate_ix(payer);

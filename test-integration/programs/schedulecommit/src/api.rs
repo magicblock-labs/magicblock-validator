@@ -31,15 +31,24 @@ pub fn init_account_instruction(
 }
 
 pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
-    let top_up_ix = dlp::instruction_builder::top_up_ephemeral_balance(payer, payer, Some(300_000_000), Some(0));
-    let delegate_ix = dlp::instruction_builder::delegate_ephemeral_balance(payer, payer, DelegateEphemeralBalanceArgs {
-        index: 0,
-        delegate_args: DelegateArgs {
-            commit_frequency_ms: 0,
-            seeds: vec![],
-            validator: None,
-        }
-    });
+    let top_up_ix = dlp::instruction_builder::top_up_ephemeral_balance(
+        payer,
+        payer,
+        Some(300_000_000),
+        Some(0),
+    );
+    let delegate_ix = dlp::instruction_builder::delegate_ephemeral_balance(
+        payer,
+        payer,
+        DelegateEphemeralBalanceArgs {
+            index: 0,
+            delegate_args: DelegateArgs {
+                commit_frequency_ms: 0,
+                seeds: vec![],
+                validator: None,
+            },
+        },
+    );
 
     [top_up_ix, delegate_ix]
 }

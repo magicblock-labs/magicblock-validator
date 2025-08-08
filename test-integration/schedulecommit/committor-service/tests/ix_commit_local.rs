@@ -1,7 +1,7 @@
 use log::*;
-use magicblock_committor_service::{ComputeBudgetConfig};
+use magicblock_committor_service::ComputeBudgetConfig;
 use magicblock_rpc_client::MagicblockRpcClient;
-use std::collections::{HashSet};
+use std::collections::HashSet;
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 use test_tools_core::init_logger;
@@ -14,13 +14,13 @@ use magicblock_committor_service::service_ext::{
 use magicblock_committor_service::types::{
     ScheduledBaseIntentWrapper, TriggerType,
 };
-use magicblock_committor_service::{
-    config::ChainConfig,
-    CommittorService,
-};
+use magicblock_committor_service::{config::ChainConfig, CommittorService};
 use magicblock_program::magic_scheduled_base_intent::{
     CommitAndUndelegate, CommitType, CommittedAccountV2, MagicBaseIntent,
     ScheduledBaseIntent, UndelegateType,
+};
+use magicblock_program::validator::{
+    init_validator_authority, validator_authority,
 };
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -32,7 +32,6 @@ use solana_sdk::transaction::Transaction;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
-use magicblock_program::validator::{init_validator_authority, validator_authority};
 use utils::instructions::{
     init_account_and_delegate_ixs, init_validator_fees_vault_ix,
     InitAccountAndDelegateIxs,
@@ -300,8 +299,7 @@ async fn commit_single_account(bytes: usize, undelegate: bool) {
 
     let counter_auth = Keypair::new();
     let (pubkey, mut account) =
-        init_and_delegate_account_on_chain(&counter_auth, bytes as u64)
-            .await;
+        init_and_delegate_account_on_chain(&counter_auth, bytes as u64).await;
     account.owner = program_flexi_counter::id();
     account.data = vec![101 as u8; bytes];
 
@@ -339,156 +337,102 @@ async fn commit_single_account(bytes: usize, undelegate: bool) {
 #[tokio::test]
 async fn test_ix_commit_two_accounts_1kb_2kb() {
     init_logger!();
-    commit_multiple_accounts(
-        &[1024, 2048],
-        false,
-    )
-    .await;
+    commit_multiple_accounts(&[1024, 2048], false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_two_accounts_512kb() {
     init_logger!();
-    commit_multiple_accounts(
-        &[512, 512],
-        false,
-    )
-    .await;
+    commit_multiple_accounts(&[512, 512], false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_three_accounts_512kb() {
     init_logger!();
-    commit_multiple_accounts(
-        &[512, 512, 512],
-        false,
-    )
-    .await;
+    commit_multiple_accounts(&[512, 512, 512], false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_six_accounts_512kb() {
     init_logger!();
-    commit_multiple_accounts(
-        &[512, 512, 512, 512, 512, 512],
-        false,
-    )
-    .await;
+    commit_multiple_accounts(&[512, 512, 512, 512, 512, 512], false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
     init_logger!();
-    commit_multiple_accounts(
-        &[1024, 2 * 1024, 5 * 1024, 10 * 1024],
-        false,
-    )
-    .await;
+    commit_multiple_accounts(&[1024, 2 * 1024, 5 * 1024, 10 * 1024], false)
+        .await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_2() {
-    commit_20_accounts_1kb(
-    )
-    .await;
+    commit_20_accounts_1kb().await;
 }
 
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_3() {
-    commit_5_accounts_1kb(
-        false,
-    )
-    .await;
+    commit_5_accounts_1kb(false).await;
 }
 
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
-    commit_5_accounts_1kb(
-        true,
-    )
-    .await;
+    commit_5_accounts_1kb(true).await;
 }
 
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_4() {
-    commit_5_accounts_1kb(
-        false,
-    )
-    .await;
+    commit_5_accounts_1kb(false).await;
 }
 
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
-    commit_5_accounts_1kb(
-        true,
-    )
-    .await;
+    commit_5_accounts_1kb(true).await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_3() {
-    commit_20_accounts_1kb(
-    )
-    .await;
+    commit_20_accounts_1kb().await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_4() {
-    commit_20_accounts_1kb(
-    )
-    .await;
+    commit_20_accounts_1kb().await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_6() {
-    commit_20_accounts_1kb(
-    )
-    .await;
+    commit_20_accounts_1kb().await;
 }
 
 #[tokio::test]
 async fn test_commit_8_accounts_1kb_bundle_size_8() {
-    commit_8_accounts_1kb()
-    .await;
+    commit_8_accounts_1kb().await;
 }
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_8() {
-    commit_20_accounts_1kb()
-    .await;
+    commit_20_accounts_1kb().await;
 }
 
-async fn commit_5_accounts_1kb(
-    undelegate_all: bool,
-) {
+async fn commit_5_accounts_1kb(undelegate_all: bool) {
     init_logger!();
     let accs = (0..5).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(
-        &accs,
-        undelegate_all,
-    )
-    .await;
+    commit_multiple_accounts(&accs, undelegate_all).await;
 }
 
-async fn commit_8_accounts_1kb(
-) {
+async fn commit_8_accounts_1kb() {
     init_logger!();
     let accs = (0..8).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, false)
-        .await;
+    commit_multiple_accounts(&accs, false).await;
 }
 
-async fn commit_20_accounts_1kb(
-) {
+async fn commit_20_accounts_1kb() {
     init_logger!();
     let accs = (0..20).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, false)
-        .await;
+    commit_multiple_accounts(&accs, false).await;
 }
 
-async fn commit_multiple_accounts(
-    bytess: &[usize],
-    undelegate_all: bool,
-) {
+async fn commit_multiple_accounts(bytess: &[usize], undelegate_all: bool) {
     init_logger!();
 
     let validator_auth = ensure_validator_authority();
@@ -500,7 +444,7 @@ async fn commit_multiple_accounts(
             ":memory:",
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
         )
-            .unwrap();
+        .unwrap();
         let service = CommittorServiceExt::new(Arc::new(service));
 
         let committees =
@@ -516,7 +460,7 @@ async fn commit_multiple_accounts(
                     &counter_auth,
                     bytes as u64,
                 )
-                    .await;
+                .await;
 
                 pda_acc.owner = program_flexi_counter::id();
                 pda_acc.data = vec![idx as u8; bytes];
@@ -549,9 +493,9 @@ async fn commit_multiple_accounts(
                     blockhash: Hash::new_unique(),
                     action_sent_transaction: Transaction::default(),
                     payer: Pubkey::new_unique(),
-                    base_intent: MagicBaseIntent::Commit(CommitType::Standalone(
-                        committed_accounts,
-                    )),
+                    base_intent: MagicBaseIntent::Commit(
+                        CommitType::Standalone(committed_accounts),
+                    ),
                 },
             };
 
@@ -589,12 +533,7 @@ async fn commit_multiple_accounts(
             base_intents.push(commit_and_undelegate_intent);
         }
 
-
-        ix_commit_local(
-            service,
-            base_intents
-        )
-        .await;
+        ix_commit_local(service, base_intents).await;
     }
 }
 

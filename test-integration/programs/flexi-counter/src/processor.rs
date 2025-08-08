@@ -1,4 +1,8 @@
+mod call_handler;
+mod create_intent;
+
 use borsh::{to_vec, BorshDeserialize};
+use ephemeral_rollups_sdk::consts::EXTERNAL_CALL_HANDLER_DISCRIMINATOR;
 use ephemeral_rollups_sdk::cpi::{DelegateAccounts, DelegateConfig};
 use ephemeral_rollups_sdk::{
     consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
@@ -18,6 +22,8 @@ use solana_program::{
 };
 
 use crate::instruction::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE;
+use crate::processor::call_handler::process_call_handler;
+use crate::processor::create_intent::process_create_intent;
 use crate::{
     instruction::{DelegateArgs, FlexiCounterInstruction},
     state::FlexiCounter,
@@ -30,11 +36,15 @@ pub fn process(
     instruction_data: &[u8],
 ) -> ProgramResult {
     if instruction_data.len() >= EXTERNAL_UNDELEGATE_DISCRIMINATOR.len() {
-        let (disc, seeds_data) =
+        let (disc, data) =
             instruction_data.split_at(EXTERNAL_UNDELEGATE_DISCRIMINATOR.len());
 
         if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
-            return process_undelegate_request(accounts, seeds_data);
+            return process_undelegate_request(accounts, data);
+        }
+
+        if disc == EXTERNAL_CALL_HANDLER_DISCRIMINATOR {
+            return process_call_handler(accounts, data);
         }
     }
 
@@ -54,6 +64,16 @@ pub fn process(
             process_add_and_schedule_commit(accounts, count, undelegate)
         }
         AddCounter => process_add_counter(accounts),
+        CreateIntent {
+            counter_diff,
+            is_undelegate,
+            compute_units,
+        } => process_create_intent(
+            accounts,
+            counter_diff,
+            is_undelegate,
+            compute_units,
+        ),
     }?;
     Ok(())
 }

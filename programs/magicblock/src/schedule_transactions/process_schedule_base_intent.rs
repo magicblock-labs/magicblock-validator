@@ -24,18 +24,12 @@ use crate::{
 const PAYER_IDX: u16 = 0;
 const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 const ACTION_ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
-const ACTIONS_SUPPORTED: bool = false;
 
 pub(crate) fn process_schedule_base_intent(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
     args: MagicBaseIntentArgs,
 ) -> Result<(), InstructionError> {
-    // TODO: remove once actions are supported
-    if !ACTIONS_SUPPORTED {
-        return Err(InstructionError::InvalidInstructionData);
-    }
-
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
     let transaction_context = &invoke_context.transaction_context.clone();

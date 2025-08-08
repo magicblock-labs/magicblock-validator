@@ -14,8 +14,7 @@ pub fn create_sibling_schedule_cpis_instruction(
     player_pubkeys: &[Pubkey],
 ) -> Instruction {
     let magic_program = magic_program::id();
-    let magic_context =
-        magic_program::MAGIC_CONTEXT_PUBKEY;
+    let magic_context = magic_program::MAGIC_CONTEXT_PUBKEY;
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(magic_context, false),
@@ -48,8 +47,7 @@ pub fn create_nested_schedule_cpis_instruction(
     player_pubkeys: &[Pubkey],
 ) -> Instruction {
     let magic_program = magic_program::id();
-    let magic_context =
-        magic_program::MAGIC_CONTEXT_PUBKEY;
+    let magic_context = magic_program::MAGIC_CONTEXT_PUBKEY;
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(magic_context, false),

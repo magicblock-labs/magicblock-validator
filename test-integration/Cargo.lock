@@ -1830,7 +1830,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=69c555#69c555f788a6758bde55495e58d028f6e64e5cf4"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=7fe62f9#7fe62f9e2d3d4e16b0b4f4f1be5a588651742f08"
 dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk-attribute-commit",
@@ -1844,7 +1844,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=69c555#69c555f788a6758bde55495e58d028f6e64e5cf4"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=7fe62f9#7fe62f9e2d3d4e16b0b4f4f1be5a588651742f08"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1853,7 +1853,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=69c555#69c555f788a6758bde55495e58d028f6e64e5cf4"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=7fe62f9#7fe62f9e2d3d4e16b0b4f4f1be5a588651742f08"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1863,7 +1863,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
 version = "0.2.6"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=69c555#69c555f788a6758bde55495e58d028f6e64e5cf4"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=7fe62f9#7fe62f9e2d3d4e16b0b4f4f1be5a588651742f08"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10455,6 +10455,21 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "teepee",
+]
+
+[[package]]
+name = "test-schedule-intent"
+version = "0.0.0"
+dependencies = [
+ "ephemeral-rollups-sdk",
+ "integration-test-tools",
+ "magicblock-config",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=00d720)",
+ "program-flexi-counter",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "tempfile",
+ "test-ledger-restore",
 ]
 
 [[package]]

@@ -1,7 +1,5 @@
+use integration_test_tools::run_test;
 use integration_test_tools::scheduled_commits::extract_scheduled_commit_sent_signature_from_logs;
-use integration_test_tools::{
-    run_test,
-};
 use log::*;
 use magicblock_core::magic_program;
 use program_schedulecommit::api::{
