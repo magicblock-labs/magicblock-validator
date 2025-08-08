@@ -1,5 +1,5 @@
 mod call_handler;
-mod create_intent;
+mod schedule_intent;
 
 use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::consts::EXTERNAL_CALL_HANDLER_DISCRIMINATOR;
@@ -23,7 +23,7 @@ use solana_program::{
 
 use crate::instruction::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE;
 use crate::processor::call_handler::process_call_handler;
-use crate::processor::create_intent::process_create_intent;
+use crate::processor::schedule_intent::process_create_intent;
 use crate::{
     instruction::{DelegateArgs, FlexiCounterInstruction},
     state::FlexiCounter,
@@ -65,12 +65,14 @@ pub fn process(
         }
         AddCounter => process_add_counter(accounts),
         CreateIntent {
-            counter_diff,
+            num_committees,
+            counter_diffs,
             is_undelegate,
             compute_units,
         } => process_create_intent(
             accounts,
-            counter_diff,
+            num_committees,
+            counter_diffs,
             is_undelegate,
             compute_units,
         ),

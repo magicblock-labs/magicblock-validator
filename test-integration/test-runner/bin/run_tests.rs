@@ -20,60 +20,66 @@ use test_runner::cleanup::{
 
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    // let Ok((security_output, scenarios_output)) =
-    //     run_schedule_commit_tests(&manifest_dir)
-    // else {
-    //     // If any test run panics (i.e. not just a failing test) then we bail
-    //     return;
-    // };
-    // let Ok(issues_frequent_commits_output) =
-    //     run_issues_frequent_commmits_tests(&manifest_dir)
-    // else {
-    //     return;
-    // };
-    // let Ok(cloning_output) = run_cloning_tests(&manifest_dir) else {
-    //     return;
-    // };
-    //
-    // let Ok(restore_ledger_output) = run_restore_ledger_tests(&manifest_dir)
-    // else {
-    //     return;
-    // };
-    //
-    // let Ok(magicblock_api_output) = run_magicblock_api_tests(&manifest_dir)
-    // else {
-    //     return;
-    // };
-    //
-    // let Ok((table_mania_output, committor_output)) =
-    //     run_table_mania_and_committor_tests(&manifest_dir)
-    // else {
-    //     return;
-    // };
-    // let Ok(magicblock_pubsub_output) =
-    //     run_magicblock_pubsub_tests(&manifest_dir)
-    // else {
-    //     return;
-    // };
+    let Ok((security_output, scenarios_output)) =
+        run_schedule_commit_tests(&manifest_dir)
+    else {
+        // If any test run panics (i.e. not just a failing test) then we bail
+        return;
+    };
+    let Ok(issues_frequent_commits_output) =
+        run_issues_frequent_commmits_tests(&manifest_dir)
+    else {
+        return;
+    };
+    let Ok(cloning_output) = run_cloning_tests(&manifest_dir) else {
+        return;
+    };
+
+    let Ok(restore_ledger_output) = run_restore_ledger_tests(&manifest_dir)
+    else {
+        return;
+    };
+
+    let Ok(magicblock_api_output) = run_magicblock_api_tests(&manifest_dir)
+    else {
+        return;
+    };
+
+    let Ok((table_mania_output, committor_output)) =
+        run_table_mania_and_committor_tests(&manifest_dir)
+    else {
+        return;
+    };
+    let Ok(magicblock_pubsub_output) =
+        run_magicblock_pubsub_tests(&manifest_dir)
+    else {
+        return;
+    };
 
     let Ok(config_output) = run_config_tests(&manifest_dir) else {
         return;
     };
 
+    let Ok(schedule_intents_output) = run_schedule_intents_tests(&manifest_dir)
+    else {
+        return;
+    };
+
     // Assert that all tests passed
-    // assert_cargo_tests_passed(security_output, "security");
-    // assert_cargo_tests_passed(scenarios_output, "scenarios");
-    // assert_cargo_tests_passed(cloning_output, "cloning");
-    // assert_cargo_tests_passed(
-    //     issues_frequent_commits_output,
-    //     "issues_frequent_commits",
-    // );
-    // assert_cargo_tests_passed(restore_ledger_output, "restore_ledger");
-    // assert_cargo_tests_passed(magicblock_api_output, "magicblock_api");
-    // assert_cargo_tests_passed(table_mania_output, "table_mania");
-    // assert_cargo_tests_passed(committor_output, "committor");
-    // assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
+    assert_cargo_tests_passed(security_output, "security");
+    assert_cargo_tests_passed(scenarios_output, "scenarios");
+    assert_cargo_tests_passed(cloning_output, "cloning");
+    assert_cargo_tests_passed(
+        issues_frequent_commits_output,
+        "issues_frequent_commits",
+    );
+    assert_cargo_tests_passed(restore_ledger_output, "restore_ledger");
+    assert_cargo_tests_passed(magicblock_api_output, "magicblock_api");
+    assert_cargo_tests_passed(table_mania_output, "table_mania");
+    assert_cargo_tests_passed(committor_output, "committor");
+    assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
     assert_cargo_tests_passed(config_output, "config");
+    assert_cargo_tests_passed(schedule_intents_output, "test-schedule-intent");
 }
 
 fn should_run_test(test_name: &str) -> bool {
@@ -504,6 +510,53 @@ fn run_config_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     };
     cleanup_devnet_only(&mut devnet_validator);
     Ok(output)
+}
+
+fn run_schedule_intents_tests(
+    manifest_dir: &str,
+) -> Result<Output, Box<dyn Error>> {
+    if !should_run_test("schedule_intents") {
+        return Ok(success_output());
+    }
+
+    eprintln!("======== RUNNING ISSUES TESTS - Schedule Intents ========");
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+    let mut devnet_validator = match start_validator(
+        "config-conf.devnet.toml",
+        ValidatorCluster::Chain(None),
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+    let mut ephem_validator = match start_validator(
+        "schedulecommit-conf.ephem.frequent-commits.toml",
+        ValidatorCluster::Ephem,
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            devnet_validator
+                .kill()
+                .expect("Failed to kill devnet validator");
+            panic!("Failed to start ephemeral validator properly");
+        }
+    };
+    let test_issues_dir =
+        format!("{}/../{}", manifest_dir, "test-schedule-intent");
+    let test_output = match run_test(test_issues_dir, Default::default()) {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("Failed to run issues: {:?}", err);
+            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+            return Err(err.into());
+        }
+    };
+    cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+    Ok(test_output)
 }
 
 // -----------------

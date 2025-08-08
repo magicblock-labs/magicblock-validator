@@ -103,15 +103,18 @@ pub enum FlexiCounterInstruction {
     /// Actions will call back our program
     ///
     /// Accounts:
-    /// 0. `[signer]` Escrow authority
-    /// 1. `[write]`  Counter pda
-    /// 2. `[]`       Destination program
-    /// 2. `[]`       MagicContext (used to record scheduled commit)
-    /// 3. `[]`       MagicBlock Program (used to schedule commit)
-    /// 4. `[write]`  Transfer destination during action
-    /// 5. `[]`       system program
+    /// 0.      `[]`       Destination program
+    /// 1.      `[]`       MagicContext (used to record scheduled commit)
+    /// 2.      `[]`       MagicBlock Program (used to schedule commit)
+    /// 3.      `[write]`  Transfer destination during action
+    /// 4.      `[]`       system program
+    /// 5.      `[signer]` Escrow authority
+    /// 5+n-1   `[signer]` Escrow authority`
+    /// 5+n     `[write]`  Counter pda
+    /// 5+2n    `[write]`  Counter pda
     CreateIntent {
-        counter_diff: i64,
+        num_committees: u8,
+        counter_diffs: Vec<i64>,
         is_undelegate: bool,
         compute_units: u32,
     },
@@ -246,7 +249,7 @@ pub fn create_add_counter_ix(
     )
 }
 
-pub fn create_intent_ix(
+pub fn create_intent_single_committee_ix(
     payer: Pubkey,
     transfer_destination: Pubkey,
     counter_diff: i64,
@@ -256,20 +259,57 @@ pub fn create_intent_ix(
     let program_id = &crate::id();
     let (counter, _) = FlexiCounter::pda(&payer);
     let accounts = vec![
+        AccountMeta::new_readonly(crate::id(), false),
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new(transfer_destination, false),
+        AccountMeta::new_readonly(system_program::id(), false),
         AccountMeta::new(payer, true),
         AccountMeta::new(counter, false),
+    ];
+
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::CreateIntent {
+            num_committees: 1,
+            // Has no effect in non-undelegate case
+            counter_diffs: vec![counter_diff],
+            is_undelegate,
+            compute_units,
+        },
+        accounts,
+    )
+}
+
+pub fn create_intent_ix(
+    payers: Vec<Pubkey>,
+    transfer_destination: Pubkey,
+    counter_diffs: Vec<i64>,
+    is_undelegate: bool,
+    compute_units: u32,
+) -> Instruction {
+    let program_id = &crate::id();
+
+    let payers_meta = payers.iter().map(|payer| AccountMeta::new(*payer, true));
+    let counter_metas = payers
+        .iter()
+        .map(|payer| AccountMeta::new(FlexiCounter::pda(payer).0, false));
+    let mut accounts = vec![
         AccountMeta::new_readonly(crate::id(), false),
         AccountMeta::new(MAGIC_CONTEXT_ID, false),
         AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
         AccountMeta::new(transfer_destination, false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];
+    accounts.extend(payers_meta);
+    accounts.extend(counter_metas);
 
     Instruction::new_with_borsh(
         *program_id,
         &FlexiCounterInstruction::CreateIntent {
+            num_committees: payers.len() as u8,
             // Has no effect in non-undelegate case
-            counter_diff,
+            counter_diffs,
             is_undelegate,
             compute_units,
         },
