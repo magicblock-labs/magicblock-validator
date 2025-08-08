@@ -25,9 +25,9 @@ snapshot-frequency = 1024
 millis_per_slot = 50
 sigverify = true
 
-# [[program]]
-# id = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
-# path = "<remote>"
+[[program]]
+id = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+path = "<remote>"
 
 [[program]]
 id = "3JnJ727jWEmPVU8qfXwtH63sCNDX7nMgsLbg8qy8aaPX"
