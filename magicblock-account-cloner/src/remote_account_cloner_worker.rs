@@ -1,10 +1,11 @@
 use std::{
     cell::RefCell,
+    cmp::max,
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::{Arc, RwLock},
     time::Duration,
 };
-use std::cmp::max;
+
 use conjunto_transwise::{
     AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
     DelegationRecord,
@@ -546,7 +547,8 @@ where
                 }
 
                 // Fee payer accounts are non-delegated ones, so we keep track of them as well
-                let lamports = max(self.clone_config.auto_aidrop_lamports, *lamports);
+                let lamports =
+                    max(self.clone_config.auto_airdrop_lamports, *lamports);
                 self.track_not_delegated_account(*pubkey).await?;
                 match self.validator_charges_fees {
                     ValidatorCollectionMode::NoFees => self

@@ -232,7 +232,9 @@ pub struct AccountsCloneConfig {
     #[serde(default)]
     pub prepare_lookup_tables: PrepareLookupTables,
     #[derive_env_var]
-    #[arg(help = "If > 0, automatically airdrop this many lamports to target accounts when cloning.")]
+    #[arg(
+        help = "If > 0, automatically airdrop this many lamports to target accounts when cloning."
+    )]
     #[serde(default)]
     pub auto_airdrop_lamports: u64,
 }
@@ -402,7 +404,7 @@ mod tests {
     fn test_clone_config_default() {
         let config = AccountsCloneConfig::default();
         assert_eq!(config.prepare_lookup_tables, PrepareLookupTables::Never);
-        assert_eq!(config.auto_aidrop_lamports, 0);
+        assert_eq!(config.auto_airdrop_lamports, 0);
     }
 
     #[test]
@@ -411,7 +413,7 @@ mod tests {
         let other = AccountsConfig {
             clone: AccountsCloneConfig {
                 prepare_lookup_tables: PrepareLookupTables::Always,
-                auto_aidrop_lamports: 0,
+                auto_airdrop_lamports: 0,
             },
             ..Default::default()
         };
