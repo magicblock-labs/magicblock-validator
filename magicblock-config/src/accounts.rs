@@ -233,6 +233,18 @@ pub struct AccountsCloneConfig {
     pub prepare_lookup_tables: PrepareLookupTables,
 }
 
+impl AccountsCloneConfig {
+    pub fn merge(&mut self, other: AccountsCloneConfig) {
+        let default = Self::default();
+
+        if self.prepare_lookup_tables == default.prepare_lookup_tables
+            && other.prepare_lookup_tables != default.prepare_lookup_tables
+        {
+            self.prepare_lookup_tables = other.prepare_lookup_tables;
+        }
+    }
+}
+
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, Args,
 )]

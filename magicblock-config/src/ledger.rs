@@ -41,6 +41,9 @@ pub struct LedgerConfig {
     #[arg(help = "The size under which it's desired to keep ledger in bytes.")]
     #[serde(default = "default_ledger_size")]
     pub size: u64,
+    #[serde(default)]
+    #[command(flatten)]
+    pub replay: ReplayConfig,
 }
 
 impl Default for LedgerConfig {
@@ -50,6 +53,28 @@ impl Default for LedgerConfig {
             skip_keypair_match_check: false,
             path: Default::default(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
+            replay: ReplayConfig::default(),
+        }
+    }
+}
+
+#[clap_prefix("ledger-replay")]
+#[clap_from_serde]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
+)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct ReplayConfig {
+    /// The number of threads to use for cloning accounts.
+    #[derive_env_var]
+    #[serde(default = "default_cloning_concurrency")]
+    pub account_hydration_concurrency: usize,
+}
+
+impl Default for ReplayConfig {
+    fn default() -> Self {
+        Self {
+            account_hydration_concurrency: default_cloning_concurrency(),
         }
     }
 }
@@ -93,6 +118,10 @@ const fn default_ledger_size() -> u64 {
     DEFAULT_LEDGER_SIZE_BYTES
 }
 
+const fn default_cloning_concurrency() -> usize {
+    10
+}
+
 #[cfg(test)]
 mod tests {
     use magicblock_config_helpers::Merge;
@@ -101,12 +130,15 @@ mod tests {
     use crate::EphemeralConfig;
 
     #[test]
-    fn test_merge_with_default() {
+    fn test_ledger_merge_with_default() {
         let mut config = LedgerConfig {
             resume_strategy: LedgerResumeStrategy::Replay,
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
+            replay: ReplayConfig {
+                account_hydration_concurrency: 20,
+            },
         };
         let original_config = config.clone();
         let other = LedgerConfig::default();
@@ -117,13 +149,16 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_default_with_non_default() {
+    fn test_ledger_merge_default_with_non_default() {
         let mut config = LedgerConfig::default();
         let other = LedgerConfig {
             resume_strategy: LedgerResumeStrategy::Replay,
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
+            replay: ReplayConfig {
+                account_hydration_concurrency: 20,
+            },
         };
 
         config.merge(other.clone());
@@ -132,12 +167,15 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_non_default() {
+    fn test_ledger_merge_non_default() {
         let mut config = LedgerConfig {
             resume_strategy: LedgerResumeStrategy::Replay,
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
+            replay: ReplayConfig {
+                account_hydration_concurrency: 20,
+            },
         };
         let original_config = config.clone();
         let other = LedgerConfig {
@@ -145,6 +183,49 @@ mod tests {
             skip_keypair_match_check: true,
             path: Some("ledger2.example.com".to_string()),
             size: 10000,
+            replay: ReplayConfig {
+                account_hydration_concurrency: 150,
+            },
+        };
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_replay_merge_with_default() {
+        let mut config = ReplayConfig {
+            account_hydration_concurrency: 20,
+        };
+        let original_config = config.clone();
+        let other = ReplayConfig::default();
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_replay_merge_default_with_non_default() {
+        let mut config = ReplayConfig::default();
+        let other = ReplayConfig {
+            account_hydration_concurrency: 20,
+        };
+
+        config.merge(other.clone());
+
+        assert_eq!(config, other);
+    }
+
+    #[test]
+    fn test_replay_merge_non_default() {
+        let mut config = ReplayConfig {
+            account_hydration_concurrency: 20,
+        };
+        let original_config = config.clone();
+        let other = ReplayConfig {
+            account_hydration_concurrency: 150,
         };
 
         config.merge(other);
@@ -170,6 +251,7 @@ size = 1000000000
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
+                replay: ReplayConfig::default(),
             }
         );
 
@@ -187,6 +269,7 @@ size = 1000000000
                 skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,
+                replay: ReplayConfig::default(),
             }
         );
 
@@ -204,6 +287,7 @@ size = 1000000000
                 skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,
+                replay: ReplayConfig::default(),
             }
         );
     }

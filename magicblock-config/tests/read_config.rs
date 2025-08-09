@@ -6,10 +6,11 @@ use std::{
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsConfig, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LedgerResumeStrategy, LifecycleMode, MagicBlockConfig,
-    MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteCluster,
-    RemoteConfig, RpcConfig, ValidatorConfig,
+    AccountsCloneConfig, AccountsConfig, CommitStrategyConfig, EphemeralConfig,
+    GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
+    MagicBlockConfig, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
+    ProgramConfig, RemoteCluster, RemoteConfig, ReplayConfig, RpcConfig,
+    ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -34,6 +35,23 @@ fn test_load_custom_ws_remote_toml() {
         .join("09_custom-ws-remote.toml");
     let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
     assert_eq!(config.accounts.remote.cluster, RemoteCluster::CustomWithWs);
+}
+
+#[test]
+fn test_load_replay_toml() {
+    let workspace_dir = cargo_workspace_dir();
+    let config_file_dir = workspace_dir
+        .join("magicblock-config")
+        .join("tests")
+        .join("fixtures")
+        .join("11_replay.toml");
+    let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
+    assert_eq!(
+        config.ledger.replay,
+        ReplayConfig {
+            account_hydration_concurrency: 20,
+        }
+    );
 }
 
 #[test]
@@ -123,6 +141,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_ENABLED", "false");
     env::set_var("METRICS_PORT", "1234");
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
+    env::set_var("LEDGER_REPLAY_ACCOUNT_HYDRATION_CONCURRENCY", "20");
 
     let config = parse_config_with_file(&config_file_dir);
 
@@ -139,6 +158,9 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                     cluster: RemoteCluster::Custom,
                     url: Some(Url::parse(base_cluster).unwrap()),
                     ..Default::default()
+                },
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Never,
                 },
                 ..Default::default()
             },
@@ -168,7 +190,10 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 resume_strategy: LedgerResumeStrategy::ResumeOnly,
                 skip_keypair_match_check: true,
                 path: Some("/hello/world".to_string()),
-                size: 123123
+                size: 123123,
+                replay: ReplayConfig {
+                    account_hydration_concurrency: 20,
+                },
             },
             metrics: MetricsConfig {
                 enabled: false,
