@@ -52,7 +52,10 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64) {
         assert_eq!(lamports, 1_111_111, cleanup(&mut validator));
 
         // Snapshot frequency is set to 2 slots for the offline validator
-        expect!(ctx.wait_for_delta_slot_ephem(SNAPSHOT_FREQUENCY), validator);
+        expect!(
+            ctx.wait_for_delta_slot_ephem(SNAPSHOT_FREQUENCY + 1),
+            validator
+        );
     }
     // Second airdrop
     {
