@@ -30,33 +30,48 @@ pub fn start_magic_block_validator_with_config(
     } = test_runner_paths;
 
     let port = rpc_port_from_config(config_path);
-
-    // First build so that the validator can start fast
-    let mut command = process::Command::new("cargo");
     let keypair_base58 = loaded_chain_accounts.validator_authority_base58();
-    command.arg("build");
-    if release {
-        command.arg("--release");
-    }
-    let build_res = command.current_dir(root_dir.clone()).output();
 
-    if build_res.is_ok_and(|output| !output.status.success()) {
-        eprintln!("Failed to build validator");
-        return None;
-    }
+    let validator_binary = if release {
+        std::env::var("VALIDATOR_BINARY_RELEASE").ok()
+    } else {
+        std::env::var("VALIDATOR_BINARY").ok()
+    };
 
-    // Start validator via `cargo run -- <path to config>`
-    let mut command = process::Command::new("cargo");
-    command.arg("run");
-    if release {
-        command.arg("--release");
-    }
+    // Check if we have a pre-built validator binary
+    let mut command = if let Some(binary_path) = validator_binary {
+        // Use pre-built binary
+        let mut cmd = process::Command::new(binary_path);
+        cmd.arg(config_path);
+        cmd
+    } else {
+        // Build and run via cargo
+        // First build so that the validator can start fast
+        let mut build_command = process::Command::new("cargo");
+        build_command.arg("build");
+        if release {
+            build_command.arg("--release");
+        }
+        let build_res = build_command.current_dir(root_dir.clone()).output();
+
+        if build_res.is_ok_and(|output| !output.status.success()) {
+            eprintln!("Failed to build validator");
+            return None;
+        }
+
+        // Start validator via `cargo run -- <path to config>`
+        let mut cmd = process::Command::new("cargo");
+        cmd.arg("run");
+        if release {
+            cmd.arg("--release");
+        }
+        cmd.arg("--").arg(config_path).current_dir(root_dir);
+        cmd
+    };
+
     command
-        .arg("--")
-        .arg(config_path)
         .env("RUST_LOG_STYLE", log_suffix)
-        .env("VALIDATOR_KEYPAIR", keypair_base58.clone())
-        .current_dir(root_dir);
+        .env("VALIDATOR_KEYPAIR", keypair_base58.clone());
 
     eprintln!("Starting validator with {:?}", command);
     eprintln!(

@@ -21,19 +21,32 @@ COMMITTOR_PROGRAM_SO := $(ROOT_DEPLOY_DIR)/magicblock_committor_program.so
 
 PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
 
+# Validator binaries path
+VALIDATOR_BINARY := $(DIR)../target/debug/magicblock-validator
+VALIDATOR_BINARY_RELEASE := $(DIR)../target/release/magicblock-validator
+
 list:
 	@cat Makefile | grep "^[a-z].*:" | sed 's/:.*//g'
 list-programs:
 	@echo $(PROGRAMS_SO)
 
-test: $(PROGRAMS_SO)
+# Build validator binaries once
+build-validator:
+	cargo build --package magicblock-validator --manifest-path $(DIR)../Cargo.toml
+	cargo build --package magicblock-validator --release --manifest-path $(DIR)../Cargo.toml
+
+test: build-validator $(PROGRAMS_SO)
 	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \
+	VALIDATOR_BINARY=$(VALIDATOR_BINARY) \
+	VALIDATOR_BINARY_RELEASE=$(VALIDATOR_BINARY_RELEASE) \
 	cargo run --package test-runner --bin run-tests
 
-test-force-mb: $(PROGRAMS_SO) test-ledger-restore
+test-force-mb: build-validator $(PROGRAMS_SO) test-ledger-restore
 	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
+	VALIDATOR_BINARY=$(VALIDATOR_BINARY) \
+	VALIDATOR_BINARY_RELEASE=$(VALIDATOR_BINARY_RELEASE) \
 	cargo run --package test-runner --bin run-tests
 
 test-schedulecommit:
@@ -89,4 +102,4 @@ deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 		$(DIR)/target/deploy/program_flexi_counter.so
 
 
-.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list
+.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list build-validator
