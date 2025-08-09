@@ -60,7 +60,7 @@ fn write(
     let slot = loop {
         if let Ok(slot) = ctx.get_slot_ephem() {
             // Wait for one slot after the last snapshot to make sure it's been flushed
-            if slot % SNAPSHOT_FREQUENCY + 1 == 0 {
+            if slot % SNAPSHOT_FREQUENCY == 1 {
                 break slot;
             }
             // Wait for half a slot to be sure to not miss the next snapshot
