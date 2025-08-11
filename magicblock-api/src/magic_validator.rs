@@ -870,7 +870,9 @@ impl MagicValidator {
         self.ledger_truncator.stop();
 
         self.claim_fees_task.stop();
-
+        if let Some(committor_service) = &self.committor_service {
+            committor_service.stop();
+        }
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
 

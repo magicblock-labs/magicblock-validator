@@ -196,53 +196,9 @@ fn test_claim_fees_rpc_connection() {
     println!("✓ RPC connection successful");
 }
 
-struct TestValidator {
-    process: Child,
-}
-
-impl TestValidator {
-    fn start() -> Self {
-        let manifest_dir_raw = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        let manifest_dir = PathBuf::from(&manifest_dir_raw);
-
-        let config_path = manifest_dir.join("../configs/claim-fees-test.toml");
-        let workspace_dir = manifest_dir.join("../");
-        let root_dir = workspace_dir.join("../");
-
-        let paths = TestRunnerPaths {
-            config_path,
-            root_dir,
-            workspace_dir,
-        };
-        let process = start_test_validator_with_config(
-            &paths,
-            None,
-            &Default::default(),
-            "CHAIN",
-        )
-        .expect("Failed to start devnet process");
-
-        Self { process }
-    }
-}
-
-impl Drop for TestValidator {
-    fn drop(&mut self) {
-        self.process
-            .kill()
-            .expect("Failed to stop solana-test-validator");
-        self.process
-            .wait()
-            .expect("Failed to wait for solana-test-validator");
-    }
-}
-
 #[test]
 fn test_validator_claim_fees() {
     println!("Starting Validator Fee Claiming Integration Test\n");
-
-    // 1. Start test infrastructure
-    let _devnet = TestValidator::start();
 
     // 2. Initialize validator authority
     validator::init_validator_authority(
