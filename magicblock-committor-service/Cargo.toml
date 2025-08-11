@@ -43,12 +43,7 @@ tokio-util = { workspace = true }
 tempfile = { workspace = true }
 
 [dev-dependencies]
-env_logger = { workspace = true }
 lazy_static = { workspace = true }
-magicblock-table-mania = { workspace = true, features = [
-  "randomize_lookup_table_slot",
-] }
-tokio = { workspace = true, features = ["rt", "macros"] }
 rand = { workspace = true }
 
 [features]

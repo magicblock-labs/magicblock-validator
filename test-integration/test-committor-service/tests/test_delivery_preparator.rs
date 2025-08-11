@@ -1,7 +1,3 @@
-// solana-test-validator \
-// --bpf-program corabpNrkBEqbTZP7xfJgSWTdBmVdLf1PARWXZbcMcS \
-// ./magicblock-committor-program/bin/magicblock_committor_program.so
-
 use borsh::BorshDeserialize;
 use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
@@ -17,7 +13,6 @@ use crate::common::{create_commit_task, generate_random_bytes, TestFixture};
 
 mod common;
 
-#[ignore = "TODO: startup validator"]
 #[tokio::test]
 async fn test_prepare_10kb_buffer() {
     let fixture = TestFixture::new().await;
@@ -73,7 +68,6 @@ async fn test_prepare_10kb_buffer() {
     );
 }
 
-#[ignore = "TODO: startup validator"]
 #[tokio::test]
 async fn test_prepare_multiple_buffers() {
     let fixture = TestFixture::new().await;
@@ -145,7 +139,6 @@ async fn test_prepare_multiple_buffers() {
     }
 }
 
-#[ignore = "TODO: startup validator"]
 #[tokio::test]
 async fn test_lookup_tables() {
     let fixture = TestFixture::new().await;

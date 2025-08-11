@@ -5,7 +5,7 @@ members = [
   "programs/schedulecommit-security",
   "programs/sysvars",
   "schedulecommit/client",
-  "schedulecommit/committor-service",
+  "test-committor-service",
   "schedulecommit/test-scenarios",
   "schedulecommit/test-security",
   "test-cloning",
@@ -28,6 +28,7 @@ edition = "2021"
 [workspace.dependencies]
 test-ledger-restore = { path = "./test-ledger-restore" }
 
+async-trait = "0.1.77"
 anyhow = "1.0.86"
 borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
 cleanass = "0.0.1"
@@ -73,6 +74,7 @@ test-tools-core = { path = "../test-tools-core" }
 toml = "0.8.13"
 lazy_static = "1.4.0"
 tokio = "1.0"
+rand = "0.8.5"
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency

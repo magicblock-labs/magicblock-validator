@@ -19,7 +19,6 @@ use crate::common::{create_committed_account, TestFixture};
 
 mod common;
 
-#[ignore = "TODO: startup validator"]
 #[tokio::test]
 async fn test_prepare_commit_tx_with_single_account() {
     let fixture = TestFixture::new().await;
@@ -54,7 +53,6 @@ async fn test_prepare_commit_tx_with_single_account() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 }
 
-#[ignore = "TODO: startup validator"]
 #[tokio::test]
 async fn test_prepare_commit_tx_with_multiple_accounts() {
     let fixture = TestFixture::new().await;
@@ -107,7 +105,6 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 }
 
-#[ignore = "TODO: startup validator"]
 #[tokio::test]
 async fn test_prepare_commit_tx_with_l1_actions() {
     let fixture = TestFixture::new().await;
@@ -166,7 +163,6 @@ async fn test_prepare_commit_tx_with_l1_actions() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 }
 
-#[ignore = "Implement MetadataFetcher for finaliztion"]
 #[tokio::test]
 async fn test_prepare_finalize_tx_with_undelegate() {
     let fixture = TestFixture::new().await;
@@ -199,7 +195,6 @@ async fn test_prepare_finalize_tx_with_undelegate() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 }
 
-#[ignore = "TODO: startup validator"]
 #[tokio::test]
 async fn test_prepare_finalize_tx_with_undelegate_and_actions() {
     let fixture = TestFixture::new().await;
@@ -248,7 +243,6 @@ async fn test_prepare_finalize_tx_with_undelegate_and_actions() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 }
 
-#[ignore = "TODO: startup validator"]
 #[tokio::test]
 async fn test_prepare_large_commit_tx_uses_buffers() {
     let fixture = TestFixture::new().await;

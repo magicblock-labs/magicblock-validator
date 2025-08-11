@@ -79,7 +79,7 @@ pub fn main() {
     assert_cargo_tests_passed(committor_output, "committor");
     assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
     assert_cargo_tests_passed(config_output, "config");
-    assert_cargo_tests_passed(schedule_intents_output, "test-schedule-intent");
+    assert_cargo_tests_passed(schedule_intents_output, "schedule_intents");
 }
 
 fn should_run_test(test_name: &str) -> bool {
@@ -206,7 +206,7 @@ fn run_table_mania_and_committor_tests(
     let committor_test_output = if run_committor {
         let test_committor_dir = format!(
             "{}/../{}",
-            manifest_dir, "schedulecommit/committor-service"
+            manifest_dir, "test-committor-service"
         );
         eprintln!("Running committor tests in {}", test_committor_dir);
         match run_test(test_committor_dir, Default::default()) {

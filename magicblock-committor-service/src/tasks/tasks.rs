@@ -74,7 +74,6 @@ pub trait BaseTask: Send + Sync {
 
 #[derive(Clone)]
 pub struct CommitTask {
-    // TODO: rename to commit_nonce?
     pub commit_id: u64,
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccountV2,

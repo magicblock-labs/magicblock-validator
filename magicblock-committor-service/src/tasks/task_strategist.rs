@@ -149,7 +149,6 @@ impl TaskStrategist {
         }
 
         // Create heap size -> index
-        // TODO(edwin): OPTIMIZATION. update ixs arr, since we know index, coul then reuse for tx creation
         let ixs =
             TransactionUtils::tasks_instructions(&Pubkey::new_unique(), tasks);
         let sizes = ixs

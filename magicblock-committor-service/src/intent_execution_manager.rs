@@ -1,6 +1,6 @@
 pub(crate) mod db;
 mod intent_execution_engine;
-pub(crate) mod intent_scheduler; // TODO(edwin): define visibility
+pub mod intent_scheduler;
 
 use std::sync::Arc;
 
@@ -57,7 +57,6 @@ impl<D: DB> IntentExecutionManager<D> {
             intent_persister,
             receiver,
         );
-        // TODO(edwin): add concellation logic
         let result_subscriber = worker.spawn();
 
         Self {

@@ -9,16 +9,14 @@ pub mod service_ext;
 pub mod transactions;
 pub mod types;
 
-pub mod intent_execution_manager;
-// TODO(edwin): define visibility
 mod committor_processor;
+pub mod intent_execution_manager;
 pub mod intent_executor;
 #[cfg(feature = "dev-context-only-utils")]
 pub mod stubs;
 pub mod tasks;
 pub mod transaction_preperator;
-pub mod utils;
-// TODO(edwin) pub(crate)
+pub(crate) mod utils;
 
 pub use compute_budget::ComputeBudgetConfig;
 pub use magicblock_committor_program::{
