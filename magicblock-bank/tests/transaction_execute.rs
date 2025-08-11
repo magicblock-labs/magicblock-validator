@@ -41,8 +41,7 @@ fn test_bank_system_transfer_instruction() {
         None,
     );
     let bank =
-        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None)
-            .unwrap();
+        Bank::new_for_tests(&genesis_config_info.genesis_config).unwrap();
 
     let (tx, from, to) = create_system_transfer_transaction(
         &bank,
@@ -98,8 +97,7 @@ fn test_bank_system_allocate_instruction() {
         Some(LAMPORTS_PER_SIGNATURE),
     );
     let bank =
-        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None)
-            .unwrap();
+        Bank::new_for_tests(&genesis_config_info.genesis_config).unwrap();
 
     const SPACE: u64 = 100;
     let rent: u64 = Rent::default().minimum_balance(SPACE as usize);
@@ -144,7 +142,7 @@ fn test_bank_one_noop_instruction() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None, None).unwrap();
+    let bank = Bank::new_for_tests(&genesis_config).unwrap();
     add_elf_program(&bank, &elfs::noop::ID);
 
     bank.advance_slot();
@@ -158,7 +156,7 @@ fn test_bank_one_noop_instruction_0_fees_not_existing_feepayer() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None, None).unwrap();
+    let bank = Bank::new_for_tests(&genesis_config).unwrap();
     add_elf_program(&bank, &elfs::noop::ID);
 
     bank.advance_slot();
@@ -183,7 +181,7 @@ fn test_bank_expired_noop_instruction() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None, None).unwrap();
+    let bank = Bank::new_for_tests(&genesis_config).unwrap();
     add_elf_program(&bank, &elfs::noop::ID);
 
     let tx = create_noop_transaction(&bank, bank.last_blockhash());
@@ -204,8 +202,7 @@ fn run_solx_instruction_test(lamports_per_signature: Option<u64>) {
         lamports_per_signature,
     );
     let bank =
-        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None)
-            .unwrap();
+        Bank::new_for_tests(&genesis_config_info.genesis_config).unwrap();
     add_elf_program(&bank, &elfs::solanax::ID);
 
     // 2. Prepare Transaction and advance slot to activate solanax program
@@ -274,7 +271,7 @@ fn test_bank_sysvars_get() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None, None).unwrap();
+    let bank = Bank::new_for_tests(&genesis_config).unwrap();
     add_elf_program(&bank, &elfs::sysvars::ID);
     let tx = create_sysvars_get_transaction(&bank);
     bank.advance_slot();
@@ -286,7 +283,7 @@ fn test_bank_sysvars_from_account() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None, None).unwrap();
+    let bank = Bank::new_for_tests(&genesis_config).unwrap();
     add_elf_program(&bank, &elfs::sysvars::ID);
     let tx = create_sysvars_from_account_transaction(&bank);
     bank.advance_slot();

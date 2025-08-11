@@ -22,22 +22,23 @@ use crate::{
         connection::ConnectionID,
         dispatch::{ConnectionTx, WsConnectionChannel},
     },
-    types::{
-        accounts::AccountWithSlot,
-        transactions::{TransactionResult, TransactionStatus},
-    },
     Slot,
 };
+use magicblock_core::link::{
+    accounts::AccountWithSlot,
+    transactions::{TransactionResult, TransactionStatus},
+};
 
-type AccountSubscriptionsDb =
+pub(crate) type AccountSubscriptionsDb =
     Arc<scc::HashMap<Pubkey, UpdateSubscribers<AccountEncoder>>>;
-type ProgramSubscriptionsDb =
+pub(crate) type ProgramSubscriptionsDb =
     Arc<scc::HashMap<Pubkey, UpdateSubscribers<ProgramAccountEncoder>>>;
-type SignatureSubscriptionsDb =
+pub(crate) type SignatureSubscriptionsDb =
     Arc<scc::HashMap<Signature, UpdateSubscriber<TransactionResultEncoder>>>;
-type LogsSubscriptionsDb =
+pub(crate) type LogsSubscriptionsDb =
     Arc<RwLock<UpdateSubscribers<TransactionLogsEncoder>>>;
-type SlotSubscriptionsDb = Arc<RwLock<UpdateSubscriber<SlotEncoder>>>;
+pub(crate) type SlotSubscriptionsDb =
+    Arc<RwLock<UpdateSubscriber<SlotEncoder>>>;
 
 pub(crate) type SubscriptionID = u64;
 
@@ -209,7 +210,7 @@ impl SubscriptionsDb {
 }
 
 /// Sender handles to subscribers for a given update
-struct UpdateSubscribers<E>(Vec<UpdateSubscriber<E>>);
+pub(crate) struct UpdateSubscribers<E>(Vec<UpdateSubscriber<E>>);
 
 pub(crate) struct UpdateSubscriber<E> {
     id: SubscriptionID,

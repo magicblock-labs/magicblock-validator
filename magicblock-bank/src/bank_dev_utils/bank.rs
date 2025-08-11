@@ -1,4 +1,4 @@
-// NOTE: copied and heavily modified from bank.rs
+// NOTE: copied and slightly modified from bank.rs
 use std::{borrow::Cow, sync::Arc};
 
 use magicblock_accounts_db::{error::AccountsDbError, StWLock};

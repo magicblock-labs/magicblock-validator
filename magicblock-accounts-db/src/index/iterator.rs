@@ -3,7 +3,7 @@ use log::error;
 use solana_pubkey::Pubkey;
 
 use super::{table::Table, MDB_SET_OP};
-use crate::{index::Offset, AdbResult};
+use crate::{index::Offset, AccountsDbResult};
 
 /// Iterator over pubkeys and offsets, where accounts
 /// for those pubkeys can be found in the database
@@ -18,7 +18,7 @@ impl<'env> OffsetPubkeyIter<'env> {
         table: &Table,
         txn: RoTransaction<'env>,
         pubkey: Option<&Pubkey>,
-    ) -> AdbResult<Self> {
+    ) -> AccountsDbResult<Self> {
         let cursor = table.cursor_ro(&txn)?;
         // SAFETY:
         // nasty/neat trick for lifetime erasure, but we are upholding

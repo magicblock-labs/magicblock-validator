@@ -37,7 +37,7 @@ impl InternalAccountProvider for InternalAccountProviderStub {
             .map(|(pubkey, account)| (*pubkey, account.clone()))
             .collect()
     }
-    fn get_slot(&self) -> Slot {
+    fn get_slot(&self) -> u64 {
         self.slot
     }
     fn get_blockhash(&self) -> Hash {

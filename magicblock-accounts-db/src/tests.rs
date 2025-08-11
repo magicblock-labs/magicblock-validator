@@ -9,7 +9,7 @@ use magicblock_config::AccountsDbConfig;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 
-use crate::{error::AccountsDbError, storage::ADB_FILE, AccountsDb, StWLock};
+use crate::{storage::ADB_FILE, AccountsDb, StWLock};
 
 const LAMPORTS: u64 = 4425;
 const SPACE: usize = 73;
@@ -25,7 +25,7 @@ fn test_get_account() {
     let AccountWithPubkey { pubkey, .. } = tenv.account();
     let acc = tenv.get_account(&pubkey);
     assert!(
-        acc.is_ok(),
+        acc.is_some(),
         "account was just inserted and should be in database"
     );
     let acc = acc.unwrap();
@@ -394,7 +394,7 @@ fn test_account_removal() {
     let mut acc = tenv.account();
     let pk = acc.pubkey;
     assert!(
-        tenv.get_account(&pk).is_ok(),
+        tenv.get_account(&pk).is_some(),
         "account should exists after init"
     );
 
@@ -403,7 +403,7 @@ fn test_account_removal() {
     tenv.insert_account(&pk, &acc.account);
 
     assert!(
-        matches!(tenv.get_account(&pk), Err(AccountsDbError::NotFound)),
+        tenv.get_account(&pk).is_none(),
         "account should have been deleted after lamports have been zeroed out"
     );
 }
@@ -413,7 +413,7 @@ fn test_owner_change() {
     let tenv = init_test_env();
     let mut acc = tenv.account();
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER]);
-    assert!(matches!(result, Ok(0)));
+    assert!(matches!(result, Some(0)));
     let mut accounts = tenv
         .get_program_accounts(&OWNER, |_| true)
         .expect("failed to get program accounts");
@@ -424,12 +424,12 @@ fn test_owner_change() {
     acc.account.set_owner(new_owner);
     tenv.insert_account(&acc.pubkey, &acc.account);
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER]);
-    assert!(matches!(result, Err(AccountsDbError::NotFound)));
+    assert!(result.is_none());
     let result = tenv.get_program_accounts(&OWNER, |_| true);
     assert!(result.map(|pks| pks.count() == 0).unwrap_or_default());
 
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER, new_owner]);
-    assert!(matches!(result, Ok(1)));
+    assert!(matches!(result, Some(1)));
     let mut accounts = tenv
         .get_program_accounts(&new_owner, |_| true)
         .expect("failed to get program accounts");

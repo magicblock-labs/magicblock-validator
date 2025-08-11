@@ -42,7 +42,7 @@ impl Bank {
             .accounts_db
             .get_account(&table.account_key)
             .map(AccountSharedData::from)
-            .map_err(|_| AddressLoaderError::LookupTableAccountNotFound)?;
+            .ok_or_else(|| AddressLoaderError::LookupTableAccountNotFound)?;
         let current_slot = self.slot();
 
         if table_account.owner() == &address_lookup_table::program::id() {

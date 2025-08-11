@@ -17,9 +17,9 @@ use storage::AccountsStorage;
 
 use crate::snapshot::SnapSlot;
 
-pub type AdbResult<T> = Result<T, AccountsDbError>;
-/// Stop the World Lock, used to halt all writes to adb while
-/// some critical operation is in action, e.g. snapshotting
+pub type AccountsDbResult<T> = Result<T, AccountsDbError>;
+/// Stop the World Lock, used to halt all writes to the accountsdb
+/// while some critical operation is in action, e.g. snapshotting
 pub type StWLock = Arc<RwLock<()>>;
 
 pub const ACCOUNTSDB_DIR: &str = "accountsdb";
@@ -32,8 +32,9 @@ pub struct AccountsDb {
     index: AccountsDbIndex,
     /// Snapshots manager, boxed for cache efficiency, as this field is rarely used
     snapshot_engine: Box<SnapshotEngine>,
-    /// Stop the world lock, currently used for snapshotting only
-    lock: StWLock,
+    /// Synchronization lock, employed for preventing other threads from
+    /// writing to accountsdb, currently used for snapshotting only
+    synchronizer: StWLock,
     /// Slot wise frequency at which snapshots should be taken
     snapshot_frequency: u64,
 }
@@ -44,7 +45,7 @@ impl AccountsDb {
         config: &AccountsDbConfig,
         directory: &Path,
         lock: StWLock,
-    ) -> AdbResult<Self> {
+    ) -> AccountsDbResult<Self> {
         let directory = directory.join(ACCOUNTSDB_SUB_DIR);
 
         std::fs::create_dir_all(&directory).inspect_err(log_err!(
@@ -64,7 +65,7 @@ impl AccountsDb {
             storage,
             index,
             snapshot_engine,
-            lock,
+            synchronizer: lock,
             snapshot_frequency,
         })
     }
@@ -72,7 +73,7 @@ impl AccountsDb {
     /// Opens existing database with given snapshot_frequency, used for tests and tools
     /// most likely you want to use [new](AccountsDb::new) method
     #[cfg(feature = "dev-tools")]
-    pub fn open(directory: &Path) -> AdbResult<Self> {
+    pub fn open(directory: &Path) -> AccountsDbResult<Self> {
         let config = AccountsDbConfig {
             snapshot_frequency: u64::MAX,
             ..Default::default()
@@ -82,9 +83,9 @@ impl AccountsDb {
 
     /// Read account from with given pubkey from the database (if exists)
     #[inline(always)]
-    pub fn get_account(&self, pubkey: &Pubkey) -> AdbResult<AccountSharedData> {
-        let offset = self.index.get_account_offset(pubkey)?;
-        Ok(self.storage.read_account(offset))
+    pub fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+        let offset = self.index.get_account_offset(pubkey).ok()?;
+        Some(self.storage.read_account(offset))
     }
 
     pub fn remove_account(&self, pubkey: &Pubkey) {
@@ -181,17 +182,14 @@ impl AccountsDb {
         &self,
         account: &Pubkey,
         owners: &[Pubkey],
-    ) -> AdbResult<usize> {
-        let offset = self.index.get_account_offset(account)?;
+    ) -> Option<usize> {
+        let offset = self.index.get_account_offset(account).ok()?;
         let memptr = self.storage.offset(offset);
         // SAFETY:
         // memptr is obtained from the storage directly, which maintains
         // the integrity of account records, by making sure, that they are
         // initialized and laid out properly along with the shadow buffer
-        let position = unsafe {
-            AccountBorrowed::any_owner_matches(memptr.as_ptr(), owners)
-        };
-        position.ok_or(AccountsDbError::NotFound)
+        unsafe { AccountBorrowed::any_owner_matches(memptr.as_ptr(), owners) }
     }
 
     /// Scans the database accounts of given program, satisfying the provided filter
@@ -199,7 +197,7 @@ impl AccountsDb {
         &self,
         program: &Pubkey,
         filter: F,
-    ) -> AdbResult<AccountsScanner<F>>
+    ) -> AccountsDbResult<AccountsScanner<F>>
     where
         F: Fn(&AccountSharedData) -> bool + 'static,
     {
@@ -217,7 +215,7 @@ impl AccountsDb {
         })
     }
 
-    pub fn reader(&self) -> AdbResult<AccountsReader<'_>> {
+    pub fn reader(&self) -> AccountsDbResult<AccountsReader<'_>> {
         let offset = self.index.offset_finder()?;
         Ok(AccountsReader {
             offset,
@@ -272,7 +270,7 @@ impl AccountsDb {
         }
         // acquire the lock, effectively stopping the world, nothing should be able
         // to modify underlying accounts database while this lock is active
-        let _locked = self.lock.write();
+        let _locked = self.synchronizer.write();
         // flush everything before taking the snapshot, in order to ensure consistent state
         self.flush(true);
 
@@ -309,13 +307,13 @@ impl AccountsDb {
     /// Note: this will delete the current database state upon rollback.
     /// But in most cases, the ledger slot and adb slot will match and
     /// no rollback will take place, in any case use with care!
-    pub fn ensure_at_most(&mut self, slot: u64) -> AdbResult<u64> {
+    pub fn ensure_at_most(&mut self, slot: u64) -> AccountsDbResult<u64> {
         // if this is a fresh start or we just match, then there's nothing to ensure
         if slot >= self.slot().saturating_sub(1) {
             return Ok(self.slot());
         }
         // make sure that no one is reading the database
-        let _locked = self.lock.write();
+        let _locked = self.synchronizer.write();
 
         let rb_slot = self
             .snapshot_engine
@@ -360,6 +358,12 @@ impl AccountsDb {
         if sync {
             self.index.flush();
         }
+    }
+
+    /// Get a clone of synchronization lock, to suspend all the writes,
+    /// while some critical operation, like snapshotting is in progress
+    pub fn synchronizer(&self) -> StWLock {
+        self.synchronizer.clone()
     }
 }
 

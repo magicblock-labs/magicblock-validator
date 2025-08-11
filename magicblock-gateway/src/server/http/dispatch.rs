@@ -1,11 +1,11 @@
 use std::{convert::Infallible, sync::Arc};
 
-use crate::types::{
-    accounts::EnsureAccountsTx, transactions::TxnExecutionTx,
-    RpcChannelEndpoints,
-};
 use hyper::{body::Incoming, Request, Response};
 use magicblock_accounts_db::AccountsDb;
+use magicblock_core::link::{
+    accounts::EnsureAccountsTx, transactions::TxnToProcessTx,
+    RpcChannelEndpoints,
+};
 use magicblock_ledger::Ledger;
 use solana_pubkey::Pubkey;
 
@@ -28,7 +28,7 @@ pub(crate) struct HttpDispatcher {
     pub(crate) transactions: TransactionsCache,
     pub(crate) blocks: Arc<BlocksCache>,
     pub(crate) ensure_accounts_tx: EnsureAccountsTx,
-    pub(crate) transaction_execution_tx: TxnExecutionTx,
+    pub(crate) transactions_tx: TxnToProcessTx,
 }
 
 impl HttpDispatcher {
@@ -36,16 +36,15 @@ impl HttpDispatcher {
         state: &SharedState,
         channels: &RpcChannelEndpoints,
     ) -> Arc<Self> {
-        Self {
+        Arc::new(Self {
             identity: state.identity,
             accountsdb: state.accountsdb.clone(),
             ledger: state.ledger.clone(),
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             ensure_accounts_tx: channels.ensure_accounts_tx.clone(),
-            transaction_execution_tx: channels.transaction_execution_tx.clone(),
-        }
-        .into()
+            transactions_tx: channels.processable_txn_tx.clone(),
+        })
     }
 
     pub(super) async fn dispatch(

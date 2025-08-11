@@ -84,10 +84,6 @@ fn default_port() -> u16 {
     8899
 }
 
-fn default_max_ws_connections() -> usize {
-    16384
-}
-
 #[cfg(test)]
 mod tests {
     use magicblock_config_helpers::Merge;

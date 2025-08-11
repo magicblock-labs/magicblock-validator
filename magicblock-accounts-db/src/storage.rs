@@ -14,7 +14,7 @@ use solana_account::AccountSharedData;
 use crate::{
     error::AccountsDbError,
     index::{Blocks, Offset},
-    log_err, AdbResult,
+    log_err, AccountsDbResult,
 };
 
 /// Extra space in database storage file reserved for metadata
@@ -79,7 +79,7 @@ impl AccountsStorage {
     pub(crate) fn new(
         config: &AccountsDbConfig,
         directory: &Path,
-    ) -> AdbResult<Self> {
+    ) -> AccountsDbResult<Self> {
         let dbpath = directory.join(ADB_FILE);
         let mut file = File::options()
             .create(true)
@@ -228,7 +228,7 @@ impl AccountsStorage {
     /// Reopen database from a different directory
     ///
     /// NOTE: this is a very cheap operation, as fast as opening a file
-    pub(crate) fn reload(&mut self, dbpath: &Path) -> AdbResult<()> {
+    pub(crate) fn reload(&mut self, dbpath: &Path) -> AccountsDbResult<()> {
         let mut file = File::options()
             .write(true)
             .read(true)
@@ -290,7 +290,7 @@ impl StorageMeta {
     fn init_adb_file(
         file: &mut File,
         config: &AccountsDbConfig,
-    ) -> AdbResult<()> {
+    ) -> AccountsDbResult<()> {
         // Somewhat arbitrary min size for database, should be good enough for most test
         // cases, and prevent accidental creation of few kilobyte large or 0 sized databases
         const MIN_DB_SIZE: usize = 16 * 1024 * 1024;

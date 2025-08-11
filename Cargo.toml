@@ -36,7 +36,6 @@ members = [
   "magicblock-validator-admin",
   "test-tools",
   "test-tools-core",
-  "utils/expiring-hashmap",
   "tools/genx",
   "tools/keypair-base58",
   "tools/ledger-stats",
@@ -56,6 +55,7 @@ edition = "2021"
 
 [workspace.dependencies]
 anyhow = "1.0.86"
+arc-swap = { version = "1.7" }
 assert_matches = "1.5.0"
 async-trait = "0.1.77"
 base64 = "0.21.7"
@@ -76,7 +76,6 @@ dyn-clone = "1.0.20"
 ed25519-dalek = "1.0.1"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"
-expiring-hashmap = { path = "./utils/expiring-hashmap" }
 fd-lock = "4.0.2"
 flume = "0.11"
 fs_extra = "1.3.0"
@@ -163,6 +162,9 @@ solana-bpf-loader-program = { version = "2.2" }
 solana-compute-budget-instruction = { version = "2.2" }
 solana-compute-budget-program = { version = "2.2" }
 solana-cost-model = { version = "2.2" }
+solana-feature-set = { version = "2.2" }
+solana-fee = { version = "2.2" }
+solana-fee-structure = { version = "2.2" }
 solana-frozen-abi-macro = { version = "2.2" }
 solana-geyser-plugin-interface = { version = "2.2", package = "agave-geyser-plugin-interface" }
 solana-geyser-plugin-manager = { version = "2.2" }
@@ -206,7 +208,6 @@ tempfile = "3.10.1"
 test-tools = { path = "./test-tools" }
 test-tools-core = { path = "./test-tools-core" }
 thiserror = "1.0.57"
-# Update solana-tokio patch below when updating this version
 tokio = "1.0"
 tokio-stream = "0.1.15"
 tokio-util = "0.7.10"
@@ -227,4 +228,4 @@ vergen = "8.3.1"
 # solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2476dab" }
 solana-account = { path = "../solana-account" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "9b722a5" }

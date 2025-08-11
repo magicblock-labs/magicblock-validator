@@ -8,7 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-magicblock-bank = { workspace = true }
-solana-sdk = { workspace = true }
+magicblock-accounts-db = { workspace = true }
 
-[dev-dependencies]
+solana-account = { workspace = true }
+solana-pubkey = { workspace = true }

@@ -11,10 +11,6 @@ use solana_transaction::{
 use solana_transaction_status::UiTransactionEncoding;
 use tokio::sync::oneshot;
 
-use crate::types::transactions::{
-    ProcessableTransaction, TransactionProcessingMode,
-};
-
 use super::prelude::*;
 
 impl HttpDispatcher {
@@ -94,17 +90,9 @@ impl HttpDispatcher {
         let (result_tx, result_rx) = oneshot::channel();
         let to_execute = ProcessableTransaction {
             transaction,
-            mode: TransactionProcessingMode::Simulation {
-                result_tx,
-                inner_instructions: config.inner_instructions,
-            },
+            mode: TransactionProcessingMode::Simulation(result_tx),
         };
-        if self
-            .transaction_execution_tx
-            .send(to_execute)
-            .await
-            .is_err()
-        {
+        if self.transactions_tx.send(to_execute).await.is_err() {
             warn!("transaction execution channel has closed");
         };
         let result =
@@ -112,13 +100,19 @@ impl HttpDispatcher {
         let slot = self.accountsdb.slot();
         let result = RpcSimulateTransactionResult {
             err: result.result.err(),
-            logs: Some(result.logs.to_vec()),
+            logs: result.logs,
             accounts: None,
             units_consumed: Some(result.units_consumed),
             return_data: result.return_data.map(Into::into),
-            inner_instructions: result.inner_instructions.map(|ii| {
-                IntoIterator::into_iter(ii).map(Into::into).collect()
-            }),
+            inner_instructions: result
+                .inner_instructions
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(index, ixs)| {
+                    IntoIterator::into_iter(ixs).map(Into::into).collect()
+                })
+                .collect(),
             replacement_blockhash: replacement,
         };
         Ok(ResponsePayload::encode(&request.id, result, slot))

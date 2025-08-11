@@ -69,7 +69,7 @@ impl HttpDispatcher {
     ) -> Option<AccountSharedData> {
         let mut ensured = false;
         loop {
-            let account = self.accountsdb.get_account(pubkey).ok();
+            let account = self.accountsdb.get_account(pubkey);
             if account.is_some() || ensured {
                 break account;
             }
@@ -114,9 +114,14 @@ mod prelude {
         },
         server::http::dispatch::HttpDispatcher,
         some_or_err,
-        types::accounts::{AccountsToEnsure, LockedAccount},
         utils::{AccountWithPubkey, JsonBody},
         Slot,
+    };
+    pub(super) use magicblock_core::link::accounts::{
+        AccountsToEnsure, LockedAccount,
+    };
+    pub(super) use magicblock_core::link::transactions::{
+        ProcessableTransaction, TransactionProcessingMode,
     };
     pub(super) use solana_account::ReadableAccount;
     pub(super) use solana_account_decoder::UiAccountEncoding;

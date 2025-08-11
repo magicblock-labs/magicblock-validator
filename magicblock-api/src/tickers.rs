@@ -36,11 +36,11 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
         while !exit.load(Ordering::Relaxed) {
             tokio::time::sleep(tick_duration).await;
 
-            let (update_ledger_result, next_slot) =
-                advance_slot_and_update_ledger(&bank, &ledger);
-            if let Err(err) = update_ledger_result {
-                error!("Failed to write block: {:?}", err);
-            }
+        let (update_ledger_result, next_slot) =
+            advance_slot_and_update_ledger(&bank, &ledger);
+        if let Err(err) = update_ledger_result {
+            error!("Failed to write block: {:?}", err);
+        }
 
             if log {
                 debug!("Advanced to slot {}", next_slot);
@@ -65,7 +65,11 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
                 .await;
             }
         }
-    })
+        if log {
+            info!("Advanced to slot {}", next_slot);
+        }
+        metrics::inc_slot();
+    }
 }
 
 async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
@@ -96,30 +100,27 @@ pub fn init_commit_accounts_ticker(
     tick_duration: Duration,
     token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
-    let manager = manager.clone();
-    tokio::task::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = tokio::time::sleep(tick_duration) => {
-                    let sigs = manager.commit_delegated().await;
-                    match sigs {
-                        Ok(sigs) if sigs.is_empty() => {
-                            trace!("No accounts committed");
-                        }
-                        Ok(sigs) => {
-                            debug!("Commits: {:?}", sigs);
-                        }
-                        Err(err) => {
-                            error!("Failed to commit accounts: {:?}", err);
-                        }
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(tick_duration) => {
+                let sigs = manager.commit_delegated().await;
+                match sigs {
+                    Ok(sigs) if sigs.is_empty() => {
+                        trace!("No accounts committed");
+                    }
+                    Ok(sigs) => {
+                        debug!("Commits: {:?}", sigs);
+                    }
+                    Err(err) => {
+                        error!("Failed to commit accounts: {:?}", err);
                     }
                 }
-                _ = token.cancelled() => {
-                    break;
-                }
+            }
+            _ = token.cancelled() => {
+                break;
             }
         }
-    })
+    }
 }
 
 #[allow(unused_variables)]

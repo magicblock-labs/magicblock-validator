@@ -24,6 +24,7 @@ flume = { workspace = true }
 
 magicblock-accounts-db = { workspace = true }
 magicblock-config = { workspace = true }
+magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
 
 solana-account = { workspace = true }
