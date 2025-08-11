@@ -1,7 +1,8 @@
+use magicblock_program::magicblock_processor;
 use solana_program_runtime::invoke_context::BuiltinFunctionWithContext;
-use solana_sdk::{
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::{
     address_lookup_table, bpf_loader_upgradeable, compute_budget,
-    pubkey::Pubkey,
 };
 
 pub struct BuiltinPrototype {
@@ -9,6 +10,16 @@ pub struct BuiltinPrototype {
     pub program_id: Pubkey,
     pub name: &'static str,
     pub entrypoint: BuiltinFunctionWithContext,
+}
+
+impl std::fmt::Debug for BuiltinPrototype {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut builder = f.debug_struct("BuiltinPrototype");
+        builder.field("program_id", &self.program_id);
+        builder.field("name", &self.name);
+        builder.field("feature_id", &self.feature_id);
+        builder.finish()
+    }
 }
 
 /// We support and load the following builtin programs at startup:
@@ -50,7 +61,7 @@ pub static BUILTINS: &[BuiltinPrototype] = &[
         feature_id: None,
         program_id: magicblock_program::id(),
         name: "magicblock_program",
-        entrypoint: magicblock_program::magicblock_processor::Entrypoint::vm,
+        entrypoint: magicblock_processor::Entrypoint::vm,
     },
     BuiltinPrototype {
         feature_id: None,
@@ -60,7 +71,7 @@ pub static BUILTINS: &[BuiltinPrototype] = &[
     },
     BuiltinPrototype {
         feature_id: None,
-        program_id: address_lookup_table::program::id(),
+        program_id: address_lookup_table::id(),
         name: "address_lookup_table_program",
         entrypoint:
             solana_address_lookup_table_program::processor::Entrypoint::vm,

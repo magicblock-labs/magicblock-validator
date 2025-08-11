@@ -338,10 +338,6 @@ impl MagicValidator {
             &config.validator_config,
         );
 
-        let pubsub_config = PubsubConfig::from_rpc(
-            config.validator_config.rpc.addr,
-            config.validator_config.rpc.port,
-        );
         validator::init_validator_authority(identity_keypair);
         let config = config.validator_config;
         let (rpc_channels, validator_channels) = link();
@@ -655,19 +651,6 @@ impl MagicValidator {
             process::id(),
         );
 
-        // NOTE: we need to create the pubsub service on each start since spawning
-        // it takes ownership
-        let pubsub_service = PubsubService::new(
-            self.pubsub_config.clone(),
-            self.geyser_rpc_service.clone(),
-            self.bank.clone(),
-        );
-
-        let (pubsub_handle, pubsub_close_handle) =
-            pubsub_service.spawn(self.pubsub_config.socket())?;
-        self.pubsub_handle.write().unwrap().replace(pubsub_handle);
-        self.pubsub_close_handle = pubsub_close_handle;
-
         self.sample_performance_service
             .replace(SamplePerformanceService::new(
                 &self.bank,
@@ -754,8 +737,6 @@ impl MagicValidator {
 
     pub fn stop(&mut self) {
         self.exit.store(true, Ordering::Relaxed);
-        self.rpc_service.close();
-        PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
         self.ledger_truncator.stop();
 

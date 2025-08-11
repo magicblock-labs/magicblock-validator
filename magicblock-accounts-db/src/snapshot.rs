@@ -13,7 +13,9 @@ use memmap2::MmapMut;
 use parking_lot::Mutex;
 use reflink::reflink;
 
-use crate::{error::AccountsDbError, log_err, storage::ADB_FILE, AdbResult};
+use crate::{
+    error::AccountsDbError, log_err, storage::ADB_FILE, AccountsDbResult,
+};
 
 pub struct SnapshotEngine {
     /// directory path where database files are kept
@@ -33,7 +35,7 @@ impl SnapshotEngine {
     pub(crate) fn new(
         dbpath: PathBuf,
         max_count: usize,
-    ) -> AdbResult<Box<Self>> {
+    ) -> AccountsDbResult<Box<Self>> {
         let is_cow_supported = Self::supports_cow(&dbpath)
             .inspect_err(log_err!("cow support check"))?;
         let snapshots = Self::read_snapshots(&dbpath, max_count)?.into();
@@ -48,7 +50,11 @@ impl SnapshotEngine {
 
     /// Take snapshot of database directory, this operation
     /// assumes that no writers are currently active
-    pub(crate) fn snapshot(&self, slot: u64, mmap: &[u8]) -> AdbResult<()> {
+    pub(crate) fn snapshot(
+        &self,
+        slot: u64,
+        mmap: &[u8],
+    ) -> AccountsDbResult<()> {
         let slot = SnapSlot(slot);
         // this lock is always free, as we take StWLock higher up in the call stack and
         // only one thread can take snapshots, namely the one that advances the slot
@@ -89,7 +95,7 @@ impl SnapshotEngine {
     pub(crate) fn try_switch_to_snapshot(
         &self,
         mut slot: u64,
-    ) -> AdbResult<u64> {
+    ) -> AccountsDbResult<u64> {
         let mut spath =
             SnapSlot(slot).as_path(Self::snapshots_dir(&self.dbpath));
         let mut snapshots = self.snapshots.lock(); // free lock

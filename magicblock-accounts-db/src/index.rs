@@ -13,7 +13,7 @@ use crate::{
     error::AccountsDbError,
     log_err,
     storage::{Allocation, ExistingAllocation},
-    AdbResult,
+    AccountsDbResult,
 };
 
 pub type Offset = u32;
@@ -92,7 +92,7 @@ macro_rules! bytes {
 impl AccountsDbIndex {
     /// Creates new index manager for AccountsDB, by
     /// opening/creating necessary lmdb environments
-    pub(crate) fn new(size: usize, directory: &Path) -> AdbResult<Self> {
+    pub(crate) fn new(size: usize, directory: &Path) -> AccountsDbResult<Self> {
         // create an environment for all the tables
         let env = lmdb_env(directory, size).inspect_err(log_err!(
             "main index env creation at {}",
@@ -129,7 +129,7 @@ impl AccountsDbIndex {
     pub(crate) fn get_account_offset(
         &self,
         pubkey: &Pubkey,
-    ) -> AdbResult<Offset> {
+    ) -> AccountsDbResult<Offset> {
         let txn = self.env.begin_ro_txn()?;
         let Some(offset) = self.accounts.get(&txn, pubkey)? else {
             return Err(AccountsDbError::NotFound);
@@ -152,7 +152,7 @@ impl AccountsDbIndex {
         &self,
         txn: &T,
         pubkey: &Pubkey,
-    ) -> AdbResult<ExistingAllocation> {
+    ) -> AccountsDbResult<ExistingAllocation> {
         let Some(slice) = self.accounts.get(txn, pubkey)? else {
             return Err(AccountsDbError::NotFound);
         };
@@ -167,7 +167,7 @@ impl AccountsDbIndex {
         pubkey: &Pubkey,
         owner: &Pubkey,
         allocation: Allocation,
-    ) -> AdbResult<Option<ExistingAllocation>> {
+    ) -> AccountsDbResult<Option<ExistingAllocation>> {
         let Allocation { offset, blocks, .. } = allocation;
 
         let mut txn = self.env.begin_rw_txn()?;
@@ -206,7 +206,7 @@ impl AccountsDbIndex {
         pubkey: &Pubkey,
         txn: &mut RwTransaction,
         index_value: &[u8],
-    ) -> AdbResult<ExistingAllocation> {
+    ) -> AccountsDbResult<ExistingAllocation> {
         // retrieve the size and offset for allocation
         let allocation = self.get_allocation(txn, pubkey)?;
         // and put it into deallocation index, so the space can be recycled later
@@ -225,7 +225,10 @@ impl AccountsDbIndex {
 
     /// Removes account from the database and marks its backing storage for recycling
     /// this method also performs various cleanup operations on the secondary indexes
-    pub(crate) fn remove_account(&self, pubkey: &Pubkey) -> AdbResult<()> {
+    pub(crate) fn remove_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> AccountsDbResult<()> {
         let mut txn = self.env.begin_rw_txn()?;
         let mut cursor = self.accounts.cursor_rw(&mut txn)?;
 
@@ -263,7 +266,7 @@ impl AccountsDbIndex {
         &self,
         pubkey: &Pubkey,
         owner: &Pubkey,
-    ) -> AdbResult<()> {
+    ) -> AccountsDbResult<()> {
         let txn = self.env.begin_ro_txn()?;
         let old_owner = match self.owners.get(&txn, pubkey)? {
             // if current owner matches with that stored in index, then we are all set
@@ -338,20 +341,24 @@ impl AccountsDbIndex {
     pub(crate) fn get_program_accounts_iter(
         &self,
         program: &Pubkey,
-    ) -> AdbResult<OffsetPubkeyIter<'_>> {
+    ) -> AccountsDbResult<OffsetPubkeyIter<'_>> {
         let txn = self.env.begin_ro_txn()?;
         OffsetPubkeyIter::new(&self.programs, txn, Some(program))
     }
 
     /// Returns an iterator over offsets and pubkeys of all accounts in database
     /// offsets can be used further to retrieve the account from storage
-    pub(crate) fn get_all_accounts(&self) -> AdbResult<OffsetPubkeyIter<'_>> {
+    pub(crate) fn get_all_accounts(
+        &self,
+    ) -> AccountsDbResult<OffsetPubkeyIter<'_>> {
         let txn = self.env.begin_ro_txn()?;
         OffsetPubkeyIter::new(&self.programs, txn, None)
     }
 
     /// Obtain a wrapped cursor to query account offsets repeatedly
-    pub(crate) fn offset_finder(&self) -> AdbResult<AccountOffsetFinder> {
+    pub(crate) fn offset_finder(
+        &self,
+    ) -> AccountsDbResult<AccountOffsetFinder> {
         let txn = self.env.begin_ro_txn()?;
         AccountOffsetFinder::new(&self.accounts, txn)
     }
@@ -371,7 +378,7 @@ impl AccountsDbIndex {
     pub(crate) fn try_recycle_allocation(
         &self,
         space: Blocks,
-    ) -> AdbResult<ExistingAllocation> {
+    ) -> AccountsDbResult<ExistingAllocation> {
         let mut txn = self.env.begin_rw_txn()?;
         let mut cursor = self.deallocations.cursor_rw(&mut txn)?;
         // this is a neat lmdb trick where we can search for entry with matching
@@ -404,7 +411,7 @@ impl AccountsDbIndex {
     /// Reopen the index databases from a different directory at provided path
     ///
     /// NOTE: this is a very cheap operation, as fast as opening a few files
-    pub(crate) fn reload(&mut self, dbpath: &Path) -> AdbResult<()> {
+    pub(crate) fn reload(&mut self, dbpath: &Path) -> AccountsDbResult<()> {
         // set it to default lmdb map size, it will be
         // ignored if smaller than currently occupied
         const DEFAULT_SIZE: usize = 1024 * 1024;

@@ -1,9 +1,9 @@
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
+use solana_program::message::inner_instruction::InnerInstructionsList;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::sanitized::SanitizedTransaction;
 use solana_transaction_context::TransactionReturnData;
-use solana_transaction_status_client_types::InnerInstructions;
 use tokio::sync::{
     mpsc::{Receiver, Sender},
     oneshot,
@@ -14,10 +14,12 @@ use crate::Slot;
 pub type TxnStatusRx = MpmcReceiver<TransactionStatus>;
 pub type TxnStatusTx = MpmcSender<TransactionStatus>;
 
-pub type TxnExecutionRx = Receiver<ProcessableTransaction>;
-pub type TxnExecutionTx = Sender<ProcessableTransaction>;
+pub type TxnToProcessRx = Receiver<ProcessableTransaction>;
+pub type TxnToProcessTx = Sender<ProcessableTransaction>;
 
 pub type TransactionResult = solana_transaction_error::TransactionResult<()>;
+pub type TxnSimulationResultTx = oneshot::Sender<TransactionSimulationResult>;
+pub type TxnExecutionResultTx = Option<oneshot::Sender<TransactionResult>>;
 
 pub struct TransactionStatus {
     pub signature: Signature,
@@ -31,23 +33,20 @@ pub struct ProcessableTransaction {
 }
 
 pub enum TransactionProcessingMode {
-    Simulation {
-        inner_instructions: bool,
-        result_tx: oneshot::Sender<TransactionSimulationResult>,
-    },
-    Execution(Option<oneshot::Sender<TransactionResult>>),
+    Simulation(TxnSimulationResultTx),
+    Execution(TxnExecutionResultTx),
 }
 
 pub struct TransactionExecutionResult {
     pub result: TransactionResult,
     pub accounts: Box<[Pubkey]>,
-    pub logs: Box<[String]>,
+    pub logs: Option<Vec<String>>,
 }
 
 pub struct TransactionSimulationResult {
     pub result: TransactionResult,
-    pub logs: Box<[String]>,
+    pub logs: Option<Vec<String>>,
     pub units_consumed: u64,
     pub return_data: Option<TransactionReturnData>,
-    pub inner_instructions: Option<Box<[InnerInstructions]>>,
+    pub inner_instructions: Option<InnerInstructionsList>,
 }
