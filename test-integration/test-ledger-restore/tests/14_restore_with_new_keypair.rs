@@ -12,7 +12,8 @@ use solana_sdk::{
     signer::Signer, transaction::Transaction,
 };
 use test_ledger_restore::{
-    setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    kill_validator, setup_validator_with_local_remote, wait_for_ledger_persist,
+    TMP_DIR_LEDGER,
 };
 
 const MEMO_PROGRAM_PK: Pubkey = Pubkey::new_from_array([
@@ -30,23 +31,26 @@ fn restore_ledger_with_new_validator_authority() {
 
     // Write a transaction that clones the memo program
     let (mut validator, _) = write(&ledger_path);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     // Read the ledger and verify that the memo program is cloned
     let mut validator = read(&ledger_path);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64) {
     let loaded_chain_accounts =
         LoadedAccounts::new_with_new_validator_authority();
     // Airdrop to the new validator authority
-    RpcClient::new("http://localhost:7799")
+    let rpc_client = RpcClient::new("http://localhost:7799");
+    rpc_client
         .request_airdrop(
             &loaded_chain_accounts.validator_authority(),
             10 * LAMPORTS_PER_SOL,
         )
         .unwrap();
+    wait_for_airdrop(&rpc_client, &loaded_chain_accounts.validator_authority());
+
     let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
@@ -99,12 +103,15 @@ fn read(ledger_path: &Path) -> Child {
     let loaded_chain_accounts =
         LoadedAccounts::new_with_new_validator_authority();
     // Airdrop to the new validator authority
-    RpcClient::new("http://localhost:7799")
+    let rpc_client = RpcClient::new("http://localhost:7799");
+    rpc_client
         .request_airdrop(
             &loaded_chain_accounts.validator_authority(),
             10 * LAMPORTS_PER_SOL,
         )
         .unwrap();
+    wait_for_airdrop(&rpc_client, &loaded_chain_accounts.validator_authority());
+
     let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
@@ -128,4 +135,14 @@ fn read(ledger_path: &Path) -> Child {
     assert_eq!(executable, true, cleanup(&mut validator));
 
     validator
+}
+
+fn wait_for_airdrop(rpc_client: &RpcClient, pubkey: &Pubkey) {
+    loop {
+        let res = rpc_client.get_balance(pubkey).unwrap();
+        if res > 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
 }

@@ -7,7 +7,8 @@ use integration_test_tools::{
 };
 use solana_sdk::pubkey::Pubkey;
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    kill_validator, setup_offline_validator, wait_for_ledger_persist,
+    TMP_DIR_LEDGER,
 };
 
 // In this test we ensure that restoring from a later slot by hydrating the
@@ -27,12 +28,12 @@ fn restore_ledger_with_two_airdrops_with_account_flush_in_between() {
     let pubkey = Pubkey::new_unique();
 
     let (mut validator, slot) = write(&ledger_path, &pubkey);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     assert!(slot > SNAPSHOT_FREQUENCY);
 
     let mut validator = read(&ledger_path, &pubkey);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64) {

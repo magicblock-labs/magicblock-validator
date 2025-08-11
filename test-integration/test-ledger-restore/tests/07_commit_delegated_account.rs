@@ -19,7 +19,7 @@ use solana_sdk::{
 use test_ledger_restore::{
     assert_counter_commits_on_chain, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
-    fetch_counter_owner_chain, get_programs_with_flexi_counter,
+    fetch_counter_owner_chain, get_programs_with_flexi_counter, kill_validator,
     setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
@@ -39,10 +39,10 @@ fn restore_ledger_containing_delegated_and_committed_account() {
     let payer = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     let mut validator = read(&ledger_path, &payer.pubkey());
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {

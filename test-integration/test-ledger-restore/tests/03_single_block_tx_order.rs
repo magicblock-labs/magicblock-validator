@@ -12,7 +12,8 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    kill_validator, setup_offline_validator, wait_for_ledger_persist,
+    TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;
@@ -30,10 +31,10 @@ fn restore_ledger_with_multiple_dependent_transactions_same_slot() {
     ];
 
     let (mut validator, _) = write(&ledger_path, &keypairs, false);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     let mut validator = read(&ledger_path, &keypairs);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 #[test]
@@ -49,10 +50,10 @@ fn restore_ledger_with_multiple_dependent_transactions_separate_slot() {
     ];
 
     let (mut validator, _) = write(&ledger_path, &keypairs, true);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     let mut validator = read(&ledger_path, &keypairs);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write(

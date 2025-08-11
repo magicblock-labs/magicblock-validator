@@ -17,6 +17,8 @@ use crate::{
     workspace_paths::path_relative_to_workspace,
 };
 
+pub const SLEEP_DURATION: Duration = Duration::from_millis(400);
+
 pub fn start_magic_block_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
     log_suffix: &str,
@@ -167,12 +169,7 @@ pub fn start_test_validator_with_config(
 }
 
 pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
-    const SLEEP_DURATION: Duration = Duration::from_millis(400);
-    let max_retries = if std::env::var("CI").is_ok() {
-        1500
-    } else {
-        800
-    };
+    let max_retries = get_max_retries();
 
     for _ in 0..max_retries {
         if TcpStream::connect(format!("0.0.0.0:{}", port)).is_ok() {
@@ -271,6 +268,15 @@ pub fn resolve_programs(
 // -----------------
 // Utilities
 // -----------------
+
+pub fn get_max_retries() -> u32 {
+    let max_retries = if std::env::var("CI").is_ok() {
+        1500
+    } else {
+        800
+    };
+    max_retries
+}
 
 /// Unwraps the provided result and ensures to kill the validator before panicking
 /// if the result was an error

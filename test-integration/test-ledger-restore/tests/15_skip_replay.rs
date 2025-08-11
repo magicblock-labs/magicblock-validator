@@ -10,7 +10,9 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
 };
-use test_ledger_restore::{setup_offline_validator, TMP_DIR_LEDGER};
+use test_ledger_restore::{
+    kill_validator, setup_offline_validator, TMP_DIR_LEDGER,
+};
 
 // Snapshot frequency is set to 2 slots for the offline validator
 const SNAPSHOT_FREQUENCY: u64 = 2;
@@ -25,11 +27,11 @@ fn restore_ledger_skip_replay() {
 
     // Make some transactions
     let (mut validator, slot, signatures) = write(&ledger_path, &keypairs);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     // Check that we're at the last slot and that the state is still there
     let mut validator = read(&ledger_path, &keypairs, &signatures, slot);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write(

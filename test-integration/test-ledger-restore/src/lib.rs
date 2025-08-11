@@ -1,11 +1,14 @@
 use solana_rpc_client::rpc_client::RpcClient;
-use std::{path::Path, process::Child, thread::sleep, time::Duration};
+use std::{
+    net::TcpStream, path::Path, process::Child, thread::sleep, time::Duration,
+};
 
 use integration_test_tools::{
     expect,
     loaded_accounts::LoadedAccounts,
     validator::{
-        resolve_programs, start_magicblock_validator_with_config_struct,
+        get_max_retries, resolve_programs,
+        start_magicblock_validator_with_config_struct, SLEEP_DURATION,
     },
     IntegrationTestContext,
 };
@@ -335,4 +338,18 @@ pub fn wait_for_cloned_accounts_hydration() {
     // NOTE: account hydration runs in the background _after_ the validator starts up
     // thus we need to wait for that to complete before we can send this transaction
     sleep(Duration::from_secs(5));
+}
+
+pub fn kill_validator(validator: &mut Child, port: u16) {
+    validator.kill().unwrap();
+
+    // Wait for the validator to be killed
+    let max_retries = get_max_retries();
+    for _ in 0..max_retries {
+        if TcpStream::connect(format!("0.0.0.0:{}", port)).is_err() {
+            break;
+        }
+
+        sleep(SLEEP_DURATION);
+    }
 }

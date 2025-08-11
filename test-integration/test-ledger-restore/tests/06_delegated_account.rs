@@ -18,8 +18,9 @@ use solana_sdk::{
 use test_ledger_restore::{
     confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
     fetch_counter_chain, fetch_counter_ephem, fetch_counter_owner_chain,
-    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    kill_validator, setup_validator_with_local_remote,
+    wait_for_cloned_accounts_hydration, wait_for_ledger_persist,
+    FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
 };
 
 const COUNTER: &str = "Counter of Payer";
@@ -40,10 +41,10 @@ fn restore_ledger_containing_delegated_account() {
     let payer = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     let mut validator = read(&ledger_path, &payer.pubkey());
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
