@@ -518,6 +518,7 @@ mod tests {
                 db: AccountsDbConfig::default(),
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
+                    auto_airdrop_lamports: 0,
                 },
                 max_monitored_accounts: 2048,
             },
