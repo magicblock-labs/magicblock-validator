@@ -7,12 +7,12 @@ use solana_pubkey::Pubkey;
 use crate::{
     requests::{params::SerdeSignature, payload::NotificationPayload},
     state::subscriptions::SubscriptionID,
-    types::{
-        accounts::LockedAccount,
-        transactions::{TransactionResult, TransactionStatus},
-    },
     utils::{AccountWithPubkey, ProgramFilters},
     Slot,
+};
+use magicblock_core::link::{
+    accounts::LockedAccount,
+    transactions::{TransactionResult, TransactionStatus},
 };
 
 pub(crate) trait Encoder: Ord + Eq + Clone {
@@ -132,6 +132,8 @@ impl Encoder for TransactionLogsEncoder {
                 .any(|p| p == pubkey)
                 .then_some(())?;
         }
+        let logs = execution.logs.as_ref()?;
+
         #[derive(Serialize)]
         struct TransactionLogs<'a> {
             signature: SerdeSignature,
@@ -142,7 +144,7 @@ impl Encoder for TransactionLogsEncoder {
         let result = TransactionLogs {
             signature: SerdeSignature(data.signature),
             err: execution.result.as_ref().map_err(|e| e.to_string()).err(),
-            logs: &execution.logs,
+            logs,
         };
         NotificationPayload::encode(result, slot, method, id)
     }

@@ -6,12 +6,13 @@ use std::{
 
 use hyper::body::{Body, Bytes, Frame, SizeHint};
 use json::Serialize;
+use magicblock_core::link::accounts::LockedAccount;
 use solana_account_decoder::{
     encode_ui_account, UiAccount, UiAccountEncoding, UiDataSliceConfig,
 };
 use solana_rpc_client_api::filter::RpcFilterType;
 
-use crate::{requests::params::Serde32Bytes, types::accounts::LockedAccount};
+use crate::requests::params::Serde32Bytes;
 
 pub(crate) struct JsonBody(pub Vec<u8>);
 

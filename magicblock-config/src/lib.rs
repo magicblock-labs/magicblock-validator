@@ -10,7 +10,6 @@ mod accounts;
 mod accounts_db;
 mod cli;
 pub mod errors;
-mod geyser_grpc;
 mod helpers;
 mod ledger;
 mod metrics;
@@ -20,7 +19,6 @@ mod validator;
 pub use accounts::*;
 pub use accounts_db::*;
 pub use cli::*;
-pub use geyser_grpc::*;
 pub use ledger::*;
 pub use metrics::*;
 pub use program::*;
@@ -46,9 +44,6 @@ pub struct EphemeralConfig {
     #[serde(default)]
     #[command(flatten)]
     pub rpc: RpcConfig,
-    #[serde(default)]
-    #[command(flatten)]
-    pub geyser_grpc: GeyserGrpcConfig,
     #[serde(default)]
     #[command(flatten)]
     pub validator: ValidatorConfig,
@@ -114,6 +109,39 @@ impl EphemeralConfig {
         Ok(config)
     }
 
+<<<<<<< master
+||||||| ancestor
+    pub fn merge(&mut self, other: EphemeralConfig) {
+        // If other differs from the default but not self, use the value from other
+        // Otherwise, use the value from self
+        self.accounts.merge(other.accounts);
+        self.rpc.merge(other.rpc);
+        self.geyser_grpc.merge(other.geyser_grpc.clone());
+        self.validator.merge(other.validator.clone());
+        self.ledger.merge(other.ledger.clone());
+        self.metrics.merge(other.metrics.clone());
+
+        if self.programs.is_empty() && !other.programs.is_empty() {
+            self.programs = other.programs.clone();
+        }
+    }
+
+=======
+    pub fn merge(&mut self, other: EphemeralConfig) {
+        // If other differs from the default but not self, use the value from other
+        // Otherwise, use the value from self
+        self.accounts.merge(other.accounts);
+        self.rpc.merge(other.rpc);
+        self.validator.merge(other.validator.clone());
+        self.ledger.merge(other.ledger.clone());
+        self.metrics.merge(other.metrics.clone());
+
+        if self.programs.is_empty() && !other.programs.is_empty() {
+            self.programs = other.programs.clone();
+        }
+    }
+
+>>>>>>> refactor: move bank functionality to processor
     pub fn post_parse(&mut self) {
         if self.accounts.remote.url.is_some() {
             match &self.accounts.remote.ws_url {
@@ -235,10 +263,6 @@ mod tests {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
             },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
-                port: 9090,
-            },
             validator: ValidatorConfig {
                 millis_per_slot: 5000,
                 sigverify: false,
@@ -323,10 +347,6 @@ mod tests {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
             },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
-                port: 9090,
-            },
             validator: ValidatorConfig {
                 millis_per_slot: 5000,
                 sigverify: false,
@@ -408,10 +428,6 @@ mod tests {
                 addr: IpAddr::V4(Ipv4Addr::new(1, 0, 0, 127)),
                 port: 9091,
             },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(1, 0, 0, 127)),
-                port: 9091,
-            },
             validator: ValidatorConfig {
                 millis_per_slot: 5001,
                 sigverify: false,
@@ -486,10 +502,6 @@ mod tests {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
             },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
-                port: 9090,
-            },
             validator: ValidatorConfig {
                 millis_per_slot: 5000,
                 sigverify: false,
@@ -554,7 +566,6 @@ mod tests {
                 max_monitored_accounts: 2048,
             },
             rpc: RpcConfig::default(),
-            geyser_grpc: GeyserGrpcConfig::default(),
             validator: ValidatorConfig::default(),
             ledger: LedgerConfig {
                 resume_strategy_config: LedgerResumeStrategyConfig {

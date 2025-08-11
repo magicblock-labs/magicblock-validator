@@ -112,10 +112,6 @@ fn test_local_dev_with_programs_toml() {
             ledger: LedgerConfig {
                 ..Default::default()
             },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                port: 11_000
-            },
             metrics: MetricsConfig {
                 enabled: true,
                 service: MetricsServiceConfig {

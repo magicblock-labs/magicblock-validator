@@ -86,10 +86,6 @@ fn test_load_local_dev_with_programs_toml() {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 7799,
             },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                port: 11000,
-            },
             validator: ValidatorConfig {
                 millis_per_slot: 14,
                 ..Default::default()
@@ -176,10 +172,6 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 )
             }],
             rpc: RpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(0, 1, 0, 1)),
-                port: 123,
-            },
-            geyser_grpc: GeyserGrpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 1, 0, 1)),
                 port: 123,
             },
