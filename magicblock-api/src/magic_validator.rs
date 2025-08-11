@@ -53,7 +53,9 @@ use magicblock_metrics::MetricsService;
 use magicblock_perf_service::SamplePerformanceService;
 use magicblock_processor::execute_transaction::TRANSACTION_INDEX_LOCK;
 use magicblock_program::{
-    init_persister, validator, validator::validator_authority,
+    init_persister,
+    validator::{self, validator_authority},
+    TASK_CONTEXT_PUBKEY,
 };
 use magicblock_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
@@ -61,6 +63,7 @@ use magicblock_pubsub::pubsub_service::{
 use magicblock_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
+use magicblock_task_scheduler::TaskSchedulerService;
 use magicblock_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
 };
@@ -93,7 +96,8 @@ use crate::{
     errors::{ApiError, ApiResult},
     external_config::{cluster_from_remote, try_convert_accounts_config},
     fund_account::{
-        fund_magic_context, fund_validator_identity, funded_faucet,
+        fund_magic_context, fund_task_context, fund_validator_identity,
+        funded_faucet,
     },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
@@ -170,6 +174,7 @@ pub struct MagicValidator {
     pubsub_config: PubsubConfig,
     pub transaction_status_sender: TransactionStatusSender,
     claim_fees_task: ClaimFeesTask,
+    task_scheduler_service: TaskSchedulerService,
 }
 
 impl MagicValidator {
@@ -239,6 +244,7 @@ impl MagicValidator {
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
+        fund_task_context(&bank);
         let faucet_keypair = funded_faucet(
             &bank,
             ledger.ledger_path().as_path(),
@@ -377,6 +383,11 @@ impl MagicValidator {
         );
         validator::init_validator_authority(identity_keypair);
 
+        let task_scheduler_service = TaskSchedulerService::new(
+            &config.validator_config.task_scheduler,
+            bank.clone(),
+        )?;
+
         // Make sure we process the ledger before we're open to handle
         // transactions via RPC
         let rpc_service = Self::init_json_rpc_service(
@@ -419,6 +430,7 @@ impl MagicValidator {
             transaction_listener,
             transaction_status_sender,
             claim_fees_task: ClaimFeesTask::new(),
+            task_scheduler_service,
         })
     }
 
@@ -764,6 +776,14 @@ impl MagicValidator {
             pubsub_service.spawn(self.pubsub_config.socket())?;
         self.pubsub_handle.write().unwrap().replace(pubsub_handle);
         self.pubsub_close_handle = pubsub_close_handle;
+
+        let context_sub = self
+            .geyser_rpc_service
+            .accounts_subscribe(1, TASK_CONTEXT_PUBKEY)
+            .await;
+        self.task_scheduler_service
+            .start(context_sub, self.token.clone())
+            .await?;
 
         self.sample_performance_service
             .replace(SamplePerformanceService::new(

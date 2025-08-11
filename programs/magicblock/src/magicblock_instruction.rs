@@ -83,12 +83,20 @@ impl From<(&Pubkey, &Account)> for AccountModification {
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub(crate) struct AccountModificationForInstruction {
+pub struct AccountModificationForInstruction {
     pub lamports: Option<u64>,
     pub owner: Option<Pubkey>,
     pub executable: Option<bool>,
     pub data_key: Option<u64>,
     pub rent_epoch: Option<u64>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct ScheduleTaskArgs {
+    pub task_id: u64,
+    pub period_millis: i64,
+    pub n_executions: u64,
+    pub instructions: Vec<Instruction>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -153,6 +161,21 @@ pub(crate) enum MagicBlockInstruction {
     /// We implement it this way so we can log the signature of this transaction
     /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
     ScheduledCommitSent(u64),
+
+    /// Schedule a new task for execution
+    ///
+    /// # Account references
+    /// - **0.**    `[WRITE, SIGNER]` Payer (payer)
+    /// - **1.**    `[WRITE]`         Task context account
+    /// - **2..n**  `[]`              Accounts included in the task
+    ScheduleTask(ScheduleTaskArgs),
+
+    /// Cancel a task
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Task authority
+    /// - **1.** `[WRITE]`         Task context account
+    CancelTask { task_id: u64 },
 }
 
 #[allow(unused)]
@@ -165,6 +188,8 @@ impl MagicBlockInstruction {
             ScheduleCommitAndUndelegate => 2,
             AcceptScheduleCommits => 3,
             ScheduledCommitSent(_) => 4,
+            ScheduleTask { .. } => 5,
+            CancelTask { .. } => 6,
         }
     }
 
@@ -324,6 +349,71 @@ pub(crate) fn scheduled_commit_sent_instruction(
     Instruction::new_with_bincode(
         *magic_block_program,
         &MagicBlockInstruction::ScheduledCommitSent(scheduled_commit_id),
+        account_metas,
+    )
+}
+
+// -----------------
+// Schedule Task
+// -----------------
+pub fn schedule_task(
+    payer: &Keypair,
+    args: ScheduleTaskArgs,
+    pdas: Vec<Pubkey>,
+    recent_blockhash: Hash,
+) -> Transaction {
+    let ix = schedule_task_instruction(&payer.pubkey(), args, pdas);
+    into_transaction(payer, ix, recent_blockhash)
+}
+
+pub fn schedule_task_instruction(
+    payer: &Pubkey,
+    args: ScheduleTaskArgs,
+    pdas: Vec<Pubkey>,
+) -> Instruction {
+    use magicblock_core::magic_program::TASK_CONTEXT_PUBKEY;
+
+    let mut account_metas = vec![
+        AccountMeta::new(*payer, true),
+        AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
+    ];
+    for pubkey in &pdas {
+        account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+    }
+
+    Instruction::new_with_bincode(
+        crate::id(),
+        &MagicBlockInstruction::ScheduleTask(args),
+        account_metas,
+    )
+}
+
+// -----------------
+// Cancel Task
+// -----------------
+pub fn cancel_task(
+    authority: &Keypair,
+    task_id: u64,
+    recent_blockhash: Hash,
+) -> Transaction {
+    let ix = cancel_task_instruction(&authority.pubkey(), task_id);
+    into_transaction(authority, ix, recent_blockhash)
+}
+
+pub fn cancel_task_instruction(
+    authority: &Pubkey,
+    task_id: u64,
+) -> Instruction {
+    use magicblock_core::magic_program::TASK_CONTEXT_PUBKEY;
+
+    let account_metas = vec![
+        AccountMeta::new(*authority, true),
+        AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
+    ];
+
+    Instruction::new_with_bincode(
+        crate::id(),
+        &MagicBlockInstruction::CancelTask { task_id },
         account_metas,
     )
 }

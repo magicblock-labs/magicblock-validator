@@ -1,0 +1,29 @@
+[accounts]
+remote.cluster = "devnet"
+lifecycle = "offline"
+commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
+
+[validator]
+millis_per_slot = 50
+sigverify = true
+
+[[program]]
+id = "6CtBV7Mrejs2CpFUW3V1Hkpzck4LoCxPTunbxQY6QsxC"
+path = "../target/deploy/schedule_task_program.so"
+
+[[program]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+path = "../schedulecommit/elfs/dlp.so"
+
+[[program]]
+id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
+path = "../schedulecommit/elfs/mdp.so"
+
+[rpc]
+port = 7799
+
+[geyser_grpc]
+port = 10002
+
+[metrics]
+enabled = false
