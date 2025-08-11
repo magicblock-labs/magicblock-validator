@@ -8,10 +8,6 @@ use solana_transaction::{
 use solana_transaction_status::UiTransactionEncoding;
 use tokio::sync::oneshot;
 
-use crate::types::transactions::{
-    ProcessableTransaction, TransactionProcessingMode,
-};
-
 use super::prelude::*;
 
 impl HttpDispatcher {
@@ -88,12 +84,7 @@ impl HttpDispatcher {
             transaction,
             mode: TransactionProcessingMode::Execution(result_tx),
         };
-        if self
-            .transaction_execution_tx
-            .send(to_execute)
-            .await
-            .is_err()
-        {
+        if self.transactions_tx.send(to_execute).await.is_err() {
             warn!("transaction execution channel has closed");
         };
         if let Some(rx) = result_rx {

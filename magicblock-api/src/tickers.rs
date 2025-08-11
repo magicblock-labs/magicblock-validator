@@ -8,6 +8,7 @@ use std::{
 
 use log::*;
 use magicblock_accounts::AccountsManager;
+use magicblock_accounts_db::AccountsDb;
 use magicblock_bank::bank::Bank;
 use magicblock_committor_service::CommittorService;
 use magicblock_core::magic_program;
@@ -23,98 +24,87 @@ use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;
 
-pub fn init_slot_ticker(
-    bank: &Arc<Bank>,
-    accounts_manager: &Arc<AccountsManager>,
+pub async fn init_slot_ticker(
+    accountsdb: Arc<AccountsDb>,
+    accounts_manager: Arc<AccountsManager>,
     committor_service: Option<Arc<CommittorService>>,
-    transaction_status_sender: Option<TransactionStatusSender>,
     ledger: Arc<Ledger>,
     tick_duration: Duration,
     exit: Arc<AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
-    let bank = bank.clone();
-    let accounts_manager = accounts_manager.clone();
-    let committor_service = committor_service.clone();
     let log = tick_duration >= Duration::from_secs(5);
-    tokio::task::spawn(async move {
-        while !exit.load(Ordering::Relaxed) {
-            tokio::time::sleep(tick_duration).await;
+    while !exit.load(Ordering::Relaxed) {
+        tokio::time::sleep(tick_duration).await;
 
-            let (update_ledger_result, next_slot) =
-                advance_slot_and_update_ledger(&bank, &ledger);
-            if let Err(err) = update_ledger_result {
-                error!("Failed to write block: {:?}", err);
-            }
+        let (update_ledger_result, next_slot) =
+            advance_slot_and_update_ledger(&bank, &ledger);
+        if let Err(err) = update_ledger_result {
+            error!("Failed to write block: {:?}", err);
+        }
 
-            // If accounts were scheduled to be committed, we accept them here
-            // and processs the commits
-            let magic_context_acc = bank.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
-                .expect("Validator found to be running without MagicContext account!");
+        // If accounts were scheduled to be committed, we accept them here
+        // and processs the commits
+        let magic_context_acc = accountsdb
+            .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+            .expect(
+                "Validator found to be running without MagicContext account!",
+            );
 
-            if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
-                // 1. Send the transaction to move the scheduled commits from the MagicContext
-                //    to the global ScheduledCommit store
-                let tx = accept_scheduled_commits(bank.last_blockhash());
-                if let Err(err) = execute_legacy_transaction(
-                    tx,
-                    &bank,
-                    transaction_status_sender.as_ref(),
-                ) {
-                    error!("Failed to accept scheduled commits: {:?}", err);
-                } else if let Some(committor_service) =
-                    committor_service.as_ref()
+        if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
+            // 1. Send the transaction to move the scheduled commits from the MagicContext
+            //    to the global ScheduledCommit store
+            let tx = accept_scheduled_commits(bank.last_blockhash());
+            if let Err(err) = execute_legacy_transaction(
+                tx,
+                &bank,
+                transaction_status_sender.as_ref(),
+            ) {
+                error!("Failed to accept scheduled commits: {:?}", err);
+            } else if let Some(committor_service) = committor_service.as_ref() {
+                // 2. Process those scheduled commits
+                // TODO: fix the possible delay here
+                // https://github.com/magicblock-labs/magicblock-validator/issues/104
+                if let Err(err) = accounts_manager
+                    .process_scheduled_commits(committor_service)
+                    .await
                 {
-                    // 2. Process those scheduled commits
-                    // TODO: fix the possible delay here
-                    // https://github.com/magicblock-labs/magicblock-validator/issues/104
-                    if let Err(err) = accounts_manager
-                        .process_scheduled_commits(committor_service)
-                        .await
-                    {
-                        error!(
-                            "Failed to process scheduled commits: {:?}",
-                            err
-                        );
-                    }
+                    error!("Failed to process scheduled commits: {:?}", err);
                 }
             }
-            if log {
-                info!("Advanced to slot {}", next_slot);
-            }
-            metrics::inc_slot();
         }
-    })
+        if log {
+            info!("Advanced to slot {}", next_slot);
+        }
+        metrics::inc_slot();
+    }
 }
 
-pub fn init_commit_accounts_ticker(
-    manager: &Arc<AccountsManager>,
+pub async fn init_commit_accounts_ticker(
+    manager: Arc<AccountsManager>,
     tick_duration: Duration,
     token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
-    let manager = manager.clone();
-    tokio::task::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = tokio::time::sleep(tick_duration) => {
-                    let sigs = manager.commit_delegated().await;
-                    match sigs {
-                        Ok(sigs) if sigs.is_empty() => {
-                            trace!("No accounts committed");
-                        }
-                        Ok(sigs) => {
-                            debug!("Commits: {:?}", sigs);
-                        }
-                        Err(err) => {
-                            error!("Failed to commit accounts: {:?}", err);
-                        }
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(tick_duration) => {
+                let sigs = manager.commit_delegated().await;
+                match sigs {
+                    Ok(sigs) if sigs.is_empty() => {
+                        trace!("No accounts committed");
+                    }
+                    Ok(sigs) => {
+                        debug!("Commits: {:?}", sigs);
+                    }
+                    Err(err) => {
+                        error!("Failed to commit accounts: {:?}", err);
                     }
                 }
-                _ = token.cancelled() => {
-                    break;
-                }
+            }
+            _ = token.cancelled() => {
+                break;
             }
         }
-    })
+    }
 }
 
 #[allow(unused_variables)]

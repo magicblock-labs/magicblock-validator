@@ -1,14 +1,13 @@
 use std::fmt;
 
 use json::{Deserialize, Serialize};
+use magicblock_core::link::blocks::BlockHash;
 use serde::{
     de::{self, Visitor},
     Deserializer, Serializer,
 };
 use solana_pubkey::Pubkey;
 use solana_signature::{Signature, SIGNATURE_BYTES};
-
-use crate::types::blocks::BlockHash;
 
 #[derive(Clone)]
 pub struct SerdeSignature(pub Signature);

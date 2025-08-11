@@ -3,7 +3,7 @@ use std::{fs, path::Path};
 use lmdb::{Cursor, Environment, EnvironmentFlags, RoCursor, RoTransaction};
 use solana_pubkey::Pubkey;
 
-use crate::{index::Blocks, AdbResult};
+use crate::{index::Blocks, AccountsDbResult};
 
 use super::{table::Table, Offset};
 
@@ -50,7 +50,7 @@ impl<'env> AccountOffsetFinder<'env> {
     pub(super) fn new(
         table: &Table,
         txn: RoTransaction<'env>,
-    ) -> AdbResult<Self> {
+    ) -> AccountsDbResult<Self> {
         let cursor = table.cursor_ro(&txn)?;
         // SAFETY:
         // nasty/neat trick for lifetime erasure, but we are upholding
