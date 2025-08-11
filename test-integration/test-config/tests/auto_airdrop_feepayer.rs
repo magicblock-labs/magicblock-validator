@@ -23,7 +23,6 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
     let config = EphemeralConfig {
         accounts: AccountsConfig {
             remote: RemoteConfig {
-                // Connect ephem validator to the local chain RPC used in tests
                 cluster: RemoteCluster::Custom,
                 url: Some(IntegrationTestContext::url_chain().try_into().unwrap()),
                 ws_url: Some(vec![IntegrationTestContext::ws_url_chain()
@@ -32,8 +31,7 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
             },
             lifecycle: LifecycleMode::Ephemeral,
             clone: AccountsCloneConfig {
-                // Set the auto airdrop lamports to 100_000 as requested
-                auto_airdrop_lamports: 100_000,
+                auto_airdrop_lamports: 1_000_000_000,
                 ..Default::default()
             },
             ..Default::default()
@@ -58,7 +56,7 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
     let recipient = Keypair::new();
 
     // Send a 0-lamport transfer to trigger account creation/cloning for the new fee payer
-    // This should cause the validator to auto-airdrop 100_000 lamports to the payer
+    // This should cause the validator to auto-airdrop 1 SOL to the payer
     let ix = system_instruction::transfer(&payer.pubkey(), &recipient.pubkey(), 0);
     let _sig = expect!(
         ctx.send_and_confirm_instructions_with_payer_ephem(&[ix], &payer),
@@ -70,7 +68,7 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
         ctx.fetch_ephem_account_balance(&payer.pubkey()),
         validator
     );
-    assert_eq!(balance, 100_000);
+    assert_eq!(balance, 1_000_000_000);
 
     // Cleanup validator process
     integration_test_tools::validator::cleanup(&mut validator);
