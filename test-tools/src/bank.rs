@@ -44,8 +44,6 @@ pub fn bank_for_tests_with_identity(
         // TODO(bmuddha): when we switch to multithreaded mode,
         // switch to actual lock held by scheduler
         StWLock::default(),
-        &adb_path,
-        adb_init_slot,
     )?;
     bank.transaction_log_collector_config
         .write()

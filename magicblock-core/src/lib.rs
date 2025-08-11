@@ -1,10 +1,9 @@
-pub mod traits;
-
+pub type Slot = u64;
 pub mod magic_program {
-    use solana_sdk::pubkey;
-    pub use solana_sdk::pubkey::Pubkey;
+    use solana_program::pubkey;
+    pub use solana_pubkey::Pubkey;
 
-    solana_sdk::declare_id!("Magic11111111111111111111111111111111111111");
+    solana_program::declare_id!("Magic11111111111111111111111111111111111111");
 
     pub const MAGIC_CONTEXT_PUBKEY: Pubkey =
         pubkey!("MagicContext1111111111111111111111111111111");
@@ -29,3 +28,6 @@ macro_rules! debug_panic {
         }
     )
 }
+
+pub mod link;
+pub mod traits;

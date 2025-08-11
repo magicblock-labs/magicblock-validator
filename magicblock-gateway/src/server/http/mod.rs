@@ -12,9 +12,9 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    error::RpcError, state::SharedState, types::RpcChannelEndpoints, RpcResult,
-};
+use magicblock_core::link::RpcChannelEndpoints;
+
+use crate::{error::RpcError, state::SharedState, RpcResult};
 
 use super::Shutdown;
 

@@ -2036,10 +2036,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "expiring-hashmap"
-version = "0.1.7"
-
-[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3882,8 +3878,9 @@ dependencies = [
 name = "magicblock-accounts-api"
 version = "0.1.7"
 dependencies = [
- "magicblock-bank",
- "solana-sdk",
+ "magicblock-accounts-db",
+ "solana-account",
+ "solana-pubkey",
 ]
 
 [[package]]
@@ -3954,7 +3951,7 @@ dependencies = [
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -3994,7 +3991,7 @@ dependencies = [
  "solana-program-runtime",
  "solana-rpc",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm",
  "solana-svm-transaction",
  "solana-system-program",
  "solana-timings",
@@ -4091,7 +4088,18 @@ dependencies = [
 name = "magicblock-core"
 version = "0.1.7"
 dependencies = [
- "solana-sdk",
+ "flume",
+ "solana-account",
+ "solana-account-decoder",
+ "solana-hash",
+ "solana-program",
+ "solana-pubkey",
+ "solana-signature",
+ "solana-transaction",
+ "solana-transaction-context",
+ "solana-transaction-error",
+ "solana-transaction-status-client-types",
+ "tokio",
 ]
 
 [[package]]
@@ -4126,6 +4134,7 @@ dependencies = [
  "log",
  "magicblock-accounts-db",
  "magicblock-config",
+ "magicblock-core",
  "magicblock-ledger",
  "parking_lot 0.12.4",
  "scc",
@@ -4151,6 +4160,7 @@ dependencies = [
 name = "magicblock-ledger"
 version = "0.1.7"
 dependencies = [
+ "arc-swap",
  "bincode",
  "byteorder",
  "fs_extra",
@@ -4169,7 +4179,7 @@ dependencies = [
  "solana-metrics",
  "solana-sdk",
  "solana-storage-proto 0.1.7",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm",
  "solana-timings",
  "solana-transaction-status",
  "tempfile",
@@ -4226,18 +4236,35 @@ dependencies = [
  "lazy_static",
  "log",
  "magicblock-accounts-db",
- "magicblock-bank",
+ "magicblock-core",
+ "magicblock-ledger",
+ "magicblock-program",
  "magicblock-transaction-status",
- "rayon",
+ "parking_lot 0.12.4",
+ "solana-account",
  "solana-account-decoder",
+ "solana-address-lookup-table-program",
+ "solana-bpf-loader-program",
+ "solana-compute-budget-program",
+ "solana-feature-set",
+ "solana-fee",
+ "solana-fee-structure",
  "solana-measure",
  "solana-metrics",
- "solana-rayon-threadlimit",
- "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-program",
+ "solana-program-runtime",
+ "solana-pubkey",
+ "solana-rent",
+ "solana-rent-collector",
+ "solana-sdk-ids",
+ "solana-svm",
+ "solana-svm-transaction",
+ "solana-system-program",
  "solana-timings",
+ "solana-transaction",
  "spl-token",
  "spl-token-2022 6.0.0",
+ "tokio",
 ]
 
 [[package]]
@@ -4315,7 +4342,7 @@ dependencies = [
  "log",
  "magicblock-bank",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm",
  "solana-transaction-status",
 ]
 
@@ -6835,7 +6862,7 @@ dependencies = [
  "solana-runtime-transaction",
  "solana-sdk",
  "solana-send-transaction-service",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git)",
+ "solana-svm",
  "tarpc",
  "tokio",
  "tokio-serde",
@@ -7894,7 +7921,7 @@ dependencies = [
  "solana-stake-program",
  "solana-storage-bigtable",
  "solana-storage-proto 2.2.1",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git)",
+ "solana-svm",
  "solana-svm-transaction",
  "solana-timings",
  "solana-transaction-status",
@@ -8479,7 +8506,7 @@ dependencies = [
  "solana-sbpf",
  "solana-sdk",
  "solana-sdk-ids",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git)",
+ "solana-svm",
  "solana-timings",
  "solana-vote-program",
  "thiserror 2.0.12",
@@ -8724,7 +8751,7 @@ dependencies = [
  "solana-stake-program",
  "solana-storage-bigtable",
  "solana-streamer",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git)",
+ "solana-svm",
  "solana-tpu-client",
  "solana-transaction-status",
  "solana-version",
@@ -8891,7 +8918,7 @@ dependencies = [
  "solana-runtime-transaction",
  "solana-sdk",
  "solana-stake-program",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git)",
+ "solana-svm",
  "solana-svm-rent-collector",
  "solana-svm-transaction",
  "solana-timings",
@@ -9440,7 +9467,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57#e93eb579767770c8a0f872117676c289a2164e87"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=9b722a5#9b722a5a9d7f5ff0b2b7542968cd765fc3f3659d"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -9470,49 +9497,7 @@ dependencies = [
  "solana-pubkey",
  "solana-rent",
  "solana-rent-debits",
- "solana-sdk",
- "solana-sdk-ids",
- "solana-svm-rent-collector",
- "solana-svm-transaction",
- "solana-timings",
- "solana-transaction-context",
- "solana-transaction-error",
- "solana-type-overrides",
- "thiserror 2.0.12",
-]
-
-[[package]]
-name = "solana-svm"
-version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git#e93eb579767770c8a0f872117676c289a2164e87"
-dependencies = [
- "ahash 0.8.12",
- "log",
- "percentage",
- "serde",
- "serde_derive",
- "solana-account",
- "solana-bpf-loader-program",
- "solana-clock",
- "solana-compute-budget",
- "solana-compute-budget-instruction",
- "solana-feature-set",
- "solana-fee-structure",
- "solana-hash",
- "solana-instruction",
- "solana-instructions-sysvar",
- "solana-loader-v4-program",
- "solana-log-collector",
- "solana-measure",
- "solana-message",
- "solana-nonce",
- "solana-nonce-account",
- "solana-precompiles",
- "solana-program",
- "solana-program-runtime",
- "solana-pubkey",
- "solana-rent",
- "solana-rent-debits",
+ "solana-reserved-account-keys",
  "solana-sdk",
  "solana-sdk-ids",
  "solana-svm-rent-collector",
@@ -10880,7 +10865,7 @@ dependencies = [
  "solana-geyser-plugin-manager",
  "solana-rpc-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm",
  "solana-timings",
  "tempfile",
  "test-tools-core",
@@ -10893,7 +10878,7 @@ version = "0.1.7"
 dependencies = [
  "env_logger 0.11.8",
  "log",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm",
 ]
 
 [[package]]
