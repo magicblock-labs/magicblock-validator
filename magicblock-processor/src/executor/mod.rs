@@ -1,3 +1,5 @@
+use std::sync::{atomic::AtomicUsize, Arc, OnceLock, RwLock};
+
 use magicblock_accounts_db::{AccountsDb, StWLock};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
@@ -9,18 +11,19 @@ use solana_bpf_loader_program::syscalls::{
     create_program_runtime_environment_v1,
     create_program_runtime_environment_v2,
 };
-use solana_program_runtime::loaded_programs::{BlockRelation, ForkGraph};
+use solana_program::sysvar;
+use solana_program_runtime::loaded_programs::{
+    BlockRelation, ForkGraph, ProgramCacheEntry,
+};
 use solana_svm::transaction_processor::{
     ExecutionRecordingConfig, TransactionBatchProcessor,
     TransactionProcessingConfig, TransactionProcessingEnvironment,
 };
-use std::{
-    sync::{atomic::AtomicUsize, Arc, OnceLock, RwLock},
-    thread,
-};
 use tokio::{runtime::Builder, sync::mpsc::Sender};
 
-use crate::{scheduler::TransactionSchedulerState, WorkerId};
+use crate::{
+    builtins::BUILTINS, scheduler::TransactionSchedulerState, WorkerId,
+};
 
 static FORK_GRAPH: OnceLock<Arc<RwLock<SimpleForkGraph>>> = OnceLock::new();
 
@@ -87,26 +90,41 @@ impl TransactionExecutor {
             environment: state.environment.clone(),
             rx,
             ready_tx,
-            accounts_tx: state.channels.account_update_tx.clone(),
-            transaction_tx: state.channels.transaction_status_tx.clone(),
+            accounts_tx: state.account_update_tx.clone(),
+            transaction_tx: state.transaction_status_tx.clone(),
             index,
         };
         this.processor.fill_missing_sysvar_cache_entries(&this);
         this
     }
 
+    pub(super) fn populate_builtins(&self) {
+        for program in BUILTINS {
+            let entry = ProgramCacheEntry::new_builtin(
+                0,
+                program.name.len(),
+                program.entrypoint,
+            );
+            self.processor.add_builtin(
+                self,
+                program.program_id,
+                program.name,
+                entry,
+            );
+        }
+    }
+
     pub(super) fn spawn(self) {
         let task = move || {
             let runtime = Builder::new_current_thread()
                 .thread_name("transaction executor")
-                .enable_time()
                 .build()
                 .expect(
                     "building single threaded tokio runtime should succeed",
                 );
-            runtime.block_on(self.run());
+            runtime.block_on(tokio::task::unconstrained(self.run()));
         };
-        thread::spawn(task);
+        std::thread::spawn(task);
     }
 
     async fn run(mut self) {
@@ -129,6 +147,10 @@ impl TransactionExecutor {
                     self.environment.blockhash = block.blockhash;
                     self.processor.set_slot(block.slot);
                     self.slot = block.slot;
+                    self.processor.writable_sysvar_cache()
+                        .write().unwrap().set_sysvar_for_tests(&block.clock);
+                    self.processor.program_cache.write()
+                        .unwrap().latest_root_slot = block.slot;
                     RwLockReadGuard::unlock_fair(_guard);
                     _guard = self.sync.read();
                 }
@@ -142,7 +164,7 @@ impl TransactionExecutor {
 
 /// Dummy, low overhead, ForkGraph implementation
 #[derive(Default)]
-struct SimpleForkGraph;
+pub(super) struct SimpleForkGraph;
 
 impl ForkGraph for SimpleForkGraph {
     /// we never have forks or relevant logic, so we

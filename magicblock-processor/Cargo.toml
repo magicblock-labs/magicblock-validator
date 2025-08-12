@@ -17,29 +17,21 @@ magicblock-accounts-db = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-program = { workspace = true }
-magicblock-transaction-status = { workspace = true }
 
 solana-account = { workspace = true }
-solana-account-decoder = { workspace = true }
 solana-bpf-loader-program = { workspace = true }
 solana-compute-budget-program = { workspace = true }
 solana-feature-set = { workspace = true }
 solana-fee = { workspace = true }
 solana-fee-structure = { workspace = true }
 solana-address-lookup-table-program = { workspace = true }
-solana-measure = { workspace = true }
-solana-metrics = { workspace = true }
 solana-program = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-pubkey = { workspace = true }
-solana-rent = { workspace = true }
 solana-rent-collector = { workspace = true }
 solana-sdk-ids = { workspace = true }
 solana-svm = { workspace = true }
 solana-svm-transaction = { workspace = true }
 solana-system-program = { workspace = true }
-solana-timings = { workspace = true }
 solana-transaction = { workspace = true }
-spl-token = { workspace = true }
-spl-token-2022 = { workspace = true }
 
