@@ -1,18 +1,7 @@
-use magicblock_bank::bank::Bank;
-use solana_sdk::{
-    account::Account, clock::Epoch, pubkey::Pubkey, system_program,
-};
+use magicblock_accounts_db::AccountsDb;
+use solana_sdk::{account::AccountSharedData, pubkey::Pubkey};
 
-pub fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
-    bank.store_account(
-        *pubkey,
-        Account {
-            lamports,
-            data: vec![],
-            owner: system_program::id(),
-            executable: false,
-            rent_epoch: Epoch::MAX,
-        }
-        .into(),
-    );
+pub fn fund_account(accountsdb: &AccountsDb, pubkey: &Pubkey, lamports: u64) {
+    let account = AccountSharedData::new(lamports, 0, &Default::default());
+    accountsdb.insert_account(pubkey, &account);
 }

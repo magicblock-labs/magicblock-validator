@@ -10,11 +10,9 @@ edition.workspace = true
 [dependencies]
 log = { workspace = true }
 magicblock-accounts-db = { workspace = true }
-magicblock-bank = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-program = { workspace = true }
-solana-geyser-plugin-manager = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
@@ -24,5 +22,3 @@ tempfile = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
-
-magicblock-bank = { workspace = true, features = ["dev-context-only-utils"] }
