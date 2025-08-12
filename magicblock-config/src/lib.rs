@@ -38,7 +38,7 @@ pub use validator::*;
     Args,
     Mergeable,
 )]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct EphemeralConfig {
     #[serde(default)]
     #[command(flatten)]

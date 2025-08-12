@@ -1,7 +1,7 @@
 [accounts]
 remote.url = "http://0.0.0.0:7799"
 lifecycle = "ephemeral"
-commit = { frequency_millis = 500_000, compute_unit_price = 1_000_000 }
+commit = { frequency-millis = 500_000, compute-unit-price = 1_000_000 }
 max-monitored-accounts = 3
 
 [accounts.db]
