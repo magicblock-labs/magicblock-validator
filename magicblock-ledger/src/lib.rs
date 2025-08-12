@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use arc_swap::{ArcSwapAny, Guard};
 pub use database::meta::PerfSample;
-use solana_sdk::hash::Hash;
+use solana_sdk::{clock::Clock, hash::Hash};
 pub use store::api::{Ledger, SignatureInfosForAddress};
 use tokio::sync::Notify;
 
 pub struct LatestBlockInner {
     pub slot: u64,
     pub blockhash: Hash,
+    pub clock: Clock,
 }
 
 /// Atomically updated, shared, latest block information
@@ -18,9 +19,24 @@ pub struct LatestBlock {
     notifier: Arc<Notify>,
 }
 
+impl LatestBlockInner {
+    fn new(slot: u64, blockhash: Hash, timestamp: i64) -> Self {
+        let clock = Clock {
+            slot,
+            unix_timestamp: timestamp,
+            ..Default::default()
+        };
+        Self {
+            slot,
+            blockhash,
+            clock,
+        }
+    }
+}
+
 impl LatestBlock {
-    pub fn new(slot: u64, blockhash: Hash) -> Self {
-        let block = LatestBlockInner { slot, blockhash };
+    pub fn new(slot: u64, blockhash: Hash, timestamp: i64) -> Self {
+        let block = LatestBlockInner::new(slot, blockhash, timestamp);
         let notifier = Arc::default();
         Self {
             inner: Arc::new(ArcSwapAny::new(block.into())),
@@ -32,8 +48,8 @@ impl LatestBlock {
         self.inner.load()
     }
 
-    pub fn store(&self, slot: u64, blockhash: Hash) {
-        let block = LatestBlockInner { slot, blockhash };
+    pub fn store(&self, slot: u64, blockhash: Hash, timestamp: i64) {
+        let block = LatestBlockInner::new(slot, blockhash, timestamp);
         self.inner.store(block.into());
         self.notifier.notify_waiters();
     }
