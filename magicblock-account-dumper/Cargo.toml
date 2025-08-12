@@ -8,10 +8,10 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-magicblock-bank = { workspace = true }
+magicblock-accounts-db = { workspace = true }
 magicblock-mutator = { workspace = true }
 magicblock-processor = { workspace = true }
-magicblock-transaction-status = { workspace = true }
+
 solana-sdk = { workspace = true }
 thiserror = { workspace = true }
 bincode = { workspace = true }

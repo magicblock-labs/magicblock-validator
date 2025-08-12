@@ -2,6 +2,7 @@ pub mod domain_registry_manager;
 pub mod errors;
 pub mod external_config;
 mod fund_account;
+mod genesis_utils;
 mod geyser_transaction_notify_listener;
 pub mod ledger;
 pub mod magic_validator;

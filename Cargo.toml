@@ -14,7 +14,6 @@ members = [
   "magicblock-accounts-api",
   "magicblock-accounts-db",
   "magicblock-api",
-  "magicblock-bank",
   "magicblock-committor-program",
   "magicblock-committor-service",
   "magicblock-config",
@@ -29,8 +28,6 @@ members = [
   "magicblock-processor",
   "magicblock-rpc-client",
   "magicblock-table-mania",
-  "magicblock-tokens",
-  "magicblock-transaction-status",
   "magicblock-validator",
   "magicblock-version",
   "magicblock-validator-admin",
@@ -96,7 +93,6 @@ jsonrpc-pubsub = "18.0.0"
 jsonrpc-ws-server = "18.0.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
-libloading = "0.7.4"
 log = "0.4.20"
 lru = "0.16.0"
 macrotest = "1"
@@ -109,7 +105,6 @@ magicblock-accounts = { path = "./magicblock-accounts" }
 magicblock-accounts-api = { path = "./magicblock-accounts-api" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-api = { path = "./magicblock-api" }
-magicblock-bank = { path = "./magicblock-bank" }
 magicblock-committor-program = { path = "./magicblock-committor-program", features = [
   "no-entrypoint",
 ] }
@@ -128,8 +123,6 @@ magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
-magicblock-tokens = { path = "./magicblock-tokens" }
-magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
 magicblock-version = { path = "./magicblock-version" }
 num-derive = "0.4"
@@ -166,8 +159,6 @@ solana-feature-set = { version = "2.2" }
 solana-fee = { version = "2.2" }
 solana-fee-structure = { version = "2.2" }
 solana-frozen-abi-macro = { version = "2.2" }
-solana-geyser-plugin-interface = { version = "2.2", package = "agave-geyser-plugin-interface" }
-solana-geyser-plugin-manager = { version = "2.2" }
 solana-hash = { version = "2.2" }
 solana-inline-spl = { version = "2.2" }
 solana-keypair = { version = "2.2" }

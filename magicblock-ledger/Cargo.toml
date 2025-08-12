@@ -18,7 +18,6 @@ num_cpus = { workspace = true }
 num-format = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
-magicblock-bank = { workspace = true }
 magicblock-accounts-db = { workspace = true }
 magicblock-core = { workspace = true }
 solana-account-decoder = { workspace = true }

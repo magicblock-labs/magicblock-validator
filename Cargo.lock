@@ -64,20 +64,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agave-geyser-plugin-interface"
-version = "2.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df63ffb691b27f0253e893d083126cbe98a6b1ace29108992310f323f1ac50b0"
-dependencies = [
- "log",
- "solana-clock",
- "solana-signature",
- "solana-transaction",
- "solana-transaction-status",
- "thiserror 2.0.12",
-]
-
-[[package]]
 name = "agave-transaction-view"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3332,17 +3318,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "json5"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96b0db21af676c1ce64250b5f40f3ce2cf27e4e47cb91ed91eb6fe9350b430c1"
-dependencies = [
- "pest",
- "pest_derive",
- "serde",
-]
-
-[[package]]
 name = "jsonrpc-client-transports"
 version = "18.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3812,10 +3787,9 @@ name = "magicblock-account-dumper"
 version = "0.1.7"
 dependencies = [
  "bincode",
- "magicblock-bank",
+ "magicblock-accounts-db",
  "magicblock-mutator",
  "magicblock-processor",
- "magicblock-transaction-status",
  "solana-sdk",
  "thiserror 1.0.69",
 ]
@@ -3871,7 +3845,7 @@ dependencies = [
  "magicblock-account-fetcher",
  "magicblock-account-updates",
  "magicblock-accounts-api",
- "magicblock-bank",
+ "magicblock-accounts-db",
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
@@ -3880,7 +3854,6 @@ dependencies = [
  "magicblock-mutator",
  "magicblock-processor",
  "magicblock-program",
- "magicblock-transaction-status",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
@@ -3923,7 +3896,6 @@ dependencies = [
 name = "magicblock-api"
 version = "0.1.7"
 dependencies = [
- "agave-geyser-plugin-interface",
  "anyhow",
  "borsh 1.5.7",
  "conjunto-transwise",
@@ -3940,7 +3912,6 @@ dependencies = [
  "magicblock-accounts",
  "magicblock-accounts-api",
  "magicblock-accounts-db",
- "magicblock-bank",
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
@@ -3959,10 +3930,14 @@ dependencies = [
  "magicblock-perf-service",
  "magicblock-processor",
  "magicblock-program",
+<<<<<<< master
  "magicblock-transaction-status",
  "magicblock-validator-admin",
+||||||| ancestor
+ "magicblock-transaction-status",
+=======
+>>>>>>> refactor: remove unecassary files
  "paste",
- "solana-geyser-plugin-manager",
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
@@ -3971,48 +3946,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.15",
-]
-
-[[package]]
-name = "magicblock-bank"
-version = "0.1.7"
-dependencies = [
- "agave-geyser-plugin-interface",
- "assert_matches",
- "bincode",
- "env_logger 0.11.8",
- "itertools 0.14.0",
- "log",
- "magicblock-accounts-db",
- "magicblock-bank",
- "magicblock-config",
- "magicblock-core",
- "magicblock-program",
- "rand 0.8.5",
- "rayon",
- "serde",
- "solana-accounts-db",
- "solana-address-lookup-table-program",
- "solana-bpf-loader-program",
- "solana-compute-budget",
- "solana-compute-budget-instruction",
- "solana-compute-budget-program",
- "solana-cost-model",
- "solana-fee",
- "solana-frozen-abi-macro",
- "solana-geyser-plugin-manager",
- "solana-inline-spl",
- "solana-measure",
- "solana-program-runtime",
- "solana-rpc",
- "solana-sdk",
- "solana-svm",
- "solana-svm-transaction",
- "solana-system-program",
- "solana-timings",
- "solana-transaction-status",
- "tempfile",
- "test-tools-core",
 ]
 
 [[package]]
@@ -4182,7 +4115,6 @@ dependencies = [
  "libc",
  "log",
  "magicblock-accounts-db",
- "magicblock-bank",
  "magicblock-core",
  "num-format",
  "num_cpus",
@@ -4225,7 +4157,6 @@ dependencies = [
  "assert_matches",
  "bincode",
  "log",
- "magicblock-bank",
  "magicblock-program",
  "solana-rpc-client",
  "solana-rpc-client-api",
@@ -4240,7 +4171,7 @@ name = "magicblock-perf-service"
 version = "0.1.7"
 dependencies = [
  "log",
- "magicblock-bank",
+ "magicblock-accounts-db",
  "magicblock-ledger",
 ]
 
@@ -4254,31 +4185,23 @@ dependencies = [
  "magicblock-core",
  "magicblock-ledger",
  "magicblock-program",
- "magicblock-transaction-status",
  "parking_lot 0.12.4",
  "solana-account",
- "solana-account-decoder",
  "solana-address-lookup-table-program",
  "solana-bpf-loader-program",
  "solana-compute-budget-program",
  "solana-feature-set",
  "solana-fee",
  "solana-fee-structure",
- "solana-measure",
- "solana-metrics",
  "solana-program",
  "solana-program-runtime",
  "solana-pubkey",
- "solana-rent",
  "solana-rent-collector",
  "solana-sdk-ids",
  "solana-svm",
  "solana-svm-transaction",
  "solana-system-program",
- "solana-timings",
  "solana-transaction",
- "spl-token",
- "spl-token-2022 6.0.0",
  "tokio",
 ]
 
@@ -4335,6 +4258,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< master
 name = "magicblock-tokens"
 version = "0.1.7"
 dependencies = [
@@ -4397,6 +4321,36 @@ dependencies = [
 ]
 
 [[package]]
+||||||| ancestor
+name = "magicblock-tokens"
+version = "0.1.7"
+dependencies = [
+ "log",
+ "magicblock-bank",
+ "magicblock-transaction-status",
+ "solana-account-decoder",
+ "solana-measure",
+ "solana-metrics",
+ "solana-sdk",
+ "spl-token",
+ "spl-token-2022 6.0.0",
+]
+
+[[package]]
+name = "magicblock-transaction-status"
+version = "0.1.7"
+dependencies = [
+ "crossbeam-channel",
+ "log",
+ "magicblock-bank",
+ "solana-sdk",
+ "solana-svm",
+ "solana-transaction-status",
+]
+
+[[package]]
+=======
+>>>>>>> refactor: remove unecassary files
 name = "magicblock-version"
 version = "0.1.7"
 dependencies = [
@@ -5047,50 +5001,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fd23b938276f14057220b707937bcb42fa76dda7560e57a2da30cb52d557937"
 dependencies = [
  "num",
-]
-
-[[package]]
-name = "pest"
-version = "2.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1db05f56d34358a8b1066f67cbb203ee3e7ed2ba674a6263a1d5ec6db2204323"
-dependencies = [
- "memchr",
- "thiserror 2.0.12",
- "ucd-trie",
-]
-
-[[package]]
-name = "pest_derive"
-version = "2.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb056d9e8ea77922845ec74a1c4e8fb17e7c218cc4fc11a15c5d25e189aa40bc"
-dependencies = [
- "pest",
- "pest_generator",
-]
-
-[[package]]
-name = "pest_generator"
-version = "2.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87e404e638f781eb3202dc82db6760c8ae8a1eeef7fb3fa8264b2ef280504966"
-dependencies = [
- "pest",
- "pest_meta",
- "proc-macro2",
- "quote",
- "syn 2.0.104",
-]
-
-[[package]]
-name = "pest_meta"
-version = "2.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edd1101f170f5903fde0914f899bb503d9ff5271d7ba76bbb70bea63690cc0d5"
-dependencies = [
- "pest",
- "sha2 0.10.9",
 ]
 
 [[package]]
@@ -7656,37 +7566,6 @@ dependencies = [
  "solana-shred-version",
  "solana-signer",
  "solana-time-utils",
-]
-
-[[package]]
-name = "solana-geyser-plugin-manager"
-version = "2.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce8287469a6f059411a3940bbc1b0a428b27104827ae1a80e465a1139f8b0773"
-dependencies = [
- "agave-geyser-plugin-interface",
- "bs58",
- "crossbeam-channel",
- "json5",
- "jsonrpc-core",
- "libloading 0.7.4",
- "log",
- "serde_json",
- "solana-account",
- "solana-accounts-db",
- "solana-clock",
- "solana-entry",
- "solana-ledger",
- "solana-measure",
- "solana-metrics",
- "solana-pubkey",
- "solana-rpc",
- "solana-runtime",
- "solana-signature",
- "solana-transaction",
- "solana-transaction-status",
- "thiserror 2.0.12",
- "tokio",
 ]
 
 [[package]]
@@ -10875,11 +10754,9 @@ version = "0.1.7"
 dependencies = [
  "log",
  "magicblock-accounts-db",
- "magicblock-bank",
  "magicblock-config",
  "magicblock-core",
  "magicblock-program",
- "solana-geyser-plugin-manager",
  "solana-rpc-client",
  "solana-sdk",
  "solana-svm",
@@ -11515,12 +11392,6 @@ name = "typenum"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
-
-[[package]]
-name = "ucd-trie"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
 
 [[package]]
 name = "unarray"

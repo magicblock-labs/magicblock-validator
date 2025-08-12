@@ -43,7 +43,7 @@ impl HttpDispatcher {
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             ensure_accounts_tx: channels.ensure_accounts_tx.clone(),
-            transactions_tx: channels.processable_txn_tx.clone(),
+            transactions_tx: channels.txn_to_process_tx.clone(),
         })
     }
 

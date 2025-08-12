@@ -2,19 +2,24 @@ use std::sync::{atomic::AtomicUsize, Arc};
 
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
-    transactions::{TxnToProcessRx, TxnToProcessTx},
-    ValidatorChannelEndpoints,
+    accounts::AccountUpdateTx,
+    transactions::{TxnStatusTx, TxnToProcessRx, TxnToProcessTx},
 };
 use magicblock_ledger::{LatestBlock, Ledger};
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
-use tokio::sync::mpsc::{channel, Receiver};
+use tokio::{
+    runtime::Builder,
+    sync::mpsc::{channel, Receiver},
+};
 
 use crate::{executor::TransactionExecutor, WorkerId};
 
-pub struct TransactionScheduler<E> {
+pub struct TransactionScheduler {
     transactions_rx: TxnToProcessRx,
     ready_rx: Receiver<WorkerId>,
-    executors: Vec<E>,
+    executors: Vec<TxnToProcessTx>,
+    block: LatestBlock,
+    index: Arc<AtomicUsize>,
 }
 
 pub struct TransactionSchedulerState {
@@ -22,10 +27,12 @@ pub struct TransactionSchedulerState {
     pub ledger: Arc<Ledger>,
     pub block: LatestBlock,
     pub environment: TransactionProcessingEnvironment<'static>,
-    pub channels: ValidatorChannelEndpoints,
+    pub txn_to_process_tx: TxnToProcessRx,
+    pub account_update_tx: AccountUpdateTx,
+    pub transaction_status_tx: TxnStatusTx,
 }
 
-impl TransactionScheduler<(TransactionExecutor, TxnToProcessTx)> {
+impl TransactionScheduler {
     pub fn new(workers: u8, state: TransactionSchedulerState) -> Self {
         let index = Arc::new(AtomicUsize::new(0));
         let mut executors = Vec::with_capacity(workers as usize);
@@ -40,20 +47,53 @@ impl TransactionScheduler<(TransactionExecutor, TxnToProcessTx)> {
                 ready_tx.clone(),
                 index.clone(),
             );
-            executors.push((executor, transactions_tx));
+            executor.populate_builtins();
+            executor.spawn();
+            executors.push(transactions_tx);
         }
         Self {
-            transactions_rx: state.channels.processable_txn_rx,
+            transactions_rx: state.txn_to_process_tx,
             ready_rx,
             executors,
+            block: state.block,
+            index,
         }
     }
 
-    fn init(self) -> TransactionScheduler<TxnToProcessTx> {
-        todo!()
+    pub fn spawn(self) {
+        let task = move || {
+            let runtime = Builder::new_current_thread()
+                .thread_name("transaction scheduler")
+                .build()
+                .expect(
+                    "building single threaded tokio runtime should succeed",
+                );
+            runtime.block_on(tokio::task::unconstrained(self.run()));
+        };
+        std::thread::spawn(task);
     }
-}
 
-impl TransactionScheduler<TxnToProcessTx> {
-    fn run(self) {}
+    async fn run(mut self) {
+        loop {
+            tokio::select! {
+                Some(txn) = self.transactions_rx.recv() => {
+                    let Some(tx) = self.executors.first() else {
+                        continue;
+                    };
+                    let _ = tx.send(txn).await;
+                }
+                Some(_) = self.ready_rx.recv() => {
+                    // TODO use the branch with the multithreaded scheduler
+                }
+                _ = self.block.changed() => {
+                    // when a new block/slot starts, reset the transaction index
+                    self.index.store(0, std::sync::atomic::Ordering::Relaxed);
+                }
+                else => {
+                    // transactions channel has been closed, the system is shutting down
+                    break
+                }
+            }
+        }
+    }
 }
