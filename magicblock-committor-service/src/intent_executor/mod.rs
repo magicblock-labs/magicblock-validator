@@ -14,11 +14,17 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub struct ExecutionOutput {
-    /// Commit stage signature
-    pub commit_signature: Signature,
-    /// Finalize stage signature
-    pub finalize_signature: Signature,
+pub enum ExecutionOutput {
+    // TODO: with arrival of challange window remove SingleStage
+    // Protocol requires 2 stage: Commit, Finalize
+    // SingleStage - optimization for timebeing
+    SingleStage(Signature),
+    TwoStage {
+        /// Commit stage signature
+        commit_signature: Signature,
+        /// Finalize stage signature
+        finalize_signature: Signature,
+    },
 }
 
 #[async_trait]

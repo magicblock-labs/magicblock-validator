@@ -5,7 +5,7 @@ use magicblock_table_mania::TableMania;
 
 use crate::{
     intent_executor::{
-        commit_id_fetcher::CommitIdTrackerImpl, IntentExecutor,
+        commit_id_fetcher::CacheTaskInfoFetcher, IntentExecutor,
         IntentExecutorImpl,
     },
     transaction_preperator::transaction_preparator::TransactionPreparatorV1,
@@ -23,24 +23,23 @@ pub struct IntentExecutorFactoryImpl {
     pub rpc_client: MagicblockRpcClient,
     pub table_mania: TableMania,
     pub compute_budget_config: ComputeBudgetConfig,
-    pub commit_id_tracker: Arc<CommitIdTrackerImpl>,
+    pub commit_id_tracker: Arc<CacheTaskInfoFetcher>,
 }
 
 impl IntentExecutorFactory for IntentExecutorFactoryImpl {
     type Executor =
-        IntentExecutorImpl<TransactionPreparatorV1<CommitIdTrackerImpl>>;
+        IntentExecutorImpl<TransactionPreparatorV1, CacheTaskInfoFetcher>;
 
     fn create_instance(&self) -> Self::Executor {
-        let transaction_preaparator =
-            TransactionPreparatorV1::<CommitIdTrackerImpl>::new(
-                self.rpc_client.clone(),
-                self.table_mania.clone(),
-                self.compute_budget_config.clone(),
-                self.commit_id_tracker.clone(),
-            );
-        IntentExecutorImpl::<TransactionPreparatorV1<CommitIdTrackerImpl>>::new(
+        let transaction_preaparator = TransactionPreparatorV1::new(
+            self.rpc_client.clone(),
+            self.table_mania.clone(),
+            self.compute_budget_config.clone(),
+        );
+        IntentExecutorImpl::<TransactionPreparatorV1, CacheTaskInfoFetcher>::new(
             self.rpc_client.clone(),
             transaction_preaparator,
+            self.commit_id_tracker.clone(),
         )
     }
 }

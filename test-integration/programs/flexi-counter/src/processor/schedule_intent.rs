@@ -53,7 +53,10 @@ pub fn process_create_intent(
     let commit_action = CommitActionData {
         transfer_amount: PRIZE,
     };
-    let commit_action_data = to_vec(&commit_action)?;
+    let mut commit_action_data = to_vec(&commit_action)?;
+    commit_action_data.extend_from_slice(&[1; 3]);
+    commit_action_data[2] = 1;
+    commit_action_data[3] = 0;
     let call_handlers = committees
         .iter()
         .zip(escrow_authorities.iter().cloned())

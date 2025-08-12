@@ -8,7 +8,7 @@ use std::{
 
 use magicblock_committor_service::{
     intent_executor::commit_id_fetcher::{
-        CommitIdFetcher, CommitIdTrackerResult,
+        TaskInfoFetcher, TaskInfoFetcherResult,
     },
     tasks::tasks::CommitTask,
     transaction_preperator::{
@@ -97,11 +97,11 @@ impl TestFixture {
 pub struct MockCommitIdFetcher;
 
 #[async_trait::async_trait]
-impl CommitIdFetcher for MockCommitIdFetcher {
+impl TaskInfoFetcher for MockCommitIdFetcher {
     async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
-    ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>> {
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
     }
 

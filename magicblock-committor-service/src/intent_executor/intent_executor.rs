@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use log::{info, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
@@ -10,38 +12,74 @@ use solana_pubkey::Pubkey;
 use solana_sdk::{
     message::VersionedMessage,
     signature::{Keypair, Signature},
+    signer::Signer,
     transaction::VersionedTransaction,
 };
 
 use crate::{
     intent_executor::{
+        commit_id_fetcher::TaskInfoFetcher,
         error::{Error, IntentExecutorResult, InternalError},
         ExecutionOutput, IntentExecutor,
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
+    tasks::{
+        task_builder::{TaskBuilderV1, TasksBuilder},
+        task_strategist::{TaskStrategist, TransactionStrategy},
+        tasks::BaseTask,
+    },
     transaction_preperator::transaction_preparator::TransactionPreparator,
     utils::persist_status_update_by_message_set,
 };
 
-pub struct IntentExecutorImpl<T> {
+pub struct IntentExecutorImpl<T, C> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
     transaction_preparator: T,
+    task_info_fetcher: Arc<C>,
 }
 
-impl<T> IntentExecutorImpl<T>
+impl<T, F> IntentExecutorImpl<T, F>
 where
     T: TransactionPreparator,
+    F: TaskInfoFetcher,
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
         transaction_preparator: T,
+        task_info_fetcher: Arc<F>,
     ) -> Self {
         let authority = validator_authority();
         Self {
             authority,
             rpc_client,
             transaction_preparator,
+            task_info_fetcher,
+        }
+    }
+
+    fn try_unite_tasks<P: IntentPersister>(
+        commit_tasks: &[Box<dyn BaseTask>],
+        finalize_task: &[Box<dyn BaseTask>],
+        authority: &Pubkey,
+        persister: &Option<P>,
+    ) -> Option<TransactionStrategy> {
+        // Clone tasks since strategies applied to united case maybe suboptimal for regular one
+        let mut commit_tasks = commit_tasks
+            .iter()
+            .map(|task| task.clone())
+            .collect::<Vec<_>>();
+        let finalize_task = finalize_task
+            .iter()
+            .map(|task| task.clone())
+            .collect::<Vec<_>>();
+
+        // Unite tasks to attempt running as single tx
+        commit_tasks.extend(finalize_task);
+        match TaskStrategist::build_strategy(commit_tasks, authority, persister)
+        {
+            Ok(strategy) => Some(strategy),
+            Err(crate::tasks::task_strategist::Error::FailedToFitError) => None,
         }
     }
 
@@ -65,60 +103,130 @@ where
             );
         }
 
-        // Commit stage
-        let commit_signature =
-            self.execute_commit_stage(&base_intent, persister).await?;
-        info!("Commit stage succeeded: {}", commit_signature);
-
-        // Finalize stage
-        // At the moment validator finalizes right away
-        // In the future there will be a challenge window
-        let finalize_signature = self
-            .execute_finalize_stage(&base_intent, commit_signature, persister)
-            .await?;
-        info!("Finalize stage succeeded: {}", finalize_signature);
-
-        Ok(ExecutionOutput {
-            commit_signature,
-            finalize_signature,
-        })
-    }
-
-    async fn execute_commit_stage<P: IntentPersister>(
-        &self,
-        l1_message: &ScheduledBaseIntent,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature> {
-        let prepared_message = self
-            .transaction_preparator
-            .prepare_commit_tx(&self.authority, l1_message, persister)
-            .await
-            .map_err(Error::FailedCommitPreparationError)?;
-
-        self.send_prepared_message(prepared_message).await.map_err(
-            |(err, signature)| Error::FailedToCommitError { err, signature },
+        // Build tasks for Commit & Finalize stages
+        let commit_tasks = TaskBuilderV1::commit_tasks(
+            &self.task_info_fetcher,
+            &base_intent,
+            &persister,
         )
+        .await?;
+        let finalize_tasks = TaskBuilderV1::finalize_tasks(
+            &self.task_info_fetcher,
+            &base_intent,
+        )
+        .await?;
+
+        // See if we can squeeze them in one tx
+        if let Some(single_tx_strategy) = Self::try_unite_tasks(
+            &commit_tasks,
+            &finalize_tasks,
+            &self.authority.pubkey(),
+            persister,
+        ) {
+            info!("Executing intent in single stage");
+            self.execute_single_stage(&single_tx_strategy, persister)
+                .await
+        } else {
+            info!("Executing intent in two stages");
+            // Build strategy for Commit stage
+            let commit_strategy = TaskStrategist::build_strategy(
+                commit_tasks,
+                &self.authority.pubkey(),
+                persister,
+            )?;
+
+            // Build strategy for Finalize stage
+            let finalize_strategy = TaskStrategist::build_strategy(
+                finalize_tasks,
+                &self.authority.pubkey(),
+                persister,
+            )?;
+
+            self.execute_two_stages(
+                &commit_strategy,
+                &finalize_strategy,
+                persister,
+            )
+            .await
+        }
     }
 
-    async fn execute_finalize_stage<P: IntentPersister>(
+    /// Optimization: executes Intent in single stage
+    /// where Commit & Finalize are united
+    // TODO: remove once challenge window introduced
+    async fn execute_single_stage<P: IntentPersister>(
         &self,
-        l1_message: &ScheduledBaseIntent,
-        commit_signature: Signature,
+        transaction_strategy: &TransactionStrategy,
         persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature> {
+    ) -> IntentExecutorResult<ExecutionOutput> {
         let prepared_message = self
             .transaction_preparator
-            .prepare_finalize_tx(&self.authority, l1_message, persister)
+            .prepare_for_strategy(
+                &self.authority,
+                transaction_strategy,
+                persister,
+            )
             .await
             .map_err(Error::FailedFinalizePreparationError)?;
 
-        self.send_prepared_message(prepared_message).await.map_err(
-            |(err, finalize_signature)| Error::FailedToFinalizeError {
+        let signature = self
+            .send_prepared_message(prepared_message)
+            .await
+            .map_err(|(err, signature)| Error::FailedToCommitError {
                 err,
-                commit_signature,
-                finalize_signature,
-            },
-        )
+                signature,
+            })?;
+
+        info!("Single stage intent executed: {}", signature);
+        Ok(ExecutionOutput::SingleStage(signature))
+    }
+
+    /// Executes Intent in 2 stage: Commit & Finalize
+    async fn execute_two_stages<P: IntentPersister>(
+        &self,
+        commit_strategy: &TransactionStrategy,
+        finalize_strategy: &TransactionStrategy,
+        persister: &Option<P>,
+    ) -> IntentExecutorResult<ExecutionOutput> {
+        // Prepare everything for Commit stage execution
+        let prepared_commit_message = self
+            .transaction_preparator
+            .prepare_for_strategy(&self.authority, commit_strategy, persister)
+            .await
+            .map_err(Error::FailedCommitPreparationError)?;
+
+        let commit_signature = self
+            .send_prepared_message(prepared_commit_message)
+            .await
+            .map_err(|(err, signature)| Error::FailedToCommitError {
+                err,
+                signature,
+            })?;
+        info!("Commit stage succeeded: {}", commit_signature);
+
+        // Prepare everything for Finalize stage execution
+        let prepared_finalize_message = self
+            .transaction_preparator
+            .prepare_for_strategy(&self.authority, finalize_strategy, persister)
+            .await
+            .map_err(Error::FailedFinalizePreparationError)?;
+
+        let finalize_signature = self
+            .send_prepared_message(prepared_finalize_message)
+            .await
+            .map_err(|(err, finalize_signature)| {
+                Error::FailedToFinalizeError {
+                    err,
+                    commit_signature: Some(commit_signature),
+                    finalize_signature,
+                }
+            })?;
+        info!("Finalize stage succeeded: {}", finalize_signature);
+
+        Ok(ExecutionOutput::TwoStage {
+            commit_signature,
+            finalize_signature,
+        })
     }
 
     /// Shared helper for sending transactions
@@ -168,14 +276,26 @@ where
     ) {
         match result {
             Ok(value) => {
-                let signatures = CommitStatusSignatures {
-                    process_signature: value.commit_signature,
-                    finalize_signature: Some(value.commit_signature)
+                let signatures = match value {
+                    ExecutionOutput::SingleStage(process_signature) => CommitStatusSignatures {
+                        process_signature: *process_signature,
+                        finalize_signature: None
+                    },
+                    ExecutionOutput::TwoStage {
+                        commit_signature, finalize_signature
+                    } => CommitStatusSignatures {
+                        process_signature: *commit_signature,
+                        finalize_signature: Some(*finalize_signature)
+                    }
                 };
                 let update_status = CommitStatus::Succeeded(signatures);
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
+            },
+            Err(Error::EmptyIntentError) | Err(Error::FailedToFitError) => {
+                let update_status = CommitStatus::Failed;
+                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
-            Err(Error::EmptyIntentError) => {
+            Err(Error::TaskBuilderError(_)) => {
                 let update_status = CommitStatus::Failed;
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
@@ -183,17 +303,6 @@ where
                 let update_status = CommitStatus::PartOfTooLargeBundleToProcess;
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
-            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::TaskBuilderError(err))) => {
-                match err {
-                    crate::tasks::task_builder::Error::CommitTasksBuildError(_) => {
-                        let update_status = CommitStatus::Failed;
-                        persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
-                    }
-                    crate::tasks::task_builder::Error::FinalizedTasksBuildError(_) => {
-                        // TODO: commit signature to set this
-                    }
-                 }
-            },
             Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::DeliveryPreparationError(_))) => {
                 // Persisted internally
             },
@@ -211,11 +320,15 @@ where
             },
             Err(Error::FailedToFinalizeError {err: _, commit_signature, finalize_signature}) => {
                 // Finalize is a single TX, so if it fails, all of commited accounts marked FailedFinalize
-                let status_signature = CommitStatusSignatures {
-                    process_signature: *commit_signature,
-                    finalize_signature: *finalize_signature
+                let update_status = if let Some(commit_signature) = commit_signature {
+                    let signatures = CommitStatusSignatures {
+                        process_signature: *commit_signature,
+                        finalize_signature: *finalize_signature
+                    };
+                    CommitStatus::FailedFinalize(signatures)
+                } else {
+                    CommitStatus::FailedProcess(None)
                 };
-                let update_status = CommitStatus::FailedFinalize( status_signature);
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
         }
@@ -223,9 +336,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T> IntentExecutor for IntentExecutorImpl<T>
+impl<T, C> IntentExecutor for IntentExecutorImpl<T, C>
 where
     T: TransactionPreparator,
+    C: TaskInfoFetcher,
 {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`
@@ -243,5 +357,78 @@ where
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use solana_pubkey::Pubkey;
+
+    use crate::{
+        intent_execution_manager::intent_scheduler::create_test_intent,
+        intent_executor::{
+            commit_id_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
+            IntentExecutorImpl,
+        },
+        persist::IntentPersisterImpl,
+        tasks::task_builder::{TaskBuilderV1, TasksBuilder},
+        transaction_preperator::transaction_preparator::TransactionPreparatorV1,
+    };
+
+    struct MockInfoFetcher;
+    #[async_trait::async_trait]
+    impl TaskInfoFetcher for MockInfoFetcher {
+        fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<u64> {
+            Some(0)
+        }
+
+        async fn fetch_next_commit_ids(
+            &self,
+            pubkeys: &[Pubkey],
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+        }
+
+        async fn fetch_rent_reimbursements(
+            &self,
+            pubkeys: &[Pubkey],
+        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_try_unite() {
+        let pubkey = [Pubkey::new_unique()];
+        let intent = create_test_intent(0, &pubkey);
+
+        let info_fetcher = Arc::new(MockInfoFetcher);
+        let commit_task = TaskBuilderV1::commit_tasks(
+            &info_fetcher,
+            &intent,
+            &None::<IntentPersisterImpl>,
+        )
+        .await
+        .unwrap();
+        let finalize_task =
+            TaskBuilderV1::finalize_tasks(&info_fetcher, &intent)
+                .await
+                .unwrap();
+
+        let result = IntentExecutorImpl::<
+            TransactionPreparatorV1,
+            MockInfoFetcher,
+        >::try_unite_tasks(
+            &commit_task,
+            &finalize_task,
+            &Pubkey::new_unique(),
+            &None::<IntentPersisterImpl>,
+        );
+        assert!(result.is_some());
+
+        let strategy = result.unwrap();
+        assert!(strategy.lookup_tables_keys.is_empty());
     }
 }

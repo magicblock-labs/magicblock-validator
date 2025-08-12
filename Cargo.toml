@@ -74,6 +74,7 @@ conjunto-transwise = { git = "https://github.com/magicblock-labs/conjunto.git", 
 console-subscriber = "0.2.0"
 crossbeam-channel = "0.5.11"
 const_format = "0.2.34"
+dyn-clone = "1.0.20"
 ed25519-dalek = "1.0.1"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"
