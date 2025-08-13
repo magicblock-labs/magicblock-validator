@@ -170,14 +170,6 @@ pub fn process_ledger(ledger: &Ledger, bank: &Arc<Bank>) -> LedgerResult<u64> {
                 prepared_block.slot,
                 &prepared_block.blockhash,
             );
-            blockhash_log::log_tx_hashes(
-                prepared_block.slot,
-                &prepared_block
-                    .transactions
-                    .iter()
-                    .map(|tx| tx.signatures[0])
-                    .collect::<Vec<_>>(),
-            );
             bank.replay_slot(
                 prepared_block.slot,
                 &prepared_block.previous_blockhash,
@@ -311,13 +303,8 @@ fn log_execution_results(results: &[TransactionCommitResult]) {
 /// Example:
 /// RUST_LOG=warn,magicblock=debug,magicblock_ledger=trace,magicblock_ledger::blockstore_processor::blockhash_log=off
 mod blockhash_log {
-    use solana_sdk::signature::Signature;
-
     use super::*;
     pub(super) fn log_blockhash(slot: u64, blockhash: &Hash) {
         trace!("Slot {} Blockhash {}", slot, &blockhash);
-    }
-    pub(super) fn log_tx_hashes(slot: u64, hashes: &[Signature]) {
-        trace!("Hashes for slot {}: {:?}", slot, hashes);
     }
 }

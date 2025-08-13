@@ -135,6 +135,35 @@ impl Ledger {
         let transaction_memos_cf = db.column();
         let perf_samples_cf = db.column();
 
+        debug!(
+            "transaction_status_cf: {:?}",
+            transaction_status_cf.count_column_using_cache()
+        );
+        debug!(
+            "address_signatures_cf: {:?}",
+            address_signatures_cf.count_column_using_cache()
+        );
+        debug!(
+            "slot_signatures_cf: {:?}",
+            slot_signatures_cf.count_column_using_cache()
+        );
+        debug!(
+            "blocktime_cf: {:?}",
+            blocktime_cf.count_column_using_cache()
+        );
+        debug!(
+            "blockhash_cf: {:?}",
+            blockhash_cf.count_column_using_cache()
+        );
+        debug!(
+            "transaction_cf: {:?}",
+            transaction_cf.count_column_using_cache()
+        );
+        debug!(
+            "transaction_memos_cf: {:?}",
+            transaction_memos_cf.count_column_using_cache()
+        );
+
         let account_mod_datas_cf = db.column();
 
         let db = Arc::new(db);
