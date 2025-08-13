@@ -922,12 +922,29 @@ impl Ledger {
                 .num_get_transaction_status
                 .fetch_add(1, Ordering::Relaxed);
 
+            // let iterator = self
+            //     .transaction_status_cf
+            //     .iter_current_index_filtered(IteratorMode::From(
+            //         (signature, lowest_available_slot),
+            //         IteratorDirection::Forward,
+            //     ));
             let iterator = self
-                .transaction_status_cf
-                .iter_current_index_filtered(IteratorMode::From(
-                    (signature, lowest_available_slot),
-                    IteratorDirection::Forward,
-                ));
+                .iter_transaction_statuses(
+                    Some(IteratorMode::From(
+                        (signature, lowest_available_slot),
+                        IteratorDirection::Forward,
+                    )),
+                    false,
+                )
+                .filter_map(|entry| {
+                    trace!("entry: {:?}", entry);
+                    match entry {
+                        Ok((slot, signature, status)) => {
+                            Some(((signature, slot), status))
+                        }
+                        Err(_) => None,
+                    }
+                });
 
             let mut result = None;
             for ((stat_signature, slot), _) in iterator {
