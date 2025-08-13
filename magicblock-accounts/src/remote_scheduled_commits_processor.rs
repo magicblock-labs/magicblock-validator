@@ -10,12 +10,11 @@ use magicblock_account_cloner::{
     AccountClonerOutput, AccountClonerOutput::Cloned, CloneOutputMap,
 };
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_bank::bank::Bank;
+use magicblock_accounts_db::AccountsDb;
 use magicblock_committor_service::{
     persist::BundleSignatureRow, ChangedAccount, Changeset, ChangesetCommittor,
     ChangesetMeta,
 };
-use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
     register_scheduled_commit_sent, FeePayerAccount, Pubkey, SentCommit,
     TransactionScheduler,
@@ -31,7 +30,7 @@ use crate::{
 pub struct RemoteScheduledCommitsProcessor {
     transaction_scheduler: TransactionScheduler,
     cloned_accounts: CloneOutputMap,
-    bank: Arc<Bank>,
+    accountsdb: Arc<AccountsDb>,
 }
 
 #[async_trait]
@@ -189,9 +188,12 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
 }
 
 impl RemoteScheduledCommitsProcessor {
-    pub fn new(bank: Arc<Bank>, cloned_accounts: CloneOutputMap) -> Self {
+    pub fn new(
+        accountsdb: Arc<AccountsDb>,
+        cloned_accounts: CloneOutputMap,
+    ) -> Self {
         Self {
-            bank,
+            accountsdb,
             cloned_accounts,
             transaction_scheduler: TransactionScheduler::default(),
         }
@@ -216,7 +218,7 @@ impl RemoteScheduledCommitsProcessor {
         // We process the changeset on a separate task in order to not block
         // the validator (slot advance) itself
         let changeset_committor = changeset_committor.clone();
-        let bank = self.bank.clone();
+        let bank = self.accountsdb.clone();
         let transaction_status_sender = self.transaction_status_sender.clone();
 
         tokio::task::spawn(async move {
