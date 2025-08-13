@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
@@ -20,6 +22,8 @@ async fn test_get_block_timestamp_stability() {
         .get_transaction(&signature, UiTransactionEncoding::Base64)
         .await
         .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     let current_slot = tx.slot;
     let block_time = rpc_client.get_block_time(current_slot).await.unwrap();
