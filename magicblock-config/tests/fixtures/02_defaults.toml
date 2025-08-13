@@ -7,7 +7,7 @@ remote.cluster = "devnet"
 # lifecycle: replica | programs-replica | ephemeral | offline
 lifecycle = "programs-replica"
 
-commit = { frequency_millis = 500, compute_unit_price = 1_000_000 }
+commit = { frequency_millis = 500, compute_unit_price = 100_000 }
 
 allowed-programs = []
 
