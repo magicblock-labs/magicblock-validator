@@ -46,7 +46,13 @@ use magicblock_config::{
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
-    ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
+    ledger_size_manager::{
+        config::{
+            ExistingLedgerState, LedgerSizeManagerConfig, ResizePercentage,
+            CHECK_LEDGER_SIZE_INTERVAL_MS,
+        },
+        TruncatingLedgerSizeManager,
+    },
     Ledger,
 };
 use magicblock_metrics::MetricsService;
@@ -138,7 +144,7 @@ pub struct MagicValidator {
     token: CancellationToken,
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
-    ledger_truncator: LedgerTruncator<Bank>,
+    ledger_size_manager: TruncatingLedgerSizeManager,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
@@ -210,6 +216,14 @@ impl MagicValidator {
             )?;
         }
 
+        let existing_ledger_state = (!config.validator_config.ledger.reset
+            && ledger.last_slot() > 0)
+            .then_some(ExistingLedgerState {
+                size: ledger.storage_size()?,
+                slot: ledger.last_slot(),
+                mod_id: ledger.last_mod_id(),
+            });
+
         // SAFETY:
         // this code will never panic as the ledger_path always appends the
         // rocksdb directory to whatever path is preconfigured for the ledger,
@@ -229,13 +243,6 @@ impl MagicValidator {
             ledger_parent_path,
             last_slot,
         )?;
-
-        let ledger_truncator = LedgerTruncator::new(
-            ledger.clone(),
-            bank.clone(),
-            DEFAULT_TRUNCATION_TIME_INTERVAL,
-            config.validator_config.ledger.size,
-        );
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
@@ -259,6 +266,18 @@ impl MagicValidator {
                 Some(TransactionNotifier::new(geyser_manager)),
             );
 
+        let ledger_size_manager: TruncatingLedgerSizeManager =
+            TruncatingLedgerSizeManager::new_from_ledger(
+                ledger.clone(),
+                bank.clone(),
+                existing_ledger_state,
+                LedgerSizeManagerConfig {
+                    max_size: config.validator_config.ledger.size,
+                    size_check_interval_ms: CHECK_LEDGER_SIZE_INTERVAL_MS,
+                    resize_percentage: ResizePercentage::Large,
+                },
+            );
+
         let metrics_config = &config.validator_config.metrics;
         let metrics = if metrics_config.enabled {
             let metrics_service =
@@ -272,7 +291,6 @@ impl MagicValidator {
                 Duration::from_secs(
                     metrics_config.system_metrics_tick_interval_secs,
                 ),
-                &ledger,
                 &bank,
                 token.clone(),
             );
@@ -414,7 +432,7 @@ impl MagicValidator {
             token,
             bank,
             ledger,
-            ledger_truncator,
+            ledger_size_manager,
             accounts_manager,
             transaction_listener,
             transaction_status_sender,
@@ -740,7 +758,7 @@ impl MagicValidator {
         self.start_remote_account_updates_worker();
         self.start_remote_account_cloner_worker().await?;
 
-        self.ledger_truncator.start();
+        self.ledger_size_manager.try_start()?;
 
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
@@ -854,7 +872,7 @@ impl MagicValidator {
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
-        self.ledger_truncator.stop();
+        self.ledger_size_manager.stop();
 
         self.claim_fees_task.stop();
 
