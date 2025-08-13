@@ -141,10 +141,7 @@ impl AccountsStorage {
         // remapping with file growth, but considering that disk is limited,
         // this too can fail
         // https://github.com/magicblock-labs/magicblock-validator/issues/334
-        assert!(
-            head.load(Relaxed) < self.meta.total_blocks as u64,
-            "database is full"
-        );
+        assert!(offset < self.meta.total_blocks as usize, "database is full");
 
         // SAFETY:
         // we have validated above that we are within bounds of mmap and fetch_add
