@@ -4,6 +4,7 @@ use json::{Deserialize, Serialize};
 use magicblock_core::link::blocks::BlockHash;
 use serde::{
     de::{self, Visitor},
+    ser::Error as _,
     Deserializer, Serializer,
 };
 use solana_pubkey::Pubkey;
@@ -44,12 +45,12 @@ impl Serialize for Serde32Bytes {
     where
         S: Serializer,
     {
-        let mut buf = [0u8; 44]; // 32 bytes will expand to at most 44 base58 characters
+        // 32 bytes will expand to at most 44 base58 characters
+        let mut buf = [0u8; 44];
         let size = bs58::encode(&self.0)
             .onto(buf.as_mut_slice())
-            .expect("Buffer too small");
-        // SAFETY:
-        // bs58 always produces valid UTF-8
+            .map_err(S::Error::custom)?;
+        // SAFETY: bs58 always produces valid UTF-8
         serializer.serialize_str(unsafe {
             std::str::from_utf8_unchecked(&buf[..size])
         })
@@ -67,9 +68,7 @@ impl<'de> Deserialize<'de> for Serde32Bytes {
             type Value = Serde32Bytes;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str(
-                    "a base58 encoded string representing a 32-byte array",
-                )
+                formatter.write_str("bs58 string representing a 32-byte array")
             }
 
             fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>

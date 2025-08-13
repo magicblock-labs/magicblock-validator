@@ -1,10 +1,15 @@
 use std::path::Path;
 
+use magicblock_accounts_db::AccountsDb;
 use magicblock_bank::bank::Bank;
 use magicblock_core::magic_program;
 use solana_sdk::{
-    account::Account, clock::Epoch, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, system_program,
+    account::{Account, AccountSharedData},
+    clock::Epoch,
+    pubkey::Pubkey,
+    signature::Keypair,
+    signer::Signer,
+    system_program,
 };
 
 use crate::{
@@ -12,41 +17,31 @@ use crate::{
     ledger::{read_faucet_keypair_from_ledger, write_faucet_keypair_to_ledger},
 };
 
-pub(crate) fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
-    bank.store_account(
-        *pubkey,
-        Account {
-            lamports,
-            data: vec![],
-            owner: system_program::id(),
-            executable: false,
-            rent_epoch: Epoch::MAX,
-        }
-        .into(),
-    );
+pub(crate) fn fund_account(
+    accountsdb: &AccountsDb,
+    pubkey: &Pubkey,
+    lamports: u64,
+) {
+    fund_account_with_data(accountsdb, pubkey, lamports, 0);
 }
 
 pub(crate) fn fund_account_with_data(
-    bank: &Bank,
+    accountsdb: &AccountsDb,
     pubkey: &Pubkey,
     lamports: u64,
-    data: Vec<u8>,
+    size: usize,
 ) {
-    bank.store_account(
-        *pubkey,
-        Account {
-            lamports,
-            data,
-            owner: system_program::id(),
-            executable: false,
-            rent_epoch: Epoch::MAX,
-        }
-        .into(),
+    accountsdb.insert_account(
+        pubkey,
+        &AccountSharedData::new(lamports, size, Default::default()),
     );
 }
 
-pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
-    fund_account(bank, validator_id, u64::MAX / 2);
+pub(crate) fn fund_validator_identity(
+    accountsdb: &AccountsDb,
+    validator_id: &Pubkey,
+) {
+    fund_account(accountsd, validator_id, u64::MAX / 2);
 }
 
 /// Funds the faucet account.
@@ -75,6 +70,6 @@ pub(crate) fn fund_magic_context(bank: &Bank) {
         bank,
         &magic_program::MAGIC_CONTEXT_PUBKEY,
         u64::MAX,
-        vec![0; magic_program::MAGIC_CONTEXT_SIZE],
+        MAGIC_CONTEXT_SIZE,
     );
 }

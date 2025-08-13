@@ -1,6 +1,12 @@
 use std::sync::Arc;
 
-use magicblock_bank::bank::Bank;
+use magicblock_accounts_db::AccountsDb;
+use magicblock_core::link::{
+    blocks::BlockHash,
+    transactions::{
+        ProcessableTransaction, TransactionProcessingMode, TxnToProcessTx,
+    },
+};
 use magicblock_mutator::{
     program::{
         create_program_buffer_modification, create_program_data_modification,
@@ -11,8 +17,6 @@ use magicblock_mutator::{
     },
     AccountModification,
 };
-use magicblock_processor::execute_transaction::execute_sanitized_transaction;
-use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     account::Account,
     bpf_loader_upgradeable::{
@@ -26,29 +30,39 @@ use solana_sdk::{
 use crate::{AccountDumper, AccountDumperError, AccountDumperResult};
 
 pub struct AccountDumperBank {
-    bank: Arc<Bank>,
+    accountsdb: Arc<AccountsDb>,
+    execution_tx: TxnToProcessTx,
 }
 
 impl AccountDumperBank {
-    pub fn new(bank: Arc<Bank>) -> Self {
-        Self { bank }
+    pub fn new(
+        accountsdb: Arc<AccountsDb>,
+        execution_tx: TxnToProcessTx,
+    ) -> Self {
+        Self {
+            accountsdb,
+            execution_tx,
+        }
     }
 
     fn execute_transaction(
         &self,
         transaction: Transaction,
     ) -> AccountDumperResult<Signature> {
-        let sanitized_tx = SanitizedTransaction::try_from_legacy_transaction(
+        let transaction = SanitizedTransaction::try_from_legacy_transaction(
             transaction,
             &Default::default(),
         )
         .map_err(AccountDumperError::TransactionError)?;
-        execute_sanitized_transaction(
-            sanitized_tx,
-            &self.bank,
-            self.transaction_status_sender.as_ref(),
-        )
-        .map_err(AccountDumperError::TransactionError)
+        let signature = *transaction.signature();
+        let txn = ProcessableTransaction {
+            transaction,
+            mode: TransactionProcessingMode::Execution(None),
+        };
+        // NOTE: this is an example code, this is not supposed to be approved
+        // instead proper async handling should be implemented in the new cloning pipeline
+        let _ = self.execution_tx.try_send(txn);
+        Ok(signature)
     }
 }
 
@@ -68,7 +82,9 @@ impl AccountDumper for AccountDumperBank {
             pubkey,
             &account,
             None,
-            self.bank.last_blockhash(),
+            // NOTE: BOGUS blockhash, this code will be replaced before merge to master
+            // this is only to present make the compiler happy
+            BlockHash::new_unique(),
         );
         self.execute_transaction(transaction)
     }
@@ -82,12 +98,14 @@ impl AccountDumper for AccountDumperBank {
             pubkey,
             account,
             None,
-            self.bank.last_blockhash(),
+            // NOTE: BOGUS blockhash, this code will be replaced before merge to master
+            // this is only to present make the compiler happy
+            BlockHash::new_unique(),
         );
         let result = self.execute_transaction(transaction)?;
-        if let Some(mut acc) = self.bank.get_account(pubkey) {
+        if let Some(mut acc) = self.accountsdb.get_account(pubkey) {
             acc.set_delegated(false);
-            self.bank.store_account(*pubkey, acc);
+            self.accountsdb.insert_account(pubkey, &acc);
         }
         Ok(result)
     }
@@ -107,12 +125,14 @@ impl AccountDumper for AccountDumperBank {
             pubkey,
             account,
             overrides,
-            self.bank.last_blockhash(),
+            // NOTE: BOGUS blockhash, this code will be replaced before merge to master
+            // this is only to present make the compiler happy
+            BlockHash::new_unique(),
         );
         let result = self.execute_transaction(transaction)?;
-        if let Some(mut acc) = self.bank.get_account(pubkey) {
+        if let Some(mut acc) = self.accountsdb.get_account(pubkey) {
             acc.set_delegated(true);
-            self.bank.store_account(*pubkey, acc);
+            self.accountsdb.insert_account(pubkey, &acc);
         }
         Ok(result)
     }
@@ -134,7 +154,7 @@ impl AccountDumper for AccountDumperBank {
             program_id_account,
             program_data_pubkey,
             program_data_account,
-            self.bank.slot(),
+            self.accountsdb.slot(),
         )
         .map_err(AccountDumperError::MutatorModificationError)?;
         let program_idl_modification =
@@ -144,14 +164,16 @@ impl AccountDumper for AccountDumperBank {
                     &program_idl_account,
                 ))
             });
-        let needs_upgrade = self.bank.has_account(program_id_pubkey);
+        let needs_upgrade = self.accountsdb.contains_account(program_id_pubkey);
         let transaction = transaction_to_clone_program(
             needs_upgrade,
             program_id_modification,
             program_data_modification,
             program_buffer_modification,
             program_idl_modification,
-            self.bank.last_blockhash(),
+            // NOTE: BOGUS blockhash, this code will be replaced before merge to master
+            // this is only to present make the compiler happy
+            BlockHash::new_unique(),
         );
         self.execute_transaction(transaction)
     }
@@ -163,7 +185,7 @@ impl AccountDumper for AccountDumperBank {
     ) -> AccountDumperResult<Signature> {
         // derive program data account address, as expected by upgradeable BPF loader
         let programdata_address = get_program_data_address(program_pubkey);
-        let slot = self.bank.slot();
+        let slot = self.accountsdb.slot();
 
         // we can use the whole data field of program, as it only contains the executable bytecode
         let program_data_modification = create_program_data_modification(
@@ -191,7 +213,7 @@ impl AccountDumper for AccountDumperBank {
         let program_buffer_modification =
             create_program_buffer_modification(&program_account.data);
 
-        let needs_upgrade = self.bank.has_account(program_pubkey);
+        let needs_upgrade = self.accountsdb.contains_account(program_pubkey);
 
         let transaction = transaction_to_clone_program(
             needs_upgrade,
@@ -199,7 +221,9 @@ impl AccountDumper for AccountDumperBank {
             program_data_modification,
             program_buffer_modification,
             None,
-            self.bank.last_blockhash(),
+            // NOTE: BOGUS blockhash, this code will be replaced before merge to master
+            // this is only to present make the compiler happy
+            BlockHash::new_unique(),
         );
         self.execute_transaction(transaction)
     }

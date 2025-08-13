@@ -8,7 +8,6 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-lazy_static = { workspace = true }
 log = { workspace = true }
 parking_lot = { workspace = true }
 tokio = { workspace = true }
@@ -34,4 +33,5 @@ solana-svm = { workspace = true }
 solana-svm-transaction = { workspace = true }
 solana-system-program = { workspace = true }
 solana-transaction = { workspace = true }
+solana-transaction-status = { workspace = true }
 

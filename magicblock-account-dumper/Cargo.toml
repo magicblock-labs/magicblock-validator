@@ -9,6 +9,7 @@ edition.workspace = true
 
 [dependencies]
 magicblock-accounts-db = { workspace = true }
+magicblock-core = { workspace = true }
 magicblock-mutator = { workspace = true }
 magicblock-processor = { workspace = true }
 

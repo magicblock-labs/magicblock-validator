@@ -30,7 +30,7 @@ use magicblock_accounts::{
     ScheduledCommitsProcessor,
 };
 use magicblock_accounts_api::BankAccountProvider;
-use magicblock_accounts_db::error::AccountsDbError;
+use magicblock_accounts_db::{error::AccountsDbError, AccountsDb, StWLock};
 use magicblock_bank::{
     bank::Bank,
     genesis_utils::create_genesis_config_with_leader,
@@ -54,7 +54,10 @@ use magicblock_ledger::{
 };
 use magicblock_metrics::MetricsService;
 use magicblock_perf_service::SamplePerformanceService;
-use magicblock_processor::execute_transaction::TRANSACTION_INDEX_LOCK;
+use magicblock_processor::{
+    execute_transaction::TRANSACTION_INDEX_LOCK,
+    scheduler::{TransactionScheduler, TransactionSchedulerState},
+};
 use magicblock_program::{
     init_persister, validator, validator::validator_authority,
     TransactionScheduler,
@@ -69,14 +72,17 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
+use solana_feature_set::FeatureSet as SolanaFeatureSet;
 use solana_geyser_plugin_manager::{
     geyser_plugin_manager::GeyserPluginManager,
     slot_status_notifier::SlotStatusNotifierImpl,
 };
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
+    account::AccountSharedData,
     clock::Slot,
     commitment_config::{CommitmentConfig, CommitmentLevel},
+    feature,
     genesis_config::GenesisConfig,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
@@ -97,6 +103,7 @@ use crate::{
         self, read_validator_keypair_from_ledger,
         write_validator_keypair_to_ledger,
     },
+    program_loader::load_programs,
     slot::advance_slot_and_update_ledger,
     tickers::{
         init_commit_accounts_ticker, init_slot_ticker,
@@ -127,9 +134,9 @@ pub struct MagicValidator {
     config: EphemeralConfig,
     exit: Arc<AtomicBool>,
     token: CancellationToken,
-    bank: Arc<Bank>,
+    accountsdb: Arc<AccountsDb>,
     ledger: Arc<Ledger>,
-    ledger_truncator: LedgerTruncator<Bank>,
+    ledger_truncator: LedgerTruncator<AccountsDb>,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
@@ -169,6 +176,7 @@ impl MagicValidator {
     ) -> ApiResult<Self> {
         // TODO(thlorenz): this will need to be recreated on each start
         let token = CancellationToken::new();
+        let config = config.validator_config;
 
         let validator_pubkey = identity_keypair.pubkey();
         let magicblock_bank::genesis_utils::GenesisConfigInfo {
@@ -178,7 +186,7 @@ impl MagicValidator {
         } = create_genesis_config_with_leader(
             u64::MAX,
             &validator_pubkey,
-            config.validator_config.validator.base_fees,
+            config.validator.base_fees,
         );
 
         let ledger_resume_strategy =
@@ -215,6 +223,7 @@ impl MagicValidator {
         )?;
         debug!("Bank initialized at slot {}", bank.slot());
 
+        let exit = Arc::<AtomicBool>::default();
         let ledger_truncator = LedgerTruncator::new(
             ledger.clone(),
             bank.clone(),
@@ -222,20 +231,20 @@ impl MagicValidator {
             config.validator_config.ledger.size,
         );
 
-        fund_validator_identity(&bank, &validator_pubkey);
+        fund_validator_identity(&accountsdb, &validator_pubkey);
         fund_magic_context(&bank);
         let faucet_keypair =
             funded_faucet(&bank, ledger.ledger_path().as_path())?;
 
-        load_programs_into_bank(
-            &bank,
+        load_programs(
+            &accountsdb,
             &programs_to_load(&config.validator_config.programs),
         )
         .map_err(|err| {
             ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
         })?;
 
-        let metrics_config = &config.validator_config.metrics;
+        let metrics_config = &config.metrics;
         let metrics = if metrics_config.enabled {
             let metrics_service =
                 magicblock_metrics::try_start_metrics_service(
@@ -359,11 +368,27 @@ impl MagicValidator {
         );
 
         validator::init_validator_authority(identity_keypair);
-        let config = config.validator_config;
+        let accountsdb = Arc::new(accountsdb);
+
         let (rpc_channels, validator_channels) = link();
+        Self::initialize_features(&accountsdb);
+
+        let txn_scheduler_state = TransactionSchedulerState {
+            accountsdb: accountsdb.clone(),
+            ledger: ledger.clone(),
+            transaction_status_tx,
+            txn_to_process_tx,
+            account_update_tx,
+            block,
+            environment,
+        };
+        let transaction_scheduler =
+            TransactionScheduler::new(1, txn_scheduler_state);
+        transaction_scheduler.spawn();
+
         let shared_state = SharedState::new(
             validator_pubkey,
-            bank.accounts_db.clone(),
+            accountsdb.clone(),
             ledger.clone(),
             config.validator.millis_per_slot,
         );
@@ -377,7 +402,8 @@ impl MagicValidator {
         let rpc_handle = tokio::spawn(rpc.run());
 
         Ok(Self {
-            config: config.validator_config,
+            accountsdb,
+            config,
             exit,
             _metrics: metrics,
             slot_ticker: None,
@@ -394,7 +420,6 @@ impl MagicValidator {
             committor_service,
             sample_performance_service: None,
             token,
-            bank,
             ledger,
             ledger_truncator,
             accounts_manager,
@@ -505,7 +530,10 @@ impl MagicValidator {
         if !self.config.ledger.resume_strategy().is_replaying() {
             return Ok(());
         }
-        let slot_to_continue_at = process_ledger(&self.ledger, &self.bank)?;
+        //     if self.config.ledger.reset {
+        //         return Ok(());
+        //     }
+        //     let slot_to_continue_at = process_ledger(&self.ledger, &self.bank)?;
 
         // The transactions to schedule and accept account commits re-run when we
         // process the ledger, however we do not want to re-commit them.
@@ -520,27 +548,27 @@ impl MagicValidator {
         );
         TransactionScheduler::default().clear_scheduled_actions();
 
-        // We want the next transaction either due to hydrating of cloned accounts or
-        // user request to be processed in the next slot such that it doesn't become
-        // part of the last block found in the existing ledger which would be incorrect.
-        let (update_ledger_result, _) =
-            advance_slot_and_update_ledger(&self.bank, &self.ledger);
-        if let Err(err) = update_ledger_result {
-            return Err(err.into());
-        }
-        if self.bank.slot() != slot_to_continue_at {
-            return Err(
-                ApiError::NextSlotAfterLedgerProcessingNotMatchingBankSlot(
-                    slot_to_continue_at,
-                    self.bank.slot(),
-                ),
-            );
-        }
+        //     // We want the next transaction either due to hydrating of cloned accounts or
+        //     // user request to be processed in the next slot such that it doesn't become
+        //     // part of the last block found in the existing ledger which would be incorrect.
+        //     let (update_ledger_result, _) =
+        //         advance_slot_and_update_ledger(&self.bank, &self.ledger);
+        //     if let Err(err) = update_ledger_result {
+        //         return Err(err.into());
+        //     }
+        //     if self.bank.slot() != slot_to_continue_at {
+        //         return Err(
+        //             ApiError::NextSlotAfterLedgerProcessingNotMatchingBankSlot(
+        //                 slot_to_continue_at,
+        //                 self.bank.slot(),
+        //             ),
+        //         );
+        //     }
 
-        info!(
-            "Processed ledger, validator continues at slot {}",
-            slot_to_continue_at
-        );
+        //     info!(
+        //         "Processed ledger, validator continues at slot {}",
+        //         slot_to_continue_at
+        //     );
 
         Ok(())
     }

@@ -138,114 +138,115 @@ pub fn process_ledger(
     accountsdb: &AccountsDb,
     max_age: u64,
 ) -> LedgerResult<u64> {
-    // NOTE:
-    // bank.adb was rolled back to max_slot (via ensure_at_most) in magicblock-bank/src/bank.rs
-    // `Bank::new` method, so the returned slot here is guaranteed to be equal or less than the
-    // slot from `ledger.get_max_blockhash`
-    let full_process_starting_slot = accountsdb.slot();
+    // // NOTE:
+    // // bank.adb was rolled back to max_slot (via ensure_at_most) in magicblock-bank/src/bank.rs
+    // // `Bank::new` method, so the returned slot here is guaranteed to be equal or less than the
+    // // slot from `ledger.get_max_blockhash`
+    // let full_process_starting_slot = accountsdb.slot();
 
-    // Since transactions may refer to blockhashes that were present when they
-    // ran initially we ensure that they are present during replay as well
-    let blockhashes_only_starting_slot = (full_process_starting_slot > max_age)
-        .then_some(full_process_starting_slot - max_age)
-        .unwrap_or_default();
-    debug!(
-        "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
-        blockhashes_only_starting_slot, full_process_starting_slot
-    );
-    iter_blocks(
-        IterBlocksParams {
-            ledger,
-            full_process_starting_slot,
-            blockhashes_only_starting_slot,
-        },
-        |prepared_block| {
-            let mut block_txs = vec![];
-            let Some(timestamp) = prepared_block.block_time else {
-                return Err(LedgerError::BlockStoreProcessor(format!(
-                    "Block has no timestamp, {:?}",
-                    prepared_block
-                )));
-            };
-            blockhash_log::log_blockhash(
-                prepared_block.slot,
-                &prepared_block.blockhash,
-            );
-            bank.replay_slot(
-                prepared_block.slot,
-                &prepared_block.previous_blockhash,
-                &prepared_block.blockhash,
-                timestamp as u64,
-            );
+    // // Since transactions may refer to blockhashes that were present when they
+    // // ran initially we ensure that they are present during replay as well
+    // let blockhashes_only_starting_slot = (full_process_starting_slot > max_age)
+    //     .then_some(full_process_starting_slot - max_age)
+    //     .unwrap_or_default();
+    // debug!(
+    //     "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
+    //     blockhashes_only_starting_slot, full_process_starting_slot
+    // );
+    // iter_blocks(
+    //     IterBlocksParams {
+    //         ledger,
+    //         full_process_starting_slot,
+    //         blockhashes_only_starting_slot,
+    //     },
+    //     |prepared_block| {
+    //         let mut block_txs = vec![];
+    //         let Some(timestamp) = prepared_block.block_time else {
+    //             return Err(LedgerError::BlockStoreProcessor(format!(
+    //                 "Block has no timestamp, {:?}",
+    //                 prepared_block
+    //             )));
+    //         };
+    //         blockhash_log::log_blockhash(
+    //             prepared_block.slot,
+    //             &prepared_block.blockhash,
+    //         );
+    //         bank.replay_slot(
+    //             prepared_block.slot,
+    //             &prepared_block.previous_blockhash,
+    //             &prepared_block.blockhash,
+    //             timestamp as u64,
+    //         );
 
-            // Transactions are stored in the ledger ordered by most recent to latest
-            // such to replay them in the order they executed we need to reverse them
-            for tx in prepared_block.transactions.into_iter().rev() {
-                match bank.verify_transaction(
-                    tx,
-                    TransactionVerificationMode::HashOnly,
-                ) {
-                    Ok(tx) => block_txs.push(tx),
-                    Err(err) => {
-                        return Err(LedgerError::BlockStoreProcessor(format!(
-                            "Error processing transaction: {:?}",
-                            err
-                        )));
-                    }
-                };
-            }
-            if !block_txs.is_empty() {
-                // NOTE: ideally we would run all transactions in a single batch, but the
-                // flawed account lock mechanism prevents this currently.
-                // Until we revamp this transaction execution we execute each transaction
-                // in its own batch.
-                for tx in block_txs {
-                    log_sanitized_transaction(&tx);
+    //         // Transactions are stored in the ledger ordered by most recent to latest
+    //         // such to replay them in the order they executed we need to reverse them
+    //         for tx in prepared_block.transactions.into_iter().rev() {
+    //             match bank.verify_transaction(
+    //                 tx,
+    //                 TransactionVerificationMode::HashOnly,
+    //             ) {
+    //                 Ok(tx) => block_txs.push(tx),
+    //                 Err(err) => {
+    //                     return Err(LedgerError::BlockStoreProcessor(format!(
+    //                         "Error processing transaction: {:?}",
+    //                         err
+    //                     )));
+    //                 }
+    //             };
+    //         }
+    //         if !block_txs.is_empty() {
+    //             // NOTE: ideally we would run all transactions in a single batch, but the
+    //             // flawed account lock mechanism prevents this currently.
+    //             // Until we revamp this transaction execution we execute each transaction
+    //             // in its own batch.
+    //             for tx in block_txs {
+    //                 log_sanitized_transaction(&tx);
 
-                    let mut timings = ExecuteTimings::default();
-                    let signature = *tx.signature();
-                    let batch = [tx];
-                    let batch = bank.prepare_sanitized_batch(&batch);
-                    let (results, _) = bank
-                        .load_execute_and_commit_transactions(
-                            &batch,
-                            false,
-                            ExecutionRecordingConfig::new_single_setting(true),
-                            &mut timings,
-                            None,
-                        );
+    //                 let mut timings = ExecuteTimings::default();
+    //                 let signature = *tx.signature();
+    //                 let batch = [tx];
+    //                 let batch = bank.prepare_sanitized_batch(&batch);
+    //                 let (results, _) = bank
+    //                     .load_execute_and_commit_transactions(
+    //                         &batch,
+    //                         false,
+    //                         ExecutionRecordingConfig::new_single_setting(true),
+    //                         &mut timings,
+    //                         None,
+    //                     );
 
-                    log_execution_results(&results);
-                    for result in results {
-                        if !result.was_executed_successfully() {
-                            // If we're on trace log level then we already logged this above
-                            if !log_enabled!(Trace) {
-                                debug!(
-                                    "Transactions: {:#?}",
-                                    batch.sanitized_transactions()
-                                );
-                                debug!("Result: {:#?}", result);
-                            }
-                            let err = match &result {
-                                Ok(tx) => match &tx.status {
-                                    Ok(_) => None,
-                                    Err(err) => Some(err),
-                                },
-                                Err(err) => Some(err),
-                            };
-                            return Err(LedgerError::BlockStoreProcessor(
-                                format!(
-                                    "Transaction '{}', {:?} could not be executed: {:?}",
-                                    signature, result, err
-                                ),
-                            ));
-                        }
-                    }
-                }
-            }
-            Ok(())
-        },
-    )
+    //                 log_execution_results(&results);
+    //                 for result in results {
+    //                     if !result.was_executed_successfully() {
+    //                         // If we're on trace log level then we already logged this above
+    //                         if !log_enabled!(Trace) {
+    //                             debug!(
+    //                                 "Transactions: {:#?}",
+    //                                 batch.sanitized_transactions()
+    //                             );
+    //                             debug!("Result: {:#?}", result);
+    //                         }
+    //                         let err = match &result {
+    //                             Ok(tx) => match &tx.status {
+    //                                 Ok(_) => None,
+    //                                 Err(err) => Some(err),
+    //                             },
+    //                             Err(err) => Some(err),
+    //                         };
+    //                         return Err(LedgerError::BlockStoreProcessor(
+    //                             format!(
+    //                                 "Transaction '{}', {:?} could not be executed: {:?}",
+    //                                 signature, result, err
+    //                             ),
+    //                         ));
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //         Ok(())
+    //     },
+    // )
+    Ok(0)
 }
 
 fn log_sanitized_transaction(tx: &SanitizedTransaction) {

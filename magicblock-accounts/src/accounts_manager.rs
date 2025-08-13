@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub type AccountsManager = ExternalAccountsManager<
-    BankAccountProvider,
+    AccountsDbProvider,
     RemoteAccountClonerClient,
     TransactionAccountsExtractorImpl,
     TransactionAccountsValidatorImpl,

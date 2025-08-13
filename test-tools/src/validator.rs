@@ -8,17 +8,17 @@ use std::{
 };
 
 use log::*;
-use magicblock_bank::bank::Bank;
+use magicblock_accounts_db::AccountsDb;
 use magicblock_core::traits::PersistsAccountModData;
 use magicblock_program::{init_persister, validator};
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
 
 use crate::account::fund_account;
 
-fn ensure_funded_validator(bank: &Bank) {
+fn ensure_funded_validator(accountsdb: &AccountsDb) {
     validator::generate_validator_authority_if_needed();
     fund_account(
-        bank,
+        accountsdb,
         &validator::validator_authority_id(),
         LAMPORTS_PER_SOL * 1_000,
     );
@@ -58,8 +58,8 @@ impl PersistsAccountModData for PersisterStub {
     }
 }
 
-pub fn init_started_validator(bank: &Bank) {
-    ensure_funded_validator(bank);
+pub fn init_started_validator(accountsdb: &AccountsDb) {
+    ensure_funded_validator(accountsdb);
     let stub = Arc::new(PersisterStub::default());
     init_persister(stub);
     validator::ensure_started_up();

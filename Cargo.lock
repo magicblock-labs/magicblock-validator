@@ -3788,6 +3788,7 @@ version = "0.1.7"
 dependencies = [
  "bincode",
  "magicblock-accounts-db",
+ "magicblock-core",
  "magicblock-mutator",
  "magicblock-processor",
  "solana-sdk",
@@ -3927,7 +3928,6 @@ dependencies = [
 >>>>>>> chore: magicblock-bank code cleanup
  "magicblock-ledger",
  "magicblock-metrics",
- "magicblock-perf-service",
  "magicblock-processor",
  "magicblock-program",
 <<<<<<< master
@@ -3938,6 +3938,7 @@ dependencies = [
 =======
 >>>>>>> refactor: remove unecassary files
  "paste",
+ "solana-feature-set",
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
@@ -4167,19 +4168,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-perf-service"
-version = "0.1.7"
-dependencies = [
- "log",
- "magicblock-accounts-db",
- "magicblock-ledger",
-]
-
-[[package]]
 name = "magicblock-processor"
 version = "0.1.7"
 dependencies = [
- "lazy_static",
  "log",
  "magicblock-accounts-db",
  "magicblock-core",
@@ -4202,6 +4193,7 @@ dependencies = [
  "solana-svm-transaction",
  "solana-system-program",
  "solana-transaction",
+ "solana-transaction-status",
  "tokio",
 ]
 
@@ -10754,6 +10746,7 @@ version = "0.1.7"
 dependencies = [
  "log",
  "magicblock-accounts-db",
+ "magicblock-api",
  "magicblock-config",
  "magicblock-core",
  "magicblock-program",
