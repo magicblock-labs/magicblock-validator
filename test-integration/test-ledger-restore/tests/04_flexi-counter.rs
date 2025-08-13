@@ -14,8 +14,9 @@ use solana_sdk::{
     signer::Signer,
 };
 use test_ledger_restore::{
-    confirm_tx_with_payer_ephem, fetch_counter_ephem, setup_offline_validator,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    confirm_tx_with_payer_ephem, fetch_counter_ephem, kill_validator,
+    setup_offline_validator, wait_for_ledger_persist, FLEXI_COUNTER_ID,
+    TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;
@@ -42,10 +43,10 @@ fn restore_ledger_with_flexi_counter_same_slot() {
     let payer2 = payer2_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer1, &payer2, false);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     let mut validator = read(&ledger_path, &payer1.pubkey(), &payer2.pubkey());
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 #[test]
@@ -55,10 +56,10 @@ fn restore_ledger_with_flexi_counter_separate_slot() {
     let payer2 = payer2_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer1, &payer2, true);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     let mut validator = read(&ledger_path, &payer1.pubkey(), &payer2.pubkey());
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn get_programs() -> Vec<ProgramConfig> {

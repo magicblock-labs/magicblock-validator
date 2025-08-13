@@ -9,7 +9,8 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature,
 };
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    kill_validator, setup_offline_validator, wait_for_ledger_persist,
+    TMP_DIR_LEDGER,
 };
 
 #[test]
@@ -21,7 +22,7 @@ fn restore_ledger_with_two_airdropped_accounts_same_slot() {
 
     let (mut validator, airdrop_sig1, airdrop_sig2, _) =
         write(&ledger_path, &pubkey1, &pubkey2, false);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     let mut validator = read(
         &ledger_path,
@@ -30,7 +31,7 @@ fn restore_ledger_with_two_airdropped_accounts_same_slot() {
         Some(&airdrop_sig1),
         Some(&airdrop_sig2),
     );
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 #[test]
@@ -42,7 +43,7 @@ fn restore_ledger_with_two_airdropped_accounts_separate_slot() {
 
     let (mut validator, airdrop_sig1, airdrop_sig2, _) =
         write(&ledger_path, &pubkey1, &pubkey2, true);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     let mut validator = read(
         &ledger_path,
@@ -51,7 +52,7 @@ fn restore_ledger_with_two_airdropped_accounts_separate_slot() {
         Some(&airdrop_sig1),
         Some(&airdrop_sig2),
     );
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write(
@@ -74,7 +75,7 @@ fn write(
 
     if separate_slot {
         slot += 5;
-        ctx.wait_for_slot_ephem(slot).unwrap();
+        expect!(ctx.wait_for_slot_ephem(slot), validator);
     }
     let sig2 = expect!(ctx.airdrop_ephem(pubkey2, 2_222_222), validator);
 

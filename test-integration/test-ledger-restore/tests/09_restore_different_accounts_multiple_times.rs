@@ -17,8 +17,9 @@ use solana_sdk::{
 use test_ledger_restore::{
     confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
     fetch_counter_chain, fetch_counter_ephem, get_programs_with_flexi_counter,
-    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
-    wait_for_ledger_persist, TMP_DIR_LEDGER,
+    kill_validator, setup_validator_with_local_remote,
+    wait_for_cloned_accounts_hydration, wait_for_ledger_persist,
+    TMP_DIR_LEDGER,
 };
 const COUNTER_MAIN: &str = "Main Counter";
 const COUNTER_READONLY: &str = "Readonly Counter";
@@ -45,7 +46,7 @@ fn restore_ledger_different_accounts_multiple_times() {
 
     let (mut validator, _, payer_main_lamports) =
         write(&ledger_path, &payer_main, &payer_readonly);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     for _ in 0..5 {
         let mut validator = read(
@@ -54,7 +55,7 @@ fn restore_ledger_different_accounts_multiple_times() {
             &payer_readonly,
             payer_main_lamports,
         );
-        validator.kill().unwrap();
+        kill_validator(&mut validator, 8899);
     }
 }
 

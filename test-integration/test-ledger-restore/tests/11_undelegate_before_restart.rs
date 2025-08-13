@@ -18,8 +18,9 @@ use std::process::Child;
 use test_ledger_restore::{
     assert_counter_state, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, get_programs_with_flexi_counter,
-    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
-    wait_for_ledger_persist, Counter, State, TMP_DIR_LEDGER,
+    kill_validator, setup_validator_with_local_remote,
+    wait_for_cloned_accounts_hydration, wait_for_ledger_persist, Counter,
+    State, TMP_DIR_LEDGER,
 };
 
 const COUNTER: &str = "Counter of Payer";
@@ -45,16 +46,16 @@ fn restore_ledger_with_account_undelegated_before_restart() {
 
     // Original instance delegates and updates account
     let (mut validator, _) = write(&ledger_path, &payer);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     // Undelegate account while validator is down (note we do this by starting
     // another instance, to use the same validator auth)
     let mut validator = update_counter_between_restarts(&payer);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     // Now we restart the validator pointing at the original ledger path
     let mut validator = read(&ledger_path, &payer);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {

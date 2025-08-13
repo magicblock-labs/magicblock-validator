@@ -8,7 +8,8 @@ use integration_test_tools::{
 };
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    kill_validator, setup_offline_validator, wait_for_ledger_persist,
+    TMP_DIR_LEDGER,
 };
 
 // In this test we ensure that the timestamps of the blocks in the restored
@@ -24,12 +25,12 @@ fn restore_preserves_timestamps() {
 
     let (mut validator, slot, signature, block_time) =
         write(&ledger_path, &pubkey);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     assert!(slot > SNAPSHOT_FREQUENCY);
 
     let mut validator = read(&ledger_path, signature, block_time);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {

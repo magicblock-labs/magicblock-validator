@@ -9,7 +9,8 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature,
 };
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    kill_validator, setup_offline_validator, wait_for_ledger_persist,
+    TMP_DIR_LEDGER,
 };
 
 #[test]
@@ -19,10 +20,10 @@ fn restore_ledger_with_airdropped_account() {
     let pubkey = Pubkey::new_unique();
 
     let (mut validator, airdrop_sig, _) = write_ledger(&ledger_path, &pubkey);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     let mut validator = read_ledger(&ledger_path, &pubkey, Some(&airdrop_sig));
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write_ledger(
@@ -45,7 +46,6 @@ fn write_ledger(
 
     let slot = wait_for_ledger_persist(&mut validator);
 
-    validator.kill().unwrap();
     (validator, sig, slot)
 }
 

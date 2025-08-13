@@ -22,8 +22,9 @@ use solana_sdk::{
     signer::{EncodableKey, Signer},
 };
 use test_ledger_restore::{
-    confirm_tx_with_payer_ephem, fetch_counter_ephem, setup_offline_validator,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    confirm_tx_with_payer_ephem, fetch_counter_ephem, kill_validator,
+    setup_offline_validator, wait_for_ledger_persist, FLEXI_COUNTER_ID,
+    TMP_DIR_LEDGER,
 };
 
 fn read_authority_pubkey(paths: &TestProgramPaths) -> Pubkey {
@@ -50,10 +51,10 @@ fn restore_ledger_with_flexi_counter_deploy() {
     );
 
     let (mut validator, _) = write(&ledger_path, &payer, &flexi_counter_paths);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     let mut validator = read(&ledger_path, &payer.pubkey());
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write(
@@ -93,8 +94,8 @@ fn write(
         .arg(&flexi_counter_paths.program_path);
 
     let output = expect!(deploy_cmd.output(), validator);
-    io::stdout().write_all(&output.stdout).unwrap();
-    io::stderr().write_all(&output.stderr).unwrap();
+    expect!(io::stdout().write_all(&output.stdout), validator);
+    expect!(io::stderr().write_all(&output.stderr), validator);
     eprintln!("Deploy status: {}", output.status);
 
     // Second we mainly test that the program was properly deployed by running

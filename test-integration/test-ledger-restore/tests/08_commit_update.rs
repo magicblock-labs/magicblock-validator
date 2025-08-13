@@ -17,9 +17,9 @@ use solana_sdk::{
 use test_ledger_restore::{
     assert_counter_commits_on_chain, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
-    get_programs_with_flexi_counter, setup_validator_with_local_remote,
-    wait_for_cloned_accounts_hydration, wait_for_ledger_persist,
-    TMP_DIR_LEDGER,
+    get_programs_with_flexi_counter, kill_validator,
+    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
+    wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 const COUNTER: &str = "Counter of Payer";
 fn payer_keypair() -> Keypair {
@@ -42,10 +42,10 @@ fn restore_ledger_committed_and_updated_account() {
     let payer = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 
     let mut validator = read(&ledger_path, &payer);
-    validator.kill().unwrap();
+    kill_validator(&mut validator, 8899);
 }
 
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
@@ -86,9 +86,10 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
         let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 4, false);
         let sig = confirm_tx_with_payer_ephem(ix, payer, &mut validator);
 
-        let res = ctx
-            .fetch_schedule_commit_result::<FlexiCounter>(sig)
-            .unwrap();
+        let res = expect!(
+            ctx.fetch_schedule_commit_result::<FlexiCounter>(sig),
+            validator
+        );
         expect!(res.confirm_commit_transactions_on_chain(&ctx), validator);
 
         let counter_ephem = expect!(
