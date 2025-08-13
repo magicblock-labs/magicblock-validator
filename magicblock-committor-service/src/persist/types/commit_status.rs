@@ -272,7 +272,7 @@ impl CommitStatus {
                 "Commit statuses not complete: {}",
                 stages
                     .iter()
-                    .filter(|s| !Self::is_complete(&s))
+                    .filter(|s| !s.is_complete())
                     .map(|s| s.to_string())
                     .collect::<Vec<_>>()
                     .join("\n")
