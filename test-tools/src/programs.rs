@@ -1,9 +1,6 @@
 use std::error::Error;
 
-use magicblock_bank::{
-    bank::Bank,
-    program_loader::{add_loadables, LoadableProgram},
-};
+use magicblock_accounts_db::AccountsDb;
 use solana_sdk::{
     bpf_loader_upgradeable::{self},
     pubkey::Pubkey,
@@ -19,7 +16,7 @@ use solana_sdk::{
 /// "<program_id>:<full_path>,<program_id>:<full_path>,..."
 /// ```
 pub fn load_programs_from_string_config(
-    bank: &Bank,
+    accountsdb: &AccountsDb,
     programs: &str,
 ) -> Result<(), Box<dyn Error>> {
     fn extract_program_info_from_parts(

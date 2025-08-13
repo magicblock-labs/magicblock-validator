@@ -44,9 +44,9 @@ impl AccountsDb {
     pub fn new(
         config: &AccountsDbConfig,
         directory: &Path,
-        lock: StWLock,
     ) -> AccountsDbResult<Self> {
         let directory = directory.join(ACCOUNTSDB_SUB_DIR);
+        let lock = StWLock::default();
 
         std::fs::create_dir_all(&directory).inspect_err(log_err!(
             "ensuring existence of accountsdb directory"
@@ -78,7 +78,7 @@ impl AccountsDb {
             snapshot_frequency: u64::MAX,
             ..Default::default()
         };
-        Self::new(&config, directory, StWLock::default())
+        Self::new(&config, directory)
     }
 
     /// Read account from with given pubkey from the database (if exists)
