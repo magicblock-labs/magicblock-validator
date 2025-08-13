@@ -31,15 +31,8 @@ use magicblock_committor_service::{
     config::ChainConfig, CommittorService, ComputeBudgetConfig,
 };
 use magicblock_config::{
-<<<<<<< master
     AccountsDbConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
     LifecycleMode, PrepareLookupTables, ProgramConfig,
-||||||| ancestor
-    AccountsDbConfig, EphemeralConfig, LifecycleMode, PrepareLookupTables,
-    ProgramConfig,
-=======
-    EphemeralConfig, LifecycleMode, PrepareLookupTables, ProgramConfig,
->>>>>>> fix: post integration fixes
 };
 use magicblock_core::link::{link, transactions::TransactionSchedulerHandle};
 use magicblock_gateway::{state::SharedState, JsonRpcServer};
@@ -55,17 +48,7 @@ use magicblock_processor::{
 use magicblock_program::{
     init_persister, validator, validator::validator_authority,
 };
-<<<<<<< master
-use magicblock_transaction_status::{
-    TransactionStatusMessage, TransactionStatusSender,
-};
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
-||||||| ancestor
-use magicblock_transaction_status::{
-    TransactionStatusMessage, TransactionStatusSender,
-};
-=======
->>>>>>> fix: post integration fixes
 use mdp::state::{
     features::FeaturesSet,
     record::{CountryCode, ErRecord},
@@ -186,7 +169,6 @@ impl MagicValidator {
             config.validator.base_fees,
         );
 
-<<<<<<< master
         let (ledger, last_slot) =
             Self::init_ledger(&config.validator_config.ledger)?;
         info!("Latest ledger slot: {}", last_slot);
@@ -199,12 +181,6 @@ impl MagicValidator {
             )?;
         }
         let ledger_path = ledger.path.as_ref();
-||||||| ancestor
-        let ledger_path = ledger.path.as_ref();
-=======
-        let ledger_path = config.ledger.path.as_ref();
->>>>>>> fix: post integration fixes
-        let ledger = Self::init_ledger(ledger_path, config.ledger.reset)?;
 
         // SAFETY:
         // this code will never panic as the ledger_path always appends the
@@ -239,13 +215,7 @@ impl MagicValidator {
         let faucet_keypair = funded_faucet(
             &accountsdb,
             ledger.ledger_path().as_path(),
-<<<<<<< master
-            &config.validator_config.ledger.resume_strategy,
-||||||| ancestor
-            config.validator_config.ledger.reset,
-=======
-            config.ledger.reset,
->>>>>>> fix: post integration fixes
+            &config.ledger.resume_strategy,
         )?;
 
         load_programs(&accountsdb, &programs_to_load(&config.programs))
@@ -644,31 +614,8 @@ impl MagicValidator {
 
         self.maybe_process_ledger()?;
 
-<<<<<<< master
         self.claim_fees_task.start(self.config.clone());
 
-        self.transaction_listener.run(true, self.bank.clone());
-
-        self.slot_ticker = Some(init_slot_ticker(
-            &self.bank,
-            &self.accounts_manager,
-            self.committor_service.clone(),
-            self.ledger.clone(),
-            Duration::from_millis(self.config.validator.millis_per_slot),
-            self.exit.clone(),
-        ));
-||||||| ancestor
-        self.transaction_listener.run(true, self.bank.clone());
-
-        self.slot_ticker = Some(init_slot_ticker(
-            &self.bank,
-            &self.accounts_manager,
-            self.committor_service.clone(),
-            self.ledger.clone(),
-            Duration::from_millis(self.config.validator.millis_per_slot),
-            self.exit.clone(),
-        ));
-=======
         self.slot_ticker = {
             let accountsdb = self.accountsdb.clone();
             let accounts_manager = self.accounts_manager.clone();
@@ -683,7 +630,6 @@ impl MagicValidator {
             );
             Some(tokio::spawn(task))
         };
->>>>>>> fix: post integration fixes
 
         self.commit_accounts_ticker = {
             let token = self.token.clone();
