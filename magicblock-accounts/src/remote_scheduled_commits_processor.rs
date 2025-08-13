@@ -219,7 +219,6 @@ impl RemoteScheduledCommitsProcessor {
         // the validator (slot advance) itself
         let changeset_committor = changeset_committor.clone();
         let bank = self.accountsdb.clone();
-        let transaction_status_sender = self.transaction_status_sender.clone();
 
         tokio::task::spawn(async move {
             // Create one sent commit transaction per bundle in our validator
@@ -290,19 +289,19 @@ impl RemoteScheduledCommitsProcessor {
                         {
                             sent_commit.chain_signatures = chain_signatures;
                             register_scheduled_commit_sent(sent_commit);
-                            match execute_legacy_transaction(
-                                commit_sent_transaction,
-                                &bank,
-                                transaction_status_sender.as_ref()
-                            ) {
-                            Ok(signature) => debug!(
-                                "Signaled sent commit with internal signature: {:?}",
-                                signature
-                            ),
-                            Err(err) => {
-                                error!("Failed to signal sent commit via transaction: {}", err);
-                            }
-                        }
+                            todo!()
+                            // match execute_legacy_transaction(
+                            //     commit_sent_transaction,
+                            //     &bank,
+                            //     transaction_status_sender.as_ref()
+                            // ) {
+                            // Ok(signature) => debug!(
+                            //     "Signaled sent commit with internal signature: {:?}",
+                            //     signature
+                            // ),
+                            // Err(err) => {
+                            //     error!("Failed to signal sent commit via transaction: {}", err);
+                            // }}
                         } else {
                             error!(
                                 "BUG: Failed to get sent commit for bundle id {} that should have been added",

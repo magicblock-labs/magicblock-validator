@@ -1,4 +1,3 @@
-use log::warn;
 use solana_message::SimpleAddressLoader;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_transaction::{
@@ -6,7 +5,6 @@ use solana_transaction::{
     versioned::sanitized::SanitizedVersionedTransaction,
 };
 use solana_transaction_status::UiTransactionEncoding;
-use tokio::sync::oneshot;
 
 use super::prelude::*;
 
@@ -75,22 +73,14 @@ impl HttpDispatcher {
             ensured = true;
         }
 
-        let (result_tx, result_rx) = config
-            .skip_preflight
-            .then(|| oneshot::channel())
-            .map(|(tx, rx)| (Some(tx), Some(rx)))
-            .unwrap_or_default();
-        let to_execute = ProcessableTransaction {
-            transaction,
-            mode: TransactionProcessingMode::Execution(result_tx),
-        };
-        if self.transactions_tx.send(to_execute).await.is_err() {
-            warn!("transaction execution channel has closed");
-        };
-        if let Some(rx) = result_rx {
-            if let Ok(result) = rx.await {
-                result.map_err(RpcError::transaction_simulation)?;
-            }
+        if config.skip_preflight {
+            self.transactions_scheduler.schedule(transaction).await;
+        } else {
+            self.transactions_scheduler
+                .execute(transaction)
+                .await
+                .ok_or_else(|| RpcError::internal("server is shutting down"))?
+                .map_err(RpcError::transaction_simulation)?;
         }
         Ok(ResponsePayload::encode_no_context(&request.id, signature))
     }

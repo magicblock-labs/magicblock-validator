@@ -11,16 +11,21 @@ use tokio::sync::{
 
 use crate::Slot;
 
-pub type TxnStatusRx = MpmcReceiver<TransactionStatus>;
-pub type TxnStatusTx = MpmcSender<TransactionStatus>;
+pub type TransactionStatusRx = MpmcReceiver<TransactionStatus>;
+pub type TransactionStatusTx = MpmcSender<TransactionStatus>;
 
-pub type TxnToProcessRx = Receiver<ProcessableTransaction>;
-pub type TxnToProcessTx = Sender<ProcessableTransaction>;
+pub type TransactionToProcessRx = Receiver<ProcessableTransaction>;
+type TransactionToProcessTx = Sender<ProcessableTransaction>;
+
+/// Convenience wrapper around channel endpoint to global transaction scheduler
+#[derive(Clone)]
+pub struct TransactionSchedulerHandle(pub(super) TransactionToProcessTx);
 
 pub type TransactionResult = solana_transaction_error::TransactionResult<()>;
 pub type TxnSimulationResultTx = oneshot::Sender<TransactionSimulationResult>;
 pub type TxnExecutionResultTx = Option<oneshot::Sender<TransactionResult>>;
 
+/// Status of executed transaction along with some metadata
 pub struct TransactionStatus {
     pub signature: Signature,
     pub slot: Slot,
@@ -49,4 +54,43 @@ pub struct TransactionSimulationResult {
     pub units_consumed: u64,
     pub return_data: Option<TransactionReturnData>,
     pub inner_instructions: Option<InnerInstructionsList>,
+}
+
+impl TransactionSchedulerHandle {
+    /// Fire and forget transaction scheduling
+    pub async fn schedule(&self, transaction: SanitizedTransaction) {
+        let txn = ProcessableTransaction {
+            transaction,
+            mode: TransactionProcessingMode::Execution(None),
+        };
+        let _ = self.0.send(txn).await;
+    }
+
+    /// Send transaction for execution and await for result
+    pub async fn execute(
+        &self,
+        transaction: SanitizedTransaction,
+    ) -> Option<TransactionResult> {
+        let (tx, rx) = oneshot::channel();
+        let txn = ProcessableTransaction {
+            transaction,
+            mode: TransactionProcessingMode::Execution(Some(tx)),
+        };
+        self.0.send(txn).await.ok()?;
+        rx.await.ok()
+    }
+
+    /// Send transaction for simulation and await for result
+    pub async fn simulate(
+        &self,
+        transaction: SanitizedTransaction,
+    ) -> Option<TransactionSimulationResult> {
+        let (tx, rx) = oneshot::channel();
+        let txn = ProcessableTransaction {
+            transaction,
+            mode: TransactionProcessingMode::Simulation(tx),
+        };
+        self.0.send(txn).await.ok()?;
+        rx.await.ok()
+    }
 }

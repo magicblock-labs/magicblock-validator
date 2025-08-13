@@ -1,5 +1,6 @@
-use log::warn;
-use solana_message::SimpleAddressLoader;
+use solana_message::{
+    inner_instruction::InnerInstructions, SimpleAddressLoader,
+};
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig,
     response::{RpcBlockhash, RpcSimulateTransactionResult},
@@ -8,8 +9,10 @@ use solana_transaction::{
     sanitized::SanitizedTransaction,
     versioned::sanitized::SanitizedVersionedTransaction,
 };
-use solana_transaction_status::UiTransactionEncoding;
-use tokio::sync::oneshot;
+use solana_transaction_status::{
+    InnerInstruction, InnerInstructions as StatusInnerInstructions,
+    UiTransactionEncoding,
+};
 
 use super::prelude::*;
 
@@ -87,17 +90,25 @@ impl HttpDispatcher {
             ensured = true;
         }
 
-        let (result_tx, result_rx) = oneshot::channel();
-        let to_execute = ProcessableTransaction {
-            transaction,
-            mode: TransactionProcessingMode::Simulation(result_tx),
-        };
-        if self.transactions_tx.send(to_execute).await.is_err() {
-            warn!("transaction execution channel has closed");
-        };
-        let result =
-            result_rx.await.map_err(RpcError::transaction_simulation)?;
+        let result = self
+            .transactions_scheduler
+            .simulate(transaction)
+            .await
+            .ok_or_else(|| RpcError::internal("validator is shutting down"))?;
         let slot = self.accountsdb.slot();
+        let converter = |(index, ixs): (usize, InnerInstructions)| {
+            StatusInnerInstructions {
+                index: index as u8,
+                instructions: ixs
+                    .into_iter()
+                    .map(|ix| InnerInstruction {
+                        instruction: ix.instruction,
+                        stack_height: Some(ix.stack_height as u32),
+                    })
+                    .collect(),
+            }
+            .into()
+        };
         let result = RpcSimulateTransactionResult {
             err: result.result.err(),
             logs: result.logs,
@@ -109,10 +120,9 @@ impl HttpDispatcher {
                 .into_iter()
                 .flatten()
                 .enumerate()
-                .map(|(index, ixs)| {
-                    IntoIterator::into_iter(ixs).map(Into::into).collect()
-                })
-                .collect(),
+                .map(converter)
+                .collect::<Vec<_>>()
+                .into(),
             replacement_blockhash: replacement,
         };
         Ok(ResponsePayload::encode(&request.id, result, slot))
