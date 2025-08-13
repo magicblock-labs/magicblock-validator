@@ -110,7 +110,7 @@ impl RpcError {
         }
     }
 
-    pub(crate) fn internal<E: Error>(error: E) -> Self {
+    pub(crate) fn internal<E: Display>(error: E) -> Self {
         Self {
             code: INTERNAL_ERROR,
             message: format!("internal server error: {error}"),

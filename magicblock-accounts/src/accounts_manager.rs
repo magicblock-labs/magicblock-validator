@@ -28,7 +28,7 @@ pub type AccountsManager = ExternalAccountsManager<
 
 impl AccountsManager {
     pub fn try_new(
-        accountsdb: &Arc<AccountsDb>,
+        accountsdb: Arc<AccountsDb>,
         cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
         validator_keypair: Keypair,

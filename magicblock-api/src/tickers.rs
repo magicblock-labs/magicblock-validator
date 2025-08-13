@@ -9,17 +9,17 @@ use std::{
 use log::*;
 use magicblock_accounts::AccountsManager;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_bank::bank::Bank;
 use magicblock_committor_service::CommittorService;
-use magicblock_core::magic_program;
+use magicblock_core::{
+    link::transactions::TransactionSchedulerHandle, magic_program,
+};
 use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics;
-use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
     magicblock_instruction::accept_scheduled_commits, MagicContext,
 };
-use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::account::ReadableAccount;
+use solana_transaction::sanitized::SanitizedTransaction;
 use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;
@@ -30,14 +30,15 @@ pub async fn init_slot_ticker(
     committor_service: Option<Arc<CommittorService>>,
     ledger: Arc<Ledger>,
     tick_duration: Duration,
+    transaction_scheduler: TransactionSchedulerHandle,
     exit: Arc<AtomicBool>,
-) -> tokio::task::JoinHandle<()> {
+) {
     let log = tick_duration >= Duration::from_secs(5);
     while !exit.load(Ordering::Relaxed) {
         tokio::time::sleep(tick_duration).await;
 
         let (update_ledger_result, next_slot) =
-            advance_slot_and_update_ledger(&bank, &ledger);
+            advance_slot_and_update_ledger(&accountsdb, &ledger);
         if let Err(err) = update_ledger_result {
             error!("Failed to write block: {:?}", err);
         }
@@ -53,12 +54,20 @@ pub async fn init_slot_ticker(
         if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
             // 1. Send the transaction to move the scheduled commits from the MagicContext
             //    to the global ScheduledCommit store
-            let tx = accept_scheduled_commits(bank.last_blockhash());
-            if let Err(err) = execute_legacy_transaction(
+            let tx = accept_scheduled_commits(ledger.latest_blockhash());
+            let Ok(transaction) = SanitizedTransaction::try_from_legacy_transaction(
                 tx,
-                &bank,
-                transaction_status_sender.as_ref(),
-            ) {
+                &Default::default(),
+            ).inspect_err(
+                |err| error!("scheduled commit transaction failed to sanitize, should never happen: {err}")) else {
+                continue;
+            };
+            let Some(result) = transaction_scheduler.execute(transaction).await
+            else {
+                warn!("validator is shutting down, cannot execute transaction");
+                continue;
+            };
+            if let Err(err) = result {
                 error!("Failed to accept scheduled commits: {:?}", err);
             } else if let Some(committor_service) = committor_service.as_ref() {
                 // 2. Process those scheduled commits
@@ -83,7 +92,7 @@ pub async fn init_commit_accounts_ticker(
     manager: Arc<AccountsManager>,
     tick_duration: Duration,
     token: CancellationToken,
-) -> tokio::task::JoinHandle<()> {
+) {
     loop {
         tokio::select! {
             _ = tokio::time::sleep(tick_duration) => {
@@ -111,7 +120,7 @@ pub async fn init_commit_accounts_ticker(
 pub fn init_system_metrics_ticker(
     tick_duration: Duration,
     ledger: &Arc<Ledger>,
-    bank: &Arc<Bank>,
+    accountsdb: &Arc<AccountsDb>,
     token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     // fn try_set_ledger_counts(ledger: &Ledger) {
