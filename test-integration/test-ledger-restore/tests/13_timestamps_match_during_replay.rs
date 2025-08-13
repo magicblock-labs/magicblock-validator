@@ -39,6 +39,9 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
         false,
     );
 
+    // Block time is only set after the first slot
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+
     // First airdrop followed by wait until account is flushed
     let signature = expect!(ctx.airdrop_ephem(pubkey, 1_111_111), validator);
 
