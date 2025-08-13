@@ -13,6 +13,7 @@ use schedulecommit_client::{
 };
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::client_error::ErrorKind;
+use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_rpc_client_api::request::RpcError;
 use solana_rpc_client_api::{
     client_error::Error as ClientError, config::RpcSendTransactionConfig,
@@ -26,6 +27,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use solana_transaction_status::UiTransactionEncoding;
 use test_tools_core::init_logger;
 use utils::{
     assert_is_instruction_error,
@@ -211,14 +213,14 @@ fn assert_cannot_increase_committee_count(
         &[&payer],
         blockhash,
     );
-    let tx_res = client.send_and_confirm_transaction_with_spinner_and_config(
-        &tx,
-        *commitment,
-        RpcSendTransactionConfig {
-            skip_preflight: true,
-            ..Default::default()
-        },
-    );
+    let simulation = client.simulate_transaction(&tx);
+    eprintln!("simulation: {:?}", simulation);
+
+    let tx_res = client
+        .send_and_confirm_transaction_with_spinner_and_commitment(
+            &tx,
+            *commitment,
+        );
     let (tx_result_err, tx_err) = extract_transaction_error(tx_res);
     if let Some(tx_err) = tx_err {
         assert_is_instruction_error(

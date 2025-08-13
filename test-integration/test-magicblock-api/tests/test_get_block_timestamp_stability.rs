@@ -22,8 +22,8 @@ async fn test_get_block_timestamp_stability() {
         .unwrap();
 
     let current_slot = tx.slot;
-    let block_time = rpc_client.get_block_time(current_slot - 1).await.unwrap();
-    let ledger_block = rpc_client.get_block(current_slot - 1).await.unwrap();
+    let block_time = rpc_client.get_block_time(current_slot).await.unwrap();
+    let ledger_block = rpc_client.get_block(current_slot).await.unwrap();
 
     assert_eq!(ledger_block.block_time, Some(block_time));
 }
