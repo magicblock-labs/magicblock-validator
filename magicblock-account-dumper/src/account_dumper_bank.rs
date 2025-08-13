@@ -4,7 +4,8 @@ use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
     blocks::BlockHash,
     transactions::{
-        ProcessableTransaction, TransactionProcessingMode, TxnToProcessTx,
+        ProcessableTransaction, TransactionProcessingMode,
+        TransactionSchedulerHandle,
     },
 };
 use magicblock_mutator::{
@@ -31,17 +32,17 @@ use crate::{AccountDumper, AccountDumperError, AccountDumperResult};
 
 pub struct AccountDumperBank {
     accountsdb: Arc<AccountsDb>,
-    execution_tx: TxnToProcessTx,
+    transaction_scheduler: TransactionSchedulerHandle,
 }
 
 impl AccountDumperBank {
     pub fn new(
         accountsdb: Arc<AccountsDb>,
-        execution_tx: TxnToProcessTx,
+        transaction_scheduler: TransactionSchedulerHandle,
     ) -> Self {
         Self {
             accountsdb,
-            execution_tx,
+            transaction_scheduler,
         }
     }
 
@@ -55,13 +56,9 @@ impl AccountDumperBank {
         )
         .map_err(AccountDumperError::TransactionError)?;
         let signature = *transaction.signature();
-        let txn = ProcessableTransaction {
-            transaction,
-            mode: TransactionProcessingMode::Execution(None),
-        };
-        // NOTE: this is an example code, this is not supposed to be approved
+        // NOTE: this is an example code, and is not supposed to be approved,
         // instead proper async handling should be implemented in the new cloning pipeline
-        let _ = self.execution_tx.try_send(txn);
+        let _ = self.transaction_scheduler.execute(transaction);
         Ok(signature)
     }
 }

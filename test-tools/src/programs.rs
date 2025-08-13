@@ -1,6 +1,7 @@
 use std::error::Error;
 
 use magicblock_accounts_db::AccountsDb;
+use magicblock_api::program_loader::{add_loadables, LoadableProgram};
 use solana_sdk::{
     bpf_loader_upgradeable::{self},
     pubkey::Pubkey,
@@ -42,7 +43,7 @@ pub fn load_programs_from_string_config(
         .map(extract_program_info_from_parts)
         .collect::<Result<Vec<LoadableProgram>, Box<dyn Error>>>()?;
 
-    add_loadables(bank, &loadables)?;
+    add_loadables(accountsdb, &loadables)?;
 
     Ok(())
 }

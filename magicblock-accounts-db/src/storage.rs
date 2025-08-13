@@ -208,18 +208,11 @@ impl AccountsStorage {
         blocks as u32
     }
 
-    pub(crate) fn flush(&self, sync: bool) {
-        if sync {
-            let _ = self
-                .mmap
-                .flush()
-                .inspect_err(log_err!("failed to sync flush the mmap"));
-        } else {
-            let _ = self
-                .mmap
-                .flush_async()
-                .inspect_err(log_err!("failed to async flush the mmap"));
-        }
+    pub(crate) fn flush(&self) {
+        let _ = self
+            .mmap
+            .flush()
+            .inspect_err(log_err!("failed to sync flush the mmap"));
     }
 
     /// Reopen database from a different directory
