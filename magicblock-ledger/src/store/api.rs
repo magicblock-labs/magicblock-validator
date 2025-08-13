@@ -931,6 +931,12 @@ impl Ledger {
 
             let mut result = None;
             for ((stat_signature, slot), _) in iterator {
+                trace!(
+                    "stat_signature: {:?}, signature: {:?}, slot: {:?}",
+                    stat_signature,
+                    signature,
+                    slot
+                );
                 if stat_signature == signature && slot <= min_slot {
                     result = self
                         .transaction_status_cf
