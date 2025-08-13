@@ -1061,7 +1061,6 @@ impl Ledger {
 
     pub fn iter_transaction_statuses_by_slot_test(
         &self,
-        slot: Slot,
     ) -> impl Iterator<
         Item = LedgerResult<(
             Signature,
@@ -1072,7 +1071,7 @@ impl Ledger {
         let (_lock, _) = self.ensure_lowest_cleanup_slot();
         self.transaction_status_cf
             .iter_protobuf(IteratorMode::From(
-                (Signature::default(), slot),
+                (Signature::default(), 0),
                 IteratorDirection::Forward,
             ))
             .map(|res| match res {

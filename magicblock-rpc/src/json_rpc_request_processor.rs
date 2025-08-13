@@ -845,7 +845,7 @@ impl JsonRpcRequestProcessor {
         debug!(
             "tx statuses: \n{:?}",
             self.ledger
-                .iter_transaction_statuses_by_slot_test(self.bank.slot(),)
+                .iter_transaction_statuses_by_slot_test()
                 .map(|status| match status {
                     Ok((signature, slot, status)) => {
                         format!(
