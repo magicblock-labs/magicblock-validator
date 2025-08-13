@@ -1,4 +1,4 @@
-use log::{info, warn};
+use log::{debug, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
@@ -68,7 +68,7 @@ where
         // Commit stage
         let commit_signature =
             self.execute_commit_stage(&base_intent, persister).await?;
-        info!("Commit stage succeeded: {}", commit_signature);
+        debug!("Commit stage succeeded: {}", commit_signature);
 
         // Finalize stage
         // At the moment validator finalizes right away
@@ -76,7 +76,7 @@ where
         let finalize_signature = self
             .execute_finalize_stage(&base_intent, commit_signature, persister)
             .await?;
-        info!("Finalize stage succeeded: {}", finalize_signature);
+        debug!("Finalize stage succeeded: {}", finalize_signature);
 
         Ok(ExecutionOutput {
             commit_signature,
@@ -189,9 +189,7 @@ where
                         let update_status = CommitStatus::Failed;
                         persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
                     }
-                    crate::tasks::task_builder::Error::FinalizedTasksBuildError(_) => {
-                        // TODO: commit signature to set this
-                    }
+                    crate::tasks::task_builder::Error::FinalizedTasksBuildError(_) => {}
                  }
             },
             Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::DeliveryPreparationError(_))) => {

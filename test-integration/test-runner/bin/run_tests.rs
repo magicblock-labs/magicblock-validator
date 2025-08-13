@@ -204,10 +204,8 @@ fn run_table_mania_and_committor_tests(
     };
 
     let committor_test_output = if run_committor {
-        let test_committor_dir = format!(
-            "{}/../{}",
-            manifest_dir, "test-committor-service"
-        );
+        let test_committor_dir =
+            format!("{}/../{}", manifest_dir, "test-committor-service");
         eprintln!("Running committor tests in {}", test_committor_dir);
         match run_test(test_committor_dir, Default::default()) {
             Ok(output) => output,

@@ -12,7 +12,7 @@ use tokio::{
         oneshot,
     },
 };
-use tokio_util::sync::CancellationToken;
+use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 
 use crate::{
     committor_processor::CommittorProcessor,
@@ -316,10 +316,6 @@ impl CommittorService {
         rx
     }
 
-    pub fn stop(&self) {
-        self.cancel_token.cancel();
-    }
-
     fn try_send(&self, msg: CommittorMessage) {
         if let Err(e) = self.sender.try_send(msg) {
             match e {
@@ -352,7 +348,7 @@ impl BaseIntentCommittor for CommittorService {
         rx
     }
 
-    fn commit_base_intent(
+    fn schedule_base_intent(
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) {
@@ -409,6 +405,14 @@ impl BaseIntentCommittor for CommittorService {
 
         rx
     }
+
+    fn stop(&self) {
+        self.cancel_token.cancel();
+    }
+
+    fn stopped(&self) -> WaitForCancellationFutureOwned {
+        self.cancel_token.clone().cancelled_owned()
+    }
 }
 
 pub trait BaseIntentCommittor: Send + Sync + 'static {
@@ -420,7 +424,10 @@ pub trait BaseIntentCommittor: Send + Sync + 'static {
     ) -> oneshot::Receiver<CommittorServiceResult<Instant>>;
 
     /// Commits the changeset and returns
-    fn commit_base_intent(&self, l1_messages: Vec<ScheduledBaseIntentWrapper>);
+    fn schedule_base_intent(
+        &self,
+        l1_messages: Vec<ScheduledBaseIntentWrapper>,
+    );
 
     /// Subscribes for results of BaseIntent execution
     fn subscribe_for_results(
@@ -446,4 +453,10 @@ pub trait BaseIntentCommittor: Send + Sync + 'static {
     ) -> oneshot::Receiver<
         CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
     >;
+
+    /// Stops Committor service
+    fn stop(&self);
+
+    /// Returns future which resolves once committor `stop` got called
+    fn stopped(&self) -> WaitForCancellationFutureOwned;
 }

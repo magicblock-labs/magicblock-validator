@@ -11,6 +11,7 @@ use solana_transaction_status_client_types::{
     EncodedTransactionWithStatusMeta,
 };
 use tokio::sync::oneshot;
+use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 
 use crate::{
     error::CommittorServiceResult,
@@ -26,6 +27,7 @@ use crate::{
 
 #[derive(Default)]
 pub struct ChangesetCommittorStub {
+    cancellation_token: CancellationToken,
     reserved_pubkeys_for_committee: Arc<Mutex<HashMap<Pubkey, Pubkey>>>,
     #[allow(clippy::type_complexity)]
     committed_changesets: Arc<Mutex<HashMap<u64, ScheduledBaseIntentWrapper>>>,
@@ -57,7 +59,7 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         rx
     }
 
-    fn commit_base_intent(
+    fn schedule_base_intent(
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) {
@@ -148,6 +150,14 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
 
         rx
     }
+
+    fn stop(&self) {
+        self.cancellation_token.cancel();
+    }
+
+    fn stopped(&self) -> WaitForCancellationFutureOwned {
+        self.cancellation_token.clone().cancelled_owned()
+    }
 }
 
 #[async_trait::async_trait]
@@ -157,7 +167,7 @@ impl BaseIntentCommittorExt for ChangesetCommittorStub {
         l1_messages: Vec<ScheduledBaseIntentWrapper>,
     ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
     {
-        self.commit_base_intent(l1_messages.clone());
+        self.schedule_base_intent(l1_messages.clone());
         let res = l1_messages
             .into_iter()
             .map(|message| {

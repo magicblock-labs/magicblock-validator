@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::types::ScheduledBaseIntentWrapper;
 
-const POISONED_MUTEX_MSG: &str = "Mutex poisoned";
+const POISONED_MUTEX_MSG: &str = "Dummy db mutex poisoned";
 
 #[async_trait]
 pub trait DB: Send + Sync + 'static {

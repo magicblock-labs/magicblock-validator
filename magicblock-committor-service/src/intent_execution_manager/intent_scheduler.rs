@@ -135,23 +135,23 @@ impl IntentScheduler {
         pubkeys
             .iter()
             .for_each(|pubkey| {
-            let mut occupied = match self.blocked_keys.entry(*pubkey) {
-                Entry::Vacant(_) => unreachable!("Invariant: queue for conflicting tasks shall exist"),
-                Entry::Occupied(value) => value
-            };
+                let mut occupied = match self.blocked_keys.entry(*pubkey) {
+                    Entry::Vacant(_) => unreachable!("Invariant: queue for conflicting tasks shall exist"),
+                    Entry::Occupied(value) => value
+                };
 
-            let blocked_intents: &mut VecDeque<IntentID> = occupied.get_mut();
-            let front = blocked_intents.pop_front();
-            assert_eq!(
-                intent_id,
-                front.expect("Invariant: if intent executing, queue for each account is non-empty"),
-                "Invariant: executing intent must be first at qeueue"
-            );
+                let blocked_intents: &mut VecDeque<IntentID> = occupied.get_mut();
+                let front = blocked_intents.pop_front();
+                assert_eq!(
+                    intent_id,
+                    front.expect("Invariant: if intent executing, queue for each account is non-empty"),
+                    "Invariant: executing intent must be first at qeueue"
+                );
 
-            if blocked_intents.is_empty() {
-                occupied.remove();
-            }
-        });
+                if blocked_intents.is_empty() {
+                    occupied.remove();
+                }
+            });
     }
 
     // Returns [`ScheduledBaseIntent`] that can be executed

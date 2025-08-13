@@ -111,9 +111,12 @@ where
         loop {
             let intent = match self.next_scheduled_intent().await {
                 Ok(value) => value,
-                Err(err) => {
-                    error!("Failed to get next intent: {}", err);
+                Err(Error::ChannelClosed) => {
+                    error!("Channel closed, exiting IntentExecutionEngine::main_loop");
                     break;
+                }
+                Err(Error::DBError(err)) => {
+                    panic!("Failed to fetch intent from db: {:?}", err);
                 }
             };
             let Some(intent) = intent else {

@@ -1,8 +1,5 @@
 use std::{
-    collections::HashMap,
-    num::NonZeroUsize,
-    sync::{Arc, Mutex},
-    time::Duration,
+    collections::HashMap, num::NonZeroUsize, sync::Mutex, time::Duration,
 };
 
 use dlp::{
@@ -27,10 +24,9 @@ pub trait CommitIdFetcher: Send + Sync + 'static {
 
 const MUTEX_POISONED_MSG: &str = "CommitIdTrackerImpl mutex poisoned!";
 
-#[derive(Clone)]
 pub struct CommitIdTrackerImpl {
     rpc_client: MagicblockRpcClient,
-    cache: Arc<Mutex<LruCache<Pubkey, u64>>>,
+    cache: Mutex<LruCache<Pubkey, u64>>,
 }
 
 impl CommitIdTrackerImpl {
@@ -40,7 +36,7 @@ impl CommitIdTrackerImpl {
 
         Self {
             rpc_client,
-            cache: Arc::new(Mutex::new(LruCache::new(CACHE_SIZE))),
+            cache: Mutex::new(LruCache::new(CACHE_SIZE)),
         }
     }
 

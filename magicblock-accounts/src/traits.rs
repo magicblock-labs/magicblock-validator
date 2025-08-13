@@ -20,8 +20,12 @@ pub trait ScheduledCommitsProcessor: Send + Sync + 'static {
 
     /// Returns the number of commits that were scheduled and accepted
     fn scheduled_commits_len(&self) -> usize;
+
     /// Clears all scheduled commits
     fn clear_scheduled_commits(&self);
+
+    /// Stop processor
+    fn stop(&self);
 }
 
 // TODO(edwin): remove this
