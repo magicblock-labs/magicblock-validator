@@ -1059,6 +1059,30 @@ impl Ledger {
             })
     }
 
+    pub fn iter_transaction_statuses_by_slot_test(
+        &self,
+        slot: Slot,
+    ) -> impl Iterator<
+        Item = LedgerResult<(
+            Signature,
+            Slot,
+            generated::TransactionStatusMeta,
+        )>,
+    > + '_ {
+        let (_lock, _) = self.ensure_lowest_cleanup_slot();
+        self.transaction_status_cf
+            .iter_protobuf(IteratorMode::From(
+                (Signature::default(), slot),
+                IteratorDirection::Forward,
+            ))
+            .map(|res| match res {
+                Ok(((signature, slot), status)) => {
+                    Ok((signature, slot, status))
+                }
+                Err(err) => Err(err),
+            })
+    }
+
     pub fn count_transaction_status(&self) -> LedgerResult<i64> {
         self.transaction_status_cf.count_column_using_cache()
     }
