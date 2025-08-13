@@ -721,12 +721,13 @@ async fn ix_commit_local(
             .join("\n")
     );
     assert_eq!(statuses.len(), changeset.accounts.len());
-    assert!(CommitStatus::all_completed(
+    CommitStatus::all_completed(
         &statuses
             .iter()
             .map(|x| x.commit_status.clone())
-            .collect::<Vec<_>>()
-    ));
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
     let mut strategies = ExpectedStrategies::new();
     for res in statuses {
         let change = changeset.accounts.get(&res.pubkey).cloned().unwrap();

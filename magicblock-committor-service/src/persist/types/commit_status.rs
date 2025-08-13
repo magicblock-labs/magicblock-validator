@@ -264,7 +264,19 @@ impl CommitStatus {
         matches!(self, Succeeded(_))
     }
 
-    pub fn all_completed(stages: &[Self]) -> bool {
-        stages.iter().all(Self::is_complete)
+    pub fn all_completed(stages: &[Self]) -> Result<(), String> {
+        if stages.iter().all(Self::is_complete) {
+            Ok(())
+        } else {
+            Err(format!(
+                "Commit statuses not complete: {}",
+                stages
+                    .iter()
+                    .filter(|s| !Self::is_complete(&s))
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ))
+        }
     }
 }
