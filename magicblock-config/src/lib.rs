@@ -109,8 +109,6 @@ impl EphemeralConfig {
         Ok(config)
     }
 
-<<<<<<< master
-||||||| ancestor
     pub fn merge(&mut self, other: EphemeralConfig) {
         // If other differs from the default but not self, use the value from other
         // Otherwise, use the value from self
@@ -126,22 +124,6 @@ impl EphemeralConfig {
         }
     }
 
-=======
-    pub fn merge(&mut self, other: EphemeralConfig) {
-        // If other differs from the default but not self, use the value from other
-        // Otherwise, use the value from self
-        self.accounts.merge(other.accounts);
-        self.rpc.merge(other.rpc);
-        self.validator.merge(other.validator.clone());
-        self.ledger.merge(other.ledger.clone());
-        self.metrics.merge(other.metrics.clone());
-
-        if self.programs.is_empty() && !other.programs.is_empty() {
-            self.programs = other.programs.clone();
-        }
-    }
-
->>>>>>> refactor: move bank functionality to processor
     pub fn post_parse(&mut self) {
         if self.accounts.remote.url.is_some() {
             match &self.accounts.remote.ws_url {
