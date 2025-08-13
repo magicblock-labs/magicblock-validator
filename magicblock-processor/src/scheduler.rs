@@ -3,33 +3,35 @@ use std::sync::{atomic::AtomicUsize, Arc};
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
-    transactions::{TxnStatusTx, TxnToProcessRx, TxnToProcessTx},
+    transactions::{
+        ProcessableTransaction, TransactionStatusTx, TransactionToProcessRx,
+    },
 };
 use magicblock_ledger::{LatestBlock, Ledger};
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
 use tokio::{
     runtime::Builder,
-    sync::mpsc::{channel, Receiver},
+    sync::mpsc::{channel, Receiver, Sender},
 };
 
 use crate::{executor::TransactionExecutor, WorkerId};
 
 pub struct TransactionScheduler {
-    transactions_rx: TxnToProcessRx,
+    transactions_rx: TransactionToProcessRx,
     ready_rx: Receiver<WorkerId>,
-    executors: Vec<TxnToProcessTx>,
-    block: LatestBlock,
+    executors: Vec<Sender<ProcessableTransaction>>,
+    latest_block: LatestBlock,
     index: Arc<AtomicUsize>,
 }
 
 pub struct TransactionSchedulerState {
     pub accountsdb: Arc<AccountsDb>,
     pub ledger: Arc<Ledger>,
-    pub block: LatestBlock,
+    pub latest_block: LatestBlock,
     pub environment: TransactionProcessingEnvironment<'static>,
-    pub txn_to_process_tx: TxnToProcessRx,
+    pub txn_to_process_rx: TransactionToProcessRx,
     pub account_update_tx: AccountUpdateTx,
-    pub transaction_status_tx: TxnStatusTx,
+    pub transaction_status_tx: TransactionStatusTx,
 }
 
 impl TransactionScheduler {
@@ -52,10 +54,10 @@ impl TransactionScheduler {
             executors.push(transactions_tx);
         }
         Self {
-            transactions_rx: state.txn_to_process_tx,
+            transactions_rx: state.txn_to_process_rx,
             ready_rx,
             executors,
-            block: state.block,
+            latest_block: state.latest_block,
             index,
         }
     }
@@ -85,7 +87,7 @@ impl TransactionScheduler {
                 Some(_) = self.ready_rx.recv() => {
                     // TODO use the branch with the multithreaded scheduler
                 }
-                _ = self.block.changed() => {
+                _ = self.latest_block.changed() => {
                     // when a new block/slot starts, reset the transaction index
                     self.index.store(0, std::sync::atomic::Ordering::Relaxed);
                 }

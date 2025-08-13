@@ -9,7 +9,7 @@ use magicblock_config::AccountsDbConfig;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 
-use crate::{storage::ADB_FILE, AccountsDb, StWLock};
+use crate::{storage::ADB_FILE, AccountsDb};
 
 const LAMPORTS: u64 = 4425;
 const SPACE: usize = 73;
@@ -570,9 +570,8 @@ pub fn init_db() -> (AccountsDb, PathBuf) {
         .expect("failed to create temporary directory")
         .keep();
     let config = AccountsDbConfig::temp_for_tests(SNAPSHOT_FREQUENCY);
-    let lock = StWLock::default();
 
-    let adb = AccountsDb::new(&config, &directory, lock)
+    let adb = AccountsDb::new(&config, &directory, 0)
         .expect("expected to initialize ADB");
     (adb, directory)
 }

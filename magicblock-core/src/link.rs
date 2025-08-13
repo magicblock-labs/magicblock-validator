@@ -3,7 +3,10 @@ use accounts::{
 };
 use blocks::{BlockUpdateRx, BlockUpdateTx};
 use tokio::sync::mpsc;
-use transactions::{TxnStatusRx, TxnStatusTx, TxnToProcessRx, TxnToProcessTx};
+use transactions::{
+    TransactionSchedulerHandle, TransactionStatusRx, TransactionStatusTx,
+    TransactionToProcessRx,
+};
 
 pub mod accounts;
 pub mod blocks;
@@ -13,19 +16,19 @@ pub type Slot = u64;
 const LINK_CAPACITY: usize = 16384;
 
 pub struct RpcChannelEndpoints {
-    pub transaction_status_rx: TxnStatusRx,
-    pub txn_to_process_tx: TxnToProcessTx,
-    pub account_update_rx: AccountUpdateRx,
-    pub ensure_accounts_tx: EnsureAccountsTx,
-    pub block_update_rx: BlockUpdateRx,
+    pub transaction_status: TransactionStatusRx,
+    pub transaction_scheduler: TransactionSchedulerHandle,
+    pub account_update: AccountUpdateRx,
+    pub ensure_accounts: EnsureAccountsTx,
+    pub block_update: BlockUpdateRx,
 }
 
 pub struct ValidatorChannelEndpoints {
-    pub transaction_status_tx: TxnStatusTx,
-    pub txn_to_process_rx: TxnToProcessRx,
-    pub account_update_tx: AccountUpdateTx,
-    pub ensure_accounts_rx: EnsureAccountsRx,
-    pub block_update_tx: BlockUpdateTx,
+    pub transaction_status: TransactionStatusTx,
+    pub transaction_to_process: TransactionToProcessRx,
+    pub account_update: AccountUpdateTx,
+    pub ensure_accounts: EnsureAccountsRx,
+    pub block_update: BlockUpdateTx,
 }
 
 pub fn link() -> (RpcChannelEndpoints, ValidatorChannelEndpoints) {
@@ -35,18 +38,18 @@ pub fn link() -> (RpcChannelEndpoints, ValidatorChannelEndpoints) {
     let (ensure_accounts_tx, ensure_accounts_rx) = mpsc::channel(LINK_CAPACITY);
     let (block_update_tx, block_update_rx) = flume::unbounded();
     let rpc = RpcChannelEndpoints {
-        txn_to_process_tx,
-        transaction_status_rx,
-        account_update_rx,
-        ensure_accounts_tx,
-        block_update_rx,
+        transaction_scheduler: TransactionSchedulerHandle(txn_to_process_tx),
+        transaction_status: transaction_status_rx,
+        account_update: account_update_rx,
+        ensure_accounts: ensure_accounts_tx,
+        block_update: block_update_rx,
     };
     let validator = ValidatorChannelEndpoints {
-        txn_to_process_rx,
-        transaction_status_tx,
-        ensure_accounts_rx,
-        account_update_tx,
-        block_update_tx,
+        transaction_to_process: txn_to_process_rx,
+        transaction_status: transaction_status_tx,
+        ensure_accounts: ensure_accounts_rx,
+        account_update: account_update_tx,
+        block_update: block_update_tx,
     };
     (rpc, validator)
 }

@@ -3,7 +3,9 @@ use std::sync::{atomic::AtomicUsize, Arc, OnceLock, RwLock};
 use magicblock_accounts_db::{AccountsDb, StWLock};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
-    transactions::{TransactionProcessingMode, TxnStatusTx, TxnToProcessRx},
+    transactions::{
+        TransactionProcessingMode, TransactionStatusTx, TransactionToProcessRx,
+    },
 };
 use magicblock_ledger::{LatestBlock, Ledger};
 use parking_lot::RwLockReadGuard;
@@ -35,8 +37,8 @@ pub(super) struct TransactionExecutor {
     config: Box<TransactionProcessingConfig<'static>>,
     block: LatestBlock,
     environment: TransactionProcessingEnvironment<'static>,
-    rx: TxnToProcessRx,
-    transaction_tx: TxnStatusTx,
+    rx: TransactionToProcessRx,
+    transaction_tx: TransactionStatusTx,
     accounts_tx: AccountUpdateTx,
     ready_tx: Sender<WorkerId>,
     sync: StWLock,
@@ -48,7 +50,7 @@ impl TransactionExecutor {
     pub(super) fn new(
         id: WorkerId,
         state: &TransactionSchedulerState,
-        rx: TxnToProcessRx,
+        rx: TransactionToProcessRx,
         ready_tx: Sender<WorkerId>,
         index: Arc<AtomicUsize>,
     ) -> Self {
@@ -80,13 +82,13 @@ impl TransactionExecutor {
         });
         let this = Self {
             id,
-            slot: state.block.load().slot,
+            slot: state.latest_block.load().slot,
             sync: state.accountsdb.synchronizer(),
             processor,
             accountsdb: state.accountsdb.clone(),
             ledger: state.ledger.clone(),
             config,
-            block: state.block.clone(),
+            block: state.latest_block.clone(),
             environment: state.environment.clone(),
             rx,
             ready_tx,

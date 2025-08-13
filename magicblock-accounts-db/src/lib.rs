@@ -44,6 +44,7 @@ impl AccountsDb {
     pub fn new(
         config: &AccountsDbConfig,
         directory: &Path,
+        max_slot: u64,
     ) -> AccountsDbResult<Self> {
         let directory = directory.join(ACCOUNTSDB_SUB_DIR);
         let lock = StWLock::default();
@@ -61,13 +62,15 @@ impl AccountsDb {
         let snapshot_frequency = config.snapshot_frequency;
         assert_ne!(snapshot_frequency, 0, "snapshot frequency cannot be zero");
 
-        Ok(Self {
+        let mut this = Self {
             storage,
             index,
             snapshot_engine,
             synchronizer: lock,
             snapshot_frequency,
-        })
+        };
+        this.ensure_at_most(max_slot)?;
+        Ok(this)
     }
 
     /// Opens existing database with given snapshot_frequency, used for tests and tools
@@ -78,7 +81,7 @@ impl AccountsDb {
             snapshot_frequency: u64::MAX,
             ..Default::default()
         };
-        Self::new(&config, directory)
+        Self::new(&config, directory, 0)
     }
 
     /// Read account from with given pubkey from the database (if exists)
@@ -249,30 +252,16 @@ impl AccountsDb {
     /// Set latest observed slot
     #[inline(always)]
     pub fn set_slot(&self, slot: u64) {
-        const PREEMPTIVE_FLUSHING_THRESHOLD: u64 = 5;
         self.storage.set_slot(slot);
-        let remainder = slot % self.snapshot_frequency;
 
-        let delta = self
-            .snapshot_frequency
-            .saturating_sub(PREEMPTIVE_FLUSHING_THRESHOLD);
-        let preemptive_flush = delta != 0 && remainder == delta;
-
-        if preemptive_flush {
-            // a few slots before next snapshot point, start flushing asynchronously so
-            // that at the actual snapshot point there will be very little to flush
-            self.flush(false);
-            return;
-        }
-
-        if remainder != 0 {
+        if 0 != slot % self.snapshot_frequency {
             return;
         }
         // acquire the lock, effectively stopping the world, nothing should be able
         // to modify underlying accounts database while this lock is active
         let _locked = self.synchronizer.write();
         // flush everything before taking the snapshot, in order to ensure consistent state
-        self.flush(true);
+        self.flush();
 
         let used_storage = self.storage.utilized_mmap();
         if let Err(err) = self.snapshot_engine.snapshot(slot, used_storage) {
@@ -349,15 +338,9 @@ impl AccountsDb {
     }
 
     /// Flush primary storage and indexes to disk
-    /// This operation can be done asynchronously (returning immediately)
-    /// or in a blocking fashion
-    pub fn flush(&self, sync: bool) {
-        self.storage.flush(sync);
-        // index is usually so small, that it takes a few ms at
-        // most to flush it, so no need to schedule async flush
-        if sync {
-            self.index.flush();
-        }
+    pub fn flush(&self) {
+        self.storage.flush();
+        self.index.flush();
     }
 
     /// Get a clone of synchronization lock, to suspend all the writes,

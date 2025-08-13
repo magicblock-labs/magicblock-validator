@@ -9,7 +9,7 @@ use solana_sdk::{
 };
 use test_tools::{
     diagnostics::log_exec_details, init_logger, skip_if_devnet_down,
-    transactions_processor, validator::init_started_validator,
+    validator::init_started_validator,
 };
 
 use crate::utils::{fund_luzifer, SOLX_POST, SOLX_PROG, SOLX_TIPS};

@@ -71,7 +71,7 @@ pub fn load_programs(
         ));
     }
 
-    add_loadables(bank, &loadables)?;
+    add_loadables(accountsdb, &loadables)?;
 
     Ok(())
 }
@@ -91,7 +91,7 @@ pub fn add_loadables(
         })
         .collect::<Result<Vec<_>, io::Error>>()?;
 
-    add_programs_vecs(bank, &progs);
+    add_programs_vecs(accountsdb, &progs);
 
     Ok(())
 }
@@ -104,7 +104,7 @@ pub fn add_programs_bytes(
         .iter()
         .map(|prog| elf_program_account_from(*prog))
         .collect::<Vec<_>>();
-    add_programs(bank, &elf_program_accounts);
+    add_programs(accountsdb, &elf_program_accounts);
 }
 
 fn add_programs_vecs(
@@ -117,7 +117,7 @@ fn add_programs_vecs(
             elf_program_account_from((*id, *loader_id, vec))
         })
         .collect::<Vec<_>>();
-    add_programs(bank, &elf_program_accounts);
+    add_programs(accountsdb, &elf_program_accounts);
 }
 
 fn add_programs(accountsdb: &AccountsDb, progs: &[ElfProgramAccount]) {

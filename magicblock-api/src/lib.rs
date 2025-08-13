@@ -5,7 +5,7 @@ mod fund_account;
 mod genesis_utils;
 pub mod ledger;
 pub mod magic_validator;
-mod program_loader;
+pub mod program_loader;
 mod slot;
 mod tickers;
 

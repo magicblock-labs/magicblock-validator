@@ -16,6 +16,7 @@ use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{instruction_utils::InstructionUtils, MagicContext};
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::account::ReadableAccount;
+use solana_transaction::sanitized::SanitizedTransaction;
 use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;
@@ -26,6 +27,7 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
     transaction_status_sender: TransactionStatusSender,
     ledger: Arc<Ledger>,
     tick_duration: Duration,
+    transaction_scheduler: TransactionSchedulerHandle,
     exit: Arc<AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
     let bank = bank.clone();
@@ -37,7 +39,7 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
             tokio::time::sleep(tick_duration).await;
 
         let (update_ledger_result, next_slot) =
-            advance_slot_and_update_ledger(&bank, &ledger);
+            advance_slot_and_update_ledger(&accountsdb, &ledger);
         if let Err(err) = update_ledger_result {
             error!("Failed to write block: {:?}", err);
         }
@@ -99,7 +101,7 @@ pub fn init_commit_accounts_ticker(
     manager: &Arc<AccountsManager>,
     tick_duration: Duration,
     token: CancellationToken,
-) -> tokio::task::JoinHandle<()> {
+) {
     loop {
         tokio::select! {
             _ = tokio::time::sleep(tick_duration) => {
@@ -127,7 +129,7 @@ pub fn init_commit_accounts_ticker(
 pub fn init_system_metrics_ticker(
     tick_duration: Duration,
     ledger: &Arc<Ledger>,
-    bank: &Arc<Bank>,
+    accountsdb: &Arc<AccountsDb>,
     token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     // fn try_set_ledger_counts(ledger: &Ledger) {

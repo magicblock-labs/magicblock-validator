@@ -3898,6 +3898,7 @@ name = "magicblock-api"
 version = "0.1.7"
 dependencies = [
  "anyhow",
+ "bincode",
  "borsh 1.5.7",
  "conjunto-transwise",
  "crossbeam-channel",
@@ -3939,10 +3940,12 @@ dependencies = [
 >>>>>>> refactor: remove unecassary files
  "paste",
  "solana-feature-set",
+ "solana-inline-spl",
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
  "solana-svm",
+ "solana-transaction",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",

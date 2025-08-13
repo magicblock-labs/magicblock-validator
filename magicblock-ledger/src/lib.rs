@@ -6,6 +6,7 @@ use solana_sdk::{clock::Clock, hash::Hash};
 pub use store::api::{Ledger, SignatureInfosForAddress};
 use tokio::sync::Notify;
 
+#[derive(Default)]
 pub struct LatestBlockInner {
     pub slot: u64,
     pub blockhash: Hash,
@@ -13,9 +14,19 @@ pub struct LatestBlockInner {
 }
 
 /// Atomically updated, shared, latest block information
-#[derive(Clone)]
+/// The instances of this type can be used by various components
+/// of the validator to cheaply retrieve the latest block data,
+/// without relying on expensive ledger operations. It's always
+/// kept in sync with the ledger by the ledger itself
+#[derive(Clone, Default)]
 pub struct LatestBlock {
+    /// Atomically swappable block data, the reference can be safely
+    /// accessed by multiple threads, even if another threads swaps
+    /// the value from under them. As long as there're some readers,
+    /// the reference will be kept alive by arc swap, while the new
+    /// readers automatically get access to the latest version of the block
     inner: Arc<ArcSwapAny<Arc<LatestBlockInner>>>,
+    /// Notification mechanism to signal that the block has been modified
     notifier: Arc<Notify>,
 }
 
@@ -35,15 +46,6 @@ impl LatestBlockInner {
 }
 
 impl LatestBlock {
-    pub fn new(slot: u64, blockhash: Hash, timestamp: i64) -> Self {
-        let block = LatestBlockInner::new(slot, blockhash, timestamp);
-        let notifier = Arc::default();
-        Self {
-            inner: Arc::new(ArcSwapAny::new(block.into())),
-            notifier,
-        }
-    }
-
     pub fn load(&self) -> Guard<Arc<LatestBlockInner>> {
         self.inner.load()
     }

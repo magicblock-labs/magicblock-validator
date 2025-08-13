@@ -17,7 +17,7 @@ use solana_sdk::{
     system_program,
 };
 
-use crate::DEFAULT_LAMPORTS_PER_SIGNATURE;
+const DEFAULT_LAMPORTS_PER_SIGNATURE: u64 = 0;
 
 // Default amount received by the validator
 const VALIDATOR_LAMPORTS: u64 = 42;
