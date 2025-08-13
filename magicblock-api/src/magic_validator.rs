@@ -36,15 +36,8 @@ use magicblock_committor_service::{
     CommittorService, ComputeBudgetConfig,
 };
 use magicblock_config::{
-<<<<<<< master
     AccountsDbConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
     LifecycleMode, PrepareLookupTables, ProgramConfig,
-||||||| ancestor
-    AccountsDbConfig, EphemeralConfig, LifecycleMode, PrepareLookupTables,
-    ProgramConfig,
-=======
-    EphemeralConfig, LifecycleMode, PrepareLookupTables, ProgramConfig,
->>>>>>> fix: post integration fixes
 };
 use magicblock_core::link::{link, transactions::TransactionSchedulerHandle};
 use magicblock_gateway::{state::SharedState, JsonRpcServer};
@@ -61,17 +54,7 @@ use magicblock_program::{
     init_persister, validator, validator::validator_authority,
     TransactionScheduler,
 };
-<<<<<<< master
-use magicblock_transaction_status::{
-    TransactionStatusMessage, TransactionStatusSender,
-};
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
-||||||| ancestor
-use magicblock_transaction_status::{
-    TransactionStatusMessage, TransactionStatusSender,
-};
-=======
->>>>>>> fix: post integration fixes
 use mdp::state::{
     features::FeaturesSet,
     record::{CountryCode, ErRecord},
@@ -660,7 +643,6 @@ impl MagicValidator {
 
         self.maybe_process_ledger()?;
 
-<<<<<<< master
         self.claim_fees_task.start(self.config.clone());
 
         self.transaction_listener.run(true, self.bank.clone());
@@ -699,7 +681,6 @@ impl MagicValidator {
             );
             Some(tokio::spawn(task))
         };
->>>>>>> fix: post integration fixes
 
         self.commit_accounts_ticker = {
             let token = self.token.clone();
