@@ -6,6 +6,9 @@ use solana_svm::{
     },
 };
 use solana_transaction::sanitized::SanitizedTransaction;
+use solana_transaction_status::{
+    map_inner_instructions, TransactionStatusMeta,
+};
 
 use magicblock_core::link::{
     accounts::{AccountWithSlot, LockedAccount},
@@ -13,9 +16,6 @@ use magicblock_core::link::{
         TransactionExecutionResult, TransactionSimulationResult,
         TxnExecutionResultTx, TxnSimulationResultTx,
     },
-};
-use magicblock_transaction_status::{
-    map_inner_instructions, TransactionStatusMeta,
 };
 
 impl super::TransactionExecutor {
