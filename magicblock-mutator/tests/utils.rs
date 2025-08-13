@@ -1,5 +1,5 @@
 use solana_sdk::{pubkey, pubkey::Pubkey};
-use test_tools::{account::fund_account, traits::TransactionsProcessor};
+use test_tools::{account::fund_account, AccountsDb};
 
 #[allow(dead_code)] // used in tests
 pub const SOLX_PROG: Pubkey =
@@ -19,7 +19,7 @@ pub const SOLX_POST: Pubkey =
 
 const LUZIFER: Pubkey = pubkey!("LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk");
 
-pub fn fund_luzifer(bank: &dyn TransactionsProcessor) {
+pub fn fund_luzifer(accountsdb: &AccountsDb) {
     // TODO: we need to fund Luzifer at startup instead of doing it here
-    fund_account(bank.bank(), &LUZIFER, u64::MAX / 2);
+    fund_account(accountsdb, &LUZIFER, u64::MAX / 2);
 }

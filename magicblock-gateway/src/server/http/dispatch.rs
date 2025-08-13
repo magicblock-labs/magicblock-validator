@@ -3,7 +3,7 @@ use std::{convert::Infallible, sync::Arc};
 use hyper::{body::Incoming, Request, Response};
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
-    accounts::EnsureAccountsTx, transactions::TxnToProcessTx,
+    accounts::EnsureAccountsTx, transactions::TransactionSchedulerHandle,
     RpcChannelEndpoints,
 };
 use magicblock_ledger::Ledger;
@@ -28,7 +28,7 @@ pub(crate) struct HttpDispatcher {
     pub(crate) transactions: TransactionsCache,
     pub(crate) blocks: Arc<BlocksCache>,
     pub(crate) ensure_accounts_tx: EnsureAccountsTx,
-    pub(crate) transactions_tx: TxnToProcessTx,
+    pub(crate) transactions_scheduler: TransactionSchedulerHandle,
 }
 
 impl HttpDispatcher {
@@ -42,8 +42,8 @@ impl HttpDispatcher {
             ledger: state.ledger.clone(),
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
-            ensure_accounts_tx: channels.ensure_accounts_tx.clone(),
-            transactions_tx: channels.txn_to_process_tx.clone(),
+            ensure_accounts_tx: channels.ensure_accounts.clone(),
+            transactions_scheduler: channels.transaction_scheduler.clone(),
         })
     }
 

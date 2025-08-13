@@ -1,10 +1,8 @@
 use std::{
-    net::SocketAddr,
     path::{Path, PathBuf},
-    process,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
+        Arc,
     },
     thread,
     time::Duration,
@@ -27,59 +25,62 @@ use magicblock_account_updates::{
 use magicblock_accounts::{
     utils::try_rpc_cluster_from_cluster, AccountsManager,
 };
-use magicblock_accounts_api::BankAccountProvider;
-use magicblock_accounts_db::{error::AccountsDbError, AccountsDb, StWLock};
-use magicblock_bank::{
-    bank::Bank,
-    genesis_utils::create_genesis_config_with_leader,
-    geyser::{AccountsUpdateNotifier, TransactionNotifier},
-    program_loader::load_programs_into_bank,
-    transaction_logs::TransactionLogCollectorFilter,
-};
+use magicblock_accounts_api::AccountsDbProvider;
+use magicblock_accounts_db::AccountsDb;
 use magicblock_committor_service::{
     config::ChainConfig, CommittorService, ComputeBudgetConfig,
 };
 use magicblock_config::{
+<<<<<<< master
     AccountsDbConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
     LifecycleMode, PrepareLookupTables, ProgramConfig,
+||||||| ancestor
+    AccountsDbConfig, EphemeralConfig, LifecycleMode, PrepareLookupTables,
+    ProgramConfig,
+=======
+    EphemeralConfig, LifecycleMode, PrepareLookupTables, ProgramConfig,
+>>>>>>> fix: post integration fixes
 };
-use magicblock_gateway::{state::SharedState, types::link, JsonRpcServer};
+use magicblock_core::link::{link, transactions::TransactionSchedulerHandle};
+use magicblock_gateway::{state::SharedState, JsonRpcServer};
 use magicblock_ledger::{
-    blockstore_processor::process_ledger,
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
     Ledger,
 };
 use magicblock_metrics::MetricsService;
-use magicblock_perf_service::SamplePerformanceService;
 use magicblock_processor::{
-    execute_transaction::TRANSACTION_INDEX_LOCK,
+    build_svm_env,
     scheduler::{TransactionScheduler, TransactionSchedulerState},
 };
 use magicblock_program::{
     init_persister, validator, validator::validator_authority,
 };
+<<<<<<< master
 use magicblock_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
 };
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
+||||||| ancestor
+use magicblock_transaction_status::{
+    TransactionStatusMessage, TransactionStatusSender,
+};
+=======
+>>>>>>> fix: post integration fixes
 use mdp::state::{
     features::FeaturesSet,
     record::{CountryCode, ErRecord},
     status::ErStatus,
     version::v0::RecordV0,
 };
-use solana_feature_set::FeatureSet as SolanaFeatureSet;
-use solana_geyser_plugin_manager::{
-    geyser_plugin_manager::GeyserPluginManager,
-    slot_status_notifier::SlotStatusNotifierImpl,
+use solana_feature_set::{
+    curve25519_restrict_msm_length, curve25519_syscall_enabled,
+    disable_rent_fees_collection, FeatureSet as SolanaFeatureSet,
 };
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     account::AccountSharedData,
-    clock::Slot,
     commitment_config::{CommitmentConfig, CommitmentLevel},
     feature,
-    genesis_config::GenesisConfig,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::Keypair,
@@ -96,13 +97,12 @@ use crate::{
     fund_account::{
         fund_magic_context, fund_validator_identity, funded_faucet,
     },
-    geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
+    genesis_utils::{create_genesis_config_with_leader, GenesisConfigInfo},
     ledger::{
         self, read_validator_keypair_from_ledger,
         write_validator_keypair_to_ledger,
     },
     program_loader::load_programs,
-    slot::advance_slot_and_update_ledger,
     tickers::{
         init_commit_accounts_ticker, init_slot_ticker,
         init_system_metrics_ticker,
@@ -134,9 +134,8 @@ pub struct MagicValidator {
     token: CancellationToken,
     accountsdb: Arc<AccountsDb>,
     ledger: Arc<Ledger>,
-    ledger_truncator: LedgerTruncator<AccountsDb>,
+    ledger_truncator: LedgerTruncator,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
-    sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
     remote_account_fetcher_worker: Option<RemoteAccountFetcherWorker>,
     remote_account_fetcher_handle: Option<tokio::task::JoinHandle<()>>,
@@ -146,7 +145,7 @@ pub struct MagicValidator {
     remote_account_cloner_worker: Option<
         Arc<
             RemoteAccountClonerWorker<
-                BankAccountProvider,
+                AccountsDbProvider,
                 RemoteAccountFetcherClient,
                 RemoteAccountUpdatesClient,
                 AccountDumperBank,
@@ -158,6 +157,8 @@ pub struct MagicValidator {
     accounts_manager: Arc<AccountsManager>,
     committor_service: Option<Arc<CommittorService>>,
     rpc_handle: JoinHandle<()>,
+    identity: Pubkey,
+    transaction_scheduler: TransactionSchedulerHandle,
     _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
     claim_fees_task: ClaimFeesTask,
 }
@@ -175,7 +176,7 @@ impl MagicValidator {
         let config = config.validator_config;
 
         let validator_pubkey = identity_keypair.pubkey();
-        let magicblock_bank::genesis_utils::GenesisConfigInfo {
+        let GenesisConfigInfo {
             genesis_config,
             validator_pubkey,
             ..
@@ -185,6 +186,7 @@ impl MagicValidator {
             config.validator.base_fees,
         );
 
+<<<<<<< master
         let (ledger, last_slot) =
             Self::init_ledger(&config.validator_config.ledger)?;
         info!("Latest ledger slot: {}", last_slot);
@@ -197,39 +199,63 @@ impl MagicValidator {
             )?;
         }
         let ledger_path = ledger.path.as_ref();
+||||||| ancestor
+        let ledger_path = ledger.path.as_ref();
+=======
+        let ledger_path = config.ledger.path.as_ref();
+>>>>>>> fix: post integration fixes
         let ledger = Self::init_ledger(ledger_path, config.ledger.reset)?;
-        let mut accountsdb = AccountsDb::new(config, ledger_path)?;
+
+        // SAFETY:
+        // this code will never panic as the ledger_path always appends the
+        // rocksdb directory to whatever path is preconfigured for the ledger,
+        // see `Ledger::do_open`, thus this path will always have a parent
+        let storage_path = ledger
+            .ledger_path()
+            .parent()
+            .expect("ledger_path didn't have a parent, should never happen");
+
+        let latest_block = ledger.latest_block().load();
+        let accountsdb = AccountsDb::new(
+            &config.accounts.db,
+            storage_path,
+            latest_block.slot,
+        )?;
         Self::sync_validator_keypair_with_ledger(
             ledger.ledger_path(),
             &identity_keypair,
-            config.validator_config.ledger.reset,
+            config.ledger.reset,
         )?;
 
         let exit = Arc::<AtomicBool>::default();
         let ledger_truncator = LedgerTruncator::new(
             ledger.clone(),
-            bank.clone(),
             DEFAULT_TRUNCATION_TIME_INTERVAL,
-            config.validator_config.ledger.size,
+            config.ledger.size,
         );
 
         fund_validator_identity(&accountsdb, &validator_pubkey);
-        fund_magic_context(&bank);
+        fund_magic_context(&accountsdb);
         let faucet_keypair = funded_faucet(
             &accountsdb,
             ledger.ledger_path().as_path(),
+<<<<<<< master
             &config.validator_config.ledger.resume_strategy,
+||||||| ancestor
+            config.validator_config.ledger.reset,
+=======
+            config.ledger.reset,
+>>>>>>> fix: post integration fixes
         )?;
 
-        load_programs(
-            &accountsdb,
-            &programs_to_load(&config.validator_config.programs),
-        )
-        .map_err(|err| {
-            ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
-        })?;
+        load_programs(&accountsdb, &programs_to_load(&config.programs))
+            .map_err(|err| {
+                ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
+            })?;
 
         let metrics_config = &config.metrics;
+        let accountsdb = Arc::new(accountsdb);
+
         let metrics = if metrics_config.enabled {
             let metrics_service =
                 magicblock_metrics::try_start_metrics_service(
@@ -243,7 +269,7 @@ impl MagicValidator {
                     metrics_config.system_metrics_tick_interval_secs,
                 ),
                 &ledger,
-                &bank,
+                &accountsdb,
                 token.clone(),
             );
 
@@ -253,9 +279,7 @@ impl MagicValidator {
         };
 
         let (accounts_config, remote_rpc_config) =
-            try_get_remote_accounts_and_rpc_config(
-                &config.validator_config.accounts,
-            )?;
+            try_get_remote_accounts_and_rpc_config(&config.accounts)?;
 
         let remote_account_fetcher_worker =
             RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
@@ -266,20 +290,25 @@ impl MagicValidator {
             // We'll kill/refresh one connection every 50 minutes
             Duration::from_secs(60 * 50),
         );
+        let (rpc_channels, validator_channels) = link();
 
-        let bank_account_provider = BankAccountProvider::new(bank.clone());
+        let accountsdb_account_provider =
+            AccountsDbProvider::new(accountsdb.clone());
         let remote_account_fetcher_client =
             RemoteAccountFetcherClient::new(&remote_account_fetcher_worker);
         let remote_account_updates_client =
             RemoteAccountUpdatesClient::new(&remote_account_updates_worker);
-        let account_dumper_bank = AccountDumperBank::new(bank.clone());
+        let account_dumper_bank = AccountDumperBank::new(
+            accountsdb.clone(),
+            rpc_channels.transaction_scheduler.clone(),
+        );
         let blacklisted_accounts = standard_blacklisted_accounts(
             &validator_pubkey,
             &faucet_keypair.pubkey(),
         );
 
         let committor_persist_path =
-            ledger_parent_path.join("committor_service.sqlite");
+            storage_path.join("committor_service.sqlite");
         debug!(
             "Committor service persists to: {}",
             committor_persist_path.display()
@@ -306,46 +335,44 @@ impl MagicValidator {
         };
 
         let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
-            bank_account_provider,
+            accountsdb_account_provider,
             remote_account_fetcher_client,
             remote_account_updates_client,
             account_dumper_bank,
             committor_service.clone(),
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
-            if config.validator_config.validator.base_fees.is_none() {
+            if config.validator.base_fees.is_none() {
                 ValidatorCollectionMode::NoFees
             } else {
                 ValidatorCollectionMode::Fees
             },
             clone_permissions,
             validator_pubkey,
-            config.validator_config.accounts.max_monitored_accounts,
-            config.validator_config.accounts.clone.clone(),
+            config.accounts.max_monitored_accounts,
+            config.accounts.clone.clone(),
         );
 
         let accounts_manager = Self::init_accounts_manager(
-            &bank,
+            &accountsdb,
             &remote_account_cloner_worker.get_last_clone_output(),
             RemoteAccountClonerClient::new(&remote_account_cloner_worker),
             &identity_keypair,
-            &config.validator_config,
+            &config,
         );
 
         validator::init_validator_authority(identity_keypair);
-        let accountsdb = Arc::new(accountsdb);
 
-        let (rpc_channels, validator_channels) = link();
-        Self::initialize_features(&accountsdb);
+        let featureset = Self::initialize_features(&accountsdb);
 
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
-            transaction_status_tx,
-            txn_to_process_tx,
-            account_update_tx,
-            block,
-            environment,
+            transaction_status_tx: validator_channels.transaction_status,
+            txn_to_process_rx: validator_channels.transaction_to_process,
+            account_update_tx: validator_channels.account_update,
+            latest_block: ledger.latest_block().clone(),
+            environment: build_svm_env(latest_block.blockhash, 0, featureset),
         };
         let transaction_scheduler =
             TransactionScheduler::new(1, txn_scheduler_state);
@@ -358,9 +385,9 @@ impl MagicValidator {
             config.validator.millis_per_slot,
         );
         let rpc = JsonRpcServer::new(
-            config.validator_config.rpc,
+            &config.rpc,
             shared_state,
-            rpc_channels,
+            &rpc_channels,
             token.clone(),
         )
         .await?;
@@ -382,13 +409,14 @@ impl MagicValidator {
             )),
             remote_account_cloner_handle: None,
             committor_service,
-            sample_performance_service: None,
             token,
             ledger,
             ledger_truncator,
             accounts_manager,
             claim_fees_task: ClaimFeesTask::new(),
             rpc_handle,
+            identity: validator_pubkey,
+            transaction_scheduler: rpc_channels.transaction_scheduler,
         })
     }
 
@@ -398,7 +426,7 @@ impl MagicValidator {
         featureset.activate(&curve25519_syscall_enabled::ID, 0);
         featureset.activate(&curve25519_restrict_msm_length::ID, 0);
 
-        let active = featureset.active.iter().map(|(k, v)| (k, Some(v)));
+        let active = featureset.active.iter().map(|(k, &v)| (k, Some(v)));
         for (feature_id, activated_at) in active {
             // Skip if the feature account already exists
             if accountsdb.get_account(feature_id).is_some() {
@@ -406,45 +434,18 @@ impl MagicValidator {
             }
             // Create a Feature struct with activated_at set to slot 0
             let f = feature::Feature { activated_at };
-            let mut account =
-                AccountSharedData::new_data(1, &f, &feature::id());
-            accountsdb.insert_account(feature_id, account);
+            let Ok(account) =
+                AccountSharedData::new_data(1, &f, &feature::id())
+            else {
+                continue;
+            };
+            accountsdb.insert_account(feature_id, &account);
         }
         featureset
     }
 
-    fn init_bank(
-        genesis_config: &GenesisConfig,
-        accountsdb_config: &AccountsDbConfig,
-        millis_per_slot: u64,
-        validator_pubkey: Pubkey,
-        adb_path: &Path,
-        adb_init_slot: Slot,
-    ) -> Result<Arc<Bank>, AccountsDbError> {
-        let runtime_config = Default::default();
-        let lock = TRANSACTION_INDEX_LOCK.clone();
-        let bank = Bank::new(
-            genesis_config,
-            runtime_config,
-            accountsdb_config,
-            None,
-            None,
-            false,
-            millis_per_slot,
-            validator_pubkey,
-            lock,
-            adb_path,
-            adb_init_slot,
-        )?;
-        bank.transaction_log_collector_config
-            .write()
-            .unwrap()
-            .filter = TransactionLogCollectorFilter::All;
-        Ok(Arc::new(bank))
-    }
-
     fn init_accounts_manager(
-        bank: &Arc<Bank>,
+        accountsdb: &Arc<AccountsDb>,
         cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
         validator_keypair: &Keypair,
@@ -455,7 +456,7 @@ impl MagicValidator {
             "Failed to derive accounts config from provided magicblock config",
         );
         let accounts_manager = AccountsManager::try_new(
-            bank,
+            accountsdb.clone(),
             cloned_accounts,
             remote_account_cloner_client,
             // NOTE: we could avoid passing a copy of the keypair here if we instead pass
@@ -606,7 +607,6 @@ impl MagicValidator {
         const MIN_BALANCE_SOL: u64 = 5;
         let (_, remote_rpc_config) =
             try_get_remote_accounts_and_rpc_config(&self.config.accounts)?;
-        let validator_pubkey = self.bank().get_identity();
 
         let lamports = RpcClient::new_with_commitment(
             remote_rpc_config.url().to_string(),
@@ -616,17 +616,17 @@ impl MagicValidator {
                     .unwrap_or(CommitmentLevel::Confirmed),
             },
         )
-        .get_balance(&validator_pubkey)
+        .get_balance(&self.identity)
         .await
         .map_err(|err| {
             ApiError::FailedToObtainValidatorOnChainBalance(
-                validator_pubkey,
+                self.identity,
                 err.to_string(),
             )
         })?;
         if lamports < MIN_BALANCE_SOL * LAMPORTS_PER_SOL {
             Err(ApiError::ValidatorInsufficientlyFunded(
-                validator_pubkey,
+                self.identity,
                 MIN_BALANCE_SOL,
             ))
         } else {
@@ -644,6 +644,7 @@ impl MagicValidator {
 
         self.maybe_process_ledger()?;
 
+<<<<<<< master
         self.claim_fees_task.start(self.config.clone());
 
         self.transaction_listener.run(true, self.bank.clone());
@@ -656,12 +657,44 @@ impl MagicValidator {
             Duration::from_millis(self.config.validator.millis_per_slot),
             self.exit.clone(),
         ));
+||||||| ancestor
+        self.transaction_listener.run(true, self.bank.clone());
 
-        self.commit_accounts_ticker = Some(init_commit_accounts_ticker(
+        self.slot_ticker = Some(init_slot_ticker(
+            &self.bank,
             &self.accounts_manager,
-            Duration::from_millis(self.config.accounts.commit.frequency_millis),
-            self.token.clone(),
+            self.committor_service.clone(),
+            self.ledger.clone(),
+            Duration::from_millis(self.config.validator.millis_per_slot),
+            self.exit.clone(),
         ));
+=======
+        self.slot_ticker = {
+            let accountsdb = self.accountsdb.clone();
+            let accounts_manager = self.accounts_manager.clone();
+            let task = init_slot_ticker(
+                accountsdb,
+                accounts_manager,
+                self.committor_service.clone(),
+                self.ledger.clone(),
+                Duration::from_millis(self.config.validator.millis_per_slot),
+                self.transaction_scheduler.clone(),
+                self.exit.clone(),
+            );
+            Some(tokio::spawn(task))
+        };
+>>>>>>> fix: post integration fixes
+
+        self.commit_accounts_ticker = {
+            let token = self.token.clone();
+            let account_manager = self.accounts_manager.clone();
+            let tick = Duration::from_millis(
+                self.config.accounts.commit.frequency_millis,
+            );
+            let task =
+                init_commit_accounts_ticker(account_manager, tick, token);
+            Some(tokio::spawn(task))
+        };
 
         // NOTE: these need to startup in the right order, otherwise some worker
         //       that may be needed, i.e. during hydration after ledger replay
@@ -671,23 +704,6 @@ impl MagicValidator {
         self.start_remote_account_cloner_worker().await?;
 
         self.ledger_truncator.start();
-
-        self.rpc_service.start().map_err(|err| {
-            ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
-        })?;
-
-        info!(
-            "Launched JSON RPC service at {:?} as part of process with pid {}",
-            self.rpc_service.rpc_addr(),
-            process::id(),
-        );
-
-        self.sample_performance_service
-            .replace(SamplePerformanceService::new(
-                &self.bank,
-                &self.ledger,
-                self.exit.clone(),
-            ));
 
         validator::finished_starting_up();
         Ok(())
@@ -786,27 +802,12 @@ impl MagicValidator {
                 error!("Failed to unregister: {}", err)
             }
         }
+        self.accountsdb.flush();
 
         // we have two memory mapped databases, flush them to disk before exitting
-        self.bank.flush();
         if let Err(err) = self.ledger.shutdown(false) {
             error!("Failed to shutdown ledger: {:?}", err);
         }
-    }
-
-    pub fn join(self) {
-        self.rpc_service.join().unwrap();
-        if let Some(x) = self.pubsub_handle.write().unwrap().take() {
-            x.join().unwrap()
-        }
-    }
-
-    pub fn bank_rc(&self) -> Arc<Bank> {
-        self.bank.clone()
-    }
-
-    pub fn bank(&self) -> &Bank {
-        &self.bank
     }
 
     pub fn ledger(&self) -> &Ledger {
