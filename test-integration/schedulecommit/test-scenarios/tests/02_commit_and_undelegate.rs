@@ -211,14 +211,14 @@ fn assert_cannot_increase_committee_count(
         &[&payer],
         blockhash,
     );
-    let simulation = client.simulate_transaction(&tx);
-    eprintln!("simulation: {:?}", simulation);
-
-    let tx_res = client
-        .send_and_confirm_transaction_with_spinner_and_commitment(
-            &tx,
-            *commitment,
-        );
+    let tx_res = client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
     let (tx_result_err, tx_err) = extract_transaction_error(tx_res);
     if let Some(tx_err) = tx_err {
         assert_is_instruction_error(

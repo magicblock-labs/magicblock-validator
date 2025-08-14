@@ -135,35 +135,6 @@ impl Ledger {
         let transaction_memos_cf = db.column();
         let perf_samples_cf = db.column();
 
-        debug!(
-            "transaction_status_cf: {:?}",
-            transaction_status_cf.count_column_using_cache()
-        );
-        debug!(
-            "address_signatures_cf: {:?}",
-            address_signatures_cf.count_column_using_cache()
-        );
-        debug!(
-            "slot_signatures_cf: {:?}",
-            slot_signatures_cf.count_column_using_cache()
-        );
-        debug!(
-            "blocktime_cf: {:?}",
-            blocktime_cf.count_column_using_cache()
-        );
-        debug!(
-            "blockhash_cf: {:?}",
-            blockhash_cf.count_column_using_cache()
-        );
-        debug!(
-            "transaction_cf: {:?}",
-            transaction_cf.count_column_using_cache()
-        );
-        debug!(
-            "transaction_memos_cf: {:?}",
-            transaction_memos_cf.count_column_using_cache()
-        );
-
         let account_mod_datas_cf = db.column();
 
         let db = Arc::new(db);
@@ -782,19 +753,12 @@ impl Ledger {
                 }
             }
             None => {
-                let mut iterator = self
-                    .iter_transaction_statuses(
-                        Some((signature, highest_confirmed_slot)),
-                        false,
-                    )
-                    .filter_map(|entry| match entry {
-                        Ok((slot, signature, status)) => {
-                            Some(((signature, slot), status))
-                        }
-                        Err(_) => None,
-                    });
+                let mut iterator = self.iter_transaction_statuses(
+                    Some((signature, highest_confirmed_slot)),
+                    false,
+                );
                 match iterator.next() {
-                    Some(((tx_signature, slot), _data)) => {
+                    Some(Ok((slot, tx_signature, _data))) => {
                         if slot <= highest_confirmed_slot
                             && tx_signature == signature
                         {
@@ -812,7 +776,7 @@ impl Ledger {
                             return Ok(None);
                         }
                     }
-                    None => {
+                    _ => {
                         // We found neither a transaction nor its status
                         return Ok(None);
                     }
@@ -936,12 +900,6 @@ impl Ledger {
 
             let mut result = None;
             for ((stat_signature, slot), _) in iterator {
-                trace!(
-                    "stat_signature: {:?}, signature: {:?}, slot: {:?}",
-                    stat_signature,
-                    signature,
-                    slot
-                );
                 if stat_signature == signature && slot <= min_slot {
                     result = self
                         .transaction_status_cf

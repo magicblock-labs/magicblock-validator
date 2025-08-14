@@ -570,8 +570,6 @@ impl JsonRpcRequestProcessor {
                 .ledger
                 .get_complete_transaction(signature, highest_confirmed_slot);
 
-            debug!("get_complete_transaction: {:?}", result);
-
             // NOTE: not supporting bigtable
             if let Some(tx) = result.ok().flatten() {
                 // NOTE: we assume to always have a blocktime
