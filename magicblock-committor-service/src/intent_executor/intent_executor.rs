@@ -19,7 +19,7 @@ use crate::{
         ExecutionOutput, IntentExecutor,
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
-    transaction_preperator::transaction_preparator::TransactionPreparator,
+    transaction_preparator::transaction_preparator::TransactionPreparator,
     utils::persist_status_update_by_message_set,
 };
 
@@ -179,11 +179,11 @@ where
                 let update_status = CommitStatus::Failed;
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
-            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::FailedToFitError)) => {
+            Err(Error::FailedCommitPreparationError(crate::transaction_preparator::error::Error::FailedToFitError)) => {
                 let update_status = CommitStatus::PartOfTooLargeBundleToProcess;
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
-            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::TaskBuilderError(err))) => {
+            Err(Error::FailedCommitPreparationError(crate::transaction_preparator::error::Error::TaskBuilderError(err))) => {
                 match err {
                     crate::tasks::task_builder::Error::CommitTasksBuildError(_) => {
                         let update_status = CommitStatus::Failed;
@@ -192,7 +192,7 @@ where
                     crate::tasks::task_builder::Error::FinalizedTasksBuildError(_) => {}
                  }
             },
-            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::DeliveryPreparationError(_))) => {
+            Err(Error::FailedCommitPreparationError(crate::transaction_preparator::error::Error::DeliveryPreparationError(_))) => {
                 // Persisted internally
             },
             Err(Error::FailedToCommitError {err: _, signature}) => {

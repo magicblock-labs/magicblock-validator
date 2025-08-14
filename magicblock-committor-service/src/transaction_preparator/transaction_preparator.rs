@@ -16,7 +16,7 @@ use crate::{
         task_strategist::TaskStrategist,
         utils::TransactionUtils,
     },
-    transaction_preperator::{
+    transaction_preparator::{
         delivery_preparator::DeliveryPreparator, error::PreparatorResult,
     },
     ComputeBudgetConfig,

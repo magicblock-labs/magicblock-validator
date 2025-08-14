@@ -3,6 +3,7 @@ use std::collections::{hash_map::Entry, HashMap, VecDeque};
 use log::warn;
 use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 use solana_pubkey::Pubkey;
+use thiserror::Error;
 
 use crate::types::ScheduledBaseIntentWrapper;
 
@@ -61,6 +62,7 @@ struct IntentMeta {
 /// arriving: `[c2, c1]`
 /// `[c2, c1]` - Even there's no overlaps with executing
 /// we can't proceed since blocked intent has [c1] that has to be executed first
+/// For tests on those edge-cases refer to complex_blocking_test module
 pub(crate) struct IntentScheduler {
     blocked_keys: HashMap<Pubkey, VecDeque<IntentID>>,
     blocked_intents: HashMap<IntentID, IntentMeta>,
@@ -123,35 +125,85 @@ impl IntentScheduler {
     /// Completes Intent, cleaning up data after itself and allowing Intents to move forward
     /// NOTE: This doesn't unblock intent, hence Self::intents_blocked will return old value.
     /// NOTE: this shall be called on executing intents to finilize their execution.
-    /// Calling on incorrect `pubkeys` set will result in panic
-    pub fn complete(&mut self, base_intent: &ScheduledBaseIntent) {
+    pub fn complete(
+        &mut self,
+        base_intent: &ScheduledBaseIntent,
+    ) -> IntentSchedulerResult<()> {
         // Release data for completed intent
         let intent_id = base_intent.id;
         let Some(pubkeys) = base_intent.get_committed_pubkeys() else {
             // This means BaseAction, it doesn't have to be scheduled
-            return;
+            return Ok(());
         };
 
-        pubkeys
-            .iter()
-            .for_each(|pubkey| {
-                let mut occupied = match self.blocked_keys.entry(*pubkey) {
-                    Entry::Vacant(_) => unreachable!("Invariant: queue for conflicting tasks shall exist"),
-                    Entry::Occupied(value) => value
-                };
+        if self.blocked_intents.contains_key(&intent_id) {
+            return Err(IntentSchedulerError::CompletingBlockedIntentError);
+        }
 
-                let blocked_intents: &mut VecDeque<IntentID> = occupied.get_mut();
-                let front = blocked_intents.pop_front();
-                assert_eq!(
-                    intent_id,
-                    front.expect("Invariant: if intent executing, queue for each account is non-empty"),
-                    "Invariant: executing intent must be first at qeueue"
+        // All front of queues contain current intent id
+        let mut all_front = true;
+        // Some of front queues contain intent id
+        let mut some_front = false;
+        for pubkey in &pubkeys {
+            if let Some(blocked_intents) = self.blocked_keys.get(pubkey) {
+                // SAFETY: if entry exists it means that queue not empty
+                // This is ensured during scheduling as we always insert el-t in the queue
+                // Other state is not supposed to be possible
+                let front = blocked_intents.front().expect(
+                    "Invariant: if entry is occupied, queue is non-empty",
                 );
-
-                if blocked_intents.is_empty() {
-                    occupied.remove();
+                if front != &intent_id {
+                    // This intent isn't executing
+                    all_front = false;
+                } else {
+                    some_front = true;
                 }
-            });
+            } else {
+                // This intent isn't executing since queue for it doesn't exist
+                all_front = false;
+            }
+        }
+
+        // Intent is indeed executing - can complete it
+        if all_front {
+            Ok(())
+        } else if some_front {
+            // Only some part of pubkeys is executing - corrupted intent
+            Err(IntentSchedulerError::CorruptedIntentError)
+        } else {
+            // Intent was never scheduled before
+            Err(IntentSchedulerError::NonScheduledMessageError)
+        }?;
+
+        // The last check for corrupted intent
+        // Say some keys got account got deleted from intent:
+        // We will have all_front = true since number of keys is less than was initially
+        let found_in_front = self
+            .blocked_keys
+            .iter()
+            .filter(|(_, queue)| queue.front() == Some(&intent_id))
+            .count();
+        if found_in_front != pubkeys.len() {
+            return Err(IntentSchedulerError::CorruptedIntentError);
+        }
+
+        // After all the checks we may safely complete
+        pubkeys.iter().for_each(|pubkey| {
+            let mut occupied = match self.blocked_keys.entry(*pubkey) {
+                Entry::Vacant(_) => unreachable!(
+                    "entry exists since following was checked beforehand"
+                ),
+                Entry::Occupied(value) => value,
+            };
+
+            let blocked_intents: &mut VecDeque<IntentID> = occupied.get_mut();
+            blocked_intents.pop_front();
+            if blocked_intents.is_empty() {
+                occupied.remove();
+            }
+        });
+
+        Ok(())
     }
 
     // Returns [`ScheduledBaseIntent`] that can be executed
@@ -161,6 +213,9 @@ impl IntentScheduler {
         // TODO(edwin): optimize. Create counter im IntentMeta & update
         let mut execute_candidates: HashMap<IntentID, usize> = HashMap::new();
         self.blocked_keys.iter().for_each(|(_, queue)| {
+            // SAFETY: if entry exists it means that queue not empty
+            // This is ensured during scheduling as we always insert el-t in the queue
+            // Other state is not supposed to be possible
             let intent_id = queue
                 .front()
                 .expect("Invariant: we maintain ony non-empty queues");
@@ -209,6 +264,18 @@ impl IntentScheduler {
         self.blocked_intents.len()
     }
 }
+
+#[derive(Error, Debug)]
+pub enum IntentSchedulerError {
+    #[error("Attempt to complete non-scheduled message")]
+    NonScheduledMessageError,
+    #[error("Attempt to complete corrupted intent")]
+    CorruptedIntentError,
+    #[error("Attempt to complete blocked message")]
+    CompletingBlockedIntentError,
+}
+
+pub type IntentSchedulerResult<T, E = IntentSchedulerError> = Result<T, E>;
 
 /// Set of simple tests
 #[cfg(test)]
@@ -288,7 +355,7 @@ mod completion_simple_test {
         assert_eq!(scheduler.intents_blocked(), 1);
 
         // Complete first intent
-        scheduler.complete(&executed.inner);
+        assert!(scheduler.complete(&executed.inner).is_ok());
 
         let next = scheduler.pop_next_scheduled_intent().unwrap();
         assert_eq!(next, msg2);
@@ -311,7 +378,7 @@ mod completion_simple_test {
         assert_eq!(scheduler.intents_blocked(), 2);
 
         // Complete first intent
-        scheduler.complete(&executed.inner);
+        assert!(scheduler.complete(&executed.inner).is_ok());
 
         // Second intent should now be available
         let expected_msg2 = scheduler.pop_next_scheduled_intent().unwrap();
@@ -319,7 +386,7 @@ mod completion_simple_test {
         assert_eq!(scheduler.intents_blocked(), 1);
 
         // Complete second intent
-        scheduler.complete(&expected_msg2.inner);
+        assert!(scheduler.complete(&expected_msg2.inner).is_ok());
 
         // Third intent should now be available
         let expected_msg3 = scheduler.pop_next_scheduled_intent().unwrap();
@@ -373,20 +440,20 @@ mod complex_blocking_test {
         assert_eq!(scheduler.intents_blocked(), 2);
 
         // Complete msg1
-        scheduler.complete(&msg1.inner);
+        assert!(scheduler.complete(&msg1.inner).is_ok());
         // None of the intents can execute yet
         // msg3 is blocked msg2
         // msg4 is blocked by msg3
         assert!(scheduler.pop_next_scheduled_intent().is_none());
 
         // Complete msg2
-        scheduler.complete(&msg2.inner);
+        assert!(scheduler.complete(&msg2.inner).is_ok());
         // Now msg3 is unblocked
         let next = scheduler.pop_next_scheduled_intent().unwrap();
         assert_eq!(next, msg3);
         assert_eq!(scheduler.intents_blocked(), 1);
         // Complete msg3
-        scheduler.complete(&next.inner);
+        assert!(scheduler.complete(&next.inner).is_ok());
 
         // Now msg4 should be available
         let next = scheduler.pop_next_scheduled_intent().unwrap();
@@ -433,7 +500,7 @@ mod complex_blocking_test {
         assert_eq!(scheduler.intents_blocked(), 2);
 
         // Complete msg1
-        scheduler.complete(&executed_msg1.inner);
+        assert!(scheduler.complete(&executed_msg1.inner).is_ok());
 
         // Now only msg2 should be available (not msg3)
         let expected_msg2 = scheduler.pop_next_scheduled_intent().unwrap();
@@ -443,7 +510,7 @@ mod complex_blocking_test {
         assert_eq!(scheduler.pop_next_scheduled_intent(), None);
 
         // Complete msg2
-        scheduler.complete(&expected_msg2.inner);
+        assert!(scheduler.complete(&expected_msg2.inner).is_ok());
 
         // Now msg3 should be available
         let expected_msg3 = scheduler.pop_next_scheduled_intent().unwrap();
@@ -475,7 +542,7 @@ mod complex_blocking_test {
         assert_eq!(scheduler.intents_blocked(), 4);
 
         // Complete msg1
-        scheduler.complete(&executed1.inner);
+        assert!(scheduler.complete(&executed1.inner).is_ok());
 
         // msg2 and msg4 should be available (they don't conflict)
         let next_msgs = [
@@ -487,7 +554,7 @@ mod complex_blocking_test {
         assert_eq!(scheduler.intents_blocked(), 2);
 
         // Complete msg2
-        scheduler.complete(&msg2.inner);
+        assert!(scheduler.complete(&msg2.inner).is_ok());
         // msg2 and msg4 should be available (they don't conflict)
         let next_intents = [
             scheduler.pop_next_scheduled_intent().unwrap(),
@@ -502,7 +569,6 @@ mod complex_blocking_test {
 #[cfg(test)]
 mod edge_cases_test {
     use magicblock_program::magic_scheduled_base_intent::MagicBaseIntent;
-    use solana_pubkey::pubkey;
 
     use super::*;
 
@@ -516,19 +582,127 @@ mod edge_cases_test {
         assert!(scheduler.schedule(msg.clone()).is_some());
         assert_eq!(scheduler.intents_blocked(), 0);
     }
+}
+
+#[cfg(test)]
+mod complete_error_test {
+    use magicblock_program::magic_scheduled_base_intent::CommittedAccountV2;
+    use solana_account::Account;
+    use solana_pubkey::pubkey;
+
+    use super::*;
 
     #[test]
-    fn test_completion_without_scheduling() {
+    fn test_complete_non_scheduled_message() {
         let mut scheduler = IntentScheduler::new();
         let msg = create_test_intent(
             1,
-            &[pubkey!("11111111111111111111111111111111")],
+            &[pubkey!("1111111111111111111111111111111111111111111")],
         );
 
-        // Completing a intent that wasn't scheduled should panic
-        let result =
-            std::panic::catch_unwind(move || scheduler.complete(&msg.inner));
-        assert!(result.is_err());
+        // Attempt to complete message that was never scheduled
+        let result = scheduler.complete(&msg.inner);
+        assert!(matches!(
+            result,
+            Err(IntentSchedulerError::NonScheduledMessageError)
+        ));
+    }
+
+    #[test]
+    fn test_corrupted_intent_state_more_keys_initially() {
+        let mut scheduler = IntentScheduler::new();
+        let pubkey1 = pubkey!("1111111111111111111111111111111111111111111");
+        let pubkey2 = pubkey!("21111111111111111111111111111111111111111111");
+
+        // Schedule first intent
+        let mut msg1 = create_test_intent(1, &[pubkey1, pubkey2]);
+        assert!(scheduler.schedule(msg1.clone()).is_some());
+
+        // Schedule second intent that conflicts with first
+        let msg2 = create_test_intent(2, &[pubkey1]);
+        assert!(scheduler.schedule(msg2.clone()).is_none());
+
+        msg1.inner.get_committed_accounts_mut().unwrap().pop();
+
+        // Attempt to complete msg1 - should detect corrupted state
+        let result = scheduler.complete(&msg1.inner);
+        assert!(matches!(
+            result,
+            Err(IntentSchedulerError::CorruptedIntentError)
+        ));
+    }
+
+    #[test]
+    fn test_corrupted_intent_state_less_keys_initially() {
+        let mut scheduler = IntentScheduler::new();
+        let pubkey1 = pubkey!("1111111111111111111111111111111111111111111");
+        let pubkey2 = pubkey!("21111111111111111111111111111111111111111111");
+        let pubkey3 = pubkey!("31111111111111111111111111111111111111111111");
+
+        // Schedule first intent
+        let mut msg1 = create_test_intent(1, &[pubkey1, pubkey2]);
+        assert!(scheduler.schedule(msg1.clone()).is_some());
+
+        msg1.inner
+            .base_intent
+            .get_committed_accounts_mut()
+            .unwrap()
+            .push(CommittedAccountV2 {
+                pubkey: pubkey3,
+                account: Account::default(),
+            });
+
+        // Attempt to complete msg1 - should detect corrupted state
+        let result = scheduler.complete(&msg1.inner);
+        assert!(matches!(
+            result,
+            Err(IntentSchedulerError::CorruptedIntentError)
+        ));
+    }
+
+    #[test]
+    fn test_completing_blocked_message_complex() {
+        let mut scheduler = IntentScheduler::new();
+        let pubkey1 = pubkey!("1111111111111111111111111111111111111111111");
+        let pubkey2 = pubkey!("21111111111111111111111111111111111111111111");
+
+        // Schedule first intent for pubkey1 only
+        let msg1 = create_test_intent(1, &[pubkey1]);
+        assert!(scheduler.schedule(msg1.clone()).is_some());
+
+        // Create second intent using both pubkeys
+        let msg2 = create_test_intent(2, &[pubkey1, pubkey2]);
+        // Manually add to blocked_keys without proper scheduling
+        scheduler.schedule(msg2.clone());
+
+        // Attempt to complete - should detect corrupted state
+        let result = scheduler.complete(&msg2.inner);
+        assert!(matches!(
+            result,
+            Err(IntentSchedulerError::CompletingBlockedIntentError)
+        ));
+    }
+
+    #[test]
+    fn test_completing_blocked_message() {
+        let mut scheduler = IntentScheduler::new();
+        let pubkey = pubkey!("1111111111111111111111111111111111111111111");
+
+        // Schedule two intents for same pubkey
+        let msg1 = create_test_intent(1, &[pubkey]);
+        let msg2 = create_test_intent(2, &[pubkey]);
+
+        // First executes immediately
+        assert!(scheduler.schedule(msg1.clone()).is_some());
+        // Second gets blocked
+        assert!(scheduler.schedule(msg2.clone()).is_none());
+
+        // Attempt to complete msg2 before msg1 - should detect corrupted state
+        let result = scheduler.complete(&msg2.inner);
+        assert!(matches!(
+            result,
+            Err(IntentSchedulerError::CompletingBlockedIntentError)
+        ));
     }
 }
 

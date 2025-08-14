@@ -11,7 +11,7 @@ use magicblock_committor_service::{
         CommitIdFetcher, CommitIdTrackerResult,
     },
     tasks::tasks::CommitTask,
-    transaction_preperator::{
+    transaction_preparator::{
         delivery_preparator::DeliveryPreparator,
         transaction_preparator::TransactionPreparatorV1,
     },

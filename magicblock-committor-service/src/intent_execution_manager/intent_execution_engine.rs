@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
-use log::{error, info, trace, warn};
+use log::{error, trace, warn};
 use tokio::{
     sync::{
         broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
@@ -29,7 +29,6 @@ const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 /// Max number of executors that can send messages in parallel to Base layer
 const MAX_EXECUTORS: u8 = 50;
 
-// TODO(edwin): rename
 #[derive(Clone, Debug)]
 pub struct ExecutionOutputWrapper {
     pub id: u64,
@@ -120,8 +119,10 @@ where
                 }
             };
             let Some(intent) = intent else {
-                // intents are blocked, skipping
-                info!("Could not schedule any intents, as all of them are blocked!");
+                // We couldn't pick up intent for execution due to:
+                // 1. All executors are currently busy
+                // 2. All intents are blocked and none could be executed at the moment
+                trace!("Could not schedule any intents");
                 continue;
             };
 
@@ -252,7 +253,8 @@ where
         inner_scheduler
             .lock()
             .expect(POISONED_INNER_MSG)
-            .complete(&intent.inner);
+            .complete(&intent.inner)
+            .expect("Valid completion of priviously scheduled message");
 
         // Free worker
         drop(execution_permit);
