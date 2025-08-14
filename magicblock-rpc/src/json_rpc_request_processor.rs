@@ -844,22 +844,6 @@ impl JsonRpcRequestProcessor {
         _search_transaction_history: bool,
     ) -> Option<TransactionStatus> {
         // Looking back 30 seconds ensures tests are more robust
-        debug!(
-            "tx statuses: \n{:?}",
-            self.ledger
-                .iter_transaction_statuses_by_slot_test()
-                .map(|status| match status {
-                    Ok((signature, slot, status)) => {
-                        format!(
-                            "slot: {:?}, signature: {:?}, status: {:?}",
-                            slot, signature, status
-                        )
-                    }
-                    Err(err) => format!("error: {:?}", err),
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        );
         let bank_result = self.bank.get_recent_signature_status(
             &signature,
             Some(self.bank.slots_for_duration(Duration::from_secs(30))),
