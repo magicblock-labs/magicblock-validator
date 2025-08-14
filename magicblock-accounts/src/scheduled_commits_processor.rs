@@ -258,17 +258,18 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
         bank: &Arc<Bank>,
         transaction_status_sender: &TransactionStatusSender,
         execution_outcome: ExecutionOutputWrapper,
-        intent_meta: ScheduledBaseIntentMeta,
+        mut intent_meta: ScheduledBaseIntentMeta,
     ) {
         let chain_signatures = vec![
             execution_outcome.output.commit_signature,
             execution_outcome.output.finalize_signature,
         ];
+        let intent_sent_transaction = std::mem::take(&mut intent_meta.intent_sent_transaction);
         let sent_commit =
-            Self::build_sent_commit(intent_id, chain_signatures, &intent_meta);
+            Self::build_sent_commit(intent_id, chain_signatures, intent_meta);
         register_scheduled_commit_sent(sent_commit);
         match execute_legacy_transaction(
-            intent_meta.intent_sent_transaction,
+            intent_sent_transaction,
             bank,
             Some(transaction_status_sender),
         ) {
@@ -286,13 +287,14 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
         intent_id: u64,
         bank: &Arc<Bank>,
         transaction_status_sender: &TransactionStatusSender,
-        intent_meta: ScheduledBaseIntentMeta,
+        mut intent_meta: ScheduledBaseIntentMeta,
     ) {
+        let intent_sent_transaction = std::mem::take(&mut intent_meta.intent_sent_transaction);
         let sent_commit =
-            Self::build_sent_commit(intent_id, vec![], &intent_meta);
+            Self::build_sent_commit(intent_id, vec![], intent_meta);
         register_scheduled_commit_sent(sent_commit);
         match execute_legacy_transaction(
-            intent_meta.intent_sent_transaction,
+            intent_sent_transaction,
             bank,
             Some(transaction_status_sender),
         ) {
@@ -309,7 +311,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
     fn build_sent_commit(
         intent_id: u64,
         chain_signatures: Vec<Signature>,
-        intent_meta: &ScheduledBaseIntentMeta,
+        intent_meta: ScheduledBaseIntentMeta,
     ) -> SentCommit {
         SentCommit {
             message_id: intent_id,
@@ -317,9 +319,9 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
             blockhash: intent_meta.blockhash,
             payer: intent_meta.payer,
             chain_signatures,
-            included_pubkeys: intent_meta.included_pubkeys.clone(),
-            excluded_pubkeys: intent_meta.excluded_pubkeys.clone(),
-            feepayers: intent_meta.feepayers.clone(),
+            included_pubkeys: intent_meta.included_pubkeys,
+            excluded_pubkeys: intent_meta.excluded_pubkeys,
+            feepayers: intent_meta.feepayers,
             requested_undelegation: intent_meta.requested_undelegation,
         }
     }

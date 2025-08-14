@@ -189,11 +189,14 @@ where
                         let update_status = CommitStatus::Failed;
                         persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
                     }
-                    crate::tasks::task_builder::Error::FinalizedTasksBuildError(_) => {}
+                    crate::tasks::task_builder::Error::FinalizedTasksBuildError(_) => {
+                        // During commit preparation we don't encounter following error
+                        // so no need to persist it
+                    }
                  }
             },
             Err(Error::FailedCommitPreparationError(crate::transaction_preparator::error::Error::DeliveryPreparationError(_))) => {
-                // Persisted internally
+                // Intermediate commit preparation progress recorded by DeliveryPreparator
             },
             Err(Error::FailedToCommitError {err: _, signature}) => {
                 // Commit is a single TX, so if it fails, all of commited accounts marked FailedProcess
