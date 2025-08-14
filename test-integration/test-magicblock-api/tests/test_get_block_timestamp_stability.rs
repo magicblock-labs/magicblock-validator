@@ -18,16 +18,19 @@ async fn test_get_block_timestamp_stability() {
         .request_airdrop(&pubkey, LAMPORTS_PER_SOL)
         .await
         .unwrap();
+
+    // Wait some time for the slot to be finalized
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     let tx = rpc_client
         .get_transaction(&signature, UiTransactionEncoding::Base64)
         .await
         .unwrap();
-
-    tokio::time::sleep(Duration::from_secs(1)).await;
 
     let current_slot = tx.slot;
     let block_time = rpc_client.get_block_time(current_slot).await.unwrap();
     let ledger_block = rpc_client.get_block(current_slot).await.unwrap();
 
     assert_eq!(ledger_block.block_time, Some(block_time));
+    assert_eq!(tx.block_time, Some(block_time));
 }

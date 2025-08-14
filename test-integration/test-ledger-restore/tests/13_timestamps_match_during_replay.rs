@@ -1,13 +1,15 @@
 use cleanass::assert_eq;
 use magicblock_config::LedgerResumeStrategy;
 use solana_transaction_status::UiTransactionEncoding;
-use std::{path::Path, process::Child, thread::sleep, time::Duration};
+use std::{path::Path, process::Child};
 
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
-use test_ledger_restore::{setup_offline_validator, TMP_DIR_LEDGER};
+use test_ledger_restore::{
+    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+};
 
 // In this test we ensure that the timestamps of the blocks in the restored
 // ledger match the timestamps of the blocks in the original ledger.
@@ -42,8 +44,8 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
     // First airdrop followed by wait until account is flushed
     let signature = expect!(ctx.airdrop_ephem(pubkey, 1_111_111), validator);
 
-    // Block time is only set after the slot
-    expect!(ctx.wait_for_next_slot_ephem(), validator);
+    // Wait for the tx to be written to disk and slot to be finalized
+    let slot = wait_for_ledger_persist(&mut validator);
 
     let block_time = expect!(
         ctx.try_ephem_client().and_then(|client| {
@@ -56,16 +58,6 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
         }),
         validator
     );
-
-    // Wait for the first slot after the snapshot
-    let slot = loop {
-        let slot = ctx.get_slot_ephem().unwrap();
-        if slot % SNAPSHOT_FREQUENCY == 1 {
-            break slot;
-        }
-        // Sleep for half a slot
-        sleep(Duration::from_millis(25));
-    };
 
     (validator, slot, signature, block_time)
 }

@@ -13,7 +13,6 @@ use schedulecommit_client::{
 };
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::client_error::ErrorKind;
-use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_rpc_client_api::request::RpcError;
 use solana_rpc_client_api::{
     client_error::Error as ClientError, config::RpcSendTransactionConfig,
@@ -27,7 +26,6 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use solana_transaction_status::UiTransactionEncoding;
 use test_tools_core::init_logger;
 use utils::{
     assert_is_instruction_error,
@@ -292,7 +290,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         } = ctx.fields();
         let chain_client = ctx.try_chain_client().unwrap();
 
-        // 1. Show we cannot use it in the ehpemeral anymore
+        // 1. Show we cannot use it in the ephemeral anymore
         assert_cannot_increase_committee_count(
             committees[0].1,
             payer,
