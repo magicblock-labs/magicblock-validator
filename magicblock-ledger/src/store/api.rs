@@ -783,11 +783,19 @@ impl Ledger {
             }
             None => {
                 let mut iterator = self
-                    .transaction_cf
-                    .iter_current_index_filtered(IteratorMode::From(
-                        (signature, highest_confirmed_slot),
-                        IteratorDirection::Forward,
-                    ));
+                    .iter_transaction_statuses(
+                        Some(IteratorMode::From(
+                            (signature, highest_confirmed_slot),
+                            IteratorDirection::Forward,
+                        )),
+                        false,
+                    )
+                    .filter_map(|entry| match entry {
+                        Ok((slot, signature, status)) => {
+                            Some(((signature, slot), status))
+                        }
+                        Err(_) => None,
+                    });
                 match iterator.next() {
                     Some(((tx_signature, slot), _data)) => {
                         if slot <= highest_confirmed_slot
