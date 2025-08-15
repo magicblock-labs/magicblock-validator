@@ -35,6 +35,7 @@ fn write_ledger(
         None,
         None,
         LedgerResumeStrategy::Reset,
+        None,
         false,
     );
 
@@ -60,6 +61,7 @@ fn read_ledger(
         None,
         None,
         LedgerResumeStrategy::Replay,
+        None,
         false,
     );
 

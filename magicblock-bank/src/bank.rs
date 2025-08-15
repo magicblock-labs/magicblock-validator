@@ -430,6 +430,7 @@ impl Bank {
         lock: StWLock,
         adb_path: &Path,
         adb_init_slot: Slot,
+        adb_init_slot_override: bool,
     ) -> std::result::Result<Self, AccountsDbError> {
         // TODO(bmuddha): When we transition to multi-threaded mode with multiple SVM workers,
         // every transaction should acquire the read guard on this lock before executing.
@@ -439,6 +440,9 @@ impl Bank {
         // here we force Accountsdb to match the minimum slot (provided by ledger),
         // this is the only place where we have a mutable access to the AccountsDb
         // before it's wrapped in Arc, and thus becomes immutable
+        if adb_init_slot_override {
+            accounts_db.set_slot(adb_init_slot);
+        }
         accounts_db.ensure_at_most(adb_init_slot)?;
 
         let mut bank = Self::default_with_accounts(

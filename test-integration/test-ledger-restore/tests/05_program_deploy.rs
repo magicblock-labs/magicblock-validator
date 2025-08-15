@@ -68,6 +68,7 @@ fn write(
         None,
         None,
         LedgerResumeStrategy::Reset,
+        None,
         false,
     );
 
@@ -131,6 +132,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
         None,
         None,
         LedgerResumeStrategy::Replay,
+        None,
         false,
     );
 
