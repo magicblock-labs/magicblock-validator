@@ -1,14 +1,5 @@
 use assert_matches::assert_matches;
 use log::*;
-use magicblock_bank::{
-    bank_dev_utils::{
-        elfs,
-        transactions::{
-            create_solx_send_post_transaction, SolanaxPostAccounts,
-        },
-    },
-    DEFAULT_LAMPORTS_PER_SIGNATURE,
-};
 use magicblock_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
 use magicblock_program::validator;
 use solana_sdk::{
@@ -24,7 +15,7 @@ use solana_sdk::{
 };
 use test_tools::{
     diagnostics::log_exec_details, init_logger, services::skip_if_devnet_down,
-    transactions_processor, validator::init_started_validator,
+    validator::init_started_validator,
 };
 
 use crate::utils::{fund_luzifer, SOLX_EXEC, SOLX_IDL, SOLX_PROG};
@@ -200,10 +191,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
         let author_acc = tx_processor.bank().get_account(&author).unwrap();
         assert_eq!(author_acc.data().len(), 0);
         assert_eq!(author_acc.owner(), &system_program::ID);
-        assert_eq!(
-            author_acc.lamports(),
-            LAMPORTS_PER_SOL - 2 * DEFAULT_LAMPORTS_PER_SIGNATURE
-        );
+        assert_eq!(author_acc.lamports(), LAMPORTS_PER_SOL);
 
         let post_acc = tx_processor.bank().get_account(&post).unwrap();
         assert_eq!(post_acc.data().len(), 1180);
@@ -256,10 +244,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
         let author_acc = tx_processor.bank().get_account(&author).unwrap();
         assert_eq!(author_acc.data().len(), 0);
         assert_eq!(author_acc.owner(), &system_program::ID);
-        assert_eq!(
-            author_acc.lamports(),
-            LAMPORTS_PER_SOL - 2 * DEFAULT_LAMPORTS_PER_SIGNATURE
-        );
+        assert_eq!(author_acc.lamports(), LAMPORTS_PER_SOL - 2);
 
         let post_acc = tx_processor.bank().get_account(&post).unwrap();
         assert_eq!(post_acc.data().len(), 1180);
