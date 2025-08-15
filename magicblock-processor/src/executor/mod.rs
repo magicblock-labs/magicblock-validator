@@ -67,6 +67,12 @@ impl TransactionExecutor {
         );
         let runtime_v2 =
             create_program_runtime_environment_v2(&Default::default(), false);
+        // TODO(bmuddha):
+        // Use a shared program cache. With a single threaded
+        // scheduler it doesn't matter, but with multiple
+        // executor approach, it's necessary for all of them
+        // to utilize the same shared global program cache
+        // https://github.com/magicblock-labs/magicblock-validator/issues/507
         let processor = TransactionBatchProcessor::new(
             slot,
             Default::default(),
@@ -136,10 +142,13 @@ impl TransactionExecutor {
                 biased; Some(txn) = self.rx.recv() => {
                     match txn.mode {
                         TransactionProcessingMode::Execution(tx) => {
-                            self.execute([txn.transaction], tx);
+                            self.execute([txn.transaction], tx, false);
                         }
                         TransactionProcessingMode::Simulation(tx) => {
                             self.simulate([txn.transaction], tx);
+                        }
+                        TransactionProcessingMode::Replay(tx) => {
+                            self.execute([txn.transaction], Some(tx), true);
                         }
                     }
                     let _ = self.ready_tx.send(self.id).await;
@@ -151,8 +160,6 @@ impl TransactionExecutor {
                     self.slot = block.slot;
                     self.processor.writable_sysvar_cache()
                         .write().unwrap().set_sysvar_for_tests(&block.clock);
-                    self.processor.program_cache.write()
-                        .unwrap().latest_root_slot = block.slot;
                     RwLockReadGuard::unlock_fair(_guard);
                     _guard = self.sync.read();
                 }

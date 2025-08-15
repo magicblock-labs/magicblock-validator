@@ -36,8 +36,8 @@ use magicblock_committor_service::{
     CommittorService, ComputeBudgetConfig,
 };
 use magicblock_config::{
-    AccountsDbConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
-    LifecycleMode, PrepareLookupTables, ProgramConfig,
+    EphemeralConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
+    PrepareLookupTables, ProgramConfig,
 };
 use magicblock_core::{
     link::{link, transactions::TransactionSchedulerHandle},
@@ -45,6 +45,7 @@ use magicblock_core::{
 };
 use magicblock_gateway::{state::SharedState, JsonRpcServer};
 use magicblock_ledger::{
+    blockstore_processor::process_ledger,
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
     Ledger,
 };
@@ -93,6 +94,7 @@ use crate::{
         write_validator_keypair_to_ledger,
     },
     program_loader::load_programs,
+    slot::advance_slot_and_update_ledger,
     tickers::{
         init_commit_accounts_ticker, init_slot_ticker,
         init_system_metrics_ticker,
@@ -519,10 +521,15 @@ impl MagicValidator {
         if !self.config.ledger.resume_strategy().is_replaying() {
             return Ok(());
         }
-        //     if self.config.ledger.reset {
-        //         return Ok(());
-        //     }
-        //     let slot_to_continue_at = process_ledger(&self.ledger, &self.bank)?;
+        if self.config.ledger.resume_strategy.is_resuming() {
+            return Ok(());
+        }
+        // SOLANA only allows blockhash to be valid for 150 slot back in time,
+        // considering that the average slot time on solana is 400ms, then:
+        const SOLANA_VALID_BLOCKHASH_AGE: u64 = 150 * 400;
+        // we have this number for our max blockhash age in slots, which correspond to 60 seconds
+        let max_block_age =
+            SOLANA_VALID_BLOCKHASH_AGE / self.config.validator.millis_per_slot;
 
         // The transactions to schedule and accept account commits re-run when we
         // process the ledger, however we do not want to re-commit them.
@@ -537,27 +544,39 @@ impl MagicValidator {
         );
         TransactionScheduler::default().clear_scheduled_actions();
 
-        //     // We want the next transaction either due to hydrating of cloned accounts or
-        //     // user request to be processed in the next slot such that it doesn't become
-        //     // part of the last block found in the existing ledger which would be incorrect.
-        //     let (update_ledger_result, _) =
-        //         advance_slot_and_update_ledger(&self.bank, &self.ledger);
-        //     if let Err(err) = update_ledger_result {
-        //         return Err(err.into());
-        //     }
-        //     if self.bank.slot() != slot_to_continue_at {
-        //         return Err(
-        //             ApiError::NextSlotAfterLedgerProcessingNotMatchingBankSlot(
-        //                 slot_to_continue_at,
-        //                 self.bank.slot(),
-        //             ),
-        //         );
-        //     }
+        // The transactions to schedule and accept account commits re-run when we
+        // process the ledger, however we do not want to re-commit them.
+        // Thus while the ledger is processed we don't yet run the machinery to handle
+        // scheduled commits and we clear all scheduled commits before fully starting the
+        // validator.
+        let scheduled_commits = self.accounts_manager.scheduled_commits_len();
+        debug!(
+            "Found {} scheduled commits while processing ledger, clearing them",
+            scheduled_commits
+        );
+        self.accounts_manager.clear_scheduled_commits();
 
-        //     info!(
-        //         "Processed ledger, validator continues at slot {}",
-        //         slot_to_continue_at
-        //     );
+        // We want the next transaction either due to hydrating of cloned accounts or
+        // user request to be processed in the next slot such that it doesn't become
+        // part of the last block found in the existing ledger which would be incorrect.
+        let (update_ledger_result, _) =
+            advance_slot_and_update_ledger(&self.accountsdb, &self.ledger);
+        if let Err(err) = update_ledger_result {
+            return Err(err.into());
+        }
+        if self.accountsdb.slot() != slot_to_continue_at {
+            return Err(
+                ApiError::NextSlotAfterLedgerProcessingNotMatchingBankSlot(
+                    slot_to_continue_at,
+                    self.accountsdb.slot(),
+                ),
+            );
+        }
+
+        info!(
+            "Processed ledger, validator continues at slot {}",
+            slot_to_continue_at
+        );
 
         Ok(())
     }
@@ -644,7 +663,7 @@ impl MagicValidator {
             }
         }
 
-        self.maybe_process_ledger()?;
+        self.maybe_process_ledger().await?;
 
         self.claim_fees_task.start(self.config.clone());
 

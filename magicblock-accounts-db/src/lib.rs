@@ -15,8 +15,6 @@ use solana_account::{
 use solana_pubkey::Pubkey;
 use storage::AccountsStorage;
 
-use crate::snapshot::SnapSlot;
-
 pub type AccountsDbResult<T> = Result<T, AccountsDbError>;
 /// Stop the World Lock, used to halt all writes to the accountsdb
 /// while some critical operation is in action, e.g. snapshotting
@@ -270,23 +268,6 @@ impl AccountsDb {
                 self.snapshot_engine.database_path().display()
             );
         }
-    }
-
-    /// Return slot of oldest maintained snapshot or None
-    /// Parses path to extract slot
-    pub fn get_oldest_snapshot_slot(&self) -> Option<u64> {
-        self.snapshot_engine
-            .with_snapshots(|snapshots| -> Option<u64> {
-                let path = snapshots.front()?;
-                SnapSlot::try_from_path(path)
-                    .map(|snap_slot: SnapSlot| snap_slot.slot())
-                    .or_else(|| {
-                        error!(
-                            "Failed to parse the path into SnapSlot: {path:?}",
-                        );
-                        None
-                    })
-            })
     }
 
     /// Checks whether AccountsDB has "freshness", not exceeding given slot

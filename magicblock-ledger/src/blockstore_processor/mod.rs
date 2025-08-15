@@ -1,23 +1,20 @@
-use std::{str::FromStr, sync::Arc};
+use std::{future::Future, pin::Pin, str::FromStr, sync::Arc};
 
 use log::{Level::Trace, *};
 use magicblock_accounts_db::AccountsDb;
+use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use num_format::{Locale, ToFormattedString};
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
     hash::Hash,
-    message::SanitizedMessage,
+    message::{SanitizedMessage, SimpleAddressLoader},
     transaction::{
         SanitizedTransaction, TransactionVerificationMode, VersionedTransaction,
     },
 };
-use solana_svm::{
-    transaction_commit_result::{
-        TransactionCommitResult, TransactionCommitResultExtensions,
-    },
-    transaction_processor::ExecutionRecordingConfig,
+use solana_svm::transaction_commit_result::{
+    TransactionCommitResult, TransactionCommitResultExtensions,
 };
-use solana_timings::ExecuteTimings;
 use solana_transaction_status::VersionedConfirmedBlock;
 
 use crate::{
@@ -28,7 +25,6 @@ use crate::{
 #[derive(Debug)]
 struct PreparedBlock {
     slot: u64,
-    previous_blockhash: Hash,
     blockhash: Hash,
     block_time: Option<UnixTimestamp>,
     transactions: Vec<VersionedTransaction>,
@@ -40,9 +36,9 @@ struct IterBlocksParams<'a> {
     blockhashes_only_starting_slot: Slot,
 }
 
-fn iter_blocks(
-    params: IterBlocksParams,
-    mut prepared_block_handler: impl FnMut(PreparedBlock) -> LedgerResult<()>,
+async fn replay_blocks(
+    params: IterBlocksParams<'_>,
+    transaction_scheduler: TransactionSchedulerHandle,
 ) -> LedgerResult<u64> {
     let IterBlocksParams {
         ledger,
@@ -76,7 +72,6 @@ fn iter_blocks(
 
         let VersionedConfirmedBlock {
             blockhash,
-            previous_blockhash,
             transactions,
             block_time,
             block_height,
@@ -104,13 +99,6 @@ fn iter_blocks(
         } else {
             vec![]
         };
-        let previous_blockhash =
-            Hash::from_str(&previous_blockhash).map_err(|err| {
-                LedgerError::BlockStoreProcessor(format!(
-                    "Failed to parse previous_blockhash: {:?}",
-                    err
-                ))
-            })?;
         let blockhash = Hash::from_str(&blockhash).map_err(|err| {
             LedgerError::BlockStoreProcessor(format!(
                 "Failed to parse blockhash: {:?}",
@@ -118,14 +106,61 @@ fn iter_blocks(
             ))
         })?;
 
-        prepared_block_handler(PreparedBlock {
+        let block = PreparedBlock {
             slot,
-            previous_blockhash,
             blockhash,
             block_time,
             transactions: successfull_txs,
-        })?;
+        };
 
+        let Some(timestamp) = block.block_time else {
+            return Err(LedgerError::BlockStoreProcessor(format!(
+                "Block has no timestamp, {block:?}",
+            )));
+        };
+        ledger
+            .latest_block()
+            .store(block.slot, block.blockhash, timestamp);
+        let mut block_txs = vec![];
+        // Transactions are stored in the ledger ordered by most recent to latest
+        // such to replay them in the order they executed we need to reverse them
+        for tx in block.transactions.into_iter().rev() {
+            let tx = tx.verify_and_hash_message().and_then(|hash| {
+                SanitizedTransaction::try_create(
+                    tx,
+                    hash,
+                    None,
+                    SimpleAddressLoader::Disabled,
+                    &Default::default(),
+                )
+            });
+
+            match tx {
+                Ok(tx) => block_txs.push(tx),
+                Err(err) => {
+                    return Err(LedgerError::BlockStoreProcessor(format!(
+                        "Error processing transaction: {err:?}",
+                    )));
+                }
+            };
+        }
+        for txn in block_txs {
+            let signature = *txn.signature();
+            let result =
+                transaction_scheduler.replay(txn).await.ok_or_else(|| {
+                    LedgerError::BlockStoreProcessor(
+                        "Transaction Scheduler is not running".into(),
+                    )
+                });
+            if !log_enabled!(Trace) {
+                debug!("Result: {signature} - {result:?}");
+            }
+            if let Err(error) = result {
+                return Err(LedgerError::BlockStoreProcessor(format!(
+                    "Transaction '{signature}' could not be executed: {error}",
+                )));
+            }
+        }
         slot += 1;
     }
     Ok(slot.max(1))
@@ -133,180 +168,34 @@ fn iter_blocks(
 
 /// Processes the provided ledger updating the bank and returns the slot
 /// at which the validator should continue processing (last processed slot + 1).
-pub fn process_ledger(
+pub async fn process_ledger(
     ledger: &Ledger,
     accountsdb: &AccountsDb,
+    transaction_scheduler: TransactionSchedulerHandle,
     max_age: u64,
 ) -> LedgerResult<u64> {
-    // // NOTE:
-    // // bank.adb was rolled back to max_slot (via ensure_at_most) in magicblock-bank/src/bank.rs
-    // // `Bank::new` method, so the returned slot here is guaranteed to be equal or less than the
-    // // slot from `ledger.get_max_blockhash`
-    // let full_process_starting_slot = accountsdb.slot();
+    // NOTE:
+    // accountsdb was rolled back to max_slot (via ensure_at_most) during init
+    // so the returned slot here is guaranteed to be equal or less than the
+    // slot from `ledger.get_max_blockhash`
+    let full_process_starting_slot = accountsdb.slot();
 
-    // // Since transactions may refer to blockhashes that were present when they
-    // // ran initially we ensure that they are present during replay as well
-    // let blockhashes_only_starting_slot = (full_process_starting_slot > max_age)
-    //     .then_some(full_process_starting_slot - max_age)
-    //     .unwrap_or_default();
-    // debug!(
-    //     "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
-    //     blockhashes_only_starting_slot, full_process_starting_slot
-    // );
-    // iter_blocks(
-    //     IterBlocksParams {
-    //         ledger,
-    //         full_process_starting_slot,
-    //         blockhashes_only_starting_slot,
-    //     },
-    //     |prepared_block| {
-    //         let mut block_txs = vec![];
-    //         let Some(timestamp) = prepared_block.block_time else {
-    //             return Err(LedgerError::BlockStoreProcessor(format!(
-    //                 "Block has no timestamp, {:?}",
-    //                 prepared_block
-    //             )));
-    //         };
-    //         blockhash_log::log_blockhash(
-    //             prepared_block.slot,
-    //             &prepared_block.blockhash,
-    //         );
-    //         bank.replay_slot(
-    //             prepared_block.slot,
-    //             &prepared_block.previous_blockhash,
-    //             &prepared_block.blockhash,
-    //             timestamp as u64,
-    //         );
-
-    //         // Transactions are stored in the ledger ordered by most recent to latest
-    //         // such to replay them in the order they executed we need to reverse them
-    //         for tx in prepared_block.transactions.into_iter().rev() {
-    //             match bank.verify_transaction(
-    //                 tx,
-    //                 TransactionVerificationMode::HashOnly,
-    //             ) {
-    //                 Ok(tx) => block_txs.push(tx),
-    //                 Err(err) => {
-    //                     return Err(LedgerError::BlockStoreProcessor(format!(
-    //                         "Error processing transaction: {:?}",
-    //                         err
-    //                     )));
-    //                 }
-    //             };
-    //         }
-    //         if !block_txs.is_empty() {
-    //             // NOTE: ideally we would run all transactions in a single batch, but the
-    //             // flawed account lock mechanism prevents this currently.
-    //             // Until we revamp this transaction execution we execute each transaction
-    //             // in its own batch.
-    //             for tx in block_txs {
-    //                 log_sanitized_transaction(&tx);
-
-    //                 let mut timings = ExecuteTimings::default();
-    //                 let signature = *tx.signature();
-    //                 let batch = [tx];
-    //                 let batch = bank.prepare_sanitized_batch(&batch);
-    //                 let (results, _) = bank
-    //                     .load_execute_and_commit_transactions(
-    //                         &batch,
-    //                         false,
-    //                         ExecutionRecordingConfig::new_single_setting(true),
-    //                         &mut timings,
-    //                         None,
-    //                     );
-
-    //                 log_execution_results(&results);
-    //                 for result in results {
-    //                     if !result.was_executed_successfully() {
-    //                         // If we're on trace log level then we already logged this above
-    //                         if !log_enabled!(Trace) {
-    //                             debug!(
-    //                                 "Transactions: {:#?}",
-    //                                 batch.sanitized_transactions()
-    //                             );
-    //                             debug!("Result: {:#?}", result);
-    //                         }
-    //                         let err = match &result {
-    //                             Ok(tx) => match &tx.status {
-    //                                 Ok(_) => None,
-    //                                 Err(err) => Some(err),
-    //                             },
-    //                             Err(err) => Some(err),
-    //                         };
-    //                         return Err(LedgerError::BlockStoreProcessor(
-    //                             format!(
-    //                                 "Transaction '{}', {:?} could not be executed: {:?}",
-    //                                 signature, result, err
-    //                             ),
-    //                         ));
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //         Ok(())
-    //     },
-    // )
-    Ok(0)
-}
-
-fn log_sanitized_transaction(tx: &SanitizedTransaction) {
-    if !log_enabled!(Trace) {
-        return;
-    }
-    use SanitizedMessage::*;
-    match tx.message() {
-        Legacy(message) => {
-            let msg = &message.message;
-            trace!(
-                "Processing Transaction:
-header: {:#?}
-account_keys: {:#?}
-recent_blockhash: {}
-message_hash: {}
-instructions: {:?}
-",
-                msg.header,
-                msg.account_keys,
-                msg.recent_blockhash,
-                tx.message_hash(),
-                msg.instructions
-            );
-        }
-        V0(msg) => trace!("Transaction: {:#?}", msg),
-    }
-}
-
-fn log_execution_results(results: &[TransactionCommitResult]) {
-    if !log_enabled!(Trace) {
-        return;
-    }
-    for result in results {
-        match result {
-            Ok(tx) => {
-                if result.was_executed_successfully() {
-                    trace!(
-                        "Executed: (fees: {:#?}, loaded accounts; {:#?})",
-                        tx.fee_details,
-                        tx.loaded_account_stats
-                    );
-                } else {
-                    trace!("NotExecuted: {:#?}", tx.status);
-                }
-            }
-            Err(err) => {
-                trace!("Failed: {:#?}", err);
-            }
-        }
-    }
-}
-
-/// NOTE: a separate module for logging the blockhash is used
-/// to in order to allow turning this off specifically
-/// Example:
-/// RUST_LOG=warn,magicblock=debug,magicblock_ledger=trace,magicblock_ledger::blockstore_processor::blockhash_log=off
-mod blockhash_log {
-    use super::*;
-    pub(super) fn log_blockhash(slot: u64, blockhash: &Hash) {
-        trace!("Slot {} Blockhash {}", slot, &blockhash);
-    }
+    // Since transactions may refer to blockhashes that were present when they
+    // ran initially we ensure that they are present during replay as well
+    let blockhashes_only_starting_slot = (full_process_starting_slot > max_age)
+        .then_some(full_process_starting_slot - max_age)
+        .unwrap_or_default();
+    debug!(
+        "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
+        blockhashes_only_starting_slot, full_process_starting_slot
+    );
+    replay_blocks(
+        IterBlocksParams {
+            ledger,
+            full_process_starting_slot,
+            blockhashes_only_starting_slot,
+        },
+        transaction_scheduler,
+    )
+    .await
 }
