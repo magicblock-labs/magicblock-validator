@@ -41,7 +41,6 @@ features = ["lz4"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
-test-tools-core = { workspace = true }
 
 [build-dependencies]
 

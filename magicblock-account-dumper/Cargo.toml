@@ -16,5 +16,3 @@ magicblock-processor = { workspace = true }
 solana-sdk = { workspace = true }
 thiserror = { workspace = true }
 bincode = { workspace = true }
-
-[dev-dependencies]

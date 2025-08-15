@@ -19,22 +19,6 @@ pub struct MagicBlockConfig {
     )]
     pub validator_keypair: String,
 
-    #[arg(
-        long,
-        help = "The comma separated list of geyser cache features to disable. Valid values are 'accounts' and 'transactions'.",
-        env = "GEYSER_CACHE_DISABLE",
-        default_value = "(accounts,transactions)"
-    )]
-    pub geyser_cache_disable: String,
-
-    #[arg(
-        long,
-        help = "The comma separated list of geyser notifications features to disable. Valid values are 'accounts' and 'transactions'.",
-        env = "GEYSER_DISABLE",
-        default_value = "(accounts,transactions)"
-    )]
-    pub geyser_disable: String,
-
     #[command(flatten)]
     pub config: EphemeralConfig,
 }

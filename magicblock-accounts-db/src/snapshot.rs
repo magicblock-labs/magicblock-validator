@@ -76,18 +76,6 @@ impl SnapshotEngine {
         Ok(())
     }
 
-    /// Provides read-only access to the internal snapshots queue.
-    ///
-    /// Executes the given closure `f` with an immutable reference to the snapshots [`VecDeque`].
-    /// This guarantees thread-safe access while preventing modification of the underlying data.
-    pub(crate) fn with_snapshots<F, R>(&self, f: F) -> R
-    where
-        F: Fn(&VecDeque<PathBuf>) -> R,
-    {
-        let snapshots = self.snapshots.lock();
-        f(&snapshots)
-    }
-
     /// Try to rollback to snapshot which is the most recent one before given slot
     ///
     /// NOTE: In case of success, this deletes the primary
@@ -238,10 +226,6 @@ impl SnapSlot {
     fn as_path(&self, ppath: &Path) -> PathBuf {
         // enforce strict alphanumeric ordering by introducing extra padding
         ppath.join(format!("snapshot-{:0>12}", self.0))
-    }
-
-    pub(crate) fn slot(&self) -> u64 {
-        self.0
     }
 }
 

@@ -3777,7 +3777,6 @@ dependencies = [
  "log",
  "magicblock-metrics",
  "solana-sdk",
- "test-tools",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.15",
@@ -3797,7 +3796,6 @@ dependencies = [
  "solana-pubsub-client",
  "solana-rpc-client-api",
  "solana-sdk",
- "test-tools",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
@@ -3830,7 +3828,6 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
- "test-tools-core",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.15",
@@ -3981,7 +3978,6 @@ dependencies = [
  "solana-keypair",
  "solana-pubkey",
  "strum",
- "test-tools-core",
  "thiserror 1.0.69",
  "toml 0.8.23",
  "url 2.5.4",
@@ -4099,7 +4095,6 @@ dependencies = [
  "solana-timings",
  "solana-transaction-status",
  "tempfile",
- "test-tools-core",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.15",
@@ -4130,7 +4125,6 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
- "test-tools",
  "thiserror 1.0.69",
  "tokio",
 ]
@@ -4181,8 +4175,6 @@ dependencies = [
  "solana-log-collector",
  "solana-program-runtime",
  "solana-sdk",
- "test-tools",
- "test-tools-core",
  "thiserror 1.0.69",
 ]
 
@@ -4229,7 +4221,6 @@ dependencies = [
  "magicblock-config",
  "magicblock-version",
  "solana-sdk",
- "test-tools",
  "tokio",
 ]
 
@@ -10649,34 +10640,6 @@ name = "termtree"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
-
-[[package]]
-name = "test-tools"
-version = "0.1.7"
-dependencies = [
- "log",
- "magicblock-accounts-db",
- "magicblock-api",
- "magicblock-config",
- "magicblock-core",
- "magicblock-program",
- "solana-rpc-client",
- "solana-sdk",
- "solana-svm",
- "solana-timings",
- "tempfile",
- "test-tools-core",
- "tokio",
-]
-
-[[package]]
-name = "test-tools-core"
-version = "0.1.7"
-dependencies = [
- "env_logger 0.11.8",
- "log",
- "solana-svm",
-]
 
 [[package]]
 name = "textwrap"

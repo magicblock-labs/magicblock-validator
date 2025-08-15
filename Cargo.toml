@@ -30,8 +30,6 @@ members = [
   "magicblock-validator",
   "magicblock-version",
   "magicblock-validator-admin",
-  "test-tools",
-  "test-tools-core",
   "tools/genx",
   "tools/keypair-base58",
   "tools/ledger-stats",
@@ -194,8 +192,6 @@ strum = "0.24"
 strum_macros = "0.24"
 syn = "2.0"
 tempfile = "3.10.1"
-test-tools = { path = "./test-tools" }
-test-tools-core = { path = "./test-tools-core" }
 thiserror = "1.0.57"
 tokio = "1.0"
 tokio-stream = "0.1.15"

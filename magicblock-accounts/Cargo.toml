@@ -41,5 +41,4 @@ magicblock-committor-service = { workspace = true, features = [
   "dev-context-only-utils",
 ] }
 magicblock-config = { workspace = true }
-test-tools-core = { workspace = true }
 tokio-util = { workspace = true }

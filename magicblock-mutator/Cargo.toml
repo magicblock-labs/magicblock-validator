@@ -24,4 +24,3 @@ assert_matches = { workspace = true }
 bincode = { workspace = true }
 tokio = { workspace = true }
 magicblock-program = { workspace = true }
-test-tools = { workspace = true }
