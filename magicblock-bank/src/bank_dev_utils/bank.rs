@@ -70,6 +70,7 @@ impl Bank {
             StWLock::default(),
             &adb_path,
             adb_init_slot,
+            false,
         )?;
         bank.transaction_log_collector_config
             .write()

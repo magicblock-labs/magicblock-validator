@@ -38,6 +38,7 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
         None,
         None,
         LedgerResumeStrategy::Reset,
+        None,
         false,
     );
 
@@ -75,6 +76,7 @@ fn read(ledger_path: &Path, signature: Signature, block_time: i64) -> Child {
         None,
         None,
         LedgerResumeStrategy::Replay,
+        None,
         false,
     );
     eprintln!(

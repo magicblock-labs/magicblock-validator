@@ -20,6 +20,12 @@ pub struct LedgerConfig {
     #[derive_env_var]
     #[serde(default)]
     pub resume_strategy: LedgerResumeStrategy,
+    /// The slot to start from.
+    /// If left empty it will start from the last slot found in the ledger and default to 0.
+    #[derive_env_var]
+    #[clap_from_serde_skip]
+    #[serde(default)]
+    pub starting_slot: Option<u64>,
     /// Checks that the validator keypair matches the one in the ledger.
     #[derive_env_var]
     #[arg(
@@ -47,6 +53,7 @@ impl Default for LedgerConfig {
     fn default() -> Self {
         Self {
             resume_strategy: LedgerResumeStrategy::default(),
+            starting_slot: None,
             skip_keypair_match_check: false,
             path: Default::default(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
@@ -69,23 +76,35 @@ impl Default for LedgerConfig {
 #[strum(serialize_all = "kebab-case")]
 #[value(rename_all = "kebab-case")]
 pub enum LedgerResumeStrategy {
-    #[default]
     Reset,
+    DiscardResume,
+    AccountsOnly,
     ResumeOnly,
+    #[default]
     Replay,
 }
 
 impl LedgerResumeStrategy {
+    /// Whether the ledger should be resumed.
+    /// This assumes that a ledger exists.
     pub fn is_resuming(&self) -> bool {
-        self != &Self::Reset
+        matches!(self, Self::DiscardResume | Self::ResumeOnly | Self::Replay)
     }
 
     pub fn is_removing_ledger(&self) -> bool {
-        self != &Self::Replay
+        matches!(self, Self::Reset | Self::DiscardResume | Self::AccountsOnly)
+    }
+
+    pub fn is_removing_accountsdb(&self) -> bool {
+        matches!(self, Self::Reset | Self::DiscardResume)
+    }
+
+    pub fn is_removing_validator_keypair(&self) -> bool {
+        matches!(self, Self::Reset | Self::DiscardResume | Self::AccountsOnly)
     }
 
     pub fn is_replaying(&self) -> bool {
-        self == &Self::Replay
+        matches!(self, Self::Replay)
     }
 }
 
@@ -104,6 +123,7 @@ mod tests {
     fn test_merge_with_default() {
         let mut config = LedgerConfig {
             resume_strategy: LedgerResumeStrategy::Replay,
+            starting_slot: None,
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
@@ -121,6 +141,7 @@ mod tests {
         let mut config = LedgerConfig::default();
         let other = LedgerConfig {
             resume_strategy: LedgerResumeStrategy::Replay,
+            starting_slot: None,
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
@@ -135,6 +156,7 @@ mod tests {
     fn test_merge_non_default() {
         let mut config = LedgerConfig {
             resume_strategy: LedgerResumeStrategy::Replay,
+            starting_slot: None,
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
@@ -142,6 +164,7 @@ mod tests {
         let original_config = config.clone();
         let other = LedgerConfig {
             resume_strategy: LedgerResumeStrategy::ResumeOnly,
+            starting_slot: None,
             skip_keypair_match_check: true,
             path: Some("ledger2.example.com".to_string()),
             size: 10000,
@@ -157,6 +180,7 @@ mod tests {
         let toml_str = r#"
 [ledger]
 resume-strategy = "replay"
+starting-slot = 0
 skip-keypair-match-check = true
 path = "ledger.example.com"
 size = 1000000000
@@ -167,6 +191,7 @@ size = 1000000000
             config.ledger,
             LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Replay,
+                starting_slot: Some(0),
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
@@ -184,6 +209,7 @@ size = 1000000000
             config.ledger,
             LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::ResumeOnly,
+                starting_slot: None,
                 skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,
@@ -201,6 +227,7 @@ size = 1000000000
             config.ledger,
             LedgerConfig {
                 resume_strategy: LedgerResumeStrategy::Reset,
+                starting_slot: None,
                 skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,

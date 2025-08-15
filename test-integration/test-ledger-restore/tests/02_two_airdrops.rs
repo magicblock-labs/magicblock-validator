@@ -65,6 +65,7 @@ fn write(
         None,
         None,
         LedgerResumeStrategy::Reset,
+        None,
         false,
     );
 
@@ -103,6 +104,7 @@ fn read(
         None,
         None,
         LedgerResumeStrategy::Replay,
+        None,
         false,
     );
 
@@ -185,6 +187,7 @@ fn _diagnose_read() {
         None,
         None,
         LedgerResumeStrategy::Replay,
+        None,
         false,
     );
 }
