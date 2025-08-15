@@ -4,9 +4,8 @@ use log::*;
 use magicblock_api::{
     ledger,
     magic_validator::{MagicValidator, MagicValidatorConfig},
-    InitGeyserServiceConfig,
 };
-use magicblock_config::{GeyserGrpcConfig, MagicBlockConfig};
+use magicblock_config::MagicBlockConfig;
 use solana_sdk::signature::Signer;
 use test_tools::init_logger;
 
@@ -74,16 +73,14 @@ async fn main() {
     let validator_keypair = mb_config.validator_keypair();
     info!("Validator identity: {}", validator_keypair.pubkey());
 
-    let geyser_grpc_config = mb_config.config.geyser_grpc.clone();
-    let init_geyser_service_config =
-        init_geyser_config(&mb_config, geyser_grpc_config);
     let config = MagicValidatorConfig {
         validator_config: mb_config.config,
     };
 
     debug!("{:#?}", config);
-    let mut api =
-        MagicValidator::try_from_config(config, validator_keypair).unwrap();
+    let mut api = MagicValidator::try_from_config(config, validator_keypair)
+        .await
+        .unwrap();
     debug!("Created API .. starting things up");
 
     // We need to create and hold on to the ledger lock here in order to keep the
@@ -111,41 +108,5 @@ async fn main() {
 
     if let Err(err) = Shutdown::wait().await {
         error!("Failed to gracefully shutdown: {}", err);
-    }
-    // weird panic behavior in json rpc http server, which panics when stopped from
-    // within async context, so we just move it to a different thread for shutdown
-    //
-    // TODO: once we move rpc out of the validator, this hack will be gone
-    let _ = std::thread::spawn(move || {
-        api.stop();
-        api.join();
-    })
-    .join();
-}
-
-fn init_geyser_config(
-    mb_config: &MagicBlockConfig,
-    grpc_config: GeyserGrpcConfig,
-) -> InitGeyserServiceConfig {
-    let (cache_accounts, cache_transactions) = {
-        let cache_accounts =
-            mb_config.geyser_cache_disable.contains("accounts");
-        let cache_transactions =
-            mb_config.geyser_cache_disable.contains("transactions");
-        (cache_accounts, cache_transactions)
-    };
-    let (enable_account_notifications, enable_transaction_notifications) = {
-        let enable_accounts = mb_config.geyser_disable.contains("accounts");
-        let enable_transactions =
-            mb_config.geyser_disable.contains("transactions");
-        (enable_accounts, enable_transactions)
-    };
-
-    InitGeyserServiceConfig {
-        cache_accounts,
-        cache_transactions,
-        enable_account_notifications,
-        enable_transaction_notifications,
-        geyser_grpc: grpc_config,
     }
 }

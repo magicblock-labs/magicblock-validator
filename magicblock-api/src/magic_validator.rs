@@ -39,7 +39,10 @@ use magicblock_config::{
     AccountsDbConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
     LifecycleMode, PrepareLookupTables, ProgramConfig,
 };
-use magicblock_core::link::{link, transactions::TransactionSchedulerHandle};
+use magicblock_core::{
+    link::{link, transactions::TransactionSchedulerHandle},
+    Slot,
+};
 use magicblock_gateway::{state::SharedState, JsonRpcServer};
 use magicblock_ledger::{
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},

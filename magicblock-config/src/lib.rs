@@ -2,6 +2,7 @@ use std::{fmt, fs, path::PathBuf, str::FromStr};
 
 use clap::Args;
 use errors::{ConfigError, ConfigResult};
+use magicblock_config_helpers::Merge;
 use magicblock_config_macro::Mergeable;
 use serde::{Deserialize, Serialize};
 use solana_pubkey::Pubkey;
@@ -114,7 +115,6 @@ impl EphemeralConfig {
         // Otherwise, use the value from self
         self.accounts.merge(other.accounts);
         self.rpc.merge(other.rpc);
-        self.geyser_grpc.merge(other.geyser_grpc.clone());
         self.validator.merge(other.validator.clone());
         self.ledger.merge(other.ledger.clone());
         self.metrics.merge(other.metrics.clone());
