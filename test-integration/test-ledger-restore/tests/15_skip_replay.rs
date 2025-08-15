@@ -14,6 +14,8 @@ use test_ledger_restore::{
     setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
+const SNAPSHOT_FREQUENCY: u64 = 2;
+
 // In this test we ensure that we can optionally skip the replay of the ledger
 // when restoring, restarting at the last slot.
 #[test]
@@ -55,8 +57,15 @@ fn write(
         assert_eq!(lamports, 1_111_111, cleanup(&mut validator));
     }
 
-    // Wait for the txs to be written to disk
-    let slot = wait_for_ledger_persist(&mut validator);
+    // Wait for the txs to be written to disk and save the actual snapshot slot
+    let slot = {
+        let slot = wait_for_ledger_persist(&mut validator);
+        if slot % SNAPSHOT_FREQUENCY == 0 {
+            slot - SNAPSHOT_FREQUENCY
+        } else {
+            slot - 1
+        }
+    };
 
     (validator, slot, signatures)
 }
