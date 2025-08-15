@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn test_merge_non_default() {
         let mut config = LedgerConfig {
-            resume_strategy: LedgerResumeStrategy::Replay,
+            resume_strategy: LedgerResumeStrategy::AccountsOnly,
             starting_slot: None,
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
