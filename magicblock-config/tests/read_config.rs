@@ -12,7 +12,6 @@ use magicblock_config::{
     ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_pubkey::pubkey;
-use test_tools_core::paths::cargo_workspace_dir;
 use url::Url;
 
 fn parse_config_with_file(config_file_dir: &Path) -> EphemeralConfig {

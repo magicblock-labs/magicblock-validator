@@ -120,9 +120,6 @@ mod prelude {
     pub(super) use magicblock_core::link::accounts::{
         AccountsToEnsure, LockedAccount,
     };
-    pub(super) use magicblock_core::link::transactions::{
-        ProcessableTransaction, TransactionProcessingMode,
-    };
     pub(super) use solana_account::ReadableAccount;
     pub(super) use solana_account_decoder::UiAccountEncoding;
     pub(super) use solana_pubkey::Pubkey;

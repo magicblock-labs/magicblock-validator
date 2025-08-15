@@ -16,11 +16,7 @@ solana-keypair = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 url = { workspace = true, features = ["serde"] }
-# strum_macros = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
 magicblock-config-helpers = { workspace = true }
 magicblock-config-macro = { workspace = true }
 isocountry = { workspace = true }
-
-[dev-dependencies]
-test-tools-core = { workspace = true }

@@ -10,7 +10,6 @@ use solana_sdk::{
     system_program,
     sysvar::{clock, rent, slot_hashes},
 };
-use test_tools::skip_if_devnet_down;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
@@ -43,7 +42,6 @@ async fn setup() -> (
 
 #[tokio::test]
 async fn test_devnet_monitoring_clock_sysvar_changes_over_time() {
-    skip_if_devnet_down!();
     // Create account updates worker and client
     let (client, cancellation_token, worker_handle) = setup().await;
     // The clock will change every slots, perfect for testing updates
@@ -72,7 +70,6 @@ async fn test_devnet_monitoring_clock_sysvar_changes_over_time() {
 
 #[tokio::test]
 async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
-    skip_if_devnet_down!();
     // Create account updates worker and client
     let (client, cancellation_token, worker_handle) = setup().await;
     // Devnet accounts to be monitored for this test
@@ -102,7 +99,6 @@ async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
 
 #[tokio::test]
 async fn test_devnet_monitoring_some_accounts_only() {
-    skip_if_devnet_down!();
     // Create account updates worker and client
     let (client, cancellation_token, worker_handle) = setup().await;
     // Devnet accounts for this test
@@ -128,7 +124,6 @@ async fn test_devnet_monitoring_some_accounts_only() {
 
 #[tokio::test]
 async fn test_devnet_monitoring_invalid_and_immutable_and_program_account() {
-    skip_if_devnet_down!();
     // Create account updates worker and client
     let (client, cancellation_token, worker_handle) = setup().await;
     // Devnet accounts for this test (none of them should change)

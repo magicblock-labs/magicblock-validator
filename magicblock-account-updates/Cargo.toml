@@ -23,5 +23,4 @@ tokio-stream = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-test-tools = { workspace = true }
 env_logger = { workspace = true }
