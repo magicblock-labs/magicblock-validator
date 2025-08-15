@@ -10,7 +10,6 @@ use solana_sdk::{
     system_program,
     sysvar::{clock, recent_blockhashes, rent},
 };
-use test_tools::skip_if_devnet_down;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
@@ -39,7 +38,6 @@ fn setup() -> (
 
 #[tokio::test]
 async fn test_devnet_fetch_clock_multiple_times() {
-    skip_if_devnet_down!();
     // Create account fetcher worker and client
     let (client, cancellation_token, worker_handle) = setup();
     // Sysvar clock should change every slot
@@ -83,7 +81,6 @@ async fn test_devnet_fetch_clock_multiple_times() {
 
 #[tokio::test]
 async fn test_devnet_fetch_multiple_accounts_same_time() {
-    skip_if_devnet_down!();
     // Create account fetcher worker and client
     let (client, cancellation_token, worker_handle) = setup();
     // A few accounts we'd want to try to fetch at the same time
