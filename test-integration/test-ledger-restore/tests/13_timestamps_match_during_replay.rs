@@ -44,12 +44,7 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
     // First airdrop followed by wait until account is flushed
     let signature = expect!(ctx.airdrop_ephem(pubkey, 1_111_111), validator);
 
-    // Snapshot frequency is set to 2 slots for the offline validator
-    expect!(
-        ctx.wait_for_delta_slot_ephem(SNAPSHOT_FREQUENCY + 1),
-        validator
-    );
-
+    // Wait for the tx to be written to disk and slot to be finalized
     let slot = wait_for_ledger_persist(&mut validator);
 
     let block_time = expect!(

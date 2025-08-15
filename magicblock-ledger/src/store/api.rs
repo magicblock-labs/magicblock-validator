@@ -754,7 +754,7 @@ impl Ledger {
             }
             None => {
                 let mut iterator = self
-                    .transaction_cf
+                    .transaction_status_cf
                     .iter_current_index_filtered(IteratorMode::From(
                         (signature, highest_confirmed_slot),
                         IteratorDirection::Forward,
@@ -990,12 +990,12 @@ impl Ledger {
     /// NOTE: since the key is `(signature, slot)` the iterator cannot be used to
     ///       iterate in the order of slots
     ///
-    /// - `iterator_mode` - The iterator mode to use for the search, defaults to [`IteratorMode::Start`]
+    /// - `from`    - The starting point of the iterator, defaults to [`Signature::default(), 0`]
     /// - `success` - If true, only successful transactions are returned,
     ///               otherwise only failed ones
     pub fn iter_transaction_statuses(
         &self,
-        iterator_mode: Option<IteratorMode<(Signature, Slot)>>,
+        from: Option<(Signature, Slot)>,
         success: bool,
     ) -> impl Iterator<
         Item = LedgerResult<(
@@ -1005,9 +1005,9 @@ impl Ledger {
         )>,
     > + '_ {
         let (_lock, _) = self.ensure_lowest_cleanup_slot();
-        let iterator_mode = iterator_mode.unwrap_or(IteratorMode::Start);
+        let from = from.unwrap_or((Signature::default(), 0));
         self.transaction_status_cf
-            .iter_protobuf(iterator_mode)
+            .iter_protobuf(IteratorMode::From(from, IteratorDirection::Forward))
             .filter_map(move |res| {
                 let ((signature, slot), status) = match res {
                     Ok(((signature, slot), status)) => {
@@ -1033,9 +1033,7 @@ impl Ledger {
         success: bool,
     ) -> LedgerResult<i64> {
         let mut count = 0;
-        for res in
-            self.iter_transaction_statuses(Some(IteratorMode::Start), success)
-        {
+        for res in self.iter_transaction_statuses(None, success) {
             match res {
                 Ok(_) => count += 1,
                 Err(err) => return Err(err),
