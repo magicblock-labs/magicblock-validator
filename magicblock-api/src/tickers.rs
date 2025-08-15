@@ -43,8 +43,7 @@ pub async fn init_slot_ticker(
             error!("Failed to write block: {:?}", err);
         }
 
-        // If accounts were scheduled to be committed, we accept them here
-        // and processs the commits
+        // If accounts were scheduled to be committed, we accept them here and processs the commits
         let magic_context_acc = accountsdb
             .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
             .expect(
