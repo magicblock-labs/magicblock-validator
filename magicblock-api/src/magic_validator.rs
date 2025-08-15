@@ -34,7 +34,10 @@ use magicblock_config::{
     AccountsDbConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
     LifecycleMode, PrepareLookupTables, ProgramConfig,
 };
-use magicblock_core::link::{link, transactions::TransactionSchedulerHandle};
+use magicblock_core::{
+    link::{link, transactions::TransactionSchedulerHandle},
+    Slot,
+};
 use magicblock_gateway::{state::SharedState, JsonRpcServer};
 use magicblock_ledger::{
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
@@ -175,7 +178,7 @@ impl MagicValidator {
             Self::init_ledger(&config.validator_config.ledger)?;
         info!("Starting slot: {}", starting_slot);
 
-        if !config.validator_config.ledger.skip_keypair_match_check {
+        if !config.ledger.skip_keypair_match_check {
             Self::sync_validator_keypair_with_ledger(
                 ledger.ledger_path(),
                 &identity_keypair,
