@@ -753,12 +753,14 @@ impl Ledger {
                 }
             }
             None => {
-                let mut iterator = self.iter_transaction_statuses(
-                    Some((signature, highest_confirmed_slot)),
-                    false,
-                );
+                let mut iterator = self
+                    .transaction_status_cf
+                    .iter_current_index_filtered(IteratorMode::From(
+                        (signature, highest_confirmed_slot),
+                        IteratorDirection::Forward,
+                    ));
                 match iterator.next() {
-                    Some(Ok((slot, tx_signature, _data))) => {
+                    Some(((tx_signature, slot), _data)) => {
                         if slot <= highest_confirmed_slot
                             && tx_signature == signature
                         {
@@ -776,7 +778,7 @@ impl Ledger {
                             return Ok(None);
                         }
                     }
-                    _ => {
+                    None => {
                         // We found neither a transaction nor its status
                         return Ok(None);
                     }
@@ -1013,11 +1015,11 @@ impl Ledger {
                     }
                     Err(err) => return Some(Err(err)),
                 };
-                let exclude = status.err.is_some() && success;
-                if exclude {
-                    None
-                } else {
+                let include = status.err.is_none() == success;
+                if include {
                     Some(Ok((slot, signature, status)))
+                } else {
+                    None
                 }
             })
     }
