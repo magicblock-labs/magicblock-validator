@@ -23,20 +23,16 @@ impl super::TransactionExecutor {
         &self,
         transaction: [SanitizedTransaction; 1],
         tx: TxnExecutionResultTx,
+        is_replay: bool,
     ) {
         let (result, balances) = self.process(&transaction);
         let [txn] = transaction;
-        let result = match result {
-            Ok(processed) => {
-                let result = processed.status();
-                self.commit(txn, processed, balances);
-                result
-            }
-            Err(error) => Err(error),
-        };
-        if let Some(tx) = tx {
-            let _ = tx.send(result);
-        }
+        let result = result.and_then(|processed| {
+            let result = processed.status();
+            self.commit(txn, processed, balances, is_replay);
+            result
+        });
+        tx.map(|tx| tx.send(result));
     }
 
     pub(super) fn simulate(
@@ -49,23 +45,20 @@ impl super::TransactionExecutor {
             Ok(processed) => {
                 let result = processed.status();
                 let units_consumed = processed.executed_units();
-                let details = match processed {
-                    ProcessedTransaction::Executed(ex) => {
-                        Some(ex.execution_details)
-                    }
-                    ProcessedTransaction::FeesOnly(_) => None,
+                let (logs, data, ixs) = match processed {
+                    ProcessedTransaction::Executed(ex) => (
+                        ex.execution_details.log_messages,
+                        ex.execution_details.return_data,
+                        ex.execution_details.inner_instructions,
+                    ),
+                    ProcessedTransaction::FeesOnly(_) => Default::default(),
                 };
-                let (logs, return_data, inner_instructions) = details
-                    .map(|d| {
-                        (d.log_messages, d.return_data, d.inner_instructions)
-                    })
-                    .unwrap_or_default();
                 TransactionSimulationResult {
                     result,
                     units_consumed,
                     logs,
-                    return_data,
-                    inner_instructions,
+                    return_data: data,
+                    inner_instructions: ixs,
                 }
             }
             Err(error) => TransactionSimulationResult {
@@ -106,6 +99,7 @@ impl super::TransactionExecutor {
         txn: SanitizedTransaction,
         result: ProcessedTransaction,
         balances: AccountsBalances,
+        is_replay: bool,
     ) {
         let mut accounts = Vec::new();
 
@@ -165,17 +159,6 @@ impl super::TransactionExecutor {
                 logs: meta.log_messages.clone(),
             },
         };
-        if let Err(error) = self.ledger.write_transaction(
-            signature,
-            self.slot,
-            txn,
-            meta,
-            self.index.load(std::sync::atomic::Ordering::Relaxed),
-        ) {
-            error!("failed to commit transaction to the ledger: {error}");
-            return;
-        }
-        let _ = self.transaction_tx.send(status);
         for (pubkey, account) in accounts {
             if !account.is_dirty() {
                 continue;
@@ -187,5 +170,19 @@ impl super::TransactionExecutor {
             };
             let _ = self.accounts_tx.send(account);
         }
+        if is_replay {
+            return;
+        }
+        if let Err(error) = self.ledger.write_transaction(
+            signature,
+            self.slot,
+            txn,
+            meta,
+            self.index.load(std::sync::atomic::Ordering::Relaxed),
+        ) {
+            error!("failed to commit transaction to the ledger: {error}");
+            return;
+        }
+        let _ = self.transaction_tx.send(status);
     }
 }
