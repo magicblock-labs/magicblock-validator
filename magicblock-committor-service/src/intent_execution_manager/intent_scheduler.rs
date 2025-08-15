@@ -190,9 +190,13 @@ impl IntentScheduler {
         // After all the checks we may safely complete
         pubkeys.iter().for_each(|pubkey| {
             let mut occupied = match self.blocked_keys.entry(*pubkey) {
-                Entry::Vacant(_) => unreachable!(
-                    "entry exists since following was checked beforehand"
-                ),
+                Entry::Vacant(_) => {
+                    // SAFETY: prior to this we iterated all pubkeys
+                    // and ensured that they all exist, so we never will reach this point
+                    unreachable!(
+                        "entry exists since following was checked beforehand"
+                    )
+                }
                 Entry::Occupied(value) => value,
             };
 
@@ -236,26 +240,20 @@ impl IntentScheduler {
         // NOTE:
         // Other way around is also true, since execute_candidates also include
         // currently executing intents
-        let candidate =
-            execute_candidates.iter().find_map(|(id, ready_keys)| {
-                if let Some(candidate) = self.blocked_intents.get(id) {
-                    if candidate.num_keys.eq(ready_keys) {
-                        Some(id)
+
+        // Find and process the first eligible intent
+        execute_candidates.into_iter().find_map(|(id, ready_keys)| {
+            match self.blocked_intents.entry(id) {
+                Entry::Occupied(entry) => {
+                    if entry.get().num_keys == ready_keys {
+                        Some(entry.remove().intent)
                     } else {
-                        // Not enough keys are ready
                         None
                     }
-                } else {
-                    // This means that this intent id is currently executing & not blocked
-                    None
                 }
-            });
-
-        if let Some(next) = candidate {
-            Some(self.blocked_intents.remove(next).unwrap().intent)
-        } else {
-            None
-        }
+                _ => None,
+            }
+        })
     }
 
     /// Returns number of blocked intents

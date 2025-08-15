@@ -161,7 +161,7 @@ where
     }
 
     fn persist_result<P: IntentPersister>(
-        persistor: &Option<P>,
+        persistor: &P,
         result: &IntentExecutorResult<ExecutionOutput>,
         message_id: u64,
         pubkeys: &[Pubkey],

@@ -249,7 +249,11 @@ where
         if let Err(err) = result_sender.send(result) {
             error!("Failed to broadcast result: {}", err);
         }
+
         // Remove executed task from Scheduler to unblock other intents
+        // SAFETY: Self::execute is called ONLY after IntentScheduler
+        // successfully is able to schedule execution of some Intent
+        // that means that the same Intent is SAFE to complete
         inner_scheduler
             .lock()
             .expect(POISONED_INNER_MSG)

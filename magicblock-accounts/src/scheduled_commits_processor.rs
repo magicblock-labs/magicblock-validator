@@ -264,7 +264,8 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
             execution_outcome.output.commit_signature,
             execution_outcome.output.finalize_signature,
         ];
-        let intent_sent_transaction = std::mem::take(&mut intent_meta.intent_sent_transaction);
+        let intent_sent_transaction =
+            std::mem::take(&mut intent_meta.intent_sent_transaction);
         let sent_commit =
             Self::build_sent_commit(intent_id, chain_signatures, intent_meta);
         register_scheduled_commit_sent(sent_commit);
@@ -289,7 +290,8 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
         transaction_status_sender: &TransactionStatusSender,
         mut intent_meta: ScheduledBaseIntentMeta,
     ) {
-        let intent_sent_transaction = std::mem::take(&mut intent_meta.intent_sent_transaction);
+        let intent_sent_transaction =
+            std::mem::take(&mut intent_meta.intent_sent_transaction);
         let sent_commit =
             Self::build_sent_commit(intent_id, vec![], intent_meta);
         register_scheduled_commit_sent(sent_commit);

@@ -3886,6 +3886,7 @@ version = "0.1.7"
 dependencies = [
  "bincode",
  "serde",
+ "solana-account",
  "solana-program",
 ]
 
