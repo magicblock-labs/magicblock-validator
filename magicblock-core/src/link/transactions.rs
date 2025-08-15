@@ -24,6 +24,7 @@ pub struct TransactionSchedulerHandle(pub(super) TransactionToProcessTx);
 pub type TransactionResult = solana_transaction_error::TransactionResult<()>;
 pub type TxnSimulationResultTx = oneshot::Sender<TransactionSimulationResult>;
 pub type TxnExecutionResultTx = Option<oneshot::Sender<TransactionResult>>;
+pub type TxnReplayResultTx = oneshot::Sender<TransactionResult>;
 
 /// Status of executed transaction along with some metadata
 pub struct TransactionStatus {
@@ -40,6 +41,7 @@ pub struct ProcessableTransaction {
 pub enum TransactionProcessingMode {
     Simulation(TxnSimulationResultTx),
     Execution(TxnExecutionResultTx),
+    Replay(TxnReplayResultTx),
 }
 
 pub struct TransactionExecutionResult {
@@ -57,7 +59,7 @@ pub struct TransactionSimulationResult {
 }
 
 impl TransactionSchedulerHandle {
-    /// Fire and forget transaction scheduling
+    /// Fire and forget the transaction for execution
     pub async fn schedule(&self, transaction: SanitizedTransaction) {
         let txn = ProcessableTransaction {
             transaction,
@@ -66,7 +68,7 @@ impl TransactionSchedulerHandle {
         let _ = self.0.send(txn).await;
     }
 
-    /// Send transaction for execution and await for result
+    /// Send the transaction for execution and await for result
     pub async fn execute(
         &self,
         transaction: SanitizedTransaction,
@@ -89,6 +91,21 @@ impl TransactionSchedulerHandle {
         let txn = ProcessableTransaction {
             transaction,
             mode: TransactionProcessingMode::Simulation(tx),
+        };
+        self.0.send(txn).await.ok()?;
+        rx.await.ok()
+    }
+
+    /// Send transaction to be replayed on top of
+    /// existing account state and wait for result
+    pub async fn replay(
+        &self,
+        transaction: SanitizedTransaction,
+    ) -> Option<TransactionResult> {
+        let (tx, rx) = oneshot::channel();
+        let txn = ProcessableTransaction {
+            transaction,
+            mode: TransactionProcessingMode::Replay(tx),
         };
         self.0.send(txn).await.ok()?;
         rx.await.ok()
