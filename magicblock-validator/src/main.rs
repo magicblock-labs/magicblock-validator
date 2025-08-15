@@ -7,7 +7,6 @@ use magicblock_api::{
 };
 use magicblock_config::MagicBlockConfig;
 use solana_sdk::signature::Signer;
-use test_tools::init_logger;
 
 use crate::shutdown::Shutdown;
 
@@ -44,8 +43,6 @@ fn init_logger() {
             _ => {}
         }
         let _ = builder.try_init();
-    } else {
-        init_logger!();
     }
 }
 
