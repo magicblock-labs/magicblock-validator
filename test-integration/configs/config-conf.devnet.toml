@@ -21,6 +21,9 @@ max-snapshots = 7
 # how frequently (slot-wise) we should take snapshots
 snapshot-frequency = 1024
 
+[ledger]
+resume-strategy = "reset"
+
 [validator]
 millis-per-slot = 50
 sigverify = true
