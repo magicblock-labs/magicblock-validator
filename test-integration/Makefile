@@ -72,6 +72,11 @@ test-config:
 	RUN_TESTS=config \
 	$(MAKE) test
 
+test-schedule-intents:
+	RUN_TESTS=schedule_intents \
+	$(MAKE) test
+
+
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)

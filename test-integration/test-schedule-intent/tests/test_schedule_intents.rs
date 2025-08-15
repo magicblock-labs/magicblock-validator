@@ -1,0 +1,243 @@
+use dlp::pda::ephemeral_balance_pda_from_payer;
+use integration_test_tools::IntegrationTestContext;
+use program_flexi_counter::delegation_program_id;
+use program_flexi_counter::instruction::{
+    create_add_ix, create_delegate_ix, create_init_ix, create_intent_ix,
+};
+use program_flexi_counter::state::FlexiCounter;
+use solana_rpc_client_api::config::RpcSendTransactionConfig;
+use solana_sdk::commitment_config::CommitmentConfig;
+use solana_sdk::native_token::LAMPORTS_PER_SOL;
+use solana_sdk::rent::Rent;
+use solana_sdk::signature::Keypair;
+use solana_sdk::signer::Signer;
+use solana_sdk::transaction::Transaction;
+
+const LABEL: &str = "I am label";
+
+#[test]
+fn test_schedule_intent() {
+    // Init context
+    let ctx = IntegrationTestContext::try_new().unwrap();
+    let payer = setup_payer(&ctx);
+
+    // Init counter
+    init_counter(&ctx, &payer);
+    // Delegate counter
+    delegate_counter(&ctx, &payer);
+    add_to_counter(&ctx, &payer, 101);
+    schedule_intent(&ctx, &[&payer], vec![-100], false);
+}
+
+#[test]
+fn test_multiple_payers_multiple_counters() {
+    // Init context
+    let ctx = IntegrationTestContext::try_new().unwrap();
+    let payer1 = setup_payer(&ctx);
+    let payer2 = setup_payer(&ctx);
+    let payer3 = setup_payer(&ctx);
+
+    // Init and setup counters for each payer
+    init_counter(&ctx, &payer1);
+    delegate_counter(&ctx, &payer1);
+    add_to_counter(&ctx, &payer1, 100);
+
+    init_counter(&ctx, &payer2);
+    delegate_counter(&ctx, &payer2);
+    add_to_counter(&ctx, &payer2, 200);
+
+    init_counter(&ctx, &payer3);
+    delegate_counter(&ctx, &payer3);
+    add_to_counter(&ctx, &payer3, 201);
+
+    // Schedule intent affecting all counters
+    schedule_intent(
+        &ctx,
+        &[&payer1, &payer2, &payer3],
+        vec![-50, 25, -75],
+        true,
+    );
+}
+
+fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
+    let payer = Keypair::new();
+    ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
+        .unwrap();
+
+    // Create actor escrow
+    let ix = dlp::instruction_builder::top_up_ephemeral_balance(
+        payer.pubkey(),
+        payer.pubkey(),
+        Some(LAMPORTS_PER_SOL / 2),
+        Some(1),
+    );
+    ctx.send_and_confirm_instructions_with_payer_chain(&[ix], &payer)
+        .unwrap();
+
+    // Confirm actor escrow
+    let escrow_pda = ephemeral_balance_pda_from_payer(&payer.pubkey(), 1);
+    let rent = Rent::default().minimum_balance(0);
+    assert_eq!(
+        ctx.fetch_chain_account(escrow_pda).unwrap().lamports,
+        LAMPORTS_PER_SOL / 2 + rent
+    );
+
+    payer
+}
+
+fn init_counter(ctx: &IntegrationTestContext, payer: &Keypair) {
+    let ix = create_init_ix(payer.pubkey(), LABEL.to_string());
+    let (_, confirmed) = ctx
+        .send_and_confirm_instructions_with_payer_chain(&[ix], &payer)
+        .unwrap();
+    assert!(confirmed, "Should confirm transaction");
+
+    let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
+    let counter = ctx
+        .fetch_chain_account_struct::<FlexiCounter>(counter_pda)
+        .unwrap();
+    assert_eq!(
+        counter,
+        FlexiCounter {
+            count: 0,
+            updates: 0,
+            label: LABEL.to_string()
+        },
+    )
+}
+
+// ER action
+fn delegate_counter(ctx: &IntegrationTestContext, payer: &Keypair) {
+    ctx.wait_for_next_slot_ephem().unwrap();
+
+    let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
+    let ix = create_delegate_ix(payer.pubkey());
+    ctx.send_and_confirm_instructions_with_payer_chain(&[ix], &payer)
+        .unwrap();
+
+    // Confirm delegated
+    let owner = ctx.fetch_chain_account_owner(counter_pda).unwrap();
+    assert_eq!(owner, delegation_program_id());
+}
+
+// ER action
+fn add_to_counter(ctx: &IntegrationTestContext, payer: &Keypair, value: u8) {
+    ctx.wait_for_next_slot_ephem().unwrap();
+
+    let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
+    let counter_before = ctx
+        .fetch_ephem_account_struct::<FlexiCounter>(counter_pda)
+        .unwrap_or(FlexiCounter {
+            count: 0,
+            updates: 0,
+            label: LABEL.to_string(),
+        });
+
+    // Add value to counter
+    let ix = create_add_ix(payer.pubkey(), value);
+    ctx.send_and_confirm_instructions_with_payer_ephem(&[ix], &payer)
+        .unwrap();
+
+    let counter = ctx
+        .fetch_ephem_account_struct::<FlexiCounter>(counter_pda)
+        .unwrap();
+    assert_eq!(
+        counter,
+        FlexiCounter {
+            count: counter_before.count + value as u64,
+            updates: counter_before.updates + 1,
+            label: LABEL.to_string()
+        },
+    )
+}
+
+fn schedule_intent(
+    ctx: &IntegrationTestContext,
+    payers: &[&Keypair],
+    counter_diffs: Vec<i64>,
+    is_undelegate: bool,
+) {
+    ctx.wait_for_next_slot_ephem().unwrap();
+
+    let counters_before = payers
+        .iter()
+        .map(|payer| {
+            let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
+            ctx.fetch_ephem_account_struct::<FlexiCounter>(counter_pda)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    let transfer_destination = Keypair::new();
+    let payers_pubkeys = payers.iter().map(|payer| payer.pubkey()).collect();
+    let ix = create_intent_ix(
+        payers_pubkeys,
+        transfer_destination.pubkey(),
+        counter_diffs.clone(),
+        is_undelegate,
+        100_000,
+    );
+
+    let rpc_client = ctx.try_ephem_client().unwrap();
+    let blockhash = rpc_client.get_latest_blockhash().unwrap();
+    let tx = Transaction::new_signed_with_payer(&[ix], None, payers, blockhash);
+    let sig = rpc_client
+        .send_transaction_with_config(
+            &tx,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let confirmed = IntegrationTestContext::confirm_transaction(
+        &sig,
+        rpc_client,
+        CommitmentConfig::confirmed(),
+    )
+    .unwrap();
+    assert!(confirmed);
+
+    // Confirm was sent on Base Layer
+    let commit_result = ctx
+        .fetch_schedule_commit_result::<FlexiCounter>(sig)
+        .unwrap();
+    commit_result
+        .confirm_commit_transactions_on_chain(&ctx)
+        .unwrap();
+
+    // Confirm results on base lauer
+    let counters_after = payers
+        .iter()
+        .map(|payer| {
+            let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
+            ctx.fetch_chain_account_struct::<FlexiCounter>(counter_pda)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    for i in 0..counter_diffs.len() {
+        let counter_before = &counters_before[i];
+        let counter_after = &counters_after[i];
+        let counter_diff = counter_diffs[i];
+        if is_undelegate {
+            assert_eq!(
+                counter_before.count as i64 + counter_diff,
+                counter_after.count as i64
+            )
+        } else {
+            assert_eq!(counter_before.count, counter_after.count)
+        }
+    }
+
+    // ensure Prize = 1_000_000 is transferred
+    let transfer_destination_balance = ctx
+        .fetch_chain_account_balance(&transfer_destination.pubkey())
+        .unwrap();
+
+    let mutiplier = if is_undelegate { 2 } else { 1 };
+    assert_eq!(
+        transfer_destination_balance,
+        mutiplier * payers.len() as u64 * 1_000_000
+    );
+}

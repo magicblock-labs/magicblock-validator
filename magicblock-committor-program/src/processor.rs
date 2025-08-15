@@ -1,8 +1,8 @@
 use borsh::{to_vec, BorshDeserialize};
 use solana_program::{
-    account_info::AccountInfo, entrypoint::ProgramResult, hash::Hash,
-    log::sol_log_64, msg, program::invoke_signed, program_error::ProgramError,
-    system_instruction, sysvar::Sysvar,
+    account_info::AccountInfo, entrypoint::ProgramResult, log::sol_log_64, msg,
+    program::invoke_signed, program_error::ProgramError, system_instruction,
+    sysvar::Sysvar,
 };
 use solana_pubkey::Pubkey;
 
@@ -31,7 +31,7 @@ pub fn process(
             pubkey,
             chunks_account_size,
             buffer_account_size,
-            blockhash,
+            commit_id,
             chunks_bump,
             buffer_bump,
             chunk_count,
@@ -42,7 +42,7 @@ pub fn process(
             &pubkey,
             chunks_account_size,
             buffer_account_size,
-            blockhash,
+            commit_id,
             chunks_bump,
             buffer_bump,
             chunk_count,
@@ -51,20 +51,20 @@ pub fn process(
         ReallocBuffer {
             pubkey,
             buffer_account_size,
-            blockhash,
+            commit_id,
             buffer_bump,
             invocation_count,
         } => process_realloc_buffer(
             accounts,
             &pubkey,
             buffer_account_size,
-            blockhash,
+            commit_id,
             buffer_bump,
             invocation_count,
         ),
         Write {
             pubkey,
-            blockhash,
+            commit_id,
             chunks_bump,
             buffer_bump,
             offset,
@@ -74,19 +74,19 @@ pub fn process(
             &pubkey,
             offset,
             data_chunk,
-            blockhash,
+            commit_id,
             chunks_bump,
             buffer_bump,
         ),
         Close {
             pubkey,
-            blockhash,
+            commit_id,
             chunks_bump,
             buffer_bump,
         } => process_close(
             accounts,
             &pubkey,
-            blockhash,
+            commit_id,
             chunks_bump,
             buffer_bump,
         ),
@@ -103,7 +103,7 @@ fn process_init(
     pubkey: &Pubkey,
     chunks_account_size: u64,
     buffer_account_size: u64,
-    blockhash: Hash,
+    commit_id: u64,
     chunks_bump: u8,
     buffer_bump: u8,
     chunk_count: usize,
@@ -118,14 +118,14 @@ fn process_init(
         return Err(ProgramError::NotEnoughAccountKeys);
     };
     assert_is_signer(authority_info, "authority")?;
-
     let chunks_bump = &[chunks_bump];
+    let commit_id_slice = &commit_id.to_le_bytes();
     let (chunks_seeds, _chunks_pda) = verified_seeds_and_pda!(
         chunks,
         authority_info,
         pubkey,
         chunks_account_info,
-        blockhash,
+        commit_id_slice,
         chunks_bump
     );
 
@@ -135,7 +135,7 @@ fn process_init(
         authority_info,
         pubkey,
         buffer_account_info,
-        blockhash,
+        commit_id_slice,
         buffer_bump
     );
 
@@ -203,7 +203,7 @@ fn process_realloc_buffer(
     accounts: &[AccountInfo],
     pubkey: &Pubkey,
     buffer_account_size: u64,
-    blockhash: Hash,
+    commit_id: u64,
     buffer_bump: u8,
     invocation_count: u16,
 ) -> ProgramResult {
@@ -228,12 +228,14 @@ fn process_realloc_buffer(
     assert_is_signer(authority_info, "authority")?;
 
     let buffer_bump = &[buffer_bump];
+    let commit_id_slice = commit_id.to_le_bytes();
+    let asd = commit_id_slice.as_slice();
     verified_seeds_and_pda!(
         buffer,
         authority_info,
         pubkey,
         buffer_account_info,
-        blockhash,
+        asd,
         buffer_bump
     );
 
@@ -268,7 +270,7 @@ fn process_write(
     pubkey: &Pubkey,
     offset: u32,
     data_chunk: Vec<u8>,
-    blockhash: Hash,
+    commit_id: u64,
     chunks_bump: u8,
     buffer_bump: u8,
 ) -> ProgramResult {
@@ -286,7 +288,7 @@ fn process_write(
         chunks_account_info,
         buffer_account_info,
         pubkey,
-        &blockhash,
+        commit_id,
         chunks_bump,
         buffer_bump,
     )?;
@@ -332,7 +334,9 @@ fn process_write(
 
     let mut chunks_data = chunks_account_info.data.borrow_mut();
     let mut chunks = Chunks::try_from_slice(&chunks_data)?;
-    chunks.set_offset(offset as usize)?;
+    chunks
+        .set_offset_delivered(offset as usize)
+        .map_err(CommittorError::from)?;
     chunks_data.copy_from_slice(&to_vec(&chunks)?);
 
     Ok(())
@@ -344,7 +348,7 @@ fn process_write(
 pub fn process_close(
     accounts: &[AccountInfo],
     pubkey: &Pubkey,
-    blockhash: Hash,
+    commit_id: u64,
     chunks_bump: u8,
     buffer_bump: u8,
 ) -> ProgramResult {
@@ -362,7 +366,7 @@ pub fn process_close(
         chunks_account_info,
         buffer_account_info,
         pubkey,
-        &blockhash,
+        commit_id,
         chunks_bump,
         buffer_bump,
     )?;
@@ -379,17 +383,18 @@ fn verify_seeds_and_pdas(
     chunks_account_info: &AccountInfo,
     buffer_account_info: &AccountInfo,
     pubkey: &Pubkey,
-    blockhash: &Hash,
+    commit_id: u64,
     chunks_bump: u8,
     buffer_bump: u8,
 ) -> ProgramResult {
     let chunks_bump = &[chunks_bump];
+    let commit_id_slice = &commit_id.to_le_bytes();
     let (_chunks_seeds, _chunks_pda) = verified_seeds_and_pda!(
         chunks,
         authority_info,
         pubkey,
         chunks_account_info,
-        blockhash,
+        commit_id_slice,
         chunks_bump
     );
 
@@ -399,7 +404,7 @@ fn verify_seeds_and_pdas(
         authority_info,
         pubkey,
         buffer_account_info,
-        blockhash,
+        commit_id_slice,
         buffer_bump
     );
     Ok(())

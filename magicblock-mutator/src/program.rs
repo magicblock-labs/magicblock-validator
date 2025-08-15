@@ -1,6 +1,4 @@
-use magicblock_program::{
-    magicblock_instruction::AccountModification, validator,
-};
+use magicblock_program::{instruction::AccountModification, validator};
 use solana_sdk::{
     account::Account,
     bpf_loader_upgradeable::{self, UpgradeableLoaderState},
@@ -48,8 +46,14 @@ pub fn create_program_modifications(
     let program_data_bytecode =
         &program_data_account.data[program_data_bytecode_index..];
     // We'll need to edit the main program account
-    let program_id_modification =
-        AccountModification::from((program_id_pubkey, program_id_account));
+    let program_id_modification = AccountModification {
+        pubkey: *program_id_pubkey,
+        lamports: Some(program_id_account.lamports),
+        owner: Some(program_id_account.owner),
+        rent_epoch: Some(program_id_account.rent_epoch),
+        data: Some(program_id_account.data.to_owned()),
+        executable: Some(program_id_account.executable),
+    };
     // Build the proper program_data that we will want to upgrade later
     let program_data_modification = create_program_data_modification(
         program_data_pubkey,
@@ -79,18 +83,18 @@ pub fn create_program_data_modification(
         })
         .unwrap();
     program_data_data.extend_from_slice(program_data_bytecode);
-    AccountModification::from((
-        program_data_pubkey,
-        &Account {
-            lamports: Rent::default()
+    AccountModification {
+        pubkey: *program_data_pubkey,
+        lamports: Some(
+            Rent::default()
                 .minimum_balance(program_data_data.len())
                 .max(1),
-            data: program_data_data,
-            owner: bpf_loader_upgradeable::id(),
-            executable: false,
-            rent_epoch: u64::MAX,
-        },
-    ))
+        ),
+        data: Some(program_data_data),
+        owner: Some(bpf_loader_upgradeable::id()),
+        executable: Some(false),
+        rent_epoch: Some(u64::MAX),
+    }
 }
 
 pub fn create_program_buffer_modification(
@@ -102,16 +106,16 @@ pub fn create_program_buffer_modification(
         })
         .unwrap();
     program_buffer_data.extend_from_slice(program_data_bytecode);
-    AccountModification::from((
-        &Keypair::new().pubkey(),
-        &Account {
-            lamports: Rent::default()
+    AccountModification {
+        pubkey: Keypair::new().pubkey(),
+        lamports: Some(
+            Rent::default()
                 .minimum_balance(program_buffer_data.len())
                 .max(1),
-            data: program_buffer_data,
-            owner: bpf_loader_upgradeable::id(),
-            executable: false,
-            rent_epoch: u64::MAX,
-        },
-    ))
+        ),
+        data: Some(program_buffer_data),
+        owner: Some(bpf_loader_upgradeable::id()),
+        executable: Some(false),
+        rent_epoch: Some(u64::MAX),
+    }
 }

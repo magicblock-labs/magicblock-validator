@@ -1,9 +1,9 @@
 // TODO(bmuddha): get rid of geyser plugins in validator
 // copied from agave-geyser-plugin-manager src/transaction_notifier.rs
 
+use solana_sdk::pubkey::Pubkey;
 /// Module responsible for notifying plugins of transactions
 use {
-    magicblock_program::Pubkey,
     solana_accounts_db::{
         account_storage::meta::StoredAccountMeta,
         accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
