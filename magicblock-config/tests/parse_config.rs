@@ -3,9 +3,9 @@ use std::net::{IpAddr, Ipv4Addr};
 use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategyConfig, EphemeralConfig,
-    GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
-    MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteConfig,
-    RpcConfig, ValidatorConfig,
+    LedgerConfig, LedgerResumeStrategy, LifecycleMode, MetricsConfig,
+    MetricsServiceConfig, ProgramConfig, RemoteConfig, RpcConfig,
+    ValidatorConfig,
 };
 use solana_pubkey::pubkey;
 use url::Url;

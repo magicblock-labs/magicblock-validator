@@ -34,7 +34,10 @@ use magicblock_config::{
     AccountsDbConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
     LifecycleMode, PrepareLookupTables, ProgramConfig,
 };
-use magicblock_core::link::{link, transactions::TransactionSchedulerHandle};
+use magicblock_core::{
+    link::{link, transactions::TransactionSchedulerHandle},
+    Slot,
+};
 use magicblock_gateway::{state::SharedState, JsonRpcServer};
 use magicblock_ledger::{
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
@@ -169,18 +172,16 @@ impl MagicValidator {
             config.validator.base_fees,
         );
 
-        let (ledger, last_slot) =
-            Self::init_ledger(&config.validator_config.ledger)?;
+        let (ledger, last_slot) = Self::init_ledger(&config.ledger)?;
         info!("Latest ledger slot: {}", last_slot);
 
-        if !config.validator_config.ledger.skip_keypair_match_check {
+        if !config.ledger.skip_keypair_match_check {
             Self::sync_validator_keypair_with_ledger(
                 ledger.ledger_path(),
                 &identity_keypair,
-                &config.validator_config.ledger.resume_strategy,
+                &config.ledger.resume_strategy,
             )?;
         }
-        let ledger_path = ledger.path.as_ref();
 
         // SAFETY:
         // this code will never panic as the ledger_path always appends the
@@ -197,11 +198,9 @@ impl MagicValidator {
             storage_path,
             latest_block.slot,
         )?;
-        Self::sync_validator_keypair_with_ledger(
-            ledger.ledger_path(),
-            &identity_keypair,
-            config.ledger.reset,
-        )?;
+        for (pubkey, account) in genesis_config.accounts {
+            accountsdb.insert_account(&pubkey, &account.into());
+        }
 
         let exit = Arc::<AtomicBool>::default();
         let ledger_truncator = LedgerTruncator::new(

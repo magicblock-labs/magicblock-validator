@@ -6,10 +6,10 @@ use std::{
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsConfig, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LedgerResumeStrategy, LifecycleMode, MagicBlockConfig,
-    MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteCluster,
-    RemoteConfig, RpcConfig, ValidatorConfig,
+    AccountsConfig, CommitStrategyConfig, EphemeralConfig, LedgerConfig,
+    LedgerResumeStrategy, LifecycleMode, MagicBlockConfig, MetricsConfig,
+    MetricsServiceConfig, ProgramConfig, RemoteCluster, RemoteConfig,
+    RpcConfig, ValidatorConfig,
 };
 use solana_pubkey::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
