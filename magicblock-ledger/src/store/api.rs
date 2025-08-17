@@ -893,6 +893,16 @@ impl Ledger {
                 .num_get_transaction_status
                 .fetch_add(1, Ordering::Relaxed);
 
+            debug!(
+                "all statuses: {:?}",
+                self.transaction_status_cf
+                    .iter(IteratorMode::From(
+                        (signature, lowest_available_slot),
+                        IteratorDirection::Forward
+                    ))
+                    .unwrap()
+                    .collect::<Vec<_>>()
+            );
             let iterator = self
                 .transaction_status_cf
                 .iter_current_index_filtered(IteratorMode::From(
