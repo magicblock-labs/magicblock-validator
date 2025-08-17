@@ -902,6 +902,7 @@ impl Ledger {
 
             let mut result = None;
             for ((stat_signature, slot), _) in iterator {
+                debug!("status: {:?}", (stat_signature, slot));
                 if stat_signature == signature && slot <= min_slot {
                     result = self
                         .transaction_status_cf
@@ -914,6 +915,7 @@ impl Ledger {
                 }
                 // Left the range of the signature we're looking for
                 if stat_signature != signature {
+                    debug!("status not found");
                     break;
                 }
             }
