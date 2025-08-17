@@ -178,7 +178,7 @@ fn default_max_monitored_accounts() -> usize {
 fn default_compute_unit_price() -> u64 {
     // This is the lowest we found to pass the transactions through mainnet fairly
     // consistently
-    1_000_000 // 1_000_000 micro-lamports == 1 Lamport
+    100_000 // 100_000 micro-lamports == 0.1 Lamport
 }
 
 impl Default for CommitStrategyConfig {
