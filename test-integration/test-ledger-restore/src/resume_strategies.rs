@@ -2,7 +2,10 @@ use cleanass::{assert, assert_eq};
 use magicblock_config::LedgerResumeStrategy;
 use std::{path::Path, process::Child};
 
-use crate::{setup_offline_validator, wait_for_snapshot, TMP_DIR_LEDGER};
+use crate::{
+    setup_offline_validator, wait_for_ledger_persist, wait_for_snapshot,
+    TMP_DIR_LEDGER,
+};
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
@@ -50,6 +53,8 @@ pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {
     // Wait for the next snapshot
     // We wait for one slot after the snapshot but the restarting validator will be at the previous slot
     let slot = wait_for_snapshot(&mut validator, SNAPSHOT_FREQUENCY) - 1;
+    // Wait more to be sure the ledger is persisted
+    wait_for_ledger_persist(&mut validator);
 
     (validator, slot, signature)
 }
