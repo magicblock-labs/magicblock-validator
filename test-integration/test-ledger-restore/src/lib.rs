@@ -263,6 +263,23 @@ pub fn wait_for_ledger_persist(validator: &mut Child) -> Slot {
     }
 }
 
+/// Waits for the next slot after the snapshot frequency
+pub fn wait_for_snapshot(
+    validator: &mut Child,
+    snapshot_frequency: u64,
+) -> Slot {
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
+
+    let initial_slot = expect!(ctx.get_slot_ephem(), validator);
+    let slots_until_next_snapshot =
+        snapshot_frequency - (initial_slot % snapshot_frequency);
+
+    expect!(
+        ctx.wait_for_delta_slot_ephem(slots_until_next_snapshot + 1),
+        validator
+    )
+}
+
 // -----------------
 // Scheduled Commits
 // -----------------
