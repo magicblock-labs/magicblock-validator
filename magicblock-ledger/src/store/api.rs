@@ -135,6 +135,39 @@ impl Ledger {
         let transaction_memos_cf = db.column();
         let perf_samples_cf = db.column();
 
+        debug!(
+            "transaction_status_cf: {:?}",
+            transaction_status_cf.count_column_using_cache()
+        );
+        debug!(
+            "address_signatures_cf: {:?}",
+            address_signatures_cf.count_column_using_cache()
+        );
+        debug!(
+            "slot_signatures_cf: {:?}",
+            slot_signatures_cf.count_column_using_cache()
+        );
+        debug!(
+            "blocktime_cf: {:?}",
+            blocktime_cf.count_column_using_cache()
+        );
+        debug!(
+            "blockhash_cf: {:?}",
+            blockhash_cf.count_column_using_cache()
+        );
+        debug!(
+            "transaction_cf: {:?}",
+            transaction_cf.count_column_using_cache()
+        );
+        debug!(
+            "transaction_memos_cf: {:?}",
+            transaction_memos_cf.count_column_using_cache()
+        );
+        debug!(
+            "perf_samples_cf: {:?}",
+            perf_samples_cf.count_column_using_cache()
+        );
+
         let account_mod_datas_cf = db.column();
 
         let db = Arc::new(db);
@@ -894,12 +927,19 @@ impl Ledger {
                 .fetch_add(1, Ordering::Relaxed);
 
             debug!(
-                "all statuses: {:?}",
+                "all statuses from 0: {:?}",
                 self.transaction_status_cf
                     .iter(IteratorMode::From(
-                        (signature, lowest_available_slot),
+                        (Signature::default(), 0),
                         IteratorDirection::Forward
                     ))
+                    .unwrap()
+                    .collect::<Vec<_>>()
+            );
+            debug!(
+                "all statuses from start: {:?}",
+                self.transaction_status_cf
+                    .iter(IteratorMode::Start)
                     .unwrap()
                     .collect::<Vec<_>>()
             );
