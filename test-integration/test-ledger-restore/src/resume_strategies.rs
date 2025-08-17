@@ -4,7 +4,7 @@ use std::{path::Path, process::Child};
 
 use crate::{
     setup_offline_validator, wait_for_ledger_persist, wait_for_snapshot,
-    TMP_DIR_LEDGER,
+    SNAPSHOT_FREQUENCY, TMP_DIR_LEDGER,
 };
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
@@ -13,9 +13,6 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
 };
-
-// Snapshot frequency is set to 2 slots for the offline validator
-const SNAPSHOT_FREQUENCY: u64 = 2;
 
 pub fn test_resume_strategy(
     strategy: LedgerResumeStrategy,
@@ -76,57 +73,41 @@ pub fn read(
         false,
     );
 
-    if strategy.is_resuming() {
-        let validator_slot = expect!(ctx.get_slot_ephem(), validator);
-        assert!(
-            validator_slot >= slot,
-            cleanup(&mut validator),
-            "{}: {} < {}",
-            strategy,
-            validator_slot,
-            slot
-        );
+    let validator_slot = expect!(ctx.get_slot_ephem(), validator);
+    let target_slot = if strategy.is_resuming() {
+        slot
     } else {
-        let validator_slot = expect!(ctx.get_slot_ephem(), validator);
-        assert!(
-            validator_slot >= starting_slot.unwrap_or(0),
-            cleanup(&mut validator),
-            "{}: {} < {}",
-            strategy,
-            validator_slot,
-            starting_slot.unwrap_or(0)
-        );
-    }
+        starting_slot.unwrap_or(0)
+    };
+    assert!(
+        validator_slot >= target_slot,
+        cleanup(&mut validator),
+        "{}: {} < {}",
+        strategy,
+        validator_slot,
+        target_slot
+    );
 
-    if strategy.is_removing_accountsdb() {
-        let lamports =
-            expect!(ctx.fetch_ephem_account_balance(&kp.pubkey()), validator);
-        assert_eq!(lamports, 0, cleanup(&mut validator), "{}", strategy);
+    let lamports =
+        expect!(ctx.fetch_ephem_account_balance(&kp.pubkey()), validator);
+    let target_lamports = if strategy.is_removing_accountsdb() {
+        0
     } else {
-        let lamports =
-            expect!(ctx.fetch_ephem_account_balance(&kp.pubkey()), validator);
-        assert_eq!(
-            lamports, 1_111_111,
-            cleanup(&mut validator),
-            "{}", strategy
-        );
-    }
+        1_111_111
+    };
+    assert_eq!(
+        lamports, target_lamports,
+        cleanup(&mut validator),
+        "{}", strategy
+    );
 
-    if strategy.is_removing_ledger() {
-        assert!(
-            ctx.get_transaction_ephem(signature).is_err(),
-            cleanup(&mut validator),
-            "{}",
-            strategy
-        );
-    } else {
-        assert!(
-            ctx.get_transaction_ephem(signature).is_ok(),
-            cleanup(&mut validator),
-            "{}",
-            strategy
-        );
-    }
+    assert!(
+        ctx.get_transaction_ephem(signature).is_err()
+            == strategy.is_removing_ledger(),
+        cleanup(&mut validator),
+        "{}",
+        strategy
+    );
 
     validator
 }

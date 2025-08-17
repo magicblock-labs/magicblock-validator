@@ -29,6 +29,7 @@ use solana_sdk::{
 use tempfile::TempDir;
 
 pub const TMP_DIR_LEDGER: &str = "TMP_DIR_LEDGER";
+pub const SNAPSHOT_FREQUENCY: u64 = 2;
 
 pub const FLEXI_COUNTER_ID: &str =
     "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4";
@@ -47,7 +48,7 @@ pub fn setup_offline_validator(
         lifecycle: LifecycleMode::Offline,
         ..Default::default()
     };
-    accounts_config.db.snapshot_frequency = 2;
+    accounts_config.db.snapshot_frequency = SNAPSHOT_FREQUENCY;
 
     let validator_config = millis_per_slot
         .map(|ms| ValidatorConfig {
@@ -105,7 +106,7 @@ pub fn setup_validator_with_local_remote(
         },
         ..Default::default()
     };
-    accounts_config.db.snapshot_frequency = 2;
+    accounts_config.db.snapshot_frequency = SNAPSHOT_FREQUENCY;
 
     let programs = resolve_programs(programs);
 

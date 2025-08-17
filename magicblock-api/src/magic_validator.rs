@@ -220,6 +220,12 @@ impl MagicValidator {
             .expect("ledger_path didn't have a parent, should never happen");
 
         let exit = Arc::<AtomicBool>::default();
+        let should_override_slot = config
+            .validator_config
+            .ledger
+            .resume_strategy
+            .should_override_bank_slot()
+            || config.validator_config.ledger.starting_slot.is_some();
         let bank = Self::init_bank(
             Some(geyser_manager.clone()),
             &genesis_config,
@@ -228,8 +234,9 @@ impl MagicValidator {
             validator_pubkey,
             ledger_parent_path,
             last_slot,
-            config.validator_config.ledger.starting_slot.is_some(),
+            should_override_slot,
         )?;
+        debug!("Bank initialized at slot {}", bank.slot());
 
         let ledger_truncator = LedgerTruncator::new(
             ledger.clone(),

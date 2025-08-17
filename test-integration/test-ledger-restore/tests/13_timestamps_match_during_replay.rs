@@ -8,13 +8,12 @@ use integration_test_tools::{
 };
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_offline_validator, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,
+    TMP_DIR_LEDGER,
 };
 
 // In this test we ensure that the timestamps of the blocks in the restored
 // ledger match the timestamps of the blocks in the original ledger.
-
-const SNAPSHOT_FREQUENCY: u64 = 2;
 
 #[test]
 fn restore_preserves_timestamps() {

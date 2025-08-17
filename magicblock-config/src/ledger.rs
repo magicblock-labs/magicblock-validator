@@ -106,6 +106,11 @@ impl LedgerResumeStrategy {
     pub fn is_replaying(&self) -> bool {
         matches!(self, Self::Replay)
     }
+
+    pub fn should_override_bank_slot(&self) -> bool {
+        // Strategies that resume but remove the ledger must override, or the start slot will be 0
+        matches!(self, Self::DiscardResume)
+    }
 }
 
 const fn default_ledger_size() -> u64 {

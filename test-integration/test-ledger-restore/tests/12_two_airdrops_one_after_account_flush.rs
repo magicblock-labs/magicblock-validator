@@ -7,7 +7,8 @@ use integration_test_tools::{
 };
 use solana_sdk::pubkey::Pubkey;
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_offline_validator, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,
+    TMP_DIR_LEDGER,
 };
 
 // In this test we ensure that restoring from a later slot by hydrating the
@@ -17,8 +18,6 @@ use test_ledger_restore::{
 // Then we airdrop again.
 // The ledger restore will start from a slot after the first airdrop was
 // flushed.
-
-const SNAPSHOT_FREQUENCY: u64 = 2;
 
 #[test]
 fn restore_ledger_with_two_airdrops_with_account_flush_in_between() {
