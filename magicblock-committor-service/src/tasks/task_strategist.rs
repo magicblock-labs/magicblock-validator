@@ -151,11 +151,13 @@ impl TaskStrategist {
         // Create heap size -> index
         let ixs =
             TransactionUtils::tasks_instructions(&Pubkey::new_unique(), tasks);
+        // Possible serialization failures are possible only due to size in our case
+        // In that case we set size to max
         let sizes = ixs
             .iter()
-            .map(|ix| bincode::serialized_size(ix).map(|size| size as usize))
-            .collect::<Result<Vec<usize>, _>>()
-            .unwrap();
+            .map(|ix| bincode::serialized_size(ix).unwrap_or(u64::MAX))
+            .map(|size| usize::try_from(size).unwrap_or(usize::MAX))
+            .collect::<Vec<_>>();
         let mut map = sizes
             .into_iter()
             .enumerate()
@@ -185,10 +187,12 @@ impl TaskStrategist {
                     tasks[index] = optimized_task;
                     let new_ix =
                         tasks[index].instruction(&Pubkey::new_unique());
-                    let new_ix_size = bincode::serialized_size(&new_ix)
-                        .expect("instruction serialization")
-                        as usize;
-
+                    // Possible serialization failures are possible only due to size in our case
+                    // In that case we set size to max
+                    let new_ix_size =
+                        bincode::serialized_size(&new_ix).unwrap_or(u64::MAX);
+                    let new_ix_size =
+                        usize::try_from(new_ix_size).unwrap_or(usize::MAX);
                     current_tx_length = calculate_tx_length(tasks);
                     map.push((new_ix_size, index));
                 }
@@ -303,6 +307,27 @@ mod tests {
         let validator = Pubkey::new_unique();
 
         let task = create_test_commit_task(1, 1000); // Large task
+        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
+
+        let strategy = TaskStrategist::build_strategy(
+            tasks,
+            &validator,
+            &None::<IntentPersisterImpl>,
+        )
+        .expect("Should build strategy with buffer optimization");
+
+        assert_eq!(strategy.optimized_tasks.len(), 1);
+        assert!(matches!(
+            strategy.optimized_tasks[0].strategy(),
+            TaskStrategy::Buffer
+        ));
+    }
+
+    #[test]
+    fn test_build_strategy_optimizes_to_buffer_u16_exceeded() {
+        let validator = Pubkey::new_unique();
+
+        let task = create_test_commit_task(1, 66_000); // Large task
         let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
 
         let strategy = TaskStrategist::build_strategy(

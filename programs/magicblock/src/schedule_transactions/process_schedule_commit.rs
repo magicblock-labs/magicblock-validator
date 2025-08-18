@@ -1,9 +1,10 @@
-use std::{collections::HashSet, sync::atomic::Ordering};
+use std::collections::HashSet;
 
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
     account::{Account, ReadableAccount},
+    account_utils::StateMut,
     instruction::InstructionError,
     pubkey::Pubkey,
 };
@@ -14,9 +15,6 @@ use crate::{
         ScheduledBaseIntent, UndelegateType,
     },
     schedule_transactions,
-    schedule_transactions::{
-        transaction_scheduler::TransactionScheduler, MESSAGE_ID,
-    },
     utils::{
         account_actions::set_account_owner_to_delegation_program,
         accounts::{
@@ -24,6 +22,7 @@ use crate::{
         },
         instruction_utils::InstructionUtils,
     },
+    MagicContext,
 };
 
 #[derive(Default)]
@@ -185,8 +184,26 @@ pub(crate) fn process_schedule_commit(
         }
     }
 
-    // Determine id and slot
-    let commit_id = MESSAGE_ID.fetch_add(1, Ordering::Relaxed);
+    // NOTE: this is only protected by all the above checks however if the
+    // instruction fails for other reasons detected afterward then the commit
+    // stays scheduled
+    let context_acc = get_instruction_account_with_idx(
+        transaction_context,
+        MAGIC_CONTEXT_IDX,
+    )?;
+    let context_data = &mut context_acc.borrow_mut();
+    let mut context =
+        MagicContext::deserialize(context_data).map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "Failed to deserialize MagicContext: {}",
+                err
+            );
+            InstructionError::GenericError
+        })?;
+
+    // Get next intent id
+    let intent_id = context.next_intent_id();
 
     // It appears that in builtin programs `Clock::get` doesn't work as expected, thus
     // we have to get it directly from the sysvar cache.
@@ -198,12 +215,10 @@ pub(crate) fn process_schedule_commit(
                 ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
                 InstructionError::UnsupportedSysvar
             })?;
-
     let blockhash = invoke_context.environment_config.blockhash;
-    let commit_sent_transaction =
-        InstructionUtils::scheduled_commit_sent(commit_id, blockhash);
-
-    let commit_sent_sig = commit_sent_transaction.signatures[0];
+    let action_sent_transaction =
+        InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
+    let commit_sent_sig = action_sent_transaction.signatures[0];
 
     let base_intent = if opts.request_undelegation {
         MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
@@ -213,37 +228,19 @@ pub(crate) fn process_schedule_commit(
     } else {
         MagicBaseIntent::Commit(CommitType::Standalone(committed_accounts))
     };
-
     let scheduled_base_intent = ScheduledBaseIntent {
-        id: commit_id,
+        id: intent_id,
         slot: clock.slot,
         blockhash,
-        action_sent_transaction: commit_sent_transaction,
+        action_sent_transaction,
         payer: *payer_pubkey,
         base_intent,
     };
 
-    // NOTE: this is only protected by all the above checks however if the
-    // instruction fails for other reasons detected afterward then the commit
-    // stays scheduled
-    let context_acc = get_instruction_account_with_idx(
-        transaction_context,
-        MAGIC_CONTEXT_IDX,
-    )?;
-    TransactionScheduler::schedule_base_intent(
-        invoke_context,
-        context_acc,
-        scheduled_base_intent,
-    )
-    .map_err(|err| {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: failed to schedule commit: {}",
-            err
-        );
-        InstructionError::GenericError
-    })?;
-    ic_msg!(invoke_context, "Scheduled commit with ID: {}", commit_id,);
+    context.add_scheduled_action(scheduled_base_intent);
+    context_data.set_state(&context)?;
+
+    ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent signature: {}",

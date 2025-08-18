@@ -1,6 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
-use log::warn;
+use log::error;
 use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
@@ -86,8 +86,27 @@ impl IntentScheduler {
         base_intent: ScheduledBaseIntentWrapper,
     ) -> Option<ScheduledBaseIntentWrapper> {
         let intent_id = base_intent.inner.id;
+
+        // To check duplicate scheduling its enough to check:
+        // 1. currently blocked
+        // 2. currently executing
         if self.blocked_intents.contains_key(&intent_id) {
-            warn!("Attempt to schedule already scheduled intent!");
+            // This is critical error as we shouldn't schedule duplicate Intents!
+            // this requires investigation
+            error!("CRITICAL! Attempt to schedule already scheduled intent!");
+            return None;
+        }
+        let duplicate_executing = self.blocked_keys.iter().any(|(_, queue)| {
+            if let Some(executing_id) = queue.front() {
+                &intent_id == executing_id
+            } else {
+                false
+            }
+        });
+        if duplicate_executing {
+            // This is critical error as we shouldn't schedule duplicate Intents!
+            // this requires investigation
+            error!("CRITICAL! Attempt to schedule already scheduled intent!");
             return None;
         }
 

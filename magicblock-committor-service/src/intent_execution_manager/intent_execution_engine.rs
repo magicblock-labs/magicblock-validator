@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
-use log::{error, trace, warn};
+use log::{error, info, trace, warn};
 use tokio::{
     sync::{
         broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
@@ -111,7 +111,7 @@ where
             let intent = match self.next_scheduled_intent().await {
                 Ok(value) => value,
                 Err(Error::ChannelClosed) => {
-                    error!("Channel closed, exiting IntentExecutionEngine::main_loop");
+                    info!("Channel closed, exiting IntentExecutionEngine::main_loop");
                     break;
                 }
                 Err(Error::DBError(err)) => {
@@ -247,7 +247,7 @@ where
 
         // Broadcast result to subscribers
         if let Err(err) = result_sender.send(result) {
-            error!("Failed to broadcast result: {}", err);
+            warn!("No result listeners of intent execution: {}", err);
         }
 
         // Remove executed task from Scheduler to unblock other intents
@@ -258,7 +258,7 @@ where
             .lock()
             .expect(POISONED_INNER_MSG)
             .complete(&intent.inner)
-            .expect("Valid completion of priviously scheduled message");
+            .expect("Valid completion of previously scheduled message");
 
         // Free worker
         drop(execution_permit);

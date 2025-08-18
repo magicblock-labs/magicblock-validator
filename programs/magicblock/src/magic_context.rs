@@ -17,6 +17,7 @@ pub struct FeePayerAccount {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MagicContext {
+    pub intent_id: u64,
     pub scheduled_base_intents: Vec<ScheduledBaseIntent>,
 }
 
@@ -31,6 +32,13 @@ impl MagicContext {
         } else {
             data.deserialize_data()
         }
+    }
+
+    pub(crate) fn next_intent_id(&mut self) -> u64 {
+        let output = self.intent_id;
+        self.intent_id = self.intent_id.wrapping_add(1);
+
+        output
     }
 
     pub(crate) fn add_scheduled_action(

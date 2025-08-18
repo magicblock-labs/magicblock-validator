@@ -243,6 +243,11 @@ impl BaseTask for BufferTask {
             committed_account.account.data.len(),
             MAX_WRITE_CHUNK_SIZE,
         );
+
+        // SAFETY: as object_length internally uses only already allocated or static buffers,
+        // and we don't use any fs writers, so the only error that may occur here is of kind
+        // OutOfMemory or WriteZero. This is impossible due to:
+        // Chunks::new panics if its size exceeds MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE or 10_240
         let chunks_account_size = borsh::object_length(&chunks).unwrap() as u64;
         let buffer_account_size = committed_account.account.data.len() as u64;
 
@@ -303,5 +308,131 @@ impl BaseTask for BufferTask {
     /// For tasks using Args strategy call corresponding `Visitor` method
     fn visit(&self, visitor: &mut dyn Visitor) {
         visitor.visit_buffer_task(self);
+    }
+}
+
+#[cfg(test)]
+mod serialization_safety_test {
+    use magicblock_program::magic_scheduled_base_intent::{
+        ProgramArgs, ShortAccountMeta,
+    };
+    use solana_account::Account;
+
+    use super::*;
+
+    // Test all ArgsTask variants
+    #[test]
+    fn test_args_task_instruction_serialization() {
+        let validator = Pubkey::new_unique();
+
+        // Test Commit variant
+        let commit_task = ArgsTask::Commit(CommitTask {
+            commit_id: 123,
+            allow_undelegation: true,
+            committed_account: CommittedAccountV2 {
+                pubkey: Pubkey::new_unique(),
+                account: Account {
+                    lamports: 1000,
+                    data: vec![1, 2, 3],
+                    owner: Pubkey::new_unique(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            },
+        });
+        assert_serializable(&commit_task.instruction(&validator));
+
+        // Test Finalize variant
+        let finalize_task = ArgsTask::Finalize(FinalizeTask {
+            delegated_account: Pubkey::new_unique(),
+        });
+        assert_serializable(&finalize_task.instruction(&validator));
+
+        // Test Undelegate variant
+        let undelegate_task = ArgsTask::Undelegate(UndelegateTask {
+            delegated_account: Pubkey::new_unique(),
+            owner_program: Pubkey::new_unique(),
+            rent_reimbursement: Pubkey::new_unique(),
+        });
+        assert_serializable(&undelegate_task.instruction(&validator));
+
+        // Test L1Action variant
+        let l1_action = ArgsTask::L1Action(L1ActionTask {
+            context: Context::Undelegate,
+            action: BaseAction {
+                destination_program: Pubkey::new_unique(),
+                escrow_authority: Pubkey::new_unique(),
+                account_metas_per_program: vec![ShortAccountMeta {
+                    pubkey: Pubkey::new_unique(),
+                    is_writable: true,
+                }],
+                data_per_program: ProgramArgs {
+                    data: vec![4, 5, 6],
+                    escrow_index: 1,
+                },
+                compute_units: 10_000,
+            },
+        });
+        assert_serializable(&l1_action.instruction(&validator));
+    }
+
+    // Test BufferTask variants
+    #[test]
+    fn test_buffer_task_instruction_serialization() {
+        let validator = Pubkey::new_unique();
+
+        let buffer_task = BufferTask::Commit(CommitTask {
+            commit_id: 456,
+            allow_undelegation: false,
+            committed_account: CommittedAccountV2 {
+                pubkey: Pubkey::new_unique(),
+                account: Account {
+                    lamports: 2000,
+                    data: vec![7, 8, 9],
+                    owner: Pubkey::new_unique(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            },
+        });
+        assert_serializable(&buffer_task.instruction(&validator));
+    }
+
+    // Test preparation instructions
+    #[test]
+    fn test_preparation_instructions_serialization() {
+        let authority = Pubkey::new_unique();
+
+        // Test BufferTask preparation
+        let buffer_task = BufferTask::Commit(CommitTask {
+            commit_id: 789,
+            allow_undelegation: true,
+            committed_account: CommittedAccountV2 {
+                pubkey: Pubkey::new_unique(),
+                account: Account {
+                    lamports: 3000,
+                    data: vec![0; 1024], // Larger data to test chunking
+                    owner: Pubkey::new_unique(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            },
+        });
+
+        let prep_info = buffer_task.preparation_info(&authority).unwrap();
+        assert_serializable(&prep_info.init_instruction);
+        for ix in prep_info.realloc_instructions {
+            assert_serializable(&ix);
+        }
+        for ix in prep_info.write_instructions {
+            assert_serializable(&ix);
+        }
+    }
+
+    // Helper function to assert serialization succeeds
+    fn assert_serializable(ix: &Instruction) {
+        bincode::serialize(ix).unwrap_or_else(|e| {
+            panic!("Failed to serialize instruction {:?}: {}", ix, e)
+        });
     }
 }

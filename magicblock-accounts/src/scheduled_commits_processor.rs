@@ -187,8 +187,6 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
     ) {
         const SUBSCRIPTION_ERR_MSG: &str =
             "Failed to get subscription of results of BaseIntents execution";
-        const META_ABSENT_ERR_MSG: &str =
-            "Absent meta for executed intent should not be possible!";
 
         let mut result_receiver =
             result_subscriber.await.expect(SUBSCRIPTION_ERR_MSG);
@@ -200,7 +198,19 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
                     return;
                 }
                 execution_result = result_receiver.recv() => {
-                    execution_result.expect("Intents results should be available")
+                    match execution_result {
+                        Ok(result) => result,
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!("Intent execution got shutdown, shutting down result processor!");
+                            break;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            // SAFETY: This shouldn't happen as our tx execution is faster than Intent execution on Base layer
+                            // If this ever happens it requires investigation
+                            error!("ScheduledCommitsProcessorImpl lags behind Intent execution! skipped: {}", skipped);
+                            continue;
+                        }
+                    }
                 }
             };
 
@@ -217,11 +227,23 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
             }
 
             // Remove intent from metas
-            let intent_meta = intents_meta_map
+            let intent_meta = if let Some(intent_meta) = intents_meta_map
                 .lock()
                 .expect(POISONED_MUTEX_MSG)
                 .remove(&intent_id)
-                .expect(META_ABSENT_ERR_MSG);
+            {
+                intent_meta
+            } else {
+                // Possible if we have duplicate Intents
+                // First one will remove id from map and second could fail.
+                // This should not happen and needs investigation!
+                error!(
+                    "CRITICAL! Failed to find IntentMeta for id: {}!",
+                    intent_id
+                );
+                continue;
+            };
+
             match execution_result {
                 Ok(value) => {
                     Self::process_intent_result(

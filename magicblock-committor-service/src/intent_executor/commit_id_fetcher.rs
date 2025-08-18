@@ -163,6 +163,11 @@ impl CommitIdFetcher for CommitIdTrackerImpl {
 
         // If all in cache - great! return
         if to_request.is_empty() {
+            let mut cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
+            result.iter().for_each(|(pubkey, id)| {
+                cache.push(*pubkey, *id);
+            });
+
             return Ok(result);
         }
 

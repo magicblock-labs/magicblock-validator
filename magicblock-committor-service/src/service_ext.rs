@@ -68,15 +68,26 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
 
         tokio::pin!(committor_stopped);
         loop {
-            // let committor_stopped = Pin::new(&mut committor_stopped);
             let execution_result = tokio::select! {
                 biased;
                 _ = &mut committor_stopped => {
-                    info!("");
+                    info!("Committor service stopped, stopping Committor extension");
                     return;
                 }
                 execution_result = results_subscription.recv() => {
-                    execution_result.expect("Intent results channel has to be alive!")
+                    match execution_result {
+                        Ok(result) => result,
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!("Intent execution got shutdown, shutting down result Committor extension!");
+                            break;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            // SAFETY: not really feasible to happen as this function is way faster than Intent execution
+                            // requires investigation if ever happens!
+                            error!("CommittorServiceExt lags behind Intent execution! skipped: {}", skipped);
+                            continue;
+                        }
+                    }
                 }
             };
 
