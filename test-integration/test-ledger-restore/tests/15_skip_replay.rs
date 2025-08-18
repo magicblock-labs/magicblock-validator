@@ -46,6 +46,9 @@ fn write(
         false,
     );
 
+    // Wait slot 1 otherwise we might be unable to fetch the transaction status
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+
     let mut signatures = Vec::with_capacity(keypairs.len());
     for pubkey in keypairs.iter().map(|kp| kp.pubkey()) {
         let signature =
