@@ -754,7 +754,7 @@ impl Ledger {
             }
             None => {
                 let mut iterator = self
-                    .transaction_status_cf
+                    .transaction_cf
                     .iter_current_index_filtered(IteratorMode::From(
                         (signature, highest_confirmed_slot),
                         IteratorDirection::Forward,
@@ -990,12 +990,12 @@ impl Ledger {
     /// NOTE: since the key is `(signature, slot)` the iterator cannot be used to
     ///       iterate in the order of slots
     ///
-    /// - `from`    - The starting point of the iterator, defaults to [`Signature::default(), 0`]
+    /// - `iterator_mode` - The iterator mode to use for the search, defaults to [`IteratorMode::Start`]
     /// - `success` - If true, only successful transactions are returned,
     ///               otherwise only failed ones
     pub fn iter_transaction_statuses(
         &self,
-        from: Option<(Signature, Slot)>,
+        iterator_mode: IteratorMode<(Signature, Slot)>,
         success: bool,
     ) -> impl Iterator<
         Item = LedgerResult<(
@@ -1005,9 +1005,8 @@ impl Ledger {
         )>,
     > + '_ {
         let (_lock, _) = self.ensure_lowest_cleanup_slot();
-        let from = from.unwrap_or((Signature::default(), 0));
         self.transaction_status_cf
-            .iter_protobuf(IteratorMode::From(from, IteratorDirection::Forward))
+            .iter_protobuf(iterator_mode)
             .filter_map(move |res| {
                 let ((signature, slot), status) = match res {
                     Ok(((signature, slot), status)) => {
@@ -1033,7 +1032,8 @@ impl Ledger {
         success: bool,
     ) -> LedgerResult<i64> {
         let mut count = 0;
-        for res in self.iter_transaction_statuses(None, success) {
+        for res in self.iter_transaction_statuses(IteratorMode::Start, success)
+        {
             match res {
                 Ok(_) => count += 1,
                 Err(err) => return Err(err),
