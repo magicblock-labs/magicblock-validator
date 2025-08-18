@@ -176,7 +176,7 @@ solana-rpc-client-api = { version = "2.2" }
 solana-sdk = { version = "2.2" }
 solana-sdk-ids = { version = "2.2" }
 solana-signature = { version = "2.2" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "9b722a5", features = [
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "0f18aa3", features = [
   "dev-context-only-utils",
 ] }
 solana-rent-collector = { version = "2.2" }
@@ -213,4 +213,4 @@ vergen = "8.3.1"
 # solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2476dab" }
 solana-account = { path = "../solana-account" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "9b722a5" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "0f18aa3" }
