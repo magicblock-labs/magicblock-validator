@@ -9,8 +9,9 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    AccountsCloneConfig, AccountsConfig, EphemeralConfig, LifecycleMode,
-    PrepareLookupTables, ProgramConfig, RemoteCluster, RemoteConfig,
+    AccountsCloneConfig, AccountsConfig, EphemeralConfig, LedgerConfig,
+    LedgerResumeStrategy, LifecycleMode, PrepareLookupTables, ProgramConfig,
+    RemoteCluster, RemoteConfig,
 };
 use program_flexi_counter::instruction::{
     create_add_ix, create_delegate_ix, create_init_ix,
@@ -52,8 +53,12 @@ pub fn start_validator_with_clone_config(
             lifecycle: LifecycleMode::Ephemeral,
             clone: AccountsCloneConfig {
                 prepare_lookup_tables,
-                auto_airdrop_lamports: 0
+                auto_airdrop_lamports: 0,
             },
+            ..Default::default()
+        },
+        ledger: LedgerConfig {
+            resume_strategy: LedgerResumeStrategy::Reset,
             ..Default::default()
         },
         ..Default::default()
