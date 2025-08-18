@@ -995,7 +995,7 @@ impl Ledger {
     ///               otherwise only failed ones
     pub fn iter_transaction_statuses(
         &self,
-        iterator_mode: IteratorMode<(Signature, Slot)>,
+        iterator_mode: Option<IteratorMode<(Signature, Slot)>>,
         success: bool,
     ) -> impl Iterator<
         Item = LedgerResult<(
@@ -1005,6 +1005,7 @@ impl Ledger {
         )>,
     > + '_ {
         let (_lock, _) = self.ensure_lowest_cleanup_slot();
+        let iterator_mode = iterator_mode.unwrap_or(IteratorMode::Start);
         self.transaction_status_cf
             .iter_protobuf(iterator_mode)
             .filter_map(move |res| {
@@ -1032,7 +1033,8 @@ impl Ledger {
         success: bool,
     ) -> LedgerResult<i64> {
         let mut count = 0;
-        for res in self.iter_transaction_statuses(IteratorMode::Start, success)
+        for res in
+            self.iter_transaction_statuses(Some(IteratorMode::Start), success)
         {
             match res {
                 Ok(_) => count += 1,
