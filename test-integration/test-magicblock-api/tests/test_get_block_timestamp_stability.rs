@@ -28,7 +28,7 @@ fn test_get_block_timestamp_stability() {
         .get_block_time(current_slot)
         .unwrap();
     let ledger_block = ctx
-        .try_chain_client()
+        .try_ephem_client()
         .unwrap()
         .get_block(current_slot)
         .unwrap();
