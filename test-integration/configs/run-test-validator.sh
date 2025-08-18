@@ -15,6 +15,9 @@ solana-test-validator \
   --limit-ledger-size \
   1000000 \
   --bpf-program \
+  CoMtrr6j336NSB5PAoAWpLe5hPgkcShWKbPgHhZxaxh \
+  $DIR/../../target/deploy/magicblock_committor_program.so \ \
+  --bpf-program \
   DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh \
   $DIR/../schedulecommit/elfs/dlp.so \
   --bpf-program \
