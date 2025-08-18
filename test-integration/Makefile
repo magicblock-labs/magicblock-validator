@@ -39,37 +39,89 @@ test-force-mb: $(PROGRAMS_SO) test-ledger-restore
 test-schedulecommit:
 	RUN_TESTS=schedulecommit \
 	$(MAKE) test
+setup-schedulecommit-devnet:
+	RUN_TESTS=schedulecommit \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-schedulecommit-both:
+	RUN_TESTS=schedulecommit \
+	SETUP_ONLY=both \
+	$(MAKE) test
 
 test-issues-frequent-commits:
-	RUN_TESTS=issues_frequent_commmits \
+	RUN_TESTS=issues_frequent_commits \
+	$(MAKE) test
+setup-issues-frequent-commits-devnet:
+	RUN_TESTS=issues_frequent_commits \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-issues-frequent-commits-both:
+	RUN_TESTS=issues_frequent_commits \
+	SETUP_ONLY=both \
 	$(MAKE) test
 
 test-cloning:
 	RUN_TESTS=cloning \
 	$(MAKE) test
+setup-cloning-devnet:
+	RUN_TESTS=cloning \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-cloning-both:
+	RUN_TESTS=cloning \
+	SETUP_ONLY=both \
+	$(MAKE) test
 
 test-restore-ledger:
 	RUN_TESTS=restore_ledger \
+	$(MAKE) test
+setup-restore-ledger-devnet:
+	RUN_TESTS=restore_ledger \
+	SETUP_ONLY=devnet \
 	$(MAKE) test
 
 test-magicblock-api:
 	RUN_TESTS=magicblock_api \
 	$(MAKE) test
+setup-magicblock-api-devnet:
+	RUN_TESTS=magicblock_api \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-magicblock-api-both:
+	RUN_TESTS=magicblock_api \
+	SETUP_ONLY=both \
+	$(MAKE) test
 
 test-table-mania:
 	RUN_TESTS=table_mania \
+	$(MAKE) test
+setup-table-mania-devnet:
+	RUN_TESTS=table_mania \
+	SETUP_ONLY=devnet \
 	$(MAKE) test
 
 test-committor:
 	RUN_TESTS=committor \
 	$(MAKE) test
+setup-committor-devnet:
+	RUN_TESTS=committor \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
 
 test-pubsub:
 	RUN_TESTS=pubsub \
 	$(MAKE) test
+setup-pubsub-ephem:
+	RUN_TESTS=pubsub \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 
 test-config:
 	RUN_TESTS=config \
+	$(MAKE) test
+setup-config-devnet:
+	RUN_TESTS=config \
+	SETUP_ONLY=devnet \
 	$(MAKE) test
 
 test-schedule-intents:

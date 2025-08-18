@@ -4,18 +4,16 @@ use dlp::instruction_builder::{
 use integration_test_tools::{
     loaded_accounts::LoadedAccounts, IntegrationTestContext,
 };
-use lazy_static::lazy_static;
-use magicblock_program::validator;
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use solana_rpc_client::rpc_client::RpcClient;
+use solana_sdk::signature::Keypair;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    signature::{Keypair, Signer},
+    commitment_config::CommitmentConfig, signature::Signer,
     transaction::Transaction,
 };
-use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
+use solana_sdk::pubkey::Pubkey;
 
 // Test constants
 const DEVNET_URL: &str = "http://127.0.0.1:7799";
@@ -24,21 +22,30 @@ const INITIAL_AIRDROP_AMOUNT: u64 = 5_000_000_000;
 const CONFIRMATION_WAIT_MS: u64 = 500;
 const SETUP_WAIT_MS: u64 = 1000;
 
-lazy_static! {
-    static ref VALIDATOR_KEYPAIR: Arc<Keypair> = Arc::new({
-        let loaded_accounts =
-            LoadedAccounts::with_delegation_program_test_authority();
-        loaded_accounts
-            .validator_authority_keypair()
-            .insecure_clone()
-    });
+fn validator_keypair() -> Keypair {
+    let loaded_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+    loaded_accounts
+        .validator_authority_keypair()
+        .insecure_clone()
+}
+
+fn validator_pubkey() -> Pubkey {
+    LoadedAccounts::with_delegation_program_test_authority()
+        .validator_authority()
+}
+
+fn validator_fees_vault() -> Pubkey {
+    LoadedAccounts::with_delegation_program_test_authority()
+        .validator_fees_vault()
 }
 
 /// Test that claim fees instruction
 fn test_claim_fees_instruction() {
     println!("Testing claim fees instruction creation...");
 
-    let validator_pubkey = VALIDATOR_KEYPAIR.pubkey();
+    let validator_pubkey = validator_pubkey();
+    eprintln!("validator_pubkey: {:?}", validator_pubkey);
     let instruction = validator_claim_fees(validator_pubkey, None);
 
     assert!(
@@ -54,38 +61,6 @@ fn test_claim_fees_instruction() {
     println!("✓ Claim fees instruction created successfully");
 }
 
-/// Initialize the validator fees vault
-fn test_init_validator_fees_vault() {
-    println!("Testing validator fees vault initialization...");
-
-    let rpc_client = RpcClient::new_with_commitment(
-        DEVNET_URL,
-        CommitmentConfig::confirmed(),
-    );
-
-    let validator_keypair = validator::validator_authority();
-    let validator_pubkey = validator_keypair.pubkey();
-
-    let init_instruction = init_validator_fees_vault(
-        validator_pubkey,
-        validator_pubkey,
-        validator_pubkey,
-    );
-
-    let blockhash = rpc_client.get_latest_blockhash().unwrap();
-    let transaction = Transaction::new_signed_with_payer(
-        &[init_instruction],
-        Some(&validator_pubkey),
-        &[&validator_keypair],
-        blockhash,
-    );
-
-    rpc_client
-        .send_and_confirm_transaction(&transaction)
-        .unwrap();
-    println!("✓ Successfully initialized validator fees vault!");
-}
-
 /// Add test fees to the vault
 fn test_add_fees_to_vault() {
     println!("Adding test fees to vault...");
@@ -95,9 +70,7 @@ fn test_add_fees_to_vault() {
         CommitmentConfig::confirmed(),
     );
 
-    let loaded_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
-    let validator_fees_vault = loaded_accounts.validator_fees_vault();
+    let validator_fees_vault = validator_fees_vault();
 
     println!("  Target vault: {}", validator_fees_vault);
 
@@ -143,12 +116,10 @@ fn test_claim_fees_transaction() {
         CommitmentConfig::confirmed(),
     );
 
-    let validator_keypair = validator::validator_authority();
+    let validator_keypair = validator_keypair();
     let validator_pubkey = validator_keypair.pubkey();
 
-    let loaded_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
-    let validator_fees_vault = loaded_accounts.validator_fees_vault();
+    let validator_fees_vault = validator_fees_vault();
 
     println!("  Validator: {}", validator_pubkey);
     println!("  Fees vault: {}", validator_fees_vault);
@@ -191,14 +162,10 @@ fn test_claim_fees_rpc_connection() {
     println!("✓ RPC connection successful");
 }
 
+/// This test assumes that the validator fees vault has been initialized
 #[test]
 fn test_validator_claim_fees() {
     println!("Starting Validator Fee Claiming Integration Test\n");
-
-    // 2. Initialize validator authority
-    validator::init_validator_authority(
-        VALIDATOR_KEYPAIR.as_ref().insecure_clone(),
-    );
 
     // 3. Fund the validator for transaction fees
     let client = RpcClient::new_with_commitment(
@@ -207,7 +174,7 @@ fn test_validator_claim_fees() {
     );
     IntegrationTestContext::airdrop(
         &client,
-        &VALIDATOR_KEYPAIR.pubkey(),
+        &validator_pubkey(),
         INITIAL_AIRDROP_AMOUNT,
         CommitmentConfig::confirmed(),
     )
@@ -220,17 +187,13 @@ fn test_validator_claim_fees() {
     println!("\n=== Test 2: ClaimFeesTask Struct ===");
     test_claim_fees_task();
 
-    println!("\n=== Test 3: Vault Initialization ===");
-    test_init_validator_fees_vault();
-    sleep(Duration::from_millis(SETUP_WAIT_MS));
-
-    println!("\n=== Test 4: Add Test Fees ===");
+    println!("\n=== Test 3: Add Test Fees ===");
     test_add_fees_to_vault();
 
-    println!("\n=== Test 5: Claim Fees Transaction ===");
+    println!("\n=== Test 4: Claim Fees Transaction ===");
     test_claim_fees_transaction();
 
-    println!("\n=== Test 6: RPC Connection ===");
+    println!("\n=== Test 5: RPC Connection ===");
     test_claim_fees_rpc_connection();
 
     println!("\nAll tests completed successfully!");
