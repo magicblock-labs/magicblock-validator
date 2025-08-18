@@ -4,13 +4,13 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
     branches-ignore:
-      - feat/more-strategies
+      - feat/more-resume-strategies
 
 name: Run CI - Format
 
 jobs:
   run_make_ci_format:
-    if: github.event.pull_request.draft == false && github.event.pull_request.base.ref != 'feat/more-strategies'
+    if: github.event.pull_request.draft == false && github.event.pull_request.base.ref != 'feat/more-resume-strategies'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout this magicblock-validator
