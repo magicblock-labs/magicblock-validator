@@ -11,7 +11,8 @@ use solana_sdk::{
     signer::Signer,
 };
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_snapshot, TMP_DIR_LEDGER,
+    setup_offline_validator, wait_for_next_slot_after_account_snapshot,
+    TMP_DIR_LEDGER,
 };
 
 const SNAPSHOT_FREQUENCY: u64 = 2;
@@ -61,7 +62,10 @@ fn write(
     }
 
     // Wait for the txs to be written to disk and save the actual snapshot slot
-    let slot = wait_for_snapshot(&mut validator, SNAPSHOT_FREQUENCY) - 1;
+    let slot = wait_for_next_slot_after_account_snapshot(
+        &mut validator,
+        SNAPSHOT_FREQUENCY,
+    ) - 1;
 
     (validator, slot, signatures)
 }

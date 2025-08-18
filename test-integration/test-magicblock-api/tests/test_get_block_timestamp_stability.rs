@@ -12,7 +12,7 @@ fn test_get_block_timestamp_stability() {
     let pubkey = Keypair::new().pubkey();
     let signature = ctx.airdrop_ephem(&pubkey, LAMPORTS_PER_SOL).unwrap();
 
-    // Wait some time for the slot to be finalized
+    // Wait for the transaction's slot to be completed
     ctx.wait_for_delta_slot_ephem(3).unwrap();
 
     let tx = ctx

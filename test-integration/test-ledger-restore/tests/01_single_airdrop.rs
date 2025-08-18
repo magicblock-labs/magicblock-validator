@@ -38,7 +38,7 @@ fn write_ledger(
         false,
     );
 
-    // Wait slot 1 otherwise we might be unable to fetch the transaction status
+    // Wait to make sure we don't process transactions on slot 0
     expect!(ctx.wait_for_next_slot_ephem(), validator);
 
     let sig = expect!(ctx.airdrop_ephem(pubkey1, 1_111_111), validator);

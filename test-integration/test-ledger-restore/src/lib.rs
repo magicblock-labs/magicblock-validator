@@ -337,7 +337,7 @@ pub fn wait_for_cloned_accounts_hydration() {
 }
 
 /// Waits for the next slot after the snapshot frequency
-pub fn wait_for_snapshot(
+pub fn wait_for_next_slot_after_account_snapshot(
     validator: &mut Child,
     snapshot_frequency: u64,
 ) -> Slot {
