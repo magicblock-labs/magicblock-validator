@@ -926,6 +926,13 @@ impl Ledger {
                 .num_get_transaction_status
                 .fetch_add(1, Ordering::Relaxed);
 
+            debug!("signature: {:?}", signature);
+            debug!("min_slot: {:?}", min_slot);
+            debug!("lowest_available_slot: {:?}", lowest_available_slot);
+            debug!(
+                "status count: {:?}",
+                self.transaction_status_cf.count_column_using_cache()
+            );
             debug!(
                 "all statuses from params: {:?}",
                 self.transaction_status_cf
@@ -945,7 +952,6 @@ impl Ledger {
                     ))
                     .unwrap()
                     .collect::<Vec<_>>()
-                    .len()
             );
             debug!(
                 "all statuses from start: {:?}",
@@ -953,7 +959,6 @@ impl Ledger {
                     .iter(IteratorMode::Start)
                     .unwrap()
                     .collect::<Vec<_>>()
-                    .len()
             );
             let iterator = self
                 .transaction_status_cf
