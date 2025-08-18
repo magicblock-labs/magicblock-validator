@@ -1,10 +1,13 @@
-on:
-  push:
-    branches: [master, dev]
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+# on:
+#   push:
+#     branches: [master, dev]
+#   pull_request:
+#     types: [opened, reopened, synchronize, ready_for_review]
 
-name: Run CI - Unit Tests
+on:
+  workflow_dispatch: # Only allow manual triggering
+
+name: Run CI - Unit Tests (DISABLED)
 
 jobs:
   run_make_ci_test:

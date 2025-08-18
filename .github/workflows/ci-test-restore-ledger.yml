@@ -1,0 +1,60 @@
+on:
+  push:
+    branches: [test/ci]
+
+name: Run CI - Test Restore Ledger (20x)
+
+jobs:
+  run_test_restore_ledger_20x:
+    if: github.event.pull_request.draft == false
+    runs-on: extra-large
+    strategy:
+      matrix:
+        run:
+          [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+          ]
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v2
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-restore-ledger-v000"
+          rust_toolchain_release: "1.84.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Run test-restore-ledger (Run ${{ matrix.run }}/20)
+        run: |
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
+          echo "Starting test-restore-ledger run ${{ matrix.run }}/20"
+          make -C test-integration test-restore-ledger
+          echo "Completed test-restore-ledger run ${{ matrix.run }}/20"
+        shell: bash
+        working-directory: magicblock-validator
