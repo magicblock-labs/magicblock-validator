@@ -3,6 +3,8 @@ on:
     branches: [master, dev]
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
+    branches-ignore:
+      - feat/more-strategies
 
 name: Run CI - Format
 

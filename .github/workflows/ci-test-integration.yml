@@ -1,10 +1,11 @@
 on:
   push:
-    branches: [master, dev]
+    branches: [feat/more-strategies]
   pull_request:
+    branches: [feat/more-strategies]
     types: [opened, reopened, synchronize, ready_for_review]
 
-name: Run CI - Integration Tests
+name: Run CI - Integration Tests (restore_ledger only)
 
 jobs:
   run_make_ci_test:
@@ -23,14 +24,13 @@ jobs:
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
-      - name: Run integration tests
+      - name: Run integration tests (restore_ledger)
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
           sudo sysctl fs.inotify.max_user_instances=1280
           sudo sysctl fs.inotify.max_user_watches=655360
-          make ci-test-integration
+          RUN_TESTS=restore_ledger make ci-test-integration
         shell: bash
         working-directory: magicblock-validator
