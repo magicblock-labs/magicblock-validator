@@ -1534,7 +1534,7 @@ impl Bank {
 
         let sanitized_output = self
             .transaction_processor
-            .read()
+            .write()
             .unwrap()
             .load_and_execute_sanitized_transactions(
                 self,
