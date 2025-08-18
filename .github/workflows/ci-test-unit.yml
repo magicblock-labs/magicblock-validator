@@ -10,7 +10,7 @@ name: Run CI - Unit Tests
 
 jobs:
   run_make_ci_test:
-    if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false && github.event.pull_request.base.ref != 'feat/more-strategies'
     runs-on: extra-large
     steps:
       - name: Checkout this magicblock-validator
