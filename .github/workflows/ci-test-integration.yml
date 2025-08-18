@@ -8,12 +8,10 @@ name: Run CI - Integration Tests (restore_ledger only)
 
 jobs:
   run_make_ci_test:
-    # Only run if the PR is not a draft, and the base branch is master or feat/more-strategies,
-    # and (the base is not master OR the head is not feat/more-resume-strategies)
+    # Only run if the PR is not a draft, and the base branch is master or feat/more-strategies
     if: |
       github.event.pull_request.draft == false &&
-      (github.event.pull_request.base.ref == 'master' || github.event.pull_request.base.ref == 'feat/more-strategies') &&
-      !(github.event.pull_request.base.ref == 'master' && github.event.pull_request.head.ref == 'feat/more-resume-strategies')
+      (github.event.pull_request.base.ref == 'master' || github.event.pull_request.base.ref == 'feat/more-strategies' || github.event.pull_request.base.ref == 'feat/more-resume-strategies')
     runs-on: extra-large
     steps:
       - name: Checkout this magicblock-validator
