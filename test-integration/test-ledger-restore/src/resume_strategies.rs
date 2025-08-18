@@ -40,6 +40,9 @@ pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {
         false,
     );
 
+    // Wait slot 1 otherwise we might be unable to fetch the transaction status
+    expect!(ctx.wait_for_next_slot_chain(), validator);
+
     let signature =
         expect!(ctx.airdrop_ephem(&kp.pubkey(), 1_111_111), validator);
 
