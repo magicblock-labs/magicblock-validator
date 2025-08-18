@@ -29,7 +29,6 @@ const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 /// Max number of executors that can send messages in parallel to Base layer
 const MAX_EXECUTORS: u8 = 50;
 
-// TODO(edwin): rename
 #[derive(Clone, Debug)]
 pub struct ExecutionOutputWrapper {
     pub id: u64,
@@ -111,14 +110,19 @@ where
         loop {
             let intent = match self.next_scheduled_intent().await {
                 Ok(value) => value,
-                Err(err) => {
-                    error!("Failed to get next intent: {}", err);
+                Err(Error::ChannelClosed) => {
+                    info!("Channel closed, exiting IntentExecutionEngine::main_loop");
                     break;
+                }
+                Err(Error::DBError(err)) => {
+                    panic!("Failed to fetch intent from db: {:?}", err);
                 }
             };
             let Some(intent) = intent else {
-                // intents are blocked, skipping
-                info!("Could not schedule any intents, as all of them are blocked!");
+                // We couldn't pick up intent for execution due to:
+                // 1. All executors are currently busy
+                // 2. All intents are blocked and none could be executed at the moment
+                trace!("Could not schedule any intents");
                 continue;
             };
 
@@ -243,13 +247,18 @@ where
 
         // Broadcast result to subscribers
         if let Err(err) = result_sender.send(result) {
-            error!("Failed to broadcast result: {}", err);
+            warn!("No result listeners of intent execution: {}", err);
         }
+
         // Remove executed task from Scheduler to unblock other intents
+        // SAFETY: Self::execute is called ONLY after IntentScheduler
+        // successfully is able to schedule execution of some Intent
+        // that means that the same Intent is SAFE to complete
         inner_scheduler
             .lock()
             .expect(POISONED_INNER_MSG)
-            .complete(&intent.inner);
+            .complete(&intent.inner)
+            .expect("Valid completion of previously scheduled message");
 
         // Free worker
         drop(execution_permit);

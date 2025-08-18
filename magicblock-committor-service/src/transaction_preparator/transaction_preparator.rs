@@ -8,7 +8,7 @@ use solana_sdk::{message::VersionedMessage, signature::Keypair};
 use crate::{
     persist::IntentPersister,
     tasks::{task_strategist::TransactionStrategy, utils::TransactionUtils},
-    transaction_preperator::{
+    transaction_preparator::{
         delivery_preparator::DeliveryPreparator, error::PreparatorResult,
     },
     ComputeBudgetConfig,

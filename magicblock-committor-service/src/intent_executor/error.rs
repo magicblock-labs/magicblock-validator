@@ -33,11 +33,11 @@ pub enum Error {
     },
     #[error("FailedCommitPreparationError: {0}")]
     FailedCommitPreparationError(
-        #[source] crate::transaction_preperator::error::Error,
+        #[source] crate::transaction_preparator::error::Error,
     ),
     #[error("FailedFinalizePreparationError: {0}")]
     FailedFinalizePreparationError(
-        #[source] crate::transaction_preperator::error::Error,
+        #[source] crate::transaction_preparator::error::Error,
     ),
 }
 

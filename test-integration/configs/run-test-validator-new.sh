@@ -15,15 +15,21 @@ solana-test-validator \
   --limit-ledger-size \
   1000000 \
   --bpf-program \
-  CoMtrr6j336NSB5PAoAWpLe5hPgkcShWKbPgHhZxaxh \
-  $DIR/../../target/deploy/magicblock_committor_program.so \ \
-  --bpf-program \
   DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh \
   $DIR/../schedulecommit/elfs/dlp.so \
+  --bpf-program \
+  DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1 \
+  $DIR/../schedulecommit/elfs/mdp.so \
   --bpf-program \
   9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY \
   $DIR/../target/deploy/program_schedulecommit.so \
   --bpf-program \
   4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr \
-  $DIR/../target/deploy/program_schedulecommit_security.so
+  $DIR/../target/deploy/program_schedulecommit_security.so \
+  --bpf-program \
+  3JnJ727jWEmPVU8qfXwtH63sCNDX7nMgsLbg8qy8aaPX \
+  /Users/edwinpaco/Documents/work/MagicBlock/redline/target/deploy/redline.so \
+  --bpf-program \
+  CoMtrr6j336NSB5PAoAWpLe5hPgkcShWKbPgHhZxaxh \
+  $DIR/../../target/deploy/magicblock_committor_program.so
 

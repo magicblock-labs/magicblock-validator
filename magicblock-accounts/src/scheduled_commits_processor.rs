@@ -24,14 +24,10 @@ use magicblock_program::{
 };
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
-    account::{Account, ReadableAccount},
-    hash::Hash,
-    pubkey::Pubkey,
-    signature::Signature,
-    system_program,
-    transaction::Transaction,
+    hash::Hash, pubkey::Pubkey, signature::Signature, transaction::Transaction,
 };
 use tokio::sync::{broadcast, oneshot};
+use tokio_util::sync::CancellationToken;
 
 use crate::{errors::AccountsResult, ScheduledCommitsProcessor};
 
@@ -40,15 +36,16 @@ const POISONED_RWLOCK_MSG: &str =
 const POISONED_MUTEX_MSG: &str =
     "Mutex of RemoteScheduledCommitsProcessor.intents_meta_map is poisoned";
 
-pub struct RemoteScheduledCommitsProcessor<C: BaseIntentCommittor> {
+pub struct ScheduledCommitsProcessorImpl<C: BaseIntentCommittor> {
     bank: Arc<Bank>,
     committor: Arc<C>,
+    cancellation_token: CancellationToken,
     intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
     cloned_accounts: CloneOutputMap,
     transaction_scheduler: TransactionScheduler,
 }
 
-impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
+impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
     pub fn new(
         bank: Arc<Bank>,
         cloned_accounts: CloneOutputMap,
@@ -57,9 +54,11 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
     ) -> Self {
         let result_subscriber = committor.subscribe_for_results();
         let intents_meta_map = Arc::new(Mutex::default());
+        let cancellation_token = CancellationToken::new();
         tokio::spawn(Self::result_processor(
             bank.clone(),
             result_subscriber,
+            cancellation_token.clone(),
             intents_meta_map.clone(),
             transaction_status_sender,
         ));
@@ -67,6 +66,7 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
         Self {
             bank,
             committor,
+            cancellation_token,
             intents_meta_map,
             cloned_accounts,
             transaction_scheduler: TransactionScheduler::default(),
@@ -112,27 +112,18 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
                 });
 
                 // We commit escrow, its data kept under FeePayer's address
-                match self.bank.get_account(&pubkey) {
-                    Some(account_data) => {
-                        account.pubkey = ephemeral_pubkey;
-                        account.account = Account {
-                            lamports: account_data.lamports(),
-                            data: account_data.data().to_vec(),
-                            owner: system_program::id(),
-                            executable: account_data.executable(),
-                            rent_epoch: account_data.rent_epoch(),
-                        };
-                        true
-                    }
-                    None => {
-                        // TODO(edwin): shouldn't be possible.. Should be a panic
-                        error!(
-                            "Scheduled commit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
-                            pubkey
-                        );
-                        self.excluded_pubkeys.insert(pubkey);
-                        false
-                    }
+                if let Some(account_data) = self.bank.get_account(&pubkey) {
+                    account.pubkey = ephemeral_pubkey;
+                    account.account = account_data.into();
+                    true
+                } else {
+                    // TODO(edwin): shouldn't be possible.. Should be a panic
+                    error!(
+                        "Scheduled commit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
+                        pubkey
+                    );
+                    self.excluded_pubkeys.insert(pubkey);
+                    false
                 }
             }
         }
@@ -191,17 +182,39 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
         result_subscriber: oneshot::Receiver<
             broadcast::Receiver<BroadcastedIntentExecutionResult>,
         >,
+        cancellation_token: CancellationToken,
         intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
         transaction_status_sender: TransactionStatusSender,
     ) {
         const SUBSCRIPTION_ERR_MSG: &str =
             "Failed to get subscription of results of BaseIntents execution";
-        const META_ABSENT_ERR_MSG: &str =
-            "Absent meta for executed intent should not be possible!";
 
         let mut result_receiver =
             result_subscriber.await.expect(SUBSCRIPTION_ERR_MSG);
-        while let Ok(execution_result) = result_receiver.recv().await {
+        loop {
+            let execution_result = tokio::select! {
+                biased;
+                _ = cancellation_token.cancelled() => {
+                    info!("ScheduledCommitsProcessorImpl stopped.");
+                    return;
+                }
+                execution_result = result_receiver.recv() => {
+                    match execution_result {
+                        Ok(result) => result,
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!("Intent execution got shutdown, shutting down result processor!");
+                            break;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            // SAFETY: This shouldn't happen as our tx execution is faster than Intent execution on Base layer
+                            // If this ever happens it requires investigation
+                            error!("ScheduledCommitsProcessorImpl lags behind Intent execution! skipped: {}", skipped);
+                            continue;
+                        }
+                    }
+                }
+            };
+
             let (intent_id, trigger_type) = execution_result
                 .as_ref()
                 .map(|output| (output.id, output.trigger_type))
@@ -215,11 +228,23 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
             }
 
             // Remove intent from metas
-            let intent_meta = intents_meta_map
+            let intent_meta = if let Some(intent_meta) = intents_meta_map
                 .lock()
                 .expect(POISONED_MUTEX_MSG)
                 .remove(&intent_id)
-                .expect(META_ABSENT_ERR_MSG);
+            {
+                intent_meta
+            } else {
+                // Possible if we have duplicate Intents
+                // First one will remove id from map and second could fail.
+                // This should not happen and needs investigation!
+                error!(
+                    "CRITICAL! Failed to find IntentMeta for id: {}!",
+                    intent_id
+                );
+                continue;
+            };
+
             match execution_result {
                 Ok(value) => {
                     Self::process_intent_result(
@@ -256,7 +281,7 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
         bank: &Arc<Bank>,
         transaction_status_sender: &TransactionStatusSender,
         execution_outcome: ExecutionOutputWrapper,
-        intent_meta: ScheduledBaseIntentMeta,
+        mut intent_meta: ScheduledBaseIntentMeta,
     ) {
         let chain_signatures = match execution_outcome.output {
             ExecutionOutput::SingleStage(signature) => vec![signature],
@@ -265,11 +290,13 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
                 finalize_signature,
             } => vec![commit_signature, finalize_signature],
         };
+        let intent_sent_transaction =
+            std::mem::take(&mut intent_meta.intent_sent_transaction);
         let sent_commit =
-            Self::build_sent_commit(intent_id, chain_signatures, &intent_meta);
+            Self::build_sent_commit(intent_id, chain_signatures, intent_meta);
         register_scheduled_commit_sent(sent_commit);
         match execute_legacy_transaction(
-            intent_meta.intent_sent_transaction,
+            intent_sent_transaction,
             bank,
             Some(transaction_status_sender),
         ) {
@@ -287,13 +314,15 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
         intent_id: u64,
         bank: &Arc<Bank>,
         transaction_status_sender: &TransactionStatusSender,
-        intent_meta: ScheduledBaseIntentMeta,
+        mut intent_meta: ScheduledBaseIntentMeta,
     ) {
+        let intent_sent_transaction =
+            std::mem::take(&mut intent_meta.intent_sent_transaction);
         let sent_commit =
-            Self::build_sent_commit(intent_id, vec![], &intent_meta);
+            Self::build_sent_commit(intent_id, vec![], intent_meta);
         register_scheduled_commit_sent(sent_commit);
         match execute_legacy_transaction(
-            intent_meta.intent_sent_transaction,
+            intent_sent_transaction,
             bank,
             Some(transaction_status_sender),
         ) {
@@ -310,7 +339,7 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
     fn build_sent_commit(
         intent_id: u64,
         chain_signatures: Vec<Signature>,
-        intent_meta: &ScheduledBaseIntentMeta,
+        intent_meta: ScheduledBaseIntentMeta,
     ) -> SentCommit {
         SentCommit {
             message_id: intent_id,
@@ -318,9 +347,9 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
             blockhash: intent_meta.blockhash,
             payer: intent_meta.payer,
             chain_signatures,
-            included_pubkeys: intent_meta.included_pubkeys.clone(),
-            excluded_pubkeys: intent_meta.excluded_pubkeys.clone(),
-            feepayers: intent_meta.feepayers.clone(),
+            included_pubkeys: intent_meta.included_pubkeys,
+            excluded_pubkeys: intent_meta.excluded_pubkeys,
+            feepayers: intent_meta.feepayers,
             requested_undelegation: intent_meta.requested_undelegation,
         }
     }
@@ -328,7 +357,7 @@ impl<C: BaseIntentCommittor> RemoteScheduledCommitsProcessor<C> {
 
 #[async_trait]
 impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
-    for RemoteScheduledCommitsProcessor<C>
+    for ScheduledCommitsProcessorImpl<C>
 {
     async fn process(&self) -> AccountsResult<()> {
         let scheduled_base_intent =
@@ -363,7 +392,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
                 .collect()
         };
 
-        self.committor.commit_base_intent(intents);
+        self.committor.schedule_base_intent(intents);
         Ok(())
     }
 
@@ -373,6 +402,10 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
 
     fn clear_scheduled_commits(&self) {
         self.transaction_scheduler.clear_scheduled_actions();
+    }
+
+    fn stop(&self) {
+        self.cancellation_token.cancel();
     }
 }
 

@@ -8,7 +8,7 @@ use crate::{
         commit_id_fetcher::CacheTaskInfoFetcher, IntentExecutor,
         IntentExecutorImpl,
     },
-    transaction_preperator::transaction_preparator::TransactionPreparatorV1,
+    transaction_preparator::transaction_preparator::TransactionPreparatorV1,
     ComputeBudgetConfig,
 };
 

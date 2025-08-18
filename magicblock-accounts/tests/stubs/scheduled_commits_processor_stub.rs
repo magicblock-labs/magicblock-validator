@@ -13,4 +13,5 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorStub {
         0
     }
     fn clear_scheduled_commits(&self) {}
+    fn stop(&self) {}
 }

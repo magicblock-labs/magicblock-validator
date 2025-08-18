@@ -7,8 +7,6 @@ mod process_scheduled_commit_sent;
 mod schedule_base_intent_processor;
 pub(crate) mod transaction_scheduler;
 
-use std::sync::atomic::AtomicU64;
-
 use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 pub(crate) use process_accept_scheduled_commits::*;
 pub(crate) use process_schedule_base_intent::*;
@@ -22,9 +20,6 @@ use solana_program_runtime::{
 };
 
 use crate::utils::accounts::get_instruction_pubkey_with_idx;
-
-// TODO(edwin): is reset on restart
-pub(crate) static MESSAGE_ID: AtomicU64 = AtomicU64::new(0);
 
 pub fn check_magic_context_id(
     invoke_context: &InvokeContext,

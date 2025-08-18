@@ -15,7 +15,7 @@ pub mod intent_executor;
 #[cfg(feature = "dev-context-only-utils")]
 pub mod stubs;
 pub mod tasks;
-pub mod transaction_preperator;
+pub mod transaction_preparator;
 pub(crate) mod utils;
 
 pub use compute_budget::ComputeBudgetConfig;

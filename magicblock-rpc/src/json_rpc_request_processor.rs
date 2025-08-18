@@ -841,9 +841,10 @@ impl JsonRpcRequestProcessor {
         signature: Signature,
         _search_transaction_history: bool,
     ) -> Option<TransactionStatus> {
+        // Looking back 30 seconds ensures tests are more robust
         let bank_result = self.bank.get_recent_signature_status(
             &signature,
-            Some(self.bank.slots_for_duration(Duration::from_secs(10))),
+            Some(self.bank.slots_for_duration(Duration::from_secs(30))),
         );
         let (slot, status) = if let Some(bank_result) = bank_result {
             bank_result

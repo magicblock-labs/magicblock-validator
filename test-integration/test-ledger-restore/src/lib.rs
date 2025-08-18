@@ -124,7 +124,7 @@ pub fn setup_validator_with_local_remote(
     };
 
     let (default_tmpdir_config, Some(mut validator)) =
-        start_magicblock_validator_with_config_struct(config, &loaded_accounts)
+        start_magicblock_validator_with_config_struct(config, loaded_accounts)
     else {
         panic!("validator should set up correctly");
     };

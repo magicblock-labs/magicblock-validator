@@ -25,8 +25,9 @@ use magicblock_account_updates::{
     RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
 };
 use magicblock_accounts::{
-    remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
+    scheduled_commits_processor::ScheduledCommitsProcessorImpl,
     utils::try_rpc_cluster_from_cluster, AccountsManager,
+    ScheduledCommitsProcessor,
 };
 use magicblock_accounts_api::BankAccountProvider;
 use magicblock_accounts_db::error::AccountsDbError;
@@ -38,8 +39,8 @@ use magicblock_bank::{
     transaction_logs::TransactionLogCollectorFilter,
 };
 use magicblock_committor_service::{
-    config::ChainConfig, service_ext::CommittorServiceExt, CommittorService,
-    ComputeBudgetConfig,
+    config::ChainConfig, service_ext::CommittorServiceExt, BaseIntentCommittor,
+    CommittorService, ComputeBudgetConfig,
 };
 use magicblock_config::{
     AccountsDbConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
@@ -147,8 +148,8 @@ pub struct MagicValidator {
     pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
-    remote_scheduled_commits_processor:
-        Option<Arc<RemoteScheduledCommitsProcessor<CommittorService>>>,
+    scheduled_commits_processor:
+        Option<Arc<ScheduledCommitsProcessorImpl<CommittorService>>>,
     remote_account_fetcher_worker: Option<RemoteAccountFetcherWorker>,
     remote_account_fetcher_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_updates_worker: Option<RemoteAccountUpdatesWorker>,
@@ -205,6 +206,7 @@ impl MagicValidator {
 
         let (ledger, last_slot) =
             Self::init_ledger(&config.validator_config.ledger)?;
+        info!("Latest ledger slot: {}", last_slot);
 
         if !config.validator_config.ledger.skip_keypair_match_check {
             Self::sync_validator_keypair_with_ledger(
@@ -368,8 +370,8 @@ impl MagicValidator {
             config.validator_config.accounts.clone.clone(),
         );
 
-        let remote_scheduled_commits_processor = if can_clone {
-            Some(Arc::new(RemoteScheduledCommitsProcessor::new(
+        let scheduled_commits_processor = if can_clone {
+            Some(Arc::new(ScheduledCommitsProcessorImpl::new(
                 bank.clone(),
                 remote_account_cloner_worker.get_last_clone_output(),
                 committor_service
@@ -416,7 +418,7 @@ impl MagicValidator {
             geyser_rpc_service,
             slot_ticker: None,
             commit_accounts_ticker: None,
-            remote_scheduled_commits_processor,
+            scheduled_commits_processor,
             remote_account_fetcher_worker: Some(remote_account_fetcher_worker),
             remote_account_fetcher_handle: None,
             remote_account_updates_worker: Some(remote_account_updates_worker),
@@ -733,7 +735,7 @@ impl MagicValidator {
 
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
-            &self.remote_scheduled_commits_processor,
+            &self.scheduled_commits_processor,
             self.transaction_status_sender.clone(),
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
@@ -866,13 +868,22 @@ impl MagicValidator {
         self.exit.store(true, Ordering::Relaxed);
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
-        self.token.cancel();
-        self.ledger_truncator.stop();
 
-        self.claim_fees_task.stop();
-        if let Some(committor_service) = &self.committor_service {
+        // Ordering is important here
+        // Commitor service shall be stopped last
+        self.token.cancel();
+        if let Some(ref scheduled_commits_processor) =
+            self.scheduled_commits_processor
+        {
+            scheduled_commits_processor.stop();
+        }
+        if let Some(ref committor_service) = self.committor_service {
             committor_service.stop();
         }
+
+        self.ledger_truncator.stop();
+        self.claim_fees_task.stop();
+
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
 

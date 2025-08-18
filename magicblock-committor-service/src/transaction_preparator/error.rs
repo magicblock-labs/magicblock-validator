@@ -6,7 +6,7 @@ pub enum Error {
     FailedToFitError,
     #[error("DeliveryPreparationError: {0}")]
     DeliveryPreparationError(
-        #[from] crate::transaction_preperator::delivery_preparator::Error,
+        #[from] crate::transaction_preparator::delivery_preparator::Error,
     ),
 }
 

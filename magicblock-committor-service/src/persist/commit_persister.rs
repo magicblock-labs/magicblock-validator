@@ -62,14 +62,13 @@ pub trait IntentPersister: Send + Sync + Clone + 'static {
         commit_id: u64,
         pubkey: &Pubkey,
     ) -> CommitPersistResult<Option<MessageSignatures>>;
-    // fn finalize_l1_message(&self blockhash: Hash) -> CommitPersistResult<()>;
 }
 
 #[derive(Clone)]
 pub struct IntentPersisterImpl {
     // DB that tracks lifespan of Commit intents
     commits_db: Arc<Mutex<CommittsDb>>,
-    // TODO: add something like
+    // TODO(edwin): add something like
     // actions_db: Arc<Mutex<ActionsDb>>
 }
 
@@ -245,10 +244,6 @@ impl IntentPersister for IntentPersisterImpl {
             .expect(POISONED_MUTEX_MSG)
             .get_signatures_by_commit(commit_id, pubkey)
     }
-
-    // fn finalize_l1_message(&self, blockhash: Hash) -> CommitPersistResult<()> {
-    //     self.db.lock().expect(POISONED_MUTEX_MSG).
-    // }
 }
 
 /// Blanket implementation for Option

@@ -1,10 +1,10 @@
-use std::{collections::HashSet, sync::atomic::Ordering};
+use std::collections::HashSet;
 
 use magicblock_core::magic_program::args::MagicBaseIntentArgs;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
-    instruction::InstructionError, pubkey::Pubkey,
+    account_utils::StateMut, instruction::InstructionError, pubkey::Pubkey,
     transaction_context::TransactionContext,
 };
 
@@ -12,13 +12,12 @@ use crate::{
     magic_scheduled_base_intent::{ConstructionContext, ScheduledBaseIntent},
     schedule_transactions::{
         check_magic_context_id,
-        schedule_base_intent_processor::schedule_base_intent_processor,
-        MESSAGE_ID,
+        schedule_base_intent_processor::change_owner_for_undelegated_accounts,
     },
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
-    TransactionScheduler,
+    MagicContext,
 };
 
 const PAYER_IDX: u16 = 0;
@@ -90,46 +89,51 @@ pub(crate) fn process_schedule_base_intent(
                 InstructionError::UnsupportedSysvar
             })?;
 
+    // NOTE: this is only protected by all the above checks however if the
+    // instruction fails for other reasons detected afterward then the commit
+    // stays scheduled
+    let context_acc = get_instruction_account_with_idx(
+        transaction_context,
+        MAGIC_CONTEXT_IDX,
+    )?;
+    let context_data = &mut context_acc.borrow_mut();
+    let mut context =
+        MagicContext::deserialize(context_data).map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "Failed to deserialize MagicContext: {}",
+                err
+            );
+            InstructionError::GenericError
+        })?;
+
+    // Get next intent id
+    let intent_id = context.next_intent_id();
+
     // Determine id and slot
-    let message_id = MESSAGE_ID.fetch_add(1, Ordering::Relaxed);
     let construction_context = ConstructionContext::new(
         parent_program_id,
         &signers,
         transaction_context,
         invoke_context,
     );
-    let scheduled_action = ScheduledBaseIntent::try_new(
+    let scheduled_intent = ScheduledBaseIntent::try_new(
         &args,
-        message_id,
+        intent_id,
         clock.slot,
         payer_pubkey,
         &construction_context,
     )?;
-    // TODO: move all logic to some Processor
-    // Rn this just locks accounts
-    schedule_base_intent_processor(&construction_context, &args)?;
+
+    change_owner_for_undelegated_accounts(&construction_context, &args)?;
 
     let action_sent_signature =
-        scheduled_action.action_sent_transaction.signatures[0];
+        scheduled_intent.action_sent_transaction.signatures[0];
 
-    let context_acc = get_instruction_account_with_idx(
-        transaction_context,
-        MAGIC_CONTEXT_IDX,
-    )?;
-    TransactionScheduler::schedule_base_intent(
-        invoke_context,
-        context_acc,
-        scheduled_action,
-    )
-    .map_err(|err| {
-        ic_msg!(
-            invoke_context,
-            "ScheduleAction ERR: failed to schedule action: {}",
-            err
-        );
-        InstructionError::GenericError
-    })?;
-    ic_msg!(invoke_context, "Scheduled commit with ID: {}", message_id);
+    context.add_scheduled_action(scheduled_intent);
+    context_data.set_state(&context)?;
+
+    ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent signature: {}",

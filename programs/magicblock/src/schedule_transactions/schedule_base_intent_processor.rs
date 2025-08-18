@@ -6,7 +6,7 @@ use crate::{
     utils::account_actions::set_account_owner_to_delegation_program,
 };
 
-pub fn schedule_base_intent_processor(
+pub fn change_owner_for_undelegated_accounts(
     construction_context: &ConstructionContext<'_, '_>,
     args: &MagicBaseIntentArgs,
 ) -> Result<(), InstructionError> {

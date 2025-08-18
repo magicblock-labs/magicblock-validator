@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
-    transaction_preperator::transaction_preparator::TransactionPreparator,
+    transaction_preparator::transaction_preparator::TransactionPreparator,
 };
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommitAndUndelegate, CommitType, CommittedAccountV2,

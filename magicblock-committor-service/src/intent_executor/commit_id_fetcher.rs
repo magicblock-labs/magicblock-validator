@@ -1,8 +1,5 @@
 use std::{
-    collections::HashMap,
-    num::NonZeroUsize,
-    sync::{Arc, Mutex},
-    time::Duration,
+    collections::HashMap, num::NonZeroUsize, sync::Mutex, time::Duration,
 };
 
 use dlp::{
@@ -36,10 +33,9 @@ const NUM_FETCH_RETRIES: NonZeroUsize =
     unsafe { NonZeroUsize::new_unchecked(5) };
 const MUTEX_POISONED_MSG: &str = "CommitIdTrackerImpl mutex poisoned!";
 
-#[derive(Clone)]
 pub struct CacheTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
-    cache: Arc<Mutex<LruCache<Pubkey, u64>>>,
+    cache: Mutex<LruCache<Pubkey, u64>>,
 }
 
 impl CacheTaskInfoFetcher {
@@ -49,7 +45,7 @@ impl CacheTaskInfoFetcher {
 
         Self {
             rpc_client,
-            cache: Arc::new(Mutex::new(LruCache::new(CACHE_SIZE))),
+            cache: Mutex::new(LruCache::new(CACHE_SIZE)),
         }
     }
 
@@ -171,6 +167,11 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
 
         // If all in cache - great! return
         if to_request.is_empty() {
+            let mut cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
+            result.iter().for_each(|(pubkey, id)| {
+                cache.push(*pubkey, *id);
+            });
+
             return Ok(result);
         }
 

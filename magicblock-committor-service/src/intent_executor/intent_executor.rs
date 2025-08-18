@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use log::{info, warn};
+use log::{debug, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
@@ -28,7 +28,7 @@ use crate::{
         task_strategist::{TaskStrategist, TransactionStrategy},
         tasks::BaseTask,
     },
-    transaction_preperator::transaction_preparator::TransactionPreparator,
+    transaction_preparator::transaction_preparator::TransactionPreparator,
     utils::persist_status_update_by_message_set,
 };
 
@@ -58,6 +58,8 @@ where
         }
     }
 
+    /// Checks if it is possible to unite Commit & Finalize stages in 1 transaction
+    /// Returns corresponding `TransactionStrategy` if possible, otherwise `None`
     fn try_unite_tasks<P: IntentPersister>(
         commit_tasks: &[Box<dyn BaseTask>],
         finalize_task: &[Box<dyn BaseTask>],
@@ -68,11 +70,11 @@ where
         let mut commit_tasks = commit_tasks
             .iter()
             .map(|task| task.clone())
-            .collect::<Vec<_>>();
+            .collect::<Vec<Box<dyn BaseTask>>>();
         let finalize_task = finalize_task
             .iter()
             .map(|task| task.clone())
-            .collect::<Vec<_>>();
+            .collect::<Vec<Box<dyn BaseTask>>>();
 
         // Unite tasks to attempt running as single tx
         commit_tasks.extend(finalize_task);
@@ -123,11 +125,11 @@ where
             &self.authority.pubkey(),
             persister,
         ) {
-            info!("Executing intent in single stage");
+            debug!("Executing intent in single stage");
             self.execute_single_stage(&single_tx_strategy, persister)
                 .await
         } else {
-            info!("Executing intent in two stages");
+            debug!("Executing intent in two stages");
             // Build strategy for Commit stage
             let commit_strategy = TaskStrategist::build_strategy(
                 commit_tasks,
@@ -177,7 +179,7 @@ where
                 signature,
             })?;
 
-        info!("Single stage intent executed: {}", signature);
+        debug!("Single stage intent executed: {}", signature);
         Ok(ExecutionOutput::SingleStage(signature))
     }
 
@@ -202,7 +204,7 @@ where
                 err,
                 signature,
             })?;
-        info!("Commit stage succeeded: {}", commit_signature);
+        debug!("Commit stage succeeded: {}", commit_signature);
 
         // Prepare everything for Finalize stage execution
         let prepared_finalize_message = self
@@ -221,7 +223,7 @@ where
                     finalize_signature,
                 }
             })?;
-        info!("Finalize stage succeeded: {}", finalize_signature);
+        debug!("Finalize stage succeeded: {}", finalize_signature);
 
         Ok(ExecutionOutput::TwoStage {
             commit_signature,
@@ -269,7 +271,7 @@ where
     }
 
     fn persist_result<P: IntentPersister>(
-        persistor: &Option<P>,
+        persistor: &P,
         result: &IntentExecutorResult<ExecutionOutput>,
         message_id: u64,
         pubkeys: &[Pubkey],
@@ -299,12 +301,12 @@ where
                 let update_status = CommitStatus::Failed;
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
-            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::FailedToFitError)) => {
+            Err(Error::FailedCommitPreparationError(crate::transaction_preparator::error::Error::FailedToFitError)) => {
                 let update_status = CommitStatus::PartOfTooLargeBundleToProcess;
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
-            Err(Error::FailedCommitPreparationError(crate::transaction_preperator::error::Error::DeliveryPreparationError(_))) => {
-                // Persisted internally
+            Err(Error::FailedCommitPreparationError(crate::transaction_preparator::error::Error::DeliveryPreparationError(_))) => {
+                // Intermediate commit preparation progress recorded by DeliveryPreparator
             },
             Err(Error::FailedToCommitError {err: _, signature}) => {
                 // Commit is a single TX, so if it fails, all of commited accounts marked FailedProcess
@@ -374,13 +376,13 @@ mod tests {
         },
         persist::IntentPersisterImpl,
         tasks::task_builder::{TaskBuilderV1, TasksBuilder},
-        transaction_preperator::transaction_preparator::TransactionPreparatorV1,
+        transaction_preparator::transaction_preparator::TransactionPreparatorV1,
     };
 
     struct MockInfoFetcher;
     #[async_trait::async_trait]
     impl TaskInfoFetcher for MockInfoFetcher {
-        fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<u64> {
+        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
             Some(0)
         }
 

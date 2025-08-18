@@ -7,11 +7,12 @@ use std::{
 
 use async_trait::async_trait;
 use futures_util::future::join_all;
-use log::error;
+use log::{error, info};
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
+use tokio_util::sync::WaitForCancellationFutureOwned;
 
 use crate::{
     error::CommittorServiceResult,
@@ -43,7 +44,9 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
     pub fn new(inner: Arc<CC>) -> Self {
         let pending_messages = Arc::new(Mutex::new(HashMap::new()));
         let results_subscription = inner.subscribe_for_results();
+        let committor_stopped = inner.stopped();
         tokio::spawn(Self::dispatcher(
+            committor_stopped,
             results_subscription,
             pending_messages.clone(),
         ));
@@ -55,13 +58,39 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
     }
 
     async fn dispatcher(
+        committor_stopped: WaitForCancellationFutureOwned,
         results_subscription: oneshot::Receiver<
             broadcast::Receiver<BroadcastedIntentExecutionResult>,
         >,
         pending_message: Arc<Mutex<HashMap<u64, MessageResultListener>>>,
     ) {
         let mut results_subscription = results_subscription.await.unwrap();
-        while let Ok(execution_result) = results_subscription.recv().await {
+
+        tokio::pin!(committor_stopped);
+        loop {
+            let execution_result = tokio::select! {
+                biased;
+                _ = &mut committor_stopped => {
+                    info!("Committor service stopped, stopping Committor extension");
+                    return;
+                }
+                execution_result = results_subscription.recv() => {
+                    match execution_result {
+                        Ok(result) => result,
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!("Intent execution got shutdown, shutting down result Committor extension!");
+                            break;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            // SAFETY: not really feasible to happen as this function is way faster than Intent execution
+                            // requires investigation if ever happens!
+                            error!("CommittorServiceExt lags behind Intent execution! skipped: {}", skipped);
+                            continue;
+                        }
+                    }
+                }
+            };
+
             let id = match &execution_result {
                 Ok(value) => value.id,
                 Err(err) => err.0,
@@ -116,7 +145,7 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittorExt
                 .collect::<Result<Vec<_>, _>>()?
         };
 
-        self.commit_base_intent(base_intents);
+        self.schedule_base_intent(base_intents);
         let results = join_all(receivers.into_iter())
             .await
             .into_iter()
@@ -135,11 +164,11 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
         self.inner.reserve_pubkeys_for_committee(committee, owner)
     }
 
-    fn commit_base_intent(
+    fn schedule_base_intent(
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) {
-        self.inner.commit_base_intent(base_intents)
+        self.inner.schedule_base_intent(base_intents)
     }
 
     fn subscribe_for_results(
@@ -172,6 +201,14 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
         CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
     > {
         self.inner.get_transaction(signature)
+    }
+
+    fn stop(&self) {
+        self.inner.stop();
+    }
+
+    fn stopped(&self) -> WaitForCancellationFutureOwned {
+        self.inner.stopped()
     }
 }
 
