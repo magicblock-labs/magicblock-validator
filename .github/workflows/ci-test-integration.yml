@@ -1,17 +1,14 @@
 on:
   push:
-    branches: [feat/more-strategies, master]
+    branches: [master, dev]
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
 
-name: Run CI - Integration Tests (restore_ledger only)
+name: Run CI - Integration Tests
 
 jobs:
   run_make_ci_test:
-    # Only run if the PR is not a draft, and the base branch is master or feat/more-strategies
-    if: |
-      github.event.pull_request.draft == false &&
-      (github.event.pull_request.base.ref == 'master' || github.event.pull_request.base.ref == 'feat/more-strategies' || github.event.pull_request.base.ref == 'feat/more-resume-strategies')
+    if: github.event.pull_request.draft == false
     runs-on: extra-large
     steps:
       - name: Checkout this magicblock-validator
@@ -28,11 +25,11 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
-      - name: Run integration tests (restore_ledger)
+      - name: Run integration tests
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
           sudo sysctl fs.inotify.max_user_instances=1280
           sudo sysctl fs.inotify.max_user_watches=655360
-          RUN_TESTS=restore_ledger make ci-test-integration
+          make ci-test-integration
         shell: bash
         working-directory: magicblock-validator

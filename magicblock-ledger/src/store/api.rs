@@ -135,39 +135,6 @@ impl Ledger {
         let transaction_memos_cf = db.column();
         let perf_samples_cf = db.column();
 
-        debug!(
-            "transaction_status_cf: {:?}",
-            transaction_status_cf.count_column_using_cache()
-        );
-        debug!(
-            "address_signatures_cf: {:?}",
-            address_signatures_cf.count_column_using_cache()
-        );
-        debug!(
-            "slot_signatures_cf: {:?}",
-            slot_signatures_cf.count_column_using_cache()
-        );
-        debug!(
-            "blocktime_cf: {:?}",
-            blocktime_cf.count_column_using_cache()
-        );
-        debug!(
-            "blockhash_cf: {:?}",
-            blockhash_cf.count_column_using_cache()
-        );
-        debug!(
-            "transaction_cf: {:?}",
-            transaction_cf.count_column_using_cache()
-        );
-        debug!(
-            "transaction_memos_cf: {:?}",
-            transaction_memos_cf.count_column_using_cache()
-        );
-        debug!(
-            "perf_samples_cf: {:?}",
-            perf_samples_cf.count_column_using_cache()
-        );
-
         let account_mod_datas_cf = db.column();
 
         let db = Arc::new(db);
@@ -926,40 +893,6 @@ impl Ledger {
                 .num_get_transaction_status
                 .fetch_add(1, Ordering::Relaxed);
 
-            debug!("signature: {:?}", signature);
-            debug!("min_slot: {:?}", min_slot);
-            debug!("lowest_available_slot: {:?}", lowest_available_slot);
-            debug!(
-                "status count: {:?}",
-                self.transaction_status_cf.count_column_using_cache()
-            );
-            debug!(
-                "all statuses from params: {:?}",
-                self.transaction_status_cf
-                    .iter(IteratorMode::From(
-                        (signature, lowest_available_slot),
-                        IteratorDirection::Forward
-                    ))
-                    .unwrap()
-                    .collect::<Vec<_>>()
-            );
-            debug!(
-                "all statuses from 0: {:?}",
-                self.transaction_status_cf
-                    .iter(IteratorMode::From(
-                        (Signature::default(), 0),
-                        IteratorDirection::Forward
-                    ))
-                    .unwrap()
-                    .collect::<Vec<_>>()
-            );
-            debug!(
-                "all statuses from start: {:?}",
-                self.transaction_status_cf
-                    .iter(IteratorMode::Start)
-                    .unwrap()
-                    .collect::<Vec<_>>()
-            );
             let iterator = self
                 .transaction_status_cf
                 .iter_current_index_filtered(IteratorMode::From(
@@ -969,7 +902,6 @@ impl Ledger {
 
             let mut result = None;
             for ((stat_signature, slot), _) in iterator {
-                debug!("status: {:?}", (stat_signature, slot));
                 if stat_signature == signature && slot <= min_slot {
                     result = self
                         .transaction_status_cf
@@ -982,7 +914,6 @@ impl Ledger {
                 }
                 // Left the range of the signature we're looking for
                 if stat_signature != signature {
-                    debug!("status not found");
                     break;
                 }
             }

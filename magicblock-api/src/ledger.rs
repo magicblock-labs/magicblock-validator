@@ -205,8 +205,6 @@ fn remove_ledger_directory_if_exists(
             }
         }
 
-        debug!("Removing ledger entry: {:?}", entry.file_name());
-
         if entry.metadata()?.is_dir() {
             fs::remove_dir_all(entry.path())?
         } else {
