@@ -3,14 +3,17 @@ on:
     branches: [master, dev]
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-    branches-ignore:
-      - feat/more-resume-strategies
 
 name: Run CI - Format
 
 jobs:
   run_make_ci_format:
-    if: github.event.pull_request.draft == false && github.event.pull_request.base.ref != 'feat/more-resume-strategies'
+    # Only run if the PR is not a draft, and the base branch is not 'feat/more-resume-strategies', and
+    # (the base is not master OR the head is not feat/more-resume-strategies)
+    if: |
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.base.ref != 'feat/more-resume-strategies' &&
+      !(github.event.pull_request.base.ref == 'master' && github.event.pull_request.head.ref == 'feat/more-resume-strategies')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout this magicblock-validator
