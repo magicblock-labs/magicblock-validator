@@ -209,4 +209,4 @@ vergen = "8.3.1"
 # solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2476dab" }
 solana-account = { path = "../solana-account" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "9b722a5" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "0f18aa3" }

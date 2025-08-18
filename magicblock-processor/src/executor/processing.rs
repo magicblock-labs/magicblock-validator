@@ -145,7 +145,7 @@ impl super::TransactionExecutor {
         let signature = *txn.signature();
         let status = magicblock_core::link::transactions::TransactionStatus {
             signature,
-            slot: self.slot,
+            slot: self.processor.slot,
             result: TransactionExecutionResult {
                 result: meta.status.clone(),
                 // TODO(bmuddha) perf: avoid allocation with the new ledger impl
@@ -165,7 +165,7 @@ impl super::TransactionExecutor {
             }
             self.accountsdb.insert_account(&pubkey, &account);
             let account = AccountWithSlot {
-                slot: self.slot,
+                slot: self.processor.slot,
                 account: LockedAccount::new(pubkey, account),
             };
             let _ = self.accounts_tx.send(account);
@@ -175,7 +175,7 @@ impl super::TransactionExecutor {
         }
         if let Err(error) = self.ledger.write_transaction(
             signature,
-            self.slot,
+            self.processor.slot,
             txn,
             meta,
             self.index.load(std::sync::atomic::Ordering::Relaxed),

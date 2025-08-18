@@ -1,5 +1,6 @@
-use std::sync::{atomic::AtomicUsize, Arc, OnceLock, RwLock};
+use std::sync::{atomic::AtomicUsize, Arc, RwLock};
 
+use log::info;
 use magicblock_accounts_db::{AccountsDb, StWLock};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
@@ -7,15 +8,10 @@ use magicblock_core::link::{
         TransactionProcessingMode, TransactionStatusTx, TransactionToProcessRx,
     },
 };
-use magicblock_ledger::{LatestBlock, Ledger};
+use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
 use parking_lot::RwLockReadGuard;
-use solana_bpf_loader_program::syscalls::{
-    create_program_runtime_environment_v1,
-    create_program_runtime_environment_v2,
-};
-use solana_program::sysvar;
 use solana_program_runtime::loaded_programs::{
-    BlockRelation, ForkGraph, ProgramCacheEntry,
+    BlockRelation, ForkGraph, ProgramCache, ProgramCacheEntry,
 };
 use solana_svm::transaction_processor::{
     ExecutionRecordingConfig, TransactionBatchProcessor,
@@ -24,10 +20,8 @@ use solana_svm::transaction_processor::{
 use tokio::{runtime::Builder, sync::mpsc::Sender};
 
 use crate::{
-    builtins::BUILTINS, scheduler::TransactionSchedulerState, WorkerId,
+    builtins::BUILTINS, scheduler::state::TransactionSchedulerState, WorkerId,
 };
-
-static FORK_GRAPH: OnceLock<Arc<RwLock<SimpleForkGraph>>> = OnceLock::new();
 
 pub(super) struct TransactionExecutor {
     id: WorkerId,
@@ -42,7 +36,9 @@ pub(super) struct TransactionExecutor {
     accounts_tx: AccountUpdateTx,
     ready_tx: Sender<WorkerId>,
     sync: StWLock,
-    slot: u64,
+    // TODO(bmuddha): get rid of explicit indexing, once the
+    // new ledger is implemented (with implicit indexing based
+    // on the position of transaction in the ledger file)
     index: Arc<AtomicUsize>,
 }
 
@@ -53,33 +49,21 @@ impl TransactionExecutor {
         rx: TransactionToProcessRx,
         ready_tx: Sender<WorkerId>,
         index: Arc<AtomicUsize>,
+        programs_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     ) -> Self {
         let slot = state.accountsdb.slot();
-        let forkgraph = Arc::downgrade(
-            FORK_GRAPH.get_or_init(|| Arc::new(RwLock::new(SimpleForkGraph))),
-        );
-
-        let runtime_v1 = create_program_runtime_environment_v1(
-            &state.environment.feature_set,
-            &Default::default(),
-            false,
-            false,
-        );
-        let runtime_v2 =
-            create_program_runtime_environment_v2(&Default::default(), false);
-        // TODO(bmuddha):
-        // Use a shared program cache. With a single threaded
-        // scheduler it doesn't matter, but with multiple
-        // executor approach, it's necessary for all of them
-        // to utilize the same shared global program cache
-        // https://github.com/magicblock-labs/magicblock-validator/issues/507
-        let processor = TransactionBatchProcessor::new(
+        let mut processor = TransactionBatchProcessor::new_uninitialized(
             slot,
             Default::default(),
-            forkgraph,
-            runtime_v1.map(Into::into).ok(),
-            Some(runtime_v2.into()),
         );
+        // override the default program cache of this processor with a global
+        // one, which is shared between all of the running processor instances,
+        // this is mostly an optimization, so a change in the program cache of
+        // one one executor is immediately available to the rest, instead of
+        // waiting for them to update their own caches on a new program encounter
+        processor.program_cache = programs_cache;
+        // NOTE: setting all of the recording settings to true, as we do here, can have
+        // a noticeable impact on performance due to all of the extra logging involved
         let recording_config =
             ExecutionRecordingConfig::new_single_setting(true);
         let config = Box::new(TransactionProcessingConfig {
@@ -88,7 +72,6 @@ impl TransactionExecutor {
         });
         let this = Self {
             id,
-            slot: state.latest_block.load().slot,
             sync: state.accountsdb.synchronizer(),
             processor,
             accountsdb: state.accountsdb.clone(),
@@ -102,10 +85,12 @@ impl TransactionExecutor {
             transaction_tx: state.transaction_status_tx.clone(),
             index,
         };
+
         this.processor.fill_missing_sysvar_cache_entries(&this);
         this
     }
 
+    /// Register all of the builtin programs with the given transaction executor
     pub(super) fn populate_builtins(&self) {
         for program in BUILTINS {
             let entry = ProgramCacheEntry::new_builtin(
@@ -122,7 +107,11 @@ impl TransactionExecutor {
         }
     }
 
+    /// Spawn the transaction executor in isolated OS thread with a dedicated async runtime
     pub(super) fn spawn(self) {
+        // For performance reasons, each transaction executor needs to operate within
+        // its own OS thread, but at the same time it needs some concurrency support,
+        // which is why we spawn it with a dedicated single threaded tokio runtime
         let task = move || {
             let runtime = Builder::new_current_thread()
                 .thread_name("transaction executor")
@@ -135,10 +124,18 @@ impl TransactionExecutor {
         std::thread::spawn(task);
     }
 
+    /// Start running the transaction executor, by accepting incoming transaction to process
     async fn run(mut self) {
+        // at the start of each slot, we need to acquire the synchronization lock,
+        // to ensure that no critical operation like accountsdb snapshotting can
+        // take place, while transactions are being executed. The lock is held for
+        // the duration of slot, and then it's released at slot boundaries, to allow
+        // for any pending critical operation to be run, before re-acquisition.
         let mut _guard = self.sync.read();
+
         loop {
             tokio::select! {
+                // Transactions to process, the source is the TransactionScheduler
                 biased; Some(txn) = self.rx.recv() => {
                     match txn.mode {
                         TransactionProcessingMode::Execution(tx) => {
@@ -153,21 +150,54 @@ impl TransactionExecutor {
                     }
                     let _ = self.ready_tx.send(self.id).await;
                 }
+                // A new block has been produced, the source is the Ledger itself
                 _ = self.block.changed() => {
                     let block = self.block.load();
+                    // most of the execution environment is immutable, with an exception
+                    // of the blockhash, which we update here with every new block
                     self.environment.blockhash = block.blockhash;
-                    self.processor.set_slot(block.slot);
-                    self.slot = block.slot;
-                    self.processor.writable_sysvar_cache()
-                        .write().unwrap().set_sysvar_for_tests(&block.clock);
+                    self.processor.slot = block.slot;
+                    self.set_sysvars(&block);
+                    // explicitly release the lock in a fair manner, allowing
+                    // any pending lock acquisition request to succeed
                     RwLockReadGuard::unlock_fair(_guard);
+                    // and then re-acquire the lock for another slot duration
                     _guard = self.sync.read();
                 }
+                // system is shutting down, no more transactions will follow
                 else => {
                     break;
                 }
             }
         }
+        info!("transaction executor {} has terminated", self.id)
+    }
+
+    /// Set sysvars, which are relevant in the context of ER, currently those are:
+    /// - Clock
+    /// - SlotHashes
+    ///
+    /// everything else, like Rent, EpochSchedule, StakeHistory, etc.
+    /// either is immutable or doesn't pertain to the ER operation
+    fn set_sysvars(&self, block: &LatestBlockInner) {
+        // SAFETY:
+        // unwrap here is safe, as we don't have any code which might panic while holding
+        // this particular lock, but if we do introduce such a code in the future, then
+        // panic propagation is probably what is desired
+        let mut cache = self.processor.writable_sysvar_cache().write().unwrap();
+
+        cache.set_sysvar_for_tests(&block.clock);
+
+        // and_then(Arc::into_inner) will always succeed as get_slot_hashes
+        // always returns a unique Arc reference, which allows us to avoid
+        // extra clone in order to construct a mutable intance of SlotHashes
+        let mut hashes = cache
+            .get_slot_hashes()
+            .ok()
+            .and_then(Arc::into_inner)
+            .unwrap_or_default();
+        hashes.add(block.slot, block.blockhash);
+        cache.set_sysvar_for_tests(&hashes);
     }
 }
 
@@ -176,8 +206,8 @@ impl TransactionExecutor {
 pub(super) struct SimpleForkGraph;
 
 impl ForkGraph for SimpleForkGraph {
-    /// we never have forks or relevant logic, so we
-    /// don't really care about those relations
+    /// we never have state forks, hence no relevant handling
+    /// logic, so we don't really care about those relations
     fn relationship(&self, _: u64, _: u64) -> BlockRelation {
         BlockRelation::Unrelated
     }
