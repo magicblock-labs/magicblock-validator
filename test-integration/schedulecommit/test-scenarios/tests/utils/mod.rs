@@ -52,7 +52,7 @@ fn get_context_with_delegated_committees_impl(
 pub fn assert_one_committee_was_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
-    finalize: bool,
+    is_single_stage: bool,
 ) {
     let pda = ctx.committees[0].1;
 
@@ -62,7 +62,9 @@ pub fn assert_one_committee_was_committed(
     let commit = res.included.get(&pda);
     assert!(commit.is_some(), "should have committed pda");
 
-    let sig_len = if finalize { 2 } else { 1 };
+    // SingleStage Commit & Finalize result in 1 tx
+    // TwoStage results in 2 signatures on base layer
+    let sig_len = if !is_single_stage { 2 } else { 1 };
     assert_eq!(
         res.sigs.len(),
         sig_len,
