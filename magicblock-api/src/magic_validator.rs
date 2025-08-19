@@ -58,7 +58,7 @@ use magicblock_processor::execute_transaction::TRANSACTION_INDEX_LOCK;
 use magicblock_program::{
     init_persister,
     validator::{self, validator_authority},
-    TransactionScheduler, TASK_CONTEXT_PUBKEY,
+    TransactionScheduler,
 };
 use magicblock_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
@@ -794,16 +794,12 @@ impl MagicValidator {
         self.pubsub_handle.write().unwrap().replace(pubsub_handle);
         self.pubsub_close_handle = pubsub_close_handle;
 
-        let context_sub = self
-            .geyser_rpc_service
-            .accounts_subscribe(1, TASK_CONTEXT_PUBKEY)
-            .await;
         self.task_scheduler_handle = Some(
             TaskSchedulerService::new(
                 &self.config.task_scheduler,
                 self.bank.clone(),
             )?
-            .start(context_sub, self.token.clone()),
+            .start(self.token.clone()),
         );
 
         self.sample_performance_service
