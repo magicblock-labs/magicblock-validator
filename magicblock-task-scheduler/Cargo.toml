@@ -24,7 +24,6 @@ r2d2_sqlite = { workspace = true }
 solana-svm = { workspace = true }
 solana-timings = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 solana-sdk = { workspace = true }
 solana-program = { workspace = true }
 solana-pubsub-client = { workspace = true }

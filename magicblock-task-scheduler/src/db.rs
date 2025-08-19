@@ -7,7 +7,6 @@ use r2d2_sqlite::{
     rusqlite::{self, params},
     SqliteConnectionManager,
 };
-use serde_json;
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
 
 use crate::errors::TaskSchedulerError;
@@ -44,7 +43,7 @@ impl SchedulerDatabase {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY,
-                instructions TEXT NOT NULL,
+                instructions BLOB NOT NULL,
                 authority TEXT NOT NULL,
                 period_millis INTEGER NOT NULL,
                 executions_left INTEGER NOT NULL,
@@ -65,7 +64,7 @@ impl SchedulerDatabase {
 
     pub fn insert_task(&self, task: &DbTask) -> Result<(), TaskSchedulerError> {
         let conn = self.pool.get()?;
-        let instructions_json = serde_json::to_string(&task.instructions)?;
+        let instructions_bin = bincode::serialize(&task.instructions)?;
         let authority_str = task.authority.to_string();
         let now = Utc::now().timestamp_millis();
 
@@ -75,7 +74,7 @@ impl SchedulerDatabase {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 task.id,
-                instructions_json,
+                instructions_bin,
                 authority_str,
                 task.period_millis,
                 task.executions_left,
@@ -141,9 +140,9 @@ impl SchedulerDatabase {
         )?;
 
         let mut rows = stmt.query_map([task_id], |row| {
-            let instructions_json: String = row.get(1)?;
+            let instructions_bin: Vec<u8> = row.get(1)?;
             let instructions: Vec<Instruction> =
-                serde_json::from_str(&instructions_json).map_err(|e| {
+                bincode::deserialize(&instructions_bin).map_err(|e| {
                     rusqlite::Error::InvalidParameterName(format!(
                         "instructions: {}",
                         e
@@ -196,9 +195,9 @@ impl SchedulerDatabase {
 
         let mut tasks = Vec::new();
         let rows = stmt.query_map([current_time], |row| {
-            let instructions_json: String = row.get(1)?;
+            let instructions_bin: Vec<u8> = row.get(1)?;
             let instructions: Vec<Instruction> =
-                serde_json::from_str(&instructions_json).map_err(|e| {
+                bincode::deserialize(&instructions_bin).map_err(|e| {
                     rusqlite::Error::InvalidParameterName(format!(
                         "instructions: {}",
                         e
