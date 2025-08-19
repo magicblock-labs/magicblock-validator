@@ -207,6 +207,10 @@ impl SubscriptionsDb {
         let subscriber = self.slot.read();
         subscriber.send(&(), slot);
     }
+
+    pub(crate) fn next_subid() -> SubscriptionID {
+        SUBID_COUNTER.fetch_add(1, Ordering::Relaxed)
+    }
 }
 
 /// Sender handles to subscribers for a given update
@@ -260,7 +264,7 @@ impl<E: Encoder> UpdateSubscribers<E> {
 
 impl<E: Encoder> UpdateSubscriber<E> {
     fn new(chan: Option<WsConnectionChannel>, encoder: E) -> Self {
-        let id = SUBID_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let id = SubscriptionsDb::next_subid();
         let mut txs = BTreeMap::new();
         if let Some(chan) = chan {
             txs.insert(chan.id, chan.tx);

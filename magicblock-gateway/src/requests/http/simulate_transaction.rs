@@ -90,11 +90,7 @@ impl HttpDispatcher {
             ensured = true;
         }
 
-        let result = self
-            .transactions_scheduler
-            .simulate(transaction)
-            .await
-            .ok_or_else(|| RpcError::internal("validator is shutting down"))?;
+        let result = self.transactions_scheduler.simulate(transaction).await?;
         let slot = self.accountsdb.slot();
         let converter = |(index, ixs): (usize, InnerInstructions)| {
             StatusInnerInstructions {

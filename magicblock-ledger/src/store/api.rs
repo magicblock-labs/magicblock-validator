@@ -1345,7 +1345,6 @@ mod tests {
         VersionedTransactionWithStatusMeta,
     };
     use tempfile::{Builder, TempDir};
-    use test_tools_core::init_logger;
 
     use super::*;
 
@@ -1509,8 +1508,6 @@ mod tests {
 
     #[test]
     fn test_persist_transaction_status() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1574,8 +1571,6 @@ mod tests {
 
     #[test]
     fn test_get_transaction_status_by_signature() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1655,8 +1650,6 @@ mod tests {
 
     #[test]
     fn test_get_complete_transaction_by_signature() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1740,8 +1733,6 @@ mod tests {
 
     #[test]
     fn test_find_address_signatures_no_intra_slot_limits() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2094,8 +2085,6 @@ mod tests {
 
     #[test]
     fn test_find_address_signatures_intra_slot_limits() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2341,8 +2330,6 @@ mod tests {
 
     #[test]
     fn test_get_confirmed_signatures_with_memos() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2445,7 +2432,6 @@ mod tests {
 
     #[test]
     fn test_truncate_slots() {
-        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 

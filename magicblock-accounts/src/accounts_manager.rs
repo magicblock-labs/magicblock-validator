@@ -29,6 +29,7 @@ impl AccountsManager {
         committor_service: Option<Arc<CommittorServiceExt<CommittorService>>>,
         remote_account_cloner_client: RemoteAccountClonerClient,
         config: AccountsConfig,
+        internal_transaction_scheduler: TransactionSchedulerHandle,
     ) -> AccountsResult<Self> {
         let internal_account_provider = BankAccountProvider::new(bank.clone());
 

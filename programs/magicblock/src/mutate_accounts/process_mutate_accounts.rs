@@ -273,7 +273,6 @@ mod tests {
         account::{Account, AccountSharedData},
         pubkey::Pubkey,
     };
-    use test_tools_core::init_logger;
 
     use super::*;
     use crate::{

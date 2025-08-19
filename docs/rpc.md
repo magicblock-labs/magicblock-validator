@@ -3,7 +3,7 @@
 - crate: `pubsub-client`
 
 > A client for subscribing to messages from the RPC server.
-> implements [Solana WebSocket event subscriptions][spec].
+> implements Solana WebSocket event subscriptions.
 > [spec]: https://solana.com/docs/rpc/websocket
 
 - crate: `quic-client`

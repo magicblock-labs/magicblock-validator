@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 use crate::state::{
     blocks::BlocksCache,
     subscriptions::SubscriptionsDb,
-    transactions::{SignatureStatus, TransactionsCache},
+    transactions::{SignatureResult, TransactionsCache},
     SharedState,
 };
 
@@ -53,13 +53,19 @@ impl EventProcessor {
         loop {
             tokio::select! {
                 biased; Ok(status) = self.transaction_status_rx.recv_async() => {
-                    let result = &status.result.result;
-                    self.subscriptions.send_signature_update(&status.signature, result, status.slot).await;
+                    self.subscriptions.send_signature_update(
+                        &status.signature,
+                        &status.result.result,
+                        status.slot
+                    ).await;
+
                     self.subscriptions.send_logs_update(&status, status.slot);
-                    self.transactions.push(
-                        status.signature,
-                        SignatureStatus { slot: status.slot, successful: result.is_ok() }
-                    );
+
+                    let result = SignatureResult {
+                        slot: status.slot,
+                        result: status.result.result
+                    };
+                    self.transactions.push(status.signature, result);
                 }
                 Ok(state) = self.account_update_rx.recv_async() => {
                     self.subscriptions.send_account_update(&state).await;

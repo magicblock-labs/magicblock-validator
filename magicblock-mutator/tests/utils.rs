@@ -1,5 +1,4 @@
 use solana_sdk::{pubkey, pubkey::Pubkey};
-use test_tools::{account::fund_account, AccountsDb};
 
 #[allow(dead_code)] // used in tests
 pub const SOLX_PROG: Pubkey =

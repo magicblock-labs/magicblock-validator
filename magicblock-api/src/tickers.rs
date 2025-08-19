@@ -16,7 +16,6 @@ use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{instruction_utils::InstructionUtils, MagicContext};
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::account::ReadableAccount;
-use solana_transaction::sanitized::SanitizedTransaction;
 use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;

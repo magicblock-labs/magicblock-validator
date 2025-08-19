@@ -39,4 +39,3 @@ Implements a `AccountsManager`, which is reponsible for:
 *Important dependencies:*
 
 - Provides `Transwise`: the conjuncto repository
-- Provides `Bank`: [magicblock-bank](../magicblock-bank/README.md)

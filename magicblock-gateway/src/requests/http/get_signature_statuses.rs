@@ -12,16 +12,14 @@ impl HttpDispatcher {
         let mut statuses = Vec::with_capacity(signatures.len());
         for signature in signatures {
             if let Some(status) = self.transactions.get(&signature.0) {
-                if status.successful {
-                    statuses.push(Some(TransactionStatus {
-                        slot: status.slot,
-                        status: Ok(()),
-                        confirmations: None,
-                        err: None,
-                        confirmation_status: None,
-                    }));
-                    continue;
-                }
+                statuses.push(Some(TransactionStatus {
+                    slot: status.slot,
+                    status: status.result,
+                    confirmations: None,
+                    err: None,
+                    confirmation_status: None,
+                }));
+                continue;
             }
             let Some((slot, meta)) =
                 self.ledger.get_transaction_status(signature.0, Slot::MAX)?

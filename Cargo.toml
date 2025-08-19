@@ -33,6 +33,7 @@ members = [
   "tools/genx",
   "tools/keypair-base58",
   "tools/ledger-stats",
+  "test-kit",
 ]
 
 # This prevents a Travis CI error when building for Windows.
@@ -121,6 +122,8 @@ magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
 magicblock-version = { path = "./magicblock-version" }
+test-kit = { path = "./test-kit" }
+
 num-derive = "0.4"
 num-format = "0.4.4"
 num-traits = "0.2"

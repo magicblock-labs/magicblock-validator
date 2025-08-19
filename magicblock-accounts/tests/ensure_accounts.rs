@@ -103,8 +103,6 @@ fn setup_ephem(
 
 #[tokio::test]
 async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
-    init_logger!();
-
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -150,7 +148,6 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
 
 #[tokio::test]
 async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
-    init_logger!();
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -194,8 +191,6 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
 
 #[tokio::test]
 async fn test_ensure_readonly_account_cloned_but_not_in_our_validator() {
-    init_logger!();
-
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -248,8 +243,6 @@ async fn test_ensure_readonly_account_cloned_but_not_in_our_validator() {
 
 #[tokio::test]
 async fn test_ensure_readonly_account_cloned_but_has_been_updated_on_chain() {
-    init_logger!();
-
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -308,8 +301,6 @@ async fn test_ensure_readonly_account_cloned_but_has_been_updated_on_chain() {
 
 #[tokio::test]
 async fn test_ensure_readonly_account_cloned_and_no_recent_update_on_chain() {
-    init_logger!();
-
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -365,8 +356,6 @@ async fn test_ensure_readonly_account_cloned_and_no_recent_update_on_chain() {
 
 #[tokio::test]
 async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
-    init_logger!();
-
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -416,8 +405,6 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
 
 #[tokio::test]
 async fn test_ensure_one_delegated_and_one_feepayer_account_writable() {
-    init_logger!();
-
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -470,8 +457,6 @@ async fn test_ensure_one_delegated_and_one_feepayer_account_writable() {
 
 #[tokio::test]
 async fn test_ensure_multiple_accounts_coming_in_over_time() {
-    init_logger!();
-
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -619,8 +604,6 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
 
 #[tokio::test]
 async fn test_ensure_accounts_seen_as_readonly_can_be_used_as_writable_later() {
-    init_logger!();
-
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -714,8 +697,6 @@ async fn test_ensure_accounts_seen_as_readonly_can_be_used_as_writable_later() {
 
 #[tokio::test]
 async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
-    init_logger!();
-
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -785,8 +766,6 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
 
 #[tokio::test]
 async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
-    init_logger!();
-
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -872,8 +851,6 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
 
 #[tokio::test]
 async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
-    init_logger!();
-
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();

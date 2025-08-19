@@ -52,7 +52,7 @@ use magicblock_ledger::{
 use magicblock_metrics::MetricsService;
 use magicblock_processor::{
     build_svm_env,
-    scheduler::{TransactionScheduler, TransactionSchedulerState},
+    scheduler::{state::TransactionSchedulerState, TransactionScheduler},
 };
 use magicblock_program::{
     init_persister, validator, validator::validator_authority,
@@ -457,6 +457,7 @@ impl MagicValidator {
         commitor_service: &Option<Arc<CommittorService>>,
         remote_account_cloner_client: RemoteAccountClonerClient,
         config: &EphemeralConfig,
+        transaction_scheduler: TransactionSchedulerHandle,
     ) -> Arc<AccountsManager> {
         let accounts_config = try_convert_accounts_config(&config.accounts)
             .expect(
@@ -470,6 +471,7 @@ impl MagicValidator {
             committor_ext,
             remote_account_cloner_client,
             accounts_config,
+            transaction_scheduler,
         )
         .expect("Failed to create accounts manager");
 

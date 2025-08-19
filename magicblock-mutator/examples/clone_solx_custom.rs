@@ -2,10 +2,6 @@ use magicblock_mutator::{
     fetch::transaction_to_clone_pubkey_from_cluster, Cluster,
 };
 use solana_sdk::{pubkey, pubkey::Pubkey};
-use test_tools::{
-    account::fund_account, diagnostics::log_exec_details, init_logger,
-    transactions_processor,
-};
 
 pub const SOLX_PROG: Pubkey =
     pubkey!("SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ");
