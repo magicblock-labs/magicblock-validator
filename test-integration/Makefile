@@ -20,7 +20,7 @@ FLEXI_COUNTER_SO := $(DEPLOY_DIR)/program_flexi_counter.so
 SCHEDULECOMMIT_SO := $(DEPLOY_DIR)/program_schedulecommit.so
 SCHEDULECOMMIT_SECURITY_SO := $(DEPLOY_DIR)/program_schedulecommit_security.so
 COMMITTOR_PROGRAM_SO := $(ROOT_DEPLOY_DIR)/magicblock_committor_program.so
-SCHEDULE_TASK_PROGRAM_SO := $(DEPLOY_DIR)/program_schedule_task.so
+SCHEDULE_TASK_PROGRAM_SO := $(DEPLOY_DIR)/schedule_task_program.so
 
 PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO) $(SCHEDULE_TASK_PROGRAM_SO)
 
@@ -138,6 +138,22 @@ setup-schedule-intents-both:
 	RUN_TESTS=schedule_intents \
 	SETUP_ONLY=both \
 	$(MAKE) test
+	
+test-task-scheduler:
+	RUN_TESTS=task-scheduler \
+	$(MAKE) test
+setup-task-scheduler-devnet:
+	RUN_TESTS=task-scheduler \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-task-scheduler-ephem:
+	RUN_TESTS=task-scheduler \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
+setup-task-scheduler-both:
+	RUN_TESTS=task-scheduler \
+	SETUP_ONLY=both \
+	$(MAKE) test
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
@@ -166,4 +182,4 @@ ci-fmt:
 ci-lint:
 	cargo clippy --all-targets -- -D warnings
 
-.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list ci-fmt ci-lint
+.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config test-task-scheduler deploy-flexi-counter list ci-fmt ci-lint
