@@ -50,7 +50,7 @@ pub(crate) fn process_cancel_task(
         TASK_CONTEXT_IDX,
     )?;
 
-    TaskContext::cancel_task(invoke_context, &context_acc, cancel_request)
+    TaskContext::cancel_task(invoke_context, context_acc, cancel_request)
         .map_err(|err| {
             ic_msg!(
                 invoke_context,

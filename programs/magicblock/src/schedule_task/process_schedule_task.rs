@@ -111,15 +111,15 @@ pub(crate) fn process_schedule_task(
         TASK_CONTEXT_IDX,
     )?;
 
-    TaskContext::schedule_task(invoke_context, &context_acc, schedule_request)
+    TaskContext::schedule_task(invoke_context, context_acc, schedule_request)
         .map_err(|err| {
-            ic_msg!(
-                invoke_context,
-                "ScheduleTask ERR: failed to schedule task: {}",
-                err
-            );
-            InstructionError::GenericError
-        })?;
+        ic_msg!(
+            invoke_context,
+            "ScheduleTask ERR: failed to schedule task: {}",
+            err
+        );
+        InstructionError::GenericError
+    })?;
 
     ic_msg!(
         invoke_context,
