@@ -1,7 +1,9 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_program::pubkey::Pubkey;
 
-#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq, Default,
+)]
 pub struct Counter {
     pub count: u64,
 }
@@ -9,9 +11,6 @@ pub struct Counter {
 const COUNTER_SEED: &[u8] = b"counter";
 
 impl Counter {
-    pub fn new() -> Self {
-        Self { count: 0 }
-    }
     pub fn seeds(payer: &Pubkey) -> [&[u8]; 3] {
         [crate::ID.as_ref(), COUNTER_SEED, payer.as_ref()]
     }
