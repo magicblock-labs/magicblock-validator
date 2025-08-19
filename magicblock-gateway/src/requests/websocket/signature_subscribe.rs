@@ -25,7 +25,7 @@ impl WsDispatcher {
             TransactionResultEncoder.encode(status.slot, &status.result, id)
         });
         let (id, subscribed) = if let Some(payload) = status {
-            self.chan.tx.send(payload).await;
+            let _ = self.chan.tx.send(payload).await;
             (id, Default::default())
         } else {
             self.subscriptions

@@ -1,6 +1,5 @@
 use std::{path::Path, sync::Arc};
 
-use const_format::concatcp;
 use error::AccountsDbError;
 use index::{
     iterator::OffsetPubkeyIter, utils::AccountOffsetFinder, AccountsDbIndex,
@@ -21,7 +20,6 @@ pub type AccountsDbResult<T> = Result<T, AccountsDbError>;
 pub type StWLock = Arc<RwLock<()>>;
 
 pub const ACCOUNTSDB_DIR: &str = "accountsdb";
-const ACCOUNTSDB_SUB_DIR: &str = concatcp!(ACCOUNTSDB_DIR, "/main");
 
 pub struct AccountsDb {
     /// Main accounts storage, where actual account records are kept
@@ -44,7 +42,7 @@ impl AccountsDb {
         directory: &Path,
         max_slot: u64,
     ) -> AccountsDbResult<Self> {
-        let directory = directory.join(ACCOUNTSDB_SUB_DIR);
+        let directory = directory.join(format!("{ACCOUNTSDB_DIR}/main"));
         let lock = StWLock::default();
 
         std::fs::create_dir_all(&directory).inspect_err(log_err!(
@@ -73,7 +71,6 @@ impl AccountsDb {
 
     /// Opens existing database with given snapshot_frequency, used for tests and tools
     /// most likely you want to use [new](AccountsDb::new) method
-    #[cfg(feature = "dev-tools")]
     pub fn open(directory: &Path) -> AccountsDbResult<Self> {
         let config = AccountsDbConfig {
             snapshot_frequency: u64::MAX,
