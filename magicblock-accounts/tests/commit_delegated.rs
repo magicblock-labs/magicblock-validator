@@ -20,7 +20,6 @@ use stubs::{
     account_committer_stub::AccountCommitterStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
 };
-use test_tools_core::init_logger;
 
 mod stubs;
 
@@ -85,8 +84,6 @@ fn generate_delegated_account_chain_snapshot(
 
 #[tokio::test]
 async fn test_commit_two_delegated_accounts_one_needs_commit() {
-    init_logger!();
-
     let commit_needed_pubkey = Pubkey::new_unique();
     let commit_needed_account = generate_account(&commit_needed_pubkey);
     let commit_needed_account_shared =

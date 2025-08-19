@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, str::FromStr, sync::Arc};
+use std::str::FromStr;
 
 use log::{Level::Trace, *};
 use magicblock_accounts_db::AccountsDb;
@@ -7,13 +7,8 @@ use num_format::{Locale, ToFormattedString};
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
     hash::Hash,
-    message::{SanitizedMessage, SimpleAddressLoader},
-    transaction::{
-        SanitizedTransaction, TransactionVerificationMode, VersionedTransaction,
-    },
-};
-use solana_svm::transaction_commit_result::{
-    TransactionCommitResult, TransactionCommitResultExtensions,
+    message::SimpleAddressLoader,
+    transaction::{SanitizedTransaction, VersionedTransaction},
 };
 use solana_transaction_status::VersionedConfirmedBlock;
 
@@ -147,10 +142,8 @@ async fn replay_blocks(
         for txn in block_txs {
             let signature = *txn.signature();
             let result =
-                transaction_scheduler.replay(txn).await.ok_or_else(|| {
-                    LedgerError::BlockStoreProcessor(
-                        "Transaction Scheduler is not running".into(),
-                    )
+                transaction_scheduler.replay(txn).await.map_err(|err| {
+                    LedgerError::BlockStoreProcessor(err.to_string())
                 });
             if !log_enabled!(Trace) {
                 debug!("Result: {signature} - {result:?}");
