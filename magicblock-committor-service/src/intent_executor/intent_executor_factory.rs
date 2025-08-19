@@ -5,7 +5,7 @@ use magicblock_table_mania::TableMania;
 
 use crate::{
     intent_executor::{
-        commit_id_fetcher::CacheTaskInfoFetcher, IntentExecutor,
+        task_info_fetcher::CacheTaskInfoFetcher, IntentExecutor,
         IntentExecutorImpl,
     },
     transaction_preparator::transaction_preparator::TransactionPreparatorV1,

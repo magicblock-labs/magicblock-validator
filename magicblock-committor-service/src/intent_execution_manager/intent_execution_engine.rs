@@ -290,10 +290,10 @@ mod tests {
             intent_scheduler::create_test_intent,
         },
         intent_executor::{
-            commit_id_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
             error::{
                 Error as ExecutorError, IntentExecutorResult, InternalError,
             },
+            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
         },
         persist::IntentPersisterImpl,
     };

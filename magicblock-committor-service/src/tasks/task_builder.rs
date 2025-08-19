@@ -9,7 +9,7 @@ use magicblock_program::magic_scheduled_base_intent::{
 use solana_pubkey::Pubkey;
 
 use crate::{
-    intent_executor::commit_id_fetcher::TaskInfoFetcher,
+    intent_executor::task_info_fetcher::TaskInfoFetcher,
     persist::IntentPersister,
     tasks::tasks::{
         ArgsTask, BaseTask, CommitTask, FinalizeTask, L1ActionTask,
@@ -197,11 +197,11 @@ impl TasksBuilder for TaskBuilderV1 {
 pub enum Error {
     #[error("CommitIdFetchError: {0}")]
     CommitTasksBuildError(
-        #[source] crate::intent_executor::commit_id_fetcher::Error,
+        #[source] crate::intent_executor::task_info_fetcher::Error,
     ),
     #[error("FinalizedTasksBuildError: {0}")]
     FinalizedTasksBuildError(
-        #[source] crate::intent_executor::commit_id_fetcher::Error,
+        #[source] crate::intent_executor::task_info_fetcher::Error,
     ),
 }
 

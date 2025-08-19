@@ -18,8 +18,8 @@ use solana_sdk::{
 
 use crate::{
     intent_executor::{
-        commit_id_fetcher::TaskInfoFetcher,
         error::{Error, IntentExecutorResult, InternalError},
+        task_info_fetcher::TaskInfoFetcher,
         ExecutionOutput, IntentExecutor,
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
@@ -377,7 +377,7 @@ mod tests {
     use crate::{
         intent_execution_manager::intent_scheduler::create_test_intent,
         intent_executor::{
-            commit_id_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
+            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
             IntentExecutorImpl,
         },
         persist::IntentPersisterImpl,

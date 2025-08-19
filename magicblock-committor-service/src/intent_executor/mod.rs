@@ -1,8 +1,8 @@
-pub mod commit_id_fetcher;
 pub mod error;
 #[allow(clippy::module_inception)]
 pub mod intent_executor;
 pub(crate) mod intent_executor_factory;
+pub mod task_info_fetcher;
 
 use async_trait::async_trait;
 pub use intent_executor::IntentExecutorImpl;

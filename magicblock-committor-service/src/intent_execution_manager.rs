@@ -17,8 +17,8 @@ use crate::{
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
     },
     intent_executor::{
-        commit_id_fetcher::CacheTaskInfoFetcher,
         intent_executor_factory::IntentExecutorFactoryImpl,
+        task_info_fetcher::CacheTaskInfoFetcher,
     },
     persist::IntentPersister,
     types::ScheduledBaseIntentWrapper,

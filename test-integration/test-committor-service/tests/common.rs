@@ -8,7 +8,7 @@ use std::{
 
 use magicblock_committor_service::intent_executor::IntentExecutorImpl;
 use magicblock_committor_service::{
-    intent_executor::commit_id_fetcher::{
+    intent_executor::task_info_fetcher::{
         TaskInfoFetcher, TaskInfoFetcherResult,
     },
     tasks::tasks::CommitTask,
