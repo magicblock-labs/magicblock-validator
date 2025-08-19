@@ -7,8 +7,7 @@ use num_format::{Locale, ToFormattedString};
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
     hash::Hash,
-    message::SimpleAddressLoader,
-    transaction::{SanitizedTransaction, VersionedTransaction},
+    transaction::VersionedTransaction,
 };
 use solana_transaction_status::VersionedConfirmedBlock;
 
@@ -116,31 +115,10 @@ async fn replay_blocks(
         ledger
             .latest_block()
             .store(block.slot, block.blockhash, timestamp);
-        let mut block_txs = vec![];
         // Transactions are stored in the ledger ordered by most recent to latest
         // such to replay them in the order they executed we need to reverse them
-        for tx in block.transactions.into_iter().rev() {
-            let tx = tx.verify_and_hash_message().and_then(|hash| {
-                SanitizedTransaction::try_create(
-                    tx,
-                    hash,
-                    None,
-                    SimpleAddressLoader::Disabled,
-                    &Default::default(),
-                )
-            });
-
-            match tx {
-                Ok(tx) => block_txs.push(tx),
-                Err(err) => {
-                    return Err(LedgerError::BlockStoreProcessor(format!(
-                        "Error processing transaction: {err:?}",
-                    )));
-                }
-            };
-        }
-        for txn in block_txs {
-            let signature = *txn.signature();
+        for txn in block.transactions.into_iter().rev() {
+            let signature = txn.signatures[0];
             let result =
                 transaction_scheduler.replay(txn).await.map_err(|err| {
                     LedgerError::BlockStoreProcessor(err.to_string())

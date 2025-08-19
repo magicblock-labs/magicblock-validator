@@ -21,7 +21,7 @@ use solana_sdk::{
     },
     pubkey::Pubkey,
     signature::Signature,
-    transaction::{SanitizedTransaction, Transaction},
+    transaction::Transaction,
 };
 
 use crate::{AccountDumper, AccountDumperError, AccountDumperResult};
@@ -46,12 +46,7 @@ impl AccountDumperBank {
         &self,
         transaction: Transaction,
     ) -> AccountDumperResult<Signature> {
-        let transaction = SanitizedTransaction::try_from_legacy_transaction(
-            transaction,
-            &Default::default(),
-        )
-        .map_err(AccountDumperError::TransactionError)?;
-        let signature = *transaction.signature();
+        let signature = transaction.signatures[0];
         // NOTE: this is an example code, and is not supposed to be approved,
         // instead proper async handling should be implemented in the new cloning pipeline
         let _ = self.transaction_scheduler.execute(transaction);

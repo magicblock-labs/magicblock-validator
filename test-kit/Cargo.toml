@@ -12,3 +12,7 @@ magicblock-accounts-db = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-processor = { workspace = true }
+
+solana-keypair = { workspace = true }
+
+tempfile = { workspace = true }

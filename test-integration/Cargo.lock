@@ -1213,26 +1213,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "const_format"
-version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "126f97965c8ad46d6d9163268ff28432e8f6a1196a55578867832e3049df63dd"
-dependencies = [
- "const_format_proc_macros",
-]
-
-[[package]]
-name = "const_format_proc_macros"
-version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d57c2eccfb16dbac1f4e61e206105db5820c9d26c3c472bc17c774259ef7744"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-xid",
-]
-
-[[package]]
 name = "constant_time_eq"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1736,16 +1716,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_filter"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "186e05a59d4c50738528153b83b0b0194d3a29507dfec16eccd4b342903397d0"
-dependencies = [
- "log",
- "regex",
-]
-
-[[package]]
 name = "env_logger"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1756,19 +1726,6 @@ dependencies = [
  "log",
  "regex",
  "termcolor",
-]
-
-[[package]]
-name = "env_logger"
-version = "0.11.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13c863f0904021b108aa8b2f55046443e6b1ebde8fd4a15c399893aae4fa069f"
-dependencies = [
- "anstream",
- "anstyle",
- "env_filter",
- "jiff",
- "log",
 ]
 
 [[package]]
@@ -3005,30 +2962,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
-name = "jiff"
-version = "0.2.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be1f93b8b1eb69c77f24bbb0afdf66f54b632ee39af40ca21c4365a1d7347e49"
-dependencies = [
- "jiff-static",
- "log",
- "portable-atomic",
- "portable-atomic-util",
- "serde",
-]
-
-[[package]]
-name = "jiff-static"
-version = "0.2.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03343451ff899767262ec32146f6d559dd759fdadf42ff0e227c7c48f72594b4"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.104",
-]
-
-[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3587,7 +3520,6 @@ dependencies = [
 name = "magicblock-accounts-db"
 version = "0.1.7"
 dependencies = [
- "const_format",
  "lmdb-rkv",
  "log",
  "magicblock-config",
@@ -3597,7 +3529,6 @@ dependencies = [
  "serde",
  "solana-account 2.2.1",
  "solana-pubkey",
- "tempfile",
  "thiserror 1.0.69",
 ]
 
@@ -3638,7 +3569,7 @@ dependencies = [
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=9b722a5)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=0f18aa3)",
  "solana-transaction",
  "tempfile",
  "thiserror 1.0.69",
@@ -3876,7 +3807,7 @@ dependencies = [
  "solana-metrics",
  "solana-sdk",
  "solana-storage-proto 0.1.7",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=9b722a5)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=0f18aa3)",
  "solana-timings",
  "solana-transaction-status",
  "thiserror 1.0.69",
@@ -3933,7 +3864,7 @@ dependencies = [
  "solana-pubkey",
  "solana-rent-collector",
  "solana-sdk-ids",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=9b722a5)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=0f18aa3)",
  "solana-svm-transaction",
  "solana-system-program",
  "solana-transaction",
@@ -4691,15 +4622,6 @@ name = "portable-atomic"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f84267b20a16ea918e43c6a88433c2d54fa145c92a811b5b047ccbe153674483"
-
-[[package]]
-name = "portable-atomic-util"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8a2f0d8d040d7848a709caf78912debcc3f33ee4b3cac47d73d1e1069e83507"
-dependencies = [
- "portable-atomic",
-]
 
 [[package]]
 name = "potential_utf"
@@ -5758,7 +5680,6 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
- "test-tools-core",
  "tokio",
 ]
 
@@ -5776,7 +5697,6 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
- "test-tools-core",
 ]
 
 [[package]]
@@ -7462,7 +7382,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "593dbcb81439d37b02757e90bd9ab56364de63f378c55db92a6fbd6a2e47ab36"
 dependencies = [
- "env_logger 0.9.3",
+ "env_logger",
  "lazy_static",
  "log",
 ]
@@ -8911,7 +8831,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=9b722a5#9b722a5a9d7f5ff0b2b7542968cd765fc3f3659d"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=0f18aa3#0f18aa3efa0b4063260c29f13688a70c0a48fa85"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -10195,7 +10115,6 @@ dependencies = [
  "solana-rpc-client",
  "solana-sdk",
  "tempfile",
- "test-tools-core",
 ]
 
 [[package]]
@@ -10204,7 +10123,6 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "log",
- "test-tools-core",
 ]
 
 [[package]]
@@ -10287,17 +10205,7 @@ dependencies = [
  "solana-pubkey",
  "solana-rpc-client",
  "solana-sdk",
- "test-tools-core",
  "tokio",
-]
-
-[[package]]
-name = "test-tools-core"
-version = "0.1.7"
-dependencies = [
- "env_logger 0.11.8",
- "log",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=9b722a5)",
 ]
 
 [[package]]

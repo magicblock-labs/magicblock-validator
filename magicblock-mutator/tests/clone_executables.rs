@@ -8,14 +8,14 @@ use solana_sdk::{
     clock::Slot,
     genesis_config::ClusterType,
     hash::Hash,
+    instruction::{AccountMeta, Instruction},
+    message::Message,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
+    signature::Keypair,
+    signer::Signer,
     system_program,
-    transaction::Transaction,
-};
-use test_tools::{
-    diagnostics::log_exec_details, init_logger, services::skip_if_devnet_down,
-    validator::init_started_validator,
+    transaction::{SanitizedTransaction, Transaction},
 };
 
 use crate::utils::{fund_luzifer, SOLX_EXEC, SOLX_IDL, SOLX_PROG};
@@ -80,11 +80,7 @@ async fn verified_tx_to_clone_executable_from_devnet_as_upgrade(
 
 #[tokio::test]
 async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
-    init_logger!();
-    skip_if_devnet_down!();
-
     let tx_processor = transactions_processor();
-    init_started_validator(tx_processor.bank());
     fund_luzifer(&*tx_processor);
 
     tx_processor.bank().advance_slot(); // We don't want to stay on slot 0
@@ -251,4 +247,63 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
         assert_eq!(post_acc.owner(), &elfs::solanax::ID);
         assert_eq!(post_acc.lamports(), 9103680);
     }
+}
+
+// SolanaX
+pub struct SolanaxPostAccounts {
+    pub post: Pubkey,
+    pub author: Pubkey,
+}
+pub fn create_solx_send_post_transaction(
+    bank: &Bank,
+) -> (SanitizedTransaction, SolanaxPostAccounts) {
+    let accounts = vec![
+        create_funded_account(
+            bank,
+            Some(Rent::default().minimum_balance(1180)),
+        ),
+        create_funded_account(bank, Some(LAMPORTS_PER_SOL)),
+    ];
+    let post = &accounts[0];
+    let author = &accounts[1];
+    let instruction =
+        create_solx_send_post_instruction(&elfs::solanax::id(), &accounts);
+    let message = Message::new(&[instruction], Some(&author.pubkey()));
+    let transaction =
+        Transaction::new(&[author, post], message, bank.last_blockhash());
+    (
+        SanitizedTransaction::try_from_legacy_transaction(
+            transaction,
+            &Default::default(),
+        )
+        .unwrap(),
+        SolanaxPostAccounts {
+            post: post.pubkey(),
+            author: author.pubkey(),
+        },
+    )
+}
+
+fn create_solx_send_post_instruction(
+    program_id: &Pubkey,
+    funded_accounts: &[Keypair],
+) -> Instruction {
+    // https://explorer.solana.com/tx/nM2WLNPVfU3R8C4dJwhzwBsVXXgBkySAuBrGTEoaGaAQMxNHy4mnAgLER8ddDmD6tjw3suVhfG1RdbdbhyScwLK?cluster=devnet
+    #[rustfmt::skip]
+    let ix_bytes: Vec<u8> = vec![
+        0x84, 0xf5, 0xee, 0x1d,
+        0xf3, 0x2a, 0xad, 0x36,
+        0x05, 0x00, 0x00, 0x00,
+        0x68, 0x65, 0x6c, 0x6c,
+        0x6f,
+    ];
+    Instruction::new_with_bytes(
+        *program_id,
+        &ix_bytes,
+        vec![
+            AccountMeta::new(funded_accounts[0].pubkey(), true),
+            AccountMeta::new(funded_accounts[1].pubkey(), true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+    )
 }

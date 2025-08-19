@@ -82,14 +82,14 @@ impl RpcError {
         }
     }
 
-    pub(crate) fn transaction_simulation<E: Error>(error: E) -> Self {
+    pub(crate) fn transaction_simulation<E: Display>(error: E) -> Self {
         Self {
             code: TRANSACTION_SIMULATION,
             message: error.to_string(),
         }
     }
 
-    pub(crate) fn transaction_verification<E: Error>(error: E) -> Self {
+    pub(crate) fn transaction_verification<E: Display>(error: E) -> Self {
         Self {
             code: TRANSACTION_VERIFICATION,
             message: format!("transaction verification error: {error}"),

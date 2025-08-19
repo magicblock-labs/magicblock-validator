@@ -6,7 +6,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    thread,
     time::Duration,
 };
 
@@ -65,15 +64,9 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
-use solana_feature_set::{
-    curve25519_restrict_msm_length, curve25519_syscall_enabled,
-    disable_rent_fees_collection, FeatureSet as SolanaFeatureSet,
-};
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    account::AccountSharedData,
     commitment_config::{CommitmentConfig, CommitmentLevel},
-    feature,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::Keypair,
@@ -361,8 +354,6 @@ impl MagicValidator {
 
         validator::init_validator_authority(identity_keypair);
 
-        let featureset = Self::initialize_features(&accountsdb);
-
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
@@ -370,7 +361,7 @@ impl MagicValidator {
             txn_to_process_rx: validator_channels.transaction_to_process,
             account_update_tx: validator_channels.account_update,
             latest_block: ledger.latest_block().clone(),
-            environment: build_svm_env(latest_block.blockhash, 0, featureset),
+            environment: build_svm_env(&accountsdb, latest_block.blockhash, 0),
         };
         let transaction_scheduler =
             TransactionScheduler::new(1, txn_scheduler_state);
@@ -812,9 +803,6 @@ impl MagicValidator {
 
         self.ledger_truncator.stop();
         self.claim_fees_task.stop();
-
-        // wait a bit for services to stop
-        thread::sleep(Duration::from_secs(1));
 
         if self.config.validator.fqdn.is_some()
             && matches!(

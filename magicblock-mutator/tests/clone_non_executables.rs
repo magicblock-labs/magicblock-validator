@@ -7,10 +7,6 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_program,
     transaction::Transaction,
 };
-use test_tools::{
-    diagnostics::log_exec_details, init_logger, skip_if_devnet_down,
-    validator::init_started_validator,
-};
 
 use crate::utils::{fund_luzifer, SOLX_POST, SOLX_PROG, SOLX_TIPS};
 

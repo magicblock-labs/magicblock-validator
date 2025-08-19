@@ -17,7 +17,6 @@ use solana_sdk::{
     system_program,
     sysvar::SysvarId,
 };
-use test_tools_core::init_logger;
 
 use crate::{
     magic_context::MagicContext,
