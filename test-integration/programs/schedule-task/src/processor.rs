@@ -79,7 +79,7 @@ fn process_init_counter(
     let bump = &[bump];
     let seeds = Counter::seeds_with_bump(payer_info.key, bump);
 
-    let counter = Counter::new();
+    let counter = Counter::default();
 
     let counter_data = to_vec(&counter)?;
     let size = counter_data.len();
