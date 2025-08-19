@@ -266,6 +266,7 @@ fn test_everything_defined() {
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1_000_000_000,
+                starting_slot: Some(100),
             },
             programs: vec![ProgramConfig {
                 id: pubkey!("wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"),
