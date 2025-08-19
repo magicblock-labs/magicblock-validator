@@ -32,11 +32,11 @@ use crate::{
     utils::persist_status_update_by_message_set,
 };
 
-pub struct IntentExecutorImpl<T, C> {
+pub struct IntentExecutorImpl<T, F> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
     transaction_preparator: T,
-    task_info_fetcher: Arc<C>,
+    task_info_fetcher: Arc<F>,
 }
 
 impl<T, F> IntentExecutorImpl<T, F>
@@ -66,15 +66,21 @@ where
         authority: &Pubkey,
         persister: &Option<P>,
     ) -> Option<TransactionStrategy> {
+        const MAX_UNITED_TASKS_LEN: usize = 22;
+
+        // We can unite in 1 tx a lot of commits
+        // but then there's a possibility of hitting CPI limit, aka
+        // MaxInstructionTraceLengthExceeded error.
+        // So we limit tasks len with 22 total tasks
+        // In case this fails as well, it will be retried with TwoStage approach
+        // on retry, once retries are introduced
+        if commit_tasks.len() + finalize_task.len() > MAX_UNITED_TASKS_LEN {
+            return None;
+        }
+
         // Clone tasks since strategies applied to united case maybe suboptimal for regular one
-        let mut commit_tasks = commit_tasks
-            .iter()
-            .map(|task| task.clone())
-            .collect::<Vec<Box<dyn BaseTask>>>();
-        let finalize_task = finalize_task
-            .iter()
-            .map(|task| task.clone())
-            .collect::<Vec<Box<dyn BaseTask>>>();
+        let mut commit_tasks = commit_tasks.to_owned();
+        let finalize_task = finalize_task.to_owned();
 
         // Unite tasks to attempt running as single tx
         commit_tasks.extend(finalize_task);
@@ -109,7 +115,7 @@ where
         let commit_tasks = TaskBuilderV1::commit_tasks(
             &self.task_info_fetcher,
             &base_intent,
-            &persister,
+            persister,
         )
         .await?;
         let finalize_tasks = TaskBuilderV1::finalize_tasks(

@@ -6,6 +6,7 @@ use std::{
     },
 };
 
+use magicblock_committor_service::intent_executor::IntentExecutorImpl;
 use magicblock_committor_service::{
     intent_executor::commit_id_fetcher::{
         TaskInfoFetcher, TaskInfoFetcherResult,
@@ -41,7 +42,7 @@ pub struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
     table_mania: TableMania,
     pub authority: Keypair,
-    compute_budget_config: ComputeBudgetConfig,
+    pub compute_budget_config: ComputeBudgetConfig,
 }
 
 impl TestFixture {
@@ -82,27 +83,45 @@ impl TestFixture {
     }
 
     #[allow(dead_code)]
-    pub fn create_transaction_preparator(
-        &self,
-    ) -> TransactionPreparatorV1<MockCommitIdFetcher> {
-        TransactionPreparatorV1::<MockCommitIdFetcher>::new(
+    pub fn create_transaction_preparator(&self) -> TransactionPreparatorV1 {
+        TransactionPreparatorV1::new(
             self.rpc_client.clone(),
             self.table_mania.clone(),
             self.compute_budget_config.clone(),
-            Arc::new(MockCommitIdFetcher),
+        )
+    }
+
+    #[allow(dead_code)]
+    pub fn create_intent_executor(
+        &self,
+    ) -> IntentExecutorImpl<TransactionPreparatorV1, MockTaskInfoFetcher> {
+        let transaction_preparator = self.create_transaction_preparator();
+        let task_info_fetcher = Arc::new(MockTaskInfoFetcher);
+
+        IntentExecutorImpl::new(
+            self.rpc_client.clone(),
+            transaction_preparator,
+            task_info_fetcher,
         )
     }
 }
 
-pub struct MockCommitIdFetcher;
+pub struct MockTaskInfoFetcher;
 
 #[async_trait::async_trait]
-impl TaskInfoFetcher for MockCommitIdFetcher {
+impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+    }
+
+    async fn fetch_rent_reimbursements(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+        Ok(pubkeys.to_vec())
     }
 
     fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {

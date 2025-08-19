@@ -100,7 +100,7 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator
-            .prepare_for_delivery(authority, &tx_strategy, intent_persister)
+            .prepare_for_delivery(authority, tx_strategy, intent_persister)
             .await?;
 
         let message = TransactionUtils::assemble_tasks_tx(
