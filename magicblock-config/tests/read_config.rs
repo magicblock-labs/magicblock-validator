@@ -1,7 +1,7 @@
 use std::{
     env,
     net::{IpAddr, Ipv4Addr},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use isocountry::CountryCode;
@@ -14,6 +14,10 @@ use magicblock_config::{
 };
 use solana_pubkey::pubkey;
 use url::Url;
+
+fn cargo_workspace_dir() -> PathBuf {
+    PathBuf::new().join(".").canonicalize().unwrap()
+}
 
 fn parse_config_with_file(config_file_dir: &Path) -> EphemeralConfig {
     MagicBlockConfig::try_parse_config_from_arg(&vec![
