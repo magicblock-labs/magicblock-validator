@@ -54,40 +54,6 @@ impl TaskContext {
     pub const SIZE: usize = TASK_CONTEXT_SIZE;
     pub const ZERO: [u8; Self::SIZE] = [0; Self::SIZE];
 
-    fn update_task_context<F>(
-        invoke_context: &InvokeContext,
-        context_account: &RefCell<AccountSharedData>,
-        update_fn: F,
-    ) -> Result<(), InstructionError>
-    where
-        F: FnOnce(&mut TaskContext),
-    {
-        let context_data = &mut context_account.borrow_mut();
-        ic_msg!(invoke_context, "TaskContext: {:?}", context_data.capacity());
-        ic_msg!(
-            invoke_context,
-            "TaskContext: {:?}",
-            context_data.data().len()
-        );
-        let mut context =
-            TaskContext::deserialize(context_data).map_err(|err| {
-                ic_msg!(
-                    invoke_context,
-                    "Failed to deserialize TaskContext: {}",
-                    err
-                );
-                InstructionError::GenericError
-            })?;
-        update_fn(&mut context);
-        let serialized = bincode::serialize(&context).map_err(|err| {
-            ic_msg!(invoke_context, "Failed to serialize TaskContext: {}", err);
-            InstructionError::GenericError
-        })?;
-        context_data.resize(serialized.len(), 0);
-        context_data.set_data_from_slice(&serialized);
-        Ok(())
-    }
-
     pub fn schedule_task(
         invoke_context: &InvokeContext,
         context_account: &RefCell<AccountSharedData>,
@@ -168,6 +134,40 @@ impl TaskContext {
                 TaskRequest::Cancel(cancel_req) => Some(cancel_req),
             })
             .collect()
+    }
+
+    fn update_task_context<F>(
+        invoke_context: &InvokeContext,
+        context_account: &RefCell<AccountSharedData>,
+        update_fn: F,
+    ) -> Result<(), InstructionError>
+    where
+        F: FnOnce(&mut TaskContext),
+    {
+        let context_data = &mut context_account.borrow_mut();
+        ic_msg!(invoke_context, "TaskContext: {:?}", context_data.capacity());
+        ic_msg!(
+            invoke_context,
+            "TaskContext: {:?}",
+            context_data.data().len()
+        );
+        let mut context =
+            TaskContext::deserialize(context_data).map_err(|err| {
+                ic_msg!(
+                    invoke_context,
+                    "Failed to deserialize TaskContext: {}",
+                    err
+                );
+                InstructionError::GenericError
+            })?;
+        update_fn(&mut context);
+        let serialized = bincode::serialize(&context).map_err(|err| {
+            ic_msg!(invoke_context, "Failed to serialize TaskContext: {}", err);
+            InstructionError::GenericError
+        })?;
+        context_data.resize(serialized.len(), 0);
+        context_data.set_data_from_slice(&serialized);
+        Ok(())
     }
 }
 

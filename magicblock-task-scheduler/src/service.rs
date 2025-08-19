@@ -3,9 +3,6 @@ use std::sync::Arc;
 use log::*;
 use magicblock_bank::bank::Bank;
 use magicblock_config::TaskSchedulerConfig;
-use magicblock_geyser_plugin::{
-    grpc_messages::Message as GrpcMessage, types::GeyserMessage,
-};
 use magicblock_program::{
     CancelTaskRequest, ScheduleTaskRequest, Task, TaskContext, TaskRequest,
     TASK_CONTEXT_PUBKEY,
@@ -19,7 +16,7 @@ use solana_sdk::{
 };
 use solana_svm::transaction_processor::ExecutionRecordingConfig;
 use solana_timings::ExecuteTimings;
-use tokio::{select, sync::mpsc::Receiver, time::Duration};
+use tokio::{select, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -55,10 +52,9 @@ impl TaskSchedulerService {
 
     pub fn start(
         self,
-        context_sub: Receiver<GeyserMessage>,
         token: CancellationToken,
     ) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(self.run(context_sub, token))
+        tokio::spawn(self.run(token))
     }
 
     fn process_context_requests(
@@ -249,11 +245,7 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    async fn run(
-        self,
-        mut context_sub: Receiver<GeyserMessage>,
-        token: CancellationToken,
-    ) {
+    async fn run(self, token: CancellationToken) {
         let mut interval = tokio::time::interval(self.tick_interval);
         let db = self.db.clone();
         let bank = self.bank.clone();
@@ -264,49 +256,38 @@ impl TaskSchedulerService {
                     if let Err(e) = Self::tick(&db, &bank) {
                         error!("Error in scheduler tick: {}", e);
                     }
-                }
-                notification = context_sub.recv() => {
-                    match notification {
-                        Some(ref notification) => {
-                            let GrpcMessage::Account(_) = notification.as_ref() else {
+
+                    // HACK: we deserialize the context on every tick avoid using geyser.
+                    // This will be fixed once the channel to the transaction executor is implemented.
+                    // Performance should not be too bad because the context should be small.
+
+                    // Process any existing requests from the context
+                    let Some(mut context_account) = bank.get_account(&TASK_CONTEXT_PUBKEY) else {
+                        error!("Task context account not found");
+                        continue;
+                    };
+
+                    let Ok(mut task_context) =
+                        bincode::deserialize::<TaskContext>(context_account.data()) else {
+                        error!("Invalid task context account");
+                        continue;
+                    };
+
+                    match Self::process_context_requests(&db, &mut task_context) {
+                        Ok(n) if n > 0 => {
+                            // Write the updated context back to the account
+                            let Ok(serialized) = bincode::serialize(&task_context) else {
+                                error!("Failed to serialize task context");
                                 continue;
                             };
-
-                            // Process any existing requests from the context
-                            let Some(mut context_account) = bank.get_account(&TASK_CONTEXT_PUBKEY) else {
-                                error!("Task context account not found");
-                                continue;
-                            };
-
-                            let Ok(mut task_context) =
-                                bincode::deserialize::<TaskContext>(context_account.data()) else {
-                                error!("Invalid task context account");
-                                continue;
-                            };
-
-                            match Self::process_context_requests(&db, &mut task_context) {
-                                Ok(n) if n > 0 => {
-                                    // Write the updated context back to the account
-                                    let Ok(serialized) = bincode::serialize(&task_context) else {
-                                        error!("Failed to serialize task context");
-                                        continue;
-                                    };
-                                    context_account.set_data(serialized);
-                                    bank.store_account(TASK_CONTEXT_PUBKEY, context_account);
-                                }
-                                Err(e) => {
-                                    error!("Failed to process context requests: {}", e);
-                                    continue;
-                                }
-                                _ => {}
-                            }
-
-
+                            context_account.set_data(serialized);
+                            bank.store_account(TASK_CONTEXT_PUBKEY, context_account);
                         }
-                        None => {
-                            error!("Context subscription closed");
-                            break;
+                        Err(e) => {
+                            error!("Failed to process context requests: {}", e);
+                            continue;
                         }
+                        _ => {}
                     }
                 }
                 _ = token.cancelled() => {
