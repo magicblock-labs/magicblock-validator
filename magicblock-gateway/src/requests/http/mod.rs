@@ -6,10 +6,13 @@ use hyper::{
     body::{Bytes, Incoming},
     Request, Response,
 };
+use magicblock_core::link::transactions::SanitizeableTransaction;
 use prelude::{AccountsToEnsure, JsonBody};
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
-use solana_transaction::versioned::VersionedTransaction;
+use solana_transaction::{
+    sanitized::SanitizedTransaction, versioned::VersionedTransaction,
+};
 use solana_transaction_status::UiTransactionEncoding;
 
 use crate::{
@@ -81,11 +84,14 @@ impl HttpDispatcher {
         }
     }
 
-    fn decode_transaction(
+    fn prepare_transaction(
         &self,
         txn: &str,
         encoding: UiTransactionEncoding,
-    ) -> RpcResult<VersionedTransaction> {
+        sigverify: bool,
+        replace_blockhash: bool,
+    ) -> RpcResult<SanitizedTransaction> {
+        // decode the transaction from string using specified encoding
         let decoded = match encoding {
             UiTransactionEncoding::Base58 => {
                 bs58::decode(txn).into_vec().map_err(RpcError::parse_error)
@@ -93,13 +99,77 @@ impl HttpDispatcher {
             UiTransactionEncoding::Base64 => {
                 BASE64_STANDARD.decode(txn).map_err(RpcError::parse_error)
             }
-            _ => {
-                return Err(RpcError::invalid_params(
-                    "invalid transaction encoding",
-                ))
-            }
+            _ => Err(RpcError::invalid_params("unknown transaction encoding"))?,
         }?;
-        bincode::deserialize(&decoded).map_err(RpcError::invalid_params)
+        // deserialize the transaction from bincode format
+        // NOTE: Transaction (legacy) can be directly deserialized into
+        // VersionedTransaction due to the compatible binary ABI
+        let mut transaction: VersionedTransaction =
+            bincode::deserialize(&decoded).map_err(RpcError::invalid_params)?;
+        // Verify that the transaction uses valid recent blockhash
+        if !replace_blockhash {
+            let hash = transaction.message.recent_blockhash();
+            self.blocks.get(&hash).ok_or_else(|| {
+                RpcError::transaction_verification("Blockhash not found")
+            })?;
+        } else {
+            transaction
+                .message
+                .set_recent_blockhash(self.blocks.get_latest().hash);
+        }
+        // sanitize the transaction making it processable
+        let transaction =
+            transaction.sanitize().map_err(RpcError::invalid_params)?;
+        // verify transaction signatures if necessary
+        if sigverify {
+            transaction
+                .verify()
+                .map_err(RpcError::transaction_verification)?;
+        }
+        Ok(transaction)
+    }
+
+    async fn ensure_transaction_accounts(
+        &self,
+        transaction: &SanitizedTransaction,
+    ) -> RpcResult<()> {
+        let message = transaction.message();
+        let reader = self.accountsdb.reader().map_err(RpcError::internal)?;
+        let mut ensured = false;
+        loop {
+            let mut to_ensure = Vec::new();
+            let accounts = message.account_keys().iter().enumerate();
+            for (index, pubkey) in accounts {
+                if !reader.contains(pubkey) {
+                    to_ensure.push(*pubkey);
+                    continue;
+                }
+                if !message.is_writable(index) {
+                    continue;
+                }
+                let delegated = reader.read(pubkey, |acc| acc.delegated());
+                if delegated.unwrap_or_default() {
+                    Err(RpcError::invalid_params(
+                        "use of non-delegated account as writeable",
+                    ))?;
+                }
+            }
+            if ensured && !to_ensure.is_empty() {
+                let msg = format!(
+                    "transaction uses non-existent accounts: {to_ensure:?}"
+                );
+                Err(RpcError::invalid_params(msg))?;
+            }
+            if to_ensure.is_empty() {
+                break Ok(());
+            }
+            let to_ensure = AccountsToEnsure::new(to_ensure);
+            let ready = to_ensure.ready.clone();
+            let _ = self.ensure_accounts_tx.send(to_ensure).await;
+            ready.notified().await;
+
+            ensured = true;
+        }
     }
 }
 

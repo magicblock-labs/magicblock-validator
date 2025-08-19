@@ -10,7 +10,6 @@ use magicblock_account_cloner::{
     AccountClonerOutput, AccountClonerOutput::Cloned, CloneOutputMap,
 };
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_accounts_db::AccountsDb;
 use magicblock_committor_service::{
     persist::BundleSignatureRow, ChangedAccount, Changeset, ChangesetCommittor,
     ChangesetMeta,

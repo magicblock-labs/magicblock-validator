@@ -1,9 +1,4 @@
-use solana_message::SimpleAddressLoader;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_transaction::{
-    sanitized::SanitizedTransaction,
-    versioned::sanitized::SanitizedVersionedTransaction,
-};
 use solana_transaction_status::UiTransactionEncoding;
 
 use super::prelude::*;
@@ -20,58 +15,11 @@ impl HttpDispatcher {
         })?;
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
-        let transaction = self.decode_transaction(&transaction, encoding)?;
-        let hash = transaction.message.hash();
-        let transaction = SanitizedVersionedTransaction::try_new(transaction)
-            .map_err(RpcError::invalid_params)?;
-        let transaction = SanitizedTransaction::try_new(
-            transaction,
-            hash,
-            false,
-            SimpleAddressLoader::Disabled,
-            &Default::default(),
-        )
-        .map_err(RpcError::invalid_params)?;
-        transaction
-            .verify()
-            .map_err(RpcError::transaction_verification)?;
-        let message = transaction.message();
-        let signature = *transaction.signature();
-        let reader = self.accountsdb.reader().map_err(RpcError::internal)?;
-        let mut ensured = false;
-        loop {
-            let mut to_ensure = Vec::new();
-            let accounts = message.account_keys().iter().enumerate();
-            for (index, pubkey) in accounts {
-                if message.is_writable(index) {
-                    match reader.read(pubkey, |account| account.delegated()) {
-                        Some(true) => (),
-                        Some(false) => {
-                            Err(RpcError::invalid_params(
-                                    "tried to use non-delegated account as writeable",
-                            ))?;
-                        }
-                        None => to_ensure.push(*pubkey),
-                    }
-                } else if !reader.contains(pubkey) {
-                    to_ensure.push(*pubkey);
-                }
-            }
-            if ensured && !to_ensure.is_empty() {
-                Err(RpcError::invalid_params(format!(
-                    "transaction uses non-existent accounts: {to_ensure:?}"
-                )))?;
-            }
-            if to_ensure.is_empty() {
-                break;
-            }
-            let to_ensure = AccountsToEnsure::new(to_ensure);
-            let ready = to_ensure.ready.clone();
-            let _ = self.ensure_accounts_tx.send(to_ensure).await;
-            ready.notified().await;
+        let transaction =
+            self.prepare_transaction(&transaction, encoding, false, false)?;
+        self.ensure_transaction_accounts(&transaction).await?;
 
-            ensured = true;
-        }
+        let signature = *transaction.signature();
 
         if config.skip_preflight {
             self.transactions_scheduler.schedule(transaction).await?;

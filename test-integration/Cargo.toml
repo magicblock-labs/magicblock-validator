@@ -66,7 +66,6 @@ solana-transaction-status = "2.2"
 teepee = "0.0.1"
 tempfile = "3.10.1"
 test-config = { path = "test-config" }
-test-tools-core = { path = "../test-tools-core" }
 toml = "0.8.13"
 lazy_static = "1.4.0"
 tokio = "1.0"

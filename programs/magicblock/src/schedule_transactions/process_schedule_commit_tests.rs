@@ -15,7 +15,6 @@ use solana_sdk::{
     system_program,
     sysvar::SysvarId,
 };
-use test_tools_core::init_logger;
 
 use crate::{
     magic_context::MagicContext,
@@ -239,7 +238,6 @@ fn assert_first_commit(
 
 #[test]
 fn test_schedule_commit_single_account_success() {
-    init_logger!();
     let payer =
         Keypair::from_seed(b"schedule_commit_single_account_success").unwrap();
     let program = Pubkey::new_unique();
@@ -317,7 +315,6 @@ fn test_schedule_commit_single_account_success() {
 
 #[test]
 fn test_schedule_commit_single_account_and_request_undelegate_success() {
-    init_logger!();
     let payer =
         Keypair::from_seed(b"single_account_with_undelegate_success").unwrap();
     let program = Pubkey::new_unique();
@@ -398,8 +395,6 @@ fn test_schedule_commit_single_account_and_request_undelegate_success() {
 
 #[test]
 fn test_schedule_commit_three_accounts_success() {
-    init_logger!();
-
     let payer =
         Keypair::from_seed(b"schedule_commit_three_accounts_success").unwrap();
 
