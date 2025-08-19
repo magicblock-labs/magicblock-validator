@@ -6,7 +6,10 @@ use magicblock_config::TaskSchedulerConfig;
 use magicblock_geyser_plugin::{
     grpc_messages::Message as GrpcMessage, types::GeyserMessage,
 };
-use magicblock_program::{Task, TaskContext, TASK_CONTEXT_PUBKEY};
+use magicblock_program::{
+    CancelTaskRequest, ScheduleTaskRequest, Task, TaskContext, TaskRequest,
+    TASK_CONTEXT_PUBKEY,
+};
 use solana_sdk::{
     account::ReadableAccount,
     message::Message,
@@ -43,18 +46,6 @@ impl TaskSchedulerService {
         }
         let db = SchedulerDatabase::new(&config.db_path)?;
 
-        // Register tasks from the context
-        if let Some(context_account) = bank.get_account(&TASK_CONTEXT_PUBKEY) {
-            let task_context: TaskContext =
-                bincode::deserialize(context_account.data())?;
-            for task in task_context.tasks.values() {
-                if let Err(e) = Self::register_task(&db, task) {
-                    // This happens if the task is already registered
-                    error!("Failed to register task {}: {}", task.id, e);
-                }
-            }
-        }
-
         Ok(Self {
             db,
             bank,
@@ -62,65 +53,82 @@ impl TaskSchedulerService {
         })
     }
 
-    pub async fn start(
-        &mut self,
-        mut context_sub: Receiver<GeyserMessage>,
+    pub fn start(
+        self,
+        context_sub: Receiver<GeyserMessage>,
         token: CancellationToken,
-    ) -> Result<(), TaskSchedulerError> {
-        let mut interval = tokio::time::interval(self.tick_interval);
-        let db = self.db.clone();
-        let bank = self.bank.clone();
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(self.run(context_sub, token))
+    }
 
-        tokio::spawn(async move {
-            loop {
-                select! {
-                    _ = interval.tick() => {
-                        if let Err(e) = Self::tick(&db, &bank) {
-                            error!("Error in scheduler tick: {}", e);
-                        }
+    fn process_context_requests(
+        db: &SchedulerDatabase,
+        task_context: &mut TaskContext,
+    ) -> Result<usize, TaskSchedulerError> {
+        let requests = task_context.get_all_requests();
+        let mut ids = Vec::new();
+
+        for request in requests {
+            debug!("Processing task scheduling request: {request:?}");
+            let id = match request {
+                TaskRequest::Schedule(schedule_request) => {
+                    if let Err(e) =
+                        Self::process_schedule_request(db, schedule_request)
+                    {
+                        error!(
+                            "Failed to process schedule request {}: {}",
+                            schedule_request.id, e
+                        );
                     }
-                    notification = context_sub.recv() => {
-                        match notification {
-                            Some(ref notification) => {
-                                let GrpcMessage::Account(account) = notification.as_ref() else {
-                                    continue;
-                                };
-
-                                let task_context: TaskContext =
-                                    bincode::deserialize(&account.account.data)?;
-                                debug!("Task context account updated: {:?}", task_context.tasks);
-
-                                let task_ids = db.get_task_ids()?;
-                                let tasks_to_register = task_context.tasks.values().filter(|task| !task_ids.contains(&task.id));
-                                let tasks_to_unregister = task_ids.iter().filter(|id| !task_context.tasks.contains_key(id));
-
-                                for task in tasks_to_register {
-                                    if let Err(e) = Self::register_task(&db, task) {
-                                        error!("Failed to register task {}: {}", task.id, e);
-                                    }
-                                }
-
-                                for task_id in tasks_to_unregister {
-                                    if let Err(e) = Self::unregister_task(&db, *task_id) {
-                                        error!("Failed to unregister task {task_id}: {e}");
-                                    }
-                                }
-                            }
-                            None => {
-                                error!("Context subscription closed");
-                                break;
-                            }
-                        }
-                    }
-                    _ = token.cancelled() => {
-                        break;
-                    }
+                    schedule_request.id
                 }
-            }
+                TaskRequest::Cancel(cancel_request) => {
+                    if let Err(e) =
+                        Self::process_cancel_request(db, cancel_request)
+                    {
+                        error!(
+                            "Failed to process cancel request for task {}: {}",
+                            cancel_request.task_id, e
+                        );
+                    }
+                    cancel_request.task_id
+                }
+            };
 
-            Ok::<(), TaskSchedulerError>(())
-        });
+            ids.push(id);
+        }
 
+        for id in &ids {
+            task_context.remove_request(*id);
+        }
+
+        Ok(ids.len())
+    }
+
+    fn process_schedule_request(
+        db: &SchedulerDatabase,
+        schedule_request: &ScheduleTaskRequest,
+    ) -> Result<(), TaskSchedulerError> {
+        // Convert request to task and register in database
+        let task = Task::from(schedule_request);
+        Self::register_task(db, &task)?;
+        debug!(
+            "Processed schedule request for task {}",
+            schedule_request.id
+        );
+        Ok(())
+    }
+
+    fn process_cancel_request(
+        db: &SchedulerDatabase,
+        cancel_request: &CancelTaskRequest,
+    ) -> Result<(), TaskSchedulerError> {
+        // Remove task from database
+        Self::unregister_task(db, cancel_request.task_id)?;
+        debug!(
+            "Processed cancel request for task {}",
+            cancel_request.task_id
+        );
         Ok(())
     }
 
@@ -151,6 +159,8 @@ impl TaskSchedulerService {
         db: &SchedulerDatabase,
         task: &DbTask,
     ) -> Result<(), TaskSchedulerError> {
+        debug!("Executing task {}", task.id);
+
         // Execute unsigned transactions
         let blockhash = bank.last_blockhash();
         let sanitized_transactions = match task
@@ -237,5 +247,72 @@ impl TaskSchedulerService {
         debug!("Removed task {} from context", task_id);
 
         Ok(())
+    }
+
+    async fn run(
+        self,
+        mut context_sub: Receiver<GeyserMessage>,
+        token: CancellationToken,
+    ) {
+        let mut interval = tokio::time::interval(self.tick_interval);
+        let db = self.db.clone();
+        let bank = self.bank.clone();
+
+        loop {
+            select! {
+                _ = interval.tick() => {
+                    if let Err(e) = Self::tick(&db, &bank) {
+                        error!("Error in scheduler tick: {}", e);
+                    }
+                }
+                notification = context_sub.recv() => {
+                    match notification {
+                        Some(ref notification) => {
+                            let GrpcMessage::Account(_) = notification.as_ref() else {
+                                continue;
+                            };
+
+                            // Process any existing requests from the context
+                            let Some(mut context_account) = bank.get_account(&TASK_CONTEXT_PUBKEY) else {
+                                error!("Task context account not found");
+                                continue;
+                            };
+
+                            let Ok(mut task_context) =
+                                bincode::deserialize::<TaskContext>(context_account.data()) else {
+                                error!("Invalid task context account");
+                                continue;
+                            };
+
+                            match Self::process_context_requests(&db, &mut task_context) {
+                                Ok(n) if n > 0 => {
+                                    // Write the updated context back to the account
+                                    let Ok(serialized) = bincode::serialize(&task_context) else {
+                                        error!("Failed to serialize task context");
+                                        continue;
+                                    };
+                                    context_account.set_data(serialized);
+                                    bank.store_account(TASK_CONTEXT_PUBKEY, context_account);
+                                }
+                                Err(e) => {
+                                    error!("Failed to process context requests: {}", e);
+                                    continue;
+                                }
+                                _ => {}
+                            }
+
+
+                        }
+                        None => {
+                            error!("Context subscription closed");
+                            break;
+                        }
+                    }
+                }
+                _ = token.cancelled() => {
+                    break;
+                }
+            }
+        }
     }
 }
