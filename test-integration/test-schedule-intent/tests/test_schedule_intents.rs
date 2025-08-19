@@ -218,7 +218,6 @@ fn schedule_intent(
         )
         .unwrap();
 
-    println!("sigasds: {}", sig);
     // In some cases it takes longer for tx to make it to baselayer
     // we need an additional wait time
     if let Some(confirmation_wait) = confirmation_wait {

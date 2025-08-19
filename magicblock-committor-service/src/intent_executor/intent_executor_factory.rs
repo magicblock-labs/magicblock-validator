@@ -31,14 +31,14 @@ impl IntentExecutorFactory for IntentExecutorFactoryImpl {
         IntentExecutorImpl<TransactionPreparatorV1, CacheTaskInfoFetcher>;
 
     fn create_instance(&self) -> Self::Executor {
-        let transaction_preaparator = TransactionPreparatorV1::new(
+        let transaction_preparator = TransactionPreparatorV1::new(
             self.rpc_client.clone(),
             self.table_mania.clone(),
             self.compute_budget_config.clone(),
         );
         IntentExecutorImpl::<TransactionPreparatorV1, CacheTaskInfoFetcher>::new(
             self.rpc_client.clone(),
-            transaction_preaparator,
+            transaction_preparator,
             self.commit_id_tracker.clone(),
         )
     }

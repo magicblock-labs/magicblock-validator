@@ -63,7 +63,7 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
         validator
     );
 
-    // Fetch the payer balance from the ephemeral validator and assert it equals 100_000
+    // Fetch the payer balance from the ephemeral validator and assert it equals 1_000_000_000
     let balance =
         expect!(ctx.fetch_ephem_account_balance(&payer.pubkey()), validator);
     assert_eq!(balance, 1_000_000_000);

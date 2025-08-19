@@ -19,7 +19,7 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         pubkeys: &[Pubkey],
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
 
-    // Fetches rent reimbursement address fo pubkeys
+    // Fetches rent reimbursement address for pubkeys
     async fn fetch_rent_reimbursements(
         &self,
         pubkeys: &[Pubkey],
@@ -31,7 +31,7 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
 
 const NUM_FETCH_RETRIES: NonZeroUsize =
     unsafe { NonZeroUsize::new_unchecked(5) };
-const MUTEX_POISONED_MSG: &str = "CommitIdTrackerImpl mutex poisoned!";
+const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
 
 pub struct CacheTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
@@ -211,7 +211,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         &self,
         pubkeys: &[Pubkey],
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-        let rent_reimbursments = Self::fetch_metadata_with_retries(
+        let rent_reimbursements = Self::fetch_metadata_with_retries(
             &self.rpc_client,
             pubkeys,
             NUM_FETCH_RETRIES,
@@ -221,7 +221,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         .map(|metadata| metadata.rent_payer)
         .collect();
 
-        Ok(rent_reimbursments)
+        Ok(rent_reimbursements)
     }
 
     /// Returns current commit id without raising priority

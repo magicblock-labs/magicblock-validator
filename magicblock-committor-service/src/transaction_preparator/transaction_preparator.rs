@@ -82,7 +82,7 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         tx_strategy: &TransactionStrategy,
         intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
-        // If message won't fit, there's no reason to prepare anythimg
+        // If message won't fit, there's no reason to prepare anything
         // Fail early
         {
             let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(

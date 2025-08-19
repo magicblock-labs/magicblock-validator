@@ -15,7 +15,7 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub enum ExecutionOutput {
-    // TODO: with arrival of challange window remove SingleStage
+    // TODO: with arrival of challenge window remove SingleStage
     // Protocol requires 2 stage: Commit, Finalize
     // SingleStage - optimization for timebeing
     SingleStage(Signature),
