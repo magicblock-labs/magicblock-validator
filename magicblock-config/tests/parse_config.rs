@@ -2,10 +2,11 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsConfig, AllowedProgram, CommitStrategyConfig, EphemeralConfig,
-    GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
-    MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteConfig,
-    RpcConfig, ValidatorConfig,
+    AccountsCloneConfig, AccountsConfig, AccountsDbConfig, AllowedProgram,
+    BlockSize, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
+    LedgerConfig, LedgerResumeStrategy, LifecycleMode, MetricsConfig,
+    MetricsServiceConfig, PrepareLookupTables, ProgramConfig, RemoteCluster,
+    RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use url::Url;
@@ -201,6 +202,86 @@ fn test_validator_with_base_fees() {
         }
     );
     assert_eq!(config.validator.base_fees, Some(1_000u64));
+}
+
+#[test]
+fn test_everything_defined() {
+    let toml = include_str!("fixtures/11_everything-defined.toml");
+    let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
+
+    assert_eq!(
+        config,
+        EphemeralConfig {
+            accounts: AccountsConfig {
+                lifecycle: LifecycleMode::ProgramsReplica,
+                allowed_programs: vec![AllowedProgram {
+                    id: pubkey!("wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4")
+                }],
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Always,
+                    auto_airdrop_lamports: 123,
+                },
+                max_monitored_accounts: 1_000_000,
+                remote: RemoteConfig {
+                    cluster: RemoteCluster::Custom,
+                    url: Some(
+                        Url::parse("https://api.devnet.solana.com").unwrap()
+                    ),
+                    ws_url: Some(vec![Url::parse(
+                        "wss://api.devnet.solana.com"
+                    )
+                    .unwrap()]),
+                },
+                commit: CommitStrategyConfig {
+                    frequency_millis: 600_000,
+                    compute_unit_price: 0,
+                },
+                db: AccountsDbConfig {
+                    db_size: 1_000_000_000,
+                    block_size: BlockSize::Block256,
+                    index_map_size: 1_000_000_000,
+                    max_snapshots: 10,
+                    snapshot_frequency: 60_000,
+                },
+            },
+            rpc: RpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 7799,
+                max_ws_connections: 1000,
+            },
+            geyser_grpc: GeyserGrpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 11_000
+            },
+            validator: ValidatorConfig {
+                sigverify: true,
+                millis_per_slot: 14,
+                base_fees: Some(1_000_000_000),
+                fqdn: Some("validator.example.com".to_string()),
+                country_code: CountryCode::for_alpha2("US").unwrap(),
+                claim_fees_interval_secs: 10,
+            },
+            ledger: LedgerConfig {
+                resume_strategy: LedgerResumeStrategy::Replay,
+                skip_keypair_match_check: true,
+                path: Some("ledger.example.com".to_string()),
+                size: 1_000_000_000,
+            },
+            programs: vec![ProgramConfig {
+                id: pubkey!("wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"),
+                path: "../demos/magic-worm/target/deploy/program_solana.so"
+                    .to_string(),
+            }],
+            metrics: MetricsConfig {
+                enabled: true,
+                system_metrics_tick_interval_secs: 10,
+                service: MetricsServiceConfig {
+                    port: 9999,
+                    addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                },
+            },
+        }
+    );
 }
 
 #[test]

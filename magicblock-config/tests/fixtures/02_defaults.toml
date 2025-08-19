@@ -7,7 +7,7 @@ remote.cluster = "devnet"
 # lifecycle: replica | programs-replica | ephemeral | offline
 lifecycle = "programs-replica"
 
-commit = { frequency_millis = 500, compute_unit_price = 100_000 }
+commit = { frequency-millis = 500, compute-unit-price = 100_000 }
 
 allowed-programs = []
 
@@ -15,12 +15,12 @@ allowed-programs = []
 addr = "0.0.0.0"
 port = 8899
 
-[geyser_grpc]
+[geyser-grpc]
 addr = "0.0.0.0"
 port = 10000
 
 [validator]
-millis_per_slot = 50
+millis-per-slot = 50
 sigverify = true
 
 [ledger]

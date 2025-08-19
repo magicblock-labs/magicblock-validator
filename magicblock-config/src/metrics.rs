@@ -16,6 +16,7 @@ helpers::socket_addr_config! {
 #[derive(
     Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
 )]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct MetricsConfig {
     #[derive_env_var]
     #[arg(help = "Whether to enable metrics.")]
