@@ -1,22 +1,112 @@
-use std::collections::BTreeMap;
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use magicblock_magic_program_api::TASK_CONTEXT_SIZE;
 use serde::{Deserialize, Serialize};
+use solana_log_collector::ic_msg;
+use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
-    instruction::Instruction,
+    instruction::{Instruction, InstructionError},
     pubkey::Pubkey,
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TaskRequest {
+    Schedule(ScheduleTaskRequest),
+    Cancel(CancelTaskRequest),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScheduleTaskRequest {
+    /// Unique identifier for this task
+    pub id: u64,
+    /// Unsigned instructions to execute when triggered
+    pub instructions: Vec<Instruction>,
+    /// Authority that can modify or cancel this task
+    pub authority: Pubkey,
+    /// Period of the task in milliseconds
+    pub period_millis: i64,
+    /// Number of times this task will be executed
+    pub n_executions: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CancelTaskRequest {
+    /// Unique identifier for the task to cancel
+    pub task_id: u64,
+    /// Authority that can cancel this task
+    pub authority: Pubkey,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct TaskContext {
-    /// Tree containing tasks index by their ID
-    pub tasks: BTreeMap<u64, Task>,
+    /// Tree containing the IDs of scheduled tasks.
+    pub scheduled_tasks: BTreeSet<u64>,
+    /// Tree containing task requests indexed by their ID.
+    /// Schedule and cancels requests have the same ID and are stored in the same map.
+    pub requests: BTreeMap<u64, TaskRequest>,
 }
 
 impl TaskContext {
     pub const SIZE: usize = TASK_CONTEXT_SIZE;
     pub const ZERO: [u8; Self::SIZE] = [0; Self::SIZE];
+
+    fn update_task_context<F>(
+        invoke_context: &InvokeContext,
+        context_account: &RefCell<AccountSharedData>,
+        update_fn: F,
+    ) -> Result<(), InstructionError>
+    where
+        F: FnOnce(&mut TaskContext),
+    {
+        let context_data = &mut context_account.borrow_mut();
+        ic_msg!(invoke_context, "TaskContext: {:?}", context_data.capacity());
+        ic_msg!(
+            invoke_context,
+            "TaskContext: {:?}",
+            context_data.data().len()
+        );
+        let mut context =
+            TaskContext::deserialize(context_data).map_err(|err| {
+                ic_msg!(
+                    invoke_context,
+                    "Failed to deserialize TaskContext: {}",
+                    err
+                );
+                InstructionError::GenericError
+            })?;
+        update_fn(&mut context);
+        let serialized = bincode::serialize(&context).map_err(|err| {
+            ic_msg!(invoke_context, "Failed to serialize TaskContext: {}", err);
+            InstructionError::GenericError
+        })?;
+        context_data.resize(serialized.len(), 0);
+        context_data.set_data_from_slice(&serialized);
+        Ok(())
+    }
+
+    pub fn schedule_task(
+        invoke_context: &InvokeContext,
+        context_account: &RefCell<AccountSharedData>,
+        request: ScheduleTaskRequest,
+    ) -> Result<(), InstructionError> {
+        Self::update_task_context(invoke_context, context_account, |context| {
+            context.add_schedule_request(request);
+        })
+    }
+
+    pub fn cancel_task(
+        invoke_context: &InvokeContext,
+        context_account: &RefCell<AccountSharedData>,
+        request: CancelTaskRequest,
+    ) -> Result<(), InstructionError> {
+        Self::update_task_context(invoke_context, context_account, |context| {
+            context.add_cancel_request(request);
+        })
+    }
 
     pub(crate) fn deserialize(
         data: &AccountSharedData,
@@ -28,23 +118,60 @@ impl TaskContext {
         }
     }
 
-    pub(crate) fn add_task(&mut self, task: Task) {
-        self.tasks.insert(task.id, task);
+    pub(crate) fn add_schedule_request(
+        &mut self,
+        request: ScheduleTaskRequest,
+    ) {
+        self.scheduled_tasks.insert(request.id);
+        self.requests
+            .insert(request.id, TaskRequest::Schedule(request));
     }
 
-    pub(crate) fn remove_task(&mut self, task_id: u64) -> Option<Task> {
-        self.tasks.remove(&task_id)
+    pub(crate) fn add_cancel_request(&mut self, request: CancelTaskRequest) {
+        self.requests
+            .insert(request.task_id, TaskRequest::Cancel(request));
     }
 
-    pub fn get_all_tasks(&self) -> Vec<&Task> {
-        self.tasks.values().collect()
+    pub fn remove_request(&mut self, request_id: u64) -> Option<TaskRequest> {
+        match self.requests.remove(&request_id) {
+            Some(TaskRequest::Cancel(request)) => {
+                self.scheduled_tasks.remove(&request_id);
+                Some(TaskRequest::Cancel(request))
+            }
+            _ => None,
+        }
     }
 
-    pub fn get_task(&self, task_id: u64) -> Option<&Task> {
-        self.tasks.get(&task_id)
+    pub fn get_all_requests(&self) -> Vec<&TaskRequest> {
+        self.requests.values().collect()
+    }
+
+    pub fn get_request(&self, request_id: u64) -> Option<&TaskRequest> {
+        self.requests.get(&request_id)
+    }
+
+    pub fn get_schedule_requests(&self) -> Vec<&ScheduleTaskRequest> {
+        self.requests
+            .values()
+            .filter_map(|req| match req {
+                TaskRequest::Schedule(schedule_req) => Some(schedule_req),
+                TaskRequest::Cancel(_) => None,
+            })
+            .collect()
+    }
+
+    pub fn get_cancel_requests(&self) -> Vec<&CancelTaskRequest> {
+        self.requests
+            .values()
+            .filter_map(|req| match req {
+                TaskRequest::Schedule(_) => None,
+                TaskRequest::Cancel(cancel_req) => Some(cancel_req),
+            })
+            .collect()
     }
 }
 
+// Keep the old Task struct for backward compatibility and database storage
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Task {
     /// Unique identifier for this task
@@ -73,6 +200,18 @@ impl Task {
             authority,
             period_millis,
             n_executions,
+        }
+    }
+}
+
+impl From<&ScheduleTaskRequest> for Task {
+    fn from(request: &ScheduleTaskRequest) -> Self {
+        Self {
+            id: request.id,
+            instructions: request.instructions.clone(),
+            authority: request.authority,
+            period_millis: request.period_millis,
+            n_executions: request.n_executions,
         }
     }
 }

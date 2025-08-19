@@ -178,7 +178,7 @@ pub struct MagicValidator {
     pubsub_config: PubsubConfig,
     pub transaction_status_sender: TransactionStatusSender,
     claim_fees_task: ClaimFeesTask,
-    task_scheduler_service: TaskSchedulerService,
+    task_scheduler_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl MagicValidator {
@@ -406,11 +406,6 @@ impl MagicValidator {
         );
         validator::init_validator_authority(identity_keypair);
 
-        let task_scheduler_service = TaskSchedulerService::new(
-            &config.validator_config.task_scheduler,
-            bank.clone(),
-        )?;
-
         // Make sure we process the ledger before we're open to handle
         // transactions via RPC
         let rpc_service = Self::init_json_rpc_service(
@@ -454,7 +449,7 @@ impl MagicValidator {
             transaction_listener,
             transaction_status_sender,
             claim_fees_task: ClaimFeesTask::new(),
-            task_scheduler_service,
+            task_scheduler_handle: None,
         })
     }
 
@@ -803,9 +798,13 @@ impl MagicValidator {
             .geyser_rpc_service
             .accounts_subscribe(1, TASK_CONTEXT_PUBKEY)
             .await;
-        self.task_scheduler_service
-            .start(context_sub, self.token.clone())
-            .await?;
+        self.task_scheduler_handle = Some(
+            TaskSchedulerService::new(
+                &self.config.task_scheduler,
+                self.bank.clone(),
+            )?
+            .start(context_sub, self.token.clone()),
+        );
 
         self.sample_performance_service
             .replace(SamplePerformanceService::new(

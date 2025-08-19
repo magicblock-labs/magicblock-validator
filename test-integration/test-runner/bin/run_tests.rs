@@ -684,8 +684,10 @@ fn run_schedule_intents_tests(
 
 fn run_task_scheduler_tests(
     manifest_dir: &str,
+    config: &TestConfigViaEnvVars,
 ) -> Result<Output, Box<dyn Error>> {
-    if !should_run_test("task_scheduler") {
+    const TEST_NAME: &str = "task-scheduler";
+    if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
     eprintln!("======== RUNNING TASK SCHEDULER TESTS ========");
@@ -693,45 +695,55 @@ fn run_task_scheduler_tests(
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
 
-    // Initialize only a devnet cluster for config tests
-    let mut devnet_validator = match start_validator(
+    let start_devnet_validator = || match start_validator(
         "schedule-task.devnet.toml",
         ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
         &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
-            panic!("Failed to start magicblock validator properly");
+            panic!("Failed to start devnet validator properly");
         }
     };
-    let mut ephem_validator = match start_validator(
+
+    let start_ephem_validator = || match start_validator(
         "schedule-task.ephem.toml",
         ValidatorCluster::Ephem,
         &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
-            cleanup_devnet_only(&mut devnet_validator);
             panic!("Failed to start ephemeral validator properly");
         }
     };
 
-    let test_task_scheduler_dir =
-        format!("{}/../{}", manifest_dir, "test-task-scheduler");
-    eprintln!(
-        "Running task scheduler tests in {}",
-        test_task_scheduler_dir
-    );
-    let output = match run_test(test_task_scheduler_dir, Default::default()) {
-        Ok(output) => output,
-        Err(err) => {
-            eprintln!("Failed to run task scheduler tests: {:?}", err);
-            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
-            return Err(err.into());
-        }
-    };
-    cleanup_validators(&mut ephem_validator, &mut devnet_validator);
-    Ok(output)
+    if config.run_test(TEST_NAME) {
+        eprintln!("======== RUNNING TASK SCHEDULER TESTS ========");
+
+        let mut devnet_validator = start_devnet_validator();
+        let mut ephem_validator = start_ephem_validator();
+
+        let test_dir = format!("{}/../{}", manifest_dir, "test-task-scheduler");
+        eprintln!("Running task scheduler tests in {}", test_dir);
+
+        let output = match run_test(test_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run task scheduler tests: {:?}", err);
+                cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+
+        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+        Ok(output)
+    } else {
+        let devnet_validator =
+            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let ephem_validator =
+            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
+        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+    }
 }
 
 // -----------------

@@ -7,10 +7,10 @@ use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
 
 use crate::{
     schedule_task::utils::{check_accounts_signers, check_task_context_id},
+    task_context::{ScheduleTaskRequest, TaskContext},
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
-    Task, TaskContext,
 };
 
 pub(crate) fn process_schedule_task(
@@ -98,34 +98,34 @@ pub(crate) fn process_schedule_task(
         signers,
     )?;
 
-    let task = Task::new(
-        args.task_id,
-        args.instructions,
-        *payer_pubkey,
-        args.period_millis,
-        args.n_executions,
-    );
+    let schedule_request = ScheduleTaskRequest {
+        id: args.task_id,
+        instructions: args.instructions,
+        authority: *payer_pubkey,
+        period_millis: args.period_millis,
+        n_executions: args.n_executions,
+    };
 
     let context_acc = get_instruction_account_with_idx(
         transaction_context,
         TASK_CONTEXT_IDX,
     )?;
-    let context_data = &mut context_acc.borrow_mut();
-    let mut context =
-        TaskContext::deserialize(context_data).map_err(|err| {
-            ic_msg!(
-                invoke_context,
-                "Failed to deserialize MagicContext: {}",
-                err
-            );
-            InstructionError::GenericError
-        })?;
-    context.add_task(task);
-    context_data.serialize_data(&context).map_err(|err| {
-        ic_msg!(invoke_context, "Failed to serialize TaskContext: {}", err);
+
+    TaskContext::schedule_task(invoke_context, context_acc, schedule_request)
+        .map_err(|err| {
+        ic_msg!(
+            invoke_context,
+            "ScheduleTask ERR: failed to schedule task: {}",
+            err
+        );
         InstructionError::GenericError
     })?;
-    ic_msg!(invoke_context, "Scheduled task with ID: {}", args.task_id);
+
+    ic_msg!(
+        invoke_context,
+        "Scheduled task request with ID: {}",
+        args.task_id
+    );
 
     Ok(())
 }

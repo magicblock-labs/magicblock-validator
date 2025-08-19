@@ -6,7 +6,7 @@ use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
 
 use crate::{
     schedule_task::utils::check_task_context_id,
-    task_context::TaskContext,
+    task_context::{CancelTaskRequest, TaskContext},
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
@@ -38,45 +38,33 @@ pub(crate) fn process_cancel_task(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
+    // Create cancel request
+    let cancel_request = CancelTaskRequest {
+        task_id,
+        authority: *task_authority_pubkey,
+    };
+
     // Get the task context account
     let context_acc = get_instruction_account_with_idx(
         transaction_context,
         TASK_CONTEXT_IDX,
     )?;
-    let context_data = &mut context_acc.borrow_mut();
-    let mut task_context =
-        TaskContext::deserialize(context_data).map_err(|err| {
+
+    TaskContext::cancel_task(invoke_context, context_acc, cancel_request)
+        .map_err(|err| {
             ic_msg!(
                 invoke_context,
-                "Failed to deserialize TaskContext: {}",
+                "CancelTask ERR: failed to cancel task: {}",
                 err
             );
             InstructionError::GenericError
         })?;
 
-    // Remove the task
-    let task = task_context
-        .remove_task(task_id)
-        .ok_or(InstructionError::InvalidArgument)?;
-
-    // Validate that the signer is the task authority
-    if task.authority != *task_authority_pubkey {
-        ic_msg!(
-            invoke_context,
-            "Task authority mismatch: expected {}, got {}",
-            task.authority,
-            task_authority_pubkey
-        );
-        return Err(InstructionError::InvalidArgument);
-    }
-
-    // Update the account data
-    context_data.serialize_data(&task_context).map_err(|err| {
-        ic_msg!(invoke_context, "Failed to serialize TaskContext: {}", err);
-        InstructionError::GenericError
-    })?;
-
-    ic_msg!(invoke_context, "Successfully cancelled task {}", task_id);
+    ic_msg!(
+        invoke_context,
+        "Successfully added cancel request for task {}",
+        task_id
+    );
 
     Ok(())
 }
