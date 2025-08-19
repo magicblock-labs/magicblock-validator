@@ -7,9 +7,9 @@ use std::{
 use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LedgerResumeStrategy, LifecycleMode, MagicBlockConfig,
-    MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteCluster,
-    RemoteConfig, RpcConfig, ValidatorConfig,
+    LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
+    LifecycleMode, MagicBlockConfig, MetricsConfig, MetricsServiceConfig,
+    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -117,8 +117,8 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("VALIDATOR_COUNTRY_CODE", "CY");
     env::set_var("VALIDATOR_FQDN", "magicblock.er.com");
     env::set_var("LEDGER_SIZE", "123123");
-    env::set_var("LEDGER_RESUME_STRATEGY", "resume-only");
-    env::set_var("LEDGER_STARTING_SLOT", "1");
+    env::set_var("LEDGER_RESUME_STRATEGY_VARIANT", "resume-only");
+    env::set_var("LEDGER_RESUME_STRATEGY_RESET_SLOT", "1");
     env::set_var("LEDGER_SKIP_KEYPAIR_MATCH_CHECK", "true");
     env::set_var("LEDGER_PATH", "/hello/world");
     env::set_var("METRICS_ENABLED", "false");
@@ -166,8 +166,10 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 ..Default::default()
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::ResumeOnly,
-                starting_slot: Some(1),
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    variant: LedgerResumeStrategyType::ResumeOnly,
+                    reset_slot: Some(1),
+                },
                 skip_keypair_match_check: true,
                 path: Some("/hello/world".to_string()),
                 size: 123123

@@ -10,4 +10,4 @@ lifecycle = "replica"
 sigverify = false
 
 [ledger]
-resume-strategy = "replay"
+resume-strategy = { variant = "replay" }

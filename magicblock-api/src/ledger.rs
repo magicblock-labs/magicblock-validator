@@ -20,18 +20,19 @@ pub(crate) fn init(
     ledger_path: PathBuf,
     ledger_config: &LedgerConfig,
 ) -> ApiResult<(Ledger, Slot)> {
-    let last_slot = if ledger_config.resume_strategy.is_resuming() {
-        // Save the last slot from the previous ledger to restart from it
-        let previous_ledger = Ledger::open(ledger_path.as_path())?;
-        previous_ledger.get_max_blockhash().map(|(slot, _)| slot)?
-    } else {
-        ledger_config.starting_slot.unwrap_or_default()
+    let resume_strategy = &ledger_config.resume_strategy();
+    let starting_slot = match resume_strategy {
+        LedgerResumeStrategy::Resume(_) => {
+            let previous_ledger = Ledger::open(ledger_path.as_path())?;
+            previous_ledger.get_max_blockhash().map(|(slot, _)| slot)?
+        }
+        LedgerResumeStrategy::Reset(slot, _) => *slot,
     };
 
-    if ledger_config.resume_strategy.is_removing_ledger() {
+    if resume_strategy.is_removing_ledger() {
         remove_ledger_directory_if_exists(
             ledger_path.as_path(),
-            &ledger_config.resume_strategy,
+            resume_strategy,
         )
         .map_err(|err| {
             error!(
@@ -47,7 +48,7 @@ pub(crate) fn init(
 
     fs::create_dir_all(&ledger_path)?;
 
-    Ok((Ledger::open(ledger_path.as_path())?, last_slot))
+    Ok((Ledger::open(ledger_path.as_path())?, starting_slot))
 }
 
 // -----------------
@@ -185,6 +186,7 @@ fn remove_ledger_directory_if_exists(
     if !dir.exists() {
         return Ok(());
     }
+    debug!("Strategy: {:?}", resume_strategy);
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
 
@@ -192,19 +194,25 @@ fn remove_ledger_directory_if_exists(
             && !resume_strategy.is_removing_accountsdb()
         {
             // The entry is accounts db
+            debug!("Skipping accounts db: {}", entry.path().display());
             continue;
         } else if let Ok(validator_keypair_path) = validator_keypair_path(dir) {
             // The entry is the validator keypair
-            if resume_strategy.is_removing_validator_keypair()
+            if resume_strategy.is_removing_ledger()
                 && validator_keypair_path
                     .file_name()
                     .map(|key_path| key_path == entry.file_name())
                     .unwrap_or(false)
             {
+                debug!(
+                    "Skipping validator keypair: {}",
+                    entry.path().display()
+                );
                 continue;
             }
         }
 
+        debug!("Removing ledger entry: {}", entry.path().display());
         if entry.metadata()?.is_dir() {
             fs::remove_dir_all(entry.path())?
         } else {

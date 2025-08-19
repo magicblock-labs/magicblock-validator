@@ -64,8 +64,7 @@ fn write(
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Reset,
-        None,
+        LedgerResumeStrategy::Reset(0, true),
         false,
     );
 
@@ -103,8 +102,7 @@ fn read(
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Replay,
-        None,
+        LedgerResumeStrategy::Resume(true),
         false,
     );
 
@@ -186,8 +184,7 @@ fn _diagnose_read() {
         &ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Replay,
-        None,
+        LedgerResumeStrategy::Resume(true),
         false,
     );
 }

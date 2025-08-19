@@ -21,7 +21,7 @@ max-snapshots = 7
 snapshot-frequency = 1024
 
 [ledger]
-resume-strategy = "reset"
+resume-strategy = { variant = "reset" }
 
 [rpc]
 port = 8899

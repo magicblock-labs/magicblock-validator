@@ -2,11 +2,6 @@ use cleanass::{assert, assert_eq};
 use magicblock_config::LedgerResumeStrategy;
 use std::{path::Path, process::Child};
 
-use crate::{
-    setup_offline_validator, wait_for_ledger_persist,
-    wait_for_next_slot_after_account_snapshot, SNAPSHOT_FREQUENCY,
-    TMP_DIR_LEDGER,
-};
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
@@ -14,19 +9,32 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
 };
+use test_ledger_restore::{
+    setup_offline_validator, wait_for_ledger_persist,
+    wait_for_next_slot_after_account_snapshot, SNAPSHOT_FREQUENCY,
+    TMP_DIR_LEDGER,
+};
 
-pub fn test_resume_strategy(
-    strategy: LedgerResumeStrategy,
-    starting_slot: Option<u64>,
-) {
+#[test]
+fn restore_ledger_reset() {
+    eprintln!("\n================\nReset\n================\n");
+    test_resume_strategy(LedgerResumeStrategy::Reset(1000, true));
+    eprintln!("\n================\nReset with accounts\n================\n");
+    test_resume_strategy(LedgerResumeStrategy::Reset(1000, false));
+    eprintln!("\n================\nResume\n================\n");
+    test_resume_strategy(LedgerResumeStrategy::Resume(true));
+    eprintln!("\n================\nReplay\n================\n");
+    test_resume_strategy(LedgerResumeStrategy::Resume(false));
+}
+
+pub fn test_resume_strategy(strategy: LedgerResumeStrategy) {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let mut kp = Keypair::new();
 
     let (mut validator, slot, signature) = write(&ledger_path, &mut kp);
     validator.kill().unwrap();
 
-    let mut validator =
-        read(&ledger_path, &kp, &signature, slot, strategy, starting_slot);
+    let mut validator = read(&ledger_path, &kp, &signature, slot, strategy);
     validator.kill().unwrap();
 }
 
@@ -36,8 +44,7 @@ pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {
         ledger_path,
         None,
         Some(millis_per_slot),
-        LedgerResumeStrategy::Reset,
-        None,
+        LedgerResumeStrategy::Reset(0, true),
         false,
     );
 
@@ -69,27 +76,24 @@ pub fn read(
     signature: &Signature,
     slot: u64,
     strategy: LedgerResumeStrategy,
-    starting_slot: Option<u64>,
 ) -> Child {
     let (_, mut validator, ctx) = setup_offline_validator(
         ledger_path,
         None,
         None,
         strategy.clone(),
-        starting_slot,
         false,
     );
 
     let validator_slot = expect!(ctx.get_slot_ephem(), validator);
-    let target_slot = if strategy.is_resuming() {
-        slot
-    } else {
-        starting_slot.unwrap_or(0)
+    let target_slot = match strategy {
+        LedgerResumeStrategy::Reset(starting_slot, _) => starting_slot,
+        LedgerResumeStrategy::Resume(_) => slot,
     };
     assert!(
         validator_slot >= target_slot,
         cleanup(&mut validator),
-        "{}: {} < {}",
+        "{:?}: {} < {}",
         strategy,
         validator_slot,
         target_slot
@@ -103,17 +107,21 @@ pub fn read(
         1_111_111
     };
     assert_eq!(
-        lamports, target_lamports,
+        lamports,
+        target_lamports,
         cleanup(&mut validator),
-        "{}", strategy
+        "{:?} (removing ADB: {})",
+        strategy,
+        strategy.is_removing_accountsdb()
     );
 
     assert!(
         ctx.get_transaction_ephem(signature).is_err()
             == strategy.is_removing_ledger(),
         cleanup(&mut validator),
-        "{}",
-        strategy
+        "{:?} (removing ledger: {})",
+        strategy,
+        strategy.is_removing_ledger()
     );
 
     validator

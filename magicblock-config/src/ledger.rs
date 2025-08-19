@@ -3,6 +3,8 @@ use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
 use strum::Display;
 
+use crate::errors::{ConfigError, ConfigResult};
+
 // Default desired ledger size 100 GiB
 pub const DEFAULT_LEDGER_SIZE_BYTES: u64 = 100 * 1024 * 1024 * 1024;
 
@@ -17,15 +19,9 @@ pub struct LedgerConfig {
     /// Reset will remove the existing ledger.
     /// Resume only will remove the ledger and resume from the last slot.
     /// Replay and resume will preserve the existing ledger and replay it and then resume.
-    #[derive_env_var]
-    #[serde(default)]
-    pub resume_strategy: LedgerResumeStrategy,
-    /// The slot to start from.
-    /// If left empty it will start from the last slot found in the ledger and default to 0.
-    #[derive_env_var]
-    #[clap_from_serde_skip]
-    #[serde(default)]
-    pub starting_slot: Option<u64>,
+    #[serde(rename = "resume-strategy")]
+    #[command(flatten)]
+    pub resume_strategy_config: LedgerResumeStrategyConfig,
     /// Checks that the validator keypair matches the one in the ledger.
     #[derive_env_var]
     #[arg(
@@ -49,14 +45,102 @@ pub struct LedgerConfig {
     pub size: u64,
 }
 
+impl LedgerConfig {
+    pub fn resume_strategy(&self) -> LedgerResumeStrategy {
+        match self.resume_strategy_config.variant {
+            LedgerResumeStrategyType::Reset => LedgerResumeStrategy::Reset(
+                self.resume_strategy_config.reset_slot.unwrap_or(0),
+                true,
+            ),
+            LedgerResumeStrategyType::ResetWithAccounts => {
+                LedgerResumeStrategy::Reset(
+                    self.resume_strategy_config.reset_slot.unwrap_or(0),
+                    false,
+                )
+            }
+            LedgerResumeStrategyType::ResumeOnly => {
+                LedgerResumeStrategy::Resume(false)
+            }
+            LedgerResumeStrategyType::Replay => {
+                LedgerResumeStrategy::Resume(true)
+            }
+        }
+    }
+}
+
 impl Default for LedgerConfig {
     fn default() -> Self {
         Self {
-            resume_strategy: LedgerResumeStrategy::default(),
-            starting_slot: None,
+            resume_strategy_config: LedgerResumeStrategyConfig::default(),
             skip_keypair_match_check: false,
             path: Default::default(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
+        }
+    }
+}
+
+impl From<LedgerResumeStrategy> for LedgerResumeStrategyConfig {
+    fn from(strategy: LedgerResumeStrategy) -> Self {
+        match strategy {
+            LedgerResumeStrategy::Reset(slot, remove_accounts) => {
+                LedgerResumeStrategyConfig {
+                    variant: if remove_accounts {
+                        LedgerResumeStrategyType::Reset
+                    } else {
+                        LedgerResumeStrategyType::ResetWithAccounts
+                    },
+                    reset_slot: Some(slot),
+                }
+            }
+            LedgerResumeStrategy::Resume(replay) => {
+                LedgerResumeStrategyConfig {
+                    variant: if replay {
+                        LedgerResumeStrategyType::Replay
+                    } else {
+                        LedgerResumeStrategyType::ResumeOnly
+                    },
+                    reset_slot: None,
+                }
+            }
+        }
+    }
+}
+
+#[clap_prefix("ledger-resume-strategy")]
+#[clap_from_serde]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    Args,
+    Mergeable,
+)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct LedgerResumeStrategyConfig {
+    #[derive_env_var]
+    #[serde(default)]
+    pub variant: LedgerResumeStrategyType,
+    #[derive_env_var]
+    #[clap_from_serde_skip]
+    #[serde(default)]
+    pub reset_slot: Option<u64>,
+}
+
+impl LedgerResumeStrategyConfig {
+    pub fn validate_resume_strategy(&self) -> ConfigResult<()> {
+        use LedgerResumeStrategyType::*;
+        match self.variant {
+            Replay | ResumeOnly if self.reset_slot.is_some() => {
+                Err(ConfigError::InvalidResumeStrategy(
+                    "reset-slot is only allowed when resume-strategy is reset"
+                        .to_string(),
+                ))
+            }
+            _ => Ok(()),
         }
     }
 }
@@ -75,41 +159,44 @@ impl Default for LedgerConfig {
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]
 #[value(rename_all = "kebab-case")]
-pub enum LedgerResumeStrategy {
+pub enum LedgerResumeStrategyType {
     Reset,
-    DiscardResume,
-    AccountsOnly,
+    ResetWithAccounts,
     ResumeOnly,
     #[default]
     Replay,
 }
 
+/// Validated strategies with the relevant arguments
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LedgerResumeStrategy {
+    /// Reset the ledger and optionally the accountsdb.
+    /// (slot, remove_accounts)
+    Reset(u64, bool),
+    /// Resume from the last slot found in the ledger.
+    /// (replay)
+    Resume(bool),
+}
+
 impl LedgerResumeStrategy {
-    /// Whether the ledger should be resumed.
-    /// This assumes that a ledger exists.
     pub fn is_resuming(&self) -> bool {
-        matches!(self, Self::DiscardResume | Self::ResumeOnly | Self::Replay)
+        matches!(self, Self::Resume(_))
     }
 
     pub fn is_removing_ledger(&self) -> bool {
-        matches!(self, Self::Reset | Self::DiscardResume | Self::AccountsOnly)
+        matches!(self, Self::Reset(_, _))
     }
 
     pub fn is_removing_accountsdb(&self) -> bool {
-        matches!(self, Self::Reset | Self::DiscardResume)
-    }
-
-    pub fn is_removing_validator_keypair(&self) -> bool {
-        matches!(self, Self::Reset | Self::DiscardResume | Self::AccountsOnly)
+        matches!(self, Self::Reset(_, true))
     }
 
     pub fn is_replaying(&self) -> bool {
-        matches!(self, Self::Replay)
+        matches!(self, Self::Resume(true))
     }
 
     pub fn should_override_bank_slot(&self) -> bool {
-        // Strategies that resume but remove the ledger must override, or the start slot will be 0
-        matches!(self, Self::DiscardResume)
+        matches!(self, Self::Reset(_, _))
     }
 }
 
@@ -125,10 +212,35 @@ mod tests {
     use crate::EphemeralConfig;
 
     #[test]
+    fn test_resume_strategy_validate() {
+        let test_cases = vec![
+            (LedgerResumeStrategyType::Replay, None, true),
+            (LedgerResumeStrategyType::Replay, Some(1), false),
+            (LedgerResumeStrategyType::Reset, None, true),
+            (LedgerResumeStrategyType::Reset, Some(1), true),
+            (LedgerResumeStrategyType::ResumeOnly, None, true),
+            (LedgerResumeStrategyType::ResumeOnly, Some(1), false),
+            (LedgerResumeStrategyType::ResetWithAccounts, None, true),
+            (LedgerResumeStrategyType::ResetWithAccounts, Some(1), true),
+        ];
+
+        for (resume_strategy_type, reset_slot, is_valid) in test_cases {
+            let config = LedgerResumeStrategyConfig {
+                variant: resume_strategy_type,
+                reset_slot,
+            };
+
+            assert_eq!(config.validate_resume_strategy().is_ok(), is_valid);
+        }
+    }
+
+    #[test]
     fn test_merge_with_default() {
         let mut config = LedgerConfig {
-            resume_strategy: LedgerResumeStrategy::Replay,
-            starting_slot: None,
+            resume_strategy_config: LedgerResumeStrategyConfig {
+                variant: LedgerResumeStrategyType::Replay,
+                reset_slot: None,
+            },
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
@@ -145,8 +257,10 @@ mod tests {
     fn test_merge_default_with_non_default() {
         let mut config = LedgerConfig::default();
         let other = LedgerConfig {
-            resume_strategy: LedgerResumeStrategy::Replay,
-            starting_slot: None,
+            resume_strategy_config: LedgerResumeStrategyConfig {
+                variant: LedgerResumeStrategyType::Replay,
+                reset_slot: None,
+            },
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
@@ -160,16 +274,20 @@ mod tests {
     #[test]
     fn test_merge_non_default() {
         let mut config = LedgerConfig {
-            resume_strategy: LedgerResumeStrategy::AccountsOnly,
-            starting_slot: None,
+            resume_strategy_config: LedgerResumeStrategyConfig {
+                variant: LedgerResumeStrategyType::ResetWithAccounts,
+                reset_slot: None,
+            },
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
         let original_config = config.clone();
         let other = LedgerConfig {
-            resume_strategy: LedgerResumeStrategy::ResumeOnly,
-            starting_slot: None,
+            resume_strategy_config: LedgerResumeStrategyConfig {
+                variant: LedgerResumeStrategyType::ResumeOnly,
+                reset_slot: None,
+            },
             skip_keypair_match_check: true,
             path: Some("ledger2.example.com".to_string()),
             size: 10000,
@@ -184,8 +302,7 @@ mod tests {
     fn test_serde() {
         let toml_str = r#"
 [ledger]
-resume-strategy = "replay"
-starting-slot = 0
+resume-strategy = { variant = "replay", reset-slot = 0 }
 skip-keypair-match-check = true
 path = "ledger.example.com"
 size = 1000000000
@@ -195,8 +312,10 @@ size = 1000000000
         assert_eq!(
             config.ledger,
             LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::Replay,
-                starting_slot: Some(0),
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    variant: LedgerResumeStrategyType::Replay,
+                    reset_slot: Some(0),
+                },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
@@ -205,7 +324,7 @@ size = 1000000000
 
         let toml_str = r#"
 [ledger]
-resume-strategy = "resume-only"
+resume-strategy = { variant = "resume-only" }
 size = 1000000000
 "#;
 
@@ -213,8 +332,10 @@ size = 1000000000
         assert_eq!(
             config.ledger,
             LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::ResumeOnly,
-                starting_slot: None,
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    variant: LedgerResumeStrategyType::ResumeOnly,
+                    reset_slot: None,
+                },
                 skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,
@@ -223,7 +344,7 @@ size = 1000000000
 
         let toml_str = r#"
 [ledger]
-resume-strategy = "reset"
+resume-strategy = { variant = "reset" }
 size = 1000000000
 "#;
 
@@ -231,8 +352,10 @@ size = 1000000000
         assert_eq!(
             config.ledger,
             LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::Reset,
-                starting_slot: None,
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    variant: LedgerResumeStrategyType::Reset,
+                    reset_slot: None,
+                },
                 skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,

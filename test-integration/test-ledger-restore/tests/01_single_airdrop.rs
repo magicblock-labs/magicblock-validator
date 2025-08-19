@@ -34,8 +34,7 @@ fn write_ledger(
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Reset,
-        None,
+        LedgerResumeStrategy::Reset(0, true),
         false,
     );
 
@@ -63,8 +62,7 @@ fn read_ledger(
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Replay,
-        None,
+        LedgerResumeStrategy::Resume(true),
         false,
     );
 

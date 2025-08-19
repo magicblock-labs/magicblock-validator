@@ -5,7 +5,8 @@ use integration_test_tools::{
 };
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, EphemeralConfig, LedgerConfig,
-    LedgerResumeStrategy, LifecycleMode, RemoteCluster, RemoteConfig,
+    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
+    RemoteCluster, RemoteConfig,
 };
 use solana_sdk::{signature::Keypair, signer::Signer, system_instruction};
 use test_tools_core::init_logger;
@@ -34,7 +35,10 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
             ..Default::default()
         },
         ledger: LedgerConfig {
-            resume_strategy: LedgerResumeStrategy::Reset,
+            resume_strategy_config: LedgerResumeStrategyConfig {
+                variant: LedgerResumeStrategyType::Reset,
+                reset_slot: Some(0),
+            },
             ..Default::default()
         },
         ..Default::default()

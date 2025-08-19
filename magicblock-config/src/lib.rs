@@ -106,6 +106,10 @@ impl EphemeralConfig {
         }
 
         config.post_parse();
+        config
+            .ledger
+            .resume_strategy_config
+            .validate_resume_strategy()?;
 
         Ok(config)
     }
@@ -243,8 +247,10 @@ mod tests {
                 claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::Replay,
-                starting_slot: Some(1),
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    variant: LedgerResumeStrategyType::Replay,
+                    reset_slot: Some(1),
+                },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
@@ -325,8 +331,10 @@ mod tests {
                 claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::Replay,
-                starting_slot: Some(1),
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    variant: LedgerResumeStrategyType::Replay,
+                    reset_slot: Some(1),
+                },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
@@ -404,8 +412,10 @@ mod tests {
                 claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::ResumeOnly,
-                starting_slot: Some(1),
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    variant: LedgerResumeStrategyType::ResumeOnly,
+                    reset_slot: Some(1),
+                },
                 skip_keypair_match_check: true,
                 path: Some("ledger2.example.com".to_string()),
                 size: 100000,
@@ -476,8 +486,10 @@ mod tests {
                 claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::Replay,
-                starting_slot: Some(2),
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    variant: LedgerResumeStrategyType::Replay,
+                    reset_slot: Some(2),
+                },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,

@@ -38,11 +38,10 @@ country-code = "US"
 claim-fees-interval-secs = 10
 
 [ledger]
-resume-strategy = "replay"
+resume-strategy = { variant = "replay", reset-slot = 100 }
 skip-keypair-match-check = true
 path = "ledger.example.com"
 size = 1000000000
-starting-slot = 100
 
 [[program]]
 id = "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"

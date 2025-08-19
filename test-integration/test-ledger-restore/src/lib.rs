@@ -1,5 +1,3 @@
-pub mod resume_strategies;
-
 use solana_rpc_client::rpc_client::RpcClient;
 use std::{path::Path, process::Child, thread::sleep, time::Duration};
 
@@ -13,7 +11,8 @@ use integration_test_tools::{
 };
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
-    LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
+    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
+    ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
     DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::state::FlexiCounter;
@@ -41,7 +40,6 @@ pub fn setup_offline_validator(
     programs: Option<Vec<ProgramConfig>>,
     millis_per_slot: Option<u64>,
     resume_strategy: LedgerResumeStrategy,
-    starting_slot: Option<u64>,
     skip_keypair_match_check: bool,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let mut accounts_config = AccountsConfig {
@@ -61,12 +59,10 @@ pub fn setup_offline_validator(
 
     let config = EphemeralConfig {
         ledger: LedgerConfig {
-            resume_strategy,
-            starting_slot,
+            resume_strategy_config: resume_strategy.into(),
             skip_keypair_match_check,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
-            ..Default::default()
         },
         accounts: accounts_config.clone(),
         programs,
@@ -110,15 +106,20 @@ pub fn setup_validator_with_local_remote(
 
     let programs = resolve_programs(programs);
 
-    let resume_strategy = if reset {
-        LedgerResumeStrategy::Reset
+    let resume_strategy_config = if reset {
+        LedgerResumeStrategyConfig {
+            variant: LedgerResumeStrategyType::Reset,
+            reset_slot: None,
+        }
     } else {
-        LedgerResumeStrategy::Replay
+        LedgerResumeStrategyConfig {
+            variant: LedgerResumeStrategyType::Replay,
+            reset_slot: None,
+        }
     };
     let config = EphemeralConfig {
         ledger: LedgerConfig {
-            resume_strategy,
-            starting_slot: None,
+            resume_strategy_config,
             skip_keypair_match_check,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,

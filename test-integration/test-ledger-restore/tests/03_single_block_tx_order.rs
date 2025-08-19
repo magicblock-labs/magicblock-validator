@@ -82,8 +82,7 @@ fn write(
         ledger_path,
         None,
         Some(SLOT_MS),
-        LedgerResumeStrategy::Reset,
-        None,
+        LedgerResumeStrategy::Reset(0, true),
         false,
     );
 
@@ -162,8 +161,7 @@ fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
         ledger_path,
         None,
         Some(SLOT_MS),
-        LedgerResumeStrategy::Replay,
-        None,
+        LedgerResumeStrategy::Resume(true),
         false,
     );
 

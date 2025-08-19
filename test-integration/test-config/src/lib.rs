@@ -10,8 +10,8 @@ use integration_test_tools::{
 };
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, EphemeralConfig, LedgerConfig,
-    LedgerResumeStrategy, LifecycleMode, PrepareLookupTables, ProgramConfig,
-    RemoteCluster, RemoteConfig,
+    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
+    PrepareLookupTables, ProgramConfig, RemoteCluster, RemoteConfig,
 };
 use program_flexi_counter::instruction::{
     create_add_ix, create_delegate_ix, create_init_ix,
@@ -58,7 +58,10 @@ pub fn start_validator_with_clone_config(
             ..Default::default()
         },
         ledger: LedgerConfig {
-            resume_strategy: LedgerResumeStrategy::Reset,
+            resume_strategy_config: LedgerResumeStrategyConfig {
+                variant: LedgerResumeStrategyType::Reset,
+                reset_slot: Some(0),
+            },
             ..Default::default()
         },
         ..Default::default()
