@@ -7,7 +7,6 @@ use solana_sdk::{
     pubkey::Pubkey,
     system_program,
 };
-use test_tools::validator::PersisterStub;
 
 use self::magicblock_processor::Entrypoint;
 use super::*;

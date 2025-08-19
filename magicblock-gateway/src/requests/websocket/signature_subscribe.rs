@@ -1,4 +1,8 @@
-use crate::requests::params::SerdeSignature;
+use crate::{
+    encoder::{Encoder, TransactionResultEncoder},
+    requests::params::SerdeSignature,
+    state::subscriptions::SubscriptionsDb,
+};
 
 use super::prelude::*;
 
@@ -16,10 +20,18 @@ impl WsDispatcher {
         let signature = signature.ok_or_else(|| {
             RpcError::invalid_params("missing or invalid signature")
         })?;
-        let (id, subscribed) = self
-            .subscriptions
-            .subscribe_to_signature(signature.0, self.chan.clone())
-            .await;
+        let id = SubscriptionsDb::next_subid();
+        let status = self.transactions.get(&signature.0).and_then(|status| {
+            TransactionResultEncoder.encode(status.slot, &status.result, id)
+        });
+        let (id, subscribed) = if let Some(payload) = status {
+            self.chan.tx.send(payload).await;
+            (id, Default::default())
+        } else {
+            self.subscriptions
+                .subscribe_to_signature(signature.0, self.chan.clone())
+                .await
+        };
         self.signatures.push(signature.0, subscribed);
         Ok(SubResult::SubId(id))
     }

@@ -19,7 +19,6 @@ use magicblock_program::{
     magicblock_instruction::accept_scheduled_commits, MagicContext,
 };
 use solana_sdk::account::ReadableAccount;
-use solana_transaction::sanitized::SanitizedTransaction;
 use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;
@@ -54,18 +53,7 @@ pub async fn init_slot_ticker(
             // 1. Send the transaction to move the scheduled commits from the MagicContext
             //    to the global ScheduledCommit store
             let tx = accept_scheduled_commits(ledger.latest_blockhash());
-            let Ok(transaction) = SanitizedTransaction::try_from_legacy_transaction(
-                tx,
-                &Default::default(),
-            ).inspect_err(
-                |err| error!("scheduled commit transaction failed to sanitize, should never happen: {err}")) else {
-                continue;
-            };
-            let Some(result) = transaction_scheduler.execute(transaction).await
-            else {
-                warn!("validator is shutting down, cannot execute transaction");
-                continue;
-            };
+            let result = transaction_scheduler.execute(tx).await;
             if let Err(err) = result {
                 error!("Failed to accept scheduled commits: {:?}", err);
             } else if let Some(committor_service) = committor_service.as_ref() {

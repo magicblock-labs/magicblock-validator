@@ -17,7 +17,7 @@ pub fn build_svm_env(
 ) -> TransactionProcessingEnvironment<'static> {
     // We have a static rent which is setup once at startup,
     // and never changes afterwards. For now we use the same
-    // values as the vanial solana validator (default())
+    // values as the vanila solana validator (default())
     let rent_collector = Box::leak(Box::new(RentCollector::default()));
 
     TransactionProcessingEnvironment {

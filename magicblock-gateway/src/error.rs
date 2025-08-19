@@ -1,6 +1,7 @@
 use std::{error::Error, fmt::Display};
 
 use json::Serialize;
+use solana_transaction_error::TransactionError;
 
 const TRANSACTION_SIMULATION: i16 = -32002;
 const TRANSACTION_VERIFICATION: i16 = -32003;
@@ -37,6 +38,12 @@ impl From<hyper::Error> for RpcError {
 impl From<json::Error> for RpcError {
     fn from(value: json::Error) -> Self {
         Self::parse_error(value)
+    }
+}
+
+impl From<TransactionError> for RpcError {
+    fn from(value: TransactionError) -> Self {
+        Self::transaction_verification(value)
     }
 }
 

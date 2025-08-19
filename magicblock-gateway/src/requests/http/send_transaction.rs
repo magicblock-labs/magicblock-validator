@@ -74,13 +74,9 @@ impl HttpDispatcher {
         }
 
         if config.skip_preflight {
-            self.transactions_scheduler.schedule(transaction).await;
+            self.transactions_scheduler.schedule(transaction).await?;
         } else {
-            self.transactions_scheduler
-                .execute(transaction)
-                .await
-                .ok_or_else(|| RpcError::internal("server is shutting down"))?
-                .map_err(RpcError::transaction_simulation)?;
+            self.transactions_scheduler.execute(transaction).await?;
         }
         Ok(ResponsePayload::encode_no_context(&request.id, signature))
     }
