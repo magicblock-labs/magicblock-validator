@@ -165,8 +165,7 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
     // - init
     // - delegate
     // - commit (original from while validator was running)
-    // - finalize
-    assert_counter_commits_on_chain(&ctx, &mut validator, &payer.pubkey(), 4);
+    assert_counter_commits_on_chain(&ctx, &mut validator, &payer.pubkey(), 3);
 
     let slot = wait_for_ledger_persist(&mut validator);
     (validator, slot)
@@ -209,7 +208,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
 
     // Ensure that at this point we still only have three chain transactions
     // for the counter, showing that the commits didn't get sent to chain again.
-    assert_counter_commits_on_chain(&ctx, &mut validator, payer, 4);
+    assert_counter_commits_on_chain(&ctx, &mut validator, payer, 3);
 
     validator
 }
