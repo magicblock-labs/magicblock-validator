@@ -14,9 +14,6 @@ pub enum TaskSchedulerError {
         solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
     ),
 
-    #[error("JSON serialization error: {0}")]
-    SerdeJson(#[from] serde_json::Error),
-
     #[error("Bincode serialization error: {0}")]
     Bincode(#[from] bincode::Error),
 
