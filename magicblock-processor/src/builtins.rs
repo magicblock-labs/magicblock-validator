@@ -1,14 +1,9 @@
 use magicblock_program::magicblock_processor;
-use solana_program_runtime::{
-    invoke_context::BuiltinFunctionWithContext, loaded_programs::ProgramCache,
-};
+use solana_program_runtime::invoke_context::BuiltinFunctionWithContext;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{
     address_lookup_table, bpf_loader_upgradeable, compute_budget,
 };
-use solana_svm::transaction_processor::TransactionBatchProcessor;
-
-use crate::executor::SimpleForkGraph;
 
 pub struct BuiltinPrototype {
     pub program_id: Pubkey,

@@ -15,6 +15,7 @@ use magicblock_committor_service::{
     persist::BundleSignatureRow, ChangedAccount, Changeset, ChangesetCommittor,
     ChangesetMeta,
 };
+use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_program::{
     register_scheduled_commit_sent, FeePayerAccount, Pubkey, SentCommit,
     TransactionScheduler,
@@ -28,9 +29,9 @@ use crate::{
 };
 
 pub struct RemoteScheduledCommitsProcessor {
-    transaction_scheduler: TransactionScheduler,
+    remote_transaction_scheduler: TransactionScheduler,
+    internal_transaction_scheduler: TransactionSchedulerHandle,
     cloned_accounts: CloneOutputMap,
-    accountsdb: Arc<AccountsDb>,
 }
 
 #[async_trait]
@@ -45,7 +46,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
         CC: ChangesetCommittor,
     {
         let scheduled_commits =
-            self.transaction_scheduler.take_scheduled_commits();
+            self.remote_transaction_scheduler.take_scheduled_commits();
 
         if scheduled_commits.is_empty() {
             return Ok(());
@@ -179,23 +180,23 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
     }
 
     fn scheduled_commits_len(&self) -> usize {
-        self.transaction_scheduler.scheduled_commits_len()
+        self.remote_transaction_scheduler.scheduled_commits_len()
     }
 
     fn clear_scheduled_commits(&self) {
-        self.transaction_scheduler.clear_scheduled_commits();
+        self.remote_transaction_scheduler.clear_scheduled_commits();
     }
 }
 
 impl RemoteScheduledCommitsProcessor {
     pub fn new(
-        accountsdb: Arc<AccountsDb>,
         cloned_accounts: CloneOutputMap,
+        internal_transaction_scheduler: TransactionSchedulerHandle,
     ) -> Self {
         Self {
-            accountsdb,
             cloned_accounts,
-            transaction_scheduler: TransactionScheduler::default(),
+            remote_transaction_scheduler: TransactionScheduler::default(),
+            internal_transaction_scheduler,
         }
     }
     fn fetch_cloned_account(
@@ -218,7 +219,7 @@ impl RemoteScheduledCommitsProcessor {
         // We process the changeset on a separate task in order to not block
         // the validator (slot advance) itself
         let changeset_committor = changeset_committor.clone();
-        let bank = self.accountsdb.clone();
+        let txn_scheduler = self.internal_transaction_scheduler.clone();
 
         tokio::task::spawn(async move {
             // Create one sent commit transaction per bundle in our validator
@@ -289,19 +290,15 @@ impl RemoteScheduledCommitsProcessor {
                         {
                             sent_commit.chain_signatures = chain_signatures;
                             register_scheduled_commit_sent(sent_commit);
-                            todo!()
-                            // match execute_legacy_transaction(
-                            //     commit_sent_transaction,
-                            //     &bank,
-                            //     transaction_status_sender.as_ref()
-                            // ) {
-                            // Ok(signature) => debug!(
-                            //     "Signaled sent commit with internal signature: {:?}",
-                            //     signature
-                            // ),
-                            // Err(err) => {
-                            //     error!("Failed to signal sent commit via transaction: {}", err);
-                            // }}
+                            let result = txn_scheduler
+                                .execute(commit_sent_transaction)
+                                .await;
+                            match result {
+                                Ok(_) => debug!("Signaled sent commit with internal signature"),
+                                Err(err) => {
+                                    error!("Failed to signal sent commit via transaction: {}", err);
+                                }
+                            }
                         } else {
                             error!(
                                 "BUG: Failed to get sent commit for bundle id {} that should have been added",
