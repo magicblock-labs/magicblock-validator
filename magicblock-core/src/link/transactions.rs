@@ -106,10 +106,8 @@ impl TransactionSchedulerHandle {
         txn: impl SanitizeableTransaction,
     ) -> Result<(), TransactionError> {
         let transaction = txn.sanitize()?;
-        let txn = ProcessableTransaction {
-            transaction,
-            mode: TransactionProcessingMode::Execution(None),
-        };
+        let mode = TransactionProcessingMode::Execution(None);
+        let txn = ProcessableTransaction { transaction, mode };
         let r = self.0.send(txn).await;
         r.map_err(|_| TransactionError::ClusterMaintenance)
     }
@@ -119,9 +117,8 @@ impl TransactionSchedulerHandle {
         &self,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        let (tx, rx) = oneshot::channel();
-        let mode = TransactionProcessingMode::Execution(Some(tx));
-        self.send(txn, mode, rx).await?
+        let mode = |tx| TransactionProcessingMode::Execution(Some(tx));
+        self.send(txn, mode).await?
     }
 
     /// Send transaction for simulation and await for result
@@ -129,9 +126,8 @@ impl TransactionSchedulerHandle {
         &self,
         txn: impl SanitizeableTransaction,
     ) -> Result<TransactionSimulationResult, TransactionError> {
-        let (tx, rx) = oneshot::channel();
-        let mode = TransactionProcessingMode::Simulation(tx);
-        self.send(txn, mode, rx).await
+        let mode = TransactionProcessingMode::Simulation;
+        self.send(txn, mode).await
     }
 
     /// Send transaction to be replayed on top of
@@ -140,18 +136,19 @@ impl TransactionSchedulerHandle {
         &self,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        let (tx, rx) = oneshot::channel();
-        let mode = TransactionProcessingMode::Replay(tx);
-        self.send(txn, mode, rx).await?
+        let mode = TransactionProcessingMode::Replay;
+        self.send(txn, mode).await?
     }
 
+    /// Sanitize and send transaction for processing and await for result
     async fn send<R>(
         &self,
         txn: impl SanitizeableTransaction,
-        mode: TransactionProcessingMode,
-        rx: oneshot::Receiver<R>,
+        mode: fn(oneshot::Sender<R>) -> TransactionProcessingMode,
     ) -> Result<R, TransactionError> {
         let transaction = txn.sanitize()?;
+        let (tx, rx) = oneshot::channel();
+        let mode = mode(tx);
         let txn = ProcessableTransaction { transaction, mode };
         self.0
             .send(txn)
