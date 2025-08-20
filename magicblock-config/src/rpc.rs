@@ -86,8 +86,6 @@ fn default_port() -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_config_helpers::Merge;
-
     use super::*;
 
     #[test]

@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use log::error;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
@@ -14,7 +16,7 @@ use magicblock_core::link::{
     accounts::{AccountWithSlot, LockedAccount},
     transactions::{
         TransactionExecutionResult, TransactionSimulationResult,
-        TxnExecutionResultTx, TxnSimulationResultTx,
+        TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
     },
 };
 
@@ -143,7 +145,7 @@ impl super::TransactionExecutor {
             },
         };
         let signature = *txn.signature();
-        let status = magicblock_core::link::transactions::TransactionStatus {
+        let status = TransactionStatus {
             signature,
             slot: self.processor.slot,
             result: TransactionExecutionResult {
@@ -178,7 +180,7 @@ impl super::TransactionExecutor {
             self.processor.slot,
             txn,
             meta,
-            self.index.load(std::sync::atomic::Ordering::Relaxed),
+            self.index.fetch_add(1, Ordering::Relaxed),
         ) {
             error!("failed to commit transaction to the ledger: {error}");
             return;

@@ -4,7 +4,7 @@ use hyper::{body::Incoming, Request, Response};
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
     accounts::EnsureAccountsTx, transactions::TransactionSchedulerHandle,
-    RpcChannelEndpoints,
+    DispatchEndpoints,
 };
 use magicblock_ledger::Ledger;
 use solana_pubkey::Pubkey;
@@ -34,7 +34,7 @@ pub(crate) struct HttpDispatcher {
 impl HttpDispatcher {
     pub(super) fn new(
         state: &SharedState,
-        channels: &RpcChannelEndpoints,
+        channels: &DispatchEndpoints,
     ) -> Arc<Self> {
         Arc::new(Self {
             identity: state.identity,

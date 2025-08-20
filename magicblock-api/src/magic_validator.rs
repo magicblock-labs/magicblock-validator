@@ -86,7 +86,6 @@ use crate::{
         self, read_validator_keypair_from_ledger,
         write_validator_keypair_to_ledger,
     },
-    program_loader::load_programs,
     slot::advance_slot_and_update_ledger,
     tickers::{
         init_commit_accounts_ticker, init_slot_ticker,
@@ -219,11 +218,6 @@ impl MagicValidator {
         let faucet_keypair =
             funded_faucet(&bank, ledger.ledger_path().as_path())?;
 
-        load_programs(&accountsdb, &programs_to_load(&config.programs))
-            .map_err(|err| {
-                ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
-            })?;
-
         let metrics_config = &config.metrics;
         let accountsdb = Arc::new(accountsdb);
 
@@ -261,7 +255,7 @@ impl MagicValidator {
             // We'll kill/refresh one connection every 50 minutes
             Duration::from_secs(60 * 50),
         );
-        let (rpc_channels, validator_channels) = link();
+        let (dispatch, validator_channels) = link();
 
         let accountsdb_account_provider =
             AccountsDbProvider::new(accountsdb.clone());
@@ -271,7 +265,7 @@ impl MagicValidator {
             RemoteAccountUpdatesClient::new(&remote_account_updates_worker);
         let account_dumper_bank = AccountDumperBank::new(
             accountsdb.clone(),
-            rpc_channels.transaction_scheduler.clone(),
+            dispatch.transaction_scheduler.clone(),
         );
         let blacklisted_accounts = standard_blacklisted_accounts(
             &validator_pubkey,
@@ -363,6 +357,11 @@ impl MagicValidator {
             latest_block: ledger.latest_block().clone(),
             environment: build_svm_env(&accountsdb, latest_block.blockhash, 0),
         };
+        txn_scheduler_state
+            .load_upgradeable_programs(&programs_to_load(&config.programs))
+            .map_err(|err| {
+                ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
+            })?;
         let transaction_scheduler =
             TransactionScheduler::new(1, txn_scheduler_state);
         transaction_scheduler.spawn();
@@ -376,7 +375,7 @@ impl MagicValidator {
         let rpc = JsonRpcServer::new(
             &config.rpc,
             shared_state,
-            &rpc_channels,
+            &dispatch,
             token.clone(),
         )
         .await?;
@@ -406,7 +405,7 @@ impl MagicValidator {
             claim_fees_task: ClaimFeesTask::new(),
             rpc_handle,
             identity: validator_pubkey,
-            transaction_scheduler: rpc_channels.transaction_scheduler,
+            transaction_scheduler: dispatch.transaction_scheduler,
         })
     }
 
@@ -784,7 +783,7 @@ impl MagicValidator {
         Ok(())
     }
 
-    pub fn stop(&mut self) {
+    pub async fn stop(mut self) {
         self.exit.store(true, Ordering::Relaxed);
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
@@ -820,6 +819,7 @@ impl MagicValidator {
         if let Err(err) = self.ledger.shutdown(false) {
             error!("Failed to shutdown ledger: {:?}", err);
         }
+        let _ = self.rpc_handle.await;
     }
 
     pub fn ledger(&self) -> &Ledger {

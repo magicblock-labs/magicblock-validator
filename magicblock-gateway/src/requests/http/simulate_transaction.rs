@@ -38,7 +38,11 @@ impl HttpDispatcher {
             .replace_recent_blockhash
             .then(|| self.blocks.get_latest().into());
 
-        let result = self.transactions_scheduler.simulate(transaction).await?;
+        let result = self
+            .transactions_scheduler
+            .simulate(transaction)
+            .await
+            .map_err(RpcError::transaction_simulation)?;
 
         let converter = |(index, ixs): (usize, InnerInstructions)| {
             StatusInnerInstructions {

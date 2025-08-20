@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+bincode = { workspace = true }
 log = { workspace = true }
 parking_lot = { workspace = true }
 tokio = { workspace = true }
@@ -35,3 +36,7 @@ solana-system-program = { workspace = true }
 solana-transaction = { workspace = true }
 solana-transaction-status = { workspace = true }
 
+[dev-dependencies]
+guinea = { workspace = true }
+solana-signer = { workspace = true }
+test-kit = { workspace = true }

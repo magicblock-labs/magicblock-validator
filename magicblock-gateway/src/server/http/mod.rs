@@ -12,7 +12,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use magicblock_core::link::RpcChannelEndpoints;
+use magicblock_core::link::DispatchEndpoints;
 
 use crate::{error::RpcError, state::SharedState, RpcResult};
 
@@ -31,7 +31,7 @@ impl HttpServer {
         addr: SocketAddr,
         state: &SharedState,
         cancel: CancellationToken,
-        channels: &RpcChannelEndpoints,
+        dispatch: &DispatchEndpoints,
     ) -> RpcResult<Self> {
         let socket =
             TcpListener::bind(addr).await.map_err(RpcError::internal)?;
@@ -39,7 +39,7 @@ impl HttpServer {
 
         Ok(Self {
             socket,
-            dispatcher: HttpDispatcher::new(state, channels),
+            dispatcher: HttpDispatcher::new(state, dispatch),
             cancel,
             shutdown,
             shutdown_rx,

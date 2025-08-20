@@ -1,7 +1,10 @@
 use assert_matches::assert_matches;
 use log::*;
 use magicblock_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
-use magicblock_program::validator;
+use magicblock_program::{
+    test_utils::ensure_started_validator,
+    validator::{self, validator_authority_id},
+};
 use solana_sdk::{
     account::{Account, ReadableAccount},
     bpf_loader_upgradeable,
@@ -12,13 +15,16 @@ use solana_sdk::{
     message::Message,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
+    rent::Rent,
     signature::Keypair,
     signer::Signer,
     system_program,
     transaction::{SanitizedTransaction, Transaction},
 };
+use test_kit::ExecutionTestEnv;
+use utils::LUZIFER;
 
-use crate::utils::{fund_luzifer, SOLX_EXEC, SOLX_IDL, SOLX_PROG};
+use crate::utils::{SOLX_EXEC, SOLX_IDL, SOLX_PROG};
 
 mod utils;
 
@@ -80,38 +86,40 @@ async fn verified_tx_to_clone_executable_from_devnet_as_upgrade(
 
 #[tokio::test]
 async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
-    let tx_processor = transactions_processor();
-    fund_luzifer(&*tx_processor);
+    ensure_started_validator(&mut Default::default());
+    let test_env = ExecutionTestEnv::new();
+    test_env.fund_account(LUZIFER, u64::MAX / 2);
+    test_env.fund_account(validator_authority_id(), u64::MAX / 2);
 
-    tx_processor.bank().advance_slot(); // We don't want to stay on slot 0
+    test_env.advance_slot(); // We don't want to stay on slot 0
 
     // 1. Exec Clone Transaction
     {
-        let slot = tx_processor.bank().slot();
-        let tx = verified_tx_to_clone_executable_from_devnet_first_deploy(
+        let slot = test_env.accountsdb.slot();
+        let txn = verified_tx_to_clone_executable_from_devnet_first_deploy(
             &SOLX_PROG,
             slot,
-            tx_processor.bank().last_blockhash(),
+            test_env.ledger.latest_blockhash(),
         )
         .await;
-        let result = tx_processor.process(vec![tx]).unwrap();
-
-        let (_, exec_details) = result.transactions.values().next().unwrap();
-        log_exec_details(exec_details);
+        test_env
+            .execute_transaction(txn)
+            .await
+            .expect("failed to execute clone transaction for SOLX");
     }
 
     // 2. Verify that all accounts were added to the validator
     {
         let solx_prog =
-            tx_processor.bank().get_account(&SOLX_PROG).unwrap().into();
+            test_env.accountsdb.get_account(&SOLX_PROG).unwrap().into();
         trace!("SolxProg account: {:#?}", solx_prog);
 
         let solx_exec =
-            tx_processor.bank().get_account(&SOLX_EXEC).unwrap().into();
+            test_env.accountsdb.get_account(&SOLX_EXEC).unwrap().into();
         trace!("SolxExec account: {:#?}", solx_exec);
 
         let solx_idl =
-            tx_processor.bank().get_account(&SOLX_IDL).unwrap().into();
+            test_env.accountsdb.get_account(&SOLX_IDL).unwrap().into();
         trace!("SolxIdl account: {:#?}", solx_idl);
 
         assert_matches!(
@@ -155,7 +163,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
             } => {
                 assert_eq!(lamports, 6264000);
                 assert_eq!(data.len(), 772);
-                assert_eq!(owner, elfs::solanax::id());
+                assert_eq!(owner, SOLX_PROG);
                 assert_eq!(rent_epoch, u64::MAX);
             }
         );
@@ -163,88 +171,78 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
 
     // 3. Run a transaction against the cloned program
     {
-        let (tx, SolanaxPostAccounts { author, post }) =
-            create_solx_send_post_transaction(tx_processor.bank());
-        let sig = *tx.signature();
+        let (txn, SolanaxPostAccounts { author, post }) =
+            create_solx_send_post_transaction(&test_env);
+        let sig = *txn.signature();
 
-        let result = tx_processor.process_sanitized(vec![tx]).unwrap();
-        assert_eq!(result.len(), 1);
+        assert_eq!(txn.signatures().len(), 2);
+        assert_eq!(txn.message().account_keys().len(), 4);
 
-        // Transaction
-        let (tx, exec_details) = result.transactions.get(&sig).unwrap();
-
-        log_exec_details(exec_details);
-        assert!(exec_details.status.is_ok());
-        assert_eq!(tx.signatures().len(), 2);
-        assert_eq!(tx.message().account_keys().len(), 4);
+        test_env
+            .execute_transaction(txn)
+            .await
+            .expect("failed to execute SOLX send post transaction");
 
         // Signature Status
-        let sig_status = tx_processor.bank().get_signature_status(&sig);
+        let sig_status =
+            test_env.ledger.get_transaction_status(sig, 0).unwrap();
         assert!(sig_status.is_some());
-        assert_matches!(sig_status.as_ref().unwrap(), Ok(()));
 
         // Accounts checks
-        let author_acc = tx_processor.bank().get_account(&author).unwrap();
+        let author_acc = test_env.accountsdb.get_account(&author).unwrap();
         assert_eq!(author_acc.data().len(), 0);
         assert_eq!(author_acc.owner(), &system_program::ID);
         assert_eq!(author_acc.lamports(), LAMPORTS_PER_SOL);
 
-        let post_acc = tx_processor.bank().get_account(&post).unwrap();
+        let post_acc = test_env.accountsdb.get_account(&post).unwrap();
         assert_eq!(post_acc.data().len(), 1180);
-        assert_eq!(post_acc.owner(), &elfs::solanax::ID);
+        assert_eq!(post_acc.owner(), &SOLX_PROG);
         assert_eq!(post_acc.lamports(), 9103680);
     }
 
     // 4. Exec Upgrade Transactions
     {
-        let slot = tx_processor.bank().slot();
-        let tx = verified_tx_to_clone_executable_from_devnet_as_upgrade(
+        let slot = test_env.accountsdb.slot();
+        let txn = verified_tx_to_clone_executable_from_devnet_as_upgrade(
             &SOLX_PROG,
             slot,
-            tx_processor.bank().last_blockhash(),
+            test_env.ledger.latest_blockhash(),
         )
         .await;
-        let result = tx_processor.process(vec![tx]).unwrap();
-
-        let (_, exec_details) = result.transactions.values().next().unwrap();
-        log_exec_details(exec_details);
+        test_env
+            .execute_transaction(txn)
+            .await
+            .expect("failed to execute solx upgrade transaction");
     }
 
     // 5. Run a transaction against the upgraded program
     {
         // For an upgraded program: `effective_slot = deployed_slot + 1`
         // Therefore to activate it we need to advance a slot
-        tx_processor.bank().advance_slot();
+        test_env.advance_slot();
 
-        let (tx, SolanaxPostAccounts { author, post }) =
-            create_solx_send_post_transaction(tx_processor.bank());
-        let sig = *tx.signature();
+        let (txn, SolanaxPostAccounts { author, post }) =
+            create_solx_send_post_transaction(&test_env);
+        let sig = *txn.signature();
+        assert_eq!(txn.signatures().len(), 2);
+        assert_eq!(txn.message().account_keys().len(), 4);
 
-        let result = tx_processor.process_sanitized(vec![tx]).unwrap();
-        assert_eq!(result.len(), 1);
-
-        // Transaction
-        let (tx, exec_details) = result.transactions.get(&sig).unwrap();
-
-        log_exec_details(exec_details);
-        assert!(exec_details.status.is_ok());
-        assert_eq!(tx.signatures().len(), 2);
-        assert_eq!(tx.message().account_keys().len(), 4);
+        test_env.execute_transaction(txn).await.expect("failed to re-run SOLX send and post transaction against an upgraded program");
 
         // Signature Status
-        let sig_status = tx_processor.bank().get_signature_status(&sig);
+        let sig_status =
+            test_env.ledger.get_transaction_status(sig, 0).unwrap();
         assert!(sig_status.is_some());
-        assert_matches!(sig_status.as_ref().unwrap(), Ok(()));
 
         // Accounts checks
-        let author_acc = tx_processor.bank().get_account(&author).unwrap();
+        let author_acc = test_env.accountsdb.get_account(&author).unwrap();
         assert_eq!(author_acc.data().len(), 0);
         assert_eq!(author_acc.owner(), &system_program::ID);
         assert_eq!(author_acc.lamports(), LAMPORTS_PER_SOL - 2);
 
-        let post_acc = tx_processor.bank().get_account(&post).unwrap();
+        let post_acc = test_env.accountsdb.get_account(&post).unwrap();
         assert_eq!(post_acc.data().len(), 1180);
-        assert_eq!(post_acc.owner(), &elfs::solanax::ID);
+        assert_eq!(post_acc.owner(), &SOLX_PROG);
         assert_eq!(post_acc.lamports(), 9103680);
     }
 }
@@ -255,22 +253,21 @@ pub struct SolanaxPostAccounts {
     pub author: Pubkey,
 }
 pub fn create_solx_send_post_transaction(
-    bank: &Bank,
+    test_env: &ExecutionTestEnv,
 ) -> (SanitizedTransaction, SolanaxPostAccounts) {
     let accounts = vec![
-        create_funded_account(
-            bank,
-            Some(Rent::default().minimum_balance(1180)),
-        ),
-        create_funded_account(bank, Some(LAMPORTS_PER_SOL)),
+        test_env.create_account(Rent::default().minimum_balance(1180), 0),
+        test_env.create_account(LAMPORTS_PER_SOL, 0),
     ];
     let post = &accounts[0];
     let author = &accounts[1];
-    let instruction =
-        create_solx_send_post_instruction(&elfs::solanax::id(), &accounts);
+    let instruction = create_solx_send_post_instruction(&SOLX_PROG, &accounts);
     let message = Message::new(&[instruction], Some(&author.pubkey()));
-    let transaction =
-        Transaction::new(&[author, post], message, bank.last_blockhash());
+    let transaction = Transaction::new(
+        &[author, post],
+        message,
+        test_env.ledger.latest_blockhash(),
+    );
     (
         SanitizedTransaction::try_from_legacy_transaction(
             transaction,

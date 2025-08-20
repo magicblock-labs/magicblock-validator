@@ -12,7 +12,7 @@ use crate::state::{
 
 use magicblock_core::link::{
     accounts::AccountUpdateRx, blocks::BlockUpdateRx,
-    transactions::TransactionStatusRx, RpcChannelEndpoints,
+    transactions::TransactionStatusRx, DispatchEndpoints,
 };
 
 pub(crate) struct EventProcessor {
@@ -25,7 +25,7 @@ pub(crate) struct EventProcessor {
 }
 
 impl EventProcessor {
-    fn new(channels: &RpcChannelEndpoints, state: &SharedState) -> Self {
+    fn new(channels: &DispatchEndpoints, state: &SharedState) -> Self {
         Self {
             subscriptions: state.subscriptions.clone(),
             transactions: state.transactions.clone(),
@@ -38,7 +38,7 @@ impl EventProcessor {
 
     pub(crate) fn start(
         state: &SharedState,
-        channels: &RpcChannelEndpoints,
+        channels: &DispatchEndpoints,
         instances: usize,
         cancel: CancellationToken,
     ) {

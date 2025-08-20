@@ -11,10 +11,6 @@ use solana_svm::transaction_processor::TransactionProcessingEnvironment;
 
 type WorkerId = u8;
 
-mod builtins;
-mod executor;
-pub mod scheduler;
-
 /// Initialize an SVM enviroment for transaction processing
 pub fn build_svm_env(
     accountsdb: &AccountsDb,
@@ -57,3 +53,8 @@ pub fn build_svm_env(
         epoch_total_stake: 0,
     }
 }
+
+mod builtins;
+mod executor;
+pub mod loader;
+pub mod scheduler;
