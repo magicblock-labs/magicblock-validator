@@ -168,6 +168,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
             }
         );
     }
+    test_env.advance_slot();
 
     // 3. Run a transaction against the cloned program
     {
@@ -198,6 +199,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
         assert_eq!(post_acc.owner(), &SOLX_PROG);
         assert_eq!(post_acc.lamports(), 9103680);
     }
+    test_env.advance_slot();
 
     // 4. Exec Upgrade Transactions
     {
@@ -236,7 +238,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
         let author_acc = test_env.accountsdb.get_account(&author).unwrap();
         assert_eq!(author_acc.data().len(), 0);
         assert_eq!(author_acc.owner(), &system_program::ID);
-        assert_eq!(author_acc.lamports(), LAMPORTS_PER_SOL - 2);
+        assert_eq!(author_acc.lamports(), LAMPORTS_PER_SOL);
 
         let post_acc = test_env.accountsdb.get_account(&post).unwrap();
         assert_eq!(post_acc.data().len(), 1180);

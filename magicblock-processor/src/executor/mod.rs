@@ -23,19 +23,34 @@ use crate::{
     builtins::BUILTINS, scheduler::state::TransactionSchedulerState, WorkerId,
 };
 
+/// Isolated SVM worker, the only entity responsible for processing transactions
 pub(super) struct TransactionExecutor {
+    /// SVM worker ID
     id: WorkerId,
+    /// Global accounts database
     accountsdb: Arc<AccountsDb>,
+    /// Global ledger of blocks/transactions
     ledger: Arc<Ledger>,
+    /// Internal solana SVM entrypoint
     processor: TransactionBatchProcessor<SimpleForkGraph>,
+    /// Immutable configuration for transaction processing, set at startup
     config: Box<TransactionProcessingConfig<'static>>,
+    /// Globaly shared state of the latest block, updated by the ledger
     block: LatestBlock,
+    /// Reusable SVM environment for transaction processing
     environment: TransactionProcessingEnvironment<'static>,
+    /// A channel from TransactionScheduler, the only source of transactions to process
     rx: TransactionToProcessRx,
+    /// A channel to forward transaction execution status to downstream consumers (RPC/Geyser)
     transaction_tx: TransactionStatusTx,
+    /// A channel to forward account state updates to downstream consumers (RPC/Geyser)
     accounts_tx: AccountUpdateTx,
+    /// A back channel to communicate workder readiness to
+    /// process more transactions back to the scheduler
     ready_tx: Sender<WorkerId>,
+    /// Synchronization lock to stop all processing during critical operations
     sync: StWLock,
+    /// Atomically incremented intra-slot index of transactions
     // TODO(bmuddha): get rid of explicit indexing, once the
     // new ledger is implemented (with implicit indexing based
     // on the position of transaction in the ledger file)
@@ -152,15 +167,11 @@ impl TransactionExecutor {
                 }
                 // A new block has been produced, the source is the Ledger itself
                 _ = self.block.changed() => {
-                    let block = self.block.load();
-                    // most of the execution environment is immutable, with an exception
-                    // of the blockhash, which we update here with every new block
-                    self.environment.blockhash = block.blockhash;
-                    self.processor.slot = block.slot;
-                    self.set_sysvars(&block);
                     // explicitly release the lock in a fair manner, allowing
                     // any pending lock acquisition request to succeed
                     RwLockReadGuard::unlock_fair(_guard);
+                    // update slot relevant state
+                    self.transition_to_new_slot();
                     // and then re-acquire the lock for another slot duration
                     _guard = self.sync.read();
                 }
@@ -173,12 +184,23 @@ impl TransactionExecutor {
         info!("transaction executor {} has terminated", self.id)
     }
 
+    /// Update slot related slot to work with latest produced block
+    fn transition_to_new_slot(&mut self) {
+        let block = self.block.load();
+        // most of the execution environment is immutable, with an exception
+        // of the blockhash, which we update here with every new block
+        self.environment.blockhash = block.blockhash;
+        self.processor.slot = block.slot;
+        self.set_sysvars(&block);
+    }
+
     /// Set sysvars, which are relevant in the context of ER, currently those are:
     /// - Clock
     /// - SlotHashes
     ///
     /// everything else, like Rent, EpochSchedule, StakeHistory, etc.
     /// either is immutable or doesn't pertain to the ER operation
+    #[inline]
     fn set_sysvars(&self, block: &LatestBlockInner) {
         // SAFETY:
         // unwrap here is safe, as we don't have any code which might panic while holding

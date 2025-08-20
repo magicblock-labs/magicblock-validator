@@ -5,15 +5,15 @@ use magicblock_core::{
     link::{
         link,
         transactions::{
-            SanitizeableTransaction, TransactionProcessingMode,
-            TransactionResult, TransactionSchedulerHandle,
+            SanitizeableTransaction, TransactionResult,
+            TransactionSchedulerHandle,
         },
         DispatchEndpoints,
     },
     magic_program::Pubkey,
     Slot,
 };
-use magicblock_ledger::{Ledger, SignatureInfosForAddress};
+use magicblock_ledger::Ledger;
 use magicblock_processor::{
     build_svm_env,
     scheduler::{state::TransactionSchedulerState, TransactionScheduler},
@@ -21,9 +21,7 @@ use magicblock_processor::{
 use solana_account::AccountSharedData;
 use solana_keypair::Keypair;
 use solana_program::{
-    hash::Hasher,
-    instruction::{AccountMeta, Instruction},
-    native_token::LAMPORTS_PER_SOL,
+    hash::Hasher, instruction::Instruction, native_token::LAMPORTS_PER_SOL,
 };
 use solana_signature::Signature;
 pub use solana_signer::Signer;
