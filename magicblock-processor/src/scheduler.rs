@@ -1,17 +1,21 @@
-use std::sync::{atomic::AtomicUsize, Arc};
+use std::sync::{atomic::AtomicUsize, Arc, RwLock};
 
 use log::info;
 use magicblock_core::link::transactions::{
     ProcessableTransaction, TransactionToProcessRx,
 };
 use magicblock_ledger::LatestBlock;
+use solana_program_runtime::loaded_programs::ProgramCache;
 use state::TransactionSchedulerState;
 use tokio::{
     runtime::Builder,
     sync::mpsc::{channel, Receiver, Sender},
 };
 
-use crate::{executor::TransactionExecutor, WorkerId};
+use crate::{
+    executor::{SimpleForkGraph, TransactionExecutor},
+    WorkerId,
+};
 
 /// Global (internal) Transaction Scheduler. A single entrypoint for transaction processing
 pub struct TransactionScheduler {
@@ -22,7 +26,9 @@ pub struct TransactionScheduler {
     ready_rx: Receiver<WorkerId>,
     /// List of channels to communicate with SVM workers (executors)
     executors: Vec<Sender<ProcessableTransaction>>,
-    /// Glabally shared latest block info (only used to reset the index for now)
+    /// Globally shared loaded programs cache, which is accessed by all SVM workers
+    program_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
+    /// Glabally shared latest block info
     latest_block: LatestBlock,
     /// Intra-slot transaction index used by SVM workers (to be phased out with new ledger)
     index: Arc<AtomicUsize>,
@@ -68,6 +74,7 @@ impl TransactionScheduler {
             ready_rx,
             executors,
             latest_block: state.latest_block,
+            program_cache,
             index,
         }
     }
@@ -107,8 +114,7 @@ impl TransactionScheduler {
                     // scheduler when account level locking is implemented
                 }
                 _ = self.latest_block.changed() => {
-                    // when a new block/slot starts, reset the transaction index
-                    self.index.store(0, std::sync::atomic::Ordering::Relaxed);
+                    self.transition_to_new_slot();
                 }
                 else => {
                     // transactions channel has been closed, the system is shutting down
@@ -117,6 +123,15 @@ impl TransactionScheduler {
             }
         }
         info!("transaction scheduler has terminated");
+    }
+
+    /// Update slot related slot to work with latest produced block
+    fn transition_to_new_slot(&self) {
+        // when a new block/slot starts, reset the transaction index
+        self.index.store(0, std::sync::atomic::Ordering::Relaxed);
+        // re-root the program cache to newly produced slot
+        self.program_cache.write().unwrap().latest_root_slot =
+            self.latest_block.load().slot;
     }
 }
 
