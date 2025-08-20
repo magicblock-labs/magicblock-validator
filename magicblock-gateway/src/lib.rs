@@ -1,6 +1,6 @@
 use error::RpcError;
 use magicblock_config::RpcConfig;
-use magicblock_core::link::RpcChannelEndpoints;
+use magicblock_core::link::DispatchEndpoints;
 use processor::EventProcessor;
 use server::{http::HttpServer, websocket::WebsocketServer};
 use state::SharedState;
@@ -26,16 +26,16 @@ impl JsonRpcServer {
     pub async fn new(
         config: &RpcConfig,
         state: SharedState,
-        channels: &RpcChannelEndpoints,
+        dispatch: &DispatchEndpoints,
         cancel: CancellationToken,
     ) -> RpcResult<Self> {
         let mut addr = config.socket_addr();
-        EventProcessor::start(&state, channels, 1, cancel.clone());
+        EventProcessor::start(&state, dispatch, 1, cancel.clone());
         let http = HttpServer::new(
             config.socket_addr(),
             &state,
             cancel.clone(),
-            channels,
+            dispatch,
         )
         .await?;
         addr.set_port(config.port + 1);

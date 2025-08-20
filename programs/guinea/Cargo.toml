@@ -1,0 +1,18 @@
+[package]
+name = "guinea"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "guinea"
+
+[dependencies]
+bincode = { workspace = true }
+serde = { workspace = true }
+
+solana-program = { workspace = true }

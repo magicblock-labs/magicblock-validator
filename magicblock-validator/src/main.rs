@@ -106,4 +106,5 @@ async fn main() {
     if let Err(err) = Shutdown::wait().await {
         error!("Failed to gracefully shutdown: {}", err);
     }
+    api.stop().await;
 }

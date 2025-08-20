@@ -21,6 +21,7 @@ solana-sdk = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+test-kit = { workspace = true }
 assert_matches = { workspace = true }
 rand = { workspace = true }
 

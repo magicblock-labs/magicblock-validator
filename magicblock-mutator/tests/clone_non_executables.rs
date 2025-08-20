@@ -7,8 +7,10 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_program,
     transaction::Transaction,
 };
+use test_kit::{skip_if_devnet_down, ExecutionTestEnv};
+use utils::LUZIFER;
 
-use crate::utils::{fund_luzifer, SOLX_POST, SOLX_PROG, SOLX_TIPS};
+use crate::utils::{SOLX_POST, SOLX_PROG, SOLX_TIPS};
 
 mod utils;
 
@@ -41,25 +43,24 @@ async fn verified_tx_to_clone_non_executable_from_devnet(
 
 #[tokio::test]
 async fn clone_non_executable_without_data() {
-    init_logger!();
     skip_if_devnet_down!();
+    let test_env = ExecutionTestEnv::new();
 
-    let tx_processor = transactions_processor();
-    init_started_validator(tx_processor.bank());
-    fund_luzifer(&*tx_processor);
+    test_env.fund_account(LUZIFER, u64::MAX / 2);
+    let slot = test_env.advance_slot();
 
-    let slot = tx_processor.bank().slot();
-    let tx = verified_tx_to_clone_non_executable_from_devnet(
+    let txn = verified_tx_to_clone_non_executable_from_devnet(
         &SOLX_TIPS,
         slot,
-        tx_processor.bank().last_blockhash(),
+        test_env.ledger.latest_blockhash(),
     )
     .await;
-    let result = tx_processor.process(vec![tx]).unwrap();
+    test_env
+        .execute_transaction(txn)
+        .await
+        .expect("failed to clone non-exec account from devnet");
 
-    let (_, exec_details) = result.transactions.values().next().unwrap();
-    log_exec_details(exec_details);
-    let solx_tips = tx_processor.bank().get_account(&SOLX_TIPS).unwrap().into();
+    let solx_tips = test_env.accountsdb.get_account(&SOLX_TIPS).unwrap().into();
 
     trace!("SolxTips account: {:#?}", solx_tips);
 
@@ -82,25 +83,23 @@ async fn clone_non_executable_without_data() {
 
 #[tokio::test]
 async fn clone_non_executable_with_data() {
-    init_logger!();
     skip_if_devnet_down!();
+    let test_env = ExecutionTestEnv::new();
 
-    let tx_processor = transactions_processor();
-    init_started_validator(tx_processor.bank());
-    fund_luzifer(&*tx_processor);
-
-    let slot = tx_processor.bank().slot();
-    let tx = verified_tx_to_clone_non_executable_from_devnet(
+    test_env.fund_account(LUZIFER, u64::MAX / 2);
+    let slot = test_env.advance_slot();
+    let txn = verified_tx_to_clone_non_executable_from_devnet(
         &SOLX_POST,
         slot,
-        tx_processor.bank().last_blockhash(),
+        test_env.ledger.latest_blockhash(),
     )
     .await;
-    let result = tx_processor.process(vec![tx]).unwrap();
+    test_env
+        .execute_transaction(txn)
+        .await
+        .expect("failed to clone non-exec account with data from devnet");
 
-    let (_, exec_details) = result.transactions.values().next().unwrap();
-    log_exec_details(exec_details);
-    let solx_post = tx_processor.bank().get_account(&SOLX_POST).unwrap().into();
+    let solx_post = test_env.accountsdb.get_account(&SOLX_POST).unwrap().into();
 
     trace!("SolxPost account: {:#?}", solx_post);
 
