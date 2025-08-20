@@ -30,9 +30,9 @@ where
                 };
 
                 let commit_strategy = if uses_lookup_tables {
-                    CommitStrategy::Args
-                } else {
                     CommitStrategy::ArgsWithLookupTable
+                } else {
+                    CommitStrategy::Args
                 };
 
                 if let Err(err) = self.persistor.set_commit_strategy(
@@ -55,9 +55,9 @@ where
             PersistorContext::PersistStrategy { uses_lookup_tables } => {
                 let BufferTask::Commit(commit_task) = task;
                 let commit_strategy = if uses_lookup_tables {
-                    CommitStrategy::FromBuffer
-                } else {
                     CommitStrategy::FromBufferWithLookupTable
+                } else {
+                    CommitStrategy::FromBuffer
                 };
 
                 if let Err(err) = self.persistor.set_commit_strategy(

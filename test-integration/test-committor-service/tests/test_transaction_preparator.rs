@@ -1,22 +1,26 @@
-use borsh::BorshDeserialize;
-use dlp::args::Context;
 use crate::common::{
     create_committed_account, generate_random_bytes, TestFixture,
 };
-use magicblock_committor_service::tasks::task_strategist::{TaskStrategist, TransactionStrategy};
-use magicblock_committor_service::tasks::tasks::{ArgsTask, BaseTask, BufferTask, CommitTask, FinalizeTask, L1ActionTask, UndelegateTask};
+use borsh::BorshDeserialize;
+use dlp::args::Context;
+use magicblock_committor_program::Chunks;
+use magicblock_committor_service::tasks::task_strategist::{
+    TaskStrategist, TransactionStrategy,
+};
+use magicblock_committor_service::tasks::tasks::{
+    ArgsTask, BaseTask, BufferTask, CommitTask, FinalizeTask, L1ActionTask,
+    UndelegateTask,
+};
 use magicblock_committor_service::tasks::utils::TransactionUtils;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     transaction_preparator::transaction_preparator::TransactionPreparator,
 };
 use magicblock_program::magic_scheduled_base_intent::{
-    BaseAction,
-    ProgramArgs, ShortAccountMeta,
+    BaseAction, ProgramArgs, ShortAccountMeta,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::{signer::Signer, system_program, };
-use magicblock_committor_program::Chunks;
+use solana_sdk::{signer::Signer, system_program};
 
 mod common;
 
@@ -138,9 +142,16 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     assert_eq!(actual_message, expected_message);
 
     // Now we verify that buffers were created
-    let preparation_info = buffer_commit_task.preparation_info(&fixture.authority.pubkey()).unwrap();
+    let preparation_info = buffer_commit_task
+        .preparation_info(&fixture.authority.pubkey())
+        .unwrap();
 
-    let chunks_account = fixture.rpc_client.get_account(&preparation_info.chunks_pda).await.unwrap().unwrap();
+    let chunks_account = fixture
+        .rpc_client
+        .get_account(&preparation_info.chunks_pda)
+        .await
+        .unwrap()
+        .unwrap();
     let chunks = Chunks::try_from_slice(&chunks_account.data).unwrap();
 
     assert!(chunks.is_complete());
@@ -182,8 +193,8 @@ async fn test_prepare_commit_tx_with_l1_actions() {
         // L1Action
         Box::new(ArgsTask::L1Action(L1ActionTask {
             context: Context::Commit,
-            action: base_action
-        }))
+            action: base_action,
+        })),
     ];
 
     // Test preparation
@@ -208,8 +219,8 @@ async fn test_prepare_commit_tx_with_l1_actions() {
         fixture.compute_budget_config.compute_unit_price,
         &[],
     )
-        .unwrap()
-        .message;
+    .unwrap()
+    .message;
 
     // Block hash is random in result of prepare_for_strategy
     // should be set be caller, so here we just set value of expected for test
@@ -217,9 +228,16 @@ async fn test_prepare_commit_tx_with_l1_actions() {
     assert_eq!(actual_message, expected_message);
 
     // Now we verify that buffers were created
-    let preparation_info = buffer_commit_task.preparation_info(&fixture.authority.pubkey()).unwrap();
+    let preparation_info = buffer_commit_task
+        .preparation_info(&fixture.authority.pubkey())
+        .unwrap();
 
-    let chunks_account = fixture.rpc_client.get_account(&preparation_info.chunks_pda).await.unwrap().unwrap();
+    let chunks_account = fixture
+        .rpc_client
+        .get_account(&preparation_info.chunks_pda)
+        .await
+        .unwrap()
+        .unwrap();
     let chunks = Chunks::try_from_slice(&chunks_account.data).unwrap();
 
     assert!(chunks.is_complete());
@@ -231,7 +249,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
     let preparator = fixture.create_transaction_preparator();
 
     // Create test data
-    let committed_account = create_committed_account(&[1,2,3]);
+    let committed_account = create_committed_account(&[1, 2, 3]);
     let tasks: Vec<Box<dyn BaseTask>> = vec![
         // finalize account
         Box::new(ArgsTask::Finalize(FinalizeTask {
@@ -241,8 +259,8 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
         Box::new(ArgsTask::Undelegate(UndelegateTask {
             delegated_account: committed_account.pubkey,
             owner_program: Pubkey::new_unique(),
-            rent_reimbursement: Pubkey::new_unique()
-        }))
+            rent_reimbursement: Pubkey::new_unique(),
+        })),
     ];
 
     let lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
