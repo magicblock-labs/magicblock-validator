@@ -1,6 +1,7 @@
 use dlp::args::{
     CallHandlerArgs, CommitStateArgs, CommitStateFromBufferArgs, Context,
 };
+use dyn_clone::DynClone;
 use magicblock_committor_program::{
     instruction_builder::{
         init_buffer::{create_init_ix, CreateInitIxArgs},
@@ -37,7 +38,7 @@ pub struct TaskPreparationInfo {
 }
 
 /// A trait representing a task that can be executed on Base layer
-pub trait BaseTask: Send + Sync {
+pub trait BaseTask: Send + Sync + DynClone {
     /// Gets all pubkeys that involved in Task's instruction
     fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
         self.instruction(validator)
@@ -71,6 +72,8 @@ pub trait BaseTask: Send + Sync {
     /// Calls [`Visitor`] with specific task type
     fn visit(&self, visitor: &mut dyn Visitor);
 }
+
+dyn_clone::clone_trait_object!(BaseTask);
 
 #[derive(Clone)]
 pub struct CommitTask {

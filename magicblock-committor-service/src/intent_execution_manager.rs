@@ -17,8 +17,8 @@ use crate::{
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
     },
     intent_executor::{
-        commit_id_fetcher::CommitIdTrackerImpl,
         intent_executor_factory::IntentExecutorFactoryImpl,
+        task_info_fetcher::CacheTaskInfoFetcher,
     },
     persist::IntentPersister,
     types::ScheduledBaseIntentWrapper,
@@ -42,7 +42,7 @@ impl<D: DB> IntentExecutionManager<D> {
         let db = Arc::new(db);
 
         let commit_id_tracker =
-            Arc::new(CommitIdTrackerImpl::new(rpc_client.clone()));
+            Arc::new(CacheTaskInfoFetcher::new(rpc_client.clone()));
         let executor_factory = IntentExecutorFactoryImpl {
             rpc_client,
             table_mania,

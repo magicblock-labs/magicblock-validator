@@ -12,25 +12,34 @@ use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 
 #[async_trait]
-pub trait CommitIdFetcher: Send + Sync + 'static {
+pub trait TaskInfoFetcher: Send + Sync + 'static {
     // Fetches correct next ids for pubkeys
     // Those ids can be used as correct commit_id during Commit
     async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
-    ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>>;
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
 
+    // Fetches rent reimbursement address for pubkeys
+    async fn fetch_rent_reimbursements(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> TaskInfoFetcherResult<Vec<Pubkey>>;
+
+    // Peeks current commit ids for pubkeys
     fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<u64>;
 }
 
-const MUTEX_POISONED_MSG: &str = "CommitIdTrackerImpl mutex poisoned!";
+const NUM_FETCH_RETRIES: NonZeroUsize =
+    unsafe { NonZeroUsize::new_unchecked(5) };
+const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
 
-pub struct CommitIdTrackerImpl {
+pub struct CacheTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
     cache: Mutex<LruCache<Pubkey, u64>>,
 }
 
-impl CommitIdTrackerImpl {
+impl CacheTaskInfoFetcher {
     pub fn new(rpc_client: MagicblockRpcClient) -> Self {
         const CACHE_SIZE: NonZeroUsize =
             unsafe { NonZeroUsize::new_unchecked(1000) };
@@ -41,19 +50,19 @@ impl CommitIdTrackerImpl {
         }
     }
 
-    /// Fetches commit_ids with some num of retries
-    pub async fn rpc_fetch_commit_ids_with_retries(
+    /// Fetches [`DelegationMetadata`]s with some num of retries
+    pub async fn fetch_metadata_with_retries(
         rpc_client: &MagicblockRpcClient,
         pubkeys: &[Pubkey],
         num_retries: NonZeroUsize,
-    ) -> CommitIdTrackerResult<Vec<u64>> {
+    ) -> TaskInfoFetcherResult<Vec<DelegationMetadata>> {
         if pubkeys.is_empty() {
             return Ok(Vec::new());
         }
 
         let mut last_err = Error::MetadataNotFoundError(pubkeys[0]);
         for i in 0..num_retries.get() {
-            match Self::rpc_fetch_commit_ids(rpc_client, pubkeys).await {
+            match Self::fetch_metadata(rpc_client, pubkeys).await {
                 Ok(value) => return Ok(value),
                 err @ Err(Error::InvalidAccountDataError(_)) => return err,
                 err @ Err(Error::MetadataNotFoundError(_)) => return err,
@@ -72,16 +81,15 @@ impl CommitIdTrackerImpl {
 
     /// Fetches commit_ids using RPC
     /// Note: remove duplicates prior to calling
-    pub async fn rpc_fetch_commit_ids(
+    pub async fn fetch_metadata(
         rpc_client: &MagicblockRpcClient,
         pubkeys: &[Pubkey],
-    ) -> CommitIdTrackerResult<Vec<u64>> {
+    ) -> TaskInfoFetcherResult<Vec<DelegationMetadata>> {
         // Early return if no pubkeys to process
         if pubkeys.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Find PDA accounts for each pubkey
         let pda_accounts = pubkeys
             .iter()
             .map(|delegated_account| {
@@ -95,50 +103,46 @@ impl CommitIdTrackerImpl {
             })
             .collect::<Vec<_>>();
 
-        // Fetch account data for all PDAs
         let accounts_data = rpc_client
             .get_multiple_accounts(&pda_accounts, None)
             .await?;
 
-        // Process each account data to extract last_update_external_slot
-        let commit_ids = accounts_data
+        let metadatas = pda_accounts
             .into_iter()
             .enumerate()
-            .map(|(i, account)| {
-                let pubkey = if let Some(pubkey) = pda_accounts.get(i) {
-                    *pubkey
+            .map(|(i, pda)| {
+                let account = if let Some(account) = accounts_data.get(i) {
+                    account
                 } else {
-                    error!("invalid pubkey index in pda_accounts: {i}");
-                    Pubkey::new_unique()
+                    return Err(Error::MetadataNotFoundError(pda));
                 };
-                let account =
-                    account.ok_or(Error::MetadataNotFoundError(pubkey))?;
+
+                let account = account
+                    .as_ref()
+                    .ok_or(Error::MetadataNotFoundError(pda))?;
                 let metadata =
                     DelegationMetadata::try_from_bytes_with_discriminator(
                         &account.data,
                     )
-                    .map_err(|_| Error::InvalidAccountDataError(pubkey))?;
+                    .map_err(|_| Error::InvalidAccountDataError(pda))?;
 
-                Ok::<_, Error>(metadata.last_update_external_slot)
+                Ok(metadata)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(commit_ids)
+        Ok(metadatas)
     }
 }
 
-/// CommitFetcher implementation that also caches most used 1000 keys
+/// TaskInfoFetcher implementation that also caches most used 1000 keys
 #[async_trait]
-impl CommitIdFetcher for CommitIdTrackerImpl {
+impl TaskInfoFetcher for CacheTaskInfoFetcher {
     /// Returns next ids for requested pubkeys
     /// If key isn't in cache, it will be requested
     async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
-    ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>> {
-        const NUM_FETCH_RETRIES: NonZeroUsize =
-            unsafe { NonZeroUsize::new_unchecked(5) };
-
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         if pubkeys.is_empty() {
             return Ok(HashMap::new());
         }
@@ -176,12 +180,14 @@ impl CommitIdFetcher for CommitIdTrackerImpl {
         to_request.sort();
         to_request.dedup();
 
-        let remaining_ids = Self::rpc_fetch_commit_ids_with_retries(
+        let remaining_ids = Self::fetch_metadata_with_retries(
             &self.rpc_client,
             &to_request,
             NUM_FETCH_RETRIES,
         )
-        .await?;
+        .await?
+        .into_iter()
+        .map(|metadata| metadata.last_update_external_slot);
 
         // We don't care if anything changed in between with cache - just update and return our ids.
         {
@@ -202,6 +208,23 @@ impl CommitIdFetcher for CommitIdTrackerImpl {
         Ok(result)
     }
 
+    async fn fetch_rent_reimbursements(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+        let rent_reimbursements = Self::fetch_metadata_with_retries(
+            &self.rpc_client,
+            pubkeys,
+            NUM_FETCH_RETRIES,
+        )
+        .await?
+        .into_iter()
+        .map(|metadata| metadata.rent_payer)
+        .collect();
+
+        Ok(rent_reimbursements)
+    }
+
     /// Returns current commit id without raising priority
     fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<u64> {
         let cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
@@ -219,4 +242,4 @@ pub enum Error {
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
 }
 
-pub type CommitIdTrackerResult<T, E = Error> = Result<T, E>;
+pub type TaskInfoFetcherResult<T, E = Error> = Result<T, E>;

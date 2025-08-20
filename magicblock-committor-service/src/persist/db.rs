@@ -238,20 +238,21 @@ impl CommittsDb {
             WHERE
                 pubkey = ?4 AND message_id = ?5";
 
-        let tx = self.conn.transaction()?;
-        tx.prepare(query)?.execute(params![
-            status.as_str(),
-            status
-                .signatures()
-                .map(|s| s.commit_stage_signature.to_string()),
-            status
-                .signatures()
-                .and_then(|s| s.finalize_stage_signature)
-                .map(|s| s.to_string()),
-            pubkey.to_string(),
-            message_id
-        ])?;
-        tx.commit()?;
+        self.conn.execute(
+            query,
+            params![
+                status.as_str(),
+                status
+                    .signatures()
+                    .map(|s| s.commit_stage_signature.to_string()),
+                status
+                    .signatures()
+                    .and_then(|s| s.finalize_stage_signature)
+                    .map(|s| s.to_string()),
+                pubkey.to_string(),
+                message_id
+            ],
+        )?;
 
         Ok(())
     }
@@ -270,20 +271,21 @@ impl CommittsDb {
             WHERE
                 pubkey = ?4 AND commit_id = ?5";
 
-        let tx = self.conn.transaction()?;
-        tx.prepare(query)?.execute(params![
-            status.as_str(),
-            status
-                .signatures()
-                .map(|s| s.commit_stage_signature.to_string()),
-            status
-                .signatures()
-                .and_then(|s| s.finalize_stage_signature)
-                .map(|s| s.to_string()),
-            pubkey.to_string(),
-            commit_id
-        ])?;
-        tx.commit()?;
+        self.conn.execute(
+            query,
+            params![
+                status.as_str(),
+                status
+                    .signatures()
+                    .map(|s| s.commit_stage_signature.to_string()),
+                status
+                    .signatures()
+                    .and_then(|s| s.finalize_stage_signature)
+                    .map(|s| s.to_string()),
+                pubkey.to_string(),
+                commit_id
+            ],
+        )?;
 
         Ok(())
     }
@@ -300,13 +302,10 @@ impl CommittsDb {
             WHERE
                 pubkey = ?2 AND commit_id = ?3";
 
-        let tx = self.conn.transaction()?;
-        tx.prepare(query)?.execute(params![
-            value.as_str(),
-            pubkey.to_string(),
-            commit_id
-        ])?;
-        tx.commit()?;
+        self.conn.execute(
+            query,
+            params![value.as_str(), pubkey.to_string(), commit_id],
+        )?;
 
         Ok(())
     }
@@ -323,14 +322,11 @@ impl CommittsDb {
         WHERE
             pubkey = ?2 AND message_id = ?3";
 
-        let tx = self.conn.transaction()?;
-        tx.prepare(query)?.execute(params![
-            commit_id,
-            pubkey.to_string(),
-            message_id
-        ])?;
+        self.conn.execute(
+            query,
+            params![commit_id, pubkey.to_string(), message_id],
+        )?;
 
-        tx.commit()?;
         Ok(())
     }
 

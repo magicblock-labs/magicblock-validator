@@ -174,7 +174,7 @@ impl BaseIntentCommittorExt for ChangesetCommittorStub {
             .map(|message| {
                 Ok(ExecutionOutputWrapper {
                     id: message.inner.id,
-                    output: ExecutionOutput {
+                    output: ExecutionOutput::TwoStage {
                         commit_signature: Signature::new_unique(),
                         finalize_signature: Signature::new_unique(),
                     },

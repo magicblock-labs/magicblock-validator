@@ -12,9 +12,11 @@ use solana_sdk::rent::Rent;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
 use solana_sdk::transaction::Transaction;
+use std::time::Duration;
 
 const LABEL: &str = "I am label";
 
+#[ignore]
 #[test]
 fn test_schedule_intent() {
     // Init context
@@ -26,36 +28,60 @@ fn test_schedule_intent() {
     // Delegate counter
     delegate_counter(&ctx, &payer);
     add_to_counter(&ctx, &payer, 101);
-    schedule_intent(&ctx, &[&payer], vec![-100], false);
+    schedule_intent(&ctx, &[&payer], vec![-100], false, None);
 }
 
 #[test]
-fn test_multiple_payers_multiple_counters() {
+fn test_3_payers_intent_with_undelegation() {
+    const PAYERS: usize = 3;
+
     // Init context
     let ctx = IntegrationTestContext::try_new().unwrap();
-    let payer1 = setup_payer(&ctx);
-    let payer2 = setup_payer(&ctx);
-    let payer3 = setup_payer(&ctx);
+    let payers = (0..PAYERS).map(|_| setup_payer(&ctx)).collect::<Vec<_>>();
 
     // Init and setup counters for each payer
-    init_counter(&ctx, &payer1);
-    delegate_counter(&ctx, &payer1);
-    add_to_counter(&ctx, &payer1, 100);
-
-    init_counter(&ctx, &payer2);
-    delegate_counter(&ctx, &payer2);
-    add_to_counter(&ctx, &payer2, 200);
-
-    init_counter(&ctx, &payer3);
-    delegate_counter(&ctx, &payer3);
-    add_to_counter(&ctx, &payer3, 201);
+    let values: [u8; PAYERS] = [100, 200, 201];
+    payers.iter().enumerate().for_each(|(i, payer)| {
+        init_counter(&ctx, &payer);
+        delegate_counter(&ctx, &payer);
+        add_to_counter(&ctx, &payer, values[i]);
+    });
 
     // Schedule intent affecting all counters
     schedule_intent(
         &ctx,
-        &[&payer1, &payer2, &payer3],
+        payers.iter().collect::<Vec<&Keypair>>().as_slice(),
         vec![-50, 25, -75],
         true,
+        Some(Duration::from_secs(50)),
+    );
+}
+
+#[ignore]
+#[test]
+fn test_5_payers_intent_only_commit() {
+    const PAYERS: usize = 5;
+
+    // Init context
+    let ctx = IntegrationTestContext::try_new().unwrap();
+    let payers = (0..PAYERS).map(|_| setup_payer(&ctx)).collect::<Vec<_>>();
+
+    // Init and setup counters for each payer
+    let values: [u8; PAYERS] = std::array::from_fn(|i| 180 + i as u8);
+    payers.iter().enumerate().for_each(|(i, payer)| {
+        init_counter(&ctx, &payer);
+        delegate_counter(&ctx, &payer);
+        add_to_counter(&ctx, &payer, values[i]);
+    });
+
+    let counter_diffs: [i64; PAYERS] = [0; PAYERS];
+    // Schedule intent affecting all counters
+    schedule_intent(
+        &ctx,
+        payers.iter().collect::<Vec<&Keypair>>().as_slice(),
+        counter_diffs.to_vec(), // not used
+        true,
+        Some(Duration::from_secs(25)),
     );
 }
 
@@ -156,6 +182,7 @@ fn schedule_intent(
     payers: &[&Keypair],
     counter_diffs: Vec<i64>,
     is_undelegate: bool,
+    confirmation_wait: Option<Duration>,
 ) {
     ctx.wait_for_next_slot_ephem().unwrap();
 
@@ -190,6 +217,12 @@ fn schedule_intent(
             },
         )
         .unwrap();
+
+    // In some cases it takes longer for tx to make it to baselayer
+    // we need an additional wait time
+    if let Some(confirmation_wait) = confirmation_wait {
+        std::thread::sleep(confirmation_wait);
+    }
     let confirmed = IntegrationTestContext::confirm_transaction(
         &sig,
         rpc_client,

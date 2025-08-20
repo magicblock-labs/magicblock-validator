@@ -1,8 +1,8 @@
-pub mod commit_id_fetcher;
 pub mod error;
 #[allow(clippy::module_inception)]
 pub mod intent_executor;
 pub(crate) mod intent_executor_factory;
+pub mod task_info_fetcher;
 
 use async_trait::async_trait;
 pub use intent_executor::IntentExecutorImpl;
@@ -14,11 +14,17 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug)]
-pub struct ExecutionOutput {
-    /// Commit stage signature
-    pub commit_signature: Signature,
-    /// Finalize stage signature
-    pub finalize_signature: Signature,
+pub enum ExecutionOutput {
+    // TODO: with arrival of challenge window remove SingleStage
+    // Protocol requires 2 stage: Commit, Finalize
+    // SingleStage - optimization for timebeing
+    SingleStage(Signature),
+    TwoStage {
+        /// Commit stage signature
+        commit_signature: Signature,
+        /// Finalize stage signature
+        finalize_signature: Signature,
+    },
 }
 
 #[async_trait]

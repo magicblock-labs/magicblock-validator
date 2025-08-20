@@ -1,6 +1,5 @@
 use integration_test_tools::{
-    expect,
-    loaded_accounts::LoadedAccounts,
+    expect, loaded_accounts::LoadedAccounts,
     validator::start_magicblock_validator_with_config_struct,
     IntegrationTestContext,
 };
@@ -8,11 +7,7 @@ use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, EphemeralConfig, LifecycleMode,
     RemoteCluster, RemoteConfig,
 };
-use solana_sdk::{
-    signature::Keypair,
-    signer::Signer,
-    system_instruction,
-};
+use solana_sdk::{signature::Keypair, signer::Signer, system_instruction};
 use test_tools_core::init_logger;
 
 #[test]
@@ -24,7 +19,9 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
         accounts: AccountsConfig {
             remote: RemoteConfig {
                 cluster: RemoteCluster::Custom,
-                url: Some(IntegrationTestContext::url_chain().try_into().unwrap()),
+                url: Some(
+                    IntegrationTestContext::url_chain().try_into().unwrap(),
+                ),
                 ws_url: Some(vec![IntegrationTestContext::ws_url_chain()
                     .try_into()
                     .unwrap()]),
@@ -40,10 +37,12 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
     };
 
     // Start the validator
-    let (_tmpdir, Some(mut validator)) = start_magicblock_validator_with_config_struct(
-        config,
-        &LoadedAccounts::with_delegation_program_test_authority(),
-    ) else {
+    let (_tmpdir, Some(mut validator)) =
+        start_magicblock_validator_with_config_struct(
+            config,
+            &LoadedAccounts::with_delegation_program_test_authority(),
+        )
+    else {
         panic!("validator should set up correctly");
     };
 
@@ -57,17 +56,16 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
 
     // Send a 0-lamport transfer to trigger account creation/cloning for the new fee payer
     // This should cause the validator to auto-airdrop 1 SOL to the payer
-    let ix = system_instruction::transfer(&payer.pubkey(), &recipient.pubkey(), 0);
+    let ix =
+        system_instruction::transfer(&payer.pubkey(), &recipient.pubkey(), 0);
     let _sig = expect!(
         ctx.send_and_confirm_instructions_with_payer_ephem(&[ix], &payer),
         validator
     );
 
-    // Fetch the payer balance from the ephemeral validator and assert it equals 100_000
-    let balance = expect!(
-        ctx.fetch_ephem_account_balance(&payer.pubkey()),
-        validator
-    );
+    // Fetch the payer balance from the ephemeral validator and assert it equals 1_000_000_000
+    let balance =
+        expect!(ctx.fetch_ephem_account_balance(&payer.pubkey()), validator);
     assert_eq!(balance, 1_000_000_000);
 
     // Cleanup validator process

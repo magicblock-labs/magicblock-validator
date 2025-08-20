@@ -155,7 +155,7 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
         );
     }
 
-    assert_counter_commits_on_chain(&ctx, &mut validator, &payer.pubkey(), 4);
+    assert_counter_commits_on_chain(&ctx, &mut validator, &payer.pubkey(), 3);
 
     let slot = wait_for_ledger_persist(&mut validator);
     (validator, slot)
@@ -211,7 +211,7 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
     );
 
     // Ensure we did not commit during ledger replay
-    assert_counter_commits_on_chain(&ctx, &mut validator, payer, 4);
+    assert_counter_commits_on_chain(&ctx, &mut validator, payer, 3);
 
     validator
 }

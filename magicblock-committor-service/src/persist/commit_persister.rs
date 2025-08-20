@@ -274,12 +274,19 @@ impl IntentPersister for IntentPersisterImpl {
         message_id: u64,
         execution_output: ExecutionOutput,
     ) -> CommitPersistResult<()> {
+        let (commit_signature, finalize_signature) = match execution_output {
+            ExecutionOutput::SingleStage(signature) => (signature, signature),
+            ExecutionOutput::TwoStage {
+                commit_signature,
+                finalize_signature,
+            } => (commit_signature, finalize_signature),
+        };
+
         let bundle_signature_row = BundleSignatureRow::new(
             message_id,
-            execution_output.commit_signature,
-            execution_output.finalize_signature,
+            commit_signature,
+            finalize_signature,
         );
-
         let commits_db = self.commits_db.lock().expect(POISONED_MUTEX_MSG);
         commits_db.insert_bundle_signature_row(&bundle_signature_row)?;
         Ok(())
@@ -623,7 +630,7 @@ mod tests {
 
         let commit_sig = Signature::new_unique();
         let finalize_sig = Signature::new_unique();
-        let execution_output = ExecutionOutput {
+        let execution_output = ExecutionOutput::TwoStage {
             commit_signature: commit_sig,
             finalize_signature: finalize_sig,
         };

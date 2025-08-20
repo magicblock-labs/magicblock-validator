@@ -1,21 +1,13 @@
-use std::{fmt::Formatter, sync::Arc};
+use std::fmt::Formatter;
 
 use async_trait::async_trait;
-use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
-use solana_sdk::{
-    message::VersionedMessage, signature::Keypair, signer::Signer,
-};
+use solana_sdk::{message::VersionedMessage, signature::Keypair};
 
 use crate::{
-    intent_executor::commit_id_fetcher::CommitIdFetcher,
     persist::IntentPersister,
-    tasks::{
-        task_builder::{TaskBuilderV1, TasksBuilder},
-        task_strategist::TaskStrategist,
-        utils::TransactionUtils,
-    },
+    tasks::{task_strategist::TransactionStrategy, utils::TransactionUtils},
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, error::PreparatorResult,
     },
@@ -41,23 +33,12 @@ impl std::fmt::Display for PreparatorVersion {
 pub trait TransactionPreparator: Send + Sync + 'static {
     fn version(&self) -> PreparatorVersion;
 
-    /// Returns [`VersionedMessage`] corresponding to [`ScheduledBaseIntent`] tasks
-    /// Handles all necessary preparations for Message to be valid
-    /// NOTE: [`VersionedMessage`] contains dummy recent_block_hash that should be replaced
-    async fn prepare_commit_tx<P: IntentPersister>(
+    /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
+    /// Handles all necessary preparation needed for successful [`BaseTask`] execution
+    async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        base_intent: &ScheduledBaseIntent,
-        intent_persister: &Option<P>,
-    ) -> PreparatorResult<VersionedMessage>;
-
-    /// Returns [`VersionedMessage`] corresponding to [`ScheduledBaseIntent`] tasks
-    /// Handles all necessary preparations for Message to be valid
-    // NOTE: [`VersionedMessage`] contains dummy recent_block_hash that should be replaced
-    async fn prepare_finalize_tx<P: IntentPersister>(
-        &self,
-        authority: &Keypair,
-        base_intent: &ScheduledBaseIntent,
+        transaction_strategy: &TransactionStrategy,
         intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
 }
@@ -65,22 +46,16 @@ pub trait TransactionPreparator: Send + Sync + 'static {
 /// [`TransactionPreparatorV1`] first version of preparator
 /// It omits future commit_bundle/finalize_bundle logic
 /// It creates TXs using current per account commit/finalize
-pub struct TransactionPreparatorV1<C: CommitIdFetcher> {
-    rpc_client: MagicblockRpcClient,
-    commit_id_fetcher: Arc<C>,
+pub struct TransactionPreparatorV1 {
     delivery_preparator: DeliveryPreparator,
     compute_budget_config: ComputeBudgetConfig,
 }
 
-impl<C> TransactionPreparatorV1<C>
-where
-    C: CommitIdFetcher,
-{
+impl TransactionPreparatorV1 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
-        commit_id_fetcher: Arc<C>,
     ) -> Self {
         let delivery_preparator = DeliveryPreparator::new(
             rpc_client.clone(),
@@ -89,8 +64,6 @@ where
         );
 
         Self {
-            rpc_client,
-            commit_id_fetcher,
             delivery_preparator,
             compute_budget_config,
         }
@@ -98,75 +71,36 @@ where
 }
 
 #[async_trait]
-impl<C> TransactionPreparator for TransactionPreparatorV1<C>
-where
-    C: CommitIdFetcher,
-{
+impl TransactionPreparator for TransactionPreparatorV1 {
     fn version(&self) -> PreparatorVersion {
         PreparatorVersion::V1
     }
 
-    /// In V1: prepares TX with commits for every account in message
-    /// For pure actions message - outputs Tx that runs actions
-    async fn prepare_commit_tx<P: IntentPersister>(
+    async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        base_intent: &ScheduledBaseIntent,
+        tx_strategy: &TransactionStrategy,
         intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
-        // create tasks
-        let tasks = TaskBuilderV1::commit_tasks(
-            &self.commit_id_fetcher,
-            base_intent,
-            intent_persister,
-        )
-        .await?;
-        // optimize to fit tx size. aka Delivery Strategy
-        let tx_strategy = TaskStrategist::build_strategy(
-            tasks,
-            &authority.pubkey(),
-            intent_persister,
-        )?;
+        // If message won't fit, there's no reason to prepare anything
+        // Fail early
+        {
+            let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(
+                &tx_strategy.lookup_tables_keys,
+            );
+            let _ = TransactionUtils::assemble_tasks_tx(
+                authority,
+                &tx_strategy.optimized_tasks,
+                self.compute_budget_config.compute_unit_price,
+                &dummy_lookup_tables,
+            )?
+            .message;
+        }
+
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator
-            .prepare_for_delivery(authority, &tx_strategy, intent_persister)
-            .await?;
-
-        // Build resulting TX to be executed
-        let message = TransactionUtils::assemble_tasks_tx(
-            authority,
-            &tx_strategy.optimized_tasks,
-            self.compute_budget_config.compute_unit_price,
-            &lookup_tables,
-        )
-        .expect("TaskStrategist had to fail prior. This shouldn't be reachable")
-        .message;
-
-        Ok(message)
-    }
-
-    /// In V1: prepares single TX with finalize, undelegation + actions
-    async fn prepare_finalize_tx<P: IntentPersister>(
-        &self,
-        authority: &Keypair,
-        base_intent: &ScheduledBaseIntent,
-        intent_presister: &Option<P>,
-    ) -> PreparatorResult<VersionedMessage> {
-        // create tasks
-        let tasks =
-            TaskBuilderV1::finalize_tasks(&self.rpc_client, base_intent)
-                .await?;
-        // optimize to fit tx size. aka Delivery Strategy
-        let tx_strategy = TaskStrategist::build_strategy(
-            tasks,
-            &authority.pubkey(),
-            intent_presister,
-        )?;
-        // Pre tx preparations. Create buffer accs + lookup tables
-        let lookup_tables = self
-            .delivery_preparator
-            .prepare_for_delivery(authority, &tx_strategy, intent_presister)
+            .prepare_for_delivery(authority, tx_strategy, intent_persister)
             .await?;
 
         let message = TransactionUtils::assemble_tasks_tx(
@@ -175,7 +109,7 @@ where
             self.compute_budget_config.compute_unit_price,
             &lookup_tables,
         )
-        .expect("TaskStrategist had to fail prior. This shouldn't be reachable")
+        .expect("Possibility to assemble checked above")
         .message;
 
         Ok(message)

@@ -290,10 +290,10 @@ mod tests {
             intent_scheduler::create_test_intent,
         },
         intent_executor::{
-            commit_id_fetcher::{CommitIdFetcher, CommitIdTrackerResult},
             error::{
                 Error as ExecutorError, IntentExecutorResult, InternalError,
             },
+            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
         },
         persist::IntentPersisterImpl,
     };
@@ -695,7 +695,7 @@ mod tests {
                     signature: None,
                 })
             } else {
-                Ok(ExecutionOutput {
+                Ok(ExecutionOutput::TwoStage {
                     commit_signature: Signature::default(),
                     finalize_signature: Signature::default(),
                 })
@@ -708,14 +708,21 @@ mod tests {
     }
 
     #[derive(Clone)]
-    pub struct MockCommitIdTracker;
+    pub struct MockInfoFetcher;
     #[async_trait]
-    impl CommitIdFetcher for MockCommitIdTracker {
+    impl TaskInfoFetcher for MockInfoFetcher {
         async fn fetch_next_commit_ids(
             &self,
             pubkeys: &[Pubkey],
-        ) -> CommitIdTrackerResult<HashMap<Pubkey, u64>> {
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(pubkeys.iter().map(|&k| (k, 1)).collect())
+        }
+
+        async fn fetch_rent_reimbursements(
+            &self,
+            pubkeys: &[Pubkey],
+        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
         }
 
         fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {

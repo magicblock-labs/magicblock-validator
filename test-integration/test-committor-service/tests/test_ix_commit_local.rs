@@ -32,6 +32,7 @@ use solana_sdk::transaction::Transaction;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
+use magicblock_committor_service::intent_executor::ExecutionOutput;
 use utils::instructions::{
     init_account_and_delegate_ixs, init_validator_fees_vault_ix,
     InitAccountAndDelegateIxs,
@@ -277,6 +278,7 @@ async fn test_ix_commit_single_account_800_bytes_and_undelegate() {
 async fn test_ix_commit_single_account_one_kb() {
     commit_single_account(1024, false).await;
 }
+
 #[tokio::test]
 async fn test_ix_commit_single_account_ten_kb() {
     commit_single_account(10 * 1024, false).await;
@@ -325,7 +327,8 @@ async fn commit_single_account(bytes: usize, undelegate: bool) {
         },
     };
 
-    ix_commit_local(service, vec![intent]).await;
+    /// We should always be able to Commit & Finalize 1 account either with Args or Buffers
+    ix_commit_local(service, vec![intent], true).await;
 }
 
 // TODO(thlorenz): once delegation program supports larger commits
@@ -337,31 +340,31 @@ async fn commit_single_account(bytes: usize, undelegate: bool) {
 #[tokio::test]
 async fn test_ix_commit_two_accounts_1kb_2kb() {
     init_logger!();
-    commit_multiple_accounts(&[1024, 2048], false).await;
+    commit_multiple_accounts(&[1024, 2048], false, true).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_two_accounts_512kb() {
     init_logger!();
-    commit_multiple_accounts(&[512, 512], false).await;
+    commit_multiple_accounts(&[512, 512], false, true).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_three_accounts_512kb() {
     init_logger!();
-    commit_multiple_accounts(&[512, 512, 512], false).await;
+    commit_multiple_accounts(&[512, 512, 512], false, true).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_six_accounts_512kb() {
     init_logger!();
-    commit_multiple_accounts(&[512, 512, 512, 512, 512, 512], false).await;
+    commit_multiple_accounts(&[512, 512, 512, 512, 512, 512], false, true).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
     init_logger!();
-    commit_multiple_accounts(&[1024, 2 * 1024, 5 * 1024, 10 * 1024], false)
+    commit_multiple_accounts(&[1024, 2 * 1024, 5 * 1024, 10 * 1024], false, true)
         .await;
 }
 
@@ -417,22 +420,25 @@ async fn test_commit_20_accounts_1kb_bundle_size_8() {
 async fn commit_5_accounts_1kb(undelegate_all: bool) {
     init_logger!();
     let accs = (0..5).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, undelegate_all).await;
+    // Let's see
+    commit_multiple_accounts(&accs, undelegate_all, true).await;
 }
 
 async fn commit_8_accounts_1kb() {
     init_logger!();
     let accs = (0..8).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, false).await;
+    // We can't commit 8 accs in single stage, expecting Commit & Finalize stages
+    commit_multiple_accounts(&accs, false, true).await;
 }
 
 async fn commit_20_accounts_1kb() {
     init_logger!();
     let accs = (0..20).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, false).await;
+    // We can't commit 20 accs in single stage, expecting Commit & Finalize stages
+    commit_multiple_accounts(&accs, false, false).await;
 }
 
-async fn commit_multiple_accounts(bytess: &[usize], undelegate_all: bool) {
+async fn commit_multiple_accounts(bytess: &[usize], undelegate_all: bool, single_stage: bool) {
     init_logger!();
 
     let validator_auth = ensure_validator_authority();
@@ -464,27 +470,20 @@ async fn commit_multiple_accounts(bytess: &[usize], undelegate_all: bool) {
 
                 pda_acc.owner = program_flexi_counter::id();
                 pda_acc.data = vec![idx as u8; bytes];
-
-                let request_undelegation = undelegate_all || idx % 2 == 0;
-                (pda, pda_acc, request_undelegation)
+                (pda, pda_acc)
             });
         }
 
-        let (committed, commmitted_and_undelegated): (Vec<_>, Vec<_>) =
-            join_set.join_all().await.into_iter().partition(
-                |(_, _, request_undelegation)| !request_undelegation,
-            );
-
-        let mut base_intents = vec![];
+        let committed= join_set.join_all().await;
         let committed_accounts = committed
             .into_iter()
-            .map(|(pda, pda_acc, _)| CommittedAccountV2 {
+            .map(|(pda, pda_acc)| CommittedAccountV2 {
                 pubkey: pda,
                 account: pda_acc,
             })
             .collect::<Vec<_>>();
 
-        if !committed_accounts.is_empty() {
+        let base_intent = if !undelegate_all {
             let commit_intent = ScheduledBaseIntentWrapper {
                 trigger_type: TriggerType::OnChain,
                 inner: ScheduledBaseIntent {
@@ -499,18 +498,8 @@ async fn commit_multiple_accounts(bytess: &[usize], undelegate_all: bool) {
                 },
             };
 
-            base_intents.push(commit_intent);
-        }
-
-        let committed_and_undelegated_accounts = commmitted_and_undelegated
-            .into_iter()
-            .map(|(pda, pda_acc, _)| CommittedAccountV2 {
-                pubkey: pda,
-                account: pda_acc,
-            })
-            .collect::<Vec<_>>();
-
-        if !committed_and_undelegated_accounts.is_empty() {
+            commit_intent
+        } else {
             let commit_and_undelegate_intent = ScheduledBaseIntentWrapper {
                 trigger_type: TriggerType::OnChain,
                 inner: ScheduledBaseIntent {
@@ -522,7 +511,7 @@ async fn commit_multiple_accounts(bytess: &[usize], undelegate_all: bool) {
                     base_intent: MagicBaseIntent::CommitAndUndelegate(
                         CommitAndUndelegate {
                             commit_action: CommitType::Standalone(
-                                committed_and_undelegated_accounts,
+                                committed_accounts,
                             ),
                             undelegate_action: UndelegateType::Standalone,
                         },
@@ -530,10 +519,10 @@ async fn commit_multiple_accounts(bytess: &[usize], undelegate_all: bool) {
                 },
             };
 
-            base_intents.push(commit_and_undelegate_intent);
-        }
+            commit_and_undelegate_intent
+        };
 
-        ix_commit_local(service, base_intents).await;
+        ix_commit_local(service, vec![base_intent], single_stage).await;
     }
 }
 
@@ -567,6 +556,7 @@ async fn commit_multiple_accounts(bytess: &[usize], undelegate_all: bool) {
 async fn ix_commit_local(
     service: CommittorServiceExt<CommittorService>,
     base_intents: Vec<ScheduledBaseIntentWrapper>,
+    is_single_stage: bool
 ) {
     let execution_outputs = service
         .schedule_base_intents_waiting(base_intents.clone())
@@ -585,25 +575,43 @@ async fn ix_commit_local(
         execution_outputs.into_iter().zip(base_intents)
     {
         // Ensure that the signatures are pointing to the correct transactions
-        let signatures = execution_output.output;
-        // Execution output presents of complete stages, both commit & finalize
-        // Since finalization isn't optional and is a part of the flow
-        // Assert that both indeed happened
+        let execution_output = execution_output.output;
+        let (commit_signature, finalize_signature) = if is_single_stage {
+            let ExecutionOutput::SingleStage(signature) = execution_output else {
+                panic!("Expected SingleStage execution, actual: TwoStage");
+            };
+
+            // Commit & Finalize happened in 1 tx
+            (signature, signature)
+        } else {
+            let ExecutionOutput::TwoStage {
+                commit_signature,
+                finalize_signature
+            } = execution_output else {
+                panic!("Expected TwoStage execution, actual: SingleStage");
+            };
+
+            // Execution output presents of complete stages, both commit & finalize
+            // Since finalization isn't optional and is a part of the flow
+            // Assert that both indeed happened
+            (commit_signature, finalize_signature)
+        };
+
         assert!(
             tx_logs_contain(
                 &rpc_client,
-                &signatures.commit_signature,
+                &commit_signature,
                 "CommitState"
             )
-            .await
+                .await
         );
         assert!(
             tx_logs_contain(
                 &rpc_client,
-                &signatures.finalize_signature,
+                &finalize_signature,
                 "Finalize"
             )
-            .await
+                .await
         );
 
         let is_undelegate = intent.is_undelegate();
@@ -612,7 +620,7 @@ async fn ix_commit_local(
             assert!(
                 tx_logs_contain(
                     &rpc_client,
-                    &signatures.finalize_signature,
+                    &finalize_signature,
                     "Undelegate"
                 )
                 .await

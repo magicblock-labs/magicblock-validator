@@ -65,7 +65,8 @@ pub fn main() {
         return;
     };
 
-    let Ok(schedule_intents_output) = run_schedule_intents_tests(&manifest_dir, &config)
+    let Ok(schedule_intents_output) =
+        run_schedule_intents_tests(&manifest_dir, &config)
     else {
         return;
     };
@@ -209,10 +210,8 @@ fn run_table_mania_and_committor_tests(
         };
 
         let committor_test_output = if run_committor {
-            let test_committor_dir = format!(
-                "{}/../{}",
-                manifest_dir, "schedulecommit/committor-service"
-            );
+            let test_committor_dir =
+                format!("{}/../{}", manifest_dir, "test-committor-service");
             eprintln!("Running committor tests in {}", test_committor_dir);
             match run_test(test_committor_dir, Default::default()) {
                 Ok(output) => output,
@@ -635,7 +634,7 @@ fn run_schedule_intents_tests(
             panic!("Failed to start devnet validator properly");
         }
     };
-    let start_ephem_validator =  || match start_validator(
+    let start_ephem_validator = || match start_validator(
         "schedulecommit-conf.ephem.frequent-commits.toml",
         ValidatorCluster::Ephem,
         &loaded_chain_accounts,

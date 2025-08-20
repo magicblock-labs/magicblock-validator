@@ -12,6 +12,7 @@ use magicblock_committor_service::{
     intent_execution_manager::{
         BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
     },
+    intent_executor::ExecutionOutput,
     types::{ScheduledBaseIntentWrapper, TriggerType},
     BaseIntentCommittor,
 };
@@ -282,10 +283,13 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
         execution_outcome: ExecutionOutputWrapper,
         mut intent_meta: ScheduledBaseIntentMeta,
     ) {
-        let chain_signatures = vec![
-            execution_outcome.output.commit_signature,
-            execution_outcome.output.finalize_signature,
-        ];
+        let chain_signatures = match execution_outcome.output {
+            ExecutionOutput::SingleStage(signature) => vec![signature],
+            ExecutionOutput::TwoStage {
+                commit_signature,
+                finalize_signature,
+            } => vec![commit_signature, finalize_signature],
+        };
         let intent_sent_transaction =
             std::mem::take(&mut intent_meta.intent_sent_transaction);
         let sent_commit =

@@ -120,6 +120,10 @@ impl TransactionUtils {
                 Err(crate::tasks::task_strategist::Error::FailedToFitError)
             }
             Err(CompileError::UnknownInstructionKey(pubkey)) => {
+                // SAFETY: this may occur in utility AccountKeys::try_compile_instructions
+                // when User's pubkeys in Instruction doesn't exist in AccountKeys.
+                // This is impossible in our case since AccountKeys created on keys of our Ixs
+                // that means that all keys from out ixs exist in AccountKeys
                 panic!(
                     "Supplied instruction has to be valid: {}",
                     CompileError::UnknownInstructionKey(pubkey)
