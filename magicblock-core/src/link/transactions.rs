@@ -66,10 +66,7 @@ pub struct TransactionSimulationResult {
 }
 
 /// Opt in convenience trait, which can be used to send transactions for
-/// execution without the sanitization boilerplate. In case if the sanitization
-/// result is important, which is rarely the case for transactions originating
-/// internally, the `SanitizeableTransaction::sanitize` can invoked directly
-/// before sending the transaction for execution/replay
+/// execution without the sanitization boilerplate.
 pub trait SanitizeableTransaction {
     fn sanitize(self) -> Result<SanitizedTransaction, TransactionError>;
 }
