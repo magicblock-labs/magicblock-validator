@@ -821,7 +821,7 @@ impl JsonRpcRequestProcessor {
 
         let search_transaction_history = config
             .map(|x| x.search_transaction_history)
-            .unwrap_or(false);
+            .unwrap_or_default();
         if search_transaction_history
             && !self.config.enable_rpc_transaction_history
         {

@@ -22,14 +22,11 @@ pub(crate) fn init(
 ) -> ApiResult<(Ledger, Slot)> {
     let resume_strategy = &ledger_config.resume_strategy();
     let starting_slot = match resume_strategy {
-        LedgerResumeStrategy::Resume { replay: _ } => {
+        LedgerResumeStrategy::Resume { .. } => {
             let previous_ledger = Ledger::open(ledger_path.as_path())?;
             previous_ledger.get_max_blockhash().map(|(slot, _)| slot)?
         }
-        LedgerResumeStrategy::Reset {
-            slot,
-            keep_accounts: _,
-        } => *slot,
+        LedgerResumeStrategy::Reset { slot, .. } => *slot,
     };
 
     if resume_strategy.is_removing_ledger() {
@@ -94,7 +91,7 @@ pub(crate) fn read_faucet_keypair_from_ledger(
     ledger_path: &Path,
 ) -> ApiResult<Keypair> {
     let keypair_path = faucet_keypair_path(ledger_path)?;
-    if fs::exists(keypair_path.as_path()).unwrap_or(false) {
+    if fs::exists(keypair_path.as_path()).unwrap_or_default() {
         let keypair =
             Keypair::read_from_file(keypair_path.as_path()).map_err(|err| {
                 ApiError::LedgerInvalidFaucetKeypair(
@@ -138,7 +135,7 @@ pub(crate) fn read_validator_keypair_from_ledger(
     ledger_path: &Path,
 ) -> ApiResult<Keypair> {
     let keypair_path = validator_keypair_path(ledger_path)?;
-    if fs::exists(keypair_path.as_path()).unwrap_or(false) {
+    if fs::exists(keypair_path.as_path()).unwrap_or_default() {
         let keypair =
             Keypair::read_from_file(keypair_path.as_path()).map_err(|err| {
                 ApiError::LedgerInvalidValidatorKeypair(
@@ -205,7 +202,7 @@ fn remove_ledger_directory_if_exists(
                 && validator_keypair_path
                     .file_name()
                     .map(|key_path| key_path == entry.file_name())
-                    .unwrap_or(false)
+                    .unwrap_or_default()
             {
                 debug!(
                     "Skipping validator keypair: {}",

@@ -96,11 +96,8 @@ pub fn read(
 
     let validator_slot = expect!(ctx.get_slot_ephem(), validator);
     let target_slot = match strategy {
-        LedgerResumeStrategy::Reset {
-            slot,
-            keep_accounts: _,
-        } => slot,
-        LedgerResumeStrategy::Resume { replay: _ } => slot,
+        LedgerResumeStrategy::Reset { slot, .. } => slot,
+        LedgerResumeStrategy::Resume { .. } => slot,
     };
     assert!(
         validator_slot >= target_slot,

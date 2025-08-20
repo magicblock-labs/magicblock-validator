@@ -49,11 +49,14 @@ impl LedgerConfig {
     pub fn resume_strategy(&self) -> LedgerResumeStrategy {
         match self.resume_strategy_config.kind {
             LedgerResumeStrategyType::Reset => LedgerResumeStrategy::Reset {
-                slot: self.resume_strategy_config.reset_slot.unwrap_or(0),
+                slot: self
+                    .resume_strategy_config
+                    .reset_slot
+                    .unwrap_or_default(),
                 keep_accounts: self
                     .resume_strategy_config
                     .keep_accounts
-                    .unwrap_or(false),
+                    .unwrap_or_default(),
             },
             LedgerResumeStrategyType::ResumeOnly => {
                 LedgerResumeStrategy::Resume { replay: false }
@@ -177,25 +180,19 @@ pub enum LedgerResumeStrategy {
 
 impl LedgerResumeStrategy {
     pub fn is_resuming(&self) -> bool {
-        matches!(self, Self::Resume { replay: _ })
+        matches!(self, Self::Resume { .. })
     }
 
     pub fn is_removing_ledger(&self) -> bool {
-        matches!(
-            self,
-            Self::Reset {
-                slot: _,
-                keep_accounts: _
-            }
-        )
+        matches!(self, Self::Reset { .. })
     }
 
     pub fn is_removing_accountsdb(&self) -> bool {
         matches!(
             self,
             Self::Reset {
-                slot: _,
-                keep_accounts: false
+                keep_accounts: false,
+                ..
             }
         )
     }
@@ -205,13 +202,7 @@ impl LedgerResumeStrategy {
     }
 
     pub fn should_override_bank_slot(&self) -> bool {
-        matches!(
-            self,
-            Self::Reset {
-                slot: _,
-                keep_accounts: _
-            }
-        )
+        matches!(self, Self::Reset { .. })
     }
 }
 

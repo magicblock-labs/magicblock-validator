@@ -153,7 +153,7 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
     // 3. Confirm the transaction
     assert!(ctx
         .confirm_transaction_chain(&commit_result.sigs[0])
-        .unwrap_or(false));
+        .unwrap_or_default());
 }
 
 #[test]
