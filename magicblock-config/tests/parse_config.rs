@@ -69,8 +69,9 @@ fn test_all_goes_toml() {
             },
             ledger: LedgerConfig {
                 resume_strategy_config: LedgerResumeStrategyConfig {
-                    variant: LedgerResumeStrategyType::Replay,
+                    kind: LedgerResumeStrategyType::Replay,
                     reset_slot: None,
+                    keep_accounts: None,
                 },
                 ..Default::default()
             },
@@ -266,8 +267,9 @@ fn test_everything_defined() {
             },
             ledger: LedgerConfig {
                 resume_strategy_config: LedgerResumeStrategyConfig {
-                    variant: LedgerResumeStrategyType::Replay,
+                    kind: LedgerResumeStrategyType::Replay,
                     reset_slot: Some(100),
+                    keep_accounts: Some(false),
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),

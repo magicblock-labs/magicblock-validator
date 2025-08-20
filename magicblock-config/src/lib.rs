@@ -248,8 +248,9 @@ mod tests {
             },
             ledger: LedgerConfig {
                 resume_strategy_config: LedgerResumeStrategyConfig {
-                    variant: LedgerResumeStrategyType::Replay,
+                    kind: LedgerResumeStrategyType::Replay,
                     reset_slot: Some(1),
+                    keep_accounts: Some(true),
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
@@ -332,8 +333,9 @@ mod tests {
             },
             ledger: LedgerConfig {
                 resume_strategy_config: LedgerResumeStrategyConfig {
-                    variant: LedgerResumeStrategyType::Replay,
+                    kind: LedgerResumeStrategyType::Replay,
                     reset_slot: Some(1),
+                    keep_accounts: Some(true),
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
@@ -413,8 +415,9 @@ mod tests {
             },
             ledger: LedgerConfig {
                 resume_strategy_config: LedgerResumeStrategyConfig {
-                    variant: LedgerResumeStrategyType::ResumeOnly,
+                    kind: LedgerResumeStrategyType::ResumeOnly,
                     reset_slot: Some(1),
+                    keep_accounts: Some(true),
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger2.example.com".to_string()),
@@ -487,8 +490,9 @@ mod tests {
             },
             ledger: LedgerConfig {
                 resume_strategy_config: LedgerResumeStrategyConfig {
-                    variant: LedgerResumeStrategyType::Replay,
+                    kind: LedgerResumeStrategyType::Replay,
                     reset_slot: Some(2),
+                    keep_accounts: Some(false),
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),

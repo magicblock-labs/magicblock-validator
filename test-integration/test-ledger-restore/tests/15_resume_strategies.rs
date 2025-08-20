@@ -18,13 +18,19 @@ use test_ledger_restore::{
 #[test]
 fn restore_ledger_reset() {
     eprintln!("\n================\nReset\n================\n");
-    test_resume_strategy(LedgerResumeStrategy::Reset(1000, true));
+    test_resume_strategy(LedgerResumeStrategy::Reset {
+        slot: 1000,
+        keep_accounts: false,
+    });
     eprintln!("\n================\nReset with accounts\n================\n");
-    test_resume_strategy(LedgerResumeStrategy::Reset(1000, false));
+    test_resume_strategy(LedgerResumeStrategy::Reset {
+        slot: 1000,
+        keep_accounts: false,
+    });
     eprintln!("\n================\nResume\n================\n");
-    test_resume_strategy(LedgerResumeStrategy::Resume(true));
+    test_resume_strategy(LedgerResumeStrategy::Resume { replay: true });
     eprintln!("\n================\nReplay\n================\n");
-    test_resume_strategy(LedgerResumeStrategy::Resume(false));
+    test_resume_strategy(LedgerResumeStrategy::Resume { replay: false });
 }
 
 pub fn test_resume_strategy(strategy: LedgerResumeStrategy) {
@@ -44,7 +50,10 @@ pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {
         ledger_path,
         None,
         Some(millis_per_slot),
-        LedgerResumeStrategy::Reset(0, true),
+        LedgerResumeStrategy::Reset {
+            slot: 0,
+            keep_accounts: false,
+        },
         false,
     );
 
@@ -87,8 +96,11 @@ pub fn read(
 
     let validator_slot = expect!(ctx.get_slot_ephem(), validator);
     let target_slot = match strategy {
-        LedgerResumeStrategy::Reset(starting_slot, _) => starting_slot,
-        LedgerResumeStrategy::Resume(_) => slot,
+        LedgerResumeStrategy::Reset {
+            slot,
+            keep_accounts: _,
+        } => slot,
+        LedgerResumeStrategy::Resume { replay: _ } => slot,
     };
     assert!(
         validator_slot >= target_slot,

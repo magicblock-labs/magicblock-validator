@@ -11,7 +11,7 @@ max-snapshots = 7
 snapshot-frequency = 1024
 
 [ledger]
-resume-strategy = { variant = "reset" }
+resume-strategy = { kind = "reset" }
 
 [validator]
 millis_per_slot = 50

@@ -39,7 +39,10 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64) {
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Reset(0, true),
+        LedgerResumeStrategy::Reset {
+            slot: 0,
+            keep_accounts: false,
+        },
         false,
     );
 
@@ -75,7 +78,7 @@ fn read(ledger_path: &Path, pubkey: &Pubkey) -> Child {
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Resume(true),
+        LedgerResumeStrategy::Resume { replay: true },
         false,
     );
     eprintln!(

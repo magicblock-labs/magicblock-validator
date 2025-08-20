@@ -22,11 +22,14 @@ pub(crate) fn init(
 ) -> ApiResult<(Ledger, Slot)> {
     let resume_strategy = &ledger_config.resume_strategy();
     let starting_slot = match resume_strategy {
-        LedgerResumeStrategy::Resume(_) => {
+        LedgerResumeStrategy::Resume { replay: _ } => {
             let previous_ledger = Ledger::open(ledger_path.as_path())?;
             previous_ledger.get_max_blockhash().map(|(slot, _)| slot)?
         }
-        LedgerResumeStrategy::Reset(slot, _) => *slot,
+        LedgerResumeStrategy::Reset {
+            slot,
+            keep_accounts: _,
+        } => *slot,
     };
 
     if resume_strategy.is_removing_ledger() {

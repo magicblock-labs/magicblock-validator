@@ -108,13 +108,15 @@ pub fn setup_validator_with_local_remote(
 
     let resume_strategy_config = if reset {
         LedgerResumeStrategyConfig {
-            variant: LedgerResumeStrategyType::Reset,
+            kind: LedgerResumeStrategyType::Reset,
             reset_slot: None,
+            keep_accounts: None,
         }
     } else {
         LedgerResumeStrategyConfig {
-            variant: LedgerResumeStrategyType::Replay,
+            kind: LedgerResumeStrategyType::Replay,
             reset_slot: None,
+            keep_accounts: None,
         }
     };
     let config = EphemeralConfig {

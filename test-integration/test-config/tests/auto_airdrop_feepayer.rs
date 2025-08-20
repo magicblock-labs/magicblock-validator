@@ -36,8 +36,9 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
         },
         ledger: LedgerConfig {
             resume_strategy_config: LedgerResumeStrategyConfig {
-                variant: LedgerResumeStrategyType::Reset,
-                reset_slot: Some(0),
+                kind: LedgerResumeStrategyType::Reset,
+                reset_slot: None,
+                keep_accounts: None,
             },
             ..Default::default()
         },

@@ -59,8 +59,9 @@ pub fn start_validator_with_clone_config(
         },
         ledger: LedgerConfig {
             resume_strategy_config: LedgerResumeStrategyConfig {
-                variant: LedgerResumeStrategyType::Reset,
-                reset_slot: Some(0),
+                kind: LedgerResumeStrategyType::Reset,
+                reset_slot: None,
+                keep_accounts: None,
             },
             ..Default::default()
         },
