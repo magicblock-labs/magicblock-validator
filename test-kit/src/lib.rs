@@ -101,7 +101,7 @@ impl ExecutionTestEnv {
         sig: Signature,
     ) -> Option<TransactionStatusMeta> {
         self.ledger
-            .get_transaction_status(sig, 0)
+            .get_transaction_status(sig, u64::MAX)
             .expect("failed to get transaction meta from ledger")
             .map(|(_, m)| m)
     }
@@ -116,9 +116,11 @@ impl ExecutionTestEnv {
             hasher.hash(&b.slot.to_le_bytes());
             hasher.result()
         };
+        self.ledger
+            .write_block(slot, slot as i64, hash)
+            .expect("failed to write new block to the ledger");
         self.accountsdb.set_slot(slot);
 
-        block.store(slot, hash, slot as i64);
         slot
     }
 

@@ -33,7 +33,7 @@ impl TransactionSchedulerState {
     ) -> Result<(), Box<dyn Error>> {
         let rent = Rent::default();
         let min_balance = |len| rent.minimum_balance(len).max(1);
-        let (data_addr, _) = Pubkey::find_program_address(
+        let (programdata_address, _) = Pubkey::find_program_address(
             &[id.as_ref()],
             &UPGRADEABLE_LOADER_ID,
         );
@@ -46,24 +46,27 @@ impl TransactionSchedulerState {
         let mut data = bincode::serialize(&state)?;
         data.extend_from_slice(elf);
 
-        let data_account = AccountSharedData::new_data(
+        let mut data_account = AccountSharedData::new(
             min_balance(data.len()),
-            &data,
+            0,
             &UPGRADEABLE_LOADER_ID,
-        )?;
-        self.accountsdb.insert_account(&data_addr, &data_account);
+        );
+        data_account.set_data(data);
+        self.accountsdb
+            .insert_account(&programdata_address, &data_account);
 
         // 2. Create and store the executable Program account.
-        let exec_bytes =
-            bincode::serialize(&UpgradeableLoaderState::Program {
-                programdata_address: data_addr,
-            })?;
+        let state = UpgradeableLoaderState::Program {
+            programdata_address,
+        };
+        let exec_bytes = bincode::serialize(&state)?;
 
-        let mut exec_account_data = AccountSharedData::new_data(
+        let mut exec_account_data = AccountSharedData::new(
             min_balance(exec_bytes.len()),
-            &exec_bytes,
+            0,
             &UPGRADEABLE_LOADER_ID,
-        )?;
+        );
+        exec_account_data.set_data(exec_bytes);
         exec_account_data.set_executable(true);
         self.accountsdb.insert_account(id, &exec_account_data);
 

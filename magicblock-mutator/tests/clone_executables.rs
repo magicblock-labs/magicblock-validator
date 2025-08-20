@@ -184,8 +184,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
             .expect("failed to execute SOLX send post transaction");
 
         // Signature Status
-        let sig_status =
-            test_env.ledger.get_transaction_status(sig, 0).unwrap();
+        let sig_status = test_env.get_transaction(sig);
         assert!(sig_status.is_some());
 
         // Accounts checks
@@ -230,8 +229,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
         test_env.execute_transaction(txn).await.expect("failed to re-run SOLX send and post transaction against an upgraded program");
 
         // Signature Status
-        let sig_status =
-            test_env.ledger.get_transaction_status(sig, 0).unwrap();
+        let sig_status = test_env.get_transaction(sig);
         assert!(sig_status.is_some());
 
         // Accounts checks
