@@ -7,4 +7,4 @@ addr = "0.0.0.0"
 port = 8899
 
 [validator]
-millis_per_slot = 50
+millis-per-slot = 50

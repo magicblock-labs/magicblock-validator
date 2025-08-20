@@ -162,6 +162,12 @@ impl IntegrationTestContext {
                     .transaction
                     .meta
                     .as_ref()
+                    .with_context(|| {
+                        format!(
+                            "No transaction meta found for signature {:?}: {:?}",
+                            sig, status
+                        )
+                    })
                     .unwrap()
                     .log_messages
                     .clone(),

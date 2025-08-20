@@ -4,7 +4,7 @@ name = "Devtool:8899"
 [node.accounts]
 remote.cluster = "devnet"
 lifecycle = "offline"
-commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
+commit = { frequency-millis = 9_000_000_000_000, compute-unit-price = 1_000_000 }
 
 [node.accounts.db]
 # size of the main storage, we have to preallocate in advance
@@ -24,7 +24,7 @@ max-snapshots = 7
 snapshot-frequency = 1024
 
 [node.validator]
-millis_per_slot = 50
+millis-per-slot = 50
 sigverify = true
 
 [[node.program]]

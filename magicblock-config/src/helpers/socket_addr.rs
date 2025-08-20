@@ -12,7 +12,7 @@ macro_rules! socket_addr_config {
             ::clap::Args,
             ::magicblock_config_macro::Mergeable,
         )]
-        #[serde(deny_unknown_fields)]
+        #[serde(deny_unknown_fields, rename_all = "kebab-case")]
         pub struct $struct_name {
             #[derive_env_var]
             #[arg(help = concat!("The address the ", $label, " service will listen on."))]

@@ -1,6 +1,4 @@
-use dlp::instruction_builder::{
-    init_validator_fees_vault, validator_claim_fees,
-};
+use dlp::instruction_builder::validator_claim_fees;
 use integration_test_tools::{
     loaded_accounts::LoadedAccounts, IntegrationTestContext,
 };
