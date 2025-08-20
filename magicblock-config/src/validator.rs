@@ -10,7 +10,7 @@ pub const DEFAULT_CLAIM_FEES_INTERVAL_SECS: u64 = 3600;
 #[derive(
     Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
 )]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct ValidatorConfig {
     #[derive_env_var]
     #[arg(help = "The duration of a slot in milliseconds.")]

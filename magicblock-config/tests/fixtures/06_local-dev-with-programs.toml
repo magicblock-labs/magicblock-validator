@@ -5,7 +5,7 @@ remote.cluster = "devnet"
 lifecycle = "programs-replica"
 # Have it check every 10 mins and since we don't expect to clone any
 # delegated accounts it will do nothing anyways.
-commit = { frequency_millis = 600_000, compute_unit_price = 0 }
+commit = { frequency-millis = 600_000, compute-unit-price = 0 }
 
 ## Choosing a different RPC binding address and port and millis/sec here to test this as well
 [rpc]
@@ -13,9 +13,9 @@ addr = "127.0.0.1"
 port = 7799
 
 [validator]
-millis_per_slot = 14
+millis-per-slot = 14
 
-[geyser_grpc]
+[geyser-grpc]
 addr = "127.0.0.1"
 port = 11000
 

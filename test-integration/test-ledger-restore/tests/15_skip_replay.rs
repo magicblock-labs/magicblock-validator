@@ -1,7 +1,7 @@
 use cleanass::{assert, assert_eq};
 use magicblock_config::LedgerResumeStrategy;
 use solana_transaction_status::UiTransactionEncoding;
-use std::{path::Path, process::Child, thread::sleep, time::Duration};
+use std::{path::Path, process::Child};
 
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
@@ -10,9 +10,11 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
 };
-use test_ledger_restore::{setup_offline_validator, TMP_DIR_LEDGER};
+use test_ledger_restore::{
+    setup_offline_validator, wait_for_next_slot_after_account_snapshot,
+    TMP_DIR_LEDGER,
+};
 
-// Snapshot frequency is set to 2 slots for the offline validator
 const SNAPSHOT_FREQUENCY: u64 = 2;
 
 // In this test we ensure that we can optionally skip the replay of the ledger
@@ -45,6 +47,9 @@ fn write(
         false,
     );
 
+    // Wait slot 1 otherwise we might be unable to fetch the transaction status
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+
     let mut signatures = Vec::with_capacity(keypairs.len());
     for pubkey in keypairs.iter().map(|kp| kp.pubkey()) {
         let signature =
@@ -56,17 +61,11 @@ fn write(
         assert_eq!(lamports, 1_111_111, cleanup(&mut validator));
     }
 
-    // Wait for the next snapshot
-    let slot = loop {
-        if let Ok(slot) = ctx.get_slot_ephem() {
-            // Wait for one slot after the last snapshot to make sure it's been flushed
-            if slot % SNAPSHOT_FREQUENCY == 1 {
-                break slot;
-            }
-            // Wait for half a slot to be sure to not miss the next snapshot
-            sleep(Duration::from_millis(millis_per_slot / 2));
-        }
-    };
+    // Wait for the txs to be written to disk and save the actual snapshot slot
+    let slot = wait_for_next_slot_after_account_snapshot(
+        &mut validator,
+        SNAPSHOT_FREQUENCY,
+    ) - 1;
 
     (validator, slot, signatures)
 }

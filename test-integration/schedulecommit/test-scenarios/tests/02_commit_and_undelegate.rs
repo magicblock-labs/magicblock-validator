@@ -288,7 +288,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         } = ctx.fields();
         let chain_client = ctx.try_chain_client().unwrap();
 
-        // 1. Show we cannot use it in the ehpemeral anymore
+        // 1. Show we cannot use it in the ephemeral anymore
         assert_cannot_increase_committee_count(
             committees[0].1,
             payer,
