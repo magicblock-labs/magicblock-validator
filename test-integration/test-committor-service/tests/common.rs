@@ -5,7 +5,7 @@ use std::{
         Arc,
     },
 };
-
+use async_trait::async_trait;
 use magicblock_committor_service::intent_executor::IntentExecutorImpl;
 use magicblock_committor_service::{
     intent_executor::task_info_fetcher::{
@@ -108,7 +108,7 @@ impl TestFixture {
 
 pub struct MockTaskInfoFetcher;
 
-#[async_trait::async_trait]
+#[async_trait]
 impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_next_commit_ids(
         &self,

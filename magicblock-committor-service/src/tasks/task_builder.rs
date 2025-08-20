@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use dlp::args::Context;
 use log::error;
 use magicblock_program::magic_scheduled_base_intent::{
@@ -17,7 +18,7 @@ use crate::{
     },
 };
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait TasksBuilder {
     // Creates tasks for commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
@@ -36,7 +37,8 @@ pub trait TasksBuilder {
 /// V1 Task builder
 /// V1: Actions are part of finalize tx
 pub struct TaskBuilderV1;
-#[async_trait::async_trait]
+
+#[async_trait]
 impl TasksBuilder for TaskBuilderV1 {
     /// Returns [`Task`]s for Commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(

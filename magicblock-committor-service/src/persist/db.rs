@@ -9,7 +9,7 @@ use super::{
     utils::{i64_into_u64, u64_into_i64},
     CommitStatus, CommitStatusSignatures, CommitStrategy, CommitType,
 };
-use crate::persist::error::CommitPersistError;
+use crate::persist::{error::CommitPersistError, utils::now};
 
 // -----------------
 // CommitStatusRow
@@ -55,11 +55,11 @@ pub struct CommitStatusRow {
 
 #[derive(Debug)]
 pub struct MessageSignatures {
-    /// The signature of the transaction on chain that processed the commit
-    pub processed_signature: Signature,
-    /// The signature of the transaction on chain that finalized the commit
-    /// if applicable
-    pub finalized_signature: Option<Signature>,
+    /// The signature of the transaction on chain that executed Commit Stage
+    pub commit_stage_signature: Signature,
+    /// The signature of the transaction on chain that executed Finalize Stage
+    /// if they were executed in 1 tx it is the same as [Self::commit_stage_signature].
+    pub finalize_stage_signature: Option<Signature>,
     /// Time since epoch at which the bundle signature was created
     pub created_at: u64,
 }
@@ -118,8 +118,8 @@ const ALL_COMMIT_STATUS_COLUMNS: &str = "
     created_at,
     commit_strategy,
     commit_status,
-    processed_signature,
-    finalized_signature,
+    commit_stage_signature,
+    finalize_stage_signature,
     last_retried_at,
     retries_count
 ";
@@ -139,11 +139,66 @@ SELECT
     created_at,
     commit_strategy,
     commit_status,
-    processed_signature,
-    finalized_signature,
+    commit_stage_signature,
+    finalize_stage_signature,
     last_retried_at,
     retries_count
 FROM commit_status
+"#;
+
+// -----------------
+// Bundle Signature
+// -----------------
+// The BundleSignature table exists to store mappings from bundle_id to the signatures used
+// to commit/finalize these bundles.
+// The signatures are repeated in the commit_status table, however the rows in there have a
+// different lifetime than the bundle signature rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundleSignatureRow {
+    /// The id of the bundle that was commited
+    /// If an account was not part of a bundle it is treated as a single account bundle
+    /// for consistency.
+    /// The bundle_id is unique
+    pub bundle_id: u64,
+    /// The signature of the transaction that executed Commit stage
+    pub commit_stage_signature: Signature,
+    /// The signature of the transaction that executed Finalize stage
+    /// if Commit & Finalize stages this will equal [Self::commit_stage_signature]
+    pub finalize_stage_signature: Signature,
+    /// Time since epoch at which the bundle signature was created
+    pub created_at: u64,
+}
+
+impl BundleSignatureRow {
+    pub fn new(
+        bundle_id: u64,
+        commit_stage_signature: Signature,
+        finalize_stage_signature: Signature,
+    ) -> Self {
+        let created_at = now();
+        Self {
+            bundle_id,
+            commit_stage_signature,
+            finalize_stage_signature,
+            created_at,
+        }
+    }
+}
+
+const ALL_BUNDLE_SIGNATURE_COLUMNS: &str = r#"
+    bundle_id,
+    commit_stage_signature,
+    finalize_stage_signature,
+    created_at
+"#;
+
+const SELECT_ALL_BUNDLE_SIGNATURE_COLUMNS: &str = r#"
+SELECT
+    bundle_id,
+    commit_stage_signature,
+    finalize_stage_signature,
+    created_at
+FROM bundle_signature
 "#;
 
 // -----------------
@@ -178,18 +233,20 @@ impl CommittsDb {
         let query = "UPDATE commit_status
             SET
                 commit_status = ?1,
-                processed_signature = ?2,
-                finalized_signature = ?3
+                commit_stage_signature = ?2,
+                finalize_stage_signature = ?3
             WHERE
                 pubkey = ?4 AND message_id = ?5";
 
         let tx = self.conn.transaction()?;
         tx.prepare(query)?.execute(params![
             status.as_str(),
-            status.signatures().map(|s| s.process_signature.to_string()),
             status
                 .signatures()
-                .and_then(|s| s.finalize_signature)
+                .map(|s| s.commit_stage_signature.to_string()),
+            status
+                .signatures()
+                .and_then(|s| s.finalize_stage_signature)
                 .map(|s| s.to_string()),
             pubkey.to_string(),
             message_id
@@ -208,18 +265,20 @@ impl CommittsDb {
         let query = "UPDATE commit_status
             SET
                 commit_status = ?1,
-                processed_signature = ?2,
-                finalized_signature = ?3
+                commit_stage_signature = ?2,
+                finalize_stage_signature = ?3
             WHERE
                 pubkey = ?4 AND commit_id = ?5";
 
         let tx = self.conn.transaction()?;
         tx.prepare(query)?.execute(params![
             status.as_str(),
-            status.signatures().map(|s| s.process_signature.to_string()),
             status
                 .signatures()
-                .and_then(|s| s.finalize_signature)
+                .map(|s| s.commit_stage_signature.to_string()),
+            status
+                .signatures()
+                .and_then(|s| s.finalize_stage_signature)
                 .map(|s| s.to_string()),
             pubkey.to_string(),
             commit_id
@@ -283,23 +342,23 @@ impl CommittsDb {
                 "
         BEGIN;
             CREATE TABLE IF NOT EXISTS commit_status (
-                message_id              INTEGER NOT NULL,
-                pubkey                  TEXT NOT NULL,
-                commit_id               INTEGER NOT NULL,
-                delegated_account_owner TEXT NOT NULL,
-                slot                    INTEGER NOT NULL,
-                ephemeral_blockhash     TEXT NOT NULL,
-                undelegate              INTEGER NOT NULL,
-                lamports                INTEGER NOT NULL,
-                data                    BLOB,
-                commit_type             TEXT NOT NULL,
-                created_at              INTEGER NOT NULL,
-                commit_strategy         TEXT NOT NULL,
-                commit_status           TEXT NOT NULL,
-                processed_signature     TEXT,
-                finalized_signature     TEXT,
-                last_retried_at         INTEGER NOT NULL,
-                retries_count           INTEGER NOT NULL,
+                message_id               INTEGER NOT NULL,
+                pubkey                   TEXT NOT NULL,
+                commit_id                INTEGER NOT NULL,
+                delegated_account_owner  TEXT NOT NULL,
+                slot                     INTEGER NOT NULL,
+                ephemeral_blockhash      TEXT NOT NULL,
+                undelegate               INTEGER NOT NULL,
+                lamports                 INTEGER NOT NULL,
+                data                     BLOB,
+                commit_type              TEXT NOT NULL,
+                created_at               INTEGER NOT NULL,
+                commit_strategy          TEXT NOT NULL,
+                commit_status            TEXT NOT NULL,
+                commit_stage_signature   TEXT,
+                finalize_stage_signature TEXT,
+                last_retried_at          INTEGER NOT NULL,
+                retries_count            INTEGER NOT NULL,
                 PRIMARY KEY (message_id, commit_id, pubkey)
             );
             CREATE INDEX IF NOT EXISTS idx_commits_pubkey ON commit_status (pubkey);
@@ -313,6 +372,96 @@ impl CommittsDb {
                 Err(err)
             }
         }
+    }
+
+    // -----------------
+    // Bundle Signature
+    // -----------------
+    pub fn create_bundle_signature_table(&self) -> Result<()> {
+        match self.conn.execute_batch(
+            "
+        BEGIN;
+            CREATE TABLE IF NOT EXISTS bundle_signature (
+                bundle_id INTEGER NOT NULL PRIMARY KEY,
+                commit_stage_signature TEXT NOT NULL,
+                finalize_stage_signature TEXT,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_bundle_signature ON bundle_signature (bundle_id);
+        COMMIT;",
+        ) {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                eprintln!("Error creating bundle_signature table: {}", err);
+                Err(err)
+            }
+        }
+    }
+
+    pub fn insert_bundle_signature_row(
+        &self,
+        bundle_signature: &BundleSignatureRow,
+    ) -> CommitPersistResult<()> {
+        let query = format!("INSERT OR REPLACE INTO bundle_signature ({ALL_BUNDLE_SIGNATURE_COLUMNS})
+             VALUES (?1, ?2, ?3, ?4)");
+
+        self.conn.execute(
+            &query,
+            params![
+                bundle_signature.bundle_id,
+                bundle_signature.commit_stage_signature.to_string(),
+                bundle_signature.finalize_stage_signature.to_string(),
+                u64_into_i64(bundle_signature.created_at)
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn get_bundle_signature_by_bundle_id(
+        &self,
+        bundle_id: u64,
+    ) -> CommitPersistResult<Option<BundleSignatureRow>> {
+        let query = format!(
+            "{SELECT_ALL_BUNDLE_SIGNATURE_COLUMNS} WHERE bundle_id = ?1"
+        );
+        let stmt = &mut self.conn.prepare(&query)?;
+        let mut rows = stmt.query(params![bundle_id])?;
+
+        if let Some(row) = rows.next()? {
+            let bundle_signature_row = Self::extract_bundle_signature_row(row)?;
+            Ok(Some(bundle_signature_row))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn extract_bundle_signature_row(
+        row: &rusqlite::Row,
+    ) -> CommitPersistResult<BundleSignatureRow> {
+        let bundle_id: u64 = {
+            let bundle_id: i64 = row.get(0)?;
+            i64_into_u64(bundle_id)
+        };
+        let commit_stage_signature = {
+            let processed_signature: String = row.get(1)?;
+            Signature::from_str(processed_signature.as_str())?
+        };
+        let finalize_stage_signature = {
+            let finalized_signature: String = row.get(2)?;
+            Signature::from_str(finalized_signature.as_str())?
+        };
+        let created_at: u64 = {
+            let created_at: i64 = row.get(3)?;
+            i64_into_u64(created_at)
+        };
+
+        Ok(BundleSignatureRow {
+            bundle_id,
+            commit_stage_signature,
+            finalize_stage_signature,
+            created_at,
+        })
     }
 
     pub fn insert_commit_status_rows(
@@ -335,11 +484,12 @@ impl CommittsDb {
         tx: &Transaction<'_>,
         commit: &CommitStatusRow,
     ) -> CommitPersistResult<()> {
-        let (processed_signature, finalized_signature) =
+        let (commit_stage_signature, finalize_stage_signature) =
             match commit.commit_status.signatures() {
-                Some(sigs) => {
-                    (Some(sigs.process_signature), sigs.finalize_signature)
-                }
+                Some(sigs) => (
+                    Some(sigs.commit_stage_signature),
+                    sigs.finalize_stage_signature,
+                ),
                 None => (None, None),
             };
         tx.execute(
@@ -361,10 +511,10 @@ impl CommittsDb {
             u64_into_i64(commit.created_at),
             commit.commit_strategy.as_str(),
             commit.commit_status.as_str(),
-            processed_signature
+            commit_stage_signature
                 .as_ref()
                 .map(|s| s.to_string()),
-            finalized_signature
+            finalize_stage_signature
                 .as_ref()
                 .map(|s| s.to_string()),
             u64_into_i64(commit.last_retried_at),
@@ -431,7 +581,7 @@ impl CommittsDb {
     ) -> CommitPersistResult<Option<MessageSignatures>> {
         let query = "
         SELECT
-           processed_signature, finalized_signature, created_at
+           commit_stage_signature, finalize_stage_signature, created_at
         FROM commit_status
         WHERE commit_id = ?1 AND pubkey = ?2
         LIMIT 1";
@@ -442,15 +592,15 @@ impl CommittsDb {
         let result = rows
             .next()?
             .map(|row| {
-                let processed_signature: String = row.get(0)?;
-                let finalized_signature: Option<String> = row.get(1)?;
+                let commit_stage_signature: String = row.get(0)?;
+                let finalize_stage_signature: Option<String> = row.get(1)?;
                 let created_at: i64 = row.get(2)?;
 
                 Ok::<_, CommitPersistError>(MessageSignatures {
-                    processed_signature: Signature::from_str(
-                        &processed_signature,
+                    commit_stage_signature: Signature::from_str(
+                        &commit_stage_signature,
                     )?,
-                    finalized_signature: finalized_signature
+                    finalize_stage_signature: finalize_stage_signature
                         .map(|s| Signature::from_str(&s))
                         .transpose()?,
                     created_at: i64_into_u64(created_at),
@@ -534,21 +684,21 @@ fn extract_committor_row(
 
     let commit_status = {
         let commit_status: String = row.get(12)?;
-        let processed_signature = {
-            let processed_signature: Option<String> = row.get(13)?;
-            processed_signature
+        let commit_stage_signature = {
+            let commit_stage_signature: Option<String> = row.get(13)?;
+            commit_stage_signature
                 .map(|s| Signature::from_str(s.as_str()))
                 .transpose()?
         };
-        let finalized_signature = {
-            let finalized_signature: Option<String> = row.get(14)?;
-            finalized_signature
+        let finalize_stage_signature = {
+            let finalize_stage_signature: Option<String> = row.get(14)?;
+            finalize_stage_signature
                 .map(|s| Signature::from_str(s.as_str()))
                 .transpose()?
         };
-        let sigs = processed_signature.map(|s| CommitStatusSignatures {
-            process_signature: s,
-            finalize_signature: finalized_signature,
+        let sigs = commit_stage_signature.map(|s| CommitStatusSignatures {
+            commit_stage_signature: s,
+            finalize_stage_signature,
         });
         CommitStatus::try_from((commit_status.as_str(), sigs))?
     };
@@ -593,6 +743,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let db = CommittsDb::new(temp_file.path()).unwrap();
         db.create_commit_status_table().unwrap();
+        db.create_bundle_signature_table().unwrap();
 
         (db, temp_file)
     }
@@ -632,6 +783,19 @@ mod tests {
     }
 
     #[test]
+    fn test_bundle_signature_table_creation() {
+        let (db, _) = setup_test_db();
+
+        // Verify bundle_signature table exists
+        let table_exists: bool = db.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='bundle_signature')",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(table_exists);
+    }
+
+    #[test]
     fn test_insert_and_retrieve_rows() {
         let (mut db, _file) = setup_test_db();
         let row1 = create_test_row(1, 0);
@@ -650,6 +814,33 @@ mod tests {
         // Retrieve individual row
         let retrieved = db.get_commit_status(1, &row1.pubkey).unwrap().unwrap();
         assert_eq!(retrieved, row1);
+    }
+
+    #[test]
+    fn test_insert_and_retrieve_bundle_signature() {
+        let (db, _file) = setup_test_db();
+        let bundle_id = 123;
+        let commit_sig = Signature::new_unique();
+        let finalize_sig = Signature::new_unique();
+
+        let bundle_row =
+            BundleSignatureRow::new(bundle_id, commit_sig, finalize_sig);
+        db.insert_bundle_signature_row(&bundle_row).unwrap();
+
+        let retrieved = db
+            .get_bundle_signature_by_bundle_id(bundle_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(retrieved.bundle_id, bundle_id);
+        assert_eq!(retrieved.commit_stage_signature, commit_sig);
+        assert_eq!(retrieved.finalize_stage_signature, finalize_sig);
+    }
+
+    #[test]
+    fn test_get_nonexistent_bundle_signature() {
+        let (db, _file) = setup_test_db();
+        let result = db.get_bundle_signature_by_bundle_id(999).unwrap();
+        assert!(result.is_none());
     }
 
     #[test]
@@ -687,8 +878,8 @@ mod tests {
         db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
         let new_status = CommitStatus::Succeeded(CommitStatusSignatures {
-            process_signature: Signature::new_unique(),
-            finalize_signature: None,
+            commit_stage_signature: Signature::new_unique(),
+            finalize_stage_signature: None,
         });
         db.update_status_by_commit(100, &row.pubkey, &new_status)
             .unwrap();
@@ -714,13 +905,13 @@ mod tests {
     #[test]
     fn test_get_signatures_by_commit() {
         let (mut db, _file) = setup_test_db();
-        let process_sig = Signature::new_unique();
+        let commit_stage_signature = Signature::new_unique();
         let finalize_sig = Signature::new_unique();
 
         let mut row = create_test_row(1, 100);
         row.commit_status = CommitStatus::Succeeded(CommitStatusSignatures {
-            process_signature: process_sig,
-            finalize_signature: Some(finalize_sig),
+            commit_stage_signature,
+            finalize_stage_signature: Some(finalize_sig),
         });
         db.insert_commit_status_rows(&[row.clone()]).unwrap();
 
@@ -728,8 +919,8 @@ mod tests {
             .get_signatures_by_commit(100, &row.pubkey)
             .unwrap()
             .unwrap();
-        assert_eq!(sigs.processed_signature, process_sig);
-        assert_eq!(sigs.finalized_signature, Some(finalize_sig));
+        assert_eq!(sigs.commit_stage_signature, commit_stage_signature);
+        assert_eq!(sigs.finalize_stage_signature, Some(finalize_sig));
     }
 
     #[test]

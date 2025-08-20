@@ -10,16 +10,20 @@ use super::{
     db::CommitStatusRow, error::CommitPersistResult, utils::now, CommitStatus,
     CommitStrategy, CommitType, CommittsDb, MessageSignatures,
 };
+use crate::{
+    intent_executor::ExecutionOutput, persist::db::BundleSignatureRow,
+};
 
 const POISONED_MUTEX_MSG: &str = "Commitor Persister lock poisoned";
 
 /// Records lifespan pf BaseIntent
 pub trait IntentPersister: Send + Sync + Clone + 'static {
-    /// Starts persisting BaseIntent
+    /// Starts persisting BaseIntents
     fn start_base_intents(
         &self,
         base_intent: &[ScheduledBaseIntent],
     ) -> CommitPersistResult<()>;
+    /// Starts persisting BaseIntent
     fn start_base_intent(
         &self,
         base_intent: &ScheduledBaseIntent,
@@ -62,6 +66,15 @@ pub trait IntentPersister: Send + Sync + Clone + 'static {
         commit_id: u64,
         pubkey: &Pubkey,
     ) -> CommitPersistResult<Option<MessageSignatures>>;
+    fn get_bundle_signatures(
+        &self,
+        message_id: u64,
+    ) -> CommitPersistResult<Option<BundleSignatureRow>>;
+    fn finalize_base_intent(
+        &self,
+        message_id: u64,
+        execution_output: ExecutionOutput,
+    ) -> CommitPersistResult<()>;
 }
 
 #[derive(Clone)]
@@ -79,6 +92,7 @@ impl IntentPersisterImpl {
     {
         let db = CommittsDb::new(db_file)?;
         db.create_commit_status_table()?;
+        db.create_bundle_signature_table()?;
 
         Ok(Self {
             commits_db: Arc::new(Mutex::new(db)),
@@ -244,6 +258,39 @@ impl IntentPersister for IntentPersisterImpl {
             .expect(POISONED_MUTEX_MSG)
             .get_signatures_by_commit(commit_id, pubkey)
     }
+
+    fn get_bundle_signatures(
+        &self,
+        message_id: u64,
+    ) -> CommitPersistResult<Option<BundleSignatureRow>> {
+        self.commits_db
+            .lock()
+            .expect(POISONED_MUTEX_MSG)
+            .get_bundle_signature_by_bundle_id(message_id)
+    }
+
+    fn finalize_base_intent(
+        &self,
+        message_id: u64,
+        execution_output: ExecutionOutput,
+    ) -> CommitPersistResult<()> {
+        let (commit_signature, finalize_signature) = match execution_output {
+            ExecutionOutput::SingleStage(signature) => (signature, signature),
+            ExecutionOutput::TwoStage {
+                commit_signature,
+                finalize_signature,
+            } => (commit_signature, finalize_signature),
+        };
+
+        let bundle_signature_row = BundleSignatureRow::new(
+            message_id,
+            commit_signature,
+            finalize_signature,
+        );
+        let commits_db = self.commits_db.lock().expect(POISONED_MUTEX_MSG);
+        commits_db.insert_bundle_signature_row(&bundle_signature_row)?;
+        Ok(())
+    }
 }
 
 /// Blanket implementation for Option
@@ -359,6 +406,29 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
                 persister.get_signatures_by_commit(commit_id, pubkey)
             }
             None => Ok(None),
+        }
+    }
+
+    fn get_bundle_signatures(
+        &self,
+        message_id: u64,
+    ) -> CommitPersistResult<Option<BundleSignatureRow>> {
+        match self {
+            Some(persister) => persister.get_bundle_signatures(message_id),
+            None => Ok(None),
+        }
+    }
+
+    fn finalize_base_intent(
+        &self,
+        message_id: u64,
+        execution_output: ExecutionOutput,
+    ) -> CommitPersistResult<()> {
+        match self {
+            Some(persister) => {
+                persister.finalize_base_intent(message_id, execution_output)
+            }
+            None => Ok(()),
         }
     }
 }
@@ -537,8 +607,8 @@ mod tests {
         let process_sig = Signature::new_unique();
         let finalize_sig = Signature::new_unique();
         let status = CommitStatus::Succeeded(CommitStatusSignatures {
-            process_signature: process_sig,
-            finalize_signature: Some(finalize_sig),
+            commit_stage_signature: process_sig,
+            finalize_stage_signature: Some(finalize_sig),
         });
 
         persister
@@ -549,8 +619,33 @@ mod tests {
             .get_signatures_by_commit(100, &pubkey)
             .unwrap()
             .unwrap();
-        assert_eq!(sigs.processed_signature, process_sig);
-        assert_eq!(sigs.finalized_signature, Some(finalize_sig));
+        assert_eq!(sigs.commit_stage_signature, process_sig);
+        assert_eq!(sigs.finalize_stage_signature, Some(finalize_sig));
+    }
+
+    #[test]
+    fn test_finalize_base_intent() {
+        let (persister, _temp_file) = create_test_persister();
+        let message_id = 1;
+
+        let commit_sig = Signature::new_unique();
+        let finalize_sig = Signature::new_unique();
+        let execution_output = ExecutionOutput::TwoStage {
+            commit_signature: commit_sig,
+            finalize_signature: finalize_sig,
+        };
+
+        persister
+            .finalize_base_intent(message_id, execution_output)
+            .unwrap();
+
+        let bundle_sig = persister
+            .get_bundle_signatures(message_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bundle_sig.bundle_id, message_id);
+        assert_eq!(bundle_sig.commit_stage_signature, commit_sig);
+        assert_eq!(bundle_sig.finalize_stage_signature, finalize_sig);
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::{
     intent_executor::error::IntentExecutorResult, persist::IntentPersister,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum ExecutionOutput {
     // TODO: with arrival of challenge window remove SingleStage
     // Protocol requires 2 stage: Commit, Finalize
