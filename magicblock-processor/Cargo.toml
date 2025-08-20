@@ -38,5 +38,6 @@ solana-transaction-status = { workspace = true }
 
 [dev-dependencies]
 guinea = { workspace = true }
+solana-signature = { workspace = true }
 solana-signer = { workspace = true }
 test-kit = { workspace = true }
