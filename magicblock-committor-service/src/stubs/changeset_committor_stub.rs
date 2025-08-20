@@ -11,7 +11,7 @@ use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta,
 };
-use tokio::sync::oneshot;
+use tokio::sync::{broadcast, oneshot};
 use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 
 use crate::{
@@ -72,9 +72,8 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
 
     fn subscribe_for_results(
         &self,
-    ) -> oneshot::Receiver<
-        tokio::sync::broadcast::Receiver<BroadcastedIntentExecutionResult>,
-    > {
+    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedIntentExecutionResult>>
+    {
         let (_, receiver) = oneshot::channel();
         receiver
     }

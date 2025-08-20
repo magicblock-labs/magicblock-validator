@@ -60,15 +60,21 @@ impl CacheTaskInfoFetcher {
             return Ok(Vec::new());
         }
 
-        let mut last_err = Error::MetadataNotFoundError(pubkeys[0]);
+        let mut last_err =
+            TaskInfoFetcherError::MetadataNotFoundError(pubkeys[0]);
         for i in 0..num_retries.get() {
             match Self::fetch_metadata(rpc_client, pubkeys).await {
                 Ok(value) => return Ok(value),
-                err @ Err(Error::InvalidAccountDataError(_)) => return err,
-                err @ Err(Error::MetadataNotFoundError(_)) => return err,
-                Err(Error::MagicBlockRpcClientError(err)) => {
+                err @ Err(TaskInfoFetcherError::InvalidAccountDataError(_)) => {
+                    return err
+                }
+                err @ Err(TaskInfoFetcherError::MetadataNotFoundError(_)) => {
+                    return err
+                }
+                Err(TaskInfoFetcherError::MagicBlockRpcClientError(err)) => {
                     // TODO: RPC error handlings should be more robust
-                    last_err = Error::MagicBlockRpcClientError(err)
+                    last_err =
+                        TaskInfoFetcherError::MagicBlockRpcClientError(err)
                 }
             };
 
@@ -114,17 +120,21 @@ impl CacheTaskInfoFetcher {
                 let account = if let Some(account) = accounts_data.get(i) {
                     account
                 } else {
-                    return Err(Error::MetadataNotFoundError(pda));
+                    return Err(TaskInfoFetcherError::MetadataNotFoundError(
+                        pda,
+                    ));
                 };
 
                 let account = account
                     .as_ref()
-                    .ok_or(Error::MetadataNotFoundError(pda))?;
+                    .ok_or(TaskInfoFetcherError::MetadataNotFoundError(pda))?;
                 let metadata =
                     DelegationMetadata::try_from_bytes_with_discriminator(
                         &account.data,
                     )
-                    .map_err(|_| Error::InvalidAccountDataError(pda))?;
+                    .map_err(|_| {
+                        TaskInfoFetcherError::InvalidAccountDataError(pda)
+                    })?;
 
                 Ok(metadata)
             })
@@ -233,7 +243,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum TaskInfoFetcherError {
     #[error("Metadata not found for: {0}")]
     MetadataNotFoundError(Pubkey),
     #[error("InvalidAccountDataError for: {0}")]
@@ -242,4 +252,4 @@ pub enum Error {
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
 }
 
-pub type TaskInfoFetcherResult<T, E = Error> = Result<T, E>;
+pub type TaskInfoFetcherResult<T, E = TaskInfoFetcherError> = Result<T, E>;

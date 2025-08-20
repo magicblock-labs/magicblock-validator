@@ -258,7 +258,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
                 }
                 Err((_, _, err)) => {
                     match err.as_ref() {
-                        &magicblock_committor_service::intent_executor::error::Error::EmptyIntentError => {
+                        &magicblock_committor_service::intent_executor::error::IntentExecutorError::EmptyIntentError => {
                             warn!("Empty intent was scheduled!");
                             Self::process_empty_intent(
                                 intent_id,

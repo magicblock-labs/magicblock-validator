@@ -19,7 +19,7 @@ use solana_sdk::{
 
 use crate::{
     intent_executor::{
-        error::{Error, IntentExecutorResult, InternalError},
+        error::{IntentExecutorError, IntentExecutorResult, InternalError},
         task_info_fetcher::TaskInfoFetcher,
         ExecutionOutput, IntentExecutor,
     },
@@ -29,7 +29,10 @@ use crate::{
         task_strategist::{TaskStrategist, TransactionStrategy},
         tasks::BaseTask,
     },
-    transaction_preparator::transaction_preparator::TransactionPreparator,
+    transaction_preparator::{
+        error::TransactionPreparatorError,
+        transaction_preparator::TransactionPreparator,
+    },
     utils::persist_status_update_by_message_set,
 };
 
@@ -88,7 +91,7 @@ where
         match TaskStrategist::build_strategy(commit_tasks, authority, persister)
         {
             Ok(strategy) => Some(strategy),
-            Err(crate::tasks::task_strategist::Error::FailedToFitError) => None,
+            Err(crate::tasks::task_strategist::TaskStrategistError::FailedToFitError) => None,
         }
     }
 
@@ -98,7 +101,7 @@ where
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         if base_intent.is_empty() {
-            return Err(Error::EmptyIntentError);
+            return Err(IntentExecutorError::EmptyIntentError);
         }
 
         // Update tasks status to Pending
@@ -176,14 +179,13 @@ where
                 persister,
             )
             .await
-            .map_err(Error::FailedFinalizePreparationError)?;
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
 
         let signature = self
             .send_prepared_message(prepared_message)
             .await
-            .map_err(|(err, signature)| Error::FailedToCommitError {
-                err,
-                signature,
+            .map_err(|(err, signature)| {
+                IntentExecutorError::FailedToCommitError { err, signature }
             })?;
 
         debug!("Single stage intent executed: {}", signature);
@@ -202,14 +204,13 @@ where
             .transaction_preparator
             .prepare_for_strategy(&self.authority, commit_strategy, persister)
             .await
-            .map_err(Error::FailedCommitPreparationError)?;
+            .map_err(IntentExecutorError::FailedCommitPreparationError)?;
 
         let commit_signature = self
             .send_prepared_message(prepared_commit_message)
             .await
-            .map_err(|(err, signature)| Error::FailedToCommitError {
-                err,
-                signature,
+            .map_err(|(err, signature)| {
+                IntentExecutorError::FailedToCommitError { err, signature }
             })?;
         debug!("Commit stage succeeded: {}", commit_signature);
 
@@ -218,13 +219,13 @@ where
             .transaction_preparator
             .prepare_for_strategy(&self.authority, finalize_strategy, persister)
             .await
-            .map_err(Error::FailedFinalizePreparationError)?;
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
 
         let finalize_signature = self
             .send_prepared_message(prepared_finalize_message)
             .await
             .map_err(|(err, finalize_signature)| {
-                Error::FailedToFinalizeError {
+                IntentExecutorError::FailedToFinalizeError {
                     err,
                     commit_signature: Some(commit_signature),
                     finalize_signature,
@@ -286,63 +287,113 @@ where
         match result {
             Ok(value) => {
                 let signatures = match *value {
-                    ExecutionOutput::SingleStage(signature) => CommitStatusSignatures {
-                        commit_stage_signature: signature,
-                        finalize_stage_signature: Some(signature)
-                    },
+                    ExecutionOutput::SingleStage(signature) => {
+                        CommitStatusSignatures {
+                            commit_stage_signature: signature,
+                            finalize_stage_signature: Some(signature),
+                        }
+                    }
                     ExecutionOutput::TwoStage {
-                        commit_signature, finalize_signature
+                        commit_signature,
+                        finalize_signature,
                     } => CommitStatusSignatures {
                         commit_stage_signature: commit_signature,
-                        finalize_stage_signature: Some(finalize_signature)
-                    }
+                        finalize_stage_signature: Some(finalize_signature),
+                    },
                 };
                 let update_status = CommitStatus::Succeeded(signatures);
-                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
+                persist_status_update_by_message_set(
+                    persistor,
+                    message_id,
+                    pubkeys,
+                    update_status,
+                );
 
-                if let Err(err) = persistor.finalize_base_intent(message_id, *value) {
+                if let Err(err) =
+                    persistor.finalize_base_intent(message_id, *value)
+                {
                     error!("Failed to persist ExecutionOutput: {}", err);
                 }
-            },
-            Err(Error::EmptyIntentError) | Err(Error::FailedToFitError) => {
-                let update_status = CommitStatus::Failed;
-                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
-            Err(Error::TaskBuilderError(_)) => {
+            Err(IntentExecutorError::EmptyIntentError)
+            | Err(IntentExecutorError::FailedToFitError) => {
                 let update_status = CommitStatus::Failed;
-                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
+                persist_status_update_by_message_set(
+                    persistor,
+                    message_id,
+                    pubkeys,
+                    update_status,
+                );
             }
-            Err(Error::FailedCommitPreparationError(crate::transaction_preparator::error::Error::FailedToFitError)) => {
+            Err(IntentExecutorError::TaskBuilderError(_)) => {
+                let update_status = CommitStatus::Failed;
+                persist_status_update_by_message_set(
+                    persistor,
+                    message_id,
+                    pubkeys,
+                    update_status,
+                );
+            }
+            Err(IntentExecutorError::FailedCommitPreparationError(
+                TransactionPreparatorError::FailedToFitError,
+            )) => {
                 let update_status = CommitStatus::PartOfTooLargeBundleToProcess;
-                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
+                persist_status_update_by_message_set(
+                    persistor,
+                    message_id,
+                    pubkeys,
+                    update_status,
+                );
             }
-            Err(Error::FailedCommitPreparationError(crate::transaction_preparator::error::Error::DeliveryPreparationError(_))) => {
+            Err(IntentExecutorError::FailedCommitPreparationError(
+                TransactionPreparatorError::DeliveryPreparationError(_),
+            )) => {
                 // Intermediate commit preparation progress recorded by DeliveryPreparator
-            },
-            Err(Error::FailedToCommitError {err: _, signature}) => {
-                // Commit is a single TX, so if it fails, all of commited accounts marked FailedProcess
-                let status_signature = signature.map(|sig| CommitStatusSignatures {
-                    commit_stage_signature: sig,
-                    finalize_stage_signature: None
-                });
-                let update_status = CommitStatus::FailedProcess(status_signature);
-                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
             }
-            Err(Error::FailedFinalizePreparationError(_)) => {
+            Err(IntentExecutorError::FailedToCommitError {
+                err: _,
+                signature,
+            }) => {
+                // Commit is a single TX, so if it fails, all of commited accounts marked FailedProcess
+                let status_signature =
+                    signature.map(|sig| CommitStatusSignatures {
+                        commit_stage_signature: sig,
+                        finalize_stage_signature: None,
+                    });
+                let update_status =
+                    CommitStatus::FailedProcess(status_signature);
+                persist_status_update_by_message_set(
+                    persistor,
+                    message_id,
+                    pubkeys,
+                    update_status,
+                );
+            }
+            Err(IntentExecutorError::FailedFinalizePreparationError(_)) => {
                 // Not supported in persistor
-            },
-            Err(Error::FailedToFinalizeError {err: _, commit_signature, finalize_signature}) => {
+            }
+            Err(IntentExecutorError::FailedToFinalizeError {
+                err: _,
+                commit_signature,
+                finalize_signature,
+            }) => {
                 // Finalize is a single TX, so if it fails, all of commited accounts marked FailedFinalize
-                let update_status = if let Some(commit_signature) = commit_signature {
-                    let signatures = CommitStatusSignatures {
-                        commit_stage_signature: *commit_signature,
-                        finalize_stage_signature: *finalize_signature
+                let update_status =
+                    if let Some(commit_signature) = commit_signature {
+                        let signatures = CommitStatusSignatures {
+                            commit_stage_signature: *commit_signature,
+                            finalize_stage_signature: *finalize_signature,
+                        };
+                        CommitStatus::FailedFinalize(signatures)
+                    } else {
+                        CommitStatus::FailedProcess(None)
                     };
-                    CommitStatus::FailedFinalize(signatures)
-                } else {
-                    CommitStatus::FailedProcess(None)
-                };
-                persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
+                persist_status_update_by_message_set(
+                    persistor,
+                    message_id,
+                    pubkeys,
+                    update_status,
+                );
             }
         }
     }

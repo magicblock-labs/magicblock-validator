@@ -72,7 +72,7 @@ impl<D: DB> IntentExecutionManager<D> {
     pub async fn schedule(
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), IntentExecutionManagerError> {
         // If db not empty push el-t there
         // This means that at some point channel got full
         // Worker first will clean-up channel, and then DB.
@@ -90,10 +90,14 @@ impl<D: DB> IntentExecutionManager<D> {
             };
 
             match err {
-                TrySendError::Closed(_) => Err(Error::ChannelClosed),
-                TrySendError::Full(el) => {
-                    self.db.store_base_intent(el).await.map_err(Error::from)
+                TrySendError::Closed(_) => {
+                    Err(IntentExecutionManagerError::ChannelClosed)
                 }
+                TrySendError::Full(el) => self
+                    .db
+                    .store_base_intent(el)
+                    .await
+                    .map_err(IntentExecutionManagerError::from),
             }?;
         }
 
@@ -109,7 +113,7 @@ impl<D: DB> IntentExecutionManager<D> {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum IntentExecutionManagerError {
     #[error("Channel was closed")]
     ChannelClosed,
     #[error("DBError: {0}")]

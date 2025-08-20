@@ -10,7 +10,9 @@ use magicblock_program::magic_scheduled_base_intent::{
 use solana_pubkey::Pubkey;
 
 use crate::{
-    intent_executor::task_info_fetcher::TaskInfoFetcher,
+    intent_executor::task_info_fetcher::{
+        TaskInfoFetcher, TaskInfoFetcherError,
+    },
     persist::IntentPersister,
     tasks::tasks::{
         ArgsTask, BaseTask, CommitTask, FinalizeTask, L1ActionTask,
@@ -74,7 +76,7 @@ impl TasksBuilder for TaskBuilderV1 {
         let commit_ids = commit_id_fetcher
             .fetch_next_commit_ids(&committed_pubkeys)
             .await
-            .map_err(Error::CommitTasksBuildError)?;
+            .map_err(TaskBuilderError::CommitTasksBuildError)?;
 
         // Persist commit ids for commitees
         commit_ids
@@ -167,7 +169,7 @@ impl TasksBuilder for TaskBuilderV1 {
                 let rent_reimbursements = info_fetcher
                     .fetch_rent_reimbursements(&pubkeys)
                     .await
-                    .map_err(Error::FinalizedTasksBuildError)?;
+                    .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
 
                 tasks.extend(accounts.iter().zip(rent_reimbursements).map(
                     |(account, rent_reimbursement)| {
@@ -196,15 +198,11 @@ impl TasksBuilder for TaskBuilderV1 {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum TaskBuilderError {
     #[error("CommitIdFetchError: {0}")]
-    CommitTasksBuildError(
-        #[source] crate::intent_executor::task_info_fetcher::Error,
-    ),
+    CommitTasksBuildError(#[source] TaskInfoFetcherError),
     #[error("FinalizedTasksBuildError: {0}")]
-    FinalizedTasksBuildError(
-        #[source] crate::intent_executor::task_info_fetcher::Error,
-    ),
+    FinalizedTasksBuildError(#[source] TaskInfoFetcherError),
 }
 
-pub type TaskBuilderResult<T, E = Error> = Result<T, E>;
+pub type TaskBuilderResult<T, E = TaskBuilderError> = Result<T, E>;

@@ -1,6 +1,13 @@
 use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_sdk::signature::{Signature, SignerError};
 
+use crate::{
+    tasks::{
+        task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
+    },
+    transaction_preparator::error::TransactionPreparatorError,
+};
+
 #[derive(thiserror::Error, Debug)]
 pub enum InternalError {
     #[error("SignerError: {0}")]
@@ -10,14 +17,14 @@ pub enum InternalError {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum IntentExecutorError {
     #[error("EmptyIntentError")]
     EmptyIntentError,
     #[error("Failed to fit in single TX")]
     FailedToFitError,
     // TODO: remove once proper retries introduced
     #[error("TaskBuilderError: {0}")]
-    TaskBuilderError(#[from] crate::tasks::task_builder::Error),
+    TaskBuilderError(#[from] TaskBuilderError),
     #[error("FailedToCommitError: {err}")]
     FailedToCommitError {
         #[source]
@@ -32,20 +39,16 @@ pub enum Error {
         finalize_signature: Option<Signature>,
     },
     #[error("FailedCommitPreparationError: {0}")]
-    FailedCommitPreparationError(
-        #[source] crate::transaction_preparator::error::Error,
-    ),
+    FailedCommitPreparationError(#[source] TransactionPreparatorError),
     #[error("FailedFinalizePreparationError: {0}")]
-    FailedFinalizePreparationError(
-        #[source] crate::transaction_preparator::error::Error,
-    ),
+    FailedFinalizePreparationError(#[source] TransactionPreparatorError),
 }
 
-impl From<crate::tasks::task_strategist::Error> for Error {
-    fn from(value: crate::tasks::task_strategist::Error) -> Self {
-        let crate::tasks::task_strategist::Error::FailedToFitError = value;
+impl From<TaskStrategistError> for IntentExecutorError {
+    fn from(value: TaskStrategistError) -> Self {
+        let TaskStrategistError::FailedToFitError = value;
         Self::FailedToFitError
     }
 }
 
-pub type IntentExecutorResult<T, E = Error> = Result<T, E>;
+pub type IntentExecutorResult<T, E = IntentExecutorError> = Result<T, E>;

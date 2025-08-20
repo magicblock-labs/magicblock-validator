@@ -14,12 +14,12 @@ use crate::{
     intent_execution_manager::{
         db::DB,
         intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
-        Error,
+        IntentExecutionManagerError,
     },
     intent_executor::{
-        error::IntentExecutorResult,
-        intent_executor_factory::IntentExecutorFactory, ExecutionOutput,
-        IntentExecutor,
+        error::{IntentExecutorError, IntentExecutorResult},
+        intent_executor_factory::IntentExecutorFactory,
+        ExecutionOutput, IntentExecutor,
     },
     persist::IntentPersister,
     types::{ScheduledBaseIntentWrapper, TriggerType},
@@ -36,8 +36,7 @@ pub struct ExecutionOutputWrapper {
     pub trigger_type: TriggerType,
 }
 
-pub type BroadcastedError =
-    (u64, TriggerType, Arc<crate::intent_executor::error::Error>);
+pub type BroadcastedError = (u64, TriggerType, Arc<IntentExecutorError>);
 
 pub type BroadcastedIntentExecutionResult =
     IntentExecutorResult<ExecutionOutputWrapper, BroadcastedError>;
@@ -110,11 +109,11 @@ where
         loop {
             let intent = match self.next_scheduled_intent().await {
                 Ok(value) => value,
-                Err(Error::ChannelClosed) => {
+                Err(IntentExecutionManagerError::ChannelClosed) => {
                     info!("Channel closed, exiting IntentExecutionEngine::main_loop");
                     break;
                 }
-                Err(Error::DBError(err)) => {
+                Err(IntentExecutionManagerError::DBError(err)) => {
                     panic!("Failed to fetch intent from db: {:?}", err);
                 }
             };
@@ -155,7 +154,8 @@ where
     /// Returns [`ScheduledBaseIntentWrapper`] or None if all intents are blocked
     async fn next_scheduled_intent(
         &mut self,
-    ) -> Result<Option<ScheduledBaseIntentWrapper>, Error> {
+    ) -> Result<Option<ScheduledBaseIntentWrapper>, IntentExecutionManagerError>
+    {
         // Limit on number of intents that can be stored in scheduler
         const SCHEDULER_CAPACITY: usize = 1000;
 
@@ -205,7 +205,7 @@ where
     async fn get_new_intent(
         receiver: &mut mpsc::Receiver<ScheduledBaseIntentWrapper>,
         db: &Arc<D>,
-    ) -> Result<ScheduledBaseIntentWrapper, Error> {
+    ) -> Result<ScheduledBaseIntentWrapper, IntentExecutionManagerError> {
         match receiver.try_recv() {
             Ok(val) => Ok(val),
             Err(TryRecvError::Empty) => {
@@ -214,10 +214,15 @@ where
                 if let Some(base_intent) = db.pop_base_intent().await? {
                     Ok(base_intent)
                 } else {
-                    receiver.recv().await.ok_or(Error::ChannelClosed)
+                    receiver
+                        .recv()
+                        .await
+                        .ok_or(IntentExecutionManagerError::ChannelClosed)
                 }
             }
-            Err(TryRecvError::Disconnected) => Err(Error::ChannelClosed),
+            Err(TryRecvError::Disconnected) => {
+                Err(IntentExecutionManagerError::ChannelClosed)
+            }
         }
     }
 
@@ -291,7 +296,8 @@ mod tests {
         },
         intent_executor::{
             error::{
-                Error as ExecutorError, IntentExecutorResult, InternalError,
+                IntentExecutorError as ExecutorError, IntentExecutorResult,
+                InternalError,
             },
             task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
         },

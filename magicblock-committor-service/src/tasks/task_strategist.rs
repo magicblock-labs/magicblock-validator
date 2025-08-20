@@ -71,7 +71,7 @@ impl TaskStrategist {
                 lookup_tables_keys,
             })
         } else {
-            Err(Error::FailedToFitError)
+            Err(TaskStrategistError::FailedToFitError)
         }
     }
 
@@ -210,12 +210,12 @@ impl TaskStrategist {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum TaskStrategistError {
     #[error("Failed to fit in single TX")]
     FailedToFitError,
 }
 
-pub type TaskStrategistResult<T, E = Error> = Result<T, E>;
+pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 
 #[cfg(test)]
 mod tests {
@@ -418,7 +418,7 @@ mod tests {
             &validator,
             &None::<IntentPersisterImpl>,
         );
-        assert!(matches!(result, Err(Error::FailedToFitError)));
+        assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
     }
 
     #[test]

@@ -102,7 +102,7 @@ impl TransactionUtils {
         // This is needed because VersionedMessage::serialize uses unwrap() ¯\_(ツ)_/¯
         instructions.iter().try_for_each(|el| {
             if el.data.len() > u16::MAX as usize {
-                Err(crate::tasks::task_strategist::Error::FailedToFitError)
+                Err(crate::tasks::task_strategist::TaskStrategistError::FailedToFitError)
             } else {
                 Ok(())
             }
@@ -117,7 +117,7 @@ impl TransactionUtils {
             Ok(message) => Ok(message),
             Err(CompileError::AccountIndexOverflow)
             | Err(CompileError::AddressTableLookupIndexOverflow) => {
-                Err(crate::tasks::task_strategist::Error::FailedToFitError)
+                Err(crate::tasks::task_strategist::TaskStrategistError::FailedToFitError)
             }
             Err(CompileError::UnknownInstructionKey(pubkey)) => {
                 // SAFETY: this may occur in utility AccountKeys::try_compile_instructions
