@@ -184,8 +184,6 @@ impl super::TransactionExecutor {
         ) {
             error!("failed to commit transaction to the ledger: {error}");
             return;
-        } else {
-            println!("{signature} has been written to ledger");
         }
         let _ = self.transaction_tx.send(status);
     }

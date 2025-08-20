@@ -254,8 +254,8 @@ pub fn create_solx_send_post_transaction(
     test_env: &ExecutionTestEnv,
 ) -> (SanitizedTransaction, SolanaxPostAccounts) {
     let accounts = vec![
-        test_env.create_account(Rent::default().minimum_balance(1180), 0),
-        test_env.create_account(LAMPORTS_PER_SOL, 0),
+        test_env.create_account(Rent::default().minimum_balance(1180)),
+        test_env.create_account(LAMPORTS_PER_SOL),
     ];
     let post = &accounts[0];
     let author = &accounts[1];

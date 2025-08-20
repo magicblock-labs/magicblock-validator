@@ -83,12 +83,20 @@ impl ExecutionTestEnv {
         this
     }
 
-    pub fn create_account(&self, lamports: u64, space: usize) -> Keypair {
+    pub fn create_account_with_config(
+        &self,
+        lamports: u64,
+        space: usize,
+        owner: Pubkey,
+    ) -> Keypair {
         let keypair = Keypair::new();
-        let account =
-            AccountSharedData::new(lamports, space, &Default::default());
+        let account = AccountSharedData::new(lamports, space, &owner);
         self.accountsdb.insert_account(&keypair.pubkey(), &account);
         keypair
+    }
+
+    pub fn create_account(&self, lamports: u64) -> Keypair {
+        self.create_account_with_config(lamports, 0, Default::default())
     }
 
     pub fn fund_account(&self, pubkey: Pubkey, lamports: u64) {

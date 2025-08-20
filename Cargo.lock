@@ -4142,6 +4142,7 @@ dependencies = [
  "solana-pubkey",
  "solana-rent-collector",
  "solana-sdk-ids",
+ "solana-signature",
  "solana-signer",
  "solana-svm",
  "solana-svm-transaction",
