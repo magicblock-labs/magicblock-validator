@@ -5,8 +5,7 @@ mod schedule_transactions;
 pub use magic_context::{FeePayerAccount, MagicContext, ScheduledCommit};
 pub mod magicblock_instruction;
 pub mod magicblock_processor;
-#[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 mod utils;
 pub mod validator;
 

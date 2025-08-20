@@ -422,6 +422,7 @@ fn test_owner_change() {
 
     let new_owner = Pubkey::new_unique();
     acc.account.set_owner(new_owner);
+    drop(accounts);
     tenv.insert_account(&acc.pubkey, &acc.account);
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER]);
     assert!(result.is_none());

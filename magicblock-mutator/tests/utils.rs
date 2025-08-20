@@ -16,9 +16,5 @@ pub const SOLX_TIPS: Pubkey =
 pub const SOLX_POST: Pubkey =
     pubkey!("5eYk1TwtEwsUTqF9FHhm6tdmvu45csFkKbC4W217TAts");
 
-const LUZIFER: Pubkey = pubkey!("LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk");
-
-pub fn fund_luzifer(accountsdb: &AccountsDb) {
-    // TODO: we need to fund Luzifer at startup instead of doing it here
-    fund_account(accountsdb, &LUZIFER, u64::MAX / 2);
-}
+pub const LUZIFER: Pubkey =
+    pubkey!("LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk");
