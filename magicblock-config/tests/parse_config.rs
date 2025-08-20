@@ -268,7 +268,7 @@ fn test_everything_defined() {
                 path: Some("ledger.example.com".to_string()),
                 size: 1_000_000_000,
                 replay: ReplayConfig {
-                    hydration_concurrency: 20,
+                    account_hydration_concurrency: 20,
                 },
             },
             programs: vec![ProgramConfig {

@@ -42,6 +42,7 @@ resume-strategy = "replay"
 skip-keypair-match-check = true
 path = "ledger.example.com"
 size = 1000000000
+replay.account-hydration-concurrency = 20
 
 [[program]]
 id = "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"

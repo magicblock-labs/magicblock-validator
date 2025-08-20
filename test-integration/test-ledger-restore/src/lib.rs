@@ -11,8 +11,8 @@ use integration_test_tools::{
 };
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
-    LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
-    DEFAULT_LEDGER_SIZE_BYTES,
+    LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig, ReplayConfig,
+    ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::state::FlexiCounter;
 use solana_sdk::{
@@ -116,6 +116,7 @@ pub fn setup_validator_with_local_remote(
             skip_keypair_match_check,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
+            replay: ReplayConfig::default(),
         },
         accounts: accounts_config.clone(),
         programs,
