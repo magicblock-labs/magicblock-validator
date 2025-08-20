@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use dlp::{args::Context, state::DelegationMetadata};
 use log::error;
 use magicblock_program::magic_scheduled_base_intent::{
@@ -18,7 +19,7 @@ use crate::{
     },
 };
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait TasksBuilder {
     // Creates tasks for commit stage
     async fn commit_tasks<C: CommitIdFetcher, P: IntentPersister>(
@@ -83,7 +84,7 @@ impl TaskBuilderV1 {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl TasksBuilder for TaskBuilderV1 {
     /// Returns [`Task`]s for Commit stage
     async fn commit_tasks<C: CommitIdFetcher, P: IntentPersister>(

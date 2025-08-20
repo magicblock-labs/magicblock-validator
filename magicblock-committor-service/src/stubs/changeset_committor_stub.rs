@@ -4,6 +4,7 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+use async_trait::async_trait;
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use solana_transaction_status_client_types::{
@@ -113,8 +114,8 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
     {
         let (tx, rx) = oneshot::channel();
         let message_signature = MessageSignatures {
-            processed_signature: Signature::new_unique(),
-            finalized_signature: Some(Signature::new_unique()),
+            commit_stage_signature: Signature::new_unique(),
+            finalize_stage_signature: Some(Signature::new_unique()),
             created_at: now(),
         };
 
@@ -160,7 +161,7 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl BaseIntentCommittorExt for ChangesetCommittorStub {
     async fn schedule_base_intents_waiting(
         &self,

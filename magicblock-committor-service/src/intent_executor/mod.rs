@@ -13,7 +13,7 @@ use crate::{
     intent_executor::error::IntentExecutorResult, persist::IntentPersister,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ExecutionOutput {
     /// Commit stage signature
     pub commit_signature: Signature,

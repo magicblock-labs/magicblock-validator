@@ -2,6 +2,7 @@ use std::{
     collections::HashMap, num::NonZeroUsize, sync::Mutex, time::Duration,
 };
 
+use async_trait::async_trait;
 use dlp::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
@@ -10,7 +11,7 @@ use lru::LruCache;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait CommitIdFetcher: Send + Sync + 'static {
     // Fetches correct next ids for pubkeys
     // Those ids can be used as correct commit_id during Commit
@@ -127,7 +128,7 @@ impl CommitIdTrackerImpl {
 }
 
 /// CommitFetcher implementation that also caches most used 1000 keys
-#[async_trait::async_trait]
+#[async_trait]
 impl CommitIdFetcher for CommitIdTrackerImpl {
     /// Returns next ids for requested pubkeys
     /// If key isn't in cache, it will be requested

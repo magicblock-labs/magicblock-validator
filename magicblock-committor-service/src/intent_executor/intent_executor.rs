@@ -1,4 +1,5 @@
-use log::{debug, warn};
+use async_trait::async_trait;
+use log::{debug, error, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
@@ -169,11 +170,15 @@ where
         match result {
             Ok(value) => {
                 let signatures = CommitStatusSignatures {
-                    process_signature: value.commit_signature,
-                    finalize_signature: Some(value.commit_signature)
+                    commit_stage_signature: value.commit_signature,
+                    finalize_stage_signature: Some(value.commit_signature)
                 };
                 let update_status = CommitStatus::Succeeded(signatures);
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
+
+                if let Err(err) = persistor.finalize_base_intent(message_id, *value) {
+                    error!("Failed to persist ExecutionOutput: {}", err);
+                }
             }
             Err(Error::EmptyIntentError) => {
                 let update_status = CommitStatus::Failed;
@@ -201,8 +206,8 @@ where
             Err(Error::FailedToCommitError {err: _, signature}) => {
                 // Commit is a single TX, so if it fails, all of commited accounts marked FailedProcess
                 let status_signature = signature.map(|sig| CommitStatusSignatures {
-                    process_signature: sig,
-                    finalize_signature: None
+                    commit_stage_signature: sig,
+                    finalize_stage_signature: None
                 });
                 let update_status = CommitStatus::FailedProcess(status_signature);
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
@@ -213,8 +218,8 @@ where
             Err(Error::FailedToFinalizeError {err: _, commit_signature, finalize_signature}) => {
                 // Finalize is a single TX, so if it fails, all of commited accounts marked FailedFinalize
                 let status_signature = CommitStatusSignatures {
-                    process_signature: *commit_signature,
-                    finalize_signature: *finalize_signature
+                    commit_stage_signature: *commit_signature,
+                    finalize_stage_signature: *finalize_signature
                 };
                 let update_status = CommitStatus::FailedFinalize( status_signature);
                 persist_status_update_by_message_set(persistor, message_id, pubkeys, update_status);
@@ -223,7 +228,7 @@ where
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl<T> IntentExecutor for IntentExecutorImpl<T>
 where
     T: TransactionPreparator,

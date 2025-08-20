@@ -112,13 +112,13 @@ impl TryFrom<(&str, Option<CommitStatusSignatures>)> for CommitStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitStatusSignatures {
-    /// The signature of the transaction processing the commit
-    pub process_signature: Signature,
-    /// The signature of the transaction finalizing the commit.
+    /// The signature of the transaction processing Commit stage
+    pub commit_stage_signature: Signature,
+    /// The signature of the transaction processing Finalize Stage.
     /// If the account was not finalized or it failed then this is `None`.
-    /// If the finalize instruction was part of the process transaction then
-    /// this signature is the same as [Self::process_signature].
-    pub finalize_signature: Option<Signature>,
+    /// If the finalize instruction was part of the Commit stage transaction then
+    /// this signature is the same as [Self::commit_stage_signature].
+    pub finalize_stage_signature: Option<Signature>,
 }
 
 impl CommitStatus {
