@@ -1,6 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use magicblock_accounts_db::AccountsDb;
+use magicblock_core::link::blocks::{BlockMeta, BlockUpdate, BlockUpdateTx};
 use magicblock_ledger::{errors::LedgerResult, Ledger};
 use solana_sdk::clock::Slot;
 use solana_sdk::hash::Hasher;
@@ -8,6 +9,7 @@ use solana_sdk::hash::Hasher;
 pub fn advance_slot_and_update_ledger(
     accountsdb: &AccountsDb,
     ledger: &Ledger,
+    block_update_tx: &BlockUpdateTx,
 ) -> (LedgerResult<()>, Slot) {
     // This is the latest "confirmed" block, written to the ledger
     let latest_block = ledger.latest_block().load();
@@ -25,6 +27,7 @@ pub fn advance_slot_and_update_ledger(
         hasher.result()
     };
 
+    // current slot is "finalized", and next slot becomes active
     let next_slot = current_slot + 1;
     // NOTE:
     // Each time we advance the slot, we check if a snapshot should be taken.
@@ -42,8 +45,18 @@ pub fn advance_slot_and_update_ledger(
         .unwrap()
         // NOTE: since we can tick very frequently, a lot of blocks might have identical timestamps
         .as_secs() as i64;
-    // Update ledger with previous block's meta,
-    // this will also notify various listeners that block has been "produced"
+    // Update ledger with previous block's meta, this will also notify various
+    // listeners (like transaction executors) that block has been "produced"
     let ledger_result = ledger.write_block(current_slot, timestamp, blockhash);
+    // also notify downstream subscribers (RPC/Geyser) that block has been produced
+    let update = BlockUpdate {
+        hash: blockhash,
+        meta: BlockMeta {
+            slot: current_slot,
+            time: timestamp,
+        },
+    };
+    let _ = block_update_tx.send(update);
+
     (ledger_result, next_slot)
 }

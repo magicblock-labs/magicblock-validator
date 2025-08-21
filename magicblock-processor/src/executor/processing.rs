@@ -166,6 +166,9 @@ impl super::TransactionExecutor {
                 continue;
             }
             self.accountsdb.insert_account(&pubkey, &account);
+            if !is_replay {
+                continue;
+            }
             let account = AccountWithSlot {
                 slot: self.processor.slot,
                 account: LockedAccount::new(pubkey, account),

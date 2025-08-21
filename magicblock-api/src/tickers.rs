@@ -27,6 +27,7 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
     ledger: Arc<Ledger>,
     tick_duration: Duration,
     transaction_scheduler: TransactionSchedulerHandle,
+    block_updates_tx: BlockUpdateTx,
     exit: Arc<AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
     let bank = bank.clone();
@@ -37,8 +38,11 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
         while !exit.load(Ordering::Relaxed) {
             tokio::time::sleep(tick_duration).await;
 
-        let (update_ledger_result, next_slot) =
-            advance_slot_and_update_ledger(&accountsdb, &ledger);
+        let (update_ledger_result, next_slot) = advance_slot_and_update_ledger(
+            &accountsdb,
+            &ledger,
+            &block_updates_tx,
+        );
         if let Err(err) = update_ledger_result {
             error!("Failed to write block: {:?}", err);
         }

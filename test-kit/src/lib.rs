@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
+use log::error;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
     link::{
         link,
         transactions::{
             SanitizeableTransaction, TransactionResult,
-            TransactionSchedulerHandle,
+            TransactionSchedulerHandle, TransactionSimulationResult,
         },
         DispatchEndpoints,
     },
@@ -143,7 +144,35 @@ impl ExecutionTestEnv {
         &self,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        self.transaction_scheduler.execute(txn).await
+        self.transaction_scheduler
+            .execute(txn)
+            .await
+            .inspect_err(|err| error!("failed to execute transaction: {err}"))
+    }
+
+    pub async fn simulate_transaction(
+        &self,
+        txn: impl SanitizeableTransaction,
+    ) -> TransactionSimulationResult {
+        let result = self
+            .transaction_scheduler
+            .simulate(txn)
+            .await
+            .expect("transaction executor has shutdown during test");
+        if let Err(ref err) = result.result {
+            error!("failed to simulate transaction: {err}")
+        }
+        result
+    }
+
+    pub async fn replay_transaction(
+        &self,
+        txn: impl SanitizeableTransaction,
+    ) -> TransactionResult {
+        self.transaction_scheduler
+            .replay(txn)
+            .await
+            .inspect_err(|err| error!("failed to replay transaction: {err}"))
     }
 }
 

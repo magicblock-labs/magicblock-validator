@@ -7,6 +7,7 @@ use solana_sdk_ids::native_loader;
 use solana_svm::transaction_processing_callback::TransactionProcessingCallback;
 use solana_svm_transaction::svm_message::SVMMessage;
 
+/// Required implementation to use the executor within the SVM
 impl TransactionProcessingCallback for super::TransactionExecutor {
     fn account_matches_owners(
         &self,

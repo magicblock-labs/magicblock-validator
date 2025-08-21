@@ -39,7 +39,9 @@ use magicblock_config::{
     PrepareLookupTables, ProgramConfig,
 };
 use magicblock_core::{
-    link::{link, transactions::TransactionSchedulerHandle},
+    link::{
+        blocks::BlockUpdateTx, link, transactions::TransactionSchedulerHandle,
+    },
     Slot,
 };
 use magicblock_gateway::{state::SharedState, JsonRpcServer};
@@ -145,6 +147,7 @@ pub struct MagicValidator {
     rpc_handle: JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
+    block_udpate_tx: BlockUpdateTx,
     _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
     claim_fees_task: ClaimFeesTask,
 }
@@ -406,6 +409,7 @@ impl MagicValidator {
             rpc_handle,
             identity: validator_pubkey,
             transaction_scheduler: dispatch.transaction_scheduler,
+            block_udpate_tx: validator_channels.block_update,
         })
     }
 
@@ -551,8 +555,11 @@ impl MagicValidator {
         // We want the next transaction either due to hydrating of cloned accounts or
         // user request to be processed in the next slot such that it doesn't become
         // part of the last block found in the existing ledger which would be incorrect.
-        let (update_ledger_result, _) =
-            advance_slot_and_update_ledger(&self.accountsdb, &self.ledger);
+        let (update_ledger_result, _) = advance_slot_and_update_ledger(
+            &self.accountsdb,
+            &self.ledger,
+            &self.block_udpate_tx,
+        );
         if let Err(err) = update_ledger_result {
             return Err(err.into());
         }
@@ -691,6 +698,7 @@ impl MagicValidator {
                 self.ledger.clone(),
                 Duration::from_millis(self.config.validator.millis_per_slot),
                 self.transaction_scheduler.clone(),
+                self.block_udpate_tx.clone(),
                 self.exit.clone(),
             );
             Some(tokio::spawn(task))
