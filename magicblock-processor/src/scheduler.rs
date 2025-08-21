@@ -96,6 +96,7 @@ impl TransactionScheduler {
     }
 
     async fn run(mut self) {
+        let mut block_produced = self.latest_block.subscribe();
         loop {
             tokio::select! {
                 // new transactions to execute or simulate, the
@@ -113,7 +114,8 @@ impl TransactionScheduler {
                     // TODO(bmuddha): use the branch with the multithreaded
                     // scheduler when account level locking is implemented
                 }
-                _ = self.latest_block.changed() => {
+                // a new block has been produced, the latest_block now contains the newest state
+                _ = block_produced.recv() => {
                     self.transition_to_new_slot();
                 }
                 else => {

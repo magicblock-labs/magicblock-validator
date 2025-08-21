@@ -4,7 +4,7 @@ use arc_swap::{ArcSwapAny, Guard};
 pub use database::meta::PerfSample;
 use solana_sdk::{clock::Clock, hash::Hash};
 pub use store::api::{Ledger, SignatureInfosForAddress};
-use tokio::sync::Notify;
+use tokio::sync::broadcast;
 
 #[derive(Default)]
 pub struct LatestBlockInner {
@@ -18,7 +18,7 @@ pub struct LatestBlockInner {
 /// of the validator to cheaply retrieve the latest block data,
 /// without relying on expensive ledger operations. It's always
 /// kept in sync with the ledger by the ledger itself
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct LatestBlock {
     /// Atomically swappable block data, the reference can be safely
     /// accessed by multiple threads, even if another threads swaps
@@ -26,8 +26,10 @@ pub struct LatestBlock {
     /// the reference will be kept alive by arc swap, while the new
     /// readers automatically get access to the latest version of the block
     inner: Arc<ArcSwapAny<Arc<LatestBlockInner>>>,
-    /// Notification mechanism to signal that the block has been modified
-    notifier: Arc<Notify>,
+    /// Notification mechanism to signal that the block has been modified,
+    /// the actual state is not sent via channel, as it can be accessed any
+    /// time with `load` method, only the fact of production is communicated
+    notifier: broadcast::Sender<()>,
 }
 
 impl LatestBlockInner {
@@ -45,6 +47,16 @@ impl LatestBlockInner {
     }
 }
 
+impl Default for LatestBlock {
+    fn default() -> Self {
+        // 1 is just enough number of notifications to keep around, in order to cover
+        // cases when a subscriber might not be listening when broadcast is triggered
+        let (notifier, _) = broadcast::channel(1);
+        let inner = Default::default();
+        Self { inner, notifier }
+    }
+}
+
 impl LatestBlock {
     pub fn load(&self) -> Guard<Arc<LatestBlockInner>> {
         self.inner.load()
@@ -53,11 +65,12 @@ impl LatestBlock {
     pub fn store(&self, slot: u64, blockhash: Hash, timestamp: i64) {
         let block = LatestBlockInner::new(slot, blockhash, timestamp);
         self.inner.store(block.into());
-        self.notifier.notify_waiters();
+        // we don't care if there're active listeners
+        let _ = self.notifier.send(());
     }
 
-    pub async fn changed(&self) {
-        self.notifier.notified().await
+    pub fn subscribe(&self) -> broadcast::Receiver<()> {
+        self.notifier.subscribe()
     }
 }
 
