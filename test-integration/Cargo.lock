@@ -4200,7 +4200,6 @@ dependencies = [
  "r2d2",
  "r2d2_sqlite",
  "serde",
- "serde_json",
  "solana-program",
  "solana-pubsub-client",
  "solana-sdk",
