@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use guinea::GuineaInstruction;
 use magicblock_core::link::transactions::TransactionResult;
@@ -71,7 +71,7 @@ pub async fn test_transaction_status_update() {
     assert!(result.is_ok(), "failed to execute print sizes transaction");
     let status = env.dispatch
         .transaction_status
-        .recv_timeout(Duration::from_millis(300))
+        .recv_timeout(Duration::from_millis(200))
         .expect("successful transaction status should be delivered immediately after execution");
     assert_eq!(
         status.signature, sig,
@@ -99,9 +99,10 @@ pub async fn test_transaction_modifies_accounts() {
     assert!(result.is_ok(), "failed to execute write byte transaction");
     let status = env.dispatch
         .transaction_status
-        .recv_timeout(Duration::from_millis(300))
+        .recv_timeout(Duration::from_millis(200))
         .expect("successful transaction status should be delivered immediately after execution");
     // iterate over transaction accounts except for the payer
+    let mut modified_accounts = HashSet::with_capacity(ACCOUNTS_COUNT);
     for acc in status.result.accounts.iter().skip(1).take(ACCOUNTS_COUNT) {
         let account = env
             .accountsdb
@@ -111,6 +112,15 @@ pub async fn test_transaction_modifies_accounts() {
             *account.data().first().unwrap(),
             42,
             "the first byte of all accounts should have been modified"
-        )
+        );
+        modified_accounts.insert(*acc);
     }
+    let mut updated_accounts = HashSet::with_capacity(ACCOUNTS_COUNT);
+    while let Ok(acc) = env.dispatch.account_update.try_recv() {
+        updated_accounts.insert(acc.account.pubkey);
+    }
+    assert_eq!(
+        updated_accounts.symmetric_difference(&modified_accounts).count(), 1, // 1 is payer
+        "account updates forwarded by txn executor should match the list modified in transaction"
+    );
 }

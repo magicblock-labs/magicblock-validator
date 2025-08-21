@@ -15,11 +15,14 @@ use magicblock_core::link::{
     transactions::{TransactionResult, TransactionStatus},
 };
 
+/// An abstraction trait over types which specialize in turning various
+/// websocket notification payload types into sequence of bytes
 pub(crate) trait Encoder: Ord + Eq + Clone {
     type Data;
     fn encode(&self, slot: u64, data: &Self::Data, id: u64) -> Option<Bytes>;
 }
 
+/// A `accountSubscribe` payload encoder
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub(crate) enum AccountEncoder {
     Base58,
@@ -52,6 +55,7 @@ impl From<UiAccountEncoding> for AccountEncoder {
     }
 }
 
+/// A `programSubscribe` payload encoder
 #[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub struct ProgramAccountEncoder {
     pub encoder: AccountEncoder,
@@ -86,6 +90,7 @@ impl Encoder for ProgramAccountEncoder {
     }
 }
 
+/// A `signatureSubscribe` payload encoder
 #[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub(crate) struct TransactionResultEncoder;
 
@@ -109,6 +114,7 @@ impl Encoder for TransactionResultEncoder {
     }
 }
 
+/// A `logsSubscribe` payload encoder
 #[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub(crate) enum TransactionLogsEncoder {
     All,
@@ -150,6 +156,7 @@ impl Encoder for TransactionLogsEncoder {
     }
 }
 
+/// A `slotSubscribe` payload encoder
 #[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub(crate) struct SlotEncoder;
 

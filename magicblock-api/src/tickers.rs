@@ -11,7 +11,8 @@ use magicblock_accounts::AccountsManager;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_committor_service::CommittorService;
 use magicblock_core::{
-    link::transactions::TransactionSchedulerHandle, magic_program,
+    link::{blocks::BlockUpdateTx, transactions::TransactionSchedulerHandle},
+    magic_program,
 };
 use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics;
@@ -30,14 +31,18 @@ pub async fn init_slot_ticker(
     ledger: Arc<Ledger>,
     tick_duration: Duration,
     transaction_scheduler: TransactionSchedulerHandle,
+    block_updates_tx: BlockUpdateTx,
     exit: Arc<AtomicBool>,
 ) {
     let log = tick_duration >= Duration::from_secs(5);
     while !exit.load(Ordering::Relaxed) {
         tokio::time::sleep(tick_duration).await;
 
-        let (update_ledger_result, next_slot) =
-            advance_slot_and_update_ledger(&accountsdb, &ledger);
+        let (update_ledger_result, next_slot) = advance_slot_and_update_ledger(
+            &accountsdb,
+            &ledger,
+            &block_updates_tx,
+        );
         if let Err(err) = update_ledger_result {
             error!("Failed to write block: {:?}", err);
         }
