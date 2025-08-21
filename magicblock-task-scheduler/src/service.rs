@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
+use futures_util::StreamExt;
 use log::*;
 use magicblock_bank::bank::Bank;
 use magicblock_config::TaskSchedulerConfig;
@@ -17,7 +18,7 @@ use solana_sdk::{
 use solana_svm::transaction_processor::ExecutionRecordingConfig;
 use solana_timings::ExecuteTimings;
 use tokio::{select, time::Duration};
-use tokio_util::sync::CancellationToken;
+use tokio_util::{sync::CancellationToken, time::DelayQueue};
 
 use crate::{
     db::{DbTask, SchedulerDatabase},
@@ -28,6 +29,8 @@ pub struct TaskSchedulerService {
     db: SchedulerDatabase,
     bank: Arc<Bank>,
     tick_interval: Duration,
+    task_queue: DelayQueue<DbTask>,
+    pending_cancellations: HashSet<u64>,
 }
 
 impl TaskSchedulerService {
@@ -42,20 +45,34 @@ impl TaskSchedulerService {
                 warn!("Failed to remove database file: {}", e);
             }
         }
-        let db = SchedulerDatabase::new(&config.db_path)?;
 
-        Ok(tokio::spawn(
-            Self {
-                db,
-                bank,
-                tick_interval: Duration::from_millis(config.millis_per_tick),
-            }
-            .run(token),
-        ))
+        // Reschedule all persisted tasks
+        let db = SchedulerDatabase::new(&config.db_path)?;
+        let tasks = db.get_tasks()?;
+        let mut service = Self {
+            db,
+            bank,
+            tick_interval: Duration::from_millis(config.millis_per_tick),
+            task_queue: DelayQueue::new(),
+            pending_cancellations: HashSet::new(),
+        };
+        let now = chrono::Utc::now().timestamp_millis();
+        for task in tasks {
+            let next_execution =
+                task.last_execution_millis + task.period_millis;
+            let timeout = Duration::from_millis(if next_execution > now {
+                (next_execution - now) as u64
+            } else {
+                0
+            });
+            service.task_queue.insert(task, timeout);
+        }
+
+        Ok(tokio::spawn(service.run(token)))
     }
 
     fn process_context_requests(
-        &self,
+        &mut self,
         task_context: &mut TaskContext,
     ) -> Result<usize, TaskSchedulerError> {
         let requests = task_context.get_all_requests();
@@ -98,7 +115,7 @@ impl TaskSchedulerService {
     }
 
     fn process_schedule_request(
-        &self,
+        &mut self,
         schedule_request: &ScheduleTaskRequest,
     ) -> Result<(), TaskSchedulerError> {
         // Convert request to task and register in database
@@ -112,9 +129,11 @@ impl TaskSchedulerService {
     }
 
     fn process_cancel_request(
-        &self,
+        &mut self,
         cancel_request: &CancelTaskRequest,
     ) -> Result<(), TaskSchedulerError> {
+        // Record ID to prevent the task from being executed
+        self.pending_cancellations.insert(cancel_request.task_id);
         // Remove task from database
         self.unregister_task(cancel_request.task_id)?;
         debug!(
@@ -124,27 +143,17 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    fn tick(&self) -> Result<(), TaskSchedulerError> {
-        let current_time = chrono::Utc::now().timestamp_millis();
-
-        // Get executable tasks
-        let executable_tasks = self.db.get_executable_tasks(current_time)?;
-
-        for task in executable_tasks {
-            if let Err(e) = self.execute_task(&task) {
-                error!("Failed to execute task {}: {}", task.id, e);
-
-                // Unschedule the task
-                // It is not removed to avoid re-scheduling the task
-                self.db.unschedule_task(task.id)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn execute_task(&self, task: &DbTask) -> Result<(), TaskSchedulerError> {
+    fn execute_task(
+        &mut self,
+        task: &DbTask,
+    ) -> Result<(), TaskSchedulerError> {
         debug!("Executing task {}", task.id);
+
+        if self.pending_cancellations.remove(&task.id) {
+            warn!("Task {} is pending cancellation", task.id);
+            self.db.unschedule_task(task.id)?;
+            return Ok(());
+        }
 
         // Execute unsigned transactions
         let blockhash = self.bank.last_blockhash();
@@ -187,37 +196,53 @@ impl TaskSchedulerService {
                 None,
             );
 
+        // If any instruction fails, the task is cancelled
         for result in output {
             if let Err(e) = result.and_then(|tx| tx.status) {
+                error!("Task {} failed to execute: {}", task.id, e);
+                self.db.unschedule_task(task.id)?;
                 return Err(TaskSchedulerError::TaskExecution(e.to_string()));
             }
         }
 
-        // Update task in database
-        let next_execution = if task.executions_left > 1 {
-            task.next_execution_millis + task.period_millis
-        } else {
-            // Task completed
-            0
-        };
+        if task.executions_left > 1 {
+            // Reschedule the task
+            let new_task = DbTask {
+                executions_left: task.executions_left - 1,
+                ..task.clone()
+            };
+            self.task_queue.insert(
+                new_task,
+                Duration::from_millis(task.period_millis as u64),
+            );
+        }
 
-        self.db
-            .update_task_after_execution(task.id, next_execution)?;
+        let current_time = chrono::Utc::now().timestamp_millis();
+        self.db.update_task_after_execution(task.id, current_time)?;
+        debug!(
+            "Task {} has {} executions left",
+            task.id, task.executions_left
+        );
 
         Ok(())
     }
 
-    pub fn register_task(&self, task: &Task) -> Result<(), TaskSchedulerError> {
+    pub fn register_task(
+        &mut self,
+        task: &Task,
+    ) -> Result<(), TaskSchedulerError> {
         let db_task = DbTask {
             id: task.id,
             instructions: task.instructions.clone(),
             authority: task.authority,
             period_millis: task.period_millis,
             executions_left: task.n_executions,
-            next_execution_millis: 0, // Run ASAP
+            last_execution_millis: 0,
         };
 
         self.db.insert_task(&db_task)?;
+        self.task_queue
+            .insert(db_task.clone(), Duration::from_millis(0));
         debug!("Registered task {} from context", task.id);
 
         Ok(())
@@ -233,15 +258,16 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    async fn run(self, token: CancellationToken) {
+    async fn run(mut self, token: CancellationToken) {
         let mut interval = tokio::time::interval(self.tick_interval);
         loop {
             select! {
-                _ = interval.tick() => {
-                    if let Err(e) = self.tick() {
-                        error!("Error in scheduler tick: {}", e);
+                Some(task) = self.task_queue.next() => {
+                    if let Err(e) = self.execute_task(task.get_ref()) {
+                        error!("Failed to execute task {}: {}", task.get_ref().id, e);
                     }
-
+                }
+                _ = interval.tick() => {
                     // HACK: we deserialize the context on every tick avoid using geyser.
                     // This will be fixed once the channel to the transaction executor is implemented.
                     // Performance should not be too bad because the context should be small.

@@ -9,12 +9,15 @@ use serde::{Deserialize, Serialize};
 )]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct TaskSchedulerConfig {
+    /// The path to the task scheduler database file.
     #[derive_env_var]
     #[serde(default = "default_db_path")]
     pub db_path: String,
+    /// If true, the task scheduler will reset the database on startup.
     #[derive_env_var]
     #[serde(default)]
     pub reset_db: bool,
+    /// Determines how frequently the task scheduler will check for executable tasks.
     #[derive_env_var]
     #[serde(default = "default_millis_per_tick")]
     pub millis_per_tick: u64,
