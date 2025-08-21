@@ -129,7 +129,7 @@ impl TransactionExecutor {
         // which is why we spawn it with a dedicated single threaded tokio runtime
         let task = move || {
             let runtime = Builder::new_current_thread()
-                .thread_name("transaction executor")
+                .thread_name(format!("transaction executor #{}", self.id))
                 .build()
                 .expect(
                     "building single threaded tokio runtime should succeed",
@@ -147,6 +147,7 @@ impl TransactionExecutor {
         // the duration of slot, and then it's released at slot boundaries, to allow
         // for any pending critical operation to be run, before re-acquisition.
         let mut _guard = self.sync.read();
+        let mut block_updated = self.block.subscribe();
 
         loop {
             tokio::select! {
@@ -166,13 +167,16 @@ impl TransactionExecutor {
                     let _ = self.ready_tx.send(self.id).await;
                 }
                 // A new block has been produced, the source is the Ledger itself
-                _ = self.block.changed() => {
+                _ = block_updated.recv() => {
                     // explicitly release the lock in a fair manner, allowing
                     // any pending lock acquisition request to succeed
                     RwLockReadGuard::unlock_fair(_guard);
                     // update slot relevant state
                     self.transition_to_new_slot();
                     // and then re-acquire the lock for another slot duration
+                    // NOTE: in most cases the re-acquisition is almost instantaneous, the only
+                    // case when "hiccup" can occur is when some critical operation which needs to
+                    // stop all the activity (like accountsdb snapshotting) needs to take place
                     _guard = self.sync.read();
                 }
                 // system is shutting down, no more transactions will follow
