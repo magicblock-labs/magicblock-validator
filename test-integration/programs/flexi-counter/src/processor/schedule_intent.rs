@@ -1,4 +1,6 @@
-use crate::args::{CommitActionData, UndelegateActionData};
+use crate::args::{
+    CallHandlerDiscriminator, CommitActionData, UndelegateActionData,
+};
 use borsh::to_vec;
 use ephemeral_rollups_sdk::ephem::{
     CallHandler, CommitAndUndelegate, CommitType, MagicAction,
@@ -67,7 +69,11 @@ pub fn process_create_intent(
 
             CallHandler {
                 args: ActionArgs {
-                    data: commit_action_data.clone(),
+                    data: [
+                        CallHandlerDiscriminator::Simple.to_vec(),
+                        commit_action_data.clone(),
+                    ]
+                    .concat(),
                     escrow_index: ACTOR_ESCROW_INDEX,
                 },
                 compute_untis: compute_units,
@@ -102,7 +108,11 @@ pub fn process_create_intent(
 
                 Ok(CallHandler {
                     args: ActionArgs {
-                        data: to_vec(&undelegate_action_data)?,
+                        data: [
+                            CallHandlerDiscriminator::Simple.to_vec(),
+                            to_vec(&undelegate_action_data)?,
+                        ]
+                        .concat(),
                         escrow_index: ACTOR_ESCROW_INDEX,
                     },
                     compute_untis: compute_units,

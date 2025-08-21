@@ -1,5 +1,6 @@
 mod call_handler;
 mod schedule_intent;
+mod schedule_redelegation_intent;
 
 use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::consts::EXTERNAL_CALL_HANDLER_DISCRIMINATOR;
@@ -24,6 +25,7 @@ use solana_program::{
 use crate::instruction::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE;
 use crate::processor::call_handler::process_call_handler;
 use crate::processor::schedule_intent::process_create_intent;
+use crate::processor::schedule_redelegation_intent::process_create_redelegation_intent;
 use crate::{
     instruction::{DelegateArgs, FlexiCounterInstruction},
     state::FlexiCounter,
@@ -76,6 +78,9 @@ pub fn process(
             is_undelegate,
             compute_units,
         ),
+        CreateRedelegationIntont => {
+            process_create_redelegation_intent(accounts)
+        }
     }?;
     Ok(())
 }

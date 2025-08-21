@@ -42,27 +42,28 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
                 error!("Failed to write block: {:?}", err);
             }
 
-            // Handle intents if such feature enabled
-            if let Some(committor_processor) = &committor_processor {
-                // If accounts were scheduled to be committed, we accept them here
-                // and processs the commits
-                let magic_context_acc = bank.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
-                    .expect("Validator found to be running without MagicContext account!");
-                if MagicContext::has_scheduled_commits(magic_context_acc.data())
-                {
-                    handle_scheduled_commits(
-                        &bank,
-                        committor_processor,
-                        &transaction_status_sender,
-                    )
-                    .await;
-                }
-            }
-
             if log {
                 info!("Advanced to slot {}", next_slot);
             }
             metrics::inc_slot();
+
+            // Handle intents if such feature enabled
+            let Some(committor_processor) = &committor_processor else {
+                continue;
+            };
+
+            // If accounts were scheduled to be committed, we accept them here
+            // and processs the commits
+            let magic_context_acc = bank.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+                .expect("Validator found to be running without MagicContext account!");
+            if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
+                handle_scheduled_commits(
+                    &bank,
+                    committor_processor,
+                    &transaction_status_sender,
+                )
+                .await;
+            }
         }
     })
 }

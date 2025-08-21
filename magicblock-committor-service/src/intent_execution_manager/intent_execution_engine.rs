@@ -114,7 +114,8 @@ where
                     break;
                 }
                 Err(IntentExecutionManagerError::DBError(err)) => {
-                    panic!("Failed to fetch intent from db: {:?}", err);
+                    error!("Failed to fetch intent from db: {:?}", err);
+                    break;
                 }
             };
             let Some(intent) = intent else {

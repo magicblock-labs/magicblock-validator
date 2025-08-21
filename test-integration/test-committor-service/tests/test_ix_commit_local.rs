@@ -434,7 +434,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
         expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
         false,
     )
-        .await;
+    .await;
 }
 
 #[tokio::test]
@@ -444,11 +444,11 @@ async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
         expect_strategies(&[
             // Intent fits in 1 TX only with ALT, see IntentExecutorImpl::try_unite_tasks
             (CommitStrategy::FromBufferWithLookupTable, 3),
-            (CommitStrategy::FromBuffer, 2)
+            (CommitStrategy::FromBuffer, 2),
         ]),
         true,
     )
-        .await;
+    .await;
 }
 
 #[tokio::test]
@@ -461,7 +461,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
         ]),
         false,
     )
-        .await;
+    .await;
 }
 
 #[tokio::test]
@@ -474,20 +474,17 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
         ]),
         true,
     )
-        .await;
+    .await;
 }
-
 
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_5_undelegate_all() {
     commit_5_accounts_1kb(
         5,
-        expect_strategies(&[
-            (CommitStrategy::FromBufferWithLookupTable, 5),
-        ]),
+        expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 5)]),
         true,
     )
-        .await;
+    .await;
 }
 
 #[tokio::test]
@@ -496,7 +493,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_3() {
         3,
         expect_strategies(&[(CommitStrategy::FromBuffer, 20)]),
     )
-        .await;
+    .await;
 }
 
 #[tokio::test]
@@ -505,7 +502,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_4() {
         4,
         expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 20)]),
     )
-        .await;
+    .await;
 }
 
 #[tokio::test]
@@ -518,18 +515,16 @@ async fn test_commit_20_accounts_1kb_bundle_size_6() {
             (CommitStrategy::FromBuffer, 2),
         ]),
     )
-        .await;
+    .await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_20() {
     commit_20_accounts_1kb(
         20,
-        expect_strategies(&[
-            (CommitStrategy::FromBufferWithLookupTable, 20),
-        ]),
+        expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 20)]),
     )
-        .await;
+    .await;
 }
 
 #[tokio::test]
@@ -542,7 +537,7 @@ async fn test_commit_8_accounts_1kb_bundle_size_8() {
             (CommitStrategy::FromBufferWithLookupTable, 8),
         ]),
     )
-        .await;
+    .await;
 }
 
 #[tokio::test]
@@ -555,7 +550,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_8() {
             (CommitStrategy::FromBufferWithLookupTable, 20),
         ]),
     )
-        .await;
+    .await;
 }
 
 async fn commit_5_accounts_1kb(

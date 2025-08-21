@@ -11,12 +11,8 @@ pub fn change_owner_for_undelegated_accounts(
     args: &MagicBaseIntentArgs,
 ) -> Result<(), InstructionError> {
     let commited_accounts_ref = match args {
-        MagicBaseIntentArgs::Commit(commit_type) => {
-            let accounts_indices = commit_type.committed_accounts_indices();
-            CommitType::extract_commit_accounts(
-                accounts_indices,
-                construction_context.transaction_context,
-            )?
+        MagicBaseIntentArgs::Commit(_) => {
+            return Ok(());
         }
         MagicBaseIntentArgs::CommitAndUndelegate(
             commit_and_undelegate_type,
