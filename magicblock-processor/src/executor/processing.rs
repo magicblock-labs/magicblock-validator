@@ -21,6 +21,8 @@ use magicblock_core::link::{
 };
 
 impl super::TransactionExecutor {
+    /// Execute transaction in the SVM, with persistence of the final state (accounts) to the
+    /// accountsdb and optional persistence of transaction (along with details) to the ledger
     pub(super) fn execute(
         &self,
         transaction: [SanitizedTransaction; 1],
@@ -29,14 +31,32 @@ impl super::TransactionExecutor {
     ) {
         let (result, balances) = self.process(&transaction);
         let [txn] = transaction;
-        let result = result.and_then(|processed| {
+        // if transaction has failed to load altogether we don't commit the results
+        //
+        // NOTE: solana has a feature which forces persistence of the payer state
+        // (fee deduction) even for such case, but it needs to be explicitly activated
+        let result = result.and_then(|mut processed| {
             let result = processed.status();
-            self.commit(txn, processed, balances, is_replay);
+            // if the transaction has failed during the execution, and the
+            // caller is interested in transaction result, which means that
+            // either the preflight check was enabled or the transaction
+            // originated internally, in both cases we don't persist anything
+            if result.is_err() && tx.is_some() {
+                return result;
+            }
+            self.commit_accounts(&mut processed, is_replay);
+            // replay transactions are already in the ledger,
+            // we just need to match account states
+            if !is_replay {
+                self.commit_transaction(txn, processed, balances);
+            }
             result
         });
         tx.map(|tx| tx.send(result));
     }
 
+    /// Same as transaction execution, but nothing is persisted,
+    /// and more execution details are returned to the caller
     pub(super) fn simulate(
         &self,
         transaction: [SanitizedTransaction; 1],
@@ -74,6 +94,7 @@ impl super::TransactionExecutor {
         let _ = tx.send(result);
     }
 
+    /// A wrapper method around SVM entrypoint to load and execute the transaction
     fn process(
         &self,
         txn: &[SanitizedTransaction],
@@ -96,45 +117,32 @@ impl super::TransactionExecutor {
         (result, output.balances)
     }
 
-    fn commit(
+    /// Persist transaction and its execution details to the ledger
+    fn commit_transaction(
         &self,
         txn: SanitizedTransaction,
         result: ProcessedTransaction,
         balances: AccountsBalances,
-        is_replay: bool,
     ) {
-        let mut accounts = Vec::new();
-
         let meta = match result {
-            ProcessedTransaction::Executed(executed) => {
-                let programs = &executed.programs_modified_by_tx;
-                if !programs.is_empty() && executed.was_successful() {
-                    self.processor
-                        .program_cache
-                        .write()
-                        .unwrap()
-                        .merge(programs);
-                }
-                accounts = executed.loaded_transaction.accounts;
-                TransactionStatusMeta {
-                    fee: executed.loaded_transaction.fee_details.total_fee(),
-                    compute_units_consumed: Some(
-                        executed.execution_details.executed_units,
-                    ),
-                    status: executed.execution_details.status,
-                    pre_balances: balances.pre,
-                    post_balances: balances.post,
-                    log_messages: executed.execution_details.log_messages,
-                    loaded_addresses: txn.get_loaded_addresses(),
-                    return_data: executed.execution_details.return_data,
-                    inner_instructions: executed
-                        .execution_details
-                        .inner_instructions
-                        .map(map_inner_instructions)
-                        .map(|i| i.collect()),
-                    ..Default::default()
-                }
-            }
+            ProcessedTransaction::Executed(executed) => TransactionStatusMeta {
+                fee: executed.loaded_transaction.fee_details.total_fee(),
+                compute_units_consumed: Some(
+                    executed.execution_details.executed_units,
+                ),
+                status: executed.execution_details.status,
+                pre_balances: balances.pre,
+                post_balances: balances.post,
+                log_messages: executed.execution_details.log_messages,
+                loaded_addresses: txn.get_loaded_addresses(),
+                return_data: executed.execution_details.return_data,
+                inner_instructions: executed
+                    .execution_details
+                    .inner_instructions
+                    .map(map_inner_instructions)
+                    .map(|i| i.collect()),
+                ..Default::default()
+            },
             ProcessedTransaction::FeesOnly(fo) => TransactionStatusMeta {
                 fee: fo.fee_details.total_fee(),
                 status: Err(fo.load_error),
@@ -161,7 +169,42 @@ impl super::TransactionExecutor {
                 logs: meta.log_messages.clone(),
             },
         };
-        for (pubkey, account) in accounts {
+        if let Err(error) = self.ledger.write_transaction(
+            signature,
+            self.processor.slot,
+            txn,
+            meta,
+            self.index.fetch_add(1, Ordering::Relaxed),
+        ) {
+            error!("failed to commit transaction to the ledger: {error}");
+            return;
+        }
+        let _ = self.transaction_tx.send(status);
+    }
+
+    /// Persist account state to the accountsdb if the transaction was successful
+    fn commit_accounts(
+        &self,
+        result: &mut ProcessedTransaction,
+        is_replay: bool,
+    ) {
+        // only persist account states if the transaction executed successfully
+        let ProcessedTransaction::Executed(executed) = result else {
+            return;
+        };
+        if !executed.was_successful() {
+            return;
+        }
+        let programs = &executed.programs_modified_by_tx;
+        if !programs.is_empty() {
+            self.processor
+                .program_cache
+                .write()
+                .unwrap()
+                .merge(programs);
+        }
+        for (pubkey, account) in executed.loaded_transaction.accounts.drain(..)
+        {
             if !account.is_dirty() {
                 continue;
             }
@@ -175,19 +218,5 @@ impl super::TransactionExecutor {
             };
             let _ = self.accounts_tx.send(account);
         }
-        if is_replay {
-            return;
-        }
-        if let Err(error) = self.ledger.write_transaction(
-            signature,
-            self.processor.slot,
-            txn,
-            meta,
-            self.index.fetch_add(1, Ordering::Relaxed),
-        ) {
-            error!("failed to commit transaction to the ledger: {error}");
-            return;
-        }
-        let _ = self.transaction_tx.send(status);
     }
 }

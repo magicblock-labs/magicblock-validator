@@ -73,7 +73,7 @@ impl TransactionScheduler {
             transactions_rx: state.txn_to_process_rx,
             ready_rx,
             executors,
-            latest_block: state.latest_block,
+            latest_block: state.ledger.latest_block().clone(),
             program_cache,
             index,
         }
