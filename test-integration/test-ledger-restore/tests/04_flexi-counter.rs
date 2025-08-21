@@ -85,7 +85,10 @@ fn write(
         ledger_path,
         Some(programs),
         Some(SLOT_MS),
-        LedgerResumeStrategy::Reset,
+        LedgerResumeStrategy::Reset {
+            slot: 0,
+            keep_accounts: false,
+        },
         false,
     );
 
@@ -241,7 +244,7 @@ fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
         ledger_path,
         Some(programs),
         Some(SLOT_MS),
-        LedgerResumeStrategy::Replay,
+        LedgerResumeStrategy::Resume { replay: true },
         false,
     );
 

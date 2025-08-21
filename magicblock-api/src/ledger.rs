@@ -7,7 +7,7 @@ use std::{
 use fd_lock::{RwLock, RwLockWriteGuard};
 use log::*;
 use magicblock_accounts_db::ACCOUNTSDB_DIR;
-use magicblock_config::LedgerResumeStrategy;
+use magicblock_config::{LedgerConfig, LedgerResumeStrategy};
 use magicblock_ledger::Ledger;
 use solana_sdk::{clock::Slot, signature::Keypair, signer::EncodableKey};
 
@@ -18,14 +18,15 @@ use crate::errors::{ApiError, ApiResult};
 // -----------------
 pub(crate) fn init(
     ledger_path: PathBuf,
-    resume_strategy: &LedgerResumeStrategy,
+    ledger_config: &LedgerConfig,
 ) -> ApiResult<(Ledger, Slot)> {
-    // Save the last slot from the previous ledger to restart from it
-    let last_slot = if resume_strategy.is_resuming() {
-        let previous_ledger = Ledger::open(ledger_path.as_path())?;
-        previous_ledger.get_max_blockhash().map(|(slot, _)| slot)?
-    } else {
-        Slot::default()
+    let resume_strategy = &ledger_config.resume_strategy();
+    let starting_slot = match resume_strategy {
+        LedgerResumeStrategy::Resume { .. } => {
+            let previous_ledger = Ledger::open(ledger_path.as_path())?;
+            previous_ledger.get_max_blockhash().map(|(slot, _)| slot)?
+        }
+        LedgerResumeStrategy::Reset { slot, .. } => *slot,
     };
 
     if resume_strategy.is_removing_ledger() {
@@ -47,7 +48,7 @@ pub(crate) fn init(
 
     fs::create_dir_all(&ledger_path)?;
 
-    Ok((Ledger::open(ledger_path.as_path())?, last_slot))
+    Ok((Ledger::open(ledger_path.as_path())?, starting_slot))
 }
 
 // -----------------
@@ -90,7 +91,7 @@ pub(crate) fn read_faucet_keypair_from_ledger(
     ledger_path: &Path,
 ) -> ApiResult<Keypair> {
     let keypair_path = faucet_keypair_path(ledger_path)?;
-    if fs::exists(keypair_path.as_path()).unwrap_or(false) {
+    if fs::exists(keypair_path.as_path()).unwrap_or_default() {
         let keypair =
             Keypair::read_from_file(keypair_path.as_path()).map_err(|err| {
                 ApiError::LedgerInvalidFaucetKeypair(
@@ -134,7 +135,7 @@ pub(crate) fn read_validator_keypair_from_ledger(
     ledger_path: &Path,
 ) -> ApiResult<Keypair> {
     let keypair_path = validator_keypair_path(ledger_path)?;
-    if fs::exists(keypair_path.as_path()).unwrap_or(false) {
+    if fs::exists(keypair_path.as_path()).unwrap_or_default() {
         let keypair =
             Keypair::read_from_file(keypair_path.as_path()).map_err(|err| {
                 ApiError::LedgerInvalidValidatorKeypair(
@@ -185,27 +186,33 @@ fn remove_ledger_directory_if_exists(
     if !dir.exists() {
         return Ok(());
     }
+    debug!("Strategy: {:?}", resume_strategy);
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
 
-        // When resuming, keep the accounts db
-        if entry.file_name() == ACCOUNTSDB_DIR && resume_strategy.is_resuming()
+        if entry.file_name() == ACCOUNTSDB_DIR
+            && !resume_strategy.is_removing_accountsdb()
         {
+            // The entry is accounts db
+            debug!("Skipping accounts db: {}", entry.path().display());
             continue;
-        }
-
-        // When resuming, keep the validator keypair
-        if let Ok(validator_keypair_path) = validator_keypair_path(dir) {
-            if resume_strategy.is_resuming()
+        } else if let Ok(validator_keypair_path) = validator_keypair_path(dir) {
+            // The entry is the validator keypair
+            if resume_strategy.is_removing_ledger()
                 && validator_keypair_path
                     .file_name()
                     .map(|key_path| key_path == entry.file_name())
-                    .unwrap_or(false)
+                    .unwrap_or_default()
             {
+                debug!(
+                    "Skipping validator keypair: {}",
+                    entry.path().display()
+                );
                 continue;
             }
         }
 
+        debug!("Removing ledger entry: {}", entry.path().display());
         if entry.metadata()?.is_dir() {
             fs::remove_dir_all(entry.path())?
         } else {

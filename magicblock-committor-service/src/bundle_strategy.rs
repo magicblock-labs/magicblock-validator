@@ -104,7 +104,7 @@ fn efficient_merge_strategy(
         if lens
             .first()
             .map(|len| current_size < len.len)
-            .unwrap_or(false)
+            .unwrap_or_default()
         {
             continue 'outer;
         }

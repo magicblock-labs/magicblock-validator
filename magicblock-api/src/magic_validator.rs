@@ -198,15 +198,17 @@ impl MagicValidator {
             config.validator_config.validator.base_fees,
         );
 
-        let (ledger, last_slot) =
+        let ledger_resume_strategy =
+            &config.validator_config.ledger.resume_strategy();
+        let (ledger, starting_slot) =
             Self::init_ledger(&config.validator_config.ledger)?;
-        info!("Latest ledger slot: {}", last_slot);
+        info!("Starting slot: {}", starting_slot);
 
         if !config.validator_config.ledger.skip_keypair_match_check {
             Self::sync_validator_keypair_with_ledger(
                 ledger.ledger_path(),
                 &identity_keypair,
-                &config.validator_config.ledger.resume_strategy,
+                ledger_resume_strategy,
             )?;
         }
 
@@ -227,8 +229,10 @@ impl MagicValidator {
             config.validator_config.validator.millis_per_slot,
             validator_pubkey,
             ledger_parent_path,
-            last_slot,
+            starting_slot,
+            ledger_resume_strategy,
         )?;
+        debug!("Bank initialized at slot {}", bank.slot());
 
         let ledger_truncator = LedgerTruncator::new(
             ledger.clone(),
@@ -242,7 +246,7 @@ impl MagicValidator {
         let faucet_keypair = funded_faucet(
             &bank,
             ledger.ledger_path().as_path(),
-            &config.validator_config.ledger.resume_strategy,
+            ledger_resume_strategy,
         )?;
 
         load_programs_into_bank(
@@ -422,6 +426,7 @@ impl MagicValidator {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn init_bank(
         geyser_manager: Option<Arc<RwLock<GeyserPluginManager>>>,
         genesis_config: &GenesisConfig,
@@ -430,6 +435,7 @@ impl MagicValidator {
         validator_pubkey: Pubkey,
         adb_path: &Path,
         adb_init_slot: Slot,
+        ledger_resume_strategy: &LedgerResumeStrategy,
     ) -> Result<Arc<Bank>, AccountsDbError> {
         let runtime_config = Default::default();
         let lock = TRANSACTION_INDEX_LOCK.clone();
@@ -447,6 +453,7 @@ impl MagicValidator {
             lock,
             adb_path,
             adb_init_slot,
+            ledger_resume_strategy.should_override_bank_slot(),
         )?;
         bank.transaction_log_collector_config
             .write()
@@ -534,8 +541,7 @@ impl MagicValidator {
                 ledger_path.path().to_path_buf()
             }
         };
-        let (ledger, last_slot) =
-            ledger::init(ledger_path, &ledger_config.resume_strategy)?;
+        let (ledger, last_slot) = ledger::init(ledger_path, ledger_config)?;
         let ledger_shared = Arc::new(ledger);
         init_persister(ledger_shared.clone());
         Ok((ledger_shared, last_slot))
@@ -546,7 +552,7 @@ impl MagicValidator {
         validator_keypair: &Keypair,
         resume_strategy: &LedgerResumeStrategy,
     ) -> ApiResult<()> {
-        if !resume_strategy.is_resuming() {
+        if resume_strategy.is_removing_ledger() {
             write_validator_keypair_to_ledger(ledger_path, validator_keypair)?;
         } else {
             let ledger_validator_keypair =
@@ -586,7 +592,7 @@ impl MagicValidator {
     // Start/Stop
     // -----------------
     fn maybe_process_ledger(&self) -> ApiResult<()> {
-        if !self.config.ledger.resume_strategy.is_replaying() {
+        if !self.config.ledger.resume_strategy().is_replaying() {
             return Ok(());
         }
         let slot_to_continue_at = process_ledger(&self.ledger, &self.bank)?;
@@ -821,7 +827,7 @@ impl MagicValidator {
                 }
             }
 
-            if self.config.ledger.resume_strategy.is_replaying() {
+            if self.config.ledger.resume_strategy().is_replaying() {
                 let remote_account_cloner_worker =
                     remote_account_cloner_worker.clone();
                 tokio::spawn(async move {
