@@ -23,8 +23,8 @@ pub struct DbTask {
     pub period_millis: i64,
     /// Number of times this task still needs to be executed.
     pub executions_left: u64,
-    /// Timestamp of the next execution of this task in milliseconds
-    pub next_execution_millis: i64,
+    /// Timestamp of the last execution of this task in milliseconds
+    pub last_execution_millis: i64,
 }
 
 #[derive(Clone)]
@@ -47,15 +47,10 @@ impl SchedulerDatabase {
                 authority TEXT NOT NULL,
                 period_millis INTEGER NOT NULL,
                 executions_left INTEGER NOT NULL,
-                next_execution_millis INTEGER NOT NULL,
+                last_execution_millis INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )",
-            [],
-        )?;
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_next_execution ON tasks(next_execution_millis)",
             [],
         )?;
 
@@ -70,7 +65,7 @@ impl SchedulerDatabase {
 
         conn.execute(
             "INSERT OR REPLACE INTO tasks 
-             (id, instructions, authority, period_millis, executions_left, next_execution_millis, created_at, updated_at)
+             (id, instructions, authority, period_millis, executions_left, last_execution_millis, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 task.id,
@@ -78,7 +73,7 @@ impl SchedulerDatabase {
                 authority_str,
                 task.period_millis,
                 task.executions_left,
-                task.next_execution_millis,
+                task.last_execution_millis,
                 now,
                 now,
             ],
@@ -91,7 +86,7 @@ impl SchedulerDatabase {
     pub fn update_task_after_execution(
         &self,
         task_id: u64,
-        next_execution: i64,
+        last_execution: i64,
     ) -> Result<(), TaskSchedulerError> {
         let now = Utc::now().timestamp_millis();
 
@@ -99,10 +94,10 @@ impl SchedulerDatabase {
         conn.execute(
             "UPDATE tasks 
              SET executions_left = executions_left - 1, 
-                 next_execution_millis = ?,
+                 last_execution_millis = ?,
                  updated_at = ?
              WHERE id = ?",
-            params![next_execution, now, task_id],
+            params![last_execution, now, task_id],
         )?;
 
         debug!("Updated task {} after execution", task_id);
@@ -115,7 +110,7 @@ impl SchedulerDatabase {
     ) -> Result<(), TaskSchedulerError> {
         let conn = self.pool.get()?;
         conn.execute(
-            "UPDATE tasks SET next_execution_millis = 0, executions_left = 0 WHERE id = ?",
+            "UPDATE tasks SET executions_left = 0 WHERE id = ?",
             [task_id],
         )?;
         debug!("Unscheduled task {}", task_id);
@@ -135,7 +130,7 @@ impl SchedulerDatabase {
     ) -> Result<Option<DbTask>, TaskSchedulerError> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(
-            "SELECT id, instructions, authority, period_millis, executions_left, next_execution_millis
+            "SELECT id, instructions, authority, period_millis, executions_left, last_execution_millis
              FROM tasks WHERE id = ?"
         )?;
 
@@ -162,39 +157,22 @@ impl SchedulerDatabase {
                 authority,
                 period_millis: row.get(3)?,
                 executions_left: row.get(4)?,
-                next_execution_millis: row.get(5)?,
+                last_execution_millis: row.get(5)?,
             })
         })?;
 
         Ok(rows.next().transpose()?)
     }
 
-    pub fn get_task_ids(&self) -> Result<Vec<u64>, TaskSchedulerError> {
+    pub fn get_tasks(&self) -> Result<Vec<DbTask>, TaskSchedulerError> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(
-            "SELECT id 
-             FROM tasks",
-        )?;
-
-        let rows = stmt.query_map([], |row| row.get(0))?;
-
-        Ok(rows.collect::<Result<Vec<u64>, rusqlite::Error>>()?)
-    }
-
-    pub fn get_executable_tasks(
-        &self,
-        current_time: i64,
-    ) -> Result<Vec<DbTask>, TaskSchedulerError> {
-        let conn = self.pool.get()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, instructions, authority, period_millis, executions_left, next_execution_millis
-             FROM tasks 
-             WHERE next_execution_millis <= ? AND executions_left > 0
-             ORDER BY next_execution_millis ASC"
+            "SELECT id, instructions, authority, period_millis, executions_left, last_execution_millis
+             FROM tasks"
         )?;
 
         let mut tasks = Vec::new();
-        let rows = stmt.query_map([current_time], |row| {
+        let rows = stmt.query_map([], |row| {
             let instructions_bin: Vec<u8> = row.get(1)?;
             let instructions: Vec<Instruction> =
                 bincode::deserialize(&instructions_bin).map_err(|e| {
@@ -217,7 +195,7 @@ impl SchedulerDatabase {
                 authority,
                 period_millis: row.get(3)?,
                 executions_left: row.get(4)?,
-                next_execution_millis: row.get(5)?,
+                last_execution_millis: row.get(5)?,
             })
         })?;
 
@@ -226,5 +204,17 @@ impl SchedulerDatabase {
         }
 
         Ok(tasks)
+    }
+
+    pub fn get_task_ids(&self) -> Result<Vec<u64>, TaskSchedulerError> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT id 
+             FROM tasks",
+        )?;
+
+        let rows = stmt.query_map([], |row| row.get(0))?;
+
+        Ok(rows.collect::<Result<Vec<u64>, rusqlite::Error>>()?)
     }
 }
