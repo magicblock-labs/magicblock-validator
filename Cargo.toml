@@ -74,6 +74,7 @@ conjunto-transwise = { git = "https://github.com/magicblock-labs/conjunto.git", 
 console-subscriber = "0.2.0"
 crossbeam-channel = "0.5.11"
 const_format = "0.2.34"
+dyn-clone = "1.0.20"
 ed25519-dalek = "1.0.1"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"
@@ -118,7 +119,7 @@ magicblock-config = { path = "./magicblock-config" }
 magicblock-config-helpers = { path = "./magicblock-config-helpers" }
 magicblock-config-macro = { path = "./magicblock-config-macro" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "00d720", features = ["no-entrypoint"] }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
@@ -195,6 +196,7 @@ spl-token-2022 = "=6.0"
 static_assertions = "1.1.0"
 strum = "0.24"
 strum_macros = "0.24"
+lru = "0.16.0"
 syn = "2.0"
 tempfile = "3.10.1"
 test-tools = { path = "./test-tools" }

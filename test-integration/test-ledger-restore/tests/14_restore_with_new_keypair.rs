@@ -1,4 +1,4 @@
-use cleanass::assert_eq;
+use cleanass::{assert, assert_eq};
 use solana_rpc_client::rpc_client::RpcClient;
 use std::{path::Path, process::Child};
 
@@ -88,7 +88,7 @@ fn write(ledger_path: &Path) -> (Child, u64) {
         owner, executable, ..
     } = account;
     assert_eq!(owner, bpf_loader_upgradeable::ID, cleanup(&mut validator));
-    assert_eq!(executable, true, cleanup(&mut validator));
+    assert!(executable, cleanup(&mut validator));
 
     let slot = wait_for_ledger_persist(&mut validator);
 
@@ -125,7 +125,7 @@ fn read(ledger_path: &Path) -> Child {
         owner, executable, ..
     } = account;
     assert_eq!(owner, bpf_loader_upgradeable::ID, cleanup(&mut validator));
-    assert_eq!(executable, true, cleanup(&mut validator));
+    assert!(executable, cleanup(&mut validator));
 
     validator
 }

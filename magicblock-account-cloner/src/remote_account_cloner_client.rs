@@ -11,7 +11,7 @@ use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::AccountUpdates;
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::ChangesetCommittor;
+use magicblock_committor_service::BaseIntentCommittor;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::oneshot::channel;
 
@@ -34,7 +34,7 @@ impl RemoteAccountClonerClient {
         AFE: AccountFetcher,
         AUP: AccountUpdates,
         ADU: AccountDumper,
-        CC: ChangesetCommittor,
+        CC: BaseIntentCommittor,
     {
         Self {
             clone_request_sender: worker.get_clone_request_sender(),

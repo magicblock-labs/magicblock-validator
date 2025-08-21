@@ -1,5 +1,5 @@
 use magicblock_accounts_db::error::AccountsDbError;
-use magicblock_program::Pubkey;
+use solana_sdk::pubkey::Pubkey;
 use thiserror::Error;
 
 pub type ApiResult<T> = std::result::Result<T, ApiError>;

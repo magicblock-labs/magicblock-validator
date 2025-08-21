@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    cmp::max,
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::{Arc, RwLock},
     time::Duration,
@@ -16,7 +17,7 @@ use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::{AccountUpdates, AccountUpdatesResult};
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::ChangesetCommittor;
+use magicblock_committor_service::BaseIntentCommittor;
 use magicblock_config::{AccountsCloneConfig, PrepareLookupTables};
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
@@ -133,7 +134,7 @@ where
     AFE: AccountFetcher,
     AUP: AccountUpdates,
     ADU: AccountDumper,
-    CC: ChangesetCommittor,
+    CC: BaseIntentCommittor,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -546,6 +547,8 @@ where
                 }
 
                 // Fee payer accounts are non-delegated ones, so we keep track of them as well
+                let lamports =
+                    max(self.clone_config.auto_airdrop_lamports, *lamports);
                 self.track_not_delegated_account(*pubkey).await?;
                 match self.validator_charges_fees {
                     ValidatorCollectionMode::NoFees => self
@@ -553,7 +556,7 @@ where
                             pubkey,
                             // TODO(GabrielePicco): change account fetching to return the account
                             &Account {
-                                lamports: *lamports,
+                                lamports,
                                 owner: *owner,
                                 ..Default::default()
                             },
@@ -714,11 +717,10 @@ where
 
                 // Allow the committer service to reserve pubkeys in lookup tables
                 // that could be needed when we commit this account
-                if let Some(committor) = self.changeset_committor.as_ref() {
+                if let Some(committor) = self.changeset_committor.clone() {
                     if self.clone_config.prepare_lookup_tables
                         == PrepareLookupTables::Always
                     {
-                        let committor = Arc::clone(committor);
                         let pubkey = *pubkey;
                         let owner = delegation_record.owner;
                         tokio::spawn(async move {

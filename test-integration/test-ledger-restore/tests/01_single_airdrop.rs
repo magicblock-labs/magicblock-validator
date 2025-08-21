@@ -38,6 +38,9 @@ fn write_ledger(
         false,
     );
 
+    // Wait to make sure we don't process transactions on slot 0
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+
     let sig = expect!(ctx.airdrop_ephem(pubkey1, 1_111_111), validator);
 
     let lamports = expect!(ctx.fetch_ephem_account_balance(pubkey1), validator);

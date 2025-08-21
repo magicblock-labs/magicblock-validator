@@ -10,7 +10,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, signature::Signer,
     transaction::Transaction,
 };
-use tokio::task::JoinHandle;
+use tokio::{task::JoinHandle, time::Instant};
 use tokio_util::sync::CancellationToken;
 
 use crate::external_config::cluster_from_remote;
@@ -37,9 +37,11 @@ impl ClaimFeesTask {
         let token = self.token.clone();
         let handle = tokio::spawn(async move {
             info!("Starting claim fees task");
-            let mut interval = tokio::time::interval(Duration::from_secs(
-                config.validator.claim_fees_interval_secs,
-            ));
+            let tick_period =
+                Duration::from_secs(config.validator.claim_fees_interval_secs);
+            let start_time = Instant::now() + tick_period;
+            let mut interval =
+                tokio::time::interval_at(start_time, tick_period);
             loop {
                 tokio::select! {
                     _ = interval.tick() => {

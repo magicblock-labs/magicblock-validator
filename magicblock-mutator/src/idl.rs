@@ -1,4 +1,4 @@
-use magicblock_program::magicblock_instruction::AccountModification;
+use magicblock_program::instruction::AccountModification;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::{fetch::fetch_account_from_cluster, Cluster};
@@ -51,7 +51,14 @@ async fn try_fetch_program_idl_modification_from_cluster(
     if let Some(pubkey) = pubkey {
         if let Ok(account) = fetch_account_from_cluster(cluster, &pubkey).await
         {
-            return Some(AccountModification::from((&pubkey, &account)));
+            return Some(AccountModification {
+                pubkey,
+                lamports: Some(account.lamports),
+                owner: Some(account.owner),
+                executable: Some(account.executable),
+                data: Some(account.data.clone()),
+                rent_epoch: Some(account.rent_epoch),
+            });
         }
     }
     None

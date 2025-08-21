@@ -73,7 +73,7 @@ impl Default for AccountsConfig {
     Args,
     Mergeable,
 )]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct RemoteConfig {
     #[arg(help = "The predefined cluster to use.")]
     #[serde(default)]
@@ -155,7 +155,7 @@ pub enum LifecycleMode {
 #[derive(
     Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
 )]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct CommitStrategyConfig {
     #[derive_env_var]
     #[serde(default = "default_frequency_millis")]
@@ -178,7 +178,7 @@ fn default_max_monitored_accounts() -> usize {
 fn default_compute_unit_price() -> u64 {
     // This is the lowest we found to pass the transactions through mainnet fairly
     // consistently
-    1_000_000 // 1_000_000 micro-lamports == 1 Lamport
+    100_000 // 100_000 micro-lamports == 0.1 Lamport
 }
 
 impl Default for CommitStrategyConfig {
@@ -227,10 +227,16 @@ pub enum PrepareLookupTables {
     Args,
     Mergeable,
 )]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct AccountsCloneConfig {
     #[serde(default)]
     pub prepare_lookup_tables: PrepareLookupTables,
+    #[derive_env_var]
+    #[arg(
+        help = "If > 0, automatically airdrop this many lamports to target accounts when cloning."
+    )]
+    #[serde(default)]
+    pub auto_airdrop_lamports: u64,
 }
 
 #[derive(
@@ -398,6 +404,7 @@ mod tests {
     fn test_clone_config_default() {
         let config = AccountsCloneConfig::default();
         assert_eq!(config.prepare_lookup_tables, PrepareLookupTables::Never);
+        assert_eq!(config.auto_airdrop_lamports, 0);
     }
 
     #[test]
@@ -406,6 +413,7 @@ mod tests {
         let other = AccountsConfig {
             clone: AccountsCloneConfig {
                 prepare_lookup_tables: PrepareLookupTables::Always,
+                auto_airdrop_lamports: 0,
             },
             ..Default::default()
         };
@@ -421,7 +429,8 @@ mod tests {
     fn test_clone_config_serde() {
         let toml_str = r#"
 [clone]
-prepare_lookup_tables = "always"
+prepare-lookup-tables = "always"
+auto-airdrop-lamports = 123
 "#;
 
         let config: AccountsConfig = toml::from_str(toml_str).unwrap();
@@ -429,5 +438,6 @@ prepare_lookup_tables = "always"
             config.clone.prepare_lookup_tables,
             PrepareLookupTables::Always
         );
+        assert_eq!(config.clone.auto_airdrop_lamports, 123);
     }
 }

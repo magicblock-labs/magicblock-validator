@@ -38,7 +38,7 @@ pub use validator::*;
     Args,
     Mergeable,
 )]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct EphemeralConfig {
     #[serde(default)]
     #[command(flatten)]
@@ -518,6 +518,7 @@ mod tests {
                 db: AccountsDbConfig::default(),
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
+                    auto_airdrop_lamports: 0,
                 },
                 max_monitored_accounts: 2048,
             },

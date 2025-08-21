@@ -1,8 +1,9 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use crate::persist::error::CommitPersistError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum CommitStrategy {
-    /// The commit strategy is not known yet
-    Undetermined,
     /// Args without the use of a lookup table
+    #[default]
     Args,
     /// Args with the use of a lookup table
     ArgsWithLookupTable,
@@ -24,7 +25,6 @@ impl CommitStrategy {
     pub fn as_str(&self) -> &str {
         use CommitStrategy::*;
         match self {
-            Undetermined => "Undetermined",
             Args => "Args",
             ArgsWithLookupTable => "ArgsWithLookupTable",
             FromBuffer => "FromBuffer",
@@ -41,14 +41,17 @@ impl CommitStrategy {
     }
 }
 
-impl From<&str> for CommitStrategy {
-    fn from(value: &str) -> Self {
+impl TryFrom<&str> for CommitStrategy {
+    type Error = CommitPersistError;
+    fn try_from(value: &str) -> Result<Self, CommitPersistError> {
         match value {
-            "Args" => Self::Args,
-            "ArgsWithLookupTable" => Self::ArgsWithLookupTable,
-            "FromBuffer" => Self::FromBuffer,
-            "FromBufferWithLookupTable" => Self::FromBufferWithLookupTable,
-            _ => Self::Undetermined,
+            "Args" => Ok(Self::Args),
+            "ArgsWithLookupTable" => Ok(Self::ArgsWithLookupTable),
+            "FromBuffer" => Ok(Self::FromBuffer),
+            "FromBufferWithLookupTable" => Ok(Self::FromBufferWithLookupTable),
+            _ => Err(CommitPersistError::InvalidCommitStrategy(
+                value.to_string(),
+            )),
         }
     }
 }

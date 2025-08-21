@@ -124,7 +124,7 @@ pub fn setup_validator_with_local_remote(
     };
 
     let (default_tmpdir_config, Some(mut validator)) =
-        start_magicblock_validator_with_config_struct(config, &loaded_accounts)
+        start_magicblock_validator_with_config_struct(config, loaded_accounts)
     else {
         panic!("validator should set up correctly");
     };
@@ -335,4 +335,21 @@ pub fn wait_for_cloned_accounts_hydration() {
     // NOTE: account hydration runs in the background _after_ the validator starts up
     // thus we need to wait for that to complete before we can send this transaction
     sleep(Duration::from_secs(5));
+}
+
+/// Waits for the next slot after the snapshot frequency
+pub fn wait_for_next_slot_after_account_snapshot(
+    validator: &mut Child,
+    snapshot_frequency: u64,
+) -> Slot {
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
+
+    let initial_slot = expect!(ctx.get_slot_ephem(), validator);
+    let slots_until_next_snapshot =
+        snapshot_frequency - (initial_slot % snapshot_frequency);
+
+    expect!(
+        ctx.wait_for_delta_slot_ephem(slots_until_next_snapshot + 1),
+        validator
+    )
 }

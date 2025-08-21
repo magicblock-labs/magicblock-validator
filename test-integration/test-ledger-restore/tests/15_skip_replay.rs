@@ -1,5 +1,5 @@
 use cleanass::{assert, assert_eq};
-use magicblock_config::{LedgerResumeStrategy, TEST_SNAPSHOT_FREQUENCY};
+use magicblock_config::LedgerResumeStrategy;
 use solana_transaction_status::UiTransactionEncoding;
 use std::{path::Path, process::Child};
 
@@ -10,7 +10,12 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
 };
-use test_ledger_restore::{setup_offline_validator, TMP_DIR_LEDGER};
+use test_ledger_restore::{
+    setup_offline_validator, wait_for_next_slot_after_account_snapshot,
+    TMP_DIR_LEDGER,
+};
+
+const SNAPSHOT_FREQUENCY: u64 = 2;
 
 // In this test we ensure that we can optionally skip the replay of the ledger
 // when restoring, restarting at the last slot.
@@ -33,13 +38,17 @@ fn write(
     ledger_path: &Path,
     keypairs: &[Keypair],
 ) -> (Child, u64, Vec<Signature>) {
+    let millis_per_slot = 100;
     let (_, mut validator, ctx) = setup_offline_validator(
         ledger_path,
         None,
-        None,
+        Some(millis_per_slot),
         LedgerResumeStrategy::Reset,
         false,
     );
+
+    // Wait slot 1 otherwise we might be unable to fetch the transaction status
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
 
     let mut signatures = Vec::with_capacity(keypairs.len());
     for pubkey in keypairs.iter().map(|kp| kp.pubkey()) {
@@ -52,12 +61,11 @@ fn write(
         assert_eq!(lamports, 1_111_111, cleanup(&mut validator));
     }
 
-    // NOTE: This slows the test down a lot (500 * 50ms = 25s) and will
-    // be improved once we can configure `FLUSH_ACCOUNTS_SLOT_FREQ`
-    let slot = expect!(
-        ctx.wait_for_delta_slot_ephem(TEST_SNAPSHOT_FREQUENCY),
-        validator
-    );
+    // Wait for the txs to be written to disk and save the actual snapshot slot
+    let slot = wait_for_next_slot_after_account_snapshot(
+        &mut validator,
+        SNAPSHOT_FREQUENCY,
+    ) - 1;
 
     (validator, slot, signatures)
 }

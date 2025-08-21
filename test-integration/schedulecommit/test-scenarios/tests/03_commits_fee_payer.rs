@@ -5,7 +5,6 @@ use crate::utils::{
     assert_feepayer_was_committed,
     get_context_with_delegated_committees_without_payer_escrow,
 };
-use integration_test_tools::conversions::pubkey_from_magic_program;
 use magicblock_core::magic_program;
 use program_schedulecommit::api::schedule_commit_with_payer_cpi_instruction;
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
@@ -41,8 +40,8 @@ fn test_committing_fee_payer_without_escrowing_lamports() {
 
         let ix = schedule_commit_with_payer_cpi_instruction(
             payer.pubkey(),
-            pubkey_from_magic_program(magic_program::id()),
-            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
+            magic_program::id(),
+            magic_program::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -94,8 +93,8 @@ fn test_committing_fee_payer_escrowing_lamports() {
 
         let ix = schedule_commit_with_payer_cpi_instruction(
             payer.pubkey(),
-            pubkey_from_magic_program(magic_program::id()),
-            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
+            magic_program::id(),
+            magic_program::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
