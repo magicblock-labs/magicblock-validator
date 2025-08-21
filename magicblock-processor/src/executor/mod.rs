@@ -92,7 +92,7 @@ impl TransactionExecutor {
             accountsdb: state.accountsdb.clone(),
             ledger: state.ledger.clone(),
             config,
-            block: state.latest_block.clone(),
+            block: state.ledger.latest_block().clone(),
             environment: state.environment.clone(),
             rx,
             ready_tx,
