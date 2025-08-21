@@ -5,7 +5,7 @@ use magicblock_core::link::{
     accounts::AccountUpdateTx,
     transactions::{TransactionStatusTx, TransactionToProcessRx},
 };
-use magicblock_ledger::{LatestBlock, Ledger};
+use magicblock_ledger::Ledger;
 use solana_account::AccountSharedData;
 use solana_bpf_loader_program::syscalls::{
     create_program_runtime_environment_v1,
@@ -22,17 +22,24 @@ use solana_svm::transaction_processor::TransactionProcessingEnvironment;
 
 use crate::executor::SimpleForkGraph;
 
+/// A bag of various states/channels, necessary to operate the transaction scheduler
 pub struct TransactionSchedulerState {
+    /// Globally shared accounts database
     pub accountsdb: Arc<AccountsDb>,
+    /// Globally shared blocks/transactions ledger
     pub ledger: Arc<Ledger>,
-    pub latest_block: LatestBlock,
+    /// Reusable SVM environment for transaction processing
     pub environment: TransactionProcessingEnvironment<'static>,
+    /// A consumer endpoint for all of the transactions originating throughout the validator
     pub txn_to_process_rx: TransactionToProcessRx,
+    /// A channel to forward account state updates to downstream consumers (RPC/Geyser)
     pub account_update_tx: AccountUpdateTx,
+    /// A channel to forward transaction execution status to downstream consumers (RPC/Geyser)
     pub transaction_status_tx: TransactionStatusTx,
 }
 
 impl TransactionSchedulerState {
+    /// Setup the shared program cache with runtime environments
     pub(crate) fn prepare_programs_cache(
         &self,
     ) -> Arc<RwLock<ProgramCache<SimpleForkGraph>>> {
@@ -62,18 +69,19 @@ impl TransactionSchedulerState {
         Arc::new(RwLock::new(cache))
     }
 
+    /// Make sure all the sysvars that are necessary for ER operation are present in the accountsdb
     pub(crate) fn prepare_sysvars(&self) {
         let owner = &sysvar::ID;
         let accountsdb = &self.accountsdb;
 
+        let block = self.ledger.latest_block().load();
         if !accountsdb.contains_account(&sysvar::clock::ID) {
-            let clock = &self.latest_block.load().clock;
-            if let Ok(acc) = AccountSharedData::new_data(1, clock, owner) {
+            let clock = AccountSharedData::new_data(1, &block.clock, owner);
+            if let Ok(acc) = clock {
                 accountsdb.insert_account(&sysvar::clock::ID, &acc);
             }
         }
         if !accountsdb.contains_account(&sysvar::slot_hashes::ID) {
-            let block = &self.latest_block.load();
             let sh = SlotHashes::new(&[(block.slot, block.blockhash)]);
             if let Ok(acc) = AccountSharedData::new_data(1, &sh, owner) {
                 accountsdb.insert_account(&sysvar::epoch_schedule::ID, &acc);

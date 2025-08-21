@@ -357,7 +357,6 @@ impl MagicValidator {
             transaction_status_tx: validator_channels.transaction_status,
             txn_to_process_rx: validator_channels.transaction_to_process,
             account_update_tx: validator_channels.account_update,
-            latest_block: ledger.latest_block().clone(),
             environment: build_svm_env(&accountsdb, latest_block.blockhash, 0),
         };
         txn_scheduler_state
