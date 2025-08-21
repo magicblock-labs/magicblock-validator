@@ -794,13 +794,11 @@ impl MagicValidator {
         self.pubsub_handle.write().unwrap().replace(pubsub_handle);
         self.pubsub_close_handle = pubsub_close_handle;
 
-        self.task_scheduler_handle = Some(
-            TaskSchedulerService::new(
-                &self.config.task_scheduler,
-                self.bank.clone(),
-            )?
-            .start(self.token.clone()),
-        );
+        self.task_scheduler_handle = Some(TaskSchedulerService::start(
+            &self.config.task_scheduler,
+            self.bank.clone(),
+            self.token.clone(),
+        )?);
 
         self.sample_performance_service
             .replace(SamplePerformanceService::new(
