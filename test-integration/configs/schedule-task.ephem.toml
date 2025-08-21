@@ -3,6 +3,9 @@ remote.url = "http://0.0.0.0:7799"
 lifecycle = "ephemeral"
 commit = { frequency-millis = 9_000_000_000_000, compute-unit-price = 1_000_000 }
 
+[ledger]
+resume-strategy = { kind = "reset" }
+
 [validator]
 millis-per-slot = 50
 sigverify = true
