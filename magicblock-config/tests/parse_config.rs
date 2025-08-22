@@ -3,10 +3,10 @@ use std::net::{IpAddr, Ipv4Addr};
 use isocountry::CountryCode;
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, AccountsDbConfig, AllowedProgram,
-    BlockSize, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
-    LifecycleMode, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
-    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
+    BlockSize, CommitStrategyConfig, EphemeralConfig, LedgerConfig,
+    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
+    MetricsConfig, MetricsServiceConfig, PrepareLookupTables, ProgramConfig,
+    RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_pubkey::pubkey;
 use url::Url;
@@ -247,11 +247,6 @@ fn test_everything_defined() {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 7799,
-                max_ws_connections: 1000,
-            },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                port: 11_000
             },
             validator: ValidatorConfig {
                 sigverify: true,

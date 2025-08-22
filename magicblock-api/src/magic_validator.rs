@@ -169,17 +169,16 @@ impl MagicValidator {
             config.validator.base_fees,
         );
 
-        let ledger_resume_strategy =
-            &config.validator_config.ledger.resume_strategy();
-        let (ledger, starting_slot) =
-            Self::init_ledger(&config.validator_config.ledger)?;
-        info!("Starting slot: {}", starting_slot);
+        let ledger_resume_strategy = &config.ledger.resume_strategy();
+
+        let (ledger, last_slot) = Self::init_ledger(&config.ledger)?;
+        info!("Latest ledger slot: {}", last_slot);
 
         if !config.ledger.skip_keypair_match_check {
             Self::sync_validator_keypair_with_ledger(
                 ledger.ledger_path(),
                 &identity_keypair,
-                ledger_resume_strategy,
+                &ledger_resume_strategy,
             )?;
         }
 
@@ -187,22 +186,20 @@ impl MagicValidator {
         // this code will never panic as the ledger_path always appends the
         // rocksdb directory to whatever path is preconfigured for the ledger,
         // see `Ledger::do_open`, thus this path will always have a parent
-        let ledger_parent_path = ledger
+        let storage_path = ledger
             .ledger_path()
             .parent()
             .expect("ledger_path didn't have a parent, should never happen");
 
-        let exit = Arc::<AtomicBool>::default();
-        let bank = Self::init_bank(
-            &genesis_config,
-            &config.validator_config.accounts.db,
-            config.validator_config.validator.millis_per_slot,
-            validator_pubkey,
-            ledger_parent_path,
-            starting_slot,
-            ledger_resume_strategy,
+        let latest_block = ledger.latest_block().load();
+        let accountsdb = AccountsDb::new(
+            &config.accounts.db,
+            storage_path,
+            latest_block.slot,
         )?;
-        debug!("Bank initialized at slot {}", bank.slot());
+        for (pubkey, account) in genesis_config.accounts {
+            accountsdb.insert_account(&pubkey, &account.into());
+        }
 
         let exit = Arc::<AtomicBool>::default();
         let ledger_truncator = LedgerTruncator::new(
@@ -216,7 +213,7 @@ impl MagicValidator {
         let faucet_keypair = funded_faucet(
             &accountsdb,
             ledger.ledger_path().as_path(),
-            ledger_resume_strategy,
+            &ledger_resume_strategy,
         )?;
 
         let metrics_config = &config.metrics;
@@ -395,39 +392,6 @@ impl MagicValidator {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn init_bank(
-        genesis_config: &GenesisConfig,
-        accountsdb_config: &AccountsDbConfig,
-        millis_per_slot: u64,
-        validator_pubkey: Pubkey,
-        adb_path: &Path,
-        adb_init_slot: Slot,
-        ledger_resume_strategy: &LedgerResumeStrategy,
-    ) -> Result<Arc<Bank>, AccountsDbError> {
-        let runtime_config = Default::default();
-        let lock = TRANSACTION_INDEX_LOCK.clone();
-        let bank = Bank::new(
-            genesis_config,
-            runtime_config,
-            accountsdb_config,
-            None,
-            None,
-            false,
-            millis_per_slot,
-            validator_pubkey,
-            lock,
-            adb_path,
-            adb_init_slot,
-            ledger_resume_strategy.should_override_bank_slot(),
-        )?;
-        bank.transaction_log_collector_config
-            .write()
-            .unwrap()
-            .filter = TransactionLogCollectorFilter::All;
-        Ok(Arc::new(bank))
-    }
-
     fn init_accounts_manager(
         accountsdb: &Arc<AccountsDb>,
         cloned_accounts: &CloneOutputMap,
@@ -479,7 +443,7 @@ impl MagicValidator {
         validator_keypair: &Keypair,
         resume_strategy: &LedgerResumeStrategy,
     ) -> ApiResult<()> {
-        if resume_strategy.is_removing_ledger() {
+        if !resume_strategy.is_resuming() {
             write_validator_keypair_to_ledger(ledger_path, validator_keypair)?;
         } else {
             let ledger_validator_keypair =
@@ -499,11 +463,8 @@ impl MagicValidator {
     // -----------------
     // Start/Stop
     // -----------------
-    fn maybe_process_ledger(&self) -> ApiResult<()> {
+    async fn maybe_process_ledger(&self) -> ApiResult<()> {
         if !self.config.ledger.resume_strategy().is_replaying() {
-            return Ok(());
-        }
-        if self.config.ledger.resume_strategy.is_resuming() {
             return Ok(());
         }
         // SOLANA only allows blockhash to be valid for 150 slot back in time,
