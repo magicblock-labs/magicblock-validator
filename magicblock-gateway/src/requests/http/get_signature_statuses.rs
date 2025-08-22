@@ -11,7 +11,7 @@ impl HttpDispatcher {
         let signatures: Vec<_> = some_or_err!(signatures);
         let mut statuses = Vec::with_capacity(signatures.len());
         for signature in signatures {
-            if let Some(status) = self.transactions.get(&signature.0) {
+            if let Some(Some(status)) = self.transactions.get(&signature.0) {
                 statuses.push(Some(TransactionStatus {
                     slot: status.slot,
                     status: status.result,

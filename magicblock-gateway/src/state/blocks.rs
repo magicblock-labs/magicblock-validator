@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::{ops::Deref, time::Duration};
 
 use parking_lot::RwLock;
 use solana_rpc_client_api::response::RpcBlockhash;
@@ -10,12 +10,23 @@ use magicblock_core::link::{
 
 use super::ExpiringCache;
 
-const SOLANA_BLOCK_TIME: u64 = 400;
-const MAX_VALID_BLOCKHASH_DURATION: u64 = 150;
+/// The standard block time for the Solana network, in milliseconds.
+const SOLANA_BLOCK_TIME: f64 = 400.0;
+/// The number of slots for which a blockhash is considered valid on the Solana network.
+const MAX_VALID_BLOCKHASH_SLOTS: f64 = 150.0;
 
+/// A thread-safe cache for recent block information.
+///
+/// This structure serves two primary functions:
+/// 1.  It stores the single **latest** block for quick access to the current block height and hash.
+/// 2.  It maintains a time-limited **cache** of recent blockhashes to validate incoming transactions.
 pub(crate) struct BlocksCache {
+    /// The number of slots for which a blockhash is considered valid.
+    /// This is calculated based on the target chain's block time relative to Solana's.
     block_validity: u64,
+    /// The most recent block update received, protected by a `RwLock` for concurrent access.
     latest: RwLock<BlockUpdate>,
+    /// An underlying time-based cache for storing `BlockHash` to `BlockMeta` mappings.
     cache: ExpiringCache<BlockHash, BlockMeta>,
 }
 
@@ -27,24 +38,38 @@ impl Deref for BlocksCache {
 }
 
 impl BlocksCache {
+    /// Creates a new `BlocksCache`.
+    ///
+    /// The `blocktime` parameter is used to dynamically calculate the blockhash validity
+    /// period, making the cache adaptable to chains with different block production speeds.
+    ///
+    /// # Panics
+    /// Panics if `blocktime` is zero.
     pub(crate) fn new(blocktime: u64) -> Self {
+        const BLOCK_CACHE_TTL: Duration = Duration::from_secs(60);
         assert!(blocktime != 0, "blocktime cannot be zero");
 
-        let block_validity = ((SOLANA_BLOCK_TIME as f64 / blocktime as f64)
-            * MAX_VALID_BLOCKHASH_DURATION as f64)
-            as u64;
-        let cache = ExpiringCache::new(block_validity as usize);
+        // Adjust blockhash validity based on the ratio of the current chain's block time
+        // to the standard Solana block time.
+        let blocktime_ratio = SOLANA_BLOCK_TIME / blocktime as f64;
+        let block_validity = blocktime_ratio * MAX_VALID_BLOCKHASH_SLOTS;
+        let cache = ExpiringCache::new(BLOCK_CACHE_TTL);
         Self {
             latest: Default::default(),
-            block_validity,
+            block_validity: block_validity as u64,
             cache,
         }
     }
 
+    /// Updates the latest block information in the cache.
     pub(crate) fn set_latest(&self, latest: BlockUpdate) {
+        // The `push` method adds the blockhash to the underlying expiring cache.
+        self.cache.push(latest.hash, latest.meta);
+        // The `latest` field is updated with the full block update.
         *self.latest.write() = latest;
     }
 
+    /// Retrieves information about the latest block, including its calculated validity period.
     pub(crate) fn get_latest(&self) -> BlockHashInfo {
         let guard = self.latest.read();
         BlockHashInfo {
@@ -54,14 +79,19 @@ impl BlocksCache {
         }
     }
 
+    /// Returns the slot number of the most recent block, also known as the block height.
     pub(crate) fn block_height(&self) -> Slot {
         self.latest.read().meta.slot
     }
 }
 
+/// A data structure containing essential details about a blockhash for RPC responses.
 pub(crate) struct BlockHashInfo {
+    /// The blockhash.
     pub(crate) hash: BlockHash,
+    /// The last slot number at which this blockhash is still considered valid.
     pub(crate) validity: Slot,
+    /// The slot in which the block was produced.
     pub(crate) slot: Slot,
 }
 
