@@ -18,7 +18,7 @@ pub(crate) struct JsonBody(pub Vec<u8>);
 
 impl<S: Serialize> From<S> for JsonBody {
     fn from(value: S) -> Self {
-        // note: json to vec serialization is infallible, so the
+        // NOTE: json to vec serialization is infallible, so the
         // unwrap is there to avoid an eyesore of panicking code
         let serialized = json::to_vec(&value).unwrap_or_default();
         Self(serialized)
