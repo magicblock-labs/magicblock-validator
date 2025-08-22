@@ -6,10 +6,10 @@ use std::{
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsConfig, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
-    LifecycleMode, MagicBlockConfig, MetricsConfig, MetricsServiceConfig,
-    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
+    AccountsConfig, CommitStrategyConfig, EphemeralConfig, LedgerConfig,
+    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
+    MagicBlockConfig, MetricsConfig, MetricsServiceConfig, ProgramConfig,
+    RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_pubkey::pubkey;
 use url::Url;
