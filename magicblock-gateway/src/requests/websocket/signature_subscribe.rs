@@ -21,9 +21,10 @@ impl WsDispatcher {
             RpcError::invalid_params("missing or invalid signature")
         })?;
         let id = SubscriptionsDb::next_subid();
-        let status = self.transactions.get(&signature.0).and_then(|status| {
-            TransactionResultEncoder.encode(status.slot, &status.result, id)
-        });
+        let status =
+            self.transactions.get(&signature.0).flatten().and_then(|s| {
+                TransactionResultEncoder.encode(s.slot, &s.result, id)
+            });
         let (id, subscribed) = if let Some(payload) = status {
             let _ = self.chan.tx.send(payload).await;
             (id, Default::default())

@@ -98,10 +98,15 @@ impl SanitizeableTransaction for Transaction {
 
 impl TransactionSchedulerHandle {
     /// Fire and forget the transaction for execution
+    ///
+    /// NOTE:
+    /// this method should be preferred over `execute` (due to the lower
+    /// overhead in terms of memory pressure) if the result of execution
+    /// is not important, or no meaningful action can be taken on error
     pub async fn schedule(
         &self,
         txn: impl SanitizeableTransaction,
-    ) -> Result<(), TransactionError> {
+    ) -> TransactionResult {
         let transaction = txn.sanitize()?;
         let mode = TransactionProcessingMode::Execution(None);
         let txn = ProcessableTransaction { transaction, mode };
@@ -110,6 +115,10 @@ impl TransactionSchedulerHandle {
     }
 
     /// Send the transaction for execution and await for result
+    ///
+    /// NOTE:
+    /// this method has higher overhead than `schedule` method due to the
+    /// necessity of managing oneshot channel and waiting for execution result
     pub async fn execute(
         &self,
         txn: impl SanitizeableTransaction,

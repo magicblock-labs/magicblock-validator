@@ -21,17 +21,35 @@ use crate::{
     utils::JsonBody,
 };
 
+/// The central request router for the JSON-RPC HTTP server.
+///
+/// An instance of `HttpDispatcher` holds all the necessary, thread-safe handles
+/// to application state (databases, caches) and communication channels required
+/// to process any supported JSON-RPC request. It acts as the `self` context
+/// for all RPC method implementations.
 pub(crate) struct HttpDispatcher {
+    /// The public key of the validator node.
     pub(crate) identity: Pubkey,
+    /// A handle to the accounts database.
     pub(crate) accountsdb: Arc<AccountsDb>,
+    /// A handle to the blockchain ledger.
     pub(crate) ledger: Arc<Ledger>,
+    /// A handle to the transaction signatures cache.
     pub(crate) transactions: TransactionsCache,
+    /// A handle to the recent blocks cache.
     pub(crate) blocks: Arc<BlocksCache>,
+    /// A sender channel to request that accounts be cloned into ER.
     pub(crate) ensure_accounts_tx: EnsureAccountsTx,
+    /// A handle to the transaction scheduler for processing
+    /// `sendTransaction` and `simulateTransaction`.
     pub(crate) transactions_scheduler: TransactionSchedulerHandle,
 }
 
 impl HttpDispatcher {
+    /// Creates a new, thread-safe `HttpDispatcher` instance.
+    ///
+    /// This constructor clones the necessary handles from the global `SharedState` and
+    /// `DispatchEndpoints`, making it cheap to create multiple `Arc<Self>` pointers.
     pub(super) fn new(
         state: &SharedState,
         channels: &DispatchEndpoints,
@@ -47,10 +65,24 @@ impl HttpDispatcher {
         })
     }
 
+    /// The main entry point for processing a single HTTP request.
+    ///
+    /// This function orchestrates the entire lifecycle of an RPC request:
+    /// 1.  **Parsing**: It extracts and deserializes the raw JSON request body.
+    /// 2.  **Routing**: It reads the `method` field and routes the request to the
+    ///     appropriate handler function (e.g., `get_account_info`).
+    /// 3.  **Execution**: It calls the handler function to process the request.
+    /// 4.  **Response**: It serializes the successful result or any error into a
+    ///     standard JSON-RPC response.
+    ///
+    /// This function is designed to never panic or return an `Err`; all errors are
+    /// caught and formatted into a valid JSON-RPC error object in the HTTP response.
     pub(super) async fn dispatch(
         self: Arc<Self>,
         request: Request<Incoming>,
     ) -> Result<Response<JsonBody>, Infallible> {
+        // A local macro to simplify error handling. If a Result is an Err,
+        // it immediately formats it into a JSON-RPC error response and returns.
         macro_rules! unwrap {
             ($result:expr, $id: expr) => {
                 match $result {
@@ -61,10 +93,13 @@ impl HttpDispatcher {
                 }
             };
         }
+
+        // 1. Extract and parse the request body.
         let body = unwrap!(extract_bytes(request).await, None);
         let mut request = unwrap!(parse_body(body), None);
         let request = &mut request;
 
+        // 2. Route the request to the correct handler based on the method name.
         use crate::requests::JsonRpcMethod::*;
         let response = match request.method {
             GetAccountInfo => self.get_account_info(request).await,
@@ -93,8 +128,11 @@ impl HttpDispatcher {
             GetBlockHeight => self.get_block_height(request),
             GetIdentity => self.get_identity(request),
             IsBlockhashValid => self.is_blockhash_valid(request),
+            // Handle any methods that are not recognized.
             unknown => Err(RpcError::method_not_found(unknown)),
         };
+
+        // 3. Format the final response, handling any errors from the execution stage.
         Ok(unwrap!(response, Some(&request.id)))
     }
 }

@@ -32,9 +32,6 @@ impl super::TransactionExecutor {
         let (result, balances) = self.process(&transaction);
         let [txn] = transaction;
         // if transaction has failed to load altogether we don't commit the results
-        //
-        // NOTE: solana has a feature which forces persistence of the payer state
-        // (fee deduction) even for such case, but it needs to be explicitly activated
         let result = result.and_then(|mut processed| {
             let result = processed.status();
             // if the transaction has failed during the execution, and the
@@ -188,7 +185,7 @@ impl super::TransactionExecutor {
         result: &mut ProcessedTransaction,
         is_replay: bool,
     ) {
-        // only persist account states if the transaction executed successfully
+        // only persist account states if the transaction was executed
         let ProcessedTransaction::Executed(executed) = result else {
             return;
         };
