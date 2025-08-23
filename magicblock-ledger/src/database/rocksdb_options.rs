@@ -36,8 +36,8 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     options.set_max_open_files(-1);
 
     // Smooth IO
-    options.set_bytes_per_sync(1 * 1024 * 1024);
-    options.set_wal_bytes_per_sync(1 * 1024 * 1024);
+    options.set_bytes_per_sync(1024 * 1024);
+    options.set_wal_bytes_per_sync(1024 * 1024);
 
     // Favor concurrency on the write path
     options.set_allow_concurrent_memtable_write(true);
@@ -47,7 +47,7 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     // Background jobs: enough to keep up, not to starve CPU
     // Cap at 8 or number of CPUs, whichever is smaller but at least 4
     let cpus = num_cpus::get() as i32;
-    let max_jobs = std::cmp::max(4, std::cmp::min(8, cpus));
+    let max_jobs = cpus.clamp(4, 8);
     options.set_max_background_jobs(max_jobs);
     options.set_max_subcompactions(2);
 
