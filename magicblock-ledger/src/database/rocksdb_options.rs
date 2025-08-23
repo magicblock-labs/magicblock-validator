@@ -16,10 +16,10 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     let mut env = rocksdb::Env::new().unwrap();
     let cpus_env = num_cpus::get() as i32;
     // Low-priority threads are used for compaction. Keep them small to favor foreground writes.
-    let low_pri = std::cmp::max(1, std::cmp::min(2, cpus_env / 4));
+    let low_pri = (cpus_env / 4).clamp(1, 2);
     env.set_background_threads(low_pri);
     // High-priority threads are used for flush. Keep a few to avoid memtable flush backlog.
-    let high_pri = std::cmp::max(2, std::cmp::min(4, cpus_env));
+    let high_pri = cpus_env.clamp(2, 4);
     env.set_high_priority_background_threads(high_pri);
     options.set_env(&env);
 
