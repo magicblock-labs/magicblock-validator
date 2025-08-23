@@ -827,22 +827,20 @@ impl MagicValidator {
                 }
             }
 
-            if self.config.ledger.resume_strategy().is_replaying() {
-                let remote_account_cloner_worker =
-                    remote_account_cloner_worker.clone();
-                tokio::spawn(async move {
-                    let _ = remote_account_cloner_worker
-                        .hydrate()
-                        .await
-                        .inspect_err(|err| {
-                            error!(
-                                "Failed to hydrate validator accounts: {:?}",
-                                err
-                            );
-                        });
-                    info!("Validator hydration complete (bank hydrate, replay, account clone)");
-                });
-            }
+            let remote_account_cloner_worker =
+                remote_account_cloner_worker.clone();
+            tokio::spawn(async move {
+                let _ = remote_account_cloner_worker
+                    .hydrate()
+                    .await
+                    .inspect_err(|err| {
+                        error!(
+                            "Failed to hydrate validator accounts: {:?}",
+                            err
+                        );
+                    });
+                info!("Validator hydration complete (bank hydrate, replay, account clone)");
+            });
 
             let cancellation_token = self.token.clone();
             self.remote_account_cloner_handle =
