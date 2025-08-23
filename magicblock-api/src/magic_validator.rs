@@ -827,18 +827,12 @@ impl MagicValidator {
                 }
             }
 
-            let remote_account_cloner_worker =
-                remote_account_cloner_worker.clone();
+            let cloner_for_hydrate = Arc::clone(&remote_account_cloner_worker);
+
             tokio::spawn(async move {
-                let _ = remote_account_cloner_worker
-                    .hydrate()
-                    .await
-                    .inspect_err(|err| {
-                        error!(
-                            "Failed to hydrate validator accounts: {:?}",
-                            err
-                        );
-                    });
+                let _ = cloner_for_hydrate.hydrate().await.inspect_err(|err| {
+                    error!("Failed to hydrate validator accounts: {:?}", err);
+                });
                 info!("Validator hydration complete (bank hydrate, replay, account clone)");
             });
 
