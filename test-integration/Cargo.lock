@@ -3036,6 +3036,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
+ "solana-transaction-status",
  "tempfile",
  "toml 0.8.23",
 ]

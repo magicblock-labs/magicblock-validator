@@ -11,7 +11,8 @@ use integration_test_tools::{
 };
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
-    LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig, ReplayConfig,
+    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
+    ProgramConfig, RemoteCluster, RemoteConfig, ReplayConfig, 
     ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::state::FlexiCounter;
@@ -27,6 +28,7 @@ use solana_sdk::{
 use tempfile::TempDir;
 
 pub const TMP_DIR_LEDGER: &str = "TMP_DIR_LEDGER";
+pub const SNAPSHOT_FREQUENCY: u64 = 2;
 
 pub const FLEXI_COUNTER_ID: &str =
     "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4";
@@ -44,7 +46,7 @@ pub fn setup_offline_validator(
         lifecycle: LifecycleMode::Offline,
         ..Default::default()
     };
-    accounts_config.db.snapshot_frequency = 2;
+    accounts_config.db.snapshot_frequency = SNAPSHOT_FREQUENCY;
 
     let validator_config = millis_per_slot
         .map(|ms| ValidatorConfig {
@@ -57,11 +59,10 @@ pub fn setup_offline_validator(
 
     let config = EphemeralConfig {
         ledger: LedgerConfig {
-            resume_strategy,
+            resume_strategy_config: resume_strategy.into(),
             skip_keypair_match_check,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
-            ..Default::default()
         },
         accounts: accounts_config.clone(),
         programs,
@@ -101,18 +102,26 @@ pub fn setup_validator_with_local_remote(
         },
         ..Default::default()
     };
-    accounts_config.db.snapshot_frequency = 2;
+    accounts_config.db.snapshot_frequency = SNAPSHOT_FREQUENCY;
 
     let programs = resolve_programs(programs);
 
-    let resume_strategy = if reset {
-        LedgerResumeStrategy::Reset
+    let resume_strategy_config = if reset {
+        LedgerResumeStrategyConfig {
+            kind: LedgerResumeStrategyType::Reset,
+            reset_slot: None,
+            keep_accounts: None,
+        }
     } else {
-        LedgerResumeStrategy::Replay
+        LedgerResumeStrategyConfig {
+            kind: LedgerResumeStrategyType::Replay,
+            reset_slot: None,
+            keep_accounts: None,
+        }
     };
     let config = EphemeralConfig {
         ledger: LedgerConfig {
-            resume_strategy,
+            resume_strategy_config,
             skip_keypair_match_check,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
@@ -257,6 +266,23 @@ pub fn wait_for_ledger_persist(validator: &mut Child) -> Slot {
         }
         advances -= 1;
     }
+}
+
+/// Waits for the next slot after the snapshot frequency
+pub fn wait_for_snapshot(
+    validator: &mut Child,
+    snapshot_frequency: u64,
+) -> Slot {
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
+
+    let initial_slot = expect!(ctx.get_slot_ephem(), validator);
+    let slots_until_next_snapshot =
+        snapshot_frequency - (initial_slot % snapshot_frequency);
+
+    expect!(
+        ctx.wait_for_delta_slot_ephem(slots_until_next_snapshot + 1),
+        validator
+    )
 }
 
 // -----------------

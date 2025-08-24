@@ -10,6 +10,9 @@ index-map-size = 2048576
 max-snapshots = 7
 snapshot-frequency = 1024
 
+[ledger]
+resume-strategy = { kind = "reset" }
+
 [validator]
 millis_per_slot = 50
 sigverify = true
