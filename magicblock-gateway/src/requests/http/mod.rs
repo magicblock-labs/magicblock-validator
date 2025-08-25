@@ -185,10 +185,10 @@ mod prelude {
         server::http::dispatch::HttpDispatcher,
         some_or_err,
         utils::{AccountWithPubkey, JsonBody},
-        Slot,
     };
-    pub(super) use magicblock_core::link::accounts::{
-        AccountsToEnsure, LockedAccount,
+    pub(super) use magicblock_core::{
+        link::accounts::{AccountsToEnsure, LockedAccount},
+        Slot,
     };
     pub(super) use solana_account::ReadableAccount;
     pub(super) use solana_account_decoder::UiAccountEncoding;

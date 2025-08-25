@@ -22,11 +22,13 @@ use crate::{
         connection::ConnectionID,
         dispatch::{ConnectionTx, WsConnectionChannel},
     },
-    Slot,
 };
-use magicblock_core::link::{
-    accounts::AccountWithSlot,
-    transactions::{TransactionResult, TransactionStatus},
+use magicblock_core::{
+    link::{
+        accounts::AccountWithSlot,
+        transactions::{TransactionResult, TransactionStatus},
+    },
+    Slot,
 };
 
 // --- Type Aliases for Subscription Databases ---
@@ -320,6 +322,11 @@ impl<E: Encoder> UpdateSubscribers<E> {
             subscriber.send(msg, slot);
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn count(&self) -> usize {
+        self.0.len()
+    }
 }
 
 impl<E: Encoder> UpdateSubscriber<E> {
@@ -349,6 +356,11 @@ impl<E: Encoder> UpdateSubscriber<E> {
             // Use try_send to avoid blocking if a client's channel is full.
             let _ = tx.try_send(bytes.clone());
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn count(&self) -> usize {
+        self.txs.len()
     }
 }
 

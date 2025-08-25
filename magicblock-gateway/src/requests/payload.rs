@@ -1,9 +1,9 @@
 use crate::{
     error::RpcError, state::subscriptions::SubscriptionID, utils::JsonBody,
-    Slot,
 };
 use hyper::{body::Bytes, Response};
 use json::{Serialize, Value};
+use magicblock_core::Slot;
 
 #[derive(Serialize)]
 pub(crate) struct NotificationPayload<T> {

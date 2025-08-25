@@ -13,30 +13,33 @@ use solana_pubkey::Pubkey;
 
 use crate::Slot;
 
-/// Receiving end of account updates channel
+/// The receiving end of the channel for account state changes.
 pub type AccountUpdateRx = MpmcReceiver<AccountWithSlot>;
-/// Sending end of account updates channel
+/// The sending end of the channel for account state changes.
 pub type AccountUpdateTx = MpmcSender<AccountWithSlot>;
 
-/// Receiving end of the channel for messages to ensure accounts
+/// The receiving end of the command channel for requesting accounts to be cloned from chain
 pub type EnsureAccountsRx = Receiver<AccountsToEnsure>;
-/// Sending end of the channel for messages to ensure accounts
+/// The sending end of the command channel for requesting accounts to be cloned from chain
 pub type EnsureAccountsTx = Sender<AccountsToEnsure>;
 
-/// List of accounts to ensure for presence in the accounts database
+/// A message sent to the accounts worker to request that a set of accounts be cloned from chain
 pub struct AccountsToEnsure {
-    /// List of accounts
+    /// The list of account public keys to load.
     pub accounts: Box<[Pubkey]>,
-    /// Notification handle, to signal the waiters that accounts' presence check is complete
+    /// A notification handle used as a callback to signal completion. A requester can
+    /// await on this handle to be notified when the accounts are ready.
     pub ready: Arc<Notify>,
 }
 
+/// A message that bundles an updated account with the slot in which the update occurred.
 pub struct AccountWithSlot {
     pub account: LockedAccount,
     pub slot: Slot,
 }
 
 impl AccountsToEnsure {
+    /// Constructs a new `AccountsToEnsure` request.
     pub fn new(accounts: Vec<Pubkey>) -> Self {
         let ready = Arc::default();
         let accounts = accounts.into_boxed_slice();
@@ -44,21 +47,24 @@ impl AccountsToEnsure {
     }
 }
 
-/// Account state after transaction execution. The optional locking mechanism ensures that for
-/// AccountSharedData::Borrowed variant, the reader has the ability to detect that the account has
-/// been modified between locking and reading and retry the read if that's the case.
+/// A wrapper for account data that provides a mechanism for safe, optimistic concurrent reads.
+///
+/// When an account's data is `Borrowed`, it points to memory that can be modified by another
+/// thread. This struct uses a sequence lock (`AccountSeqLock`) to detect if a concurrent
+/// modification occurred during a read operation, allowing the read to be safely retried.
 pub struct LockedAccount {
-    /// Pubkey of the modified account
+    /// The public key of the account.
     pub pubkey: Pubkey,
-    /// Sequence lock, optimistically allows to read the borrowed account,
-    /// and handle concurrent modification post factum and retry
+    /// A sequence lock captured at the time of creation. It is `Some` only for `Borrowed`
+    /// accounts and is used to detect read-write race conditions.
     pub lock: Option<AccountSeqLock>,
-    /// Account state, either borrowed, or owned
+    /// The account's data, which can be either owned or a borrowed reference.
     pub account: AccountSharedData,
 }
 
 impl LockedAccount {
-    /// Construct new potenitally sequence locked account, record the lock state for Borrowed state
+    /// Creates a new `LockedAccount`, capturing the initial sequence lock state
+    /// if the account data is borrowed.
     pub fn new(pubkey: Pubkey, account: AccountSharedData) -> Self {
         let lock = match &account {
             AccountSharedData::Owned(_) => None,
@@ -71,6 +77,8 @@ impl LockedAccount {
         }
     }
 
+    /// Safely reads the account data and encodes it into the `UiAccount` format for RPC responses.
+    /// This method internally uses `read_locked` to ensure data consistency.
     #[inline]
     pub fn ui_encode(&self, encoding: UiAccountEncoding) -> UiAccount {
         self.read_locked(|pk, acc| {
@@ -78,6 +86,8 @@ impl LockedAccount {
         })
     }
 
+    /// Checks the sequence lock to see if the underlying data has been modified since this
+    /// `LockedAccount` was created. Returns `false` for `Owned` accounts.
     #[inline]
     fn changed(&self) -> bool {
         self.lock
@@ -86,28 +96,46 @@ impl LockedAccount {
             .unwrap_or_default()
     }
 
+    /// Performs a read operation on the account data, automatically handling race conditions.
+    ///
+    /// ## How it Works
+    /// This function implements an optimistic read pattern:
+    /// 1.  It executes the `reader` closure with the current account data.
+    /// 2.  It then checks the sequence lock. If the data has not been changed concurrently
+    ///     during the read, the result is returned immediately (the "fast path").
+    /// 3.  If a race condition is detected, it enters a retry loop. It continuously
+    ///     re-reads the latest account data and checks the lock again until a consistent,
+    ///     race-free read can be completed.
     pub fn read_locked<F, R>(&self, reader: F) -> R
     where
         F: Fn(&Pubkey, &AccountSharedData) -> R,
     {
+        // Attempt the initial optimistic read.
         let result = reader(&self.pubkey, &self.account);
+        // Fast path: If no change was detected, the read was consistent.
         if !self.changed() {
             return result;
         }
+
+        // Slow path: A race condition occurred. This is only possible for borrowed accounts.
         let AccountSharedData::Borrowed(ref borrowed) = self.account else {
             return result;
         };
         let Some(mut lock) = self.lock.clone() else {
             return result;
         };
+
+        // Enter the retry loop.
         let mut account = borrowed.reinit();
         loop {
             let result = reader(&self.pubkey, &account);
             if lock.changed() {
+                // The data changed again during our read attempt. Retry.
                 account = borrowed.reinit();
                 lock.relock();
                 continue;
             }
+            // The read was successful and consistent.
             break result;
         }
     }

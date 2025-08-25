@@ -163,6 +163,7 @@ solana-fee-structure = { version = "2.2" }
 solana-frozen-abi-macro = { version = "2.2" }
 solana-hash = { version = "2.2" }
 solana-inline-spl = { version = "2.2" }
+solana-instruction = { version = "2.2" }
 solana-keypair = { version = "2.2" }
 solana-log-collector = { version = "2.2" }
 solana-measure = { version = "2.2" }

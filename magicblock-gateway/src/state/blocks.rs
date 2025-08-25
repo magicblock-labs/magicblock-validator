@@ -3,8 +3,8 @@ use std::{ops::Deref, time::Duration};
 use parking_lot::RwLock;
 use solana_rpc_client_api::response::RpcBlockhash;
 
-use magicblock_core::link::{
-    blocks::{BlockHash, BlockMeta, BlockUpdate},
+use magicblock_core::{
+    link::blocks::{BlockHash, BlockMeta, BlockUpdate},
     Slot,
 };
 

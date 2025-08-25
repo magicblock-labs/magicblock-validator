@@ -4053,6 +4053,7 @@ dependencies = [
  "serde",
  "solana-sdk",
  "sonic-rs",
+ "test-kit",
  "tokio",
  "tokio-util 0.7.15",
 ]
@@ -10648,6 +10649,7 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-processor",
  "solana-account",
+ "solana-instruction",
  "solana-keypair",
  "solana-program",
  "solana-rpc-client",

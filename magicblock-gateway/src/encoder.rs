@@ -8,11 +8,13 @@ use crate::{
     requests::{params::SerdeSignature, payload::NotificationPayload},
     state::subscriptions::SubscriptionID,
     utils::{AccountWithPubkey, ProgramFilters},
-    Slot,
 };
-use magicblock_core::link::{
-    accounts::LockedAccount,
-    transactions::{TransactionResult, TransactionStatus},
+use magicblock_core::{
+    link::{
+        accounts::LockedAccount,
+        transactions::{TransactionResult, TransactionStatus},
+    },
+    Slot,
 };
 
 /// An abstraction trait over types which specialize in turning various

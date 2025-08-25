@@ -4,6 +4,7 @@ use log::error;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
     link::{
+        blocks::{BlockMeta, BlockUpdate, BlockUpdateTx},
         link,
         transactions::{
             SanitizeableTransaction, TransactionResult,
@@ -21,14 +22,15 @@ use magicblock_processor::{
 };
 use solana_account::AccountSharedData;
 use solana_keypair::Keypair;
-use solana_program::{
-    hash::Hasher, instruction::Instruction, native_token::LAMPORTS_PER_SOL,
-};
+use solana_program::{hash::Hasher, native_token::LAMPORTS_PER_SOL};
 use solana_signature::Signature;
 pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
+
+pub use guinea;
+pub use solana_instruction::*;
 
 pub struct ExecutionTestEnv {
     pub payer: Keypair,
@@ -37,6 +39,7 @@ pub struct ExecutionTestEnv {
     pub transaction_scheduler: TransactionSchedulerHandle,
     pub dir: TempDir,
     pub dispatch: DispatchEndpoints,
+    pub blocks_tx: BlockUpdateTx,
 }
 
 impl ExecutionTestEnv {
@@ -75,6 +78,7 @@ impl ExecutionTestEnv {
             transaction_scheduler: dispatch.transaction_scheduler.clone(),
             dir,
             dispatch,
+            blocks_tx: validator_channels.block_update,
         };
         this.fund_account(this.payer.pubkey(), LAMPORTS_PER_SOL);
         this
@@ -121,10 +125,15 @@ impl ExecutionTestEnv {
             hasher.hash(&b.slot.to_le_bytes());
             hasher.result()
         };
+        let time = slot as i64;
         self.ledger
-            .write_block(slot, slot as i64, hash)
+            .write_block(slot, time, hash)
             .expect("failed to write new block to the ledger");
         self.accountsdb.set_slot(slot);
+        let _ = self.blocks_tx.send(BlockUpdate {
+            hash,
+            meta: BlockMeta { slot, time },
+        });
 
         slot
     }

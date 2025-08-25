@@ -23,41 +23,47 @@ use crate::{
     builtins::BUILTINS, scheduler::state::TransactionSchedulerState, WorkerId,
 };
 
-/// Isolated SVM worker, the only entity responsible for processing transactions
+/// A dedicated, single-threaded worker responsible for processing transactions using
+/// the Solana SVM. This struct represents the computational core of the validator.
+/// It operates in isolation, pulling transactions from a queue, executing them against
+/// the current state, committing the results, and broadcasting updates. Multiple
+/// executors can be spawned to process transactions in parallel.
 pub(super) struct TransactionExecutor {
-    /// SVM worker ID
+    /// A unique identifier for this worker instance.
     id: WorkerId,
-    /// Global accounts database
+    /// A handle to the global accounts database for reading and writing account state.
     accountsdb: Arc<AccountsDb>,
-    /// Global ledger of blocks/transactions
+    /// A handle to the global ledger for writing committed transaction history.
     ledger: Arc<Ledger>,
-    /// Internal solana SVM entrypoint
+    /// The core Solana SVM `TransactionBatchProcessor` that loads and executes transactions.
     processor: TransactionBatchProcessor<SimpleForkGraph>,
-    /// Immutable configuration for transaction processing, set at startup
+    /// An immutable configuration for the SVM, set at startup.
     config: Box<TransactionProcessingConfig<'static>>,
-    /// Globaly shared state of the latest block, updated by the ledger
+    /// A handle to the globally shared state of the latest block.
     block: LatestBlock,
-    /// Reusable SVM environment for transaction processing
+    /// A reusable SVM environment for transaction processing.
     environment: TransactionProcessingEnvironment<'static>,
-    /// A channel from TransactionScheduler, the only source of transactions to process
+    /// The channel from which this worker receives new transactions to process.
     rx: TransactionToProcessRx,
-    /// A channel to forward transaction execution status to downstream consumers (RPC/Geyser)
+    /// A channel to send out the final status of processed transactions.
     transaction_tx: TransactionStatusTx,
-    /// A channel to forward account state updates to downstream consumers (RPC/Geyser)
+    /// A channel to send out account state updates after processing.
     accounts_tx: AccountUpdateTx,
-    /// A back channel to communicate workder readiness to
-    /// process more transactions back to the scheduler
+    /// A back-channel to notify the `TransactionScheduler` that this worker is ready for more work.
     ready_tx: Sender<WorkerId>,
-    /// Synchronization lock to stop all processing during critical operations
+    /// A read lock held during a slot's processing to synchronize with critical global
+    /// operations like `AccountsDb` snapshots.
     sync: StWLock,
-    /// Atomically incremented intra-slot index of transactions
-    // TODO(bmuddha): get rid of explicit indexing, once the
-    // new ledger is implemented (with implicit indexing based
-    // on the position of transaction in the ledger file)
+    /// An atomic counter for ordering transactions within a single slot.
     index: Arc<AtomicUsize>,
 }
 
 impl TransactionExecutor {
+    /// Creates a new `TransactionExecutor` worker.
+    ///
+    /// It initializes the SVM processor and, for performance, overrides its local program cache
+    /// with a globally shared one. This allows updates made by one executor to be immediately
+    /// visible to all others, preventing redundant program loads.
     pub(super) fn new(
         id: WorkerId,
         state: &TransactionSchedulerState,
@@ -71,14 +77,12 @@ impl TransactionExecutor {
             slot,
             Default::default(),
         );
-        // override the default program cache of this processor with a global
-        // one, which is shared between all of the running processor instances,
-        // this is mostly an optimization, so a change in the program cache of
-        // one one executor is immediately available to the rest, instead of
-        // waiting for them to update their own caches on a new program encounter
+
+        // Override the default program cache with a globally shared one.
         processor.program_cache = programs_cache;
-        // NOTE: setting all of the recording settings to true, as we do here, can have
-        // a noticeable impact on performance due to all of the extra logging involved
+
+        // NOTE: Enabling full recording (as it is done here)
+        // can have a noticeable performance impact.
         let recording_config =
             ExecutionRecordingConfig::new_single_setting(true);
         let config = Box::new(TransactionProcessingConfig {
@@ -105,7 +109,7 @@ impl TransactionExecutor {
         this
     }
 
-    /// Register all of the builtin programs with the given transaction executor
+    /// Registers all Solana builtin programs (e.g., System Program, BPF Loader) with the SVM.
     pub(super) fn populate_builtins(&self) {
         for program in BUILTINS {
             let entry = ProgramCacheEntry::new_builtin(
@@ -122,11 +126,12 @@ impl TransactionExecutor {
         }
     }
 
-    /// Spawn the transaction executor in isolated OS thread with a dedicated async runtime
+    /// Spawns the transaction executor into a new, dedicated OS thread.
+    ///
+    /// For performance and isolation, each executor runs in its own thread
+    /// with a dedicated single-threaded Tokio runtime. This avoids contention
+    /// with other asynchronous tasks in the main application runtime.
     pub(super) fn spawn(self) {
-        // For performance reasons, each transaction executor needs to operate within
-        // its own OS thread, but at the same time it needs some concurrency support,
-        // which is why we spawn it with a dedicated single threaded tokio runtime
         let task = move || {
             let runtime = Builder::new_current_thread()
                 .thread_name(format!("transaction executor #{}", self.id))
@@ -139,20 +144,21 @@ impl TransactionExecutor {
         std::thread::spawn(task);
     }
 
-    /// Start running the transaction executor, by accepting incoming transaction to process
+    /// The main event loop of the transaction executor.
+    ///
+    /// At the start of each slot, it acquires a read lock to prevent disruptive global
+    /// operations (like snapshotting) during transaction processing. This lock is
+    /// released and re-acquired at every slot boundary. The loop multiplexes between
+    /// processing new transactions and handling new block notifications.
     async fn run(mut self) {
-        // at the start of each slot, we need to acquire the synchronization lock,
-        // to ensure that no critical operation like accountsdb snapshotting can
-        // take place, while transactions are being executed. The lock is held for
-        // the duration of slot, and then it's released at slot boundaries, to allow
-        // for any pending critical operation to be run, before re-acquisition.
         let mut _guard = self.sync.read();
         let mut block_updated = self.block.subscribe();
 
         loop {
             tokio::select! {
-                // Transactions to process, the source is the TransactionScheduler
-                biased; Some(txn) = self.rx.recv() => {
+                // Prioritize processing incoming transactions.
+                biased;
+                Some(txn) = self.rx.recv() => {
                     match txn.mode {
                         TransactionProcessingMode::Execution(tx) => {
                             self.execute([txn.transaction], tx, false);
@@ -164,22 +170,19 @@ impl TransactionExecutor {
                             self.execute([txn.transaction], Some(tx), true);
                         }
                     }
+                    // Notify the scheduler that this worker is ready for another transaction.
                     let _ = self.ready_tx.send(self.id).await;
                 }
-                // A new block has been produced, the source is the Ledger itself
+                // When a new block is produced, transition to the new slot.
                 _ = block_updated.recv() => {
-                    // explicitly release the lock in a fair manner, allowing
-                    // any pending lock acquisition request to succeed
+                    // Fairly release the lock to allow any pending critical operations to proceed.
                     RwLockReadGuard::unlock_fair(_guard);
-                    // update slot relevant state
                     self.transition_to_new_slot();
-                    // and then re-acquire the lock for another slot duration
-                    // NOTE: in most cases the re-acquisition is almost instantaneous, the only
-                    // case when "hiccup" can occur is when some critical operation which needs to
-                    // stop all the activity (like accountsdb snapshotting) needs to take place
+                    // Re-acquire the lock to begin processing for the new slot. This will block
+                    // only if a critical operation (like a snapshot) is in progress.
                     _guard = self.sync.read();
                 }
-                // system is shutting down, no more transactions will follow
+                // If the transaction channel closes, the system is shutting down.
                 else => {
                     break;
                 }
@@ -188,35 +191,26 @@ impl TransactionExecutor {
         info!("transaction executor {} has terminated", self.id)
     }
 
-    /// Update slot related slot to work with latest produced block
+    /// Updates the executor's internal state to align with a new slot.
+    /// This updates the SVM processor's current slot, blockhash, and relevant sysvars.
     fn transition_to_new_slot(&mut self) {
         let block = self.block.load();
-        // most of the execution environment is immutable, with an exception
-        // of the blockhash, which we update here with every new block
         self.environment.blockhash = block.blockhash;
         self.processor.slot = block.slot;
         self.set_sysvars(&block);
     }
 
-    /// Set sysvars, which are relevant in the context of ER, currently those are:
-    /// - Clock
-    /// - SlotHashes
-    ///
-    /// everything else, like Rent, EpochSchedule, StakeHistory, etc.
-    /// either is immutable or doesn't pertain to the ER operation
+    /// Updates the SVM's sysvar cache for the current slot.
+    /// For the ER, only `Clock` and `SlotHashes` are relevant and mutable between slots.
     #[inline]
     fn set_sysvars(&self, block: &LatestBlockInner) {
         // SAFETY:
-        // unwrap here is safe, as we don't have any code which might panic while holding
-        // this particular lock, but if we do introduce such a code in the future, then
-        // panic propagation is probably what is desired
+        // This unwrap is safe as no code that could panic holds this specific lock.
         let mut cache = self.processor.writable_sysvar_cache().write().unwrap();
-
         cache.set_sysvar_for_tests(&block.clock);
 
-        // and_then(Arc::into_inner) will always succeed as get_slot_hashes
-        // always returns a unique Arc reference, which allows us to avoid
-        // extra clone in order to construct a mutable intance of SlotHashes
+        // Avoid a clone by consuming the Arc if we are the only owner, which is
+        // guaranteed by the SVM's internal sysvar cache logic.
         let mut hashes = cache
             .get_slot_hashes()
             .ok()
@@ -227,21 +221,19 @@ impl TransactionExecutor {
     }
 }
 
-/// Dummy, low overhead, ForkGraph implementation
+/// A dummy, low-overhead implementation of the `ForkGraph` trait.
 #[derive(Default)]
 pub(super) struct SimpleForkGraph;
 
 impl ForkGraph for SimpleForkGraph {
-    /// we never have state forks, hence no relevant handling
-    /// logic, so we don't really care about those relations
     fn relationship(&self, _: u64, _: u64) -> BlockRelation {
         BlockRelation::Unrelated
     }
 }
 
-/// SAFETY:
-/// The complaint is about SVMRentCollector trait object which doesn't have
-/// Send bound, but we use ordinary RentCollector, which is Send + 'static
+// SAFETY:
+// The trait is not automatically derived due to a type within the SVM (`dyn SVMRentCollector`).
+// This is considered safe because the concrete `RentCollector` type used at runtime is `Send`.
 unsafe impl Send for TransactionExecutor {}
 
 mod callback;

@@ -22,30 +22,38 @@ use solana_svm::transaction_processor::TransactionProcessingEnvironment;
 
 use crate::executor::SimpleForkGraph;
 
-/// A bag of various states/channels, necessary to operate the transaction scheduler
+/// A container for the shared state and communication
+/// channels required by the `TransactionScheduler`.
+///
+/// This struct acts as a container for the entire transaction processing pipeline,
+/// holding all the necessary handles to global state and communication endpoints.
 pub struct TransactionSchedulerState {
-    /// Globally shared accounts database
+    /// A handle to the globally shared accounts database.
     pub accountsdb: Arc<AccountsDb>,
-    /// Globally shared blocks/transactions ledger
+    /// A handle to the globally shared ledger of blocks and transactions.
     pub ledger: Arc<Ledger>,
-    /// Reusable SVM environment for transaction processing
+    /// The shared, reusable Solana SVM processing environment.
     pub environment: TransactionProcessingEnvironment<'static>,
-    /// A consumer endpoint for all of the transactions originating throughout the validator
+    /// The receiving end of the queue where all new transactions are submitted for processing.
     pub txn_to_process_rx: TransactionToProcessRx,
-    /// A channel to forward account state updates to downstream consumers (RPC/Geyser)
+    /// The channel for sending account state updates to downstream consumers.
     pub account_update_tx: AccountUpdateTx,
-    /// A channel to forward transaction execution status to downstream consumers (RPC/Geyser)
+    /// The channel for sending final transaction statuses to downstream consumers.
     pub transaction_status_tx: TransactionStatusTx,
 }
 
 impl TransactionSchedulerState {
-    /// Setup the shared program cache with runtime environments
+    /// Initializes and configures the globally shared BPF program cache.
+    ///
+    /// This cache is shared among all `TransactionExecutor` workers to avoid
+    /// redundant program compilations and loads, improving performance.
     pub(crate) fn prepare_programs_cache(
         &self,
     ) -> Arc<RwLock<ProgramCache<SimpleForkGraph>>> {
         static FORK_GRAPH: OnceLock<Arc<RwLock<SimpleForkGraph>>> =
             OnceLock::new();
 
+        // Use a static singleton for the fork graph as this validator does not handle forks.
         let forkgraph = Arc::downgrade(
             FORK_GRAPH.get_or_init(|| Arc::new(RwLock::new(SimpleForkGraph))),
         );
@@ -69,11 +77,15 @@ impl TransactionSchedulerState {
         Arc::new(RwLock::new(cache))
     }
 
-    /// Make sure all the sysvars that are necessary for ER operation are present in the accountsdb
+    /// Ensures that all necessary sysvar accounts are present in the `AccountsDb` at startup.
+    ///
+    /// This is a one-time setup step to populate the database with essential on-chain state
+    /// (like `Clock`, `Rent`, etc.) that programs may need to access during execution.
     pub(crate) fn prepare_sysvars(&self) {
         let owner = &sysvar::ID;
         let accountsdb = &self.accountsdb;
 
+        // Initialize mutable sysvars based on the latest block.
         let block = self.ledger.latest_block().load();
         if !accountsdb.contains_account(&sysvar::clock::ID) {
             let clock = AccountSharedData::new_data(1, &block.clock, owner);
@@ -84,13 +96,12 @@ impl TransactionSchedulerState {
         if !accountsdb.contains_account(&sysvar::slot_hashes::ID) {
             let sh = SlotHashes::new(&[(block.slot, block.blockhash)]);
             if let Ok(acc) = AccountSharedData::new_data(1, &sh, owner) {
-                accountsdb.insert_account(&sysvar::epoch_schedule::ID, &acc);
+                accountsdb.insert_account(&sysvar::slot_hashes::ID, &acc);
             }
         }
 
-        // The following sysvars are immutable for the run time of the validator
+        // Initialize sysvars that are immutable for the lifetime of the validator.
         if !accountsdb.contains_account(&sysvar::epoch_schedule::ID) {
-            // since we don't have epochs, any value will do
             let es = EpochSchedule::new(DEFAULT_SLOTS_PER_EPOCH);
             if let Ok(acc) = AccountSharedData::new_data(1, &es, owner) {
                 accountsdb.insert_account(&sysvar::epoch_schedule::ID, &acc);
