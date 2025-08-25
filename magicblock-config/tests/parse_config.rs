@@ -6,8 +6,8 @@ use magicblock_config::{
     BlockSize, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
     LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
     LifecycleMode, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
-    ProgramConfig, RemoteCluster, RemoteConfig, ReplayConfig,
-    RpcConfig, ValidatorConfig,
+    ProgramConfig, RemoteCluster, RemoteConfig, ReplayConfig, RpcConfig,
+    ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use url::Url;
