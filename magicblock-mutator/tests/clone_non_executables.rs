@@ -1,7 +1,10 @@
 use assert_matches::assert_matches;
 use log::*;
 use magicblock_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
-use magicblock_program::validator;
+use magicblock_program::{
+    test_utils::ensure_started_validator,
+    validator::{self, validator_authority_id},
+};
 use solana_sdk::{
     account::Account, clock::Slot, genesis_config::ClusterType, hash::Hash,
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_program,
@@ -44,9 +47,12 @@ async fn verified_tx_to_clone_non_executable_from_devnet(
 #[tokio::test]
 async fn clone_non_executable_without_data() {
     skip_if_devnet_down!();
+    ensure_started_validator(&mut Default::default());
+
     let test_env = ExecutionTestEnv::new();
 
     test_env.fund_account(LUZIFER, u64::MAX / 2);
+    test_env.fund_account(validator_authority_id(), u64::MAX / 2);
     let slot = test_env.advance_slot();
 
     let txn = verified_tx_to_clone_non_executable_from_devnet(
@@ -84,9 +90,12 @@ async fn clone_non_executable_without_data() {
 #[tokio::test]
 async fn clone_non_executable_with_data() {
     skip_if_devnet_down!();
+    ensure_started_validator(&mut Default::default());
+
     let test_env = ExecutionTestEnv::new();
 
     test_env.fund_account(LUZIFER, u64::MAX / 2);
+    test_env.fund_account(validator_authority_id(), u64::MAX / 2);
     let slot = test_env.advance_slot();
     let txn = verified_tx_to_clone_non_executable_from_devnet(
         &SOLX_POST,
