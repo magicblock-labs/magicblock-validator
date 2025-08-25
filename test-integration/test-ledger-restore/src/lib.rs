@@ -12,8 +12,8 @@ use integration_test_tools::{
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
     LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
-    ProgramConfig, RemoteCluster, RemoteConfig, ReplayConfig, 
-    ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES,
+    ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
+    DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::state::FlexiCounter;
 use solana_sdk::{
@@ -109,16 +109,12 @@ pub fn setup_validator_with_local_remote(
     let resume_strategy_config = if reset {
         LedgerResumeStrategyConfig {
             kind: LedgerResumeStrategyType::Reset,
-            reset_slot: None,
-            keep_accounts: None,
-            account_hydration_concurrency: 20,
+            ..Default::default()
         }
     } else {
         LedgerResumeStrategyConfig {
             kind: LedgerResumeStrategyType::Replay,
-            reset_slot: None,
-            keep_accounts: None,
-            account_hydration_concurrency: 20,
+            ..Default::default()
         }
     };
     let config = EphemeralConfig {
