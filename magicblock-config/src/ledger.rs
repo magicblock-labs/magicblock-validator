@@ -19,7 +19,9 @@ pub struct LedgerConfig {
     /// Reset will remove the existing ledger.
     /// Resume only will remove the ledger and resume from the last slot.
     /// Replay and resume will preserve the existing ledger and replay it and then resume.
+    ///
     #[serde(rename = "resume-strategy")]
+    #[serde(default)]
     #[command(flatten)]
     pub resume_strategy_config: LedgerResumeStrategyConfig,
     /// Checks that the validator keypair matches the one in the ledger.
@@ -89,6 +91,7 @@ impl From<LedgerResumeStrategy> for LedgerResumeStrategyConfig {
                 kind: LedgerResumeStrategyType::Reset,
                 reset_slot: Some(slot),
                 keep_accounts: Some(keep_accounts),
+                account_hydration_concurrency: default_cloning_concurrency(),
             },
             LedgerResumeStrategy::Resume { replay } => {
                 LedgerResumeStrategyConfig {
@@ -99,6 +102,8 @@ impl From<LedgerResumeStrategy> for LedgerResumeStrategyConfig {
                     },
                     reset_slot: None,
                     keep_accounts: None,
+                    account_hydration_concurrency: default_cloning_concurrency(
+                    ),
                 }
             }
         }
@@ -108,15 +113,7 @@ impl From<LedgerResumeStrategy> for LedgerResumeStrategyConfig {
 #[clap_prefix("ledger-resume-strategy")]
 #[clap_from_serde]
 #[derive(
-    Debug,
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    Deserialize,
-    Serialize,
-    Args,
-    Mergeable,
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
 )]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct LedgerResumeStrategyConfig {
@@ -131,6 +128,10 @@ pub struct LedgerResumeStrategyConfig {
     #[clap_from_serde_skip]
     #[serde(default)]
     pub keep_accounts: Option<bool>,
+    /// The number of threads to use for cloning accounts during replay hydration.
+    #[derive_env_var]
+    #[serde(default = "default_cloning_concurrency")]
+    pub account_hydration_concurrency: usize,
 }
 
 impl LedgerResumeStrategyConfig {
@@ -144,6 +145,17 @@ impl LedgerResumeStrategyConfig {
                 ))
             }
             _ => Ok(()),
+        }
+    }
+}
+
+impl Default for LedgerResumeStrategyConfig {
+    fn default() -> Self {
+        Self {
+            kind: LedgerResumeStrategyType::default(),
+            reset_slot: None,
+            keep_accounts: None,
+            account_hydration_concurrency: default_cloning_concurrency(),
         }
     }
 }
@@ -210,6 +222,10 @@ const fn default_ledger_size() -> u64 {
     DEFAULT_LEDGER_SIZE_BYTES
 }
 
+const fn default_cloning_concurrency() -> usize {
+    10
+}
+
 #[cfg(test)]
 mod tests {
     use magicblock_config_helpers::Merge;
@@ -251,6 +267,7 @@ mod tests {
                 kind: resume_strategy_type,
                 reset_slot,
                 keep_accounts,
+                account_hydration_concurrency: default_cloning_concurrency(),
             };
 
             assert_eq!(config.validate_resume_strategy().is_ok(), is_valid);
@@ -264,6 +281,7 @@ mod tests {
                 kind: LedgerResumeStrategyType::Replay,
                 reset_slot: None,
                 keep_accounts: None,
+                account_hydration_concurrency: 20,
             },
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
@@ -278,13 +296,14 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_default_with_non_default() {
+    fn test_ledger_merge_default_with_non_default() {
         let mut config = LedgerConfig::default();
         let other = LedgerConfig {
             resume_strategy_config: LedgerResumeStrategyConfig {
                 kind: LedgerResumeStrategyType::Reset,
                 reset_slot: Some(1),
                 keep_accounts: Some(true),
+                account_hydration_concurrency: 20,
             },
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
@@ -297,12 +316,13 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_non_default() {
+    fn test_ledger_merge_non_default() {
         let mut config = LedgerConfig {
             resume_strategy_config: LedgerResumeStrategyConfig {
                 kind: LedgerResumeStrategyType::Reset,
                 reset_slot: Some(1),
                 keep_accounts: Some(true),
+                account_hydration_concurrency: 20,
             },
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
@@ -314,6 +334,7 @@ mod tests {
                 kind: LedgerResumeStrategyType::ResumeOnly,
                 reset_slot: None,
                 keep_accounts: None,
+                account_hydration_concurrency: 150,
             },
             skip_keypair_match_check: true,
             path: Some("ledger2.example.com".to_string()),
@@ -343,6 +364,8 @@ size = 1000000000
                     kind: LedgerResumeStrategyType::Replay,
                     reset_slot: Some(0),
                     keep_accounts: Some(true),
+                    account_hydration_concurrency: default_cloning_concurrency(
+                    ),
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
@@ -364,6 +387,8 @@ size = 1000000000
                     kind: LedgerResumeStrategyType::ResumeOnly,
                     reset_slot: None,
                     keep_accounts: None,
+                    account_hydration_concurrency: default_cloning_concurrency(
+                    ),
                 },
                 skip_keypair_match_check: false,
                 path: None,
@@ -385,6 +410,8 @@ size = 1000000000
                     kind: LedgerResumeStrategyType::Reset,
                     reset_slot: None,
                     keep_accounts: None,
+                    account_hydration_concurrency: default_cloning_concurrency(
+                    ),
                 },
                 skip_keypair_match_check: false,
                 path: None,
