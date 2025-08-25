@@ -1,8 +1,3 @@
-use crate::utils::{
-    create_nested_schedule_cpis_instruction,
-    create_sibling_non_cpi_instruction,
-    create_sibling_schedule_cpis_instruction,
-};
 use integration_test_tools::conversions::pubkey_from_magic_program;
 use magicblock_core::magic_program;
 use program_schedulecommit::api::schedule_commit_cpi_instruction;
@@ -15,6 +10,12 @@ use solana_sdk::{
     pubkey::Pubkey,
     signer::Signer,
     transaction::Transaction,
+};
+
+use crate::utils::{
+    create_nested_schedule_cpis_instruction,
+    create_sibling_non_cpi_instruction,
+    create_sibling_schedule_cpis_instruction,
 };
 mod utils;
 

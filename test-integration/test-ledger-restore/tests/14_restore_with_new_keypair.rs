@@ -1,11 +1,11 @@
-use cleanass::{assert, assert_eq};
-use solana_rpc_client::rpc_client::RpcClient;
 use std::{path::Path, process::Child};
 
+use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
+use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable, instruction::Instruction,
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,

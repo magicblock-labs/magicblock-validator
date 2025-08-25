@@ -1,4 +1,3 @@
-use solana_rpc_client::rpc_client::RpcClient;
 use std::{path::Path, process::Child, thread::sleep, time::Duration};
 
 use integration_test_tools::{
@@ -16,6 +15,7 @@ use magicblock_config::{
     DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::state::FlexiCounter;
+use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     clock::Slot,
     instruction::Instruction,

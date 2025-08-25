@@ -1,14 +1,15 @@
-use cleanass::assert_eq;
-use integration_test_tools::loaded_accounts::LoadedAccounts;
-use integration_test_tools::validator::cleanup;
 use std::{path::Path, process::Child};
 
-use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
-use program_flexi_counter::instruction::{
-    create_add_counter_ix, create_add_ix,
+use cleanass::assert_eq;
+use integration_test_tools::{
+    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    validator::cleanup,
 };
 use program_flexi_counter::{
-    instruction::{create_delegate_ix, create_init_ix},
+    instruction::{
+        create_add_counter_ix, create_add_ix, create_delegate_ix,
+        create_init_ix,
+    },
     state::FlexiCounter,
 };
 use solana_sdk::{

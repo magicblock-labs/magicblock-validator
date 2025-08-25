@@ -1,17 +1,22 @@
-use integration_test_tools::IntegrationTestContext;
-use lazy_static::lazy_static;
-use magicblock_api::domain_registry_manager::DomainRegistryManager;
-use mdp::state::record::CountryCode;
-use mdp::state::status::ErStatus;
-use mdp::state::version::v0::RecordV0;
-use mdp::state::{features::FeaturesSet, record::ErRecord};
-use solana_rpc_client::rpc_client::RpcClient;
-use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::signature::{Keypair, Signer};
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     sync::Arc,
+};
+
+use integration_test_tools::IntegrationTestContext;
+use lazy_static::lazy_static;
+use magicblock_api::domain_registry_manager::DomainRegistryManager;
+use mdp::state::{
+    features::FeaturesSet,
+    record::{CountryCode, ErRecord},
+    status::ErStatus,
+    version::v0::RecordV0,
+};
+use solana_rpc_client::rpc_client::RpcClient;
+use solana_sdk::{
+    commitment_config::CommitmentConfig,
+    native_token::LAMPORTS_PER_SOL,
+    signature::{Keypair, Signer},
 };
 
 lazy_static! {

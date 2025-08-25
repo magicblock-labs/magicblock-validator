@@ -1,10 +1,10 @@
-use cleanass::assert_eq;
-use magicblock_config::LedgerResumeStrategy;
 use std::{path::Path, process::Child};
 
+use cleanass::assert_eq;
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
+use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::pubkey::Pubkey;
 use test_ledger_restore::{
     setup_offline_validator, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,

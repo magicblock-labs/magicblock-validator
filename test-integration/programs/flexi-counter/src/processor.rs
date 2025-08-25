@@ -1,8 +1,9 @@
 use borsh::{to_vec, BorshDeserialize};
-use ephemeral_rollups_sdk::cpi::{DelegateAccounts, DelegateConfig};
 use ephemeral_rollups_sdk::{
     consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
-    cpi::{delegate_account, undelegate_account},
+    cpi::{
+        delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
+    },
     ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
 use solana_program::{
@@ -17,9 +18,11 @@ use solana_program::{
     sysvar::Sysvar,
 };
 
-use crate::instruction::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE;
 use crate::{
-    instruction::{DelegateArgs, FlexiCounterInstruction},
+    instruction::{
+        DelegateArgs, FlexiCounterInstruction,
+        MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
+    },
     state::FlexiCounter,
     utils::assert_keys_equal,
 };
