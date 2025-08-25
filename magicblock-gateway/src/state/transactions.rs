@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use magicblock_core::link::transactions::TransactionResult;
+use magicblock_core::{link::transactions::TransactionResult, Slot};
 use solana_signature::Signature;
-
-use crate::Slot;
 
 use super::ExpiringCache;
 
