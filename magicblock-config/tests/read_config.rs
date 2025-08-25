@@ -10,7 +10,7 @@ use magicblock_config::{
     GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategyConfig,
     LedgerResumeStrategyType, LifecycleMode, MagicBlockConfig, MetricsConfig,
     MetricsServiceConfig, PrepareLookupTables, ProgramConfig, RemoteCluster,
-    RemoteConfig, ReplayConfig, RpcConfig, ValidatorConfig,
+    RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -44,13 +44,14 @@ fn test_load_replay_toml() {
         .join("magicblock-config")
         .join("tests")
         .join("fixtures")
-        .join("11_replay.toml");
+        .join("12_replay.toml");
     let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
     assert_eq!(
-        config.ledger.replay,
-        ReplayConfig {
-            account_hydration_concurrency: 20,
-        }
+        config
+            .ledger
+            .resume_strategy_config
+            .account_hydration_concurrency,
+        10
     );
 }
 
@@ -197,13 +198,11 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                     kind: LedgerResumeStrategyType::ResumeOnly,
                     reset_slot: Some(1),
                     keep_accounts: Some(true),
+                    account_hydration_concurrency: 20,
                 },
                 skip_keypair_match_check: true,
                 path: Some("/hello/world".to_string()),
                 size: 123123,
-                replay: ReplayConfig {
-                    account_hydration_concurrency: 20,
-                },
             },
             metrics: MetricsConfig {
                 enabled: false,

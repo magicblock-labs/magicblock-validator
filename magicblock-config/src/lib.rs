@@ -255,13 +255,11 @@ mod tests {
                     kind: LedgerResumeStrategyType::Replay,
                     reset_slot: Some(1),
                     keep_accounts: Some(true),
+                    account_hydration_concurrency: 20,
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
-                replay: ReplayConfig {
-                    account_hydration_concurrency: 20,
-                },
             },
             programs: vec![ProgramConfig {
                 id: Pubkey::from_str_const(
@@ -347,13 +345,11 @@ mod tests {
                     kind: LedgerResumeStrategyType::Replay,
                     reset_slot: Some(1),
                     keep_accounts: Some(true),
+                    account_hydration_concurrency: 20,
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
-                replay: ReplayConfig {
-                    account_hydration_concurrency: 20,
-                },
             },
             programs: vec![ProgramConfig {
                 id: Pubkey::from_str_const(
@@ -436,13 +432,11 @@ mod tests {
                     kind: LedgerResumeStrategyType::ResumeOnly,
                     reset_slot: Some(1),
                     keep_accounts: Some(true),
+                    account_hydration_concurrency: 20,
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger2.example.com".to_string()),
                 size: 100000,
-                replay: ReplayConfig {
-                    account_hydration_concurrency: 20,
-                },
             },
             programs: vec![ProgramConfig {
                 id: Pubkey::from_str_const(
@@ -518,13 +512,11 @@ mod tests {
                     kind: LedgerResumeStrategyType::Replay,
                     reset_slot: Some(2),
                     keep_accounts: Some(false),
+                    account_hydration_concurrency: 20,
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
-                replay: ReplayConfig {
-                    account_hydration_concurrency: 20,
-                },
             },
             programs: vec![ProgramConfig {
                 id: Pubkey::from_str_const(
@@ -579,13 +571,11 @@ mod tests {
                     kind: LedgerResumeStrategyType::Replay,
                     reset_slot: Some(1),
                     keep_accounts: Some(true),
+                    account_hydration_concurrency: 20,
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
-                replay: ReplayConfig {
-                    account_hydration_concurrency: 20,
-                },
             },
             programs: vec![],
             metrics: MetricsConfig::default(),

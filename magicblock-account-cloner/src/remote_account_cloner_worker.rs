@@ -19,7 +19,8 @@ use magicblock_account_updates::{AccountUpdates, AccountUpdatesResult};
 use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_committor_service::ChangesetCommittor;
 use magicblock_config::{
-    AccountsCloneConfig, PrepareLookupTables, ReplayConfig,
+    AccountsCloneConfig, LedgerResumeStrategyConfig, PrepareLookupTables,
+    ReplayConfig,
 };
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
@@ -113,7 +114,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC> {
     validator_identity: Pubkey,
     monitored_accounts: RefCell<LruCache<Pubkey, ()>>,
     clone_config: AccountsCloneConfig,
-    replay_config: ReplayConfig,
+    ledger_resume_strategy_config: LedgerResumeStrategyConfig,
 }
 
 // SAFETY:
@@ -153,7 +154,7 @@ where
         validator_authority: Pubkey,
         max_monitored_accounts: usize,
         clone_config: AccountsCloneConfig,
-        replay_config: ReplayConfig,
+        ledger_resume_strategy_config: LedgerResumeStrategyConfig,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) = flume::unbounded();
         let fetch_retries = 50;
@@ -178,7 +179,7 @@ where
             validator_identity: validator_authority,
             monitored_accounts: LruCache::new(max_monitored_accounts).into(),
             clone_config,
-            replay_config,
+            ledger_resume_strategy_config,
         }
     }
 
@@ -294,7 +295,8 @@ where
         let result = stream
             .map(Ok::<_, AccountClonerError>)
             .try_for_each_concurrent(
-                self.replay_config.account_hydration_concurrency,
+                self.ledger_resume_strategy_config
+                    .account_hydration_concurrency,
                 |(pubkey, owner)| async move {
                     trace!("Hydrating '{}'", pubkey);
                     let res = self

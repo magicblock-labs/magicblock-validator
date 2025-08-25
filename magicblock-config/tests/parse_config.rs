@@ -6,8 +6,7 @@ use magicblock_config::{
     BlockSize, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
     LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
     LifecycleMode, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
-    ProgramConfig, RemoteCluster, RemoteConfig, ReplayConfig, RpcConfig,
-    ValidatorConfig,
+    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use url::Url;
@@ -73,6 +72,7 @@ fn test_all_goes_toml() {
                     kind: LedgerResumeStrategyType::Replay,
                     reset_slot: None,
                     keep_accounts: None,
+                    account_hydration_concurrency: 10,
                 },
                 ..Default::default()
             },
@@ -272,13 +272,11 @@ fn test_everything_defined() {
                     kind: LedgerResumeStrategyType::Replay,
                     reset_slot: Some(100),
                     keep_accounts: Some(false),
+                    account_hydration_concurrency: 20,
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1_000_000_000,
-                replay: ReplayConfig {
-                    account_hydration_concurrency: 20,
-                },
             },
             programs: vec![ProgramConfig {
                 id: pubkey!("wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"),
@@ -322,17 +320,17 @@ path = "/tmp/program.so"
 }
 
 #[test]
-fn test_replay_toml() {
+fn test_hydration_concurrency_toml() {
     let toml = r#"
-[ledger]
-replay.account-hydration-concurrency = 20
+[ledger.resume-strategy]
+account-hydration-concurrency = 20
 "#;
 
     let res = toml::from_str::<EphemeralConfig>(toml).unwrap();
     assert_eq!(
-        res.ledger.replay,
-        ReplayConfig {
-            account_hydration_concurrency: 20,
-        }
+        res.ledger
+            .resume_strategy_config
+            .account_hydration_concurrency,
+        20
     );
 }

@@ -111,12 +111,14 @@ pub fn setup_validator_with_local_remote(
             kind: LedgerResumeStrategyType::Reset,
             reset_slot: None,
             keep_accounts: None,
+            account_hydration_concurrency: 20,
         }
     } else {
         LedgerResumeStrategyConfig {
             kind: LedgerResumeStrategyType::Replay,
             reset_slot: None,
             keep_accounts: None,
+            account_hydration_concurrency: 20,
         }
     };
     let config = EphemeralConfig {
@@ -125,7 +127,6 @@ pub fn setup_validator_with_local_remote(
             skip_keypair_match_check,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
-            replay: ReplayConfig::default(),
         },
         accounts: accounts_config.clone(),
         programs,

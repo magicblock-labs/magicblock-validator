@@ -19,7 +19,9 @@ pub struct LedgerConfig {
     /// Reset will remove the existing ledger.
     /// Resume only will remove the ledger and resume from the last slot.
     /// Replay and resume will preserve the existing ledger and replay it and then resume.
+    ///
     #[serde(rename = "resume-strategy")]
+    #[serde(default)]
     #[command(flatten)]
     pub resume_strategy_config: LedgerResumeStrategyConfig,
     /// Checks that the validator keypair matches the one in the ledger.
@@ -43,9 +45,6 @@ pub struct LedgerConfig {
     #[arg(help = "The size under which it's desired to keep ledger in bytes.")]
     #[serde(default = "default_ledger_size")]
     pub size: u64,
-    #[serde(default)]
-    #[command(flatten)]
-    pub replay: ReplayConfig,
 }
 
 impl LedgerConfig {
@@ -78,7 +77,6 @@ impl Default for LedgerConfig {
             skip_keypair_match_check: false,
             path: Default::default(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
-            replay: ReplayConfig::default(),
         }
     }
 }
@@ -114,6 +112,7 @@ impl From<LedgerResumeStrategy> for LedgerResumeStrategyConfig {
                 kind: LedgerResumeStrategyType::Reset,
                 reset_slot: Some(slot),
                 keep_accounts: Some(keep_accounts),
+                account_hydration_concurrency: default_cloning_concurrency(),
             },
             LedgerResumeStrategy::Resume { replay } => {
                 LedgerResumeStrategyConfig {
@@ -124,6 +123,8 @@ impl From<LedgerResumeStrategy> for LedgerResumeStrategyConfig {
                     },
                     reset_slot: None,
                     keep_accounts: None,
+                    account_hydration_concurrency: default_cloning_concurrency(
+                    ),
                 }
             }
         }
@@ -156,6 +157,10 @@ pub struct LedgerResumeStrategyConfig {
     #[clap_from_serde_skip]
     #[serde(default)]
     pub keep_accounts: Option<bool>,
+    /// The number of threads to use for cloning accounts during replay hydration.
+    #[derive_env_var]
+    #[serde(default = "default_cloning_concurrency")]
+    pub account_hydration_concurrency: usize,
 }
 
 impl LedgerResumeStrategyConfig {
@@ -280,6 +285,7 @@ mod tests {
                 kind: resume_strategy_type,
                 reset_slot,
                 keep_accounts,
+                account_hydration_concurrency: default_cloning_concurrency(),
             };
 
             assert_eq!(config.validate_resume_strategy().is_ok(), is_valid);
@@ -293,13 +299,11 @@ mod tests {
                 kind: LedgerResumeStrategyType::Replay,
                 reset_slot: None,
                 keep_accounts: None,
+                account_hydration_concurrency: 20,
             },
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
-            replay: ReplayConfig {
-                account_hydration_concurrency: 20,
-            },
         };
         let original_config = config.clone();
         let other = LedgerConfig::default();
@@ -317,13 +321,11 @@ mod tests {
                 kind: LedgerResumeStrategyType::Reset,
                 reset_slot: Some(1),
                 keep_accounts: Some(true),
+                account_hydration_concurrency: 20,
             },
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
-            replay: ReplayConfig {
-                account_hydration_concurrency: 20,
-            },
         };
 
         config.merge(other.clone());
@@ -338,13 +340,11 @@ mod tests {
                 kind: LedgerResumeStrategyType::Reset,
                 reset_slot: Some(1),
                 keep_accounts: Some(true),
+                account_hydration_concurrency: 20,
             },
             skip_keypair_match_check: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
-            replay: ReplayConfig {
-                account_hydration_concurrency: 20,
-            },
         };
         let original_config = config.clone();
         let other = LedgerConfig {
@@ -352,13 +352,11 @@ mod tests {
                 kind: LedgerResumeStrategyType::ResumeOnly,
                 reset_slot: None,
                 keep_accounts: None,
+                account_hydration_concurrency: 150,
             },
             skip_keypair_match_check: true,
             path: Some("ledger2.example.com".to_string()),
             size: 10000,
-            replay: ReplayConfig {
-                account_hydration_concurrency: 150,
-            },
         };
 
         config.merge(other);
@@ -424,11 +422,12 @@ size = 1000000000
                     kind: LedgerResumeStrategyType::Replay,
                     reset_slot: Some(0),
                     keep_accounts: Some(true),
+                    account_hydration_concurrency: default_cloning_concurrency(
+                    ),
                 },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
-                replay: ReplayConfig::default(),
             }
         );
 
@@ -446,11 +445,12 @@ size = 1000000000
                     kind: LedgerResumeStrategyType::ResumeOnly,
                     reset_slot: None,
                     keep_accounts: None,
+                    account_hydration_concurrency: default_cloning_concurrency(
+                    ),
                 },
                 skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,
-                replay: ReplayConfig::default(),
             }
         );
 
@@ -468,11 +468,12 @@ size = 1000000000
                     kind: LedgerResumeStrategyType::Reset,
                     reset_slot: None,
                     keep_accounts: None,
+                    account_hydration_concurrency: default_cloning_concurrency(
+                    ),
                 },
                 skip_keypair_match_check: false,
                 path: None,
                 size: 1000000000,
-                replay: ReplayConfig::default(),
             }
         );
     }
