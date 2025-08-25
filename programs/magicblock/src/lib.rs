@@ -1,8 +1,13 @@
 pub mod errors;
 mod magic_context;
 mod mutate_accounts;
+mod schedule_task;
 mod schedule_transactions;
+pub mod task_context;
 pub use magic_context::{FeePayerAccount, MagicContext, ScheduledCommit};
+pub use task_context::{
+    CancelTaskRequest, ScheduleTaskRequest, Task, TaskContext, TaskRequest,
+};
 pub mod magicblock_instruction;
 pub mod magicblock_processor;
 #[cfg(test)]

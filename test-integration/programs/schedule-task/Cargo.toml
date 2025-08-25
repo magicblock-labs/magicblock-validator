@@ -1,23 +1,24 @@
 [package]
-name = "program-schedulecommit-security"
+name = "schedule-task-program"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
+bincode = { workspace = true }
 borsh = { workspace = true }
-program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
-solana-program = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
+serde = { workspace = true }
+solana-program = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "lib"]
 
 [features]
+custom-heap = []
+custom-panic = []
 no-entrypoint = []
 cpi = ["no-entrypoint"]
 default = []
-custom-panic = []
-custom-heap = []
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
