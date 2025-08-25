@@ -21,8 +21,22 @@ use magicblock_core::link::{
 };
 
 impl super::TransactionExecutor {
-    /// Execute transaction in the SVM, with persistence of the final state (accounts) to the
-    /// accountsdb and optional persistence of transaction (along with details) to the ledger
+    /// Executes a transaction and conditionally commits its results to the
+    /// `AccountsDb` and `Ledger`.
+    ///
+    /// This is the primary entry point for processing transactions
+    /// that are intended to change the state of the blockchain.
+    ///
+    /// ## Commitment Logic
+    /// - **Successful transactions** are fully committed: account changes are saved to
+    ///   the `AccountsDb`, and the transaction itself is written to the `Ledger`.
+    /// - **"Fire-and-forget" failed transactions** (`tx` is `None`) have only the fee
+    ///   deducted from the payer account, which is then saved to the `AccountsDb`.
+    /// - **Awaited failed transactions** (`tx` is `Some`, e.g., an RPC preflight check)
+    ///   are **not committed** at all; their results are returned directly to the caller
+    ///   without any state changes.
+    /// - **Replayed transactions** (`is_replay` is `true`) commit account changes but do
+    ///   not write the transaction to the ledger, as it's already there.
     pub(super) fn execute(
         &self,
         transaction: [SanitizedTransaction; 1],
@@ -31,29 +45,37 @@ impl super::TransactionExecutor {
     ) {
         let (result, balances) = self.process(&transaction);
         let [txn] = transaction;
-        // if transaction has failed to load altogether we don't commit the results
+
+        // If the transaction fails to load entirely, we don't commit anything.
         let result = result.and_then(|mut processed| {
             let result = processed.status();
-            // if the transaction has failed during the execution, and the
-            // caller is interested in transaction result, which means that
-            // either the preflight check was enabled or the transaction
-            // originated internally, in both cases we don't persist anything
+
+            // If the transaction failed and the caller is waiting for the result,
+            // do not persist any changes.
             if result.is_err() && tx.is_some() {
                 return result;
             }
+
+            // Otherwise, commit the account state changes.
             self.commit_accounts(&mut processed, is_replay);
-            // replay transactions are already in the ledger,
-            // we just need to match account states
+
+            // For new transactions, also commit the transaction to the ledger.
             if !is_replay {
                 self.commit_transaction(txn, processed, balances);
             }
             result
         });
+
+        // Send the final result back to the caller if they are waiting.
         tx.map(|tx| tx.send(result));
     }
 
-    /// Same as transaction execution, but nothing is persisted,
-    /// and more execution details are returned to the caller
+    /// Executes a transaction in a simulated, read-only environment.
+    ///
+    /// This method runs a transaction through the SVM but **never persists any state changes**
+    /// to the `AccountsDb` or `Ledger`. It returns a more detailed set of execution
+    /// results, including compute units, logs, and return data, which is required by
+    /// RPC `simulateTransaction` call.
     pub(super) fn simulate(
         &self,
         transaction: [SanitizedTransaction; 1],
@@ -91,7 +113,8 @@ impl super::TransactionExecutor {
         let _ = tx.send(result);
     }
 
-    /// A wrapper method around SVM entrypoint to load and execute the transaction
+    /// A convenience helper that wraps the core Solana SVM `load_and_execute` function.
+    /// It serves as the bridge between the executor's logic and the underlying SVM engine.
     fn process(
         &self,
         txn: &[SanitizedTransaction],
@@ -114,7 +137,9 @@ impl super::TransactionExecutor {
         (result, output.balances)
     }
 
-    /// Persist transaction and its execution details to the ledger
+    /// A private helper that persists a transaction and its metadata to the ledger.
+    /// After a successful write, it also forwards the `TransactionStatus` to the
+    /// rest of the system via corresponding channel.
     fn commit_transaction(
         &self,
         txn: SanitizedTransaction,
@@ -155,14 +180,12 @@ impl super::TransactionExecutor {
             slot: self.processor.slot,
             result: TransactionExecutionResult {
                 result: meta.status.clone(),
-                // TODO(bmuddha) perf: avoid allocation with the new ledger impl
                 accounts: txn
                     .message()
                     .account_keys()
                     .iter()
                     .copied()
                     .collect(),
-                // TODO(bmuddha) perf: avoid cloning with the new ledger impl
                 logs: meta.log_messages.clone(),
             },
         };
@@ -176,24 +199,26 @@ impl super::TransactionExecutor {
             error!("failed to commit transaction to the ledger: {error}");
             return;
         }
+        // Send the final status to the listeners (EventProcessor workers).
         let _ = self.transaction_tx.send(status);
     }
 
-    /// Persist account state to the accountsdb if the transaction was successful
+    /// A private helper that persists modified account states to the `AccountsDb`.
     fn commit_accounts(
         &self,
         result: &mut ProcessedTransaction,
         is_replay: bool,
     ) {
-        // only persist account states if the transaction was executed
         let ProcessedTransaction::Executed(executed) = result else {
             return;
         };
-        if !executed.was_successful() {
-            return;
+        let succeeded = executed.was_successful();
+        if !succeeded {
+            // For failed transactions, only persist the payer's account to charge the fee.
+            executed.loaded_transaction.accounts.drain(1..);
         }
         let programs = &executed.programs_modified_by_tx;
-        if !programs.is_empty() {
+        if !programs.is_empty() && succeeded {
             self.processor
                 .program_cache
                 .write()
@@ -202,11 +227,14 @@ impl super::TransactionExecutor {
         }
         for (pubkey, account) in executed.loaded_transaction.accounts.drain(..)
         {
+            // only insert/send account's update if it was actually modified,
+            // ignore the rest even if account was writeable in transaction
             if !account.is_dirty() {
                 continue;
             }
             self.accountsdb.insert_account(&pubkey, &account);
-            if !is_replay {
+
+            if is_replay {
                 continue;
             }
             let account = AccountWithSlot {

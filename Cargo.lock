@@ -4029,6 +4029,7 @@ dependencies = [
  "solana-transaction-status",
  "solana-transaction-status-client-types",
  "sonic-rs",
+ "test-kit",
  "tokio",
  "tokio-util 0.7.15",
 ]
@@ -10622,6 +10623,7 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-processor",
  "solana-account",
+ "solana-instruction",
  "solana-keypair",
  "solana-program",
  "solana-rpc-client",
