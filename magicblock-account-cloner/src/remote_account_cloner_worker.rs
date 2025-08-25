@@ -289,17 +289,8 @@ where
             .collect::<HashSet<_>>();
 
         let count = account_keys.len();
-        debug!("Hydrating {count} accounts");
+        info!("Hydrating {count} accounts");
         let stream = stream::iter(account_keys);
-        // NOTE: depending on the RPC provider we may get rate limited if we request
-        // account states at a too high rate.
-        // I confirmed the following concurrency working fine:
-        //   Solana Mainnet: 10
-        //   Helius: 20
-        // If we go higher than this we hit 429s which causes the fetcher to have to
-        // retry resulting in overall slower hydration.
-        // If the optimal rate here is desired we might make this configurable in the
-        // future.
         let result = stream
             .map(Ok::<_, AccountClonerError>)
             .try_for_each_concurrent(
