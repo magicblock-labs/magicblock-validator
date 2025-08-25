@@ -27,6 +27,9 @@ jobs:
         shell: bash
         working-directory: magicblock-validator
 
-      - run: make ci-fmt
+      - name: Run ci-fmt in test-integration
+        run: |
+          cd test-integration
+          make ci-fmt
         shell: bash
-        working-directory: test-integration
+        working-directory: magicblock-validator

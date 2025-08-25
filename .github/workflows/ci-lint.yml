@@ -27,6 +27,9 @@ jobs:
         shell: bash
         working-directory: magicblock-validator
 
-      - run: make ci-lint
+      - name: Run ci-lint in test-integration
+        run: |
+          cd test-integration
+          make ci-lint
         shell: bash
-        working-directory: test-integration
+        working-directory: magicblock-validator
