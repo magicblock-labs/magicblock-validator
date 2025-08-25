@@ -21,7 +21,7 @@ use solana_sdk::{
     system_program,
     transaction::{SanitizedTransaction, Transaction},
 };
-use test_kit::ExecutionTestEnv;
+use test_kit::{skip_if_devnet_down, ExecutionTestEnv};
 use utils::LUZIFER;
 
 use crate::utils::{SOLX_EXEC, SOLX_IDL, SOLX_PROG};
@@ -86,6 +86,7 @@ async fn verified_tx_to_clone_executable_from_devnet_as_upgrade(
 
 #[tokio::test]
 async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
+    skip_if_devnet_down!();
     ensure_started_validator(&mut Default::default());
     let test_env = ExecutionTestEnv::new();
     test_env.fund_account(LUZIFER, u64::MAX / 2);
