@@ -1,7 +1,7 @@
-use integration_test_tools::run_test;
+use integration_test_tools::{
+    conversions::pubkey_from_magic_program, run_test,
+};
 use log::*;
-
-use integration_test_tools::conversions::pubkey_from_magic_program;
 use magicblock_core::magic_program;
 use program_schedulecommit::api::schedule_commit_cpi_instruction;
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};

@@ -1,14 +1,14 @@
-use cleanass::assert_eq;
-use integration_test_tools::loaded_accounts::LoadedAccounts;
-use integration_test_tools::validator::cleanup;
 use std::{path::Path, process::Child};
 
-use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
+use cleanass::assert_eq;
+use integration_test_tools::{
+    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    validator::cleanup,
+};
 use magicblock_config::ProgramConfig;
-use program_flexi_counter::instruction::create_add_ix;
 use program_flexi_counter::{
     delegation_program_id,
-    instruction::{create_delegate_ix, create_init_ix},
+    instruction::{create_add_ix, create_delegate_ix, create_init_ix},
     state::FlexiCounter,
 };
 use solana_sdk::{

@@ -1,3 +1,7 @@
+#[allow(deprecated)]
+use solana_program::sysvar::{
+    fees::Fees, recent_blockhashes::RecentBlockhashes,
+};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     clock::Clock,
@@ -15,11 +19,6 @@ use solana_program::{
         },
         Sysvar,
     },
-};
-
-#[allow(deprecated)]
-use solana_program::sysvar::{
-    fees::Fees, recent_blockhashes::RecentBlockhashes,
 };
 
 solana_program::entrypoint!(process_instruction);

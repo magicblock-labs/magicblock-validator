@@ -1,6 +1,6 @@
-use cleanass::assert_eq;
 use std::{path::Path, process::Child};
 
+use cleanass::assert_eq;
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };

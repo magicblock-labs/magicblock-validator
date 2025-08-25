@@ -1,4 +1,3 @@
-use solana_rpc_client::rpc_client::RpcClient;
 use std::{path::Path, process::Child, thread::sleep, time::Duration};
 
 use integration_test_tools::{
@@ -16,6 +15,7 @@ use magicblock_config::{
     DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::state::FlexiCounter;
+use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     clock::Slot,
     instruction::Instruction,
@@ -109,14 +109,12 @@ pub fn setup_validator_with_local_remote(
     let resume_strategy_config = if reset {
         LedgerResumeStrategyConfig {
             kind: LedgerResumeStrategyType::Reset,
-            reset_slot: None,
-            keep_accounts: None,
+            ..Default::default()
         }
     } else {
         LedgerResumeStrategyConfig {
             kind: LedgerResumeStrategyType::Replay,
-            reset_slot: None,
-            keep_accounts: None,
+            ..Default::default()
         }
     };
     let config = EphemeralConfig {
