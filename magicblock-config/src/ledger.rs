@@ -81,27 +81,6 @@ impl Default for LedgerConfig {
     }
 }
 
-#[clap_prefix("ledger-replay")]
-#[clap_from_serde]
-#[derive(
-    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
-)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct ReplayConfig {
-    /// The number of threads to use for cloning accounts.
-    #[derive_env_var]
-    #[serde(default = "default_cloning_concurrency")]
-    pub account_hydration_concurrency: usize,
-}
-
-impl Default for ReplayConfig {
-    fn default() -> Self {
-        Self {
-            account_hydration_concurrency: default_cloning_concurrency(),
-        }
-    }
-}
-
 impl From<LedgerResumeStrategy> for LedgerResumeStrategyConfig {
     fn from(strategy: LedgerResumeStrategy) -> Self {
         match strategy {
@@ -134,15 +113,7 @@ impl From<LedgerResumeStrategy> for LedgerResumeStrategyConfig {
 #[clap_prefix("ledger-resume-strategy")]
 #[clap_from_serde]
 #[derive(
-    Debug,
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    Deserialize,
-    Serialize,
-    Args,
-    Mergeable,
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
 )]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct LedgerResumeStrategyConfig {
@@ -174,6 +145,17 @@ impl LedgerResumeStrategyConfig {
                 ))
             }
             _ => Ok(()),
+        }
+    }
+}
+
+impl Default for LedgerResumeStrategyConfig {
+    fn default() -> Self {
+        Self {
+            kind: LedgerResumeStrategyType::default(),
+            reset_slot: None,
+            keep_accounts: None,
+            account_hydration_concurrency: default_cloning_concurrency(),
         }
     }
 }
@@ -357,46 +339,6 @@ mod tests {
             skip_keypair_match_check: true,
             path: Some("ledger2.example.com".to_string()),
             size: 10000,
-        };
-
-        config.merge(other);
-
-        assert_eq!(config, original_config);
-    }
-
-    #[test]
-    fn test_replay_merge_with_default() {
-        let mut config = ReplayConfig {
-            account_hydration_concurrency: 20,
-        };
-        let original_config = config.clone();
-        let other = ReplayConfig::default();
-
-        config.merge(other);
-
-        assert_eq!(config, original_config);
-    }
-
-    #[test]
-    fn test_replay_merge_default_with_non_default() {
-        let mut config = ReplayConfig::default();
-        let other = ReplayConfig {
-            account_hydration_concurrency: 20,
-        };
-
-        config.merge(other.clone());
-
-        assert_eq!(config, other);
-    }
-
-    #[test]
-    fn test_replay_merge_non_default() {
-        let mut config = ReplayConfig {
-            account_hydration_concurrency: 20,
-        };
-        let original_config = config.clone();
-        let other = ReplayConfig {
-            account_hydration_concurrency: 150,
         };
 
         config.merge(other);

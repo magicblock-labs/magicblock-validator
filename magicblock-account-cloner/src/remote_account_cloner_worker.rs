@@ -20,7 +20,6 @@ use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_committor_service::ChangesetCommittor;
 use magicblock_config::{
     AccountsCloneConfig, LedgerResumeStrategyConfig, PrepareLookupTables,
-    ReplayConfig,
 };
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};

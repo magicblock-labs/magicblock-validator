@@ -18,9 +18,7 @@ use magicblock_accounts::{
 };
 use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_committor_service::stubs::ChangesetCommittorStub;
-use magicblock_config::{
-    AccountsCloneConfig, LedgerResumeStrategyConfig, ReplayConfig,
-};
+use magicblock_config::{AccountsCloneConfig, LedgerResumeStrategyConfig};
 use solana_sdk::pubkey::Pubkey;
 use stubs::{
     account_committer_stub::AccountCommitterStub,

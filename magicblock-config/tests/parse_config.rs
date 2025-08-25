@@ -225,7 +225,6 @@ fn test_everything_defined() {
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
                     auto_airdrop_lamports: 123,
-                    concurrency: 20,
                 },
                 max_monitored_accounts: 1_000_000,
                 remote: RemoteConfig {

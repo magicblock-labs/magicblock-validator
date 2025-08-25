@@ -228,7 +228,6 @@ mod tests {
                 },
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
-                    concurrency: 20,
                     auto_airdrop_lamports: 123,
                 },
                 max_monitored_accounts: 1234,
@@ -318,7 +317,6 @@ mod tests {
                 },
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
-                    concurrency: 20,
                     auto_airdrop_lamports: 123,
                 },
                 max_monitored_accounts: 1234,
@@ -405,7 +403,6 @@ mod tests {
                 },
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
-                    concurrency: 20,
                     auto_airdrop_lamports: 123,
                 },
                 max_monitored_accounts: 12346,
@@ -485,7 +482,6 @@ mod tests {
                 },
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
-                    concurrency: 30,
                     auto_airdrop_lamports: 12345,
                 },
                 max_monitored_accounts: 1234,
@@ -559,7 +555,6 @@ mod tests {
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
                     auto_airdrop_lamports: 0,
-                    concurrency: 20,
                 },
                 max_monitored_accounts: 2048,
             },

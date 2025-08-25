@@ -1,7 +1,7 @@
 [accounts]
 lifecycle = "programs-replica"
 allowed-programs = [{ id = "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4" }]
-clone = { prepare-lookup-tables = "always", auto-airdrop-lamports = 123, concurrency = 20 }
+clone = { prepare-lookup-tables = "always", auto-airdrop-lamports = 123 }
 max-monitored-accounts = 1000000
 
 [accounts.remote]
@@ -38,11 +38,10 @@ country-code = "US"
 claim-fees-interval-secs = 10
 
 [ledger]
-resume-strategy = { kind = "replay", reset-slot = 100, keep-accounts = false }
+resume-strategy = { kind = "replay", reset-slot = 100, keep-accounts = false, account-hydration-concurrency = 20 }
 skip-keypair-match-check = true
 path = "ledger.example.com"
 size = 1000000000
-replay.account-hydration-concurrency = 20
 
 [[program]]
 id = "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"

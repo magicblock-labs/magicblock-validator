@@ -139,14 +139,13 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("LEDGER_RESUME_STRATEGY_KIND", "resume-only");
     env::set_var("LEDGER_RESUME_STRATEGY_RESET_SLOT", "1");
     env::set_var("LEDGER_RESUME_STRATEGY_KEEP_ACCOUNTS", "true");
+    env::set_var("LEDGER_RESUME_STRATEGY_ACCOUNT_HYDRATION_CONCURRENCY", "20");
     env::set_var("LEDGER_SKIP_KEYPAIR_MATCH_CHECK", "true");
     env::set_var("LEDGER_PATH", "/hello/world");
     env::set_var("METRICS_ENABLED", "false");
     env::set_var("METRICS_PORT", "1234");
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
-    env::set_var("CLONE_CONCURRENCY", "20");
     env::set_var("CLONE_AUTO_AIRDROP_LAMPORTS", "123");
-    env::set_var("LEDGER_REPLAY_ACCOUNT_HYDRATION_CONCURRENCY", "20");
 
     let config = parse_config_with_file(&config_file_dir);
 
@@ -166,7 +165,6 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 },
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Never,
-                    concurrency: 20,
                     auto_airdrop_lamports: 123,
                 },
                 ..Default::default()
