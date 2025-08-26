@@ -111,7 +111,7 @@ fn get_cf_options<C: 'static + Column + ColumnName>(
     // 256 * 8 = 2GB. 6 of these columns should take at most 12GB of RAM
     cf_options.set_max_write_buffer_number(8);
     cf_options.set_write_buffer_size(consts::MAX_WRITE_BUFFER_SIZE as usize);
-    let file_num_compaction_trigger = 4;
+    let file_num_compaction_trigger = 8;
     // Recommend that this be around the size of level 0. Level 0 estimated size in stable state is
     // write_buffer_size * min_write_buffer_number_to_merge * level0_file_num_compaction_trigger
     // Source: https://docs.rs/rocksdb/0.6.0/rocksdb/struct.Options.html#method.set_level_zero_file_num_compaction_trigger
@@ -121,8 +121,19 @@ fn get_cf_options<C: 'static + Column + ColumnName>(
     cf_options.set_level_zero_file_num_compaction_trigger(
         file_num_compaction_trigger as i32,
     );
+    // Stall prevention thresholds to avoid write stalls under compaction pressure
+    // Choose defaults that give more headroom relative to compaction trigger
+    cf_options.set_level_zero_slowdown_writes_trigger(32);
+    cf_options.set_level_zero_stop_writes_trigger(64);
+
+    // Level sizing
     cf_options.set_max_bytes_for_level_base(total_size_base);
     cf_options.set_target_file_size_base(file_size_base);
+    cf_options.set_level_compaction_dynamic_level_bytes(true);
+
+    // Merge more memtables to reduce L0 file churn
+    cf_options.set_min_write_buffer_number_to_merge(2);
+
     cf_options.set_compaction_filter_factory(
         PurgedSlotFilterFactory::<C>::new(oldest_slot.clone()),
     );

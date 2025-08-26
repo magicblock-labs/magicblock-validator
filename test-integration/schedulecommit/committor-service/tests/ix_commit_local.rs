@@ -1,34 +1,35 @@
-use log::*;
-use magicblock_committor_service::error::CommittorServiceResult;
-use magicblock_committor_service::{ChangesetCommittor, ComputeBudgetConfig};
-use magicblock_rpc_client::MagicblockRpcClient;
-use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
-use test_tools_core::init_logger;
-use tokio::sync::oneshot;
-use tokio::task::JoinSet;
-use utils::transactions::tx_logs_contain;
+use std::{
+    collections::{HashMap, HashSet},
+    time::{Duration, Instant},
+};
 
+use log::*;
 use magicblock_committor_program::{ChangedAccount, Changeset};
 use magicblock_committor_service::{
     changeset_for_slot,
     config::ChainConfig,
+    error::CommittorServiceResult,
     persist::{CommitStatus, CommitStrategy},
-    CommittorService,
+    ChangesetCommittor, CommittorService, ComputeBudgetConfig,
 };
+use magicblock_rpc_client::MagicblockRpcClient;
 use solana_account::{Account, AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::hash::Hash;
-use solana_sdk::transaction::Transaction;
 use solana_sdk::{
+    commitment_config::CommitmentConfig, hash::Hash,
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
-use utils::instructions::{
-    init_account_and_delegate_ixs, init_validator_fees_vault_ix,
-    InitAccountAndDelegateIxs,
+use test_tools_core::init_logger;
+use tokio::{sync::oneshot, task::JoinSet};
+use utils::{
+    instructions::{
+        init_account_and_delegate_ixs, init_validator_fees_vault_ix,
+        InitAccountAndDelegateIxs,
+    },
+    transactions::tx_logs_contain,
 };
 
 mod utils;

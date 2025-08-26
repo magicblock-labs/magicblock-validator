@@ -1,15 +1,15 @@
-use cleanass::assert_eq;
-use integration_test_tools::loaded_accounts::LoadedAccounts;
 use std::{path::Path, process::Child};
 
+use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
-};
-use program_flexi_counter::instruction::{
-    create_add_counter_ix, create_add_ix,
+    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    validator::cleanup,
 };
 use program_flexi_counter::{
-    instruction::{create_delegate_ix, create_init_ix},
+    instruction::{
+        create_add_counter_ix, create_add_ix, create_delegate_ix,
+        create_init_ix,
+    },
     state::FlexiCounter,
 };
 use solana_sdk::{
@@ -22,6 +22,7 @@ use test_ledger_restore::{
     wait_for_cloned_accounts_hydration, wait_for_ledger_persist, Counter,
     State, TMP_DIR_LEDGER,
 };
+
 const COUNTER_MAIN: &str = "Main Counter";
 const COUNTER_READONLY: &str = "Readonly Counter";
 fn payer_keypair() -> Keypair {

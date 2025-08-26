@@ -1,5 +1,4 @@
 use log::*;
-
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{
     find_open_tables, LookupTableRc, TableManiaComputeBudgets,

@@ -2,7 +2,6 @@ use futures::StreamExt;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signer::Signer,
 };
-
 use test_pubsub::PubSubEnv;
 
 #[tokio::test]
