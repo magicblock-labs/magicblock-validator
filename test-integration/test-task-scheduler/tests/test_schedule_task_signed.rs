@@ -16,8 +16,9 @@ use solana_sdk::{
 };
 use test_task_scheduler::DB_PATH;
 
+/// Test that a task can be scheduled and executed when it has multiple signers
 #[test]
-fn test_cancel_ongoing_task() {
+fn test_schedule_task() {
     let ctx = IntegrationTestContext::try_new().unwrap();
     let payer = Keypair::new();
     let (counter_pda, _) = Counter::pda(&payer.pubkey());
@@ -57,9 +58,9 @@ fn test_cancel_ongoing_task() {
     sleep(std::time::Duration::from_secs(3));
 
     // Schedule a task
-    let task_id = 3;
+    let task_id = 4;
     let period_millis = 100;
-    let n_executions = 1000000;
+    let n_executions = 3;
     ctx.try_ephem_client()
         .unwrap()
         .send_transaction(&Transaction::new_signed_with_payer(
@@ -71,7 +72,7 @@ fn test_cancel_ongoing_task() {
                 period_millis,
                 n_executions,
                 false,
-                false,
+                true,
             )],
             Some(&payer.pubkey()),
             &[&payer],
@@ -84,6 +85,32 @@ fn test_cancel_ongoing_task() {
 
     // Wait for the task to be scheduled
     sleep(std::time::Duration::from_secs(3));
+
+    // Check that the task was scheduled in the database
+    let db_path = PathBuf::from(DB_PATH);
+    let db = SchedulerDatabase::new(db_path).unwrap();
+
+    let tasks = db.get_task_ids().unwrap();
+    assert_eq!(tasks.len(), 1);
+
+    let task = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.id, task_id);
+    assert_eq!(task.authority, payer.pubkey());
+    assert_eq!(task.period_millis, 100);
+    assert_eq!(task.executions_left, 0);
+
+    // Check that the counter was incremented
+    let counter_account = ctx
+        .try_ephem_client()
+        .unwrap()
+        .get_account(&counter_pda)
+        .unwrap();
+    let counter = Counter::try_decode(&counter_account.data).unwrap();
+    assert!(
+        counter.count == n_executions,
+        "counter.count: {}",
+        counter.count
+    );
 
     // Cancel the task
     ctx.try_ephem_client()
@@ -104,30 +131,9 @@ fn test_cancel_ongoing_task() {
         ))
         .unwrap();
 
-    // Wait for the task to be cancelled
-    sleep(std::time::Duration::from_secs(1));
+    sleep(std::time::Duration::from_secs(3));
 
     // Check that the task was cancelled
-    let db_path = PathBuf::from(DB_PATH);
-    let db = SchedulerDatabase::new(db_path).unwrap();
-
     let tasks = db.get_task_ids().unwrap();
-    assert_eq!(tasks.len(), 0, "tasks: {:?}", tasks);
-
-    let task = db.get_task(task_id).unwrap();
-    assert!(task.is_none());
-
-    // Check that the counter was incremented but not as much as the number of executions
-    let counter_account = ctx
-        .try_ephem_client()
-        .unwrap()
-        .get_account(&counter_pda)
-        .unwrap();
-    let counter = Counter::try_decode(&counter_account.data).unwrap();
-    assert!(
-        counter.count < n_executions,
-        "counter.count: {}",
-        counter.count
-    );
-    assert!(counter.count > 0, "counter.count: {}", counter.count);
+    assert_eq!(tasks.len(), 0);
 }

@@ -71,6 +71,7 @@ fn test_schedule_task() {
                 period_millis,
                 n_executions,
                 false,
+                false,
             )],
             Some(&payer.pubkey()),
             &[&payer],

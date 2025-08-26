@@ -72,6 +72,7 @@ fn test_schedule_error() {
                 period_millis,
                 n_executions,
                 true,
+                false,
             )],
             Some(&payer.pubkey()),
             &[&payer],

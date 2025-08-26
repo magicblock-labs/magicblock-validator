@@ -171,6 +171,7 @@ impl TaskSchedulerService {
                         &blockhash,
                     ));
                 tx.partial_sign(&[fake_payer], blockhash);
+                debug!("task tx: {tx:?}");
                 SanitizedTransaction::try_from_legacy_transaction(
                     tx,
                     &Default::default(),
