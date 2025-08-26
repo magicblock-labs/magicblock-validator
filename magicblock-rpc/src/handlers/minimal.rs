@@ -123,7 +123,7 @@ impl Minimal for MinimalImpl {
         debug!("get_version rpc request received");
         let version = magicblock_version::Version::default();
         let git_commit = format!("{:08x}", version.commit);
-        let solana_core_version = env!("CARGO_PKG_VERSION").to_string();
+        let git_commit = format!("{:08x}", version.commit);
         Ok(RpcVersionInfoExt {
             solana_core: version.solana_core.to_string(),
             feature_set: Some(version.feature_set),
