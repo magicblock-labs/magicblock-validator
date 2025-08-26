@@ -16,6 +16,7 @@ pub struct ScheduleArgs {
     pub period_millis: i64,
     pub n_executions: u64,
     pub error: bool,
+    pub signer: bool,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -64,6 +65,13 @@ pub enum ScheduleTaskInstruction {
     /// 0. `[signer]` The payer that created the account.
     /// 1. `[write]` The counter PDA account that will be updated.
     IncrementCounter,
+
+    /// Increments the counter.
+    ///
+    /// Accounts:
+    /// 0. `[signer]` The payer that created the account.
+    /// 1. `[signer, write]` The counter PDA account that will be updated.
+    IncrementCounterSigned,
 
     /// Increments the counter with an error.
     ///
@@ -116,6 +124,21 @@ pub fn create_increment_counter_ix(payer: Pubkey) -> Instruction {
     )
 }
 
+pub fn create_increment_counter_signed_ix(payer: Pubkey) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = Counter::pda(&payer);
+    let accounts = vec![
+        AccountMeta::new_readonly(payer, true),
+        AccountMeta::new(pda, true),
+    ];
+
+    Instruction::new_with_borsh(
+        *program_id,
+        &ScheduleTaskInstruction::IncrementCounterSigned,
+        accounts,
+    )
+}
+
 pub fn create_increment_counter_error_ix(payer: Pubkey) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = Counter::pda(&payer);
@@ -131,6 +154,7 @@ pub fn create_increment_counter_error_ix(payer: Pubkey) -> Instruction {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn create_schedule_task_ix(
     payer: Pubkey,
     task_context: Pubkey,
@@ -139,6 +163,7 @@ pub fn create_schedule_task_ix(
     period_millis: i64,
     n_executions: u64,
     error: bool,
+    signer: bool,
 ) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = Counter::pda(&payer);
@@ -155,6 +180,7 @@ pub fn create_schedule_task_ix(
             period_millis,
             n_executions,
             error,
+            signer,
         }),
         accounts,
     )

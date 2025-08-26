@@ -21,7 +21,8 @@ use solana_program::{
 use crate::{
     instruction::{
         create_increment_counter_error_ix, create_increment_counter_ix,
-        CancelArgs, DelegateArgs, ScheduleArgs, ScheduleTaskInstruction,
+        create_increment_counter_signed_ix, CancelArgs, DelegateArgs,
+        ScheduleArgs, ScheduleTaskInstruction,
     },
     magic_program::{CancelTaskArgs, ScheduleTaskArgs},
     state::Counter,
@@ -50,6 +51,7 @@ pub fn process(
         Schedule(args) => process_schedule_task(accounts, args),
         Cancel(args) => process_cancel_task(accounts, args),
         IncrementCounter => process_increment_counter(accounts),
+        IncrementCounterSigned => process_increment_counter_signed(accounts),
         IncrementCounterError => process_increment_counter_error(),
         Delegate(args) => process_delegate(accounts, &args),
     }?;
@@ -128,10 +130,12 @@ fn process_schedule_task(
         task_id: args.task_id,
         period_millis: args.period_millis,
         n_executions: args.n_executions,
-        instructions: vec![if args.error {
-            create_increment_counter_error_ix(*payer_info.key)
-        } else {
-            create_increment_counter_ix(*payer_info.key)
+        instructions: vec![match (args.error, args.signer) {
+            (true, false) => create_increment_counter_error_ix(*payer_info.key),
+            (false, true) => {
+                create_increment_counter_signed_ix(*payer_info.key)
+            }
+            _ => create_increment_counter_ix(*payer_info.key),
         }],
     };
     discriminator.extend_from_slice(&bincode::serialize(&args).map_err(
@@ -205,6 +209,11 @@ fn process_increment_counter(accounts: &[AccountInfo]) -> ProgramResult {
     let payer_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
 
+    if !payer_info.is_signer {
+        msg!("Payer is not signer");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
     let (counter_pda, _) = Counter::pda(payer_info.key);
     assert_keys_equal(counter_pda_info.key, &counter_pda, || {
         format!(
@@ -214,6 +223,43 @@ fn process_increment_counter(accounts: &[AccountInfo]) -> ProgramResult {
     })?;
     if !counter_pda_info.is_writable {
         msg!("Counter PDA is not writable");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    let mut counter = Counter::try_from_slice(&counter_pda_info.data.borrow())?;
+
+    counter.count += 1;
+
+    let size = counter_pda_info.data_len();
+    let counter_data = to_vec(&counter)?;
+    counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
+
+    Ok(())
+}
+
+fn process_increment_counter_signed(accounts: &[AccountInfo]) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+
+    if !payer_info.is_signer {
+        msg!("Payer is not signer");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    let (counter_pda, _) = Counter::pda(payer_info.key);
+    assert_keys_equal(counter_pda_info.key, &counter_pda, || {
+        format!(
+            "Invalid counter PDA {}, should be {}",
+            counter_pda_info.key, counter_pda
+        )
+    })?;
+    if !counter_pda_info.is_writable {
+        msg!("Counter PDA is not writable");
+        return Err(ProgramError::InvalidAccountData);
+    }
+    if !counter_pda_info.is_signer {
+        msg!("Counter PDA is not signer");
         return Err(ProgramError::InvalidAccountData);
     }
 
