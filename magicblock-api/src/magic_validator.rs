@@ -553,7 +553,7 @@ impl MagicValidator {
             read_validator_keypair_from_ledger(ledger_path)
         {
             if ledger_validator_keypair.ne(validator_keypair)
-                && skip_keypair_match_check
+                && !skip_keypair_match_check
             {
                 return Err(
                     ApiError::LedgerValidatorKeypairNotMatchingProvidedKeypair(
