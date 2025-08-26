@@ -4461,6 +4461,7 @@ dependencies = [
  "semver",
  "serde",
  "solana-frozen-abi-macro",
+ "solana-rpc-client-api",
  "solana-sdk",
 ]
 

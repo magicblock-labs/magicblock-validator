@@ -64,9 +64,9 @@ impl Default for Version {
             feature_set,
             // Other client implementations need to modify this line.
             client: u16::try_from(ClientId::MagicBlock).unwrap(),
-            solana_core: option_env!("SOLANA_CORE_VERSION")
-                .unwrap_or("unknown")
-                .to_string(),
+            solana_core:
+                solana_rpc_client_api::response::RpcApiVersion::default()
+                    .to_string(),
             git_version: git_version::git_version!().to_string(),
         }
     }

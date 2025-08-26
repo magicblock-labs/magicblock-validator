@@ -11,6 +11,7 @@ edition.workspace = true
 semver = { workspace = true }
 serde = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }
+solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 git-version = { workspace = true }
 
