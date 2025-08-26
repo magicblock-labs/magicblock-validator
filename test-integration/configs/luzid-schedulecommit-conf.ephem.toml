@@ -23,6 +23,9 @@ max-snapshots = 7
 # how frequently (slot-wise) we should take snapshots
 snapshot-frequency = 1024
 
+[node.ledger]
+resume-strategy = { kind = "reset" }
+
 [node.rpc]
 port = 8899
 

@@ -1,10 +1,10 @@
-use cleanass::{assert, assert_eq};
-use magicblock_config::LedgerResumeStrategy;
 use std::{path::Path, process::Child};
 
+use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, unwrap, validator::cleanup,
 };
+use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::{
     commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature,
 };
@@ -64,7 +64,10 @@ fn write(
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Reset,
+        LedgerResumeStrategy::Reset {
+            slot: 0,
+            keep_accounts: false,
+        },
         false,
     );
 
@@ -102,7 +105,7 @@ fn read(
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Replay,
+        LedgerResumeStrategy::Resume { replay: true },
         false,
     );
 
@@ -184,7 +187,7 @@ fn _diagnose_read() {
         &ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Replay,
+        LedgerResumeStrategy::Resume { replay: true },
         false,
     );
 }

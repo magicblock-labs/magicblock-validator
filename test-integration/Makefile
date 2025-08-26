@@ -145,5 +145,10 @@ deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 		--program-id $(DIR)/programs/flexi-counter/keys/f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4.json \
 		$(DIR)/target/deploy/program_flexi_counter.so
 
+ci-fmt:
+	cargo +nightly fmt --check -- --config-path ../rustfmt-nightly.toml
 
-.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list
+ci-lint:
+	cargo clippy --all-targets -- -D warnings
+
+.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list ci-fmt ci-lint

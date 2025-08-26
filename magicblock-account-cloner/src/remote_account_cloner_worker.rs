@@ -18,7 +18,9 @@ use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::{AccountUpdates, AccountUpdatesResult};
 use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_committor_service::BaseIntentCommittor;
-use magicblock_config::{AccountsCloneConfig, PrepareLookupTables};
+use magicblock_config::{
+    AccountsCloneConfig, LedgerResumeStrategyConfig, PrepareLookupTables,
+};
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
@@ -111,6 +113,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC> {
     validator_identity: Pubkey,
     monitored_accounts: RefCell<LruCache<Pubkey, ()>>,
     clone_config: AccountsCloneConfig,
+    ledger_resume_strategy_config: LedgerResumeStrategyConfig,
 }
 
 // SAFETY:
@@ -150,6 +153,7 @@ where
         validator_authority: Pubkey,
         max_monitored_accounts: usize,
         clone_config: AccountsCloneConfig,
+        ledger_resume_strategy_config: LedgerResumeStrategyConfig,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) = flume::unbounded();
         let fetch_retries = 50;
@@ -174,6 +178,7 @@ where
             validator_identity: validator_authority,
             monitored_accounts: LruCache::new(max_monitored_accounts).into(),
             clone_config,
+            ledger_resume_strategy_config,
         }
     }
 
@@ -284,45 +289,39 @@ where
             .collect::<HashSet<_>>();
 
         let count = account_keys.len();
-        debug!("Hydrating {count} accounts");
+        info!("Hydrating {count} accounts");
         let stream = stream::iter(account_keys);
-        // NOTE: depending on the RPC provider we may get rate limited if we request
-        // account states at a too high rate.
-        // I confirmed the following concurrency working fine:
-        //   Solana Mainnet: 10
-        //   Helius: 20
-        // If we go higher than this we hit 429s which causes the fetcher to have to
-        // retry resulting in overall slower hydration.
-        // If the optimal rate here is desired we might make this configurable in the
-        // future.
-        // TODO(GabrielePicco): Make the concurrency configurable
         let result = stream
             .map(Ok::<_, AccountClonerError>)
-            .try_for_each_concurrent(10, |(pubkey, owner)| async move {
-                trace!("Hydrating '{}'", pubkey);
-                let res = self
-                    .do_clone_and_update_cache(
-                        &pubkey,
-                        ValidatorStage::Hydrating {
-                            validator_identity: self.validator_identity,
-                            account_owner: owner,
-                        },
-                    )
-                    .await;
-                match res {
-                    Ok(output) => {
-                        trace!("Cloned '{}': {:?}", pubkey, output);
-                        Ok(())
-                    }
-                    Err(err) => {
-                        error!("Failed to clone {} ('{:?}')", pubkey, err);
-                        // NOTE: the account fetch already has retries built in, so
-                        // we don't to retry here
+            .try_for_each_concurrent(
+                self.ledger_resume_strategy_config
+                    .account_hydration_concurrency,
+                |(pubkey, owner)| async move {
+                    trace!("Hydrating '{}'", pubkey);
+                    let res = self
+                        .do_clone_and_update_cache(
+                            &pubkey,
+                            ValidatorStage::Hydrating {
+                                validator_identity: self.validator_identity,
+                                account_owner: owner,
+                            },
+                        )
+                        .await;
+                    match res {
+                        Ok(output) => {
+                            trace!("Cloned '{}': {:?}", pubkey, output);
+                            Ok(())
+                        }
+                        Err(err) => {
+                            error!("Failed to clone {} ('{:?}')", pubkey, err);
+                            // NOTE: the account fetch already has retries built in, so
+                            // we don't to retry here
 
-                        Err(err)
+                            Err(err)
+                        }
                     }
-                }
-            })
+                },
+            )
             .await;
         info!("On-startup account ensurance is complete: {count}");
         result

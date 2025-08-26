@@ -106,6 +106,10 @@ impl EphemeralConfig {
         }
 
         config.post_parse();
+        config
+            .ledger
+            .resume_strategy_config
+            .validate_resume_strategy()?;
 
         Ok(config)
     }
@@ -222,7 +226,10 @@ mod tests {
                     max_snapshots: 1234,
                     snapshot_frequency: 1000000000,
                 },
-                clone: AccountsCloneConfig::default(),
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Always,
+                    auto_airdrop_lamports: 123,
+                },
                 max_monitored_accounts: 1234,
             },
             rpc: RpcConfig {
@@ -243,7 +250,12 @@ mod tests {
                 claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::Replay,
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    kind: LedgerResumeStrategyType::Replay,
+                    reset_slot: Some(1),
+                    keep_accounts: Some(true),
+                    account_hydration_concurrency: 20,
+                },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
@@ -303,7 +315,10 @@ mod tests {
                     max_snapshots: 12345,
                     snapshot_frequency: 1000000000,
                 },
-                clone: AccountsCloneConfig::default(),
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Always,
+                    auto_airdrop_lamports: 123,
+                },
                 max_monitored_accounts: 1234,
             },
             rpc: RpcConfig {
@@ -324,7 +339,12 @@ mod tests {
                 claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::Replay,
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    kind: LedgerResumeStrategyType::Replay,
+                    reset_slot: Some(1),
+                    keep_accounts: Some(true),
+                    account_hydration_concurrency: 20,
+                },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
@@ -381,7 +401,10 @@ mod tests {
                     max_snapshots: 12345,
                     snapshot_frequency: 999,
                 },
-                clone: AccountsCloneConfig::default(),
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Always,
+                    auto_airdrop_lamports: 123,
+                },
                 max_monitored_accounts: 12346,
             },
             rpc: RpcConfig {
@@ -402,7 +425,12 @@ mod tests {
                 claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::ResumeOnly,
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    kind: LedgerResumeStrategyType::ResumeOnly,
+                    reset_slot: Some(1),
+                    keep_accounts: Some(true),
+                    account_hydration_concurrency: 20,
+                },
                 skip_keypair_match_check: true,
                 path: Some("ledger2.example.com".to_string()),
                 size: 100000,
@@ -452,7 +480,10 @@ mod tests {
                     max_snapshots: 12345,
                     snapshot_frequency: 1000000000,
                 },
-                clone: AccountsCloneConfig::default(),
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Always,
+                    auto_airdrop_lamports: 12345,
+                },
                 max_monitored_accounts: 1234,
             },
             rpc: RpcConfig {
@@ -473,7 +504,12 @@ mod tests {
                 claim_fees_interval_secs: DEFAULT_CLAIM_FEES_INTERVAL_SECS,
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::Replay,
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    kind: LedgerResumeStrategyType::Replay,
+                    reset_slot: Some(2),
+                    keep_accounts: Some(false),
+                    account_hydration_concurrency: 20,
+                },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
@@ -525,7 +561,17 @@ mod tests {
             rpc: RpcConfig::default(),
             geyser_grpc: GeyserGrpcConfig::default(),
             validator: ValidatorConfig::default(),
-            ledger: LedgerConfig::default(),
+            ledger: LedgerConfig {
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    kind: LedgerResumeStrategyType::Replay,
+                    reset_slot: Some(1),
+                    keep_accounts: Some(true),
+                    account_hydration_concurrency: 20,
+                },
+                skip_keypair_match_check: true,
+                path: Some("ledger.example.com".to_string()),
+                size: 1000000000,
+            },
             programs: vec![],
             metrics: MetricsConfig::default(),
         };

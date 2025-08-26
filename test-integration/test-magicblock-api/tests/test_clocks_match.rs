@@ -79,7 +79,7 @@ async fn test_clocks_match() {
 
         // Also verify that the timestamp is not 0 and not in the future
         assert!(
-            tx.block_time.map(|t| t > 0).unwrap_or(false),
+            tx.block_time.map(|t| t > 0).unwrap_or_default(),
             "Timestamp should be positive",
         );
         let current_time = std::time::SystemTime::now()
@@ -87,7 +87,7 @@ async fn test_clocks_match() {
             .unwrap()
             .as_secs() as i64;
         assert!(
-            tx.block_time.map(|t| t <= current_time).unwrap_or(false),
+            tx.block_time.map(|t| t <= current_time).unwrap_or_default(),
             "Timestamp should be in the past: {:?} > {}",
             tx.block_time,
             current_time,

@@ -4,10 +4,11 @@ mod schedule_redelegation_intent;
 
 use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::consts::EXTERNAL_CALL_HANDLER_DISCRIMINATOR;
-use ephemeral_rollups_sdk::cpi::{DelegateAccounts, DelegateConfig};
 use ephemeral_rollups_sdk::{
     consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
-    cpi::{delegate_account, undelegate_account},
+    cpi::{
+        delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
+    },
     ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
 use solana_program::{
@@ -22,12 +23,14 @@ use solana_program::{
     sysvar::Sysvar,
 };
 
-use crate::instruction::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE;
 use crate::processor::call_handler::process_call_handler;
 use crate::processor::schedule_intent::process_create_intent;
 use crate::processor::schedule_redelegation_intent::process_create_redelegation_intent;
 use crate::{
-    instruction::{DelegateArgs, FlexiCounterInstruction},
+    instruction::{
+        DelegateArgs, FlexiCounterInstruction,
+        MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
+    },
     state::FlexiCounter,
     utils::assert_keys_equal,
 };

@@ -1,20 +1,19 @@
-use cleanass::assert_eq;
-use magicblock_config::LedgerResumeStrategy;
-use solana_transaction_status::UiTransactionEncoding;
 use std::{path::Path, process::Child};
 
+use cleanass::assert_eq;
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
+use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use solana_transaction_status::UiTransactionEncoding;
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_offline_validator, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,
+    TMP_DIR_LEDGER,
 };
 
 // In this test we ensure that the timestamps of the blocks in the restored
 // ledger match the timestamps of the blocks in the original ledger.
-
-const SNAPSHOT_FREQUENCY: u64 = 2;
 
 #[test]
 fn restore_preserves_timestamps() {
@@ -37,7 +36,10 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Reset,
+        LedgerResumeStrategy::Reset {
+            slot: 0,
+            keep_accounts: false,
+        },
         false,
     );
 
@@ -72,7 +74,7 @@ fn read(ledger_path: &Path, signature: Signature, block_time: i64) -> Child {
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Replay,
+        LedgerResumeStrategy::Resume { replay: true },
         false,
     );
     eprintln!(

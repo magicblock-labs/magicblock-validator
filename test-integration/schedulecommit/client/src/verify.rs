@@ -1,6 +1,5 @@
 use integration_test_tools::scheduled_commits::ScheduledCommitResult;
 use program_schedulecommit::MainAccount;
-
 use solana_sdk::signature::Signature;
 
 use crate::ScheduleCommitTestContext;

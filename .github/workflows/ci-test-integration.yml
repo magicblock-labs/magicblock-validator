@@ -23,7 +23,6 @@ jobs:
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
       - name: Run integration tests

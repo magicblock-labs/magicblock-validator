@@ -14,4 +14,7 @@ pub enum ConfigError {
 
     #[error("Program with id '{0}' has invalid path '{1}'")]
     ProgramPathInvalidUnicode(String, String),
+
+    #[error("Invalid resume strategy: {0}")]
+    InvalidResumeStrategy(String),
 }

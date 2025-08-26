@@ -10,10 +10,10 @@ use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
-use solana_rpc_client_api::client_error::ErrorKind;
-use solana_rpc_client_api::request::RpcError;
 use solana_rpc_client_api::{
-    client_error::Error as ClientError, config::RpcSendTransactionConfig,
+    client_error::{Error as ClientError, ErrorKind},
+    config::RpcSendTransactionConfig,
+    request::RpcError,
 };
 use solana_sdk::{
     commitment_config::CommitmentConfig,

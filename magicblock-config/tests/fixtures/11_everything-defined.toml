@@ -38,7 +38,7 @@ country-code = "US"
 claim-fees-interval-secs = 10
 
 [ledger]
-resume-strategy = "replay"
+resume-strategy = { kind = "replay", reset-slot = 100, keep-accounts = false, account-hydration-concurrency = 20 }
 skip-keypair-match-check = true
 path = "ledger.example.com"
 size = 1000000000

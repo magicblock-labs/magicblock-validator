@@ -1,3 +1,5 @@
+use std::{thread::sleep, time::Duration};
+
 use dlp::instruction_builder::validator_claim_fees;
 use integration_test_tools::{
     loaded_accounts::LoadedAccounts, IntegrationTestContext,
@@ -5,13 +7,11 @@ use integration_test_tools::{
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Keypair;
 use solana_sdk::{
-    commitment_config::CommitmentConfig, signature::Signer,
+    commitment_config::CommitmentConfig,
+    signature::{Keypair, Signer},
     transaction::Transaction,
 };
-use std::thread::sleep;
-use std::time::Duration;
 
 // Test constants
 const DEVNET_URL: &str = "http://127.0.0.1:7799";

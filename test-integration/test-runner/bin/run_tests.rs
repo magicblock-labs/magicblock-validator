@@ -1,23 +1,23 @@
-use integration_test_tools::loaded_accounts::LoadedAccounts;
-use integration_test_tools::validator::start_test_validator_with_config;
-use integration_test_tools::{
-    toml_to_args::ProgramLoader,
-    validator::{
-        resolve_workspace_dir, start_magic_block_validator_with_config,
-        TestRunnerPaths,
-    },
-};
 use std::{
     error::Error,
     io,
     path::Path,
     process::{self, Output},
 };
+
+use integration_test_tools::{
+    loaded_accounts::LoadedAccounts,
+    toml_to_args::ProgramLoader,
+    validator::{
+        resolve_workspace_dir, start_magic_block_validator_with_config,
+        start_test_validator_with_config, TestRunnerPaths,
+    },
+};
 use teepee::Teepee;
-use test_runner::signal::wait_for_ctrlc;
 use test_runner::{
     cleanup::{cleanup_devnet_only, cleanup_validator, cleanup_validators},
     env_config::TestConfigViaEnvVars,
+    signal::wait_for_ctrlc,
 };
 
 pub fn main() {

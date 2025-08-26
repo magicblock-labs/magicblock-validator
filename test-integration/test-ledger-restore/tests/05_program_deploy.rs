@@ -1,5 +1,3 @@
-use cleanass::assert_eq;
-use magicblock_config::LedgerResumeStrategy;
 use std::{
     io::{self, Write},
     path::Path,
@@ -7,10 +5,12 @@ use std::{
     process::Child,
 };
 
+use cleanass::assert_eq;
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
     workspace_paths::TestProgramPaths,
 };
+use magicblock_config::LedgerResumeStrategy;
 use program_flexi_counter::{
     instruction::{create_add_ix, create_init_ix, create_mul_ix},
     state::FlexiCounter,
@@ -67,7 +67,10 @@ fn write(
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Reset,
+        LedgerResumeStrategy::Reset {
+            slot: 0,
+            keep_accounts: false,
+        },
         false,
     );
 
@@ -130,7 +133,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Replay,
+        LedgerResumeStrategy::Resume { replay: true },
         false,
     );
 

@@ -1,8 +1,8 @@
-use log::*;
 use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
+use log::*;
 use solana_rpc_client::rpc_client::{
     GetConfirmedSignaturesForAddress2Config, RpcClient,
 };
@@ -23,6 +23,9 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
     transaction::{Transaction, TransactionError},
+};
+use solana_transaction_status::{
+    EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
 
 const URL_CHAIN: &str = "http://localhost:7799";
@@ -758,6 +761,28 @@ impl IntegrationTestContext {
                 self.dump_ephemeral_logs(sig);
                 self.dump_chain_logs(sig);
             })
+    }
+
+    pub fn get_transaction_chain(
+        &self,
+        sig: &Signature,
+    ) -> Result<EncodedConfirmedTransactionWithStatusMeta, anyhow::Error> {
+        self.try_chain_client().and_then(|client| {
+            client
+                .get_transaction(sig, UiTransactionEncoding::Base58)
+                .map_err(|e| anyhow::anyhow!("{}", e))
+        })
+    }
+
+    pub fn get_transaction_ephem(
+        &self,
+        sig: &Signature,
+    ) -> Result<EncodedConfirmedTransactionWithStatusMeta, anyhow::Error> {
+        self.try_ephem_client().and_then(|client| {
+            client
+                .get_transaction(sig, UiTransactionEncoding::Base58)
+                .map_err(|e| anyhow::anyhow!("{}", e))
+        })
     }
 
     // -----------------

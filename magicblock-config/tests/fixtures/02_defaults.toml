@@ -24,4 +24,4 @@ millis-per-slot = 50
 sigverify = true
 
 [ledger]
-resume-strategy = "reset"
+resume-strategy = { kind = "replay" }

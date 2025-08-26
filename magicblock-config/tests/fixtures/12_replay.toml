@@ -1,0 +1,2 @@
+[ledger]
+resume-strategy = { account-hydration-concurrency = 10 }

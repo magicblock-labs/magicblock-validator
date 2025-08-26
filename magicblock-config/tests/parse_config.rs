@@ -4,9 +4,9 @@ use isocountry::CountryCode;
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, AccountsDbConfig, AllowedProgram,
     BlockSize, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LedgerResumeStrategy, LifecycleMode, MetricsConfig,
-    MetricsServiceConfig, PrepareLookupTables, ProgramConfig, RemoteCluster,
-    RemoteConfig, RpcConfig, ValidatorConfig,
+    LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
+    LifecycleMode, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
+    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use url::Url;
@@ -68,7 +68,12 @@ fn test_all_goes_toml() {
                 ..Default::default()
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::Replay,
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    kind: LedgerResumeStrategyType::Replay,
+                    reset_slot: None,
+                    keep_accounts: None,
+                    account_hydration_concurrency: 10,
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -262,7 +267,12 @@ fn test_everything_defined() {
                 claim_fees_interval_secs: 10,
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::Replay,
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    kind: LedgerResumeStrategyType::Replay,
+                    reset_slot: Some(100),
+                    keep_accounts: Some(false),
+                    account_hydration_concurrency: 20,
+                },
                 skip_keypair_match_check: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1_000_000_000,
@@ -306,4 +316,20 @@ path = "/tmp/program.so"
     let res = toml::from_str::<EphemeralConfig>(toml);
     eprintln!("{:?}", res);
     assert!(res.is_err());
+}
+
+#[test]
+fn test_hydration_concurrency_toml() {
+    let toml = r#"
+[ledger.resume-strategy]
+account-hydration-concurrency = 20
+"#;
+
+    let res = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    assert_eq!(
+        res.ledger
+            .resume_strategy_config
+            .account_hydration_concurrency,
+        20
+    );
 }

@@ -1,9 +1,12 @@
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    str::FromStr,
+};
+
 use anyhow::{bail, Context, Result};
 use borsh::BorshDeserialize;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
-use std::collections::HashSet;
-use std::str::FromStr;
-use std::{collections::HashMap, fmt};
 
 use crate::IntegrationTestContext;
 

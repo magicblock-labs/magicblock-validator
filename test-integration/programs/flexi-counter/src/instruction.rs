@@ -121,9 +121,9 @@ pub enum FlexiCounterInstruction {
 
     /// Creates intent that will undelegate an account,
     /// and delegate is back in an Action
-	/// NOTE: This will be abled in the future and left as an example for now
-	///
-	/// Accounts:
+    /// NOTE: This will be abled in the future and left as an example for now
+    ///
+    /// Accounts:
     /// 0. `[signer]` The payer that is delegating the account. Escrow authority
     /// 1. `[write]` The counter PDA account that will be delegated.
     /// 2. `[]` The owner program of the delegated account
