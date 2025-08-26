@@ -1,17 +1,16 @@
 use borsh::{to_vec, BorshDeserialize};
-use ephemeral_rollups_sdk::consts::MAGIC_PROGRAM_ID;
-use ephemeral_rollups_sdk::cpi::{DelegateAccounts, DelegateConfig};
 use ephemeral_rollups_sdk::{
-    consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
-    cpi::{delegate_account, undelegate_account},
+    consts::{EXTERNAL_UNDELEGATE_DISCRIMINATOR, MAGIC_PROGRAM_ID},
+    cpi::{
+        delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
+    },
 };
-use solana_program::instruction::{AccountMeta, Instruction};
-use solana_program::program::invoke;
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
+    instruction::{AccountMeta, Instruction},
     msg,
-    program::invoke_signed,
+    program::{invoke, invoke_signed},
     program_error::ProgramError,
     pubkey::Pubkey,
     rent::Rent,
@@ -19,13 +18,12 @@ use solana_program::{
     sysvar::Sysvar,
 };
 
-use crate::instruction::{
-    create_increment_counter_error_ix, create_increment_counter_ix, CancelArgs,
-    ScheduleArgs,
-};
-use crate::magic_program::{CancelTaskArgs, ScheduleTaskArgs};
 use crate::{
-    instruction::{DelegateArgs, ScheduleTaskInstruction},
+    instruction::{
+        create_increment_counter_error_ix, create_increment_counter_ix,
+        CancelArgs, DelegateArgs, ScheduleArgs, ScheduleTaskInstruction,
+    },
+    magic_program::{CancelTaskArgs, ScheduleTaskArgs},
     state::Counter,
     utils::assert_keys_equal,
 };
