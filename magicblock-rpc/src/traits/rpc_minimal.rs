@@ -15,14 +15,11 @@ use solana_rpc_client_api::{
 use solana_sdk::{epoch_info::EpochInfo, slot_history::Slot};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "kebab-case")]
 pub struct RpcVersionInfoExt {
-    #[serde(rename = "solana-core")]
     pub solana_core: String,
-    #[serde(rename = "feature-set")]
     pub feature_set: Option<u32>,
-    #[serde(rename = "git-commit")]
     pub git_commit: String,
-    #[serde(rename = "magicblock-core")]
     pub magicblock_core: String,
 }
 
