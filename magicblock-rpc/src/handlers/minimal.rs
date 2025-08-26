@@ -108,26 +108,13 @@ impl Minimal for MinimalImpl {
         meta.get_transaction_count(config.unwrap_or_default())
     }
 
-    fn get_vote_accounts(
-        &self,
-        meta: Self::Metadata,
-        config: Option<RpcGetVoteAccountsConfig>,
-    ) -> Result<RpcVoteAccountStatus> {
-        Ok(RpcVoteAccountStatus {
-            current: vec![],
-            delinquent: vec![],
-        })
-    }
-
     fn get_version(&self, _: Self::Metadata) -> Result<RpcVersionInfoExt> {
         debug!("get_version rpc request received");
         let version = magicblock_version::Version::default();
-        let git_commit = format!("{:08x}", version.commit);
-        let git_commit = format!("{:08x}", version.commit);
         Ok(RpcVersionInfoExt {
             solana_core: version.solana_core.to_string(),
             feature_set: Some(version.feature_set),
-            git_commit,
+            git_commit: version.git_version.to_string(),
             magicblock_core: version.to_string(),
         })
     }
@@ -162,5 +149,16 @@ impl Minimal for MinimalImpl {
         let leader_schedule = [(identity, slots)].into();
 
         Ok(Some(leader_schedule))
+    }
+
+    fn get_vote_accounts(
+        &self,
+        meta: Self::Metadata,
+        config: Option<RpcGetVoteAccountsConfig>,
+    ) -> Result<RpcVoteAccountStatus> {
+        Ok(RpcVoteAccountStatus {
+            current: vec![],
+            delinquent: vec![],
+        })
     }
 }
