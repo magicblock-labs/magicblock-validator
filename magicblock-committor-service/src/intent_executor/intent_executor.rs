@@ -1,14 +1,12 @@
 use std::sync::Arc;
-
+use std::time::Duration;
 use async_trait::async_trait;
 use log::{debug, error, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
 };
-use magicblock_rpc_client::{
-    MagicBlockSendTransactionConfig, MagicblockRpcClient,
-};
+use magicblock_rpc_client::{MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     message::VersionedMessage,
@@ -16,7 +14,8 @@ use solana_sdk::{
     signer::Signer,
     transaction::VersionedTransaction,
 };
-
+use solana_sdk::transaction::TransactionError;
+use tokio::time::{sleep, Instant};
 use crate::{
     intent_executor::{
         error::{IntentExecutorError, IntentExecutorResult, InternalError},
@@ -35,6 +34,7 @@ use crate::{
     },
     utils::persist_status_update_by_message_set,
 };
+use crate::intent_executor::error::TransactionStrategyExecutionError;
 
 pub struct IntentExecutorImpl<T, F> {
     authority: Keypair,
@@ -136,8 +136,10 @@ where
             persister,
         ) {
             debug!("Executing intent in single stage");
-            self.execute_single_stage(&single_tx_strategy, persister)
-                .await
+            let output = self.execute_single_stage(single_tx_strategy, persister)
+                .await?;
+
+            Ok(output)
         } else {
             debug!("Executing intent in two stages");
             // Build strategy for Commit stage
@@ -154,13 +156,108 @@ where
                 persister,
             )?;
 
-            self.execute_two_stages(
-                &commit_strategy,
-                &finalize_strategy,
+            // TODO: move and handle retries within those/
+            let output = self.execute_two_stages(
+                commit_strategy,
+                finalize_strategy,
+                persister,
+            )
+            .await?;
+
+            // Cleanup
+            {
+                let authority_copy = self.authority.insecure_clone();
+                tokio::spawn(async move {
+                    self.transaction_preparator.cleanup_for_strategy(&authority_copy, commit_strategy).await;
+                });
+            }
+
+            {
+                let authority_copy = self.authority.insecure_clone();
+                tokio::spawn(async move {
+                    self.transaction_preparator.cleanup_for_strategy(&authority_copy, finalize_strategy).await;
+                });
+            }
+
+            Ok(output)
+        }
+    }
+
+    /// Starting execution from single stage
+    async fn single_stage_execution_flow<P: IntentPersister>(&self, transaction_strategy: TransactionStrategy, persistor: &Option<P>) -> IntentExecutorResult<ExecutionOutput> {
+        let result = self.execute_single_stage(&transaction_strategy, persistor).await;
+        match result {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                todo!()
+            }
+        }
+    }
+
+    /// Attempts and retries to execute strategy and parses errors
+    async fn execute_strategy_with_retries<P: IntentPersister>(
+        &self,
+        transaction_strategy: &TransactionStrategy,
+        persister: &Option<P>,
+    ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError> {
+        const RETRY_FOR: Duration = Duration::from_secs(2*60);
+        const SLEEP: Duration = Duration::from_millis(500);
+
+        // TransactionPreparator retries internally,
+        // so we can skip retries here
+        // More importantly errors from it can't be handled so we propagate them
+        let prepared_message = self
+            .transaction_preparator
+            .prepare_for_strategy(
+                &self.authority,
+                transaction_strategy,
                 persister,
             )
             .await
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
+
+        let mut err;
+        let start = Instant::now();
+        while start.elapsed() >= RETRY_FOR {
+            let result = self
+                .send_prepared_message(prepared_message.clone())
+                .await;
+                // .map_err(|(err, signature)| {
+                //     IntentExecutorError::FailedToCommitError { err, signature }
+                // })?;
+
+            match result {
+                Ok(result ) => {
+                    if result.has_error() {
+                        // SAFETY: has_error ensures presense of error
+                        match result.into_error().unwrap() {
+                            TransactionError::InstructionError()
+                            err => return Err(TransactionStrategyExecutionError::InternalError())
+                        }
+                    } else {
+                        return Ok(result.into_signature())
+                    }
+                },
+                // Can't handle SignerError in any way
+                Err((err @ InternalError::SignerError(_), _)) => {
+                    Err(err.into())
+                }
+                Err((InternalError::MagicBlockRpcClientError(err), Some(signature))) => {
+
+
+                    todo!()
+                }
+                // TODO: test
+                Err((err @ InternalError::MagicBlockRpcClientError(_), None)) => {
+                    // Nothing we can do without signature
+                    return Err(err.into())
+                }
+            }
+
+            sleep(SLEEP).await
         }
+
+        Err(err)
     }
 
     /// Optimization: executes Intent in single stage
@@ -186,7 +283,8 @@ where
             .await
             .map_err(|(err, signature)| {
                 IntentExecutorError::FailedToCommitError { err, signature }
-            })?;
+            })?
+            .into_signature();
 
         debug!("Single stage intent executed: {}", signature);
         Ok(ExecutionOutput::SingleStage(signature))
@@ -200,18 +298,25 @@ where
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         // Prepare everything for Commit stage execution
-        let prepared_commit_message = self
+        let result = self
             .transaction_preparator
             .prepare_for_strategy(&self.authority, commit_strategy, persister)
-            .await
-            .map_err(IntentExecutorError::FailedCommitPreparationError)?;
+            .await;
+
+        // TODO: improve this, the thing is from delivery preparator we shall get only RpcError
+        let prepared_commit_message = match result {
+            Ok(value) => Ok(value),
+            Err(TransactionPreparatorError::FailedToFitError) => unreachable!("This is checked in TaskBuilder!"),
+            err @ Err(TransactionPreparatorError::DeliveryPreparationError(_)) => err
+        }.map_err(IntentExecutorError::FailedCommitPreparationError)?;
 
         let commit_signature = self
             .send_prepared_message(prepared_commit_message)
             .await
             .map_err(|(err, signature)| {
                 IntentExecutorError::FailedToCommitError { err, signature }
-            })?;
+            })?
+            .into_signature();
         debug!("Commit stage succeeded: {}", commit_signature);
 
         // Prepare everything for Finalize stage execution
@@ -230,7 +335,8 @@ where
                     commit_signature: Some(commit_signature),
                     finalize_signature,
                 }
-            })?;
+            })?
+            .into_signature();
         debug!("Finalize stage succeeded: {}", finalize_signature);
 
         Ok(ExecutionOutput::TwoStage {
@@ -243,7 +349,7 @@ where
     async fn send_prepared_message(
         &self,
         mut prepared_message: VersionedMessage,
-    ) -> IntentExecutorResult<Signature, (InternalError, Option<Signature>)>
+    ) -> IntentExecutorResult<MagicBlockSendTransactionOutcome, (InternalError, Option<Signature>)>
     {
         let latest_blockhash = self
             .rpc_client
@@ -275,7 +381,7 @@ where
                 (err.into(), signature)
             })?;
 
-        Ok(result.into_signature())
+        Ok(result)
     }
 
     fn persist_result<P: IntentPersister>(
@@ -397,6 +503,18 @@ where
             }
         }
     }
+
+    fn handle_result(
+        result: &IntentExecutorResult<ExecutionOutput>,
+        message_id: u64,
+        pubkeys: &[Pubkey],
+    ) {
+        match result {
+            Ok(val) => {
+
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -415,7 +533,7 @@ where
         let message_id = base_intent.id;
         let pubkeys = base_intent.get_committed_pubkeys();
 
-        let result = self.execute_inner(base_intent, &persister).await;
+        let result = self.execute_inner(&base_intent, &persister).await;
         if let Some(pubkeys) = pubkeys {
             Self::persist_result(&persister, &result, message_id, &pubkeys);
         }
@@ -433,7 +551,9 @@ mod tests {
     use crate::{
         intent_execution_manager::intent_scheduler::create_test_intent,
         intent_executor::{
-            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
+            task_info_fetcher::{
+                ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+            },
             IntentExecutorImpl,
         },
         persist::IntentPersisterImpl,
@@ -444,10 +564,6 @@ mod tests {
     struct MockInfoFetcher;
     #[async_trait::async_trait]
     impl TaskInfoFetcher for MockInfoFetcher {
-        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
-            Some(0)
-        }
-
         async fn fetch_next_commit_ids(
             &self,
             pubkeys: &[Pubkey],
@@ -461,7 +577,39 @@ mod tests {
         ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
             Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
         }
+
+        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
+            Some(0)
+        }
+
+        fn reset(&self, reset_type: ResetType) {}
     }
+
+    // Flow
+    // We attempt an Intent execution
+    // 1. We create tasks
+    //     Err. Retry for 1 minute. Still fails - terrible error, return. Can't recover
+    //          The errors here: Metadata Record not found/invalid or RPC is broken
+    // 2. We build a strategy
+    //  Err. Critical error which shouldn't happen because of smart contract check(doesn't exist)
+    //      No retry here, exit
+    //
+    // 3. Prepare for delivery
+    //  Err. We can get only RPC related issues here or TableMania(also RPC).
+    //      We can only retry but if still no luck - fail. Can't be recovered
+    // 4. Send transaction
+    //  Err. Here we could have: ActionError, CommitIdError, CpiLimitError, RpcError
+    //      ActionError: based on config strip away actions & just commit/return ActionError
+    //          User will have an ability to specify if actions are mandatory so if set we return ActionError
+    //      CommitIdError: some other process could mess with our CommitId and commit concurrently, hence invalidating our CommitId
+    //          Reset TaskInfoFetcher - retry
+    //      CpiLimitError:
+    //          a. SingleStage - switch to TwoStage & retry. Reuse already created buffers and ALTs
+    //          b. TwoStage - if mandatory commit set - strip away Actions - retry,
+    //              otherwise fail(actually we shouldn't allow this on first place, should be checked on contract)
+    //                i. If still fail after retry: return CpiLimitError(shouldn't allow this on first place, should be checked on contract)
+    //      RpcError/AnyOtherError:
+    //          Nothing we can do other than retry :(
 
     #[tokio::test]
     async fn test_try_unite() {

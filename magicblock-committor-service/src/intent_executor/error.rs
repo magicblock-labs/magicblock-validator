@@ -1,6 +1,6 @@
 use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_sdk::signature::{Signature, SignerError};
-
+use solana_sdk::transaction::TransactionError;
 use crate::{
     tasks::{
         task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
@@ -42,6 +42,23 @@ pub enum IntentExecutorError {
     FailedCommitPreparationError(#[source] TransactionPreparatorError),
     #[error("FailedFinalizePreparationError: {0}")]
     FailedFinalizePreparationError(#[source] TransactionPreparatorError),
+}
+
+/// Those are the errors that may occur during Commit/Finalize stages on Base layer
+#[derive(thiserror::Error, Debug)]
+pub enum TransactionStrategyExecutionError {
+    #[error("User supplied action are ill-formed!")]
+    ActionsError,
+    #[error("Accounts committed with an invalid Commit id")]
+    CommitIDError,
+    #[error("Max instruction trace length exceeded")]
+    CpiLimitError,
+    #[error("InternalError: {0}")]
+    InternalError(#[source] InternalError),
+}
+
+impl From<&TransactionError> for TransactionStrategyExecutionError {
+    match
 }
 
 impl From<TaskStrategistError> for IntentExecutorError {

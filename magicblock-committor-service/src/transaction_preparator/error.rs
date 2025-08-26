@@ -1,4 +1,5 @@
 use thiserror::Error;
+use crate::tasks::task_strategist::TaskStrategistError;
 
 #[derive(Error, Debug)]
 pub enum TransactionPreparatorError {
@@ -10,12 +11,12 @@ pub enum TransactionPreparatorError {
     ),
 }
 
-impl From<crate::tasks::task_strategist::TaskStrategistError>
+impl From<TaskStrategistError>
     for TransactionPreparatorError
 {
-    fn from(value: crate::tasks::task_strategist::TaskStrategistError) -> Self {
+    fn from(value: TaskStrategistError) -> Self {
         match value {
-            crate::tasks::task_strategist::TaskStrategistError::FailedToFitError => {
+            TaskStrategistError::FailedToFitError => {
                 Self::FailedToFitError
             }
         }

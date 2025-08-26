@@ -164,7 +164,7 @@ impl DeliveryPreparator {
 
         // Initialization & reallocs
         for instructions in preparation_instructions {
-            self.send_ixs_with_retry::<2>(&instructions, authority)
+            self.send_ixs_with_retry(&instructions, authority, 5)
                 .await?;
         }
 
@@ -251,7 +251,7 @@ impl DeliveryPreparator {
             .collect::<Vec<_>>();
 
         let fut_iter = chunks_write_instructions.iter().map(|instructions| {
-            self.send_ixs_with_retry::<2>(instructions.as_slice(), authority)
+            self.send_ixs_with_retry(instructions.as_slice(), authority, 5)
         });
 
         join_all(fut_iter)
@@ -263,14 +263,15 @@ impl DeliveryPreparator {
     }
 
     // CommitProcessor::init_accounts analog
-    async fn send_ixs_with_retry<const MAX_RETRIES: usize>(
+    async fn send_ixs_with_retry(
         &self,
         instructions: &[Instruction],
         authority: &Keypair,
+        max_retries: usize
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let mut last_error =
             InternalError::InternalError(anyhow!("ZeroRetriesRequested"));
-        for _ in 0..MAX_RETRIES {
+        for _ in 0..max_retries {
             match self.try_send_ixs(instructions, authority).await {
                 Ok(()) => return Ok(()),
                 Err(err) => {

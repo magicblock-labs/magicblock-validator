@@ -189,6 +189,14 @@ impl MagicBlockSendTransactionOutcome {
     pub fn error(&self) -> Option<&TransactionError> {
         self.confirmed_err.as_ref().or(self.processed_err.as_ref())
     }
+
+    pub fn has_error(&self) -> bool {
+        self.error().is_some()
+    }
+
+    pub fn into_error(self) -> Option<TransactionError> {
+        self.confirmed_err.or(self.processed_err)
+    }
 }
 
 // -----------------
@@ -562,5 +570,9 @@ impl MagicblockRpcClient {
     ) -> MagicBlockRpcClientResult<Option<u64>> {
         let tx = self.get_transaction(signature, config).await?;
         Ok(Self::get_cus_from_transaction(&tx))
+    }
+
+    pub fn get_inner(&self) -> &Arc<RpcClient> {
+        &self.client
     }
 }
