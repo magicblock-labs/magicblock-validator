@@ -11,8 +11,8 @@ use integration_test_tools::{
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
     LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
-    ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
-    DEFAULT_LEDGER_SIZE_BYTES,
+    ProgramConfig, RemoteCluster, RemoteConfig, TaskSchedulerConfig,
+    ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::state::FlexiCounter;
 use solana_rpc_client::rpc_client::RpcClient;
@@ -126,6 +126,10 @@ pub fn setup_validator_with_local_remote(
         },
         accounts: accounts_config.clone(),
         programs,
+        task_scheduler: TaskSchedulerConfig {
+            reset_db: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
 

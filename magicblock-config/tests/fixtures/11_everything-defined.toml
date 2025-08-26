@@ -52,3 +52,8 @@ enabled = true
 addr = "127.0.0.1"
 port = 9999
 system-metrics-tick-interval-secs = 10
+
+[task-scheduler]
+db-path = "test.db"
+reset-db = true
+millis-per-tick = 1000
