@@ -1,10 +1,5 @@
 use integration_test_tools::run_test;
 use log::*;
-
-use crate::utils::{
-    assert_feepayer_was_committed,
-    get_context_with_delegated_committees_without_payer_escrow,
-};
 use magicblock_core::magic_program;
 use program_schedulecommit::api::schedule_commit_with_payer_cpi_instruction;
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
@@ -16,6 +11,11 @@ use utils::{
     assert_two_committees_synchronized_count,
     assert_two_committees_were_committed,
     get_context_with_delegated_committees,
+};
+
+use crate::utils::{
+    assert_feepayer_was_committed,
+    get_context_with_delegated_committees_without_payer_escrow,
 };
 
 mod utils;

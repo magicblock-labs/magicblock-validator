@@ -145,6 +145,9 @@ deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 		--program-id $(DIR)/programs/flexi-counter/keys/f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4.json \
 		$(DIR)/target/deploy/program_flexi_counter.so
 
+fmt:
+	cargo +nightly fmt -- --config-path ../rustfmt-nightly.toml
+
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path ../rustfmt-nightly.toml
 

@@ -6,9 +6,9 @@ use integration_test_tools::{
 };
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use solana_rpc_client::rpc_client::RpcClient;
-use solana_sdk::pubkey::Pubkey;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
+    pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
 };

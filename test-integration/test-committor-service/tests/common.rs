@@ -1,8 +1,16 @@
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
+
 use async_trait::async_trait;
-use magicblock_committor_service::intent_executor::IntentExecutorImpl;
 use magicblock_committor_service::{
-    intent_executor::task_info_fetcher::{
-        TaskInfoFetcher, TaskInfoFetcherResult,
+    intent_executor::{
+        task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
+        IntentExecutorImpl,
     },
     tasks::tasks::CommitTask,
     transaction_preparator::{
@@ -19,13 +27,6 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
-};
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
 };
 
 // Helper function to create a test RPC client

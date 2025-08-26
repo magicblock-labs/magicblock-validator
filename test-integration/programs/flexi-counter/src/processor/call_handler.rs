@@ -1,20 +1,24 @@
-use crate::args::{
-    CallHandlerDiscriminator, CommitActionData, UndelegateActionData,
-};
-use crate::state::FlexiCounter;
-use borsh::{to_vec, BorshDeserialize};
-use ephemeral_rollups_sdk::cpi::{
-    delegate_account, DelegateAccounts, DelegateConfig,
-};
-use ephemeral_rollups_sdk::pda::ephemeral_balance_pda_from_payer;
-use ephemeral_rollups_sdk::{CallHandlerArgs, Context};
-use solana_program::account_info::{next_account_info, AccountInfo};
-use solana_program::entrypoint::ProgramResult;
-use solana_program::msg;
-use solana_program::program::invoke;
-use solana_program::program_error::ProgramError;
-use solana_program::system_instruction::transfer;
 use std::slice::Iter;
+
+use borsh::{to_vec, BorshDeserialize};
+use ephemeral_rollups_sdk::{
+    cpi::{delegate_account, DelegateAccounts, DelegateConfig},
+    pda::ephemeral_balance_pda_from_payer,
+    CallHandlerArgs, Context,
+};
+use solana_program::{
+    account_info::{next_account_info, AccountInfo},
+    entrypoint::ProgramResult,
+    msg,
+    program::invoke,
+    program_error::ProgramError,
+    system_instruction::transfer,
+};
+
+use crate::{
+    args::{CallHandlerDiscriminator, CommitActionData, UndelegateActionData},
+    state::FlexiCounter,
+};
 
 pub fn process_call_handler(
     accounts: &[AccountInfo],
@@ -28,7 +32,7 @@ pub fn process_call_handler(
 
     let mut call_handler = CallHandlerArgs::try_from_slice(call_data)?;
     let discriminator = &call_handler.data.as_slice()[0..4];
-    if discriminator == &CallHandlerDiscriminator::Simple.to_array() {
+    if discriminator == CallHandlerDiscriminator::Simple.to_array() {
         call_handler.data.drain(0..4);
         process_simple_call_handler(
             escrow_authority,
@@ -36,7 +40,7 @@ pub fn process_call_handler(
             account_info_iter,
             &call_handler,
         )
-    } else if discriminator == &CallHandlerDiscriminator::ReDelegate.to_array()
+    } else if discriminator == CallHandlerDiscriminator::ReDelegate.to_array()
     {
         call_handler.data.drain(0..4);
         process_redelegation_call_handler(

@@ -1,18 +1,21 @@
+use borsh::to_vec;
+use ephemeral_rollups_sdk::{
+    ephem::{
+        CallHandler, CommitAndUndelegate, CommitType, MagicAction,
+        MagicInstructionBuilder, UndelegateType,
+    },
+    ActionArgs,
+};
+use solana_program::{
+    account_info::{next_account_info, next_account_infos, AccountInfo},
+    entrypoint::ProgramResult,
+    msg,
+    program_error::ProgramError,
+};
+
 use crate::args::{
     CallHandlerDiscriminator, CommitActionData, UndelegateActionData,
 };
-use borsh::to_vec;
-use ephemeral_rollups_sdk::ephem::{
-    CallHandler, CommitAndUndelegate, CommitType, MagicAction,
-    MagicInstructionBuilder, UndelegateType,
-};
-use ephemeral_rollups_sdk::ActionArgs;
-use solana_program::account_info::{
-    next_account_info, next_account_infos, AccountInfo,
-};
-use solana_program::entrypoint::ProgramResult;
-use solana_program::msg;
-use solana_program::program_error::ProgramError;
 
 pub const ACTOR_ESCROW_INDEX: u8 = 1;
 const PRIZE: u64 = 1_000_000;
