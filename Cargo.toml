@@ -213,7 +213,6 @@ vergen = "8.3.1"
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-# solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2476dab" }
-solana-account = { path = "../solana-account" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "ee2d713" }
 solana-storage-proto = { path = "./storage-proto" }
 solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "0f18aa3" }
