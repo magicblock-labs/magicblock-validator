@@ -34,12 +34,11 @@ pub struct LedgerConfig {
     /// The file system path onto which the ledger should be written at
     /// If left empty it will be auto-generated to a temporary folder
     #[derive_env_var]
-    #[clap_from_serde_skip]
     #[arg(
         help = "The file system path onto which the ledger should be written at."
     )]
-    #[serde(default)]
-    pub path: Option<String>,
+    #[serde(default = "default_ledger_path")]
+    pub path: String,
     /// The size under which it's desired to keep ledger in bytes.
     #[derive_env_var]
     #[arg(help = "The size under which it's desired to keep ledger in bytes.")]
@@ -75,7 +74,7 @@ impl Default for LedgerConfig {
         Self {
             resume_strategy_config: LedgerResumeStrategyConfig::default(),
             skip_keypair_match_check: false,
-            path: Default::default(),
+            path: default_ledger_path(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         }
     }
@@ -226,6 +225,10 @@ const fn default_cloning_concurrency() -> usize {
     10
 }
 
+fn default_ledger_path() -> String {
+    "test-ledger-magicblock".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use magicblock_config_helpers::Merge;
@@ -284,7 +287,7 @@ mod tests {
                 account_hydration_concurrency: 20,
             },
             skip_keypair_match_check: true,
-            path: Some("ledger.example.com".to_string()),
+            path: "ledger.example.com".to_string(),
             size: 1000000000,
         };
         let original_config = config.clone();
@@ -306,7 +309,7 @@ mod tests {
                 account_hydration_concurrency: 20,
             },
             skip_keypair_match_check: true,
-            path: Some("ledger.example.com".to_string()),
+            path: "ledger.example.com".to_string(),
             size: 1000000000,
         };
 
@@ -325,7 +328,7 @@ mod tests {
                 account_hydration_concurrency: 20,
             },
             skip_keypair_match_check: true,
-            path: Some("ledger.example.com".to_string()),
+            path: "ledger.example.com".to_string(),
             size: 1000000000,
         };
         let original_config = config.clone();
@@ -337,7 +340,7 @@ mod tests {
                 account_hydration_concurrency: 150,
             },
             skip_keypair_match_check: true,
-            path: Some("ledger2.example.com".to_string()),
+            path: "ledger2.example.com".to_string(),
             size: 10000,
         };
 
@@ -368,7 +371,7 @@ size = 1000000000
                     ),
                 },
                 skip_keypair_match_check: true,
-                path: Some("ledger.example.com".to_string()),
+                path: "ledger.example.com".to_string(),
                 size: 1000000000,
             }
         );
@@ -391,7 +394,7 @@ size = 1000000000
                     ),
                 },
                 skip_keypair_match_check: false,
-                path: None,
+                path: "ledger2.example.com".to_string(),
                 size: 1000000000,
             }
         );
@@ -414,7 +417,7 @@ size = 1000000000
                     ),
                 },
                 skip_keypair_match_check: false,
-                path: None,
+                path: "test-ledger-magicblock".to_string(),
                 size: 1000000000,
             }
         );

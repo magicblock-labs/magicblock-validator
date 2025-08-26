@@ -199,7 +199,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                     account_hydration_concurrency: 20,
                 },
                 skip_keypair_match_check: true,
-                path: Some("/hello/world".to_string()),
+                path: "/hello/world".to_string(),
                 size: 123123,
             },
             metrics: MetricsConfig {
