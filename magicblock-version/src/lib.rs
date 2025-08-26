@@ -26,7 +26,15 @@ pub struct Version {
     pub commit: u32,      // first 4 bytes of the sha1 commit hash
     pub feature_set: u32, // first 4 bytes of the FeatureSet identifier
     client: u16,
+    pub struct Version {
+    pub major: u16,
+    pub minor: u16,
+    pub patch: u16,
+    pub commit: u32,      // first 4 bytes of the sha1 commit hash
+    pub feature_set: u32, // first 4 bytes of the FeatureSet identifier
+    client: u16,
     pub solana_core: String,
+}
 }
 
 impl Version {
