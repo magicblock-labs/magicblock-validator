@@ -274,7 +274,7 @@ fn test_everything_defined() {
                     account_hydration_concurrency: 20,
                 },
                 skip_keypair_match_check: true,
-                path: Some("ledger.example.com".to_string()),
+                path: "ledger.example.com".to_string(),
                 size: 1_000_000_000,
             },
             programs: vec![ProgramConfig {

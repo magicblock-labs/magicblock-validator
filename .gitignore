@@ -18,6 +18,7 @@ target/
 
 # Ledger
 test-ledger/
+test-ledger-magicblock/
 
 # Mac
 **/.DS_Store
