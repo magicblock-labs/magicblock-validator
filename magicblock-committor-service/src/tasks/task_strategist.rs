@@ -1,7 +1,10 @@
 use std::collections::BinaryHeap;
 
 use solana_pubkey::Pubkey;
-use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_sdk::{
+    signature::Keypair,
+    signer::{Signer, SignerError},
+};
 
 use crate::{
     persist::IntentPersister,
@@ -30,7 +33,8 @@ impl TaskStrategist {
         persistor: &Option<P>,
     ) -> TaskStrategistResult<TransactionStrategy> {
         // Attempt optimizing tasks themselves(using buffers)
-        if Self::optimize_strategy(&mut tasks) <= MAX_ENCODED_TRANSACTION_SIZE {
+        if Self::optimize_strategy(&mut tasks)? <= MAX_ENCODED_TRANSACTION_SIZE
+        {
             // Persist tasks strategy
             if let Some(persistor) = persistor {
                 let mut persistor_visitor = PersistorVisitor {
@@ -128,7 +132,9 @@ impl TaskStrategist {
 
     /// Optimizes set of [`TaskDeliveryStrategy`] to fit [`MAX_ENCODED_TRANSACTION_SIZE`]
     /// Returns size of tx after optimizations
-    fn optimize_strategy(tasks: &mut [Box<dyn BaseTask>]) -> usize {
+    fn optimize_strategy(
+        tasks: &mut [Box<dyn BaseTask>],
+    ) -> Result<usize, SignerError> {
         // Get initial transaction size
         let calculate_tx_length = |tasks: &[Box<dyn BaseTask>]| {
             match TransactionUtils::assemble_tasks_tx(
@@ -137,15 +143,16 @@ impl TaskStrategist {
                 u64::default(), // placeholder
                 &[],
             ) {
-                Ok(tx) => serialize_and_encode_base64(&tx).len(),
-                Err(_) => usize::MAX,
+                Ok(tx) => Ok(serialize_and_encode_base64(&tx).len()),
+                Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
+                Err(TaskStrategistError::SignerError(err)) => Err(err),
             }
         };
 
         // Get initial transaction size
-        let mut current_tx_length = calculate_tx_length(tasks);
+        let mut current_tx_length = calculate_tx_length(tasks)?;
         if current_tx_length <= MAX_ENCODED_TRANSACTION_SIZE {
-            return current_tx_length;
+            return Ok(current_tx_length);
         }
 
         // Create heap size -> index
@@ -193,7 +200,7 @@ impl TaskStrategist {
                         bincode::serialized_size(&new_ix).unwrap_or(u64::MAX);
                     let new_ix_size =
                         usize::try_from(new_ix_size).unwrap_or(usize::MAX);
-                    current_tx_length = calculate_tx_length(tasks);
+                    current_tx_length = calculate_tx_length(tasks)?;
                     map.push((new_ix_size, index));
                 }
                 // That means el-t can't be optimized further
@@ -205,7 +212,7 @@ impl TaskStrategist {
             }
         }
 
-        current_tx_length
+        Ok(current_tx_length)
     }
 }
 
@@ -213,6 +220,8 @@ impl TaskStrategist {
 pub enum TaskStrategistError {
     #[error("Failed to fit in single TX")]
     FailedToFitError,
+    #[error("SignerError: {0}")]
+    SignerError(#[from] SignerError),
 }
 
 pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;

@@ -22,6 +22,8 @@ pub enum IntentExecutorError {
     EmptyIntentError,
     #[error("Failed to fit in single TX")]
     FailedToFitError,
+    #[error("SignerError: {0}")]
+    SignerError(#[from] SignerError),
     // TODO: remove once proper retries introduced
     #[error("TaskBuilderError: {0}")]
     TaskBuilderError(#[from] TaskBuilderError),
@@ -46,8 +48,10 @@ pub enum IntentExecutorError {
 
 impl From<TaskStrategistError> for IntentExecutorError {
     fn from(value: TaskStrategistError) -> Self {
-        let TaskStrategistError::FailedToFitError = value;
-        Self::FailedToFitError
+        match value {
+            TaskStrategistError::FailedToFitError => Self::FailedToFitError,
+            TaskStrategistError::SignerError(err) => Self::SignerError(err),
+        }
     }
 }
 

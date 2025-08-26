@@ -13,7 +13,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk::{
     message::VersionedMessage,
     signature::{Keypair, Signature},
-    signer::Signer,
+    signer::{Signer, SignerError},
     transaction::VersionedTransaction,
 };
 
@@ -26,7 +26,9 @@ use crate::{
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     tasks::{
         task_builder::{TaskBuilderV1, TasksBuilder},
-        task_strategist::{TaskStrategist, TransactionStrategy},
+        task_strategist::{
+            TaskStrategist, TaskStrategistError, TransactionStrategy,
+        },
         tasks::BaseTask,
     },
     transaction_preparator::{
@@ -69,7 +71,7 @@ where
         finalize_task: &[Box<dyn BaseTask>],
         authority: &Pubkey,
         persister: &Option<P>,
-    ) -> Option<TransactionStrategy> {
+    ) -> Result<Option<TransactionStrategy>, SignerError> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
 
         // We can unite in 1 tx a lot of commits
@@ -79,7 +81,7 @@ where
         // In case this fails as well, it will be retried with TwoStage approach
         // on retry, once retries are introduced
         if commit_tasks.len() + finalize_task.len() > MAX_UNITED_TASKS_LEN {
-            return None;
+            return Ok(None);
         }
 
         // Clone tasks since strategies applied to united case maybe suboptimal for regular one
@@ -90,8 +92,9 @@ where
         commit_tasks.extend(finalize_task);
         match TaskStrategist::build_strategy(commit_tasks, authority, persister)
         {
-            Ok(strategy) => Some(strategy),
-            Err(crate::tasks::task_strategist::TaskStrategistError::FailedToFitError) => None,
+            Ok(strategy) => Ok(Some(strategy)),
+            Err(TaskStrategistError::FailedToFitError) => Ok(None),
+            Err(TaskStrategistError::SignerError(err)) => Err(err),
         }
     }
 
@@ -134,7 +137,7 @@ where
             &finalize_tasks,
             &self.authority.pubkey(),
             persister,
-        ) {
+        )? {
             debug!("Executing intent in single stage");
             self.execute_single_stage(&single_tx_strategy, persister)
                 .await
@@ -284,7 +287,7 @@ where
         message_id: u64,
         pubkeys: &[Pubkey],
     ) {
-        match result {
+        let update_status = match result {
             Ok(value) => {
                 let signatures = match *value {
                     ExecutionOutput::SingleStage(signature) => {
@@ -314,41 +317,26 @@ where
                 {
                     error!("Failed to persist ExecutionOutput: {}", err);
                 }
+
+                return;
             }
             Err(IntentExecutorError::EmptyIntentError)
-            | Err(IntentExecutorError::FailedToFitError) => {
-                let update_status = CommitStatus::Failed;
-                persist_status_update_by_message_set(
-                    persistor,
-                    message_id,
-                    pubkeys,
-                    update_status,
-                );
-            }
-            Err(IntentExecutorError::TaskBuilderError(_)) => {
-                let update_status = CommitStatus::Failed;
-                persist_status_update_by_message_set(
-                    persistor,
-                    message_id,
-                    pubkeys,
-                    update_status,
-                );
-            }
+            | Err(IntentExecutorError::FailedToFitError)
+            | Err(IntentExecutorError::TaskBuilderError(_))
+            | Err(IntentExecutorError::FailedCommitPreparationError(
+                TransactionPreparatorError::SignerError(_),
+            ))
+            | Err(IntentExecutorError::FailedFinalizePreparationError(
+                TransactionPreparatorError::SignerError(_),
+            )) => Some(CommitStatus::Failed),
             Err(IntentExecutorError::FailedCommitPreparationError(
                 TransactionPreparatorError::FailedToFitError,
-            )) => {
-                let update_status = CommitStatus::PartOfTooLargeBundleToProcess;
-                persist_status_update_by_message_set(
-                    persistor,
-                    message_id,
-                    pubkeys,
-                    update_status,
-                );
-            }
+            )) => Some(CommitStatus::PartOfTooLargeBundleToProcess),
             Err(IntentExecutorError::FailedCommitPreparationError(
                 TransactionPreparatorError::DeliveryPreparationError(_),
             )) => {
                 // Intermediate commit preparation progress recorded by DeliveryPreparator
+                None
             }
             Err(IntentExecutorError::FailedToCommitError {
                 err: _,
@@ -360,17 +348,11 @@ where
                         commit_stage_signature: sig,
                         finalize_stage_signature: None,
                     });
-                let update_status =
-                    CommitStatus::FailedProcess(status_signature);
-                persist_status_update_by_message_set(
-                    persistor,
-                    message_id,
-                    pubkeys,
-                    update_status,
-                );
+                Some(CommitStatus::FailedProcess(status_signature))
             }
             Err(IntentExecutorError::FailedFinalizePreparationError(_)) => {
                 // Not supported in persistor
+                None
             }
             Err(IntentExecutorError::FailedToFinalizeError {
                 err: _,
@@ -388,13 +370,21 @@ where
                     } else {
                         CommitStatus::FailedProcess(None)
                     };
-                persist_status_update_by_message_set(
-                    persistor,
-                    message_id,
-                    pubkeys,
-                    update_status,
-                );
+
+                Some(update_status)
             }
+            Err(IntentExecutorError::SignerError(_)) => {
+                Some(CommitStatus::Failed)
+            }
+        };
+
+        if let Some(update_status) = update_status {
+            persist_status_update_by_message_set(
+                persistor,
+                message_id,
+                pubkeys,
+                update_status,
+            );
         }
     }
 }
@@ -490,9 +480,8 @@ mod tests {
             &Pubkey::new_unique(),
             &None::<IntentPersisterImpl>,
         );
-        assert!(result.is_some());
 
-        let strategy = result.unwrap();
+        let strategy = result.unwrap().unwrap();
         assert!(strategy.lookup_tables_keys.is_empty());
     }
 }

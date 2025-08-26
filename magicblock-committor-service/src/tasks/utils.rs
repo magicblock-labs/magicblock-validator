@@ -135,8 +135,7 @@ impl TransactionUtils {
         let tx = VersionedTransaction::try_new(
             VersionedMessage::V0(message),
             &[authority],
-        )
-        .expect("Signing transaction has to be non-failing");
+        )?;
 
         Ok(tx)
     }
