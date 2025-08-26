@@ -394,7 +394,7 @@ size = 1000000000
                     ),
                 },
                 skip_keypair_match_check: false,
-                path: "ledger2.example.com".to_string(),
+                path: default_ledger_path(),
                 size: 1000000000,
             }
         );
