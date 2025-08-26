@@ -1,6 +1,7 @@
 // NOTE: from rpc/src/rpc.rs
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
+use serde::{Deserialize, Serialize};
 use solana_rpc_client_api::{
     config::{
         RpcContextConfig, RpcGetVoteAccountsConfig, RpcLeaderScheduleConfig,
@@ -8,10 +9,22 @@ use solana_rpc_client_api::{
     },
     response::{
         Response as RpcResponse, RpcIdentity, RpcLeaderSchedule,
-        RpcSnapshotSlotInfo, RpcVersionInfo, RpcVoteAccountStatus,
+        RpcSnapshotSlotInfo, RpcVoteAccountStatus,
     },
 };
 use solana_sdk::{epoch_info::EpochInfo, slot_history::Slot};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RpcVersionInfoExt {
+    #[serde(rename = "solana-core")]
+    pub solana_core: String,
+    #[serde(rename = "feature-set")]
+    pub feature_set: Option<u32>,
+    #[serde(rename = "git-commit")]
+    pub git_commit: String,
+    #[serde(rename = "magicblock-core")]
+    pub magicblock_core: String,
+}
 
 #[rpc]
 pub trait Minimal {
@@ -69,7 +82,7 @@ pub trait Minimal {
     ) -> Result<u64>;
 
     #[rpc(meta, name = "getVersion")]
-    fn get_version(&self, meta: Self::Metadata) -> Result<RpcVersionInfo>;
+    fn get_version(&self, meta: Self::Metadata) -> Result<RpcVersionInfoExt>;
 
     #[rpc(meta, name = "getLeaderSchedule")]
     fn get_leader_schedule(

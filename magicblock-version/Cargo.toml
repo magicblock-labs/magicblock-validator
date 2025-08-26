@@ -12,6 +12,7 @@ semver = { workspace = true }
 serde = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }
 solana-sdk = { workspace = true }
+git-version = { workspace = true }
 
 [build-dependencies]
 rustc_version = { workspace = true }

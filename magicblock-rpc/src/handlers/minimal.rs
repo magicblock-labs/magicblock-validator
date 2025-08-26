@@ -9,14 +9,15 @@ use solana_rpc_client_api::{
     custom_error::RpcCustomError,
     response::{
         Response as RpcResponse, RpcIdentity, RpcLeaderSchedule,
-        RpcSnapshotSlotInfo, RpcVersionInfo, RpcVoteAccountStatus,
+        RpcSnapshotSlotInfo, RpcVoteAccountStatus,
     },
 };
 use solana_sdk::{epoch_info::EpochInfo, slot_history::Slot};
 
 use crate::{
     json_rpc_request_processor::JsonRpcRequestProcessor,
-    rpc_health::RpcHealthStatus, traits::rpc_minimal::Minimal,
+    rpc_health::RpcHealthStatus,
+    traits::rpc_minimal::{Minimal, RpcVersionInfoExt},
     utils::verify_pubkey,
 };
 
@@ -118,12 +119,16 @@ impl Minimal for MinimalImpl {
         })
     }
 
-    fn get_version(&self, _: Self::Metadata) -> Result<RpcVersionInfo> {
+    fn get_version(&self, _: Self::Metadata) -> Result<RpcVersionInfoExt> {
         debug!("get_version rpc request received");
         let version = magicblock_version::Version::default();
-        Ok(RpcVersionInfo {
-            solana_core: version.to_string(),
+        let git_commit = format!("{:08x}", version.commit);
+        let solana_core_version = env!("CARGO_PKG_VERSION").to_string();
+        Ok(RpcVersionInfoExt {
+            solana_core: version.solana_core.to_string(),
             feature_set: Some(version.feature_set),
+            git_commit,
+            magicblock_core: version.to_string(),
         })
     }
 

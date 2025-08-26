@@ -26,6 +26,7 @@ pub struct Version {
     pub commit: u32,      // first 4 bytes of the sha1 commit hash
     pub feature_set: u32, // first 4 bytes of the FeatureSet identifier
     client: u16,
+    pub solana_core: String,
 }
 
 impl Version {
@@ -57,11 +58,14 @@ impl Default for Version {
             major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
             minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
             patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
-            commit: compute_commit(option_env!("CI_COMMIT"))
+            solana_core: option_env!("SOLANA_CORE_VERSION")
+                .unwrap_or("unknown")
+                .to_string(),
+            commit: compute_commit(Some(git_version::git_version!()))
                 .unwrap_or_default(),
             feature_set,
             // Other client implementations need to modify this line.
-            client: u16::try_from(ClientId::SolanaLabs).unwrap(),
+            client: u16::try_from(ClientId::MagicBlock).unwrap(),
         }
     }
 }
