@@ -1,10 +1,10 @@
-use cleanass::{assert, assert_eq};
-use magicblock_config::LedgerResumeStrategy;
 use std::{path::Path, process::Child};
 
+use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup, IntegrationTestContext,
 };
+use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signer},
@@ -82,7 +82,10 @@ fn write(
         ledger_path,
         None,
         Some(SLOT_MS),
-        LedgerResumeStrategy::Reset,
+        LedgerResumeStrategy::Reset {
+            slot: 0,
+            keep_accounts: false,
+        },
         false,
     );
 
@@ -161,7 +164,7 @@ fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
         ledger_path,
         None,
         Some(SLOT_MS),
-        LedgerResumeStrategy::Replay,
+        LedgerResumeStrategy::Resume { replay: true },
         false,
     );
 

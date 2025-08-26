@@ -1,20 +1,22 @@
+use std::{path::Path, process::Child};
+
 use cleanass::assert;
-use integration_test_tools::conversions::get_rpc_transwise_error_msg;
-use integration_test_tools::loaded_accounts::LoadedAccounts;
-use integration_test_tools::validator::cleanup;
-use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
-use integration_test_tools::{expect_err, unwrap, IntegrationTestContext};
-use program_flexi_counter::instruction::{
-    create_add_and_schedule_commit_ix, create_add_ix,
+use integration_test_tools::{
+    conversions::get_rpc_transwise_error_msg, expect, expect_err,
+    loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir, unwrap,
+    validator::cleanup, IntegrationTestContext,
 };
-use program_flexi_counter::instruction::{create_delegate_ix, create_init_ix};
-use program_flexi_counter::state::FlexiCounter;
-use solana_sdk::transaction::Transaction;
+use program_flexi_counter::{
+    instruction::{
+        create_add_and_schedule_commit_ix, create_add_ix, create_delegate_ix,
+        create_init_ix,
+    },
+    state::FlexiCounter,
+};
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
-use std::path::Path;
-use std::process::Child;
 use test_ledger_restore::{
     assert_counter_state, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, get_programs_with_flexi_counter,

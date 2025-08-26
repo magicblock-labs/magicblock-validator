@@ -1,19 +1,20 @@
+use std::time::Duration;
+
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use integration_test_tools::IntegrationTestContext;
-use program_flexi_counter::delegation_program_id;
-use program_flexi_counter::instruction::{
-    create_add_ix, create_delegate_ix, create_init_ix, create_intent_ix,
-    create_redelegation_intent_ix,
+use program_flexi_counter::{
+    delegation_program_id,
+    instruction::{
+        create_add_ix, create_delegate_ix, create_init_ix, create_intent_ix,
+        create_redelegation_intent_ix,
+    },
+    state::FlexiCounter,
 };
-use program_flexi_counter::state::FlexiCounter;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::rent::Rent;
-use solana_sdk::signature::Keypair;
-use solana_sdk::signer::Signer;
-use solana_sdk::transaction::Transaction;
-use std::time::Duration;
+use solana_sdk::{
+    commitment_config::CommitmentConfig, native_token::LAMPORTS_PER_SOL,
+    rent::Rent, signature::Keypair, signer::Signer, transaction::Transaction,
+};
 
 const LABEL: &str = "I am a label";
 
@@ -77,9 +78,9 @@ fn test_3_payers_intent_with_undelegation() {
     // Init and setup counters for each payer
     let values: [u8; PAYERS] = [100, 200, 201];
     payers.iter().enumerate().for_each(|(i, payer)| {
-        init_counter(&ctx, &payer);
-        delegate_counter(&ctx, &payer);
-        add_to_counter(&ctx, &payer, values[i]);
+        init_counter(&ctx, payer);
+        delegate_counter(&ctx, payer);
+        add_to_counter(&ctx, payer, values[i]);
     });
 
     // Schedule intent affecting all counters
@@ -103,9 +104,9 @@ fn test_5_payers_intent_only_commit() {
     // Init and setup counters for each payer
     let values: [u8; PAYERS] = std::array::from_fn(|i| 180 + i as u8);
     payers.iter().enumerate().for_each(|(i, payer)| {
-        init_counter(&ctx, &payer);
-        delegate_counter(&ctx, &payer);
-        add_to_counter(&ctx, &payer, values[i]);
+        init_counter(&ctx, payer);
+        delegate_counter(&ctx, payer);
+        add_to_counter(&ctx, payer, values[i]);
     });
 
     let counter_diffs: [i64; PAYERS] = [-2; PAYERS];
@@ -163,7 +164,7 @@ fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
 fn init_counter(ctx: &IntegrationTestContext, payer: &Keypair) {
     let ix = create_init_ix(payer.pubkey(), LABEL.to_string());
     let (_, confirmed) = ctx
-        .send_and_confirm_instructions_with_payer_chain(&[ix], &payer)
+        .send_and_confirm_instructions_with_payer_chain(&[ix], payer)
         .unwrap();
     assert!(confirmed, "Should confirm transaction");
 
@@ -187,7 +188,7 @@ fn delegate_counter(ctx: &IntegrationTestContext, payer: &Keypair) {
 
     let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
     let ix = create_delegate_ix(payer.pubkey());
-    ctx.send_and_confirm_instructions_with_payer_chain(&[ix], &payer)
+    ctx.send_and_confirm_instructions_with_payer_chain(&[ix], payer)
         .unwrap();
 
     // Confirm delegated
@@ -210,7 +211,7 @@ fn add_to_counter(ctx: &IntegrationTestContext, payer: &Keypair, value: u8) {
 
     // Add value to counter
     let ix = create_add_ix(payer.pubkey(), value);
-    ctx.send_and_confirm_instructions_with_payer_ephem(&[ix], &payer)
+    ctx.send_and_confirm_instructions_with_payer_ephem(&[ix], payer)
         .unwrap();
 
     let counter = ctx
@@ -286,7 +287,7 @@ fn schedule_intent(
         .fetch_schedule_commit_result::<FlexiCounter>(sig)
         .unwrap();
     commit_result
-        .confirm_commit_transactions_on_chain(&ctx)
+        .confirm_commit_transactions_on_chain(ctx)
         .unwrap();
 
     // Confirm results on base lauer
@@ -340,7 +341,7 @@ fn redelegate_intent(ctx: &IntegrationTestContext, payer: &Keypair) {
         .fetch_schedule_commit_result::<FlexiCounter>(sig)
         .unwrap();
     commit_result
-        .confirm_commit_transactions_on_chain(&ctx)
+        .confirm_commit_transactions_on_chain(ctx)
         .unwrap();
 
     // Confirm that it got delegated back

@@ -1,10 +1,12 @@
 use integration_test_tools::IntegrationTestContext;
-use solana_sdk::instruction::{AccountMeta, Instruction};
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Keypair;
-use solana_sdk::signer::Signer;
-use solana_sdk::transaction::Transaction;
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    signature::Keypair,
+    signer::Signer,
+    transaction::Transaction,
+};
 
 const TEST_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("3JnJ727jWEmPVU8qfXwtH63sCNDX7nMgsLbg8qy8aaPX");

@@ -26,3 +26,10 @@ jobs:
       - run: make ci-fmt
         shell: bash
         working-directory: magicblock-validator
+
+      - name: Run ci-fmt in test-integration
+        run: |
+          cd test-integration
+          make ci-fmt
+        shell: bash
+        working-directory: magicblock-validator

@@ -1,5 +1,7 @@
-use integration_test_tools::run_test;
-use integration_test_tools::scheduled_commits::extract_scheduled_commit_sent_signature_from_logs;
+use integration_test_tools::{
+    run_test,
+    scheduled_commits::extract_scheduled_commit_sent_signature_from_logs,
+};
 use log::*;
 use magicblock_core::magic_program;
 use program_schedulecommit::api::{
@@ -10,10 +12,10 @@ use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
-use solana_rpc_client_api::client_error::ErrorKind;
-use solana_rpc_client_api::request::RpcError;
 use solana_rpc_client_api::{
-    client_error::Error as ClientError, config::RpcSendTransactionConfig,
+    client_error::{Error as ClientError, ErrorKind},
+    config::RpcSendTransactionConfig,
+    request::RpcError,
 };
 use solana_sdk::{
     commitment_config::CommitmentConfig,

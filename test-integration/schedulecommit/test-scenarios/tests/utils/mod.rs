@@ -2,11 +2,10 @@ use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
 use integration_test_tools::scheduled_commits::ScheduledCommitResult;
 use program_schedulecommit::MainAccount;
 use schedulecommit_client::ScheduleCommitTestContext;
-use solana_sdk::signature::Signer;
 use solana_sdk::{
     instruction::InstructionError,
     pubkey::Pubkey,
-    signature::{Keypair, Signature},
+    signature::{Keypair, Signature, Signer},
     transaction::TransactionError,
 };
 

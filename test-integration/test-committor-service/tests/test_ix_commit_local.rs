@@ -1,42 +1,43 @@
-use log::*;
-use magicblock_committor_service::{BaseIntentCommittor, ComputeBudgetConfig};
-use magicblock_rpc_client::MagicblockRpcClient;
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Once};
-use std::time::{Duration, Instant};
-use test_tools_core::init_logger;
-use tokio::task::JoinSet;
-use utils::transactions::tx_logs_contain;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Once},
+    time::{Duration, Instant},
+};
 
-use magicblock_committor_service::intent_executor::ExecutionOutput;
-use magicblock_committor_service::persist::CommitStrategy;
-use magicblock_committor_service::service_ext::{
-    BaseIntentCommittorExt, CommittorServiceExt,
+use log::*;
+use magicblock_committor_service::{
+    config::ChainConfig,
+    intent_executor::ExecutionOutput,
+    persist::CommitStrategy,
+    service_ext::{BaseIntentCommittorExt, CommittorServiceExt},
+    types::{ScheduledBaseIntentWrapper, TriggerType},
+    BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
 };
-use magicblock_committor_service::types::{
-    ScheduledBaseIntentWrapper, TriggerType,
+use magicblock_program::{
+    magic_scheduled_base_intent::{
+        CommitAndUndelegate, CommitType, CommittedAccountV2, MagicBaseIntent,
+        ScheduledBaseIntent, UndelegateType,
+    },
+    validator::{init_validator_authority, validator_authority},
 };
-use magicblock_committor_service::{config::ChainConfig, CommittorService};
-use magicblock_program::magic_scheduled_base_intent::{
-    CommitAndUndelegate, CommitType, CommittedAccountV2, MagicBaseIntent,
-    ScheduledBaseIntent, UndelegateType,
-};
-use magicblock_program::validator::{
-    init_validator_authority, validator_authority,
-};
+use magicblock_rpc_client::MagicblockRpcClient;
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::hash::Hash;
-use solana_sdk::transaction::Transaction;
 use solana_sdk::{
+    commitment_config::CommitmentConfig, hash::Hash,
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
-use utils::instructions::{
-    init_account_and_delegate_ixs, init_validator_fees_vault_ix,
-    InitAccountAndDelegateIxs,
+use test_tools_core::init_logger;
+use tokio::task::JoinSet;
+use utils::{
+    instructions::{
+        init_account_and_delegate_ixs, init_validator_fees_vault_ix,
+        InitAccountAndDelegateIxs,
+    },
+    transactions::tx_logs_contain,
 };
 
 mod utils;
@@ -319,7 +320,7 @@ async fn commit_single_account(
     let (pubkey, mut account) =
         init_and_delegate_account_on_chain(&counter_auth, bytes as u64).await;
     account.owner = program_flexi_counter::id();
-    account.data = vec![101 as u8; bytes];
+    account.data = vec![101_u8; bytes];
 
     let account = CommittedAccountV2 { pubkey, account };
     let base_intent = if undelegate {
@@ -343,7 +344,7 @@ async fn commit_single_account(
         },
     };
 
-    /// We should always be able to Commit & Finalize 1 account either with Args or Buffers
+    // We should always be able to Commit & Finalize 1 account either with Args or Buffers
     ix_commit_local(
         service,
         vec![intent],
@@ -749,7 +750,7 @@ async fn ix_commit_local(
         let mut committed_accounts = base_intent
             .get_committed_accounts()
             .unwrap()
-            .into_iter()
+            .iter()
             .map(|el| (el.pubkey, el.clone()))
             .collect::<HashMap<Pubkey, CommittedAccountV2>>();
         let statuses = service

@@ -11,7 +11,7 @@ use magicblock_account_fetcher::AccountFetcherStub;
 use magicblock_account_updates::AccountUpdatesStub;
 use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_committor_service::stubs::ChangesetCommittorStub;
-use magicblock_config::AccountsCloneConfig;
+use magicblock_config::{AccountsCloneConfig, LedgerResumeStrategyConfig};
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     bpf_loader_upgradeable::get_program_data_address,
@@ -51,6 +51,7 @@ fn setup_custom(
         Pubkey::new_unique(),
         1024,
         AccountsCloneConfig::default(),
+        LedgerResumeStrategyConfig::default(),
     );
     let cloner_client = RemoteAccountClonerClient::new(&cloner_worker);
     // Run the worker in a separate task

@@ -1,12 +1,17 @@
-use crate::args::CallHandlerDiscriminator;
-use ephemeral_rollups_sdk::ephem::{
-    CallHandler, CommitAndUndelegate, CommitType, MagicAction,
-    MagicInstructionBuilder, UndelegateType,
+use ephemeral_rollups_sdk::{
+    ephem::{
+        CallHandler, CommitAndUndelegate, CommitType, MagicAction,
+        MagicInstructionBuilder, UndelegateType,
+    },
+    ActionArgs,
 };
-use ephemeral_rollups_sdk::ActionArgs;
-use solana_program::account_info::{next_account_info, AccountInfo};
-use solana_program::entrypoint::ProgramResult;
-use solana_program::msg;
+use solana_program::{
+    account_info::{next_account_info, AccountInfo},
+    entrypoint::ProgramResult,
+    msg,
+};
+
+use crate::args::CallHandlerDiscriminator;
 
 pub const ACTOR_ESCROW_INDEX: u8 = 1;
 

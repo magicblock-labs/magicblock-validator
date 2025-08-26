@@ -1,13 +1,14 @@
-use cleanass::assert_eq;
-use magicblock_config::LedgerResumeStrategy;
 use std::{path::Path, process::Child};
 
+use cleanass::assert_eq;
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
+use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::pubkey::Pubkey;
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_offline_validator, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,
+    TMP_DIR_LEDGER,
 };
 
 // In this test we ensure that restoring from a later slot by hydrating the
@@ -17,8 +18,6 @@ use test_ledger_restore::{
 // Then we airdrop again.
 // The ledger restore will start from a slot after the first airdrop was
 // flushed.
-
-const SNAPSHOT_FREQUENCY: u64 = 2;
 
 #[test]
 fn restore_ledger_with_two_airdrops_with_account_flush_in_between() {
@@ -40,7 +39,10 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64) {
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Reset,
+        LedgerResumeStrategy::Reset {
+            slot: 0,
+            keep_accounts: false,
+        },
         false,
     );
 
@@ -76,7 +78,7 @@ fn read(ledger_path: &Path, pubkey: &Pubkey) -> Child {
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Replay,
+        LedgerResumeStrategy::Resume { replay: true },
         false,
     );
     eprintln!(

@@ -1,8 +1,3 @@
-use crate::utils::{
-    create_nested_schedule_cpis_instruction,
-    create_sibling_non_cpi_instruction,
-    create_sibling_schedule_cpis_instruction,
-};
 use magicblock_core::magic_program;
 use program_schedulecommit::api::schedule_commit_cpi_instruction;
 use schedulecommit_client::{
@@ -14,6 +9,12 @@ use solana_sdk::{
     pubkey::Pubkey,
     signer::Signer,
     transaction::Transaction,
+};
+
+use crate::utils::{
+    create_nested_schedule_cpis_instruction,
+    create_sibling_non_cpi_instruction,
+    create_sibling_schedule_cpis_instruction,
 };
 mod utils;
 
@@ -152,7 +153,7 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
     // 3. Confirm the transaction
     assert!(ctx
         .confirm_transaction_chain(&commit_result.sigs[0])
-        .unwrap_or(false));
+        .unwrap_or_default());
 }
 
 #[test]

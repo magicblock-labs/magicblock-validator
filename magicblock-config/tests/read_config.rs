@@ -6,9 +6,10 @@ use std::{
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsConfig, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LedgerResumeStrategy, LifecycleMode, MagicBlockConfig,
-    MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteCluster,
+    AccountsCloneConfig, AccountsConfig, CommitStrategyConfig, EphemeralConfig,
+    GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategyConfig,
+    LedgerResumeStrategyType, LifecycleMode, MagicBlockConfig, MetricsConfig,
+    MetricsServiceConfig, PrepareLookupTables, ProgramConfig, RemoteCluster,
     RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
@@ -34,6 +35,24 @@ fn test_load_custom_ws_remote_toml() {
         .join("09_custom-ws-remote.toml");
     let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
     assert_eq!(config.accounts.remote.cluster, RemoteCluster::CustomWithWs);
+}
+
+#[test]
+fn test_load_replay_toml() {
+    let workspace_dir = cargo_workspace_dir();
+    let config_file_dir = workspace_dir
+        .join("magicblock-config")
+        .join("tests")
+        .join("fixtures")
+        .join("12_replay.toml");
+    let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
+    assert_eq!(
+        config
+            .ledger
+            .resume_strategy_config
+            .account_hydration_concurrency,
+        10
+    );
 }
 
 #[test]
@@ -117,12 +136,16 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("VALIDATOR_COUNTRY_CODE", "CY");
     env::set_var("VALIDATOR_FQDN", "magicblock.er.com");
     env::set_var("LEDGER_SIZE", "123123");
-    env::set_var("LEDGER_RESUME_STRATEGY", "resume-only");
+    env::set_var("LEDGER_RESUME_STRATEGY_KIND", "resume-only");
+    env::set_var("LEDGER_RESUME_STRATEGY_RESET_SLOT", "1");
+    env::set_var("LEDGER_RESUME_STRATEGY_KEEP_ACCOUNTS", "true");
+    env::set_var("LEDGER_RESUME_STRATEGY_ACCOUNT_HYDRATION_CONCURRENCY", "20");
     env::set_var("LEDGER_SKIP_KEYPAIR_MATCH_CHECK", "true");
     env::set_var("LEDGER_PATH", "/hello/world");
     env::set_var("METRICS_ENABLED", "false");
     env::set_var("METRICS_PORT", "1234");
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
+    env::set_var("CLONE_AUTO_AIRDROP_LAMPORTS", "123");
 
     let config = parse_config_with_file(&config_file_dir);
 
@@ -139,6 +162,10 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                     cluster: RemoteCluster::Custom,
                     url: Some(Url::parse(base_cluster).unwrap()),
                     ..Default::default()
+                },
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Never,
+                    auto_airdrop_lamports: 123,
                 },
                 ..Default::default()
             },
@@ -165,10 +192,15 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 ..Default::default()
             },
             ledger: LedgerConfig {
-                resume_strategy: LedgerResumeStrategy::ResumeOnly,
+                resume_strategy_config: LedgerResumeStrategyConfig {
+                    kind: LedgerResumeStrategyType::ResumeOnly,
+                    reset_slot: Some(1),
+                    keep_accounts: Some(true),
+                    account_hydration_concurrency: 20,
+                },
                 skip_keypair_match_check: true,
                 path: Some("/hello/world".to_string()),
-                size: 123123
+                size: 123123,
             },
             metrics: MetricsConfig {
                 enabled: false,
