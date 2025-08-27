@@ -7,7 +7,7 @@ use magicblock_committor_service::{
         task_strategist::{TaskStrategist, TransactionStrategy},
         tasks::{
             ArgsTask, BaseTask, BufferTask, CommitTask, FinalizeTask,
-            L1ActionTask, UndelegateTask,
+            BaseActionTask, UndelegateTask,
         },
         utils::TransactionUtils,
     },
@@ -192,7 +192,7 @@ async fn test_prepare_commit_tx_with_l1_actions() {
             delegated_account: committed_account.pubkey,
         })),
         // L1Action
-        Box::new(ArgsTask::L1Action(L1ActionTask {
+        Box::new(ArgsTask::BaseAction(BaseActionTask {
             context: Context::Commit,
             action: base_action,
         })),

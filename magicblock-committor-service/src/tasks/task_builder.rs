@@ -15,7 +15,7 @@ use crate::{
     },
     persist::IntentPersister,
     tasks::tasks::{
-        ArgsTask, BaseTask, CommitTask, FinalizeTask, L1ActionTask,
+        ArgsTask, BaseActionTask, BaseTask, CommitTask, FinalizeTask,
         UndelegateTask,
     },
 };
@@ -53,11 +53,12 @@ impl TasksBuilder for TaskBuilderV1 {
                 let tasks = actions
                     .iter()
                     .map(|el| {
-                        let task = L1ActionTask {
+                        let task = BaseActionTask {
                             context: Context::Standalone,
                             action: el.clone(),
                         };
-                        Box::new(ArgsTask::L1Action(task)) as Box<dyn BaseTask>
+                        Box::new(ArgsTask::BaseAction(task))
+                            as Box<dyn BaseTask>
                     })
                     .collect();
 
@@ -143,11 +144,12 @@ impl TasksBuilder for TaskBuilderV1 {
                         .map(finalize_task)
                         .collect::<Vec<_>>();
                     tasks.extend(l1_actions.iter().map(|action| {
-                        let task = L1ActionTask {
+                        let task = BaseActionTask {
                             context: Context::Commit,
                             action: action.clone(),
                         };
-                        Box::new(ArgsTask::L1Action(task)) as Box<dyn BaseTask>
+                        Box::new(ArgsTask::BaseAction(task))
+                            as Box<dyn BaseTask>
                     }));
                     tasks
                 }
@@ -181,11 +183,11 @@ impl TasksBuilder for TaskBuilderV1 {
                     UndelegateType::Standalone => Ok(tasks),
                     UndelegateType::WithBaseActions(actions) => {
                         tasks.extend(actions.iter().map(|action| {
-                            let task = L1ActionTask {
+                            let task = BaseActionTask {
                                 context: Context::Undelegate,
                                 action: action.clone(),
                             };
-                            Box::new(ArgsTask::L1Action(task))
+                            Box::new(ArgsTask::BaseAction(task))
                                 as Box<dyn BaseTask>
                         }));
 

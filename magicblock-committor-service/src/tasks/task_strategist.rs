@@ -239,7 +239,7 @@ mod tests {
     use crate::{
         persist::IntentPersisterImpl,
         tasks::tasks::{
-            CommitTask, L1ActionTask, TaskStrategy, UndelegateTask,
+            BaseActionTask, CommitTask, TaskStrategy, UndelegateTask,
         },
     };
 
@@ -263,7 +263,7 @@ mod tests {
 
     // Helper to create an L1 action task
     fn create_test_l1_action_task(len: usize) -> ArgsTask {
-        ArgsTask::L1Action(L1ActionTask {
+        ArgsTask::BaseAction(BaseActionTask {
             context: Context::Commit,
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),

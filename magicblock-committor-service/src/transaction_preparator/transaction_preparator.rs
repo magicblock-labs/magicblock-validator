@@ -43,7 +43,11 @@ pub trait TransactionPreparator: Send + Sync + 'static {
     ) -> PreparatorResult<VersionedMessage>;
 
     /// Cleans up after strategy
-    async fn cleanup_for_strategy(&self, authority: &Keypair, transaction_strategy: TransactionStrategy);
+    async fn cleanup_for_strategy(
+        &self,
+        authority: &Keypair,
+        transaction_strategy: TransactionStrategy,
+    );
 }
 
 /// [`TransactionPreparatorV1`] first version of preparator
@@ -118,7 +122,10 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         Ok(message)
     }
 
-    async fn cleanup_for_strategy(&self, authority: &Keypair, transaction_strategy: TransactionStrategy) {
-        
+    async fn cleanup_for_strategy(
+        &self,
+        authority: &Keypair,
+        transaction_strategy: TransactionStrategy,
+    ) {
     }
 }

@@ -1,24 +1,33 @@
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
+
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use log::{debug, error, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
 };
-use magicblock_rpc_client::{MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome, MagicblockRpcClient};
+use magicblock_rpc_client::{
+    MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
+    MagicBlockSendTransactionOutcome, MagicblockRpcClient,
+};
 use solana_pubkey::Pubkey;
+use solana_rpc_client_api::client_error::ErrorKind;
 use solana_sdk::{
+    instruction::InstructionError,
     message::VersionedMessage,
     signature::{Keypair, Signature},
     signer::{Signer, SignerError},
-    transaction::VersionedTransaction,
+    transaction::{TransactionError, VersionedTransaction},
 };
-use solana_sdk::transaction::TransactionError;
 use tokio::time::{sleep, Instant};
+
 use crate::{
     intent_executor::{
-        error::{IntentExecutorError, IntentExecutorResult, InternalError},
+        error::{
+            IntentExecutorError, IntentExecutorResult, InternalError,
+            TransactionStrategyExecutionError,
+        },
         task_info_fetcher::TaskInfoFetcher,
         ExecutionOutput, IntentExecutor,
     },
@@ -28,7 +37,7 @@ use crate::{
         task_strategist::{
             TaskStrategist, TaskStrategistError, TransactionStrategy,
         },
-        tasks::BaseTask,
+        tasks::{BaseTask, TaskType},
     },
     transaction_preparator::{
         error::TransactionPreparatorError,
@@ -36,7 +45,6 @@ use crate::{
     },
     utils::persist_status_update_by_message_set,
 };
-use crate::intent_executor::error::TransactionStrategyExecutionError;
 
 pub struct IntentExecutorImpl<T, F> {
     authority: Keypair,
@@ -139,7 +147,8 @@ where
             persister,
         )? {
             debug!("Executing intent in single stage");
-            let output = self.execute_single_stage(single_tx_strategy, persister)
+            let output = self
+                .execute_single_stage(single_tx_strategy, persister)
                 .await?;
 
             Ok(output)
@@ -160,25 +169,33 @@ where
             )?;
 
             // TODO: move and handle retries within those/
-            let output = self.execute_two_stages(
-                commit_strategy,
-                finalize_strategy,
-                persister,
-            )
-            .await?;
+            let output = self
+                .execute_two_stages(
+                    commit_strategy,
+                    finalize_strategy,
+                    persister,
+                )
+                .await?;
 
             // Cleanup
             {
                 let authority_copy = self.authority.insecure_clone();
                 tokio::spawn(async move {
-                    self.transaction_preparator.cleanup_for_strategy(&authority_copy, commit_strategy).await;
+                    self.transaction_preparator
+                        .cleanup_for_strategy(&authority_copy, commit_strategy)
+                        .await;
                 });
             }
 
             {
                 let authority_copy = self.authority.insecure_clone();
                 tokio::spawn(async move {
-                    self.transaction_preparator.cleanup_for_strategy(&authority_copy, finalize_strategy).await;
+                    self.transaction_preparator
+                        .cleanup_for_strategy(
+                            &authority_copy,
+                            finalize_strategy,
+                        )
+                        .await;
                 });
             }
 
@@ -187,8 +204,14 @@ where
     }
 
     /// Starting execution from single stage
-    async fn single_stage_execution_flow<P: IntentPersister>(&self, transaction_strategy: TransactionStrategy, persistor: &Option<P>) -> IntentExecutorResult<ExecutionOutput> {
-        let result = self.execute_single_stage(&transaction_strategy, persistor).await;
+    async fn single_stage_execution_flow<P: IntentPersister>(
+        &self,
+        transaction_strategy: TransactionStrategy,
+        persistor: &Option<P>,
+    ) -> IntentExecutorResult<ExecutionOutput> {
+        let result = self
+            .execute_single_stage(&transaction_strategy, persistor)
+            .await;
         match result {
             Ok(value) => Ok(value),
             Err(err) => {
@@ -202,13 +225,72 @@ where
         &self,
         transaction_strategy: &TransactionStrategy,
         persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError> {
-        const RETRY_FOR: Duration = Duration::from_secs(2*60);
+    ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
+    {
+        const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
         const SLEEP: Duration = Duration::from_millis(500);
+
+        let convert_transaction_error =
+            |err: TransactionError,
+             map: fn(
+                solana_rpc_client_api::client_error::Error,
+            ) -> MagicBlockRpcClientError|
+             -> TransactionStrategyExecutionError {
+                // There's always 2 budget instructions in front
+                const OFFSET: u8 = 2;
+                const OUTDATED_SLOT: u32 =
+                    dlp::error::DlpError::OutdatedSlot as u32;
+
+                match err {
+                    TransactionError::InstructionError(
+                        _,
+                        InstructionError::Custom(OUTDATED_SLOT),
+                    ) => TransactionStrategyExecutionError::CommitIDError,
+                    TransactionError::InstructionError(
+                        _,
+                        InstructionError::MaxInstructionTraceLengthExceeded,
+                    ) => TransactionStrategyExecutionError::CpiLimitError,
+                    TransactionError::InstructionError(index, ix_err) => {
+                        let transaction_error =
+                            TransactionError::InstructionError(index, ix_err);
+                        let internal_err =
+                            TransactionStrategyExecutionError::InternalError(
+                                InternalError::MagicBlockRpcClientError(map(
+                                    transaction_error.into(),
+                                )),
+                            );
+
+                        let Some(action_index) = index.checked_sub(OFFSET)
+                        else {
+                            return internal_err;
+                        };
+
+                        if let Some(TaskType::Action) = transaction_strategy
+                            .optimized_tasks
+                            .get(action_index as usize)
+                            .map(|task: &Box<dyn BaseTask>| task.task_type())
+                        {
+                            TransactionStrategyExecutionError::ActionsError
+                        } else {
+                            internal_err
+                        }
+                    }
+                    err => TransactionStrategyExecutionError::InternalError(
+                        InternalError::MagicBlockRpcClientError(
+                            map(err.into()),
+                        ),
+                    ),
+                }
+            };
+
+        let conver_rpc_error = |err: solana_rpc_client_api::client_error::Error| -> TransactionStrategyExecutionError {
+            todo!()
+        };
 
         // TransactionPreparator retries internally,
         // so we can skip retries here
         // More importantly errors from it can't be handled so we propagate them
+        // TODO: move outside
         let prepared_message = self
             .transaction_preparator
             .prepare_for_strategy(
@@ -219,48 +301,204 @@ where
             .await
             .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
 
-        let mut err;
+        let mut last_err;
         let start = Instant::now();
-        while start.elapsed() >= RETRY_FOR {
-            let result = self
-                .send_prepared_message(prepared_message.clone())
-                .await;
-                // .map_err(|(err, signature)| {
-                //     IntentExecutorError::FailedToCommitError { err, signature }
-                // })?;
+        while start.elapsed() < RETRY_FOR {
+            let result =
+                self.send_prepared_message(prepared_message.clone()).await;
+            // .map_err(|(err, signature)| {
+            //     IntentExecutorError::FailedToCommitError { err, signature }
+            // })?;
 
             match result {
-                Ok(result ) => {
-                    if result.has_error() {
-                        // SAFETY: has_error ensures presense of error
-                        match result.into_error().unwrap() {
-                            TransactionError::InstructionError()
-                            err => return Err(TransactionStrategyExecutionError::InternalError())
+                Ok(result) => {
+                    return match result.into_result() {
+                        Ok(value) =>  Ok(value),
+                        Err(err) => {
+                            // Since err is TransactionError we return from here right away
+                            // It's wether some known reason like: ActionError/CommitIdError or something else
+                            // We can't recover here so we propagate
+                            Err(convert_transaction_error(err, MagicBlockRpcClientError::SendTransaction))
                         }
-                    } else {
-                        return Ok(result.into_signature())
                     }
-                },
-                // Can't handle SignerError in any way
-                Err((err @ InternalError::SignerError(_), _)) => {
-                    Err(err.into())
                 }
-                Err((InternalError::MagicBlockRpcClientError(err), Some(signature))) => {
-
-
-                    todo!()
+                Err(err @ InternalError::SignerError(_)) => {
+                    // Can't handle SignerError in any way
+                    // propagate lower
+                    return Err(TransactionStrategyExecutionError::InternalError(err))
                 }
-                // TODO: test
-                Err((err @ InternalError::MagicBlockRpcClientError(_), None)) => {
-                    // Nothing we can do without signature
-                    return Err(err.into())
+                Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(err))) => {
+                    match err.kind {
+                        err_kind @ ErrorKind::Io(_) => {
+                            last_err =  TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            )))
+                        }
+                        err_kind @ ErrorKind::Reqwest(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                        err_kind @ ErrorKind::Middleware(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                        err_kind @ ErrorKind::RpcError(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                        err_kind @ ErrorKind::SerdeJson(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                        err_kind @ ErrorKind::SigningError(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                        ErrorKind::TransactionError(err) => return Err(convert_transaction_error(err, MagicBlockRpcClientError::RpcClientError)),
+                        err_kind @ ErrorKind::Custom(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                    }
                 }
-            }
+                Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::SendTransaction(err)))
+                => {
+                    match err.kind {
+                        err_kind @ ErrorKind::Io(_) => {
+                            last_err =  TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            )))
+                        }
+                        err_kind @ ErrorKind::Reqwest(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                        err_kind @ ErrorKind::Middleware(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                        err_kind @ ErrorKind::RpcError(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                        err_kind @ ErrorKind::SerdeJson(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                        err_kind @ ErrorKind::SigningError(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                        ErrorKind::TransactionError(err) => return Err(convert_transaction_error(err, MagicBlockRpcClientError::RpcClientError)),
+                        err_kind @ ErrorKind::Custom(_) => {
+                            // Can't handle - propagate
+                            return Err(TransactionStrategyExecutionError::InternalError(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(
+                                solana_rpc_client_api::client_error::Error {
+                                    request: err.request,
+                                    kind: err_kind
+                                }
+                            ))))
+                        }
+                    }
+                }
+                Err(InternalError::MagicBlockRpcClientError(err @ MagicBlockRpcClientError::GetLatestBlockhash(_))) => {
+                    // we're retrying in that case
+                    last_err = err;
+                }
+                Err(InternalError::MagicBlockRpcClientError(err @ MagicBlockRpcClientError::GetSlot(_))) => {
+                    // Unexpected error, returning right away
+                    warn!("MagicBlockRpcClientError::GetSlot during send transaction");
+                    return Err(TransactionStrategyExecutionError::InternalError(err.into()))
+                }
+                Err(InternalError::MagicBlockRpcClientError(err @ MagicBlockRpcClientError::LookupTableDeserialize(_))) => {
+                    // Unexpected error, returning right away
+                    warn!(" MagicBlockRpcClientError::LookupTableDeserialize during send transaction");
+                    return Err(TransactionStrategyExecutionError::InternalError(err.into()))
+                }
+                err @ Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(_, _))) => {
+                    // if there's still time left we can retry sending tx
+                    last_err = err;
+                    continue
+                }
+                err @ Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(_, _))) => {
+                    // if there's still time left we can retry sending tx
+                    // Since [`DEFAULT_MAX_TIME_TO_PROCESSED`] is large we skip sleep as well
+                    last_err = err;
+                    continue
+                }
+                err @ Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::SentTransactionError(_, _))) => {
+                    // if there's still time left we can retry sending tx
+                    // Since [`DEFAULT_MAX_TIME_TO_PROCESSED`] is large we skip sleep as well
+                    last_err = err;
+                    continue
+                }
+            };
 
             sleep(SLEEP).await
         }
 
-        Err(err)
+        Err(last_err)
     }
 
     /// Optimization: executes Intent in single stage
@@ -284,7 +522,8 @@ where
         let signature = self
             .send_prepared_message(prepared_message)
             .await
-            .map_err(|(err, signature)| {
+            .map_err(|(err)| {
+                let signature = err.signature();
                 IntentExecutorError::FailedToCommitError { err, signature }
             })?
             .into_signature();
@@ -309,14 +548,21 @@ where
         // TODO: improve this, the thing is from delivery preparator we shall get only RpcError
         let prepared_commit_message = match result {
             Ok(value) => Ok(value),
-            Err(TransactionPreparatorError::FailedToFitError) => unreachable!("This is checked in TaskBuilder!"),
-            err @ Err(TransactionPreparatorError::DeliveryPreparationError(_)) => err
-        }.map_err(IntentExecutorError::FailedCommitPreparationError)?;
+            Err(TransactionPreparatorError::FailedToFitError) => {
+                unreachable!("This is checked in TaskBuilder!")
+            }
+            err @ Err(TransactionPreparatorError::SignerError(_)) => err,
+            err @ Err(TransactionPreparatorError::DeliveryPreparationError(
+                _,
+            )) => err,
+        }
+        .map_err(IntentExecutorError::FailedCommitPreparationError)?;
 
         let commit_signature = self
             .send_prepared_message(prepared_commit_message)
             .await
-            .map_err(|(err, signature)| {
+            .map_err(|err| {
+                let signature = err.signature();
                 IntentExecutorError::FailedToCommitError { err, signature }
             })?
             .into_signature();
@@ -332,7 +578,8 @@ where
         let finalize_signature = self
             .send_prepared_message(prepared_finalize_message)
             .await
-            .map_err(|(err, finalize_signature)| {
+            .map_err(|err| {
+                let finalize_signature = err.signature();
                 IntentExecutorError::FailedToFinalizeError {
                     err,
                     commit_signature: Some(commit_signature),
@@ -352,13 +599,9 @@ where
     async fn send_prepared_message(
         &self,
         mut prepared_message: VersionedMessage,
-    ) -> IntentExecutorResult<MagicBlockSendTransactionOutcome, (InternalError, Option<Signature>)>
+    ) -> IntentExecutorResult<MagicBlockSendTransactionOutcome, InternalError>
     {
-        let latest_blockhash = self
-            .rpc_client
-            .get_latest_blockhash()
-            .await
-            .map_err(|err| (err.into(), None))?;
+        let latest_blockhash = self.rpc_client.get_latest_blockhash().await?;
         match &mut prepared_message {
             VersionedMessage::V0(value) => {
                 value.recent_blockhash = latest_blockhash;
@@ -369,20 +612,17 @@ where
             }
         };
 
-        let transaction =
-            VersionedTransaction::try_new(prepared_message, &[&self.authority])
-                .map_err(|err| (err.into(), None))?;
+        let transaction = VersionedTransaction::try_new(
+            prepared_message,
+            &[&self.authority],
+        )?;
         let result = self
             .rpc_client
             .send_transaction(
                 &transaction,
                 &MagicBlockSendTransactionConfig::ensure_committed(),
             )
-            .await
-            .map_err(|err| {
-                let signature = err.signature();
-                (err.into(), signature)
-            })?;
+            .await?;
 
         Ok(result)
     }
@@ -494,17 +734,15 @@ where
         }
     }
 
-    fn handle_result(
-        result: &IntentExecutorResult<ExecutionOutput>,
-        message_id: u64,
-        pubkeys: &[Pubkey],
-    ) {
-        match result {
-            Ok(val) => {
-
-            }
-        }
-    }
+    // fn handle_result(
+    //     result: &IntentExecutorResult<ExecutionOutput>,
+    //     message_id: u64,
+    //     pubkeys: &[Pubkey],
+    // ) {
+    //     match result {
+    //         Ok(val) => {}
+    //     }
+    // }
 }
 
 #[async_trait]

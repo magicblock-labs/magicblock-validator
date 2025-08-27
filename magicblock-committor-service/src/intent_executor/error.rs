@@ -1,6 +1,10 @@
 use magicblock_rpc_client::MagicBlockRpcClientError;
-use solana_sdk::signature::{Signature, SignerError};
-use solana_sdk::transaction::TransactionError;
+use solana_sdk::{
+    instruction::InstructionError,
+    signature::{Signature, SignerError},
+    transaction::TransactionError,
+};
+
 use crate::{
     tasks::{
         task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
@@ -14,6 +18,15 @@ pub enum InternalError {
     SignerError(#[from] SignerError),
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+}
+
+impl InternalError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::SignerError(_) => None,
+            Self::MagicBlockRpcClientError(err) => err.signature(),
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -57,10 +70,6 @@ pub enum TransactionStrategyExecutionError {
     CpiLimitError,
     #[error("InternalError: {0}")]
     InternalError(#[source] InternalError),
-}
-
-impl From<&TransactionError> for TransactionStrategyExecutionError {
-    match
 }
 
 impl From<TaskStrategistError> for IntentExecutorError {

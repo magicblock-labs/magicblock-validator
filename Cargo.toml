@@ -190,6 +190,7 @@ solana-storage-proto = { path = "storage-proto" }
 solana-system-program = { version = "2.2" }
 solana-timings = "2.2"
 solana-transaction-status = { version = "2.2" }
+solana-transaction-error = "2.2"
 solana-transaction-status-client-types = "2.2"
 spl-token = "=7.0"
 spl-token-2022 = "=6.0"

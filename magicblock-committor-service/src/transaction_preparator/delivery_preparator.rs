@@ -267,7 +267,7 @@ impl DeliveryPreparator {
         &self,
         instructions: &[Instruction],
         authority: &Keypair,
-        max_retries: usize
+        max_retries: usize,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let mut last_error =
             InternalError::InternalError(anyhow!("ZeroRetriesRequested"));
