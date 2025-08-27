@@ -1,0 +1,29 @@
+name: Deploy to Testnet
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+    types: [ closed ]
+
+jobs:
+  trigger-deploy:
+    if: github.event_name == 'push' || (github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger deploy workflow
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.DEPLOY_TRIGGER_TOKEN }}
+          repository: magicblock-labs/validator-deployment
+          event-type: auto-deploy
+          client-payload: |
+            {
+              "project": "magicblock-validator",
+              "deploy_target": "testnet",
+              "branch": "master",
+              "triggered_by": "${{ github.actor }}",
+              "source_repo": "${{ github.repository }}",
+              "source_sha": "${{ github.sha }}"
+            }
