@@ -8,25 +8,32 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+# network
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["server", "http2", "http1"] }
 hyper-util = { workspace = true, features = ["server", "http2", "http1"] }
 fastwebsockets = { version = "0.10", features = ["upgrade"] }
 
+# runtime
 futures = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 
+# containers
 scc = { workspace = true }
 
+# sync
 parking_lot = { workspace = true }
 flume = { workspace = true }
 
+# magicblock
 magicblock-accounts-db = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
+magicblock-version = { workspace = true }
 
+# solana
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-hash = { workspace = true }
@@ -40,13 +47,16 @@ solana-transaction-error = { workspace = true }
 solana-transaction-status = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
 
-serde = { workspace = true }
-json = { workspace = true }
-bs58 = { workspace = true }
+
+# misc
 base64 = { workspace = true }
 bincode = { workspace = true }
-
+bs58 = { workspace = true }
+json = { workspace = true }
 log = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
 test-kit = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-pubsub-client = { workspace = true }

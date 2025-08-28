@@ -3,17 +3,16 @@ use std::{convert::Infallible, sync::Arc};
 use hyper::{body::Incoming, Request, Response};
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
-    accounts::EnsureAccountsTx, transactions::TransactionSchedulerHandle,
-    DispatchEndpoints,
+    transactions::TransactionSchedulerHandle, DispatchEndpoints,
 };
 use magicblock_ledger::Ledger;
 use solana_pubkey::Pubkey;
 
 use crate::{
-    error::RpcError,
     requests::{
-        http::{extract_bytes, parse_body},
+        http::{extract_bytes, parse_body, HandlerResult},
         payload::ResponseErrorPayload,
+        JsonHttpRequest,
     },
     state::{
         blocks::BlocksCache, transactions::TransactionsCache, SharedState,
@@ -38,8 +37,6 @@ pub(crate) struct HttpDispatcher {
     pub(crate) transactions: TransactionsCache,
     /// A handle to the recent blocks cache.
     pub(crate) blocks: Arc<BlocksCache>,
-    /// A sender channel to request that accounts be cloned into ER.
-    pub(crate) ensure_accounts_tx: EnsureAccountsTx,
     /// A handle to the transaction scheduler for processing
     /// `sendTransaction` and `simulateTransaction`.
     pub(crate) transactions_scheduler: TransactionSchedulerHandle,
@@ -60,7 +57,6 @@ impl HttpDispatcher {
             ledger: state.ledger.clone(),
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
-            ensure_accounts_tx: channels.ensure_accounts.clone(),
             transactions_scheduler: channels.transaction_scheduler.clone(),
         })
     }
@@ -94,14 +90,27 @@ impl HttpDispatcher {
             };
         }
 
-        // 1. Extract and parse the request body.
+        // Extract and parse the request body.
         let body = unwrap!(extract_bytes(request).await, None);
         let mut request = unwrap!(parse_body(body), None);
-        let request = &mut request;
+        // Resolve the handler for request and process it
+        let response = self.process(&mut request).await;
 
-        // 2. Route the request to the correct handler based on the method name.
-        use crate::requests::JsonRpcMethod::*;
-        let response = match request.method {
+        // Format the final response, handling any errors from the execution stage.
+        Ok(unwrap!(response, Some(&request.id)))
+    }
+
+    async fn process(&self, request: &mut JsonHttpRequest) -> HandlerResult {
+        // Route the request to the correct handler based on the method name.
+        use crate::requests::JsonRpcHttpMethod::*;
+        match request.method {
+            GetFirstAvailableBlock => self.get_first_available_block(request),
+            GetTokenLargestAccounts => self.get_token_largest_accounts(request),
+            GetLargestAccounts => self.get_largest_accounts(request),
+            GetVersion => self.get_version(request),
+            MinimumLedgerSlot => self.get_first_available_block(request),
+            GetSlotLeader => self.get_slot_leader(request),
+            GetSlotLeaders => self.get_slot_leaders(request),
             GetAccountInfo => self.get_account_info(request).await,
             GetBalance => self.get_balance(request).await,
             GetMultipleAccounts => self.get_multiple_accounts(request).await,
@@ -111,6 +120,15 @@ impl HttpDispatcher {
             GetTransaction => self.get_transaction(request),
             GetSignatureStatuses => self.get_signature_statuses(request),
             GetSignaturesForAddress => self.get_signatures_for_address(request),
+            GetEpochInfo => self.get_epoch_info(request),
+            GetEpochSchedule => self.get_epoch_schedule(request),
+            GetClusterNodes => self.get_cluster_nodes(request),
+            GetHealth => self.get_health(request),
+            GetGenesisHash => self.get_genesis_hash(request),
+            GetHighestSnapshotSlot => self.get_highest_snapshot_slot(request),
+            GetSupply => self.get_supply(request),
+            GetTokenSupply => self.get_token_supply(request),
+            GetBlockCommitment => self.get_block_commitment(request),
             GetTokenAccountBalance => {
                 self.get_token_account_balance(request).await
             }
@@ -123,16 +141,12 @@ impl HttpDispatcher {
             GetSlot => self.get_slot(request),
             GetBlock => self.get_block(request),
             GetBlocks => self.get_blocks(request),
+            GetBlockTime => self.get_block_time(request),
             GetBlocksWithLimit => self.get_blocks_with_limit(request),
             GetLatestBlockhash => self.get_latest_blockhash(request),
             GetBlockHeight => self.get_block_height(request),
             GetIdentity => self.get_identity(request),
             IsBlockhashValid => self.is_blockhash_valid(request),
-            // Handle any methods that are not recognized.
-            unknown => Err(RpcError::method_not_found(unknown)),
-        };
-
-        // 3. Format the final response, handling any errors from the execution stage.
-        Ok(unwrap!(response, Some(&request.id)))
+        }
     }
 }

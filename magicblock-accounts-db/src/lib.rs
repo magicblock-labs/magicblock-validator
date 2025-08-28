@@ -347,9 +347,13 @@ where
 {
     type Item = (Pubkey, AccountSharedData);
     fn next(&mut self) -> Option<Self::Item> {
-        let (offset, pubkey) = self.iterator.next()?;
-        let account = self.storage.read_account(offset);
-        (self.filter)(&account).then_some((pubkey, account))
+        loop {
+            let (offset, pubkey) = self.iterator.next()?;
+            let account = self.storage.read_account(offset);
+            if (self.filter)(&account) {
+                break Some((pubkey, account));
+            }
+        }
     }
 }
 
