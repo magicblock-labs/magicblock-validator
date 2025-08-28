@@ -26,36 +26,36 @@ version = "0.0.0"
 edition = "2021"
 
 [workspace.dependencies]
-test-ledger-restore = { path = "./test-ledger-restore" }
-
-async-trait = "0.1.77"
 anyhow = "1.0.86"
+async-trait = "0.1.77"
 borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
 cleanass = "0.0.1"
 ctrlc = "3.4.7"
 ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "e461a07" }
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
+lazy_static = "1.4.0"
 log = "0.4.20"
-magicblock-api = { path = "../magicblock-api" }
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [
   "dev-tools",
 ] }
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
-magicblock-config = { path = "../magicblock-config" }
-magicblock-core = { path = "../magicblock-core" }
+magicblock-api = { path = "../magicblock-api" }
 magicblock-committor-program = { path = "../magicblock-committor-program", features = [
   "no-entrypoint",
 ] }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "00d720", features = ["no-entrypoint"] }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
+magicblock-config = { path = "../magicblock-config" }
+magicblock-core = { path = "../magicblock-core" }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "00d720", features = ["no-entrypoint"] }
+magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
-magicblock-program = { path = "../programs/magicblock" }
 paste = "1.0"
 program-flexi-counter = { path = "./programs/flexi-counter" }
 program-schedulecommit = { path = "programs/schedulecommit" }
 program-schedulecommit-security = { path = "programs/schedulecommit-security" }
+rand = "0.8.5"
 rayon = "1.10.0"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
@@ -71,11 +71,10 @@ solana-transaction-status = "2.2"
 teepee = "0.0.1"
 tempfile = "3.10.1"
 test-config = { path = "test-config" }
+test-ledger-restore = { path = "./test-ledger-restore" }
 test-tools-core = { path = "../test-tools-core" }
-toml = "0.8.13"
-lazy_static = "1.4.0"
 tokio = "1.0"
-rand = "0.8.5"
+toml = "0.8.13"
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency

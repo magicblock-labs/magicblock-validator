@@ -27,8 +27,8 @@ pub fn change_owner_for_undelegated_accounts(
         MagicBaseIntentArgs::BaseActions(_) => return Ok(()),
     };
 
-    // TODO: proper explanation
     // Change owner to dlp
+    // Undelegated it immediately becomes immutable in our validator.
     commited_accounts_ref
         .into_iter()
         .for_each(|(_, account_ref)| {

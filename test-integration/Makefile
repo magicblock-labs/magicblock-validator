@@ -127,7 +127,14 @@ setup-config-devnet:
 test-schedule-intents:
 	RUN_TESTS=schedule_intents \
 	$(MAKE) test
-
+setup-schedule-intents-devnet:
+	RUN_TESTS=schedule_intents \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-schedule-intents-both:
+	RUN_TESTS=schedule_intents \
+	SETUP_ONLY=both \
+	$(MAKE) test
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml

@@ -40,8 +40,7 @@ pub fn process_call_handler(
             account_info_iter,
             &call_handler,
         )
-    } else if discriminator == CallHandlerDiscriminator::ReDelegate.to_array()
-    {
+    } else if discriminator == CallHandlerDiscriminator::ReDelegate.to_array() {
         call_handler.data.drain(0..4);
         process_redelegation_call_handler(
             escrow_authority,

@@ -66,14 +66,14 @@ borsh = { version = "1.5.1", features = ["derive", "unstable__schema"] }
 borsh-derive = "1.5.1"
 bs58 = "0.4.0"
 byteorder = "1.5.0"
-cargo-lock = "10.0.0"
 cargo-expand = "1"
+cargo-lock = "10.0.0"
 clap = "4.5.40"
-convert_case = "0.8.0"
 conjunto-transwise = { git = "https://github.com/magicblock-labs/conjunto.git", rev = "bf82b45" }
 console-subscriber = "0.2.0"
-crossbeam-channel = "0.5.11"
 const_format = "0.2.34"
+convert_case = "0.8.0"
+crossbeam-channel = "0.5.11"
 dyn-clone = "1.0.20"
 ed25519-dalek = "1.0.1"
 enum-iterator = "1.5.0"
@@ -101,7 +101,9 @@ lazy_static = "1.4.0"
 libc = "0.2.153"
 libloading = "0.7.4"
 log = "0.4.20"
+lru = "0.16.0"
 macrotest = "1"
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
 magicblock-account-dumper = { path = "./magicblock-account-dumper" }
 magicblock-account-fetcher = { path = "./magicblock-account-fetcher" }
@@ -120,7 +122,6 @@ magicblock-config-helpers = { path = "./magicblock-config-helpers" }
 magicblock-config-macro = { path = "./magicblock-config-macro" }
 magicblock-core = { path = "./magicblock-core" }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "00d720", features = ["no-entrypoint"] }
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-metrics = { path = "./magicblock-metrics" }
@@ -149,20 +150,20 @@ protobuf-src = "1.1"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10.0"
-rustc_version = "0.4"
 rusqlite = { version = "0.34.0", features = ["bundled"] } # bundled sqlite 3.44
+rustc_version = "0.4"
 semver = "1.0.22"
 serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
 sha3 = "0.10.8"
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "176540a" }
-solana-accounts-db = { version = "2.2" }
 solana-account-decoder = { version = "2.2" }
+solana-accounts-db = { version = "2.2" }
 solana-address-lookup-table-program = { version = "2.2" }
 solana-bpf-loader-program = { version = "2.2" }
-solana-compute-budget-program = { version = "2.2" }
 solana-compute-budget-instruction = { version = "2.2" }
+solana-compute-budget-program = { version = "2.2" }
 solana-cost-model = { version = "2.2" }
 solana-frozen-abi-macro = { version = "2.2" }
 solana-geyser-plugin-interface = { version = "2.2", package = "agave-geyser-plugin-interface" }
@@ -176,17 +177,17 @@ solana-program = "2.2"
 solana-program-runtime = { version = "2.2" }
 solana-program-test = "2.2"
 solana-pubkey = { version = "2.2" }
-solana-rayon-threadlimit = { version = "2.2" }
 solana-pubsub-client = { version = "2.2" }
+solana-rayon-threadlimit = { version = "2.2" }
 solana-rpc = "2.2"
 solana-rpc-client = { version = "2.2" }
 solana-rpc-client-api = { version = "2.2" }
 solana-sdk = { version = "2.2" }
+solana-storage-proto = { path = "storage-proto" }
 solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "e93eb57", features = [
   "dev-context-only-utils",
 ] }
 solana-svm-transaction = { version = "2.2" }
-solana-storage-proto = { path = "storage-proto" }
 solana-system-program = { version = "2.2" }
 solana-timings = "2.2"
 solana-transaction-status = { version = "2.2" }
@@ -196,7 +197,6 @@ spl-token-2022 = "=6.0"
 static_assertions = "1.1.0"
 strum = "0.24"
 strum_macros = "0.24"
-lru = "0.16.0"
 syn = "2.0"
 tempfile = "3.10.1"
 test-tools = { path = "./test-tools" }

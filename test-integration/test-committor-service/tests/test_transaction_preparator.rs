@@ -6,8 +6,8 @@ use magicblock_committor_service::{
     tasks::{
         task_strategist::{TaskStrategist, TransactionStrategy},
         tasks::{
-            ArgsTask, BaseTask, BufferTask, CommitTask, FinalizeTask,
-            BaseActionTask, UndelegateTask,
+            ArgsTask, BaseActionTask, BaseTask, BufferTask, CommitTask,
+            FinalizeTask, UndelegateTask,
         },
         utils::TransactionUtils,
     },
