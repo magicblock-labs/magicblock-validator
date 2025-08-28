@@ -3,8 +3,9 @@
 use std::sync::atomic::{AtomicU16, Ordering};
 
 use magicblock_config::RpcConfig;
-use magicblock_core::link::accounts::LockedAccount;
+use magicblock_core::{link::accounts::LockedAccount, Slot};
 use magicblock_gateway::{state::SharedState, JsonRpcServer};
+use magicblock_ledger::LatestBlock;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
@@ -19,6 +20,7 @@ pub struct RpcTestEnv {
     pub execution: ExecutionTestEnv,
     pub rpc: RpcClient,
     pub pubsub: PubsubClient,
+    pub block: LatestBlock,
 }
 
 impl RpcTestEnv {
@@ -48,6 +50,7 @@ impl RpcTestEnv {
             .await
             .expect("failed to create a pubsub client to RPC server");
         Self {
+            block: execution.ledger.latest_block().clone(),
             execution,
             rpc,
             pubsub,
@@ -97,5 +100,15 @@ impl RpcTestEnv {
             .accountsdb
             .insert_account(&token, &token_account);
         LockedAccount::new(token, token_account)
+    }
+
+    pub fn advance_slots(&self, count: usize) {
+        for _ in 0..count {
+            self.execution.advance_slot();
+        }
+    }
+
+    pub fn latest_slot(&self) -> Slot {
+        self.block.load().slot
     }
 }
