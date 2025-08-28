@@ -72,7 +72,7 @@ impl CacheTaskInfoFetcher {
                     return err
                 }
                 Err(TaskInfoFetcherError::MagicBlockRpcClientError(err)) => {
-                    // TODO: RPC error handlings should be more robust
+                    // TODO(edwin0: RPC error handlings should be more robust
                     last_err =
                         TaskInfoFetcherError::MagicBlockRpcClientError(err)
                 }

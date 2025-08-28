@@ -6,15 +6,15 @@ use magicblock_core::magic_program::args::{
 };
 use serde::{Deserialize, Serialize};
 use solana_log_collector::ic_msg;
-use solana_program_runtime::{
-    __private::{Hash, InstructionError, ReadableAccount, TransactionContext},
-    invoke_context::InvokeContext,
-};
+use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
-    account::{Account, AccountSharedData},
+    account::{Account, AccountSharedData, ReadableAccount},
     clock::Slot,
+    hash::Hash,
+    instruction::InstructionError,
     pubkey::Pubkey,
     transaction::Transaction,
+    transaction_context::TransactionContext,
 };
 
 use crate::{

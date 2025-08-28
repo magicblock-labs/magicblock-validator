@@ -3926,6 +3926,7 @@ dependencies = [
  "async-trait",
  "conjunto-transwise",
  "futures-util",
+ "itertools 0.14.0",
  "log",
  "magicblock-account-cloner",
  "magicblock-account-dumper",

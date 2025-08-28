@@ -28,8 +28,6 @@ pub trait ScheduledCommitsProcessor: Send + Sync + 'static {
     fn stop(&self);
 }
 
-// TODO(edwin): remove this
-#[derive(Clone)]
 pub struct AccountCommittee {
     /// The pubkey of the account to be committed.
     pub pubkey: Pubkey,

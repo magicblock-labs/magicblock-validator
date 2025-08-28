@@ -1,6 +1,0 @@
-- Persister changed from reqid & bundle_id format to message_id. Meaning row created per message. A particular Row tracking lifespan of Intent
-- Persister will be passed along into Executors & Scheduler for them to update Intent statuses during execution
-- No notion of bundles anymore, we represent things by Intent id
-- AccountsManager doesn't use custom `AccountCommitter` for periodic commits of accounts but instead uses CommittorService
-- RemoteScheduledCommitsProcessor extracted from AccountsManager since has nothing to do with it
-- 

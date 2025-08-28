@@ -101,7 +101,7 @@ impl DeliveryPreparator {
         );
 
         // Initialize buffer account. Init + reallocs
-        self.initialize_buffer_account(authority, task, &preparation_info)
+        self.initialize_buffer_account(authority, &preparation_info)
             .await?;
 
         // Persist initialization success
@@ -113,7 +113,7 @@ impl DeliveryPreparator {
             update_status,
         );
 
-        // Writing chunks with some retries. Stol
+        // Writing chunks with some retries
         self.write_buffer_with_retries(authority, &preparation_info, 5)
             .await?;
         // Persist that buffer account initiated successfully
@@ -133,7 +133,6 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        _task: &dyn BaseTask,
         preparation_info: &TaskPreparationInfo,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_instructions = chunk_realloc_ixs(

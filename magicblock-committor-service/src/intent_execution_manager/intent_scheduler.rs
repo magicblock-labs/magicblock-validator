@@ -78,9 +78,6 @@ impl IntentScheduler {
 
     /// Returns [`ScheduledBaseIntent`] if intent can be executed,
     /// otherwise consumes it and enqueues
-    ///
-    /// CRITICAL: IntentIds should be unique
-    /// Intent should be scheduled once!
     pub fn schedule(
         &mut self,
         base_intent: ScheduledBaseIntentWrapper,

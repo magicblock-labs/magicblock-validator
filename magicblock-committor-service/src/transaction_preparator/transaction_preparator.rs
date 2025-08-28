@@ -93,8 +93,7 @@ impl TransactionPreparator for TransactionPreparatorV1 {
                 &tx_strategy.optimized_tasks,
                 self.compute_budget_config.compute_unit_price,
                 &dummy_lookup_tables,
-            )?
-            .message;
+            )?;
         }
 
         // Pre tx preparations. Create buffer accs + lookup tables

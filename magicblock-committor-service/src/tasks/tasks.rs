@@ -251,6 +251,7 @@ impl BaseTask for BufferTask {
         // and we don't use any fs writers, so the only error that may occur here is of kind
         // OutOfMemory or WriteZero. This is impossible due to:
         // Chunks::new panics if its size exceeds MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE or 10_240
+        // https://github.com/near/borsh-rs/blob/f1b75a6b50740bfb6231b7d0b1bd93ea58ca5452/borsh/src/ser/helpers.rs#L59
         let chunks_account_size = borsh::object_length(&chunks).unwrap() as u64;
         let buffer_account_size = committed_account.account.data.len() as u64;
 

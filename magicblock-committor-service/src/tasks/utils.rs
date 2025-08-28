@@ -15,21 +15,6 @@ use solana_sdk::{
 
 use crate::tasks::{task_strategist::TaskStrategistResult, tasks::BaseTask};
 
-/// Returns [`Vec<AddressLookupTableAccount>`] where all TX accounts stored in ALT
-pub fn estimate_lookup_tables_for_tx(
-    transaction: &VersionedTransaction,
-) -> Vec<AddressLookupTableAccount> {
-    transaction
-        .message
-        .static_account_keys()
-        .chunks(256)
-        .map(|addresses| AddressLookupTableAccount {
-            key: Pubkey::new_unique(),
-            addresses: addresses.to_vec(),
-        })
-        .collect()
-}
-
 pub struct TransactionUtils;
 impl TransactionUtils {
     pub fn dummy_lookup_table(

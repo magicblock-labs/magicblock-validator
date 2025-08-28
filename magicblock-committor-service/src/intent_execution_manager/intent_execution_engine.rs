@@ -192,9 +192,11 @@ where
                 self.inner.lock().expect(POISONED_INNER_MSG).schedule(intent)
             },
             else => {
-                // Shouldn't be possible
-                // If no executors spawned -> we can receive
-                // If can't receive -> there are running executors
+                // Shouldn't be possible:
+                // 1. If no executors spawned -> we can receive
+                // 2. If can't receive ->  there are MAX_EXECUTORS running executors
+                // We can't receive new message as there's no available Executor
+                // that could pick up the task.
                 unreachable!("next_scheduled_intent")
             }
         };

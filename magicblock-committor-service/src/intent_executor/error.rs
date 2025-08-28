@@ -24,7 +24,7 @@ pub enum IntentExecutorError {
     FailedToFitError,
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
-    // TODO: remove once proper retries introduced
+    // TODO(edwin): remove once proper retries introduced
     #[error("TaskBuilderError: {0}")]
     TaskBuilderError(#[from] TaskBuilderError),
     #[error("FailedToCommitError: {err}")]

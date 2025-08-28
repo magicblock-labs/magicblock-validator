@@ -71,26 +71,7 @@ pub enum MagicBlockInstruction {
     ScheduleBaseIntent(MagicBaseIntentArgs),
 }
 
-// TODO: why that exists?
-#[allow(unused)]
 impl MagicBlockInstruction {
-    pub fn index(&self) -> u8 {
-        use MagicBlockInstruction::*;
-        match self {
-            ModifyAccounts(_) => 0,
-            ScheduleCommit => 1,
-            ScheduleCommitAndUndelegate => 2,
-            AcceptScheduleCommits => 3,
-            ScheduledCommitSent(_) => 4,
-            ScheduleBaseIntent(_) => 5,
-        }
-    }
-
-    pub fn discriminant(&self) -> [u8; 4] {
-        let idx = self.index();
-        [idx, 0, 0, 0]
-    }
-
     pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
         bincode::serialize(self)
     }

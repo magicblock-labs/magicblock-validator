@@ -16,6 +16,7 @@ use conjunto_transwise::{
     AccountChainSnapshotShared, AccountChainState, CommitFrequency,
 };
 use futures_util::future::{try_join, try_join_all};
+use itertools::Itertools;
 use log::*;
 use magicblock_account_cloner::{AccountCloner, AccountClonerOutput};
 use magicblock_accounts_api::InternalAccountProvider;
@@ -406,13 +407,14 @@ where
             .collect::<Vec<_>>();
 
         committees
+            .into_iter()
             .chunks(MAX_PROCESS_PER_TX as usize)
+            .into_iter()
             .map(|committees| {
                 let committees = committees
-                    .iter()
-                    .cloned()
                     .map(CommittedAccountV2::from)
-                    .collect();
+                    .collect::<Vec<_>>();
+
                 ScheduledBaseIntent {
                     // isn't important but shall be unique
                     id: MESSAGE_ID.fetch_sub(1, Ordering::Relaxed),

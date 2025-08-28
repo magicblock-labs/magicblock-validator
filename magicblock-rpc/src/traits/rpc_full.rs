@@ -185,18 +185,3 @@ pub trait Full {
         pubkey_strs: Option<Vec<String>>,
     ) -> Result<Vec<RpcPrioritizationFee>>;
 }
-
-// ideally
-// 1. We add all of ScheduledBaseIntent on baselayer
-// 2. We finalize them:
-//      1. Runs committs per account
-//      2. Runs actions(undelegate one actions)
-//
-
-// That means
-// Commits - shall be atomic(1 tx)
-// Finalization - Shall be one per batch
-
-// Current solution:
-// 1. We create a single commit tx, with multiple ixs
-// 2. We create "finalize" tx

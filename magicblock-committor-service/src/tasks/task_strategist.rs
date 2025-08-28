@@ -81,7 +81,7 @@ impl TaskStrategist {
 
     /// Attempt to use ALTs for ALL keys in tx
     /// Returns `true` if ALTs make tx fit, otherwise `false`
-    /// TODO: optimize to use only necessary amount of pubkeys
+    /// TODO(edwin): optimize to use only necessary amount of pubkeys
     pub fn attempt_lookup_tables(tasks: &[Box<dyn BaseTask>]) -> bool {
         let placeholder = Keypair::new();
         // Gather all involved keys in tx
@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_build_strategy_with_lookup_tables_when_needed() {
-        // TODO: ALSO MAX NUMBER OF TASKS fit with ALTs!
+        // Also max number of committed accounts fit with ALTs!
         const NUM_COMMITS: u64 = 22;
 
         let validator = Pubkey::new_unique();

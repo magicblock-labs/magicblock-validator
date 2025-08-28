@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use log::{debug, error, warn};
+use log::{error, trace, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
@@ -138,11 +138,11 @@ where
             &self.authority.pubkey(),
             persister,
         )? {
-            debug!("Executing intent in single stage");
+            trace!("Executing intent in single stage");
             self.execute_single_stage(&single_tx_strategy, persister)
                 .await
         } else {
-            debug!("Executing intent in two stages");
+            trace!("Executing intent in two stages");
             // Build strategy for Commit stage
             let commit_strategy = TaskStrategist::build_strategy(
                 commit_tasks,
@@ -168,7 +168,7 @@ where
 
     /// Optimization: executes Intent in single stage
     /// where Commit & Finalize are united
-    // TODO: remove once challenge window introduced
+    // TODO(edwin): remove once challenge window introduced
     async fn execute_single_stage<P: IntentPersister>(
         &self,
         transaction_strategy: &TransactionStrategy,
@@ -191,7 +191,7 @@ where
                 IntentExecutorError::FailedToCommitError { err, signature }
             })?;
 
-        debug!("Single stage intent executed: {}", signature);
+        trace!("Single stage intent executed: {}", signature);
         Ok(ExecutionOutput::SingleStage(signature))
     }
 
@@ -215,7 +215,7 @@ where
             .map_err(|(err, signature)| {
                 IntentExecutorError::FailedToCommitError { err, signature }
             })?;
-        debug!("Commit stage succeeded: {}", commit_signature);
+        trace!("Commit stage succeeded: {}", commit_signature);
 
         // Prepare everything for Finalize stage execution
         let prepared_finalize_message = self
@@ -234,7 +234,7 @@ where
                     finalize_signature,
                 }
             })?;
-        debug!("Finalize stage succeeded: {}", finalize_signature);
+        trace!("Finalize stage succeeded: {}", finalize_signature);
 
         Ok(ExecutionOutput::TwoStage {
             commit_signature,
@@ -281,6 +281,8 @@ where
         Ok(result.into_signature())
     }
 
+    /// Flushes result into presistor
+    /// The result will be propagated down to callers
     fn persist_result<P: IntentPersister>(
         persistor: &P,
         result: &IntentExecutorResult<ExecutionOutput>,
