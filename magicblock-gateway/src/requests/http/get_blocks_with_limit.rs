@@ -11,7 +11,7 @@ impl HttpDispatcher {
         let start: u64 = some_or_err!(start, "start slot");
         let limit = limit.unwrap_or(MAX_DEFAULT_BLOCKS_LIMIT);
         let end = (start + limit).min(self.accountsdb.slot());
-        let range = (start..=end).collect::<Vec<Slot>>();
+        let range = (start..end).collect::<Vec<Slot>>();
         Ok(ResponsePayload::encode_no_context(&request.id, range))
     }
 }

@@ -9,7 +9,7 @@ impl HttpDispatcher {
         let start = some_or_err!(start, "start slot");
         let slot = self.accountsdb.slot();
         let end = end.map(|end| end.min(slot)).unwrap_or(slot);
-        if start < end {
+        if start > end {
             Err(RpcError::invalid_params(
                 "start slot is greater than the end slot",
             ))?;
