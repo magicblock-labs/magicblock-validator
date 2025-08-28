@@ -43,7 +43,7 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
             }
 
             if log {
-                info!("Advanced to slot {}", next_slot);
+                debug!("Advanced to slot {}", next_slot);
             }
             metrics::inc_slot();
 

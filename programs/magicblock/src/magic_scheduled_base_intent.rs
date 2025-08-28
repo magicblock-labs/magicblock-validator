@@ -339,7 +339,6 @@ impl<'a> From<CommittedAccountRef<'a>> for CommittedAccount {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommitType {
     /// Regular commit without actions
-    /// TODO: feels like ShortMeta isn't needed
     Standalone(Vec<CommittedAccount>), // accounts to commit
     /// Commits accounts and runs actions
     WithBaseActions {
@@ -349,7 +348,6 @@ pub enum CommitType {
 }
 
 impl CommitType {
-    // TODO: move to processor
     fn validate_accounts(
         accounts: &[CommittedAccountRef],
         context: &ConstructionContext<'_, '_>,
@@ -383,12 +381,11 @@ impl CommitType {
     // I delegated an account, now the owner is delegation program
     // parent_program_id != Some(&acc_owner) should fail. or any modification on ER
     // ER perceives owner as old one, hence for ER those are valid txs
-    // On commit_and_undelegate and commit we will set owner to DLP, for latter temparerily
+    // On commit_and_undelegate and commit we will set owner to DLP, for latter temporarily
     // The owner shall be real owner on chain
     // So first:
     // 1. Validate
     // 2. Fetch current account states
-    // TODO: 3. switch the ownership
     pub fn extract_commit_accounts<'a>(
         account_indices: &[u8],
         transaction_context: &'a TransactionContext,

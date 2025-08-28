@@ -758,6 +758,14 @@ async fn ix_commit_local(
             .await
             .unwrap()
             .unwrap();
+        debug!(
+            "{}",
+            statuses
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
 
         // When we finalize it is possible to also undelegate the account
         let expected_owner = if is_undelegate {
