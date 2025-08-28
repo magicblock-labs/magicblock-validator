@@ -1,12 +1,6 @@
-use std::sync::Arc;
-
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use solana_account::cow::AccountSeqLock;
 use solana_account_decoder::{encode_ui_account, UiAccount, UiAccountEncoding};
-use tokio::sync::{
-    mpsc::{Receiver, Sender},
-    Notify,
-};
 
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -18,33 +12,10 @@ pub type AccountUpdateRx = MpmcReceiver<AccountWithSlot>;
 /// The sending end of the channel for account state changes.
 pub type AccountUpdateTx = MpmcSender<AccountWithSlot>;
 
-/// The receiving end of the command channel for requesting accounts to be cloned from chain
-pub type EnsureAccountsRx = Receiver<AccountsToEnsure>;
-/// The sending end of the command channel for requesting accounts to be cloned from chain
-pub type EnsureAccountsTx = Sender<AccountsToEnsure>;
-
-/// A message sent to the accounts worker to request that a set of accounts be cloned from chain
-pub struct AccountsToEnsure {
-    /// The list of account public keys to load.
-    pub accounts: Box<[Pubkey]>,
-    /// A notification handle used as a callback to signal completion. A requester can
-    /// await on this handle to be notified when the accounts are ready.
-    pub ready: Arc<Notify>,
-}
-
 /// A message that bundles an updated account with the slot in which the update occurred.
 pub struct AccountWithSlot {
     pub account: LockedAccount,
     pub slot: Slot,
-}
-
-impl AccountsToEnsure {
-    /// Constructs a new `AccountsToEnsure` request.
-    pub fn new(accounts: Vec<Pubkey>) -> Self {
-        let ready = Arc::default();
-        let accounts = accounts.into_boxed_slice();
-        Self { accounts, ready }
-    }
 }
 
 /// A wrapper for account data that provides a mechanism for safe, optimistic concurrent reads.

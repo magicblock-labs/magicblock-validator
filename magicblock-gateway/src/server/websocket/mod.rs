@@ -19,7 +19,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     error::RpcError,
-    requests::JsonRequest,
     state::{
         subscriptions::SubscriptionsDb, transactions::TransactionsCache,
         SharedState,

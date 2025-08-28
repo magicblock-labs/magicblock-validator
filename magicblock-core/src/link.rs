@@ -1,6 +1,4 @@
-use accounts::{
-    AccountUpdateRx, AccountUpdateTx, EnsureAccountsRx, EnsureAccountsTx,
-};
+use accounts::{AccountUpdateRx, AccountUpdateTx};
 use blocks::{BlockUpdateRx, BlockUpdateTx};
 use tokio::sync::mpsc;
 use transactions::{
@@ -27,8 +25,6 @@ pub struct DispatchEndpoints {
     pub transaction_scheduler: TransactionSchedulerHandle,
     /// Receives notifications about account state changes from the executor.
     pub account_update: AccountUpdateRx,
-    /// Sends requests to the `AccountsDb` worker to pre-load or cache specific accounts.
-    pub ensure_accounts: EnsureAccountsTx,
     /// Receives notifications when a new block is produced.
     pub block_update: BlockUpdateRx,
 }
@@ -45,8 +41,6 @@ pub struct ValidatorChannelEndpoints {
     pub transaction_to_process: TransactionToProcessRx,
     /// Sends notifications about account state changes to the pool of EventProccessor workers.
     pub account_update: AccountUpdateTx,
-    /// Receives requests to pre-clone specific accounts.
-    pub ensure_accounts: EnsureAccountsRx,
     /// Sends notifications when a new block is produced to the pool of EventProcessor workers.
     pub block_update: BlockUpdateTx,
 }
@@ -67,14 +61,12 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
 
     // Bounded channels for command queues where applying backpressure is important.
     let (txn_to_process_tx, txn_to_process_rx) = mpsc::channel(LINK_CAPACITY);
-    let (ensure_accounts_tx, ensure_accounts_rx) = mpsc::channel(LINK_CAPACITY);
 
     // Bundle the respective channel ends for the dispatch side.
     let dispatch = DispatchEndpoints {
         transaction_scheduler: TransactionSchedulerHandle(txn_to_process_tx),
         transaction_status: transaction_status_rx,
         account_update: account_update_rx,
-        ensure_accounts: ensure_accounts_tx,
         block_update: block_update_rx,
     };
 
@@ -82,7 +74,6 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
     let validator = ValidatorChannelEndpoints {
         transaction_to_process: txn_to_process_rx,
         transaction_status: transaction_status_tx,
-        ensure_accounts: ensure_accounts_rx,
         account_update: account_update_tx,
         block_update: block_update_tx,
     };

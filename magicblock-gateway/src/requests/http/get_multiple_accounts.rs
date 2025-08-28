@@ -20,35 +20,22 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let slot = self.accountsdb.slot();
         let mut accounts = vec![None; pubkeys.len()];
-        let mut ensured = false;
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
-        loop {
-            let reader = self.accountsdb.reader()?;
-            for (pubkey, account) in pubkeys.iter().zip(&mut accounts) {
-                if account.is_some() {
-                    continue;
-                }
-                *account = reader.read(pubkey, identity).map(|acc| {
-                    LockedAccount::new(*pubkey, acc).ui_encode(encoding)
-                });
+        // TODO(thlorenz): use chainlink
+        let reader = self.accountsdb.reader()?;
+        for (pubkey, account) in pubkeys.iter().zip(&mut accounts) {
+            if account.is_some() {
+                continue;
             }
-            if ensured {
-                break;
-            }
-            let to_ensure = accounts
-                .iter()
-                .zip(&pubkeys)
-                .filter_map(|(acc, pk)| acc.is_none().then_some(*pk))
-                .collect::<Vec<_>>();
-            if to_ensure.is_empty() {
-                break;
-            }
-            let to_ensure = AccountsToEnsure::new(to_ensure);
-            let ready = to_ensure.ready.clone();
-            let _ = self.ensure_accounts_tx.send(to_ensure).await;
-            ready.notified().await;
-            ensured = true;
+            *account = reader.read(pubkey, identity).map(|acc| {
+                LockedAccount::new(*pubkey, acc).ui_encode(encoding)
+            });
         }
+        let _to_ensure = accounts
+            .iter()
+            .zip(&pubkeys)
+            .filter_map(|(acc, pk)| acc.is_none().then_some(*pk))
+            .collect::<Vec<_>>();
 
         Ok(ResponsePayload::encode(&request.id, accounts, slot))
     }

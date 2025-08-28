@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     error::RpcError,
     parse_params,
-    requests::JsonRpcMethod,
+    requests::{JsonRpcWsMethod, JsonWsRequest},
     state::{
         signatures::SignaturesExpirer,
         subscriptions::{CleanUp, SubscriptionID, SubscriptionsDb},
@@ -12,7 +12,7 @@ use crate::{
     RpcResult,
 };
 
-use super::{connection::ConnectionID, JsonRequest};
+use super::connection::ConnectionID;
 use hyper::body::Bytes;
 use json::{Serialize, Value};
 use tokio::sync::mpsc;
@@ -65,9 +65,9 @@ impl WsDispatcher {
     /// It returns an error for any other method type.
     pub(crate) async fn dispatch(
         &mut self,
-        request: &mut JsonRequest,
+        request: &mut JsonWsRequest,
     ) -> RpcResult<WsDispatchResult> {
-        use JsonRpcMethod::*;
+        use JsonRpcWsMethod::*;
         let result = match request.method {
             AccountSubscribe => self.account_subscribe(request).await,
             ProgramSubscribe => self.program_subscribe(request).await,
@@ -75,8 +75,9 @@ impl WsDispatcher {
             SlotSubscribe => self.slot_subscribe(),
             LogsSubscribe => self.logs_subscribe(request),
             AccountUnsubscribe | ProgramUnsubscribe | LogsUnsubscribe
-            | SlotUnsubsribe => self.unsubscribe(request),
-            unknown => return Err(RpcError::method_not_found(unknown)),
+            | SlotUnsubsribe | SignatureUnsubscribe => {
+                self.unsubscribe(request)
+            }
         }?;
 
         Ok(WsDispatchResult {
@@ -105,7 +106,7 @@ impl WsDispatcher {
     /// executed in a background task, removing the subscriber from the global database.
     fn unsubscribe(
         &mut self,
-        request: &mut JsonRequest,
+        request: &mut JsonWsRequest,
     ) -> RpcResult<SubResult> {
         let mut params = request
             .params

@@ -3,13 +3,13 @@ use std::{error::Error, fmt::Display};
 use json::Serialize;
 use solana_transaction_error::TransactionError;
 
-const TRANSACTION_SIMULATION: i16 = -32002;
-const TRANSACTION_VERIFICATION: i16 = -32003;
-const INVALID_REQUEST: i16 = -32600;
-const METHOD_NOTFOUND: i16 = -32601;
-const INVALID_PARAMS: i16 = -32602;
-const INTERNAL_ERROR: i16 = -32603;
-const PARSE_ERROR: i16 = -32700;
+pub(crate) const TRANSACTION_SIMULATION: i16 = -32002;
+pub(crate) const TRANSACTION_VERIFICATION: i16 = -32003;
+pub(crate) const BLOCK_NOT_FOUND: i16 = 32009;
+pub(crate) const INVALID_REQUEST: i16 = -32600;
+pub(crate) const INVALID_PARAMS: i16 = -32602;
+pub(crate) const INTERNAL_ERROR: i16 = -32603;
+pub(crate) const PARSE_ERROR: i16 = -32700;
 
 #[derive(Serialize, Debug)]
 pub struct RpcError {
@@ -103,13 +103,6 @@ impl RpcError {
         }
     }
 
-    pub(crate) fn method_not_found<M: Display>(method: M) -> Self {
-        Self {
-            code: METHOD_NOTFOUND,
-            message: format!("method not found: {method}"),
-        }
-    }
-
     pub(crate) fn parse_error<E: Error>(error: E) -> Self {
         Self {
             code: PARSE_ERROR,
@@ -121,6 +114,13 @@ impl RpcError {
         Self {
             code: INTERNAL_ERROR,
             message: format!("internal server error: {error}"),
+        }
+    }
+
+    pub(crate) fn custom<E: Display>(error: E, code: i16) -> Self {
+        Self {
+            code,
+            message: error.to_string(),
         }
     }
 }
