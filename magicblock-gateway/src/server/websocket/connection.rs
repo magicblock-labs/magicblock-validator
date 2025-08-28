@@ -18,10 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     error::RpcError,
-    requests::{
-        payload::{ResponseErrorPayload, ResponsePayload},
-        JsonRequest,
-    },
+    requests::payload::{ResponseErrorPayload, ResponsePayload},
     server::{websocket::dispatch::WsConnectionChannel, Shutdown},
 };
 
@@ -113,8 +110,7 @@ impl ConnectionHandler {
                     }
 
                     // Parse the JSON RPC request.
-                    let parsed = json::from_slice::<JsonRequest>(&frame.payload)
-                        .map_err(RpcError::parse_error);
+                    let parsed = json::from_slice(&frame.payload).map_err(RpcError::parse_error);
                     let mut request = match parsed {
                         Ok(r) => r,
                         Err(error) => {

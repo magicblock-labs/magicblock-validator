@@ -7,7 +7,7 @@ use hyper::{
     Request, Response,
 };
 use magicblock_core::link::transactions::SanitizeableTransaction;
-use prelude::{AccountsToEnsure, JsonBody};
+use prelude::JsonBody;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 use solana_transaction::{
@@ -19,9 +19,9 @@ use crate::{
     error::RpcError, server::http::dispatch::HttpDispatcher, RpcResult,
 };
 
-use super::JsonRequest;
+use super::JsonHttpRequest;
 
-type HandlerResult = RpcResult<Response<JsonBody>>;
+pub(crate) type HandlerResult = RpcResult<Response<JsonBody>>;
 
 pub(crate) enum Data {
     Empty,
@@ -29,7 +29,7 @@ pub(crate) enum Data {
     MultiChunk(Vec<u8>),
 }
 
-pub(crate) fn parse_body(body: Data) -> RpcResult<JsonRequest> {
+pub(crate) fn parse_body(body: Data) -> RpcResult<JsonHttpRequest> {
     let body = match &body {
         Data::Empty => {
             return Err(RpcError::invalid_request("missing request body"));
@@ -70,18 +70,8 @@ impl HttpDispatcher {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
-        let mut ensured = false;
-        loop {
-            let account = self.accountsdb.get_account(pubkey);
-            if account.is_some() || ensured {
-                break account;
-            }
-            let to_ensure = AccountsToEnsure::new(vec![*pubkey]);
-            let ready = to_ensure.ready.clone();
-            let _ = self.ensure_accounts_tx.send(to_ensure).await;
-            ready.notified().await;
-            ensured = true;
-        }
+        // TODO(thlorenz): use chainlink
+        self.accountsdb.get_account(pubkey)
     }
 
     fn prepare_transaction(
@@ -133,43 +123,33 @@ impl HttpDispatcher {
         &self,
         transaction: &SanitizedTransaction,
     ) -> RpcResult<()> {
+        // TODO(thlorenz): replace the entire call with chainlink
         let message = transaction.message();
         let reader = self.accountsdb.reader().map_err(RpcError::internal)?;
-        let mut ensured = false;
-        loop {
-            let mut to_ensure = Vec::new();
-            let accounts = message.account_keys().iter().enumerate();
-            for (index, pubkey) in accounts {
-                if !reader.contains(pubkey) {
-                    to_ensure.push(*pubkey);
-                    continue;
-                }
-                if !message.is_writable(index) {
-                    continue;
-                }
-                let delegated = reader.read(pubkey, |acc| acc.delegated());
-                if delegated.unwrap_or_default() {
-                    Err(RpcError::invalid_params(
-                        "use of non-delegated account as writeable",
-                    ))?;
-                }
+        let mut to_ensure = Vec::new();
+        let accounts = message.account_keys().iter().enumerate();
+        for (index, pubkey) in accounts {
+            if !reader.contains(pubkey) {
+                to_ensure.push(*pubkey);
+                continue;
             }
-            if ensured && !to_ensure.is_empty() {
-                let msg = format!(
-                    "transaction uses non-existent accounts: {to_ensure:?}"
-                );
-                Err(RpcError::invalid_params(msg))?;
+            if !message.is_writable(index) {
+                continue;
             }
-            if to_ensure.is_empty() {
-                break Ok(());
+            let delegated = reader.read(pubkey, |acc| acc.delegated());
+            if delegated.unwrap_or_default() {
+                Err(RpcError::invalid_params(
+                    "use of non-delegated account as writeable",
+                ))?;
             }
-            let to_ensure = AccountsToEnsure::new(to_ensure);
-            let ready = to_ensure.ready.clone();
-            let _ = self.ensure_accounts_tx.send(to_ensure).await;
-            ready.notified().await;
-
-            ensured = true;
         }
+        if !to_ensure.is_empty() {
+            let msg = format!(
+                "transaction uses non-existent accounts: {to_ensure:?}"
+            );
+            Err(RpcError::invalid_params(msg))?;
+        }
+        Ok(())
     }
 }
 
@@ -180,16 +160,13 @@ mod prelude {
         requests::{
             params::{Serde32Bytes, SerdeSignature},
             payload::ResponsePayload,
-            JsonRequest,
+            JsonHttpRequest as JsonRequest,
         },
         server::http::dispatch::HttpDispatcher,
         some_or_err,
         utils::{AccountWithPubkey, JsonBody},
     };
-    pub(super) use magicblock_core::{
-        link::accounts::{AccountsToEnsure, LockedAccount},
-        Slot,
-    };
+    pub(super) use magicblock_core::{link::accounts::LockedAccount, Slot};
     pub(super) use solana_account::ReadableAccount;
     pub(super) use solana_account_decoder::UiAccountEncoding;
     pub(super) use solana_pubkey::Pubkey;
@@ -227,6 +204,8 @@ pub(crate) mod get_token_account_balance;
 pub(crate) mod get_token_accounts_by_delegate;
 pub(crate) mod get_token_accounts_by_owner;
 pub(crate) mod get_transaction;
+pub(crate) mod get_version;
 pub(crate) mod is_blockhash_valid;
+pub(crate) mod mocked;
 pub(crate) mod send_transaction;
 pub(crate) mod simulate_transaction;

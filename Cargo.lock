@@ -4013,6 +4013,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
+ "magicblock-version",
  "parking_lot 0.12.4",
  "scc",
  "serde",
@@ -4021,6 +4022,8 @@ dependencies = [
  "solana-hash",
  "solana-message",
  "solana-pubkey",
+ "solana-pubsub-client",
+ "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-signature",
  "solana-transaction",
@@ -6425,6 +6428,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=ee2d713#ee2d7136a60dd675605f8540fc0e6f9ea8c6d961"
 dependencies = [
  "bincode",
  "qualifier_attr",
