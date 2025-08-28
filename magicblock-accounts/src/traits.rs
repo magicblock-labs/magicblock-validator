@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use magicblock_metrics::metrics::HistogramTimer;
-use magicblock_program::magic_scheduled_base_intent::CommittedAccountV2;
+use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
     account::{Account, AccountSharedData, ReadableAccount},
@@ -43,9 +43,9 @@ pub struct AccountCommittee {
     pub undelegation_requested: bool,
 }
 
-impl From<AccountCommittee> for CommittedAccountV2 {
+impl From<AccountCommittee> for CommittedAccount {
     fn from(value: AccountCommittee) -> Self {
-        CommittedAccountV2 {
+        CommittedAccount {
             pubkey: value.pubkey,
             account: Account {
                 lamports: value.account_data.lamports(),

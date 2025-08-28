@@ -32,7 +32,7 @@ use magicblock_committor_service::{
 use magicblock_core::magic_program;
 use magicblock_program::{
     magic_scheduled_base_intent::{
-        CommitType, CommittedAccountV2, MagicBaseIntent, ScheduledBaseIntent,
+        CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
     },
     validator::validator_authority_id,
 };
@@ -411,9 +411,8 @@ where
             .chunks(MAX_PROCESS_PER_TX as usize)
             .into_iter()
             .map(|committees| {
-                let committees = committees
-                    .map(CommittedAccountV2::from)
-                    .collect::<Vec<_>>();
+                let committees =
+                    committees.map(CommittedAccount::from).collect::<Vec<_>>();
 
                 ScheduledBaseIntent {
                     // isn't important but shall be unique

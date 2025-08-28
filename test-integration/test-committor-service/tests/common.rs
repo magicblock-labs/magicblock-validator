@@ -19,7 +19,7 @@ use magicblock_committor_service::{
     },
     ComputeBudgetConfig,
 };
-use magicblock_program::magic_scheduled_base_intent::CommittedAccountV2;
+use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;
@@ -144,7 +144,7 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
     CommitTask {
         commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
         allow_undelegation: false,
-        committed_account: CommittedAccountV2 {
+        committed_account: CommittedAccount {
             pubkey: Pubkey::new_unique(),
             account: Account {
                 lamports: 1000,
@@ -158,8 +158,8 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
 }
 
 #[allow(dead_code)]
-pub fn create_committed_account(data: &[u8]) -> CommittedAccountV2 {
-    CommittedAccountV2 {
+pub fn create_committed_account(data: &[u8]) -> CommittedAccount {
+    CommittedAccount {
         pubkey: Pubkey::new_unique(),
         account: Account {
             lamports: 1000,

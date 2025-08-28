@@ -230,7 +230,7 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use dlp::args::Context;
     use magicblock_program::magic_scheduled_base_intent::{
-        BaseAction, CommittedAccountV2, ProgramArgs,
+        BaseAction, CommittedAccount, ProgramArgs,
     };
     use solana_account::Account;
     use solana_sdk::system_program;
@@ -248,7 +248,7 @@ mod tests {
         ArgsTask::Commit(CommitTask {
             commit_id,
             allow_undelegation: false,
-            committed_account: CommittedAccountV2 {
+            committed_account: CommittedAccount {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
                     lamports: 1000,

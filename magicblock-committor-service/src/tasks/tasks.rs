@@ -13,7 +13,7 @@ use magicblock_committor_program::{
     ChangesetChunks, Chunks,
 };
 use magicblock_program::magic_scheduled_base_intent::{
-    BaseAction, CommittedAccountV2,
+    BaseAction, CommittedAccount,
 };
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::{AccountMeta, Instruction};
@@ -79,7 +79,7 @@ dyn_clone::clone_trait_object!(BaseTask);
 pub struct CommitTask {
     pub commit_id: u64,
     pub allow_undelegation: bool,
-    pub committed_account: CommittedAccountV2,
+    pub committed_account: CommittedAccount,
 }
 
 #[derive(Clone)]
@@ -333,7 +333,7 @@ mod serialization_safety_test {
         let commit_task = ArgsTask::Commit(CommitTask {
             commit_id: 123,
             allow_undelegation: true,
-            committed_account: CommittedAccountV2 {
+            committed_account: CommittedAccount {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
                     lamports: 1000,
@@ -388,7 +388,7 @@ mod serialization_safety_test {
         let buffer_task = BufferTask::Commit(CommitTask {
             commit_id: 456,
             allow_undelegation: false,
-            committed_account: CommittedAccountV2 {
+            committed_account: CommittedAccount {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
                     lamports: 2000,
@@ -411,7 +411,7 @@ mod serialization_safety_test {
         let buffer_task = BufferTask::Commit(CommitTask {
             commit_id: 789,
             allow_undelegation: true,
-            committed_account: CommittedAccountV2 {
+            committed_account: CommittedAccount {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
                     lamports: 3000,

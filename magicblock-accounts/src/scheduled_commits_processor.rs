@@ -18,7 +18,7 @@ use magicblock_committor_service::{
 };
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
-    magic_scheduled_base_intent::{CommittedAccountV2, ScheduledBaseIntent},
+    magic_scheduled_base_intent::{CommittedAccount, ScheduledBaseIntent},
     register_scheduled_commit_sent, FeePayerAccount, SentCommit,
     TransactionScheduler,
 };
@@ -101,7 +101,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
             /// Returns `true` if account should be retained, `false` otherwise
             fn process_feepayer(
                 &mut self,
-                account: &mut CommittedAccountV2,
+                account: &mut CommittedAccount,
             ) -> bool {
                 let pubkey = account.pubkey;
                 let ephemeral_pubkey =

@@ -436,7 +436,7 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
 #[cfg(test)]
 mod tests {
     use magicblock_program::magic_scheduled_base_intent::{
-        CommitType, CommittedAccountV2, MagicBaseIntent,
+        CommitType, CommittedAccount, MagicBaseIntent,
     };
     use solana_sdk::{
         account::Account, hash::Hash, pubkey::Pubkey, signature::Signature,
@@ -476,11 +476,11 @@ mod tests {
             action_sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
             base_intent: MagicBaseIntent::Commit(CommitType::Standalone(vec![
-                CommittedAccountV2 {
+                CommittedAccount {
                     pubkey: Pubkey::new_unique(),
                     account: account1,
                 },
-                CommittedAccountV2 {
+                CommittedAccount {
                     pubkey: Pubkey::new_unique(),
                     account: account2,
                 },

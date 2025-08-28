@@ -1,5 +1,3 @@
-use std::fmt::Formatter;
-
 use async_trait::async_trait;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
@@ -14,25 +12,8 @@ use crate::{
     ComputeBudgetConfig,
 };
 
-/// Transaction Preparator version
-/// Some actions maybe invalid per version
-#[derive(Debug)]
-pub enum PreparatorVersion {
-    V1,
-}
-
-impl std::fmt::Display for PreparatorVersion {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::V1 => write!(f, "V1"),
-        }
-    }
-}
-
 #[async_trait]
 pub trait TransactionPreparator: Send + Sync + 'static {
-    fn version(&self) -> PreparatorVersion;
-
     /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
     /// Handles all necessary preparation needed for successful [`BaseTask`] execution
     async fn prepare_for_strategy<P: IntentPersister>(
@@ -72,10 +53,6 @@ impl TransactionPreparatorV1 {
 
 #[async_trait]
 impl TransactionPreparator for TransactionPreparatorV1 {
-    fn version(&self) -> PreparatorVersion {
-        PreparatorVersion::V1
-    }
-
     async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,

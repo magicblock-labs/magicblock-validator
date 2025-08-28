@@ -11,7 +11,7 @@ use solana_sdk::{
 
 use crate::{
     magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, CommittedAccountV2, MagicBaseIntent,
+        CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
         ScheduledBaseIntent, UndelegateType,
     },
     schedule_transactions,
@@ -124,7 +124,7 @@ pub(crate) fn process_schedule_commit(
     // NOTE: we don't require PDAs to be signers as in our case verifying that the
     // program owning the PDAs invoked us via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
-    let mut committed_accounts: Vec<CommittedAccountV2> = Vec::new();
+    let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
@@ -158,7 +158,7 @@ pub(crate) fn process_schedule_commit(
             account.owner = parent_program_id.cloned().unwrap_or(account.owner);
 
             #[allow(clippy::unnecessary_literal_unwrap)]
-            committed_accounts.push(CommittedAccountV2 {
+            committed_accounts.push(CommittedAccount {
                 pubkey: *acc_pubkey,
                 account,
             });
