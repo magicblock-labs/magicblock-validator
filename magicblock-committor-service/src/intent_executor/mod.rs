@@ -33,7 +33,7 @@ pub trait IntentExecutor: Send + Sync + 'static {
     /// Returns `ExecutionOutput` or an `Error`
     async fn execute<P: IntentPersister>(
         &self,
-        l1_message: ScheduledBaseIntent,
+        base_intent: ScheduledBaseIntent,
         persister: Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput>;
 }

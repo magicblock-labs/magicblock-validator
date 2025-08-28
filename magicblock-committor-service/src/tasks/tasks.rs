@@ -95,7 +95,7 @@ pub struct FinalizeTask {
 }
 
 #[derive(Clone)]
-pub struct L1ActionTask {
+pub struct BaseActionTask {
     pub context: Context,
     pub action: BaseAction,
 }
@@ -106,7 +106,7 @@ pub enum ArgsTask {
     Commit(CommitTask),
     Finalize(FinalizeTask),
     Undelegate(UndelegateTask), // Special action really
-    L1Action(L1ActionTask),
+    BaseAction(BaseActionTask),
 }
 
 impl BaseTask for ArgsTask {
@@ -136,7 +136,7 @@ impl BaseTask for ArgsTask {
                 value.owner_program,
                 value.rent_reimbursement,
             ),
-            Self::L1Action(value) => {
+            Self::BaseAction(value) => {
                 let action = &value.action;
                 let account_metas = action
                     .account_metas_per_program
@@ -167,7 +167,7 @@ impl BaseTask for ArgsTask {
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
         match *self {
             Self::Commit(value) => Ok(Box::new(BufferTask::Commit(value))),
-            Self::L1Action(_) | Self::Finalize(_) | Self::Undelegate(_) => {
+            Self::BaseAction(_) | Self::Finalize(_) | Self::Undelegate(_) => {
                 Err(self)
             }
         }
@@ -181,7 +181,7 @@ impl BaseTask for ArgsTask {
     fn compute_units(&self) -> u32 {
         match self {
             Self::Commit(_) => 55_000,
-            Self::L1Action(task) => task.action.compute_units,
+            Self::BaseAction(task) => task.action.compute_units,
             Self::Undelegate(_) => 50_000,
             Self::Finalize(_) => 40_000,
         }
@@ -359,8 +359,8 @@ mod serialization_safety_test {
         });
         assert_serializable(&undelegate_task.instruction(&validator));
 
-        // Test L1Action variant
-        let l1_action = ArgsTask::L1Action(L1ActionTask {
+        // Test BaseAction variant
+        let base_action = ArgsTask::BaseAction(BaseActionTask {
             context: Context::Undelegate,
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
@@ -376,7 +376,7 @@ mod serialization_safety_test {
                 compute_units: 10_000,
             },
         });
-        assert_serializable(&l1_action.instruction(&validator));
+        assert_serializable(&base_action.instruction(&validator));
     }
 
     // Test BufferTask variants

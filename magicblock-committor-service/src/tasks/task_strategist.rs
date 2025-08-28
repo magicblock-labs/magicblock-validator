@@ -239,7 +239,7 @@ mod tests {
     use crate::{
         persist::IntentPersisterImpl,
         tasks::tasks::{
-            CommitTask, L1ActionTask, TaskStrategy, UndelegateTask,
+            BaseActionTask, CommitTask, TaskStrategy, UndelegateTask,
         },
     };
 
@@ -261,9 +261,9 @@ mod tests {
         })
     }
 
-    // Helper to create an L1 action task
-    fn create_test_l1_action_task(len: usize) -> ArgsTask {
-        ArgsTask::L1Action(L1ActionTask {
+    // Helper to create a Base action task
+    fn create_test_base_action_task(len: usize) -> ArgsTask {
+        ArgsTask::BaseAction(BaseActionTask {
             context: Context::Commit,
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
@@ -450,7 +450,7 @@ mod tests {
         let tasks = vec![
             Box::new(create_test_commit_task(1, 1000)) as Box<dyn BaseTask>,
             Box::new(create_test_finalize_task()) as Box<dyn BaseTask>,
-            Box::new(create_test_l1_action_task(500)) as Box<dyn BaseTask>,
+            Box::new(create_test_base_action_task(500)) as Box<dyn BaseTask>,
             Box::new(create_test_undelegate_task()) as Box<dyn BaseTask>,
         ];
 
@@ -474,7 +474,7 @@ mod tests {
             vec![
                 TaskStrategy::Buffer, // Commit task optimized
                 TaskStrategy::Args,   // Finalize stays
-                TaskStrategy::Args,   // L1Action stays
+                TaskStrategy::Args,   // BaseAction stays
                 TaskStrategy::Args,   // Undelegate stays
             ]
         );

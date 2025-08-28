@@ -164,11 +164,11 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
 impl BaseIntentCommittorExt for ChangesetCommittorStub {
     async fn schedule_base_intents_waiting(
         &self,
-        l1_messages: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
     {
-        self.schedule_base_intent(l1_messages.clone());
-        let res = l1_messages
+        self.schedule_base_intent(base_intents.clone());
+        let res = base_intents
             .into_iter()
             .map(|message| {
                 Ok(ExecutionOutputWrapper {

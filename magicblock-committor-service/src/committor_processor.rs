@@ -130,7 +130,7 @@ impl CommittorProcessor {
     ) {
         let intents = base_intents
             .iter()
-            .map(|l1_message| l1_message.inner.clone())
+            .map(|base_intent| base_intent.inner.clone())
             .collect::<Vec<_>>();
         if let Err(err) = self.persister.start_base_intents(&intents) {
             // We will still try to perform the commits, but the fact that we cannot
@@ -144,7 +144,7 @@ impl CommittorProcessor {
 
         if let Err(err) = self.commits_scheduler.schedule(base_intents).await {
             // CommittorService broken
-            panic!("Failed to schedule L1 message: {}", err);
+            panic!("Failed to schedule base intent: {}", err);
         }
     }
 

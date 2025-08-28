@@ -23,12 +23,12 @@ IntentExecutor - responsible for execution of Intent. Calls  **TransactionPrepar
 TransactionPreparator - is an entity that handles all of the above "Transaction preparation" calling **TaskBuilderV1**,  **TaskStrategist**, **DeliveryPreparator** and then assempling it all and passing to **MessageExecutor**
 
 ## DeliveryPreparator
-After our **L1Task**s are ready we need to prepare eveything for their successful execution. **DeliveryPreparator** - handles ALTs and commit buffers
+After our **BaseTask**s are ready we need to prepare eveything for their successful execution. **DeliveryPreparator** - handles ALTs and commit buffers
 
 ## TaskBuilder
 First, lets build atomic tasks from scheduled message/intent.
 
-High level: TaskBuilder responsible for creating L1Tasks(to be renamed...) from ScheduledL1Message(to be renamed...).
+High level: TaskBuilder responsible for creating BaseTasks(to be renamed...) from ScheduledBaseIntent(to be renamed...).
 Details: To do that is requires additional information from DelegationMetadata, it is provided **CommitIdFetcher**
 
 ### BaseTask
