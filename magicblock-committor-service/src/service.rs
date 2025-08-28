@@ -426,7 +426,7 @@ pub trait BaseIntentCommittor: Send + Sync + 'static {
     /// Commits the changeset and returns
     fn schedule_base_intent(
         &self,
-        l1_messages: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
     );
 
     /// Subscribes for results of BaseIntent execution

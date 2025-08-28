@@ -152,9 +152,9 @@ impl IntentPersisterImpl {
 impl IntentPersister for IntentPersisterImpl {
     fn start_base_intents(
         &self,
-        l1_message: &[ScheduledBaseIntent],
+        base_intents: &[ScheduledBaseIntent],
     ) -> CommitPersistResult<()> {
-        let commit_rows = l1_message
+        let commit_rows = base_intents
             .iter()
             .flat_map(Self::create_commit_rows)
             .collect::<Vec<_>>();
@@ -168,9 +168,9 @@ impl IntentPersister for IntentPersisterImpl {
 
     fn start_base_intent(
         &self,
-        l1_message: &ScheduledBaseIntent,
+        base_intents: &ScheduledBaseIntent,
     ) -> CommitPersistResult<()> {
-        let commit_row = Self::create_commit_rows(l1_message);
+        let commit_row = Self::create_commit_rows(base_intents);
         self.commits_db
             .lock()
             .expect(POISONED_MUTEX_MSG)
@@ -297,20 +297,20 @@ impl IntentPersister for IntentPersisterImpl {
 impl<T: IntentPersister> IntentPersister for Option<T> {
     fn start_base_intents(
         &self,
-        l1_messages: &[ScheduledBaseIntent],
+        base_intents: &[ScheduledBaseIntent],
     ) -> CommitPersistResult<()> {
         match self {
-            Some(persister) => persister.start_base_intents(l1_messages),
+            Some(persister) => persister.start_base_intents(base_intents),
             None => Ok(()),
         }
     }
 
     fn start_base_intent(
         &self,
-        l1_message: &ScheduledBaseIntent,
+        base_intents: &ScheduledBaseIntent,
     ) -> CommitPersistResult<()> {
         match self {
-            Some(persister) => persister.start_base_intent(l1_message),
+            Some(persister) => persister.start_base_intent(base_intents),
             None => Ok(()),
         }
     }
@@ -506,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn test_start_l1_message() {
+    fn test_start_base_message() {
         let (persister, _temp_file) = create_test_persister();
         let message = create_test_message(1);
 
@@ -522,7 +522,7 @@ mod tests {
     }
 
     #[test]
-    fn test_start_l1_messages() {
+    fn test_start_base_messages() {
         let (persister, _temp_file) = create_test_persister();
         let message1 = create_test_message(1);
         let message2 = create_test_message(2);

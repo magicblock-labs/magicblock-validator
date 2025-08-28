@@ -137,13 +137,13 @@ impl TasksBuilder for TaskBuilderV1 {
                 }
                 CommitType::WithBaseActions {
                     committed_accounts,
-                    base_actions: l1_actions,
+                    base_actions,
                 } => {
                     let mut tasks = committed_accounts
                         .iter()
                         .map(finalize_task)
                         .collect::<Vec<_>>();
-                    tasks.extend(l1_actions.iter().map(|action| {
+                    tasks.extend(base_actions.iter().map(|action| {
                         let task = BaseActionTask {
                             context: Context::Commit,
                             action: action.clone(),

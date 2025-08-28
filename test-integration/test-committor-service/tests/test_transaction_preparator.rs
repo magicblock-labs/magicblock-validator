@@ -191,7 +191,7 @@ async fn test_prepare_commit_tx_with_l1_actions() {
         Box::new(ArgsTask::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
         })),
-        // L1Action
+        // BaseAction
         Box::new(ArgsTask::BaseAction(BaseActionTask {
             context: Context::Commit,
             action: base_action,
@@ -256,7 +256,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
         Box::new(ArgsTask::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
         })),
-        // L1Action
+        // BaseAction
         Box::new(ArgsTask::Undelegate(UndelegateTask {
             delegated_account: committed_account.pubkey,
             owner_program: Pubkey::new_unique(),

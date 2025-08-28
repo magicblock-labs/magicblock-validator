@@ -261,8 +261,8 @@ mod tests {
         })
     }
 
-    // Helper to create an L1 action task
-    fn create_test_l1_action_task(len: usize) -> ArgsTask {
+    // Helper to create a base action task
+    fn create_test_base_action_task(len: usize) -> ArgsTask {
         ArgsTask::BaseAction(BaseActionTask {
             context: Context::Commit,
             action: BaseAction {
@@ -450,7 +450,7 @@ mod tests {
         let tasks = vec![
             Box::new(create_test_commit_task(1, 1000)) as Box<dyn BaseTask>,
             Box::new(create_test_finalize_task()) as Box<dyn BaseTask>,
-            Box::new(create_test_l1_action_task(500)) as Box<dyn BaseTask>,
+            Box::new(create_test_base_action_task(500)) as Box<dyn BaseTask>,
             Box::new(create_test_undelegate_task()) as Box<dyn BaseTask>,
         ];
 

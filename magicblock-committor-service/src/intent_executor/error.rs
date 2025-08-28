@@ -69,7 +69,7 @@ pub enum TransactionStrategyExecutionError {
     #[error("Max instruction trace length exceeded")]
     CpiLimitError,
     #[error("InternalError: {0}")]
-    InternalError(#[source] InternalError),
+    InternalError(#[from] InternalError),
 }
 
 impl From<TaskStrategistError> for IntentExecutorError {

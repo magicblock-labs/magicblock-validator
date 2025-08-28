@@ -290,36 +290,36 @@ where
         }
 
         // Convert committees to BaseIntents s
-        let scheduled_l1_messages =
-            self.create_scheduled_l1_message(accounts_to_be_committed);
+        let scheduled_base_intent =
+            self.create_scheduled_base_intents(accounts_to_be_committed);
 
         // Commit BaseIntents
         let results = committor_service
-            .schedule_base_intents_waiting(scheduled_l1_messages.clone())
+            .schedule_base_intents_waiting(scheduled_base_intent.clone())
             .await?;
 
         // Process results
-        let output = self.process_l1_messages_results(
+        let output = self.process_base_intents_results(
             &now,
             results,
-            &scheduled_l1_messages,
+            &scheduled_base_intent,
         );
         Ok(output)
     }
 
-    fn process_l1_messages_results(
+    fn process_base_intents_results(
         &self,
         now: &Duration,
         results: Vec<BroadcastedIntentExecutionResult>,
-        scheduled_l1_messages: &[ScheduledBaseIntentWrapper],
+        scheduled_base_intents: &[ScheduledBaseIntentWrapper],
     ) -> Vec<ExecutionOutput> {
-        // Filter failed l1 messages, log failed ones
+        // Filter failed base intents, log failed ones
         let outputs = results
             .into_iter()
             .filter_map(|execution_result| match execution_result {
                 Ok(value) => Some(value),
                 Err(err) => {
-                    error!("Failed to send l1 message: {}", err.2);
+                    error!("Failed to send base intent: {}", err.2);
                     None
                 }
             })
@@ -327,7 +327,7 @@ where
             .collect::<HashMap<u64, ExecutionOutputWrapper>>();
 
         // For successfully committed accounts get their (pubkey, hash)
-        let pubkeys_with_hashes = scheduled_l1_messages
+        let pubkeys_with_hashes = scheduled_base_intents
             .iter()
             // Filter out unsuccessful messages
             .filter(|message| outputs.contains_key(&message.inner.id))
@@ -367,7 +367,7 @@ where
         outputs.into_values().map(|output| output.output).collect()
     }
 
-    fn create_scheduled_l1_message(
+    fn create_scheduled_base_intents(
         &self,
         accounts_to_be_committed: Vec<(Pubkey, Pubkey, Option<Hash>)>,
     ) -> Vec<ScheduledBaseIntentWrapper> {
@@ -425,8 +425,8 @@ where
                     ),
                 }
             })
-            .map(|scheduled_l1_message| ScheduledBaseIntentWrapper {
-                inner: scheduled_l1_message,
+            .map(|scheduled_base_intents| ScheduledBaseIntentWrapper {
+                inner: scheduled_base_intents,
                 trigger_type: TriggerType::OffChain,
             })
             .collect()
