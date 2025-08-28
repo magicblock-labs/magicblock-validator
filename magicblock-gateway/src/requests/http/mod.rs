@@ -123,7 +123,7 @@ impl HttpDispatcher {
         &self,
         transaction: &SanitizedTransaction,
     ) -> RpcResult<()> {
-        // TODO(thlorenz): replace the entire call with chainlink
+        // TODO(thlorenz): replace the entire method call with chainlink
         let message = transaction.message();
         let reader = self.accountsdb.reader().map_err(RpcError::internal)?;
         let mut to_ensure = Vec::new();
