@@ -104,49 +104,49 @@ impl HttpDispatcher {
         // Route the request to the correct handler based on the method name.
         use crate::requests::JsonRpcHttpMethod::*;
         match request.method {
-            GetFirstAvailableBlock => self.get_first_available_block(request),
-            GetTokenLargestAccounts => self.get_token_largest_accounts(request),
-            GetLargestAccounts => self.get_largest_accounts(request),
-            GetVersion => self.get_version(request),
-            MinimumLedgerSlot => self.get_first_available_block(request),
-            GetSlotLeader => self.get_slot_leader(request),
-            GetSlotLeaders => self.get_slot_leaders(request),
             GetAccountInfo => self.get_account_info(request).await,
             GetBalance => self.get_balance(request).await,
-            GetMultipleAccounts => self.get_multiple_accounts(request).await,
-            GetProgramAccounts => self.get_program_accounts(request),
-            SendTransaction => self.send_transaction(request).await,
-            SimulateTransaction => self.simulate_transaction(request).await,
-            GetTransaction => self.get_transaction(request),
-            GetSignatureStatuses => self.get_signature_statuses(request),
-            GetSignaturesForAddress => self.get_signatures_for_address(request),
+            GetBlock => self.get_block(request),
+            GetBlockCommitment => self.get_block_commitment(request),
+            GetBlockHeight => self.get_block_height(request),
+            GetBlockTime => self.get_block_time(request),
+            GetBlocks => self.get_blocks(request),
+            GetBlocksWithLimit => self.get_blocks_with_limit(request),
+            GetClusterNodes => self.get_cluster_nodes(request),
             GetEpochInfo => self.get_epoch_info(request),
             GetEpochSchedule => self.get_epoch_schedule(request),
-            GetClusterNodes => self.get_cluster_nodes(request),
-            GetHealth => self.get_health(request),
+            GetFirstAvailableBlock => self.get_first_available_block(request),
             GetGenesisHash => self.get_genesis_hash(request),
+            GetHealth => self.get_health(request),
             GetHighestSnapshotSlot => self.get_highest_snapshot_slot(request),
+            GetIdentity => self.get_identity(request),
+            GetLargestAccounts => self.get_largest_accounts(request),
+            GetLatestBlockhash => self.get_latest_blockhash(request),
+            GetMultipleAccounts => self.get_multiple_accounts(request).await,
+            GetProgramAccounts => self.get_program_accounts(request),
+            GetSignatureStatuses => self.get_signature_statuses(request),
+            GetSignaturesForAddress => self.get_signatures_for_address(request),
+            GetSlot => self.get_slot(request),
+            GetSlotLeader => self.get_slot_leader(request),
+            GetSlotLeaders => self.get_slot_leaders(request),
             GetSupply => self.get_supply(request),
-            GetTokenSupply => self.get_token_supply(request),
-            GetBlockCommitment => self.get_block_commitment(request),
             GetTokenAccountBalance => {
                 self.get_token_account_balance(request).await
-            }
-            GetTokenAccountsByOwner => {
-                self.get_token_accounts_by_owner(request)
             }
             GetTokenAccountsByDelegate => {
                 self.get_token_accounts_by_delegate(request)
             }
-            GetSlot => self.get_slot(request),
-            GetBlock => self.get_block(request),
-            GetBlocks => self.get_blocks(request),
-            GetBlockTime => self.get_block_time(request),
-            GetBlocksWithLimit => self.get_blocks_with_limit(request),
-            GetLatestBlockhash => self.get_latest_blockhash(request),
-            GetBlockHeight => self.get_block_height(request),
-            GetIdentity => self.get_identity(request),
+            GetTokenAccountsByOwner => {
+                self.get_token_accounts_by_owner(request)
+            }
+            GetTokenLargestAccounts => self.get_token_largest_accounts(request),
+            GetTokenSupply => self.get_token_supply(request),
+            GetTransaction => self.get_transaction(request),
+            GetVersion => self.get_version(request),
             IsBlockhashValid => self.is_blockhash_valid(request),
+            MinimumLedgerSlot => self.get_first_available_block(request),
+            SendTransaction => self.send_transaction(request).await,
+            SimulateTransaction => self.simulate_transaction(request).await,
         }
     }
 }

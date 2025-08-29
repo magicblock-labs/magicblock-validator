@@ -7,7 +7,7 @@ impl HttpDispatcher {
     ) -> HandlerResult {
         let (start, end) = parse_params!(request.params()?, Slot, Slot);
         let start = some_or_err!(start, "start slot");
-        let slot = self.accountsdb.slot();
+        let slot = self.blocks.block_height();
         let end = end.map(|end| end.min(slot)).unwrap_or(slot);
         if start > end {
             Err(RpcError::invalid_params(

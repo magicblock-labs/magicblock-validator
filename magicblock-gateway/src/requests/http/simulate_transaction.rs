@@ -32,7 +32,6 @@ impl HttpDispatcher {
             config.replace_recent_blockhash,
         )?;
         self.ensure_transaction_accounts(&transaction).await?;
-        let slot = self.accountsdb.slot();
 
         let replacement = config
             .replace_recent_blockhash
@@ -73,6 +72,7 @@ impl HttpDispatcher {
                 .into(),
             replacement_blockhash: replacement,
         };
+        let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, result, slot))
     }
 }
