@@ -7,36 +7,32 @@ use std::{
 };
 
 use log::*;
-use magicblock_accounts::AccountsManager;
+use magicblock_accounts::{AccountsManager, ScheduledCommitsProcessor};
 use magicblock_bank::bank::Bank;
-use magicblock_committor_service::CommittorService;
 use magicblock_core::magic_program;
 use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics;
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
-use magicblock_program::{
-    magicblock_instruction::accept_scheduled_commits, MagicContext,
-};
+use magicblock_program::{instruction_utils::InstructionUtils, MagicContext};
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;
 
-pub fn init_slot_ticker(
+pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
     bank: &Arc<Bank>,
-    accounts_manager: &Arc<AccountsManager>,
-    committor_service: Option<Arc<CommittorService>>,
-    transaction_status_sender: Option<TransactionStatusSender>,
+    committor_processor: &Option<Arc<C>>,
+    transaction_status_sender: TransactionStatusSender,
     ledger: Arc<Ledger>,
     tick_duration: Duration,
     exit: Arc<AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
     let bank = bank.clone();
-    let accounts_manager = accounts_manager.clone();
-    let committor_service = committor_service.clone();
-    let log = tick_duration >= Duration::from_secs(5);
+    let committor_processor = committor_processor.clone();
+
     tokio::task::spawn(async move {
+        let log = tick_duration >= Duration::from_secs(5);
         while !exit.load(Ordering::Relaxed) {
             tokio::time::sleep(tick_duration).await;
 
@@ -46,44 +42,53 @@ pub fn init_slot_ticker(
                 error!("Failed to write block: {:?}", err);
             }
 
+            if log {
+                debug!("Advanced to slot {}", next_slot);
+            }
+            metrics::inc_slot();
+
+            // Handle intents if such feature enabled
+            let Some(committor_processor) = &committor_processor else {
+                continue;
+            };
+
             // If accounts were scheduled to be committed, we accept them here
             // and processs the commits
             let magic_context_acc = bank.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
                 .expect("Validator found to be running without MagicContext account!");
-
             if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
-                // 1. Send the transaction to move the scheduled commits from the MagicContext
-                //    to the global ScheduledCommit store
-                let tx = accept_scheduled_commits(bank.last_blockhash());
-                if let Err(err) = execute_legacy_transaction(
-                    tx,
+                handle_scheduled_commits(
                     &bank,
-                    transaction_status_sender.as_ref(),
-                ) {
-                    error!("Failed to accept scheduled commits: {:?}", err);
-                } else if let Some(committor_service) =
-                    committor_service.as_ref()
-                {
-                    // 2. Process those scheduled commits
-                    // TODO: fix the possible delay here
-                    // https://github.com/magicblock-labs/magicblock-validator/issues/104
-                    if let Err(err) = accounts_manager
-                        .process_scheduled_commits(committor_service)
-                        .await
-                    {
-                        error!(
-                            "Failed to process scheduled commits: {:?}",
-                            err
-                        );
-                    }
-                }
+                    committor_processor,
+                    &transaction_status_sender,
+                )
+                .await;
             }
-            if log {
-                info!("Advanced to slot {}", next_slot);
-            }
-            metrics::inc_slot();
         }
     })
+}
+
+async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
+    bank: &Arc<Bank>,
+    committor_processor: &Arc<C>,
+    transaction_status_sender: &TransactionStatusSender,
+) {
+    // 1. Send the transaction to move the scheduled commits from the MagicContext
+    //    to the global ScheduledCommit store
+    let tx = InstructionUtils::accept_scheduled_commits(bank.last_blockhash());
+    if let Err(err) =
+        execute_legacy_transaction(tx, bank, Some(transaction_status_sender))
+    {
+        error!("Failed to accept scheduled commits: {:?}", err);
+        return;
+    }
+
+    // 2. Process those scheduled commits
+    // TODO: fix the possible delay here
+    // https://github.com/magicblock-labs/magicblock-validator/issues/104
+    if let Err(err) = committor_processor.process().await {
+        error!("Failed to process scheduled commits: {:?}", err);
+    }
 }
 
 pub fn init_commit_accounts_ticker(

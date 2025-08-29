@@ -74,6 +74,7 @@ impl BufferWriteChunkBudget {
 // -----------------
 #[derive(Debug, Clone)]
 pub struct ComputeBudgetConfig {
+    pub compute_unit_price: u64,
     pub args_process: Budget,
     pub finalize: Budget,
     pub buffer_close: Budget,
@@ -90,6 +91,7 @@ pub struct ComputeBudgetConfig {
 impl ComputeBudgetConfig {
     pub fn new(compute_unit_price: u64) -> Self {
         Self {
+            compute_unit_price,
             args_process: Budget {
                 compute_unit_price,
                 base_budget: 80_000,
@@ -187,7 +189,7 @@ impl ComputeBudget {
         }
     }
 
-    fn compute_unit_price(&self) -> u64 {
+    pub fn compute_unit_price(&self) -> u64 {
         use ComputeBudget::*;
         match self {
             Process(budget) => budget.compute_unit_price,

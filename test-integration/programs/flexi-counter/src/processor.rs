@@ -1,6 +1,12 @@
+mod call_handler;
+mod schedule_intent;
+mod schedule_redelegation_intent;
+
 use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::{
-    consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
+    consts::{
+        EXTERNAL_CALL_HANDLER_DISCRIMINATOR, EXTERNAL_UNDELEGATE_DISCRIMINATOR,
+    },
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
@@ -23,6 +29,11 @@ use crate::{
         DelegateArgs, FlexiCounterInstruction,
         MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
     },
+    processor::{
+        call_handler::process_call_handler,
+        schedule_intent::process_create_intent,
+        schedule_redelegation_intent::process_create_redelegation_intent,
+    },
     state::FlexiCounter,
     utils::assert_keys_equal,
 };
@@ -33,11 +44,15 @@ pub fn process(
     instruction_data: &[u8],
 ) -> ProgramResult {
     if instruction_data.len() >= EXTERNAL_UNDELEGATE_DISCRIMINATOR.len() {
-        let (disc, seeds_data) =
+        let (disc, data) =
             instruction_data.split_at(EXTERNAL_UNDELEGATE_DISCRIMINATOR.len());
 
         if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
-            return process_undelegate_request(accounts, seeds_data);
+            return process_undelegate_request(accounts, data);
+        }
+
+        if disc == EXTERNAL_CALL_HANDLER_DISCRIMINATOR {
+            return process_call_handler(accounts, data);
         }
     }
 
@@ -57,6 +72,21 @@ pub fn process(
             process_add_and_schedule_commit(accounts, count, undelegate)
         }
         AddCounter => process_add_counter(accounts),
+        CreateIntent {
+            num_committees,
+            counter_diffs,
+            is_undelegate,
+            compute_units,
+        } => process_create_intent(
+            accounts,
+            num_committees,
+            counter_diffs,
+            is_undelegate,
+            compute_units,
+        ),
+        CreateRedelegationIntont => {
+            process_create_redelegation_intent(accounts)
+        }
     }?;
     Ok(())
 }
@@ -231,10 +261,10 @@ fn process_delegate(
         DelegateAccounts {
             payer,
             pda: delegate_account_pda,
+            owner_program,
             buffer,
             delegation_record,
             delegation_metadata,
-            owner_program,
             delegation_program,
             system_program,
         },

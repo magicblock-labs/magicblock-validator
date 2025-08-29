@@ -124,6 +124,18 @@ setup-config-devnet:
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
+test-schedule-intents:
+	RUN_TESTS=schedule_intents \
+	$(MAKE) test
+setup-schedule-intents-devnet:
+	RUN_TESTS=schedule_intents \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-schedule-intents-both:
+	RUN_TESTS=schedule_intents \
+	SETUP_ONLY=both \
+	$(MAKE) test
+
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
@@ -139,6 +151,9 @@ deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 		--keypair $(DIR)/target/deploy/program_flexi_counter-keypair.json \
 		--program-id $(DIR)/programs/flexi-counter/keys/f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4.json \
 		$(DIR)/target/deploy/program_flexi_counter.so
+
+fmt:
+	cargo +nightly fmt -- --config-path ../rustfmt-nightly.toml
 
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path ../rustfmt-nightly.toml

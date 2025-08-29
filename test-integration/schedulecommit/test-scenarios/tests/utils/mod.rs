@@ -51,7 +51,7 @@ fn get_context_with_delegated_committees_impl(
 pub fn assert_one_committee_was_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
-    finalize: bool,
+    is_single_stage: bool,
 ) {
     let pda = ctx.committees[0].1;
 
@@ -61,7 +61,9 @@ pub fn assert_one_committee_was_committed(
     let commit = res.included.get(&pda);
     assert!(commit.is_some(), "should have committed pda");
 
-    let sig_len = if finalize { 2 } else { 1 };
+    // SingleStage Commit & Finalize result in 1 tx
+    // TwoStage results in 2 signatures on base layer
+    let sig_len = if is_single_stage { 1 } else { 2 };
     assert_eq!(
         res.sigs.len(),
         sig_len,
@@ -74,7 +76,7 @@ pub fn assert_one_committee_was_committed(
 pub fn assert_two_committees_were_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
-    finalize: bool,
+    is_single_stage: bool,
 ) {
     let pda1 = ctx.committees[0].1;
     let pda2 = ctx.committees[1].1;
@@ -87,7 +89,7 @@ pub fn assert_two_committees_were_committed(
     assert!(commit1.is_some(), "should have committed pda1");
     assert!(commit2.is_some(), "should have committed pda2");
 
-    let sig_len = if finalize { 2 } else { 1 };
+    let sig_len = if is_single_stage { 1 } else { 2 };
     assert_eq!(
         res.sigs.len(),
         sig_len,
@@ -100,7 +102,7 @@ pub fn assert_two_committees_were_committed(
 pub fn assert_feepayer_was_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
-    finalize: bool,
+    is_single_stage: bool,
 ) {
     let payer = ctx.payer.pubkey();
 
@@ -109,7 +111,7 @@ pub fn assert_feepayer_was_committed(
     let commit_payer = res.feepayers.iter().find(|(p, _)| p == &payer);
     assert!(commit_payer.is_some(), "should have committed payer");
 
-    let sig_len = if finalize { 2 } else { 1 };
+    let sig_len = if is_single_stage { 1 } else { 2 };
     assert_eq!(
         res.sigs.len(),
         sig_len,
