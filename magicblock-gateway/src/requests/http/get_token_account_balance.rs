@@ -48,7 +48,7 @@ impl HttpDispatcher {
             ui_amount_string: ui_amount.to_string(),
             decimals,
         };
-        let slot = self.accountsdb.slot();
+        let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, ui_token_amount, slot))
     }
 }

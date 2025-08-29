@@ -18,7 +18,6 @@ impl HttpDispatcher {
         // SAFETY: Pubkey has the same memory layout and size as Serde32Bytes
         let pubkeys: Vec<Pubkey> = unsafe { std::mem::transmute(pubkeys) };
         let config = config.unwrap_or_default();
-        let slot = self.accountsdb.slot();
         let mut accounts = vec![None; pubkeys.len()];
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         // TODO(thlorenz): use chainlink
@@ -37,6 +36,7 @@ impl HttpDispatcher {
             .filter_map(|(acc, pk)| acc.is_none().then_some(*pk))
             .collect::<Vec<_>>();
 
+        let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, accounts, slot))
     }
 }

@@ -7,12 +7,12 @@ impl HttpDispatcher {
     ) -> HandlerResult {
         let pubkey = parse_params!(request.params()?, Serde32Bytes);
         let pubkey = some_or_err!(pubkey);
-        let slot = self.accountsdb.slot();
         let account = self
             .read_account_with_ensure(&pubkey)
             .await
             .map(|a| a.lamports())
             .unwrap_or_default();
+        let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, account, slot))
     }
 }
