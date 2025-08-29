@@ -26,6 +26,7 @@ magicblock-committor-program = { workspace = true, features = [
 magicblock-delegation-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
+magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true }

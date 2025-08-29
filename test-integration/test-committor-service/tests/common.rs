@@ -9,7 +9,9 @@ use std::{
 use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
-        task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
+        task_info_fetcher::{
+            ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+        },
         IntentExecutorImpl,
     },
     tasks::tasks::CommitTask,
@@ -108,7 +110,6 @@ impl TestFixture {
 }
 
 pub struct MockTaskInfoFetcher;
-
 #[async_trait]
 impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_next_commit_ids(
@@ -128,6 +129,8 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
         None
     }
+
+    fn reset(&self, _: ResetType) {}
 }
 
 #[allow(dead_code)]

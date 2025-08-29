@@ -4103,6 +4103,7 @@ dependencies = [
  "lru 0.16.0",
  "magicblock-committor-program",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=00d720)",
+ "magicblock-metrics",
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",

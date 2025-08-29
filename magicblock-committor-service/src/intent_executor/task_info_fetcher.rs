@@ -28,6 +28,14 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
 
     // Peeks current commit ids for pubkeys
     fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<u64>;
+
+    /// Resets cache for some or all accounts
+    fn reset(&self, reset_type: ResetType);
+}
+
+pub enum ResetType<'a> {
+    All,
+    Specific(&'a [Pubkey]),
 }
 
 const NUM_FETCH_RETRIES: NonZeroUsize =
@@ -239,6 +247,21 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
     fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<u64> {
         let cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
         cache.peek(pubkey).copied()
+    }
+
+    /// Reset cache
+    fn reset(&self, reset_type: ResetType) {
+        match reset_type {
+            ResetType::All => {
+                self.cache.lock().expect(MUTEX_POISONED_MSG).clear()
+            }
+            ResetType::Specific(pubkeys) => {
+                let mut cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
+                pubkeys.iter().for_each(|pubkey| {
+                    let _ = cache.pop(pubkey);
+                });
+            }
+        }
     }
 }
 

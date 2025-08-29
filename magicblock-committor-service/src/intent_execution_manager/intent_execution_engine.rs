@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use log::{error, info, trace, warn};
+use magicblock_metrics::metrics;
 use tokio::{
     sync::{
         broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
@@ -149,6 +150,9 @@ where
             ));
 
             self.running_executors.push(handle);
+            metrics::set_committor_executors_busy_count(
+                self.running_executors.len() as i64,
+            );
         }
     }
 
@@ -250,6 +254,8 @@ where
                 output,
             })
             .map_err(|err| {
+                // Increase failed intents metric as well
+                metrics::inc_committor_failed_intents_count();
                 (intent.inner.id, intent.trigger_type, Arc::new(err))
             });
 
@@ -306,6 +312,7 @@ mod tests {
         },
         persist::IntentPersisterImpl,
     };
+    use crate::intent_executor::task_info_fetcher::ResetType;
 
     type MockIntentExecutionEngine = IntentExecutionEngine<
         DummyDB,
@@ -737,5 +744,7 @@ mod tests {
         fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
             None
         }
+
+        fn reset(&self, _: ResetType) {}
     }
 }

@@ -37,6 +37,7 @@ use crate::{
     },
     utils::persist_status_update_by_message_set,
 };
+use crate::intent_executor::task_info_fetcher::ResetType;
 
 pub struct IntentExecutorImpl<T, F> {
     authority: Keypair,
@@ -409,6 +410,12 @@ where
 
         let result = self.execute_inner(base_intent, &persister).await;
         if let Some(pubkeys) = pubkeys {
+            // Reset TaskInfoFetcher, as cache could become invalid
+            if result.is_err() {
+                self.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
+            }
+
+            // Write result of intent into Persister
             Self::persist_result(&persister, &result, message_id, &pubkeys);
         }
 
@@ -432,14 +439,11 @@ mod tests {
         tasks::task_builder::{TaskBuilderV1, TasksBuilder},
         transaction_preparator::transaction_preparator::TransactionPreparatorV1,
     };
+    use crate::intent_executor::task_info_fetcher::ResetType;
 
     struct MockInfoFetcher;
     #[async_trait::async_trait]
     impl TaskInfoFetcher for MockInfoFetcher {
-        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
-            Some(0)
-        }
-
         async fn fetch_next_commit_ids(
             &self,
             pubkeys: &[Pubkey],
@@ -453,6 +457,12 @@ mod tests {
         ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
             Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
         }
+
+        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
+            Some(0)
+        }
+
+        fn reset(&self, _: ResetType) {}
     }
 
     #[tokio::test]
