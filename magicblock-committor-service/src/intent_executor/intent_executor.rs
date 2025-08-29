@@ -20,7 +20,7 @@ use solana_sdk::{
 use crate::{
     intent_executor::{
         error::{IntentExecutorError, IntentExecutorResult, InternalError},
-        task_info_fetcher::TaskInfoFetcher,
+        task_info_fetcher::{ResetType, TaskInfoFetcher},
         ExecutionOutput, IntentExecutor,
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
@@ -37,7 +37,6 @@ use crate::{
     },
     utils::persist_status_update_by_message_set,
 };
-use crate::intent_executor::task_info_fetcher::ResetType;
 
 pub struct IntentExecutorImpl<T, F> {
     authority: Keypair,
@@ -432,14 +431,15 @@ mod tests {
     use crate::{
         intent_execution_manager::intent_scheduler::create_test_intent,
         intent_executor::{
-            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
+            task_info_fetcher::{
+                ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+            },
             IntentExecutorImpl,
         },
         persist::IntentPersisterImpl,
         tasks::task_builder::{TaskBuilderV1, TasksBuilder},
         transaction_preparator::transaction_preparator::TransactionPreparatorV1,
     };
-    use crate::intent_executor::task_info_fetcher::ResetType;
 
     struct MockInfoFetcher;
     #[async_trait::async_trait]

@@ -12,8 +12,6 @@ use test_tools::init_logger;
 
 use crate::shutdown::Shutdown;
 
-const GIT_VERSION: &str = git_version::git_version!();
-
 fn init_logger() {
     if let Ok(style) = std::env::var("RUST_LOG_STYLE") {
         use std::io::Write;
@@ -97,12 +95,13 @@ async fn main() {
         ledger::lock_ledger(api.ledger().ledger_path(), &mut ledger_lock);
 
     api.start().await.expect("Failed to start validator");
+    let version = magicblock_version::Version::default();
     info!("");
     info!("🧙 Magicblock Validator is running!");
     info!(
         "🏷️ Validator version: {} (Git: {})",
-        env!("CARGO_PKG_VERSION"),
-        GIT_VERSION
+        version.to_string(),
+        version.git_version
     );
     info!("-----------------------------------");
     info!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);

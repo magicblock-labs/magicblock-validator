@@ -308,11 +308,12 @@ mod tests {
                 IntentExecutorError as ExecutorError, IntentExecutorResult,
                 InternalError,
             },
-            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
+            task_info_fetcher::{
+                ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+            },
         },
         persist::IntentPersisterImpl,
     };
-    use crate::intent_executor::task_info_fetcher::ResetType;
 
     type MockIntentExecutionEngine = IntentExecutionEngine<
         DummyDB,

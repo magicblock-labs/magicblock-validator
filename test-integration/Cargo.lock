@@ -4222,10 +4222,12 @@ dependencies = [
 name = "magicblock-version"
 version = "0.1.7"
 dependencies = [
+ "git-version",
  "rustc_version",
  "semver",
  "serde",
  "solana-frozen-abi-macro",
+ "solana-rpc-client-api",
  "solana-sdk",
 ]
 
