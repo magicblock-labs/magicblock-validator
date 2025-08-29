@@ -35,7 +35,7 @@ impl HttpDispatcher {
                 confirmation_status: None,
             }));
         }
-        let slot = self.accountsdb.slot();
+        let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, statuses, slot))
     }
 }

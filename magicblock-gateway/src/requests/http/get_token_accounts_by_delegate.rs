@@ -23,7 +23,6 @@ impl HttpDispatcher {
         let delegate: Serde32Bytes = some_or_err!(delegate);
         let filter = some_or_err!(filter);
         let config = config.unwrap_or_default();
-        let slot = self.accountsdb.slot();
         let mut filters = ProgramFilters::default();
         let mut program = TOKEN_PROGRAM_ID;
         match filter {
@@ -58,6 +57,8 @@ impl HttpDispatcher {
                 AccountWithPubkey::new(&locked, encoding, slice)
             })
             .collect::<Vec<_>>();
+
+        let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, accounts, slot))
     }
 }

@@ -8,7 +8,7 @@ impl HttpDispatcher {
         let blockhash = parse_params!(request.params()?, Serde32Bytes);
         let blockhash = some_or_err!(blockhash);
         let valid = self.blocks.contains(&blockhash);
-        let slot = self.accountsdb.slot();
+        let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, valid, slot))
     }
 }

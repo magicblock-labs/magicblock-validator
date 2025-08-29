@@ -1,17 +1,22 @@
 use magicblock_core::link::blocks::BlockHash;
 use setup::RpcTestEnv;
+use solana_rpc_client_api::config::RpcBlockConfig;
+use solana_transaction_status::UiTransactionEncoding;
 
 mod setup;
 
 #[tokio::test]
 async fn test_get_slot() {
     let env = RpcTestEnv::new().await;
-    let slot = env.rpc.get_slot().await.expect("get_slot request failed");
-    assert_eq!(
-        slot,
-        env.latest_slot(),
-        "RPC slot should match the current slot of the AccountsDb"
-    );
+    for _ in 0..64 {
+        let slot = env.rpc.get_slot().await.expect("get_slot request failed");
+        assert_eq!(
+            slot,
+            env.latest_slot(),
+            "RPC slot should match the latest slot in the ledger"
+        );
+        env.advance_slots(1);
+    }
 }
 
 #[tokio::test]
@@ -89,46 +94,59 @@ async fn test_is_blockhash_valid() {
     );
 }
 
-// #[tokio::test]
-// async fn test_get_block() {
-//     let env = RpcTestEnv::new().await;
-//     // Create a transaction and advance the slot to include it in a block.
-//     let tx_sig = env.execution.build_transaction(ixs);
-//     let current_slot = env.execution.accountsdb.slot();
+#[tokio::test]
+async fn test_get_block() {
+    let env = RpcTestEnv::new().await;
+    // Create a transaction in ledger and advance the slot to include it in a block.
+    let signature = env.execute_transaction().await;
+    let latest_block = env.block.load();
+    env.advance_slots(1);
 
-//     // 1. Test fetching an existing block.
-//     let block = env
-//         .rpc
-//         .get_block(current_slot)
-//         .await
-//         .expect("get_block request for an existing block failed");
-//     assert!(block.is_some(), "block should exist");
-//     let block = block.unwrap();
-//     assert_eq!(
-//         block.block_height,
-//         Some(current_slot),
-//         "block height mismatch"
-//     );
-//     assert!(
-//         block
-//             .transactions
-//             .unwrap()
-//             .iter()
-//             .any(|tx| tx.transaction.signatures[0] == tx_sig),
-//         "block should contain the processed transaction"
-//     );
+    // Test fetching an existing block.
+    let block = env
+        .rpc
+        .get_block_with_config(
+            latest_block.slot,
+            RpcBlockConfig {
+                encoding: Some(UiTransactionEncoding::Base64),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("get_block request for an existing block failed");
+    assert_eq!(
+        block.block_height,
+        Some(latest_block.slot),
+        "block height mismatch"
+    );
+    assert_eq!(
+        block.blockhash,
+        latest_block.blockhash.to_string(),
+        "blockhash of fetched block should match the latest in the ledger"
+    );
+    let transaction = block
+        .transactions
+        .expect("returned block should have transactions list included")
+        .pop();
+    assert!(
+        transaction.is_some(),
+        "block should contain the executed transaction"
+    );
+    let transaction = transaction.unwrap();
+    let block_txn_signature =
+        transaction.transaction.decode().unwrap().signatures[0];
+    assert_eq!(
+        block_txn_signature, signature,
+        "block should contain the processed transaction"
+    );
 
-//     // 2. Test fetching a non-existent block.
-//     let nonexistent_block = env
-//         .rpc
-//         .get_block(current_slot + 100)
-//         .await
-//         .expect("get_block request for a non-existent block failed");
-//     assert!(
-//         nonexistent_block.is_none(),
-//         "block should not exist at a future slot"
-//     );
-// }
+    // Test fetching a non-existent block.
+    let nonexistent_block = env.rpc.get_block(latest_block.slot + 100).await;
+    assert!(
+        nonexistent_block.is_err(),
+        "block should not exist at a future slot"
+    );
+}
 
 #[tokio::test]
 async fn test_get_blocks() {
@@ -146,6 +164,23 @@ async fn test_get_blocks() {
         blocks,
         vec![1, 2, 3, 4],
         "should return the correct range of slots"
+    );
+}
+
+#[tokio::test]
+async fn test_get_block_time() {
+    let env = RpcTestEnv::new().await;
+    let latest_block = env.block.load();
+
+    // Request blocks from slot 1 to 4.
+    let time = env
+        .rpc
+        .get_block_time(latest_block.slot)
+        .await
+        .expect("get_blocks request failed");
+    assert_eq!(
+        time, latest_block.clock.unix_timestamp,
+        "get_block_time should return the same timestamp stored in the ledger"
     );
 }
 

@@ -14,12 +14,12 @@ impl HttpDispatcher {
         );
         let pubkey = some_or_err!(pubkey);
         let config = config.unwrap_or_default();
-        let slot = self.accountsdb.slot();
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         let account = self
             .read_account_with_ensure(&pubkey)
             .await
             .map(|acc| LockedAccount::new(pubkey, acc).ui_encode(encoding));
+        let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, account, slot))
     }
 }

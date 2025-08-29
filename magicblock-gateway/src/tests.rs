@@ -34,8 +34,6 @@ fn ws_channel() -> (WsConnectionChannel, Receiver<Bytes>) {
 }
 
 mod event_processor {
-    use std::thread::yield_now;
-
     use super::*;
 
     /// Sets up a shared state and test environment for event processor tests.
@@ -52,8 +50,6 @@ mod event_processor {
         let cancel = CancellationToken::new();
         EventProcessor::start(&state, &env.dispatch, 1, cancel);
         env.advance_slot();
-        // allow transaction executor to register slot advancement
-        yield_now();
         (state, env)
     }
 

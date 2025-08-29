@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, thread::yield_now};
 
 use log::error;
 use magicblock_accounts_db::AccountsDb;
@@ -134,6 +134,8 @@ impl ExecutionTestEnv {
             hash,
             meta: BlockMeta { slot, time },
         });
+        // allow transaction executor to register slot advancement
+        yield_now();
 
         slot
     }

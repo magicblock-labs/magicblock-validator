@@ -33,7 +33,7 @@ impl HttpDispatcher {
             })
             .collect::<Vec<_>>();
         if config.with_context.unwrap_or_default() {
-            let slot = self.accountsdb.slot();
+            let slot = self.blocks.block_height();
             Ok(ResponsePayload::encode(&request.id, accounts, slot))
         } else {
             Ok(ResponsePayload::encode_no_context(&request.id, accounts))

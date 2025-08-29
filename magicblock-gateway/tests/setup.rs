@@ -10,7 +10,11 @@ use solana_account::{ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use test_kit::{guinea, ExecutionTestEnv, Signer};
+use solana_signature::Signature;
+use test_kit::{
+    guinea::{self, GuineaInstruction},
+    AccountMeta, ExecutionTestEnv, Instruction, Signer,
+};
 use tokio_util::sync::CancellationToken;
 
 pub const TOKEN_PROGRAM_ID: Pubkey =
@@ -45,6 +49,7 @@ impl RpcTestEnv {
                     "failed to start RPC service with: {config:?}"
                 ));
         tokio::spawn(rpc.run());
+        execution.advance_slot();
         let rpc = RpcClient::new(format!("http://{addr}:{port}"));
         let pubsub = PubsubClient::new(&format!("ws://{addr}:{}", port + 1))
             .await
@@ -110,5 +115,21 @@ impl RpcTestEnv {
 
     pub fn latest_slot(&self) -> Slot {
         self.block.load().slot
+    }
+
+    pub async fn execute_transaction(&self) -> Signature {
+        let account = self.create_account();
+        let ix = Instruction::new_with_bincode(
+            guinea::ID,
+            &GuineaInstruction::WriteByteToData(42),
+            vec![AccountMeta::new(account.pubkey, false)],
+        );
+        let txn = self.execution.build_transaction(&[ix]);
+        let signature = txn.signatures[0];
+        self.execution
+            .execute_transaction(txn)
+            .await
+            .expect("failed to execute modifying transaction");
+        signature
     }
 }
