@@ -1,6 +1,7 @@
 use std::sync::atomic::Ordering;
 
 use log::error;
+use solana_program::message::SanitizedMessage;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
     transaction_processing_result::{
@@ -8,6 +9,7 @@ use solana_svm::{
     },
 };
 use solana_transaction::sanitized::SanitizedTransaction;
+use solana_transaction_error::TransactionError;
 use solana_transaction_status::{
     map_inner_instructions, TransactionStatusMeta,
 };
@@ -15,8 +17,9 @@ use solana_transaction_status::{
 use magicblock_core::link::{
     accounts::{AccountWithSlot, LockedAccount},
     transactions::{
-        TransactionExecutionResult, TransactionSimulationResult,
-        TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
+        TransactionExecutionResult, TransactionResult,
+        TransactionSimulationResult, TransactionStatus, TxnExecutionResultTx,
+        TxnSimulationResultTx,
     },
 };
 
@@ -50,13 +53,15 @@ impl super::TransactionExecutor {
         let result = result.and_then(|mut processed| {
             let result = processed.status();
 
-            // If the transaction failed and the caller is waiting for the result,
-            // do not persist any changes.
+            // If the transaction failed and the caller is waiting
+            // for the result, do not persist any changes.
             if result.is_err() && tx.is_some() {
                 return result;
             }
 
-            // Otherwise, commit the account state changes.
+            // Otherwise, check that the transaction didn't violate any permissions
+            Self::validate_account_access(txn.message(), &processed)?;
+            // And commit the account state changes if all is good
             self.commit_accounts(&mut processed, is_replay);
 
             // For new transactions, also commit the transaction to the ledger.
@@ -70,7 +75,7 @@ impl super::TransactionExecutor {
         tx.map(|tx| tx.send(result));
     }
 
-    /// Executes a transaction in a simulated, read-only environment.
+    /// Executes a transaction in a simulated, ephemeral environment.
     ///
     /// This method runs a transaction through the SVM but **never persists any state changes**
     /// to the `AccountsDb` or `Ledger`. It returns a more detailed set of execution
@@ -117,7 +122,7 @@ impl super::TransactionExecutor {
     /// It serves as the bridge between the executor's logic and the underlying SVM engine.
     fn process(
         &self,
-        txn: &[SanitizedTransaction],
+        txn: &[SanitizedTransaction; 1],
     ) -> (TransactionProcessingResult, AccountsBalances) {
         let checked = CheckedTransactionDetails::new(
             None,
@@ -126,20 +131,72 @@ impl super::TransactionExecutor {
         let mut output =
             self.processor.load_and_execute_sanitized_transactions(
                 self,
-                &txn,
+                txn,
                 vec![Ok(checked); 1],
                 &self.environment,
                 &self.config,
             );
+        // SAFETY:
+        // we passed a single transaction for execution, and
+        // we will get a guaranteed single result back.
         let result = output.processing_results.pop().expect(
             "single transaction result is always present in the output",
         );
         (result, output.balances)
     }
 
-    /// A private helper that persists a transaction and its metadata to the ledger.
-    /// After a successful write, it also forwards the `TransactionStatus` to the
-    /// rest of the system via corresponding channel.
+    /// Validates that a processed transaction did not
+    /// attempt to write to any non-delegated accounts.
+    ///
+    /// This is a critical security check to prevent privilege escalation.
+    /// It ensures that any account modification is restricted to accounts
+    /// that have been explicitly delegated to this validator node.
+    ///
+    /// ## Logic
+    /// The validation enforces a simple, powerful rule: **any account that is ultimately
+    /// written to must be a delegated account.** This covers all scenarios:
+    ///
+    /// 1.  **Standard Writable Accounts**: Any account marked as writable in the transaction
+    ///     message is checked to ensure it is delegated.
+    /// 2.  **Fee Payer**: The SVM may perform an "escrow swap" for the fee payer. This
+    ///     check ensures that the final account whose balance is modified to pay the
+    ///     fee is a delegated account.
+    /// 3.  **Read-only Accounts**: Accounts marked as read-only are ignored, as they
+    ///     do not modify state.
+    ///
+    /// # Arguments
+    /// * `message` - The original, sanitized transaction message, used to check which
+    ///   accounts were intended to be writable.
+    /// * `result` - The output from the SVM, containing the list of accounts that were
+    ///   actually loaded and potentially modified.
+    ///
+    /// # Returns
+    /// - `Ok(())` if all writable account access is valid.
+    /// - `Err(TransactionError::InvalidWritableAccount)` if the transaction attempted
+    ///   to write to a non-delegated account.
+    fn validate_account_access(
+        message: &SanitizedMessage,
+        result: &ProcessedTransaction,
+    ) -> TransactionResult {
+        // If the transaction failed to load, its accounts weren't processed,
+        // so there's nothing to validate. No state will be persisted.
+        let ProcessedTransaction::Executed(executed) = result else {
+            return Ok(());
+        };
+
+        let accounts = executed.loaded_transaction.accounts.iter();
+        for (i, acc) in accounts.enumerate() {
+            // Enforce that any account intended to be writable is a delegated account.
+            if message.is_writable(i) && !acc.1.delegated() {
+                return Err(TransactionError::InvalidWritableAccount);
+            }
+        }
+        Ok(())
+    }
+
+    /// A helper method that persists a transaction and its metadata to
+    /// the ledger. After a successful write, it also forwards the
+    /// `TransactionStatus` to the rest of the system via corresponding channel.
     fn commit_transaction(
         &self,
         txn: SanitizedTransaction,
@@ -203,7 +260,7 @@ impl super::TransactionExecutor {
         let _ = self.transaction_tx.send(status);
     }
 
-    /// A private helper that persists modified account states to the `AccountsDb`.
+    /// A helper method that persists modified account states to the `AccountsDb`.
     fn commit_accounts(
         &self,
         result: &mut ProcessedTransaction,
@@ -227,8 +284,8 @@ impl super::TransactionExecutor {
         }
         for (pubkey, account) in executed.loaded_transaction.accounts.drain(..)
         {
-            // only insert/send account's update if it was actually modified,
-            // ignore the rest even if account was writeable in transaction
+            // only persist account's update if it was actually modified, ignore
+            // the rest, even if an account was writeable in the transaction
             if !account.is_dirty() {
                 continue;
             }
