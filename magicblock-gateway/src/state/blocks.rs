@@ -1,6 +1,6 @@
 use std::{ops::Deref, time::Duration};
 
-use parking_lot::RwLock;
+use magicblock_ledger::LatestBlock;
 use solana_rpc_client_api::response::RpcBlockhash;
 
 use magicblock_core::{
@@ -25,7 +25,7 @@ pub(crate) struct BlocksCache {
     /// This is calculated based on the target chain's block time relative to Solana's.
     block_validity: u64,
     /// The most recent block update received, protected by a `RwLock` for concurrent access.
-    latest: RwLock<BlockUpdate>,
+    latest: LatestBlock,
     /// An underlying time-based cache for storing `BlockHash` to `BlockMeta` mappings.
     cache: ExpiringCache<BlockHash, BlockMeta>,
 }
@@ -45,7 +45,7 @@ impl BlocksCache {
     ///
     /// # Panics
     /// Panics if `blocktime` is zero.
-    pub(crate) fn new(blocktime: u64) -> Self {
+    pub(crate) fn new(blocktime: u64, latest: LatestBlock) -> Self {
         const BLOCK_CACHE_TTL: Duration = Duration::from_secs(60);
         assert!(blocktime != 0, "blocktime cannot be zero");
 
@@ -55,7 +55,7 @@ impl BlocksCache {
         let block_validity = blocktime_ratio * MAX_VALID_BLOCKHASH_SLOTS;
         let cache = ExpiringCache::new(BLOCK_CACHE_TTL);
         Self {
-            latest: Default::default(),
+            latest,
             block_validity: block_validity as u64,
             cache,
         }
@@ -65,23 +65,21 @@ impl BlocksCache {
     pub(crate) fn set_latest(&self, latest: BlockUpdate) {
         // The `push` method adds the blockhash to the underlying expiring cache.
         self.cache.push(latest.hash, latest.meta);
-        // The `latest` field is updated with the full block update.
-        *self.latest.write() = latest;
     }
 
     /// Retrieves information about the latest block, including its calculated validity period.
     pub(crate) fn get_latest(&self) -> BlockHashInfo {
-        let guard = self.latest.read();
+        let block = self.latest.load();
         BlockHashInfo {
-            hash: guard.hash,
-            validity: guard.meta.slot + self.block_validity,
-            slot: guard.meta.slot,
+            hash: block.blockhash,
+            validity: block.slot + self.block_validity,
+            slot: block.slot,
         }
     }
 
     /// Returns the slot number of the most recent block, also known as the block height.
     pub(crate) fn block_height(&self) -> Slot {
-        self.latest.read().meta.slot
+        self.latest.load().slot
     }
 }
 

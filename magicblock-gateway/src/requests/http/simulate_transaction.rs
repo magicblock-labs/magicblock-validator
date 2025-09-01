@@ -20,9 +20,7 @@ impl HttpDispatcher {
             String,
             RpcSimulateTransactionConfig
         );
-        let transaction = transaction.ok_or_else(|| {
-            RpcError::invalid_params("missing encoded transaction")
-        })?;
+        let transaction: String = some_or_err!(transaction);
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
         let transaction = self.prepare_transaction(

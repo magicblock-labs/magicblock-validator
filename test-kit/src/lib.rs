@@ -1,4 +1,4 @@
-use std::{sync::Arc, thread::yield_now};
+use std::{sync::Arc, thread};
 
 use log::error;
 use magicblock_accounts_db::AccountsDb;
@@ -55,9 +55,20 @@ impl ExecutionTestEnv {
         let (dispatch, validator_channels) = link();
         let blockhash = ledger.latest_block().load().blockhash;
         let environment = build_svm_env(&accountsdb, blockhash, 0);
-        let scheduler_state = TransactionSchedulerState {
+        let payer = Keypair::new();
+        let this = Self {
+            payer,
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
+            transaction_scheduler: dispatch.transaction_scheduler.clone(),
+            dir,
+            dispatch,
+            blocks_tx: validator_channels.block_update,
+        };
+        this.advance_slot();
+        let scheduler_state = TransactionSchedulerState {
+            accountsdb,
+            ledger,
             account_update_tx: validator_channels.account_update,
             transaction_status_tx: validator_channels.transaction_status,
             txn_to_process_rx: validator_channels.transaction_to_process,
@@ -70,16 +81,7 @@ impl ExecutionTestEnv {
             )])
             .expect("failed to load test programs into test env");
         TransactionScheduler::new(1, scheduler_state).spawn();
-        let payer = Keypair::new();
-        let this = Self {
-            payer,
-            accountsdb,
-            ledger,
-            transaction_scheduler: dispatch.transaction_scheduler.clone(),
-            dir,
-            dispatch,
-            blocks_tx: validator_channels.block_update,
-        };
+
         this.fund_account(this.payer.pubkey(), LAMPORTS_PER_SOL);
         this
     }
@@ -91,7 +93,8 @@ impl ExecutionTestEnv {
         owner: Pubkey,
     ) -> Keypair {
         let keypair = Keypair::new();
-        let account = AccountSharedData::new(lamports, space, &owner);
+        let mut account = AccountSharedData::new(lamports, space, &owner);
+        account.set_delegated(true);
         self.accountsdb.insert_account(&keypair.pubkey(), &account);
         keypair
     }
@@ -101,7 +104,9 @@ impl ExecutionTestEnv {
     }
 
     pub fn fund_account(&self, pubkey: Pubkey, lamports: u64) {
-        let account = AccountSharedData::new(lamports, 0, &Default::default());
+        let mut account =
+            AccountSharedData::new(lamports, 0, &Default::default());
+        account.set_delegated(true);
         self.accountsdb.insert_account(&pubkey, &account);
     }
 
@@ -135,7 +140,7 @@ impl ExecutionTestEnv {
             meta: BlockMeta { slot, time },
         });
         // allow transaction executor to register slot advancement
-        yield_now();
+        thread::yield_now();
 
         slot
     }

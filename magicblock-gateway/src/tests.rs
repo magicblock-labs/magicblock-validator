@@ -34,15 +34,20 @@ fn ws_channel() -> (WsConnectionChannel, Receiver<Bytes>) {
 }
 
 mod event_processor {
+    use crate::state::NodeContext;
+
     use super::*;
 
     /// Sets up a shared state and test environment for event processor tests.
     fn setup() -> (SharedState, ExecutionTestEnv) {
-        let identity = Pubkey::new_unique();
         let env = ExecutionTestEnv::new();
         env.advance_slot();
+        let node_context = NodeContext {
+            identity: env.payer.pubkey(),
+            ..Default::default()
+        };
         let state = SharedState::new(
-            identity,
+            node_context,
             env.accountsdb.clone(),
             env.ledger.clone(),
             50,

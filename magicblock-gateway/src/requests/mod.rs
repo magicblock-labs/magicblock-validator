@@ -41,6 +41,7 @@ pub(crate) enum JsonRpcHttpMethod {
     GetClusterNodes,
     GetEpochInfo,
     GetEpochSchedule,
+    GetFeeForMessage,
     GetFirstAvailableBlock,
     GetGenesisHash,
     GetHealth,
@@ -65,6 +66,7 @@ pub(crate) enum JsonRpcHttpMethod {
     GetVersion,
     IsBlockhashValid,
     MinimumLedgerSlot,
+    RequestAirdrop,
     SendTransaction,
     SimulateTransaction,
 }

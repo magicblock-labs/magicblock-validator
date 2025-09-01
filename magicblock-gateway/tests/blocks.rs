@@ -99,14 +99,15 @@ async fn test_get_block() {
     let env = RpcTestEnv::new().await;
     // Create a transaction in ledger and advance the slot to include it in a block.
     let signature = env.execute_transaction().await;
-    let latest_block = env.block.load();
-    env.advance_slots(1);
+    let latest_slot = env.block.load().slot;
+    let latest_blockhash = env.block.load().blockhash;
+    env.advance_slots(10);
 
     // Test fetching an existing block.
     let block = env
         .rpc
         .get_block_with_config(
-            latest_block.slot,
+            latest_slot,
             RpcBlockConfig {
                 encoding: Some(UiTransactionEncoding::Base64),
                 ..Default::default()
@@ -116,12 +117,12 @@ async fn test_get_block() {
         .expect("get_block request for an existing block failed");
     assert_eq!(
         block.block_height,
-        Some(latest_block.slot),
+        Some(latest_slot),
         "block height mismatch"
     );
     assert_eq!(
         block.blockhash,
-        latest_block.blockhash.to_string(),
+        latest_blockhash.to_string(),
         "blockhash of fetched block should match the latest in the ledger"
     );
     let transaction = block
@@ -141,7 +142,7 @@ async fn test_get_block() {
     );
 
     // Test fetching a non-existent block.
-    let nonexistent_block = env.rpc.get_block(latest_block.slot + 100).await;
+    let nonexistent_block = env.rpc.get_block(latest_slot + 100).await;
     assert!(
         nonexistent_block.is_err(),
         "block should not exist at a future slot"

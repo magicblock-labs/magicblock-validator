@@ -6,7 +6,6 @@ use magicblock_core::link::{
     transactions::TransactionSchedulerHandle, DispatchEndpoints,
 };
 use magicblock_ledger::Ledger;
-use solana_pubkey::Pubkey;
 
 use crate::{
     requests::{
@@ -15,7 +14,8 @@ use crate::{
         JsonHttpRequest,
     },
     state::{
-        blocks::BlocksCache, transactions::TransactionsCache, SharedState,
+        blocks::BlocksCache, transactions::TransactionsCache, NodeContext,
+        SharedState,
     },
     utils::JsonBody,
 };
@@ -28,7 +28,7 @@ use crate::{
 /// for all RPC method implementations.
 pub(crate) struct HttpDispatcher {
     /// The public key of the validator node.
-    pub(crate) identity: Pubkey,
+    pub(crate) context: NodeContext,
     /// A handle to the accounts database.
     pub(crate) accountsdb: Arc<AccountsDb>,
     /// A handle to the blockchain ledger.
@@ -48,11 +48,11 @@ impl HttpDispatcher {
     /// This constructor clones the necessary handles from the global `SharedState` and
     /// `DispatchEndpoints`, making it cheap to create multiple `Arc<Self>` pointers.
     pub(super) fn new(
-        state: &SharedState,
+        state: SharedState,
         channels: &DispatchEndpoints,
     ) -> Arc<Self> {
         Arc::new(Self {
-            identity: state.identity,
+            context: state.context,
             accountsdb: state.accountsdb.clone(),
             ledger: state.ledger.clone(),
             transactions: state.transactions.clone(),
@@ -115,6 +115,7 @@ impl HttpDispatcher {
             GetClusterNodes => self.get_cluster_nodes(request),
             GetEpochInfo => self.get_epoch_info(request),
             GetEpochSchedule => self.get_epoch_schedule(request),
+            GetFeeForMessage => self.get_fee_for_message(request),
             GetFirstAvailableBlock => self.get_first_available_block(request),
             GetGenesisHash => self.get_genesis_hash(request),
             GetHealth => self.get_health(request),
@@ -145,6 +146,7 @@ impl HttpDispatcher {
             GetVersion => self.get_version(request),
             IsBlockhashValid => self.is_blockhash_valid(request),
             MinimumLedgerSlot => self.get_first_available_block(request),
+            RequestAirdrop => self.request_airdrop(request).await,
             SendTransaction => self.send_transaction(request).await,
             SimulateTransaction => self.simulate_transaction(request).await,
         }

@@ -22,24 +22,22 @@ impl JsonRpcServer {
         dispatch: &DispatchEndpoints,
         cancel: CancellationToken,
     ) -> RpcResult<Self> {
-        let mut addr = config.socket_addr();
         // Start up an event processor task, which will handle forwarding of any validator
         // originating event to client subscribers, or use them to update server's caches
         //
         // NOTE: currently we only start 1 instance, but it
         // can be scaled to more if that becomes a bottleneck
         EventProcessor::start(&state, dispatch, 1, cancel.clone());
-        // bind http server at specified socket address
-        let http = HttpServer::new(
-            config.socket_addr(),
-            &state,
-            cancel.clone(),
-            dispatch,
-        )
-        .await?;
-        // for websocket use the same address but with port bumped by one
-        addr.set_port(config.port + 1);
-        let websocket = WebsocketServer::new(addr, &state, cancel).await?;
+
+        // initialize HTTP and Websocket servers
+        let addr = config.socket_addr();
+        let websocket = {
+            let mut addr = addr.clone();
+            addr.set_port(config.port + 1);
+            let cancel = cancel.clone();
+            WebsocketServer::new(addr, &state, cancel).await?
+        };
+        let http = HttpServer::new(addr, state, cancel, dispatch).await?;
         Ok(Self { http, websocket })
     }
 

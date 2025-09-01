@@ -44,7 +44,10 @@ use magicblock_core::{
     },
     Slot,
 };
-use magicblock_gateway::{state::SharedState, JsonRpcServer};
+use magicblock_gateway::{
+    state::{NodeContext, SharedState},
+    JsonRpcServer,
+};
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
@@ -317,13 +320,9 @@ impl MagicValidator {
             },
             clone_permissions,
             validator_pubkey,
-            config.validator_config.accounts.max_monitored_accounts,
-            config.validator_config.accounts.clone.clone(),
-            config
-                .validator_config
-                .ledger
-                .resume_strategy_config
-                .clone(),
+            config.accounts.max_monitored_accounts,
+            config.accounts.clone.clone(),
+            config.ledger.resume_strategy_config.clone(),
         );
 
         let scheduled_commits_processor = if can_clone {
@@ -361,12 +360,24 @@ impl MagicValidator {
             .map_err(|err| {
                 ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
             })?;
+
+        // Faucet keypair is only used for airdrops, which are not allowed in
+        // the Ephemeral mode by setting the faucet to None in node context
+        // (used by the RPC implementation), we effectively disable airdrops
+        let faucet = (config.accounts.lifecycle != LifecycleMode::Ephemeral)
+            .then_some(faucet_keypair);
+        let node_context = NodeContext {
+            identity: validator_pubkey,
+            faucet,
+            base_fee: config.validator.base_fees.unwrap_or_default(),
+            featureset: txn_scheduler_state.environment.feature_set.clone(),
+        };
         let transaction_scheduler =
             TransactionScheduler::new(1, txn_scheduler_state);
         transaction_scheduler.spawn();
 
         let shared_state = SharedState::new(
-            validator_pubkey,
+            node_context,
             accountsdb.clone(),
             ledger.clone(),
             config.validator.millis_per_slot,

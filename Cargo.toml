@@ -137,6 +137,7 @@ proc-macro2 = "1.0"
 prometheus = "0.13.4"
 # Needs to match https://crates.io/crates/solana-storage-bigtable/2.1.13/dependencies
 prost = "0.11.9"
+json = { package = "sonic-rs", version = "0.5.3" }
 protobuf-src = "1.1"
 quote = "1.0"
 rand = "0.8.5"
@@ -145,9 +146,8 @@ rusqlite = { version = "0.34.0", features = ["bundled"] } # bundled sqlite 3.44
 rustc_version = "0.4"
 semver = "1.0.22"
 serde = "1.0.217"
-serde_json = "1.0"
 serde_derive = "1.0"
-json = { package = "sonic-rs", version = "0.5.3" }
+serde_json = "1.0"
 sha3 = "0.10.8"
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "176540a" }
 solana-account-decoder = { version = "2.2" }
@@ -186,6 +186,7 @@ solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", re
 ] }
 solana-svm-transaction = { version = "2.2" }
 solana-system-program = { version = "2.2" }
+solana-system-transaction = { version = "2.2" }
 solana-timings = "2.2"
 solana-transaction = { version = "2.2" }
 solana-transaction-context = { version = "2.2" }
