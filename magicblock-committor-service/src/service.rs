@@ -55,6 +55,7 @@ pub enum CommittorMessage {
     ScheduleBaseIntents {
         /// The [`ScheduledBaseIntent`]s to commit
         base_intents: Vec<ScheduledBaseIntentWrapper>,
+        respond_to: oneshot::Sender<CommittorServiceResult<()>>,
     },
     GetCommitStatuses {
         respond_to:
@@ -161,8 +162,15 @@ impl CommittorActor {
                     }
                 });
             }
-            ScheduleBaseIntents { base_intents } => {
-                self.processor.schedule_base_intents(base_intents).await;
+            ScheduleBaseIntents {
+                base_intents,
+                respond_to,
+            } => {
+                let result =
+                    self.processor.schedule_base_intents(base_intents).await;
+                if let Err(e) = respond_to.send(result) {
+                    error!("Failed to send response {:?}", e);
+                }
             }
             GetCommitStatuses {
                 message_id,
@@ -351,8 +359,13 @@ impl BaseIntentCommittor for CommittorService {
     fn schedule_base_intent(
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
-    ) {
-        self.try_send(CommittorMessage::ScheduleBaseIntents { base_intents });
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::ScheduleBaseIntents {
+            base_intents,
+            respond_to: tx,
+        });
+        rx
     }
 
     fn get_commit_statuses(
@@ -427,7 +440,7 @@ pub trait BaseIntentCommittor: Send + Sync + 'static {
     fn schedule_base_intent(
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
-    );
+    ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
     /// Subscribes for results of BaseIntent execution
     fn subscribe_for_results(

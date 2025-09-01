@@ -1,12 +1,14 @@
 use async_trait::async_trait;
-use magicblock_accounts::{errors::AccountsResult, ScheduledCommitsProcessor};
+use magicblock_accounts::{
+    errors::ScheduledCommitsProcessorResult, ScheduledCommitsProcessor,
+};
 
 #[derive(Default)]
 pub struct ScheduledCommitsProcessorStub {}
 
 #[async_trait]
 impl ScheduledCommitsProcessor for ScheduledCommitsProcessorStub {
-    async fn process(&self) -> AccountsResult<()> {
+    async fn process(&self) -> ScheduledCommitsProcessorResult<()> {
         Ok(())
     }
     fn scheduled_commits_len(&self) -> usize {

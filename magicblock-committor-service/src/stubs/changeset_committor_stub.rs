@@ -63,11 +63,14 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
     fn schedule_base_intent(
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
-    ) {
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        let (_, receiver) = oneshot::channel();
         let mut changesets = self.committed_changesets.lock().unwrap();
         base_intents.into_iter().for_each(|intent| {
             changesets.insert(intent.inner.id, intent);
         });
+
+        receiver
     }
 
     fn subscribe_for_results(
@@ -167,7 +170,7 @@ impl BaseIntentCommittorExt for ChangesetCommittorStub {
         base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
     {
-        self.schedule_base_intent(base_intents.clone());
+        self.schedule_base_intent(base_intents.clone()).await??;
         let res = base_intents
             .into_iter()
             .map(|message| {

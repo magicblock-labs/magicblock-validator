@@ -11,12 +11,12 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-use crate::errors::AccountsResult;
+use crate::errors::ScheduledCommitsProcessorResult;
 
 #[async_trait]
 pub trait ScheduledCommitsProcessor: Send + Sync + 'static {
     /// Processes all commits that were scheduled and accepted
-    async fn process(&self) -> AccountsResult<()>;
+    async fn process(&self) -> ScheduledCommitsProcessorResult<()>;
 
     /// Returns the number of commits that were scheduled and accepted
     fn scheduled_commits_len(&self) -> usize;

@@ -29,7 +29,9 @@ use solana_sdk::{
 use tokio::sync::{broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::{errors::AccountsResult, ScheduledCommitsProcessor};
+use crate::{
+    errors::ScheduledCommitsProcessorResult, ScheduledCommitsProcessor,
+};
 
 const POISONED_RWLOCK_MSG: &str =
     "RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned";
@@ -359,7 +361,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
 impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
     for ScheduledCommitsProcessorImpl<C>
 {
-    async fn process(&self) -> AccountsResult<()> {
+    async fn process(&self) -> ScheduledCommitsProcessorResult<()> {
         let scheduled_base_intent =
             self.transaction_scheduler.take_scheduled_actions();
 
@@ -392,7 +394,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
                 .collect()
         };
 
-        self.committor.schedule_base_intent(intents);
+        self.committor.schedule_base_intent(intents).await??;
         Ok(())
     }
 
