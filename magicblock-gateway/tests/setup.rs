@@ -1,12 +1,19 @@
 #![allow(unused)]
 
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::{
+    sync::atomic::{AtomicU16, Ordering},
+    thread,
+};
 
 use magicblock_config::RpcConfig;
 use magicblock_core::{link::accounts::LockedAccount, Slot};
-use magicblock_gateway::{state::SharedState, JsonRpcServer};
+use magicblock_gateway::{
+    state::{NodeContext, SharedState},
+    JsonRpcServer,
+};
 use magicblock_ledger::LatestBlock;
 use solana_account::{ReadableAccount, WritableAccount};
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -28,15 +35,25 @@ pub struct RpcTestEnv {
 }
 
 impl RpcTestEnv {
+    pub const BASE_FEE: u64 = 1000;
     pub async fn new() -> Self {
         const BLOCK_TIME_MS: u64 = 50;
         static PORT: AtomicU16 = AtomicU16::new(13001);
+        let execution = ExecutionTestEnv::new();
+
         let port = PORT.fetch_add(2, Ordering::Relaxed);
         let addr = "0.0.0.0".parse().unwrap();
         let config = RpcConfig { addr, port };
-        let execution = ExecutionTestEnv::new();
+        let faucet = Keypair::new();
+        execution.fund_account(faucet.pubkey(), 10_000_000_000);
+        let node_context = NodeContext {
+            identity: execution.payer.pubkey(),
+            faucet: Some(faucet),
+            base_fee: Self::BASE_FEE,
+            featureset: Default::default(),
+        };
         let state = SharedState::new(
-            Pubkey::new_unique(),
+            node_context,
             execution.accountsdb.clone(),
             execution.ledger.clone(),
             BLOCK_TIME_MS,
@@ -49,11 +66,12 @@ impl RpcTestEnv {
                     "failed to start RPC service with: {config:?}"
                 ));
         tokio::spawn(rpc.run());
-        execution.advance_slot();
         let rpc = RpcClient::new(format!("http://{addr}:{port}"));
         let pubsub = PubsubClient::new(&format!("ws://{addr}:{}", port + 1))
             .await
             .expect("failed to create a pubsub client to RPC server");
+        // allow other threads to consolidate their state
+        thread::yield_now();
         Self {
             block: execution.ledger.latest_block().clone(),
             execution,

@@ -4,6 +4,8 @@ use blocks::BlocksCache;
 use cache::ExpiringCache;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_ledger::Ledger;
+use solana_feature_set::FeatureSet;
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use subscriptions::SubscriptionsDb;
 use transactions::TransactionsCache;
@@ -16,10 +18,9 @@ use transactions::TransactionsCache;
 ///
 /// It is cheaply cloneable, as cloning only increments the reference counts
 /// of the underlying shared data.
-#[derive(Clone)]
 pub struct SharedState {
     /// The public key of the validator node.
-    pub(crate) identity: Pubkey,
+    pub(crate) context: NodeContext,
     /// A thread-safe handle to the accounts database, which stores account states.
     pub(crate) accountsdb: Arc<AccountsDb>,
     /// A thread-safe handle to the blockchain ledger for accessing historical data.
@@ -34,29 +35,43 @@ pub struct SharedState {
     pub(crate) subscriptions: SubscriptionsDb,
 }
 
+/// Holds the core configuration and runtime parameters that define the node's operational context.
+#[derive(Default)]
+pub struct NodeContext {
+    /// The public key of the validator node.
+    pub identity: Pubkey,
+    /// The keypair for the optional faucet, used to airdrop tokens.
+    pub faucet: Option<Keypair>,
+    /// Base fee charged for transaction execution per signature.
+    pub base_fee: u64,
+    /// Runtime features activated for this node (used to compute fees)
+    pub featureset: Arc<FeatureSet>,
+}
+
 impl SharedState {
     /// Initializes the shared state for the RPC service.
     ///
     /// # Security Note on TTLs
     ///
     /// The `TRANSACTIONS_CACHE_TTL` (75s) is intentionally set to be longer than the
-    /// blockhash validity window (~60s). This is a security measure to prevent a
+    /// blockhash validity window (60s). This is a security measure to prevent a
     /// timing attack where a transaction's signature might be evicted from the cache
     /// before its blockhash expires, potentially allowing the transaction to be
     /// processed a second time.
     pub fn new(
-        identity: Pubkey,
+        context: NodeContext,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
         blocktime: u64,
     ) -> Self {
         const TRANSACTIONS_CACHE_TTL: Duration = Duration::from_secs(75);
+        let latest = ledger.latest_block().clone();
         Self {
-            identity,
+            context,
             accountsdb,
-            ledger,
             transactions: ExpiringCache::new(TRANSACTIONS_CACHE_TTL).into(),
-            blocks: BlocksCache::new(blocktime).into(),
+            blocks: BlocksCache::new(blocktime, latest).into(),
+            ledger,
             subscriptions: Default::default(),
         }
     }

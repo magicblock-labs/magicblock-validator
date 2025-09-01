@@ -41,7 +41,7 @@ impl HttpServer {
     /// Initializes the HTTP server by binding to an address and setting up shutdown signaling.
     pub(crate) async fn new(
         addr: SocketAddr,
-        state: &SharedState,
+        state: SharedState,
         cancel: CancellationToken,
         dispatch: &DispatchEndpoints,
     ) -> RpcResult<Self> {

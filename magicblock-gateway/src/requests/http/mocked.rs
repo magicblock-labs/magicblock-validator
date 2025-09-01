@@ -26,7 +26,7 @@ impl HttpDispatcher {
     ) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
-            Serde32Bytes::from(self.identity),
+            Serde32Bytes::from(self.context.identity),
         ))
     }
 
@@ -39,7 +39,7 @@ impl HttpDispatcher {
     ) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
-            [Serde32Bytes::from(self.identity)],
+            [Serde32Bytes::from(self.context.identity)],
         ))
     }
 
@@ -198,7 +198,7 @@ impl HttpDispatcher {
         request: &JsonRequest,
     ) -> HandlerResult {
         let info = RpcContactInfo {
-            pubkey: self.identity.to_string(),
+            pubkey: self.context.identity.to_string(),
             gossip: None,
             tvu: None,
             tpu: None,
