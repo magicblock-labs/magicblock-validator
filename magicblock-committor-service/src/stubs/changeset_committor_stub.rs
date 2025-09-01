@@ -64,7 +64,9 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
-        let (_, receiver) = oneshot::channel();
+        let (sender, receiver) = oneshot::channel();
+        let _ = sender.send(Ok(()));
+
         let mut changesets = self.committed_changesets.lock().unwrap();
         base_intents.into_iter().for_each(|intent| {
             changesets.insert(intent.inner.id, intent);
