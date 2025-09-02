@@ -15,13 +15,13 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
         let transaction =
-            self.prepare_transaction(&transaction, encoding, false, false)?;
+            self.prepare_transaction(&transaction, encoding, true, false)?;
         let signature = *transaction.signature();
 
-        // check whether signature has been processed recently, if not then reserve
-        // the cache entry for it to prevent rapid double spending attacks. This means
-        // that only one transaction with a given signature can be processed within
-        // the cache expiration period (which is equal to blockhash validity time)
+        // check whether signature has been processed recently, if not then reserve the
+        // cache entry for it to prevent rapid double spending attacks. This means that
+        // only one transaction with a given signature can be processed within the cache
+        // expiration period (which is slightly greater than the blockhash validity time)
         if self.transactions.contains(&signature)
             || !self.transactions.push(signature, None)
         {
@@ -35,6 +35,7 @@ impl HttpDispatcher {
         } else {
             self.transactions_scheduler.execute(transaction).await?;
         }
+        let signature = SerdeSignature(signature);
         Ok(ResponsePayload::encode_no_context(&request.id, signature))
     }
 }

@@ -112,7 +112,7 @@ impl SanitizeableTransaction for VersionedTransaction {
         SanitizedTransaction::try_create(
             self,
             hash,
-            None,
+            Some(false),
             SimpleAddressLoader::Disabled,
             &Default::default(),
         )

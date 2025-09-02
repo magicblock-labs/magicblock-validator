@@ -2,12 +2,17 @@ use setup::{RpcTestEnv, TOKEN_PROGRAM_ID};
 use solana_account::{accounts_equal, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::request::TokenAccountsFilter;
+use std::collections::HashSet;
+use test_kit::guinea;
 
 mod setup;
 
+/// Verifies `getAccountInfo` for both existing and non-existent accounts.
 #[tokio::test]
 async fn test_get_account_info() {
     let env = RpcTestEnv::new().await;
+
+    // Test for an existing account
     let acc = env.create_account();
     let account = env
         .rpc
@@ -18,18 +23,23 @@ async fn test_get_account_info() {
         accounts_equal(&account, &acc.account),
         "created account doesn't match the rpc response"
     );
+
+    // Test for a non-existent account
     let nonexistent = env
         .rpc
         .get_account_with_commitment(&Pubkey::new_unique(), Default::default())
         .await
         .expect("rpc request for non-existent account failed");
     assert_eq!(nonexistent.context.slot, env.latest_slot());
-    assert_eq!(nonexistent.value, None, "account shouldn't have existed");
+    assert_eq!(nonexistent.value, None, "account should not exist");
 }
 
+/// Verifies `getMultipleAccounts` for both existing and non-existent accounts.
 #[tokio::test]
 async fn test_get_multiple_accounts() {
     let env = RpcTestEnv::new().await;
+
+    // Test with a list of existing accounts
     let acc1 = env.create_account();
     let acc2 = env.create_account();
     let accounts = env
@@ -37,14 +47,13 @@ async fn test_get_multiple_accounts() {
         .get_multiple_accounts(&[acc1.pubkey, acc2.pubkey])
         .await
         .expect("failed to fetch newly created accounts");
-    assert!(
-        !accounts.is_empty(),
-        "gMA should return a non empty list of created accounts"
-    );
+    assert_eq!(accounts.len(), 2, "should return two accounts");
     assert!(
         accounts.iter().all(Option::is_some),
-        "all account should have been present in the database"
+        "all existing accounts should be found"
     );
+
+    // Test with a list of non-existent accounts
     let nonexistent = env
         .rpc
         .get_multiple_accounts(&[Pubkey::new_unique(), Pubkey::new_unique()])
@@ -52,13 +61,16 @@ async fn test_get_multiple_accounts() {
         .expect("rpc request for non-existent accounts failed");
     assert!(
         nonexistent.iter().all(Option::is_none),
-        "none of the requested accounts should have been present in the database"
+        "non-existent accounts should not be found"
     );
 }
 
+/// Verifies `getBalance` for both existing and non-existent accounts.
 #[tokio::test]
 async fn test_get_balance() {
     let env = RpcTestEnv::new().await;
+
+    // Test balance of an existing account
     let acc = env.create_account();
     let balance = env
         .rpc
@@ -68,132 +80,115 @@ async fn test_get_balance() {
     assert_eq!(
         balance,
         acc.account.lamports(),
-        "balance fetched from rpc should match the one from database"
+        "rpc balance should match the account's lamports"
     );
+
+    // Test balance of a non-existent account
     let balance = env
         .rpc
         .get_balance(&Pubkey::new_unique())
         .await
-        .expect("failed to fetch balance for nonexistent account");
+        .expect("failed to fetch balance for non-existent account");
     assert_eq!(
         balance, 0,
-        "balance fetched from rpc for nonexistent account should be zero"
+        "balance of a non-existent account should be zero"
     );
 }
 
+/// Verifies `getTokenAccountBalance` for both existing and non-existent token accounts.
 #[tokio::test]
 async fn test_get_token_account_balance() {
     let env = RpcTestEnv::new().await;
     let mint = Pubkey::new_unique();
     let owner = Pubkey::new_unique();
-    let token = env.create_token_account(mint, owner);
+
+    // Test a valid token account
+    let token_account = env.create_token_account(mint, owner);
     let balance = env
         .rpc
-        .get_token_account_balance(&token.pubkey)
+        .get_token_account_balance(&token_account.pubkey)
         .await
         .expect("failed to fetch balance for newly created token account");
-    assert_eq!(
-        balance.decimals, 9,
-        "balance fetched from rpc should match the one from database"
-    );
-    let nonexistent = env
+    assert_eq!(balance.decimals, 9, "balance decimals should be correct");
+    assert_eq!(balance.amount, RpcTestEnv::INIT_ACCOUNT_BALANCE.to_string());
+
+    // Test a non-existent account, which should error.
+    // This differs from `getBalance` which returns 0 for any pubkey.
+    let nonexistent_result = env
         .rpc
         .get_token_account_balance(&Pubkey::new_unique())
         .await;
     assert!(
-        nonexistent.is_err(),
-        "fetching non existent token account's balance should result in error"
+        nonexistent_result.is_err(),
+        "fetching balance of a non-token account should result in an error"
     );
 }
 
+/// Verifies `getProgramAccounts` finds all accounts owned by a program.
 #[tokio::test]
 async fn test_get_program_accounts() {
     let env = RpcTestEnv::new().await;
+
+    // Test a program with multiple accounts
     let acc1 = env.create_account();
     let acc2 = env.create_account();
+    let expected_pubkeys: HashSet<Pubkey> = [acc1.pubkey, acc2.pubkey].into();
 
     let accounts = env
         .rpc
-        .get_program_accounts(acc1.account.owner())
+        .get_program_accounts(&guinea::ID)
         .await
-        .expect("failed to fetch newly created accounts for program");
-    assert!(
-        !accounts.is_empty(),
-        "gPA response should be a non-empty list of created accounts"
+        .expect("failed to fetch accounts for program");
+
+    assert_eq!(
+        accounts.len(),
+        2,
+        "should return all accounts for the program"
     );
     for (pubkey, account) in accounts {
-        assert!(
-            pubkey == acc1.pubkey || pubkey == acc2.pubkey,
-            "getProgramAccounts returned irrelevant account"
-        );
-        assert_eq!(
-            account.owner,
-            *acc1.account.owner(),
-            "owner mismatch in the result of getProgramAccounts"
-        );
+        assert!(expected_pubkeys.contains(&pubkey));
+        assert_eq!(account.owner, guinea::ID);
     }
+
+    // Test a program with no accounts
+    let empty_program_accounts = env
+        .rpc
+        .get_program_accounts(&Pubkey::new_unique())
+        .await
+        .unwrap();
+    assert!(
+        empty_program_accounts.is_empty(),
+        "should return an empty list for a program with no accounts"
+    );
 }
 
+/// Verifies `getTokenAccountsByOwner` using both Mint and ProgramId filters.
 #[tokio::test]
-async fn test_get_token_accounts_by_filter() {
+async fn test_get_token_accounts_by_owner() {
     let env = RpcTestEnv::new().await;
     let mint = Pubkey::new_unique();
     let owner = Pubkey::new_unique();
     let acc1 = env.create_token_account(mint, owner);
     let acc2 = env.create_token_account(mint, owner);
 
-    for filter in [
+    let filters = [
         TokenAccountsFilter::Mint(mint),
         TokenAccountsFilter::ProgramId(TOKEN_PROGRAM_ID),
-    ] {
+    ];
+
+    for filter in filters {
         let accounts = env
             .rpc
             .get_token_accounts_by_owner(&owner, filter)
             .await
-            .expect("failed to fetch newly created accounts for program");
-        assert!(
-            !accounts.is_empty(),
-            "gTABO should return non empty list of accounts"
-        );
-        for account in accounts {
-            let pubkey: Pubkey = account.pubkey.parse().unwrap();
-            assert!(
-                pubkey == acc1.pubkey || pubkey == acc2.pubkey,
-                "getTokenAccountsByOwner returned irrelevant account"
-            );
-            assert_eq!(
-                account.account.data.decode().unwrap().len(),
-                165,
-                "token account data length mismatch in the result of getTokenAccountsByOwner"
-            );
-        }
+            .expect("failed to fetch token accounts by owner");
+
+        assert_eq!(accounts.len(), 2, "should return two token accounts");
+        assert!(accounts.iter().any(|a| a.pubkey == acc1.pubkey.to_string()));
+        assert!(accounts.iter().any(|a| a.pubkey == acc2.pubkey.to_string()));
     }
-    for filter in [
-        TokenAccountsFilter::Mint(mint),
-        TokenAccountsFilter::ProgramId(TOKEN_PROGRAM_ID),
-    ] {
-        let accounts = env
-            .rpc
-            .get_token_accounts_by_delegate(&owner, filter)
-            .await
-            .expect("failed to fetch newly created accounts for program");
-        assert!(
-            !accounts.is_empty(),
-            "gTABD should return non empty list of accounts"
-        );
-        for account in accounts {
-            let pubkey: Pubkey = account.pubkey.parse().unwrap();
-            assert!(
-                pubkey == acc1.pubkey || pubkey == acc2.pubkey,
-                "getTokenAccountsByDelegate returned irrelevant account"
-            );
-            assert_eq!(
-                account.account.data.decode().unwrap().len(),
-                165,
-                "token account data length mismatch in the result of getTokenAccountsByDelegate"
-            );
-        }
-    }
+
+    // Test with a non-existent mint
     let nonexistent = env
         .rpc
         .get_token_accounts_by_owner(
@@ -201,11 +196,42 @@ async fn test_get_token_accounts_by_filter() {
             TokenAccountsFilter::Mint(Pubkey::new_unique()),
         )
         .await
-        .expect("failed to fetch response for gTABO");
+        .expect("RPC call for non-existent mint should not fail");
     assert!(
         nonexistent.is_empty(),
-        "getTokenAccountsByOwner should not return anything for nonexistent mint"
+        "should return an empty list for a non-existent mint"
     );
+}
+
+/// Verifies `getTokenAccountsByDelegate` using both Mint and ProgramId filters.
+#[tokio::test]
+async fn test_get_token_accounts_by_delegate() {
+    let env = RpcTestEnv::new().await;
+    let mint = Pubkey::new_unique();
+    let owner = Pubkey::new_unique();
+    env.create_token_account(mint, owner);
+    env.create_token_account(mint, owner);
+
+    let filters = [
+        TokenAccountsFilter::Mint(mint),
+        TokenAccountsFilter::ProgramId(TOKEN_PROGRAM_ID),
+    ];
+
+    for filter in filters {
+        let accounts = env
+            .rpc
+            .get_token_accounts_by_delegate(&owner, filter)
+            .await
+            .expect("failed to fetch token accounts by delegate");
+
+        assert_eq!(
+            accounts.len(),
+            2,
+            "should return two token accounts for the delegate"
+        );
+    }
+
+    // Test with a non-existent program ID
     let nonexistent = env
         .rpc
         .get_token_accounts_by_delegate(
@@ -213,9 +239,10 @@ async fn test_get_token_accounts_by_filter() {
             TokenAccountsFilter::ProgramId(Pubkey::new_unique()),
         )
         .await
-        .expect("failed to fetch response for gTABD");
+        .expect("RPC call for non-existent program should not fail");
+
     assert!(
         nonexistent.is_empty(),
-        "getTokenAccountsByDelegate should not return anything for nonexistent program"
+        "should return an empty list for a non-existent program ID"
     );
 }

@@ -24,25 +24,46 @@ use solana_account::AccountSharedData;
 use solana_keypair::Keypair;
 use solana_program::{hash::Hasher, native_token::LAMPORTS_PER_SOL};
 use solana_signature::Signature;
-pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
 
 pub use guinea;
 pub use solana_instruction::*;
+pub use solana_signer::Signer;
 
+/// A simulated validator backend for integration tests.
+///
+/// This struct encapsulates all the core components of a validator, including
+/// the `AccountsDb`, a `Ledger`, and a running `TransactionScheduler` with its
+/// worker pool. It provides a high-level API for tests to manipulate the blockchain
+/// state and process transactions.
 pub struct ExecutionTestEnv {
+    /// The default keypair used for paying transaction fees and signing.
     pub payer: Keypair,
+    /// A handle to the accounts database, storing all account states.
     pub accountsdb: Arc<AccountsDb>,
+    /// A handle to the ledger, storing all blocks and transactions.
     pub ledger: Arc<Ledger>,
+    /// The entry point for submitting transactions to the processing pipeline.
     pub transaction_scheduler: TransactionSchedulerHandle,
+    /// The temporary directory holding the `AccountsDb` and `Ledger` files for this test run.
     pub dir: TempDir,
+    /// The "client-side" channel endpoints for listening to validator events.
     pub dispatch: DispatchEndpoints,
+    /// The "server-side" channel endpoint for broadcasting new block updates.
     pub blocks_tx: BlockUpdateTx,
 }
 
 impl ExecutionTestEnv {
+    /// Creates a new, fully initialized validator test environment.
+    ///
+    /// This function sets up a complete validator stack in memory:
+    /// 1.  Creates temporary on-disk storage for the accounts database and ledger.
+    /// 2.  Initializes all the communication channels between the API layer and the core.
+    /// 3.  Spawns a `TransactionScheduler` with one worker thread.
+    /// 4.  Pre-loads a test program (`guinea`) for use in tests.
+    /// 5.  Funds a default `payer` keypair with 1 SOL.
     pub fn new() -> Self {
         init_logger!();
         let dir =
@@ -52,10 +73,12 @@ impl ExecutionTestEnv {
         );
         let ledger =
             Arc::new(Ledger::open(dir.path()).expect("opening test ledger"));
+
         let (dispatch, validator_channels) = link();
         let blockhash = ledger.latest_block().load().blockhash;
         let environment = build_svm_env(&accountsdb, blockhash, 0);
         let payer = Keypair::new();
+
         let this = Self {
             payer,
             accountsdb: accountsdb.clone(),
@@ -65,7 +88,8 @@ impl ExecutionTestEnv {
             dispatch,
             blocks_tx: validator_channels.block_update,
         };
-        this.advance_slot();
+        this.advance_slot(); // Move to slot 1 to ensure a non-genesis state.
+
         let scheduler_state = TransactionSchedulerState {
             accountsdb,
             ledger,
@@ -74,18 +98,24 @@ impl ExecutionTestEnv {
             txn_to_process_rx: validator_channels.transaction_to_process,
             environment,
         };
+
+        // Load test program
         scheduler_state
             .load_upgradeable_programs(&[(
                 guinea::ID,
                 "../programs/elfs/guinea.so".into(),
             )])
             .expect("failed to load test programs into test env");
+
+        // Start the transaction processing backend.
         TransactionScheduler::new(1, scheduler_state).spawn();
 
         this.fund_account(this.payer.pubkey(), LAMPORTS_PER_SOL);
         this
     }
 
+    /// Creates a new account with the specified properties.
+    /// Note: This helper automatically marks the account as `delegated`.
     pub fn create_account_with_config(
         &self,
         lamports: u64,
@@ -99,17 +129,31 @@ impl ExecutionTestEnv {
         keypair
     }
 
+    /// Creates a new, empty system account with the given lamports.
     pub fn create_account(&self, lamports: u64) -> Keypair {
         self.create_account_with_config(lamports, 0, Default::default())
     }
 
+    /// Funds an existing account with the given lamports.
+    /// If the account does not exist, it will be created as a system account.
     pub fn fund_account(&self, pubkey: Pubkey, lamports: u64) {
-        let mut account =
-            AccountSharedData::new(lamports, 0, &Default::default());
+        self.fund_account_with_owner(pubkey, lamports, Default::default());
+    }
+
+    /// Funds an account with a specific owner.
+    /// Note: This helper automatically marks the account as `delegated`.
+    pub fn fund_account_with_owner(
+        &self,
+        pubkey: Pubkey,
+        lamports: u64,
+        owner: Pubkey,
+    ) {
+        let mut account = AccountSharedData::new(lamports, 0, &owner);
         account.set_delegated(true);
         self.accountsdb.insert_account(&pubkey, &account);
     }
 
+    /// Retrieves a transaction's metadata from the ledger by its signature.
     pub fn get_transaction(
         &self,
         sig: Signature,
@@ -120,6 +164,10 @@ impl ExecutionTestEnv {
             .map(|(_, m)| m)
     }
 
+    /// Simulates the production of a new block.
+    ///
+    /// This advances the slot, calculates a new blockhash, writes the block to the
+    /// ledger, and broadcasts a `BlockUpdate` notification.
     pub fn advance_slot(&self) -> Slot {
         let block = self.ledger.latest_block();
         let b = block.load();
@@ -135,16 +183,19 @@ impl ExecutionTestEnv {
             .write_block(slot, time, hash)
             .expect("failed to write new block to the ledger");
         self.accountsdb.set_slot(slot);
+
+        // Notify the system that a new block was produced.
         let _ = self.blocks_tx.send(BlockUpdate {
             hash,
             meta: BlockMeta { slot, time },
         });
-        // allow transaction executor to register slot advancement
-        thread::yield_now();
 
+        // Yield to allow other tasks (like the executor) to process the slot change.
+        thread::yield_now();
         slot
     }
 
+    /// Builds a transaction with the given instructions, signed by the default payer.
     pub fn build_transaction(&self, ixs: &[Instruction]) -> Transaction {
         Transaction::new_signed_with_payer(
             ixs,
@@ -154,6 +205,7 @@ impl ExecutionTestEnv {
         )
     }
 
+    /// Submits a transaction for execution and waits for its result.
     pub async fn execute_transaction(
         &self,
         txn: impl SanitizeableTransaction,
@@ -164,6 +216,7 @@ impl ExecutionTestEnv {
             .inspect_err(|err| error!("failed to execute transaction: {err}"))
     }
 
+    /// Submits a transaction for simulation and waits for the detailed result.
     pub async fn simulate_transaction(
         &self,
         txn: impl SanitizeableTransaction,
@@ -179,6 +232,7 @@ impl ExecutionTestEnv {
         result
     }
 
+    /// Submits a transaction for replay and waits for its result.
     pub async fn replay_transaction(
         &self,
         txn: impl SanitizeableTransaction,

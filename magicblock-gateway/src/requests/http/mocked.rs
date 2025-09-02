@@ -85,10 +85,10 @@ impl HttpDispatcher {
         request: &JsonRequest,
     ) -> HandlerResult {
         let supply = UiTokenAmount {
-            ui_amount: None,
+            ui_amount: Some(0.0),
             decimals: 0,
-            amount: String::new(),
-            ui_amount_string: String::new(),
+            amount: "0".into(),
+            ui_amount_string: "0.0".into(),
         };
         Ok(ResponsePayload::encode(
             &request.id,
