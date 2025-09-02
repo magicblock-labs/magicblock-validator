@@ -14,7 +14,7 @@ use crate::{
         TaskInfoFetcher, TaskInfoFetcherError,
     },
     persist::IntentPersister,
-    tasks::tasks::{
+    tasks::{
         ArgsTask, BaseActionTask, BaseTask, CommitTask, FinalizeTask,
         UndelegateTask,
     },

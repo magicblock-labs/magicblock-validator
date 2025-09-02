@@ -79,10 +79,10 @@ impl DB for DummyDB {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("StoreError: {0}")]
-    StoreError(anyhow::Error),
-    #[error("FetchError: {0}")]
-    FetchError(anyhow::Error),
+    #[error("StoreError")]
+    StoreError,
+    #[error("FetchError")]
+    FetchError,
 }
 
 pub type DBResult<T, E = Error> = Result<T, E>;

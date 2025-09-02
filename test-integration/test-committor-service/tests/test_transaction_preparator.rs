@@ -5,11 +5,9 @@ use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
         task_strategist::{TaskStrategist, TransactionStrategy},
-        tasks::{
-            ArgsTask, BaseActionTask, BaseTask, BufferTask, CommitTask,
-            FinalizeTask, UndelegateTask,
-        },
         utils::TransactionUtils,
+        ArgsTask, BaseActionTask, BaseTask, BufferTask, CommitTask,
+        FinalizeTask, UndelegateTask,
     },
     transaction_preparator::transaction_preparator::TransactionPreparator,
 };

@@ -4,7 +4,7 @@ use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
         task_strategist::{TaskStrategist, TransactionStrategy},
-        tasks::{ArgsTask, BaseTask, BufferTask},
+        ArgsTask, BaseTask, BufferTask,
     },
 };
 use solana_sdk::signer::Signer;

@@ -29,7 +29,7 @@ use crate::{
         task_strategist::{
             TaskStrategist, TaskStrategistError, TransactionStrategy,
         },
-        tasks::BaseTask,
+        BaseTask,
     },
     transaction_preparator::{
         error::TransactionPreparatorError,

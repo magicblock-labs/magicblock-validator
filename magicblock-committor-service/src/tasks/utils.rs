@@ -13,7 +13,7 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 
-use crate::tasks::{task_strategist::TaskStrategistResult, tasks::BaseTask};
+use crate::tasks::{task_strategist::TaskStrategistResult, BaseTask};
 
 pub struct TransactionUtils;
 impl TransactionUtils {

@@ -12,8 +12,8 @@ use crate::{
         task_visitors::persistor_visitor::{
             PersistorContext, PersistorVisitor,
         },
-        tasks::{ArgsTask, BaseTask, FinalizeTask},
         utils::TransactionUtils,
+        ArgsTask, BaseTask, FinalizeTask,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
@@ -162,7 +162,14 @@ impl TaskStrategist {
         // In that case we set size to max
         let sizes = ixs
             .iter()
-            .map(|ix| bincode::serialized_size(ix).unwrap_or(u64::MAX))
+            .map(|ix| {
+                let asd = bincode::serialize(ix);
+                if asd.is_err() {
+                    u64::MAX
+                } else {
+                    asd.unwrap().len() as u64
+                }
+            })
             .map(|size| usize::try_from(size).unwrap_or(usize::MAX))
             .collect::<Vec<_>>();
         let mut map = sizes
@@ -238,9 +245,7 @@ mod tests {
     use super::*;
     use crate::{
         persist::IntentPersisterImpl,
-        tasks::tasks::{
-            BaseActionTask, CommitTask, TaskStrategy, UndelegateTask,
-        },
+        tasks::{BaseActionTask, CommitTask, TaskStrategy, UndelegateTask},
     };
 
     // Helper to create a simple commit task
@@ -252,7 +257,7 @@ mod tests {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
                     lamports: 1000,
-                    data: vec![0; data_size],
+                    data: vec![1; data_size],
                     owner: system_program::id(),
                     executable: false,
                     rent_epoch: 0,
@@ -336,7 +341,7 @@ mod tests {
     fn test_build_strategy_optimizes_to_buffer_u16_exceeded() {
         let validator = Pubkey::new_unique();
 
-        let task = create_test_commit_task(1, 66_000); // Large task
+        let task = create_test_commit_task(1, 9_060_000); // Large task
         let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
 
         let strategy = TaskStrategist::build_strategy(
