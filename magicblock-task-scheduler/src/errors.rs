@@ -2,11 +2,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum TaskSchedulerError {
-    #[error("Database error: {0}")]
-    DatabaseConnection(#[from] r2d2::Error),
-
-    #[error("Database error: {0}")]
-    Database(#[from] r2d2_sqlite::rusqlite::Error),
+    #[error(transparent)]
+    DatabaseConnection(#[from] rusqlite::Error),
 
     #[error("Pubsub error: {0}")]
     Pubsub(

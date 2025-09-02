@@ -2,11 +2,7 @@ use std::path::Path;
 
 use chrono::Utc;
 use log::*;
-use r2d2::Pool;
-use r2d2_sqlite::{
-    rusqlite::{self, params},
-    SqliteConnectionManager,
-};
+use rusqlite::{params, Connection};
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
 
 use crate::errors::TaskSchedulerError;
@@ -27,17 +23,13 @@ pub struct DbTask {
     pub last_execution_millis: i64,
 }
 
-#[derive(Clone)]
 pub struct SchedulerDatabase {
-    pool: Pool<SqliteConnectionManager>,
+    conn: Connection,
 }
 
 impl SchedulerDatabase {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, TaskSchedulerError> {
-        let manager = SqliteConnectionManager::file(path);
-        let pool = Pool::new(manager)?;
-
-        let conn = pool.get()?;
+        let conn = Connection::open(path)?;
 
         // Create tables
         conn.execute(
@@ -54,16 +46,15 @@ impl SchedulerDatabase {
             [],
         )?;
 
-        Ok(Self { pool })
+        Ok(Self { conn })
     }
 
     pub fn insert_task(&self, task: &DbTask) -> Result<(), TaskSchedulerError> {
-        let conn = self.pool.get()?;
         let instructions_bin = bincode::serialize(&task.instructions)?;
         let authority_str = task.authority.to_string();
         let now = Utc::now().timestamp_millis();
 
-        conn.execute(
+        self.conn.execute(
             "INSERT OR REPLACE INTO tasks 
              (id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -90,8 +81,7 @@ impl SchedulerDatabase {
     ) -> Result<(), TaskSchedulerError> {
         let now = Utc::now().timestamp_millis();
 
-        let conn = self.pool.get()?;
-        conn.execute(
+        self.conn.execute(
             "UPDATE tasks 
              SET executions_left = executions_left - 1, 
                  last_execution_millis = ?,
@@ -108,8 +98,7 @@ impl SchedulerDatabase {
         &self,
         task_id: u64,
     ) -> Result<(), TaskSchedulerError> {
-        let conn = self.pool.get()?;
-        conn.execute(
+        self.conn.execute(
             "UPDATE tasks SET executions_left = 0 WHERE id = ?",
             [task_id],
         )?;
@@ -118,8 +107,8 @@ impl SchedulerDatabase {
     }
 
     pub fn remove_task(&self, task_id: u64) -> Result<(), TaskSchedulerError> {
-        let conn = self.pool.get()?;
-        conn.execute("DELETE FROM tasks WHERE id = ?", [task_id])?;
+        self.conn
+            .execute("DELETE FROM tasks WHERE id = ?", [task_id])?;
         debug!("Removed task {} from database", task_id);
         Ok(())
     }
@@ -128,8 +117,7 @@ impl SchedulerDatabase {
         &self,
         task_id: u64,
     ) -> Result<Option<DbTask>, TaskSchedulerError> {
-        let conn = self.pool.get()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = self.conn.prepare(
             "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
              FROM tasks WHERE id = ?"
         )?;
@@ -165,8 +153,7 @@ impl SchedulerDatabase {
     }
 
     pub fn get_tasks(&self) -> Result<Vec<DbTask>, TaskSchedulerError> {
-        let conn = self.pool.get()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = self.conn.prepare(
             "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
              FROM tasks"
         )?;
@@ -207,8 +194,7 @@ impl SchedulerDatabase {
     }
 
     pub fn get_task_ids(&self) -> Result<Vec<u64>, TaskSchedulerError> {
-        let conn = self.pool.get()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = self.conn.prepare(
             "SELECT id 
              FROM tasks",
         )?;

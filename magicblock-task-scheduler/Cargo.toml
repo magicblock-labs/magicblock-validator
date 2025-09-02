@@ -19,8 +19,7 @@ magicblock-config = { workspace = true }
 magicblock-geyser-plugin = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-processor = { workspace = true }
-r2d2 = { workspace = true }
-r2d2_sqlite = { workspace = true }
+rusqlite = { workspace = true }
 solana-svm = { workspace = true }
 solana-timings = { workspace = true }
 serde = { workspace = true }
