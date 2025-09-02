@@ -280,7 +280,6 @@ mod tests {
                 },
             },
             task_scheduler: TaskSchedulerConfig {
-                path: "tasks.db".to_string(),
                 reset: true,
                 millis_per_tick: 1000,
             },
@@ -374,7 +373,6 @@ mod tests {
                 },
             },
             task_scheduler: TaskSchedulerConfig {
-                path: "tasks.db".to_string(),
                 reset: true,
                 millis_per_tick: 1000,
             },
@@ -465,7 +463,6 @@ mod tests {
                 },
             },
             task_scheduler: TaskSchedulerConfig {
-                path: "tasks2.db".to_string(),
                 reset: true,
                 millis_per_tick: 2000,
             },
@@ -549,7 +546,6 @@ mod tests {
                 },
             },
             task_scheduler: TaskSchedulerConfig {
-                path: "tasks.db".to_string(),
                 reset: true,
                 millis_per_tick: 1000,
             },

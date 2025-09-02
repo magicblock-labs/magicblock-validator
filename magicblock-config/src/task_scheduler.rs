@@ -9,10 +9,6 @@ use serde::{Deserialize, Serialize};
 )]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct TaskSchedulerConfig {
-    /// The path to the task scheduler database file.
-    #[derive_env_var]
-    #[serde(default = "default_db_path")]
-    pub path: String,
     /// If true, the task scheduler will reset the database on startup.
     #[derive_env_var]
     #[serde(default)]
@@ -26,15 +22,10 @@ pub struct TaskSchedulerConfig {
 impl Default for TaskSchedulerConfig {
     fn default() -> Self {
         Self {
-            path: default_db_path(),
             reset: bool::default(),
             millis_per_tick: default_millis_per_tick(),
         }
     }
-}
-
-fn default_db_path() -> String {
-    "target/task_scheduler.db".to_string()
 }
 
 fn default_millis_per_tick() -> u64 {

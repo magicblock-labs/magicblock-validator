@@ -792,7 +792,18 @@ impl MagicValidator {
         self.pubsub_handle.write().unwrap().replace(pubsub_handle);
         self.pubsub_close_handle = pubsub_close_handle;
 
+        let task_scheduler_db_path = self
+            .ledger
+            .ledger_path()
+            .parent()
+            .expect("ledger_path didn't have a parent, should never happen")
+            .join("task_scheduler.sqlite");
+        debug!(
+            "Task scheduler persists to: {}",
+            task_scheduler_db_path.display()
+        );
         self.task_scheduler_handle = Some(TaskSchedulerService::start(
+            &task_scheduler_db_path,
             &self.config.task_scheduler,
             self.bank.clone(),
             self.token.clone(),
