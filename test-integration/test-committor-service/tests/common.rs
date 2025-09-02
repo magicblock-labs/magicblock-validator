@@ -16,8 +16,7 @@ use magicblock_committor_service::{
     },
     tasks::CommitTask,
     transaction_preparator::{
-        delivery_preparator::DeliveryPreparator,
-        transaction_preparator::TransactionPreparatorV1,
+        delivery_preparator::DeliveryPreparator, TransactionPreparatorV1,
     },
     ComputeBudgetConfig,
 };

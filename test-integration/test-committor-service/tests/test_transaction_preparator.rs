@@ -9,7 +9,7 @@ use magicblock_committor_service::{
         ArgsTask, BaseActionTask, BaseTask, BufferTask, CommitTask,
         FinalizeTask, UndelegateTask,
     },
-    transaction_preparator::transaction_preparator::TransactionPreparator,
+    transaction_preparator::TransactionPreparator,
 };
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, ProgramArgs, ShortAccountMeta,

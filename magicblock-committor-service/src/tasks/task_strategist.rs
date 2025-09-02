@@ -162,14 +162,7 @@ impl TaskStrategist {
         // In that case we set size to max
         let sizes = ixs
             .iter()
-            .map(|ix| {
-                let asd = bincode::serialize(ix);
-                if asd.is_err() {
-                    u64::MAX
-                } else {
-                    asd.unwrap().len() as u64
-                }
-            })
+            .map(|ix| bincode::serialized_size(ix).unwrap_or(u64::MAX))
             .map(|size| usize::try_from(size).unwrap_or(usize::MAX))
             .collect::<Vec<_>>();
         let mut map = sizes
