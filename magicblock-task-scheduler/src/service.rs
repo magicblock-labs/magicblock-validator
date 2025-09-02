@@ -88,7 +88,7 @@ impl TaskSchedulerService {
         let mut ids = Vec::new();
 
         for request in requests {
-            debug!("Processing task scheduling request: {request:?}");
+            trace!("Processing task scheduling request: {request:?}");
             let id = match request {
                 TaskRequest::Schedule(schedule_request) => {
                     if let Err(e) =
@@ -130,7 +130,7 @@ impl TaskSchedulerService {
         // Convert request to task and register in database
         let task = CrankTask::from(schedule_request);
         self.register_task(&task)?;
-        debug!(
+        trace!(
             "Processed schedule request for task {}",
             schedule_request.id
         );
@@ -145,7 +145,7 @@ impl TaskSchedulerService {
         self.pending_cancellations.insert(cancel_request.task_id);
         // Remove task from database
         self.unregister_task(cancel_request.task_id)?;
-        debug!(
+        trace!(
             "Processed cancel request for task {}",
             cancel_request.task_id
         );
@@ -156,7 +156,7 @@ impl TaskSchedulerService {
         &mut self,
         task: &DbTask,
     ) -> Result<(), TaskSchedulerError> {
-        debug!("Executing task {}", task.id);
+        trace!("Executing task {}", task.id);
 
         if self.pending_cancellations.remove(&task.id) {
             warn!("Task {} is pending cancellation", task.id);
@@ -180,7 +180,6 @@ impl TaskSchedulerService {
                         &blockhash,
                     ));
                 tx.partial_sign(&[fake_payer], blockhash);
-                debug!("task tx: {tx:?}");
                 SanitizedTransaction::try_from_legacy_transaction(
                     tx,
                     &Default::default(),
@@ -227,9 +226,10 @@ impl TaskSchedulerService {
 
         let current_time = chrono::Utc::now().timestamp_millis();
         self.db.update_task_after_execution(task.id, current_time)?;
-        debug!(
+        trace!(
             "Task {} has {} executions left",
-            task.id, task.executions_left
+            task.id,
+            task.executions_left
         );
 
         Ok(())
