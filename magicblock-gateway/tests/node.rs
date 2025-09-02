@@ -3,6 +3,7 @@ use test_kit::Signer;
 
 mod setup;
 
+/// Verifies the `getVersion` RPC method returns valid information.
 #[tokio::test]
 async fn test_get_version() {
     let env = RpcTestEnv::new().await;
@@ -14,7 +15,7 @@ async fn test_get_version() {
 
     assert!(
         !version_info.solana_core.is_empty(),
-        "solana version should not be an empty string"
+        "solana version should not be empty"
     );
     assert!(
         version_info.feature_set.is_some(),
@@ -22,6 +23,7 @@ async fn test_get_version() {
     );
 }
 
+/// Verifies the `getIdentity` RPC method returns the correct validator public key.
 #[tokio::test]
 async fn test_get_identity() {
     let env = RpcTestEnv::new().await;

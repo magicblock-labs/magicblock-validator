@@ -46,8 +46,9 @@ impl<K: Hash + Eq + Copy + 'static, V: Clone> ExpiringCache<K, V> {
     /// Before insertion, this method performs a lazy cleanup by removing all entries
     /// from the head of the queue that have exceeded their TTL.
     ///
-    /// If the key already exists, its value is updated. **Note:** The entry's lifetime
-    /// is **not** renewed upon update; it retains its original creation timestamp.
+    /// If the key already exists, its value is updated.
+    /// **Note:** The entry's lifetime is **not** renewed upon
+    /// update; it retains its original creation timestamp.
     ///
     /// # Returns
     ///

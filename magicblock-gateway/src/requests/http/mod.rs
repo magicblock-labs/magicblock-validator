@@ -6,12 +6,16 @@ use hyper::{
     body::{Bytes, Incoming},
     Request, Response,
 };
-use magicblock_core::link::transactions::SanitizeableTransaction;
+use magicblock_core::link::{
+    blocks::BlockHash, transactions::SanitizeableTransaction,
+};
 use prelude::JsonBody;
 use solana_account::AccountSharedData;
+use solana_message::SimpleAddressLoader;
 use solana_pubkey::Pubkey;
 use solana_transaction::{
-    sanitized::SanitizedTransaction, versioned::VersionedTransaction,
+    sanitized::{MessageHash, SanitizedTransaction},
+    versioned::VersionedTransaction,
 };
 use solana_transaction_status::UiTransactionEncoding;
 
@@ -108,14 +112,18 @@ impl HttpDispatcher {
                 .set_recent_blockhash(self.blocks.get_latest().hash);
         }
         // sanitize the transaction making it processable
-        let transaction =
-            transaction.sanitize().map_err(RpcError::invalid_params)?;
-        // verify transaction signatures if necessary
-        if sigverify {
-            transaction
-                .verify()
-                .map_err(RpcError::transaction_verification)?;
-        }
+        let transaction = if sigverify {
+            transaction.sanitize().map_err(RpcError::invalid_params)?
+        } else {
+            // for transaction simulation we bypass signature verification entirely
+            SanitizedTransaction::try_create(
+                transaction,
+                MessageHash::Precomputed(BlockHash::new_unique()),
+                Some(false),
+                SimpleAddressLoader::Disabled,
+                &Default::default(),
+            )?
+        };
         Ok(transaction)
     }
 
@@ -126,28 +134,11 @@ impl HttpDispatcher {
         // TODO(thlorenz): replace the entire method call with chainlink
         let message = transaction.message();
         let reader = self.accountsdb.reader().map_err(RpcError::internal)?;
-        let mut to_ensure = Vec::new();
-        let accounts = message.account_keys().iter().enumerate();
-        for (index, pubkey) in accounts {
+        let accounts = message.account_keys().iter();
+        for pubkey in accounts {
             if !reader.contains(pubkey) {
-                to_ensure.push(*pubkey);
-                continue;
+                panic!("account is not present in the database: {pubkey}");
             }
-            if !message.is_writable(index) {
-                continue;
-            }
-            let delegated = reader.read(pubkey, |acc| acc.delegated());
-            if delegated.unwrap_or_default() {
-                Err(RpcError::invalid_params(
-                    "use of non-delegated account as writeable",
-                ))?;
-            }
-        }
-        if !to_ensure.is_empty() {
-            let msg = format!(
-                "transaction uses non-existent accounts: {to_ensure:?}"
-            );
-            Err(RpcError::invalid_params(msg))?;
         }
         Ok(())
     }
@@ -175,12 +166,13 @@ mod prelude {
 const SPL_MINT_OFFSET: usize = 0;
 const SPL_OWNER_OFFSET: usize = 32;
 const SPL_DECIMALS_OFFSET: usize = 40;
-const SPL_DELEGATE_OFFSET: usize = 73;
+const SPL_TOKEN_AMOUNT_OFFSET: usize = 64;
+const SPL_DELEGATE_OFFSET: usize = 76;
 
 const SPL_MINT_RANGE: Range<usize> =
     SPL_MINT_OFFSET..SPL_MINT_OFFSET + size_of::<Pubkey>();
 const SPL_TOKEN_AMOUNT_RANGE: Range<usize> =
-    SPL_DECIMALS_OFFSET..SPL_DECIMALS_OFFSET + size_of::<u64>();
+    SPL_TOKEN_AMOUNT_OFFSET..SPL_TOKEN_AMOUNT_OFFSET + size_of::<u64>();
 
 const TOKEN_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");

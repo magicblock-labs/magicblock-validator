@@ -22,8 +22,13 @@ impl HttpDispatcher {
             self.blocks.get_latest().hash,
         );
         let txn = txn.sanitize()?;
-        let signature = *txn.signature();
-        self.transactions_scheduler.schedule(txn).await?;
+        let signature = SerdeSignature(*txn.signature());
+        self.transactions_scheduler
+            .execute(txn)
+            .await
+            .inspect_err(|err| {
+                eprintln!("transaction airdrop failed: {err}")
+            })?;
         Ok(ResponsePayload::encode_no_context(&request.id, signature))
     }
 }

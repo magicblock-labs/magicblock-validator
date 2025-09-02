@@ -3,7 +3,7 @@ use core::slice;
 
 use serde::{Deserialize, Serialize};
 use solana_program::{
-    account_info::AccountInfo,
+    account_info::{next_account_info, AccountInfo},
     declare_id,
     entrypoint::{self, ProgramResult},
     log,
@@ -20,6 +20,7 @@ pub enum GuineaInstruction {
     ComputeBalances,
     PrintSizes,
     WriteByteToData(u8),
+    Transfer(u64),
 }
 
 fn compute_balances(accounts: slice::Iter<AccountInfo>) {
@@ -47,6 +48,29 @@ fn write_byte_to_data(
     Ok(())
 }
 
+fn transfer(
+    mut accounts: slice::Iter<AccountInfo>,
+    lamports: u64,
+) -> ProgramResult {
+    let sender = next_account_info(&mut accounts)?;
+    let recipient = next_account_info(&mut accounts)?;
+    let mut from_lamports = sender.try_borrow_mut_lamports()?;
+    let mut to_lamports = recipient.try_borrow_mut_lamports()?;
+    **from_lamports = from_lamports
+        .checked_sub(lamports)
+        .ok_or(ProgramError::InsufficientFunds)?;
+    **to_lamports = to_lamports
+        .checked_add(lamports)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
+    log::msg!(
+        "Sent {} lamport from {} to {}",
+        lamports,
+        sender.key,
+        recipient.key
+    );
+    Ok(())
+}
+
 fn process_instruction(
     _program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -65,8 +89,9 @@ fn process_instruction(
         GuineaInstruction::ComputeBalances => compute_balances(accounts),
         GuineaInstruction::PrintSizes => print_sizes(accounts),
         GuineaInstruction::WriteByteToData(byte) => {
-            write_byte_to_data(accounts, byte)?;
+            write_byte_to_data(accounts, byte)?
         }
+        GuineaInstruction::Transfer(lamports) => transfer(accounts, lamports)?,
     }
     Ok(())
 }

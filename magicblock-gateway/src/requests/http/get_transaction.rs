@@ -20,7 +20,9 @@ impl HttpDispatcher {
             .get_complete_transaction(signature.0, u64::MAX)?;
 
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
-        let txn = transaction.and_then(|tx| tx.encode(encoding, None).ok());
+        // we support all transaction versions, including the future ones
+        let version = Some(u8::MAX);
+        let txn = transaction.and_then(|tx| tx.encode(encoding, version).ok());
         Ok(ResponsePayload::encode_no_context(&request.id, txn))
     }
 }
