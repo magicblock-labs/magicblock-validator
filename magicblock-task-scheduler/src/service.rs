@@ -183,9 +183,7 @@ impl TaskSchedulerService {
             Ok(transactions) => transactions,
             Err(e) => {
                 error!("Failed to sanitize transactions: {}", e);
-                return Err(TaskSchedulerError::SanitizeTransactions(
-                    e.to_string(),
-                ));
+                return Err(TaskSchedulerError::Transaction(e));
             }
         };
         let batch = self.bank.prepare_sanitized_batch(&sanitized_transactions);
@@ -203,7 +201,7 @@ impl TaskSchedulerService {
             if let Err(e) = result.and_then(|tx| tx.status) {
                 error!("Task {} failed to execute: {}", task.id, e);
                 self.db.unschedule_task(task.id)?;
-                return Err(TaskSchedulerError::TaskExecution(e.to_string()));
+                return Err(TaskSchedulerError::Transaction(e));
             }
         }
 
