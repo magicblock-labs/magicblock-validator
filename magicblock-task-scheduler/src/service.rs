@@ -42,8 +42,15 @@ impl TaskSchedulerService {
     ) -> Result<tokio::task::JoinHandle<()>, TaskSchedulerError> {
         debug!("Initializing task scheduler service");
         if config.reset {
-            if let Err(e) = std::fs::remove_file(path) {
-                warn!("Failed to remove database file: {}", e);
+            match std::fs::remove_file(path) {
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    debug!("Database file not found, skip resetting");
+                }
+                Err(e) => {
+                    warn!("Failed to remove database file: {}", e);
+                    return Err(TaskSchedulerError::Io(e));
+                }
             }
         }
 
