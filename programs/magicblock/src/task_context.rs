@@ -27,8 +27,8 @@ pub struct ScheduleTaskRequest {
     pub instructions: Vec<Instruction>,
     /// Authority that can modify or cancel this task
     pub authority: Pubkey,
-    /// Period of the task in milliseconds
-    pub period_millis: i64,
+    /// How frequently the task should be executed, in milliseconds
+    pub execution_interval_millis: i64,
     /// Number of times this task will be executed
     pub n_executions: u64,
 }
@@ -180,8 +180,8 @@ pub struct Task {
     pub instructions: Vec<Instruction>,
     /// Authority that can modify or cancel this task
     pub authority: Pubkey,
-    /// Period of the task in milliseconds
-    pub period_millis: i64,
+    /// How frequently the task should be executed, in milliseconds
+    pub execution_interval_millis: i64,
     /// Number of times this task will be executed
     pub n_executions: u64,
 }
@@ -191,14 +191,14 @@ impl Task {
         id: u64,
         instructions: Vec<Instruction>,
         authority: Pubkey,
-        period_millis: i64,
+        execution_interval_millis: i64,
         n_executions: u64,
     ) -> Self {
         Self {
             id,
             instructions,
             authority,
-            period_millis,
+            execution_interval_millis,
             n_executions,
         }
     }
@@ -210,7 +210,7 @@ impl From<&ScheduleTaskRequest> for Task {
             id: request.id,
             instructions: request.instructions.clone(),
             authority: request.authority,
-            period_millis: request.period_millis,
+            execution_interval_millis: request.execution_interval_millis,
             n_executions: request.n_executions,
         }
     }

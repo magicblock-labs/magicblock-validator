@@ -60,7 +60,7 @@ impl TaskSchedulerService {
         let now = chrono::Utc::now().timestamp_millis();
         for task in tasks {
             let next_execution =
-                task.last_execution_millis + task.period_millis;
+                task.last_execution_millis + task.execution_interval_millis;
             let timeout = Duration::from_millis(if next_execution > now {
                 (next_execution - now) as u64
             } else {
@@ -215,7 +215,7 @@ impl TaskSchedulerService {
             };
             self.task_queue.insert(
                 new_task,
-                Duration::from_millis(task.period_millis as u64),
+                Duration::from_millis(task.execution_interval_millis as u64),
             );
         }
 
@@ -237,7 +237,7 @@ impl TaskSchedulerService {
             id: task.id,
             instructions: task.instructions.clone(),
             authority: task.authority,
-            period_millis: task.period_millis,
+            execution_interval_millis: task.execution_interval_millis,
             executions_left: task.n_executions,
             last_execution_millis: 0,
         };

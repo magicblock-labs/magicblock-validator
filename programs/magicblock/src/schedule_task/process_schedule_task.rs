@@ -102,7 +102,7 @@ pub(crate) fn process_schedule_task(
         id: args.task_id,
         instructions: args.instructions,
         authority: *payer_pubkey,
-        period_millis: args.period_millis,
+        execution_interval_millis: args.execution_interval_millis,
         n_executions: args.n_executions,
     };
 

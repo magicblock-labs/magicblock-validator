@@ -128,7 +128,7 @@ fn process_schedule_task(
     let mut discriminator = vec![5_u8, 0, 0, 0];
     let args = ScheduleTaskArgs {
         task_id: args.task_id,
-        period_millis: args.period_millis,
+        execution_interval_millis: args.execution_interval_millis,
         n_executions: args.n_executions,
         instructions: vec![match (args.error, args.signer) {
             (true, false) => create_increment_counter_error_ix(*payer_info.key),
