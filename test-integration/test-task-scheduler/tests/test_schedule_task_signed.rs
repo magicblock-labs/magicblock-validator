@@ -90,6 +90,17 @@ fn test_schedule_task() {
     let db_path = PathBuf::from(DB_PATH);
     let db = SchedulerDatabase::new(db_path).unwrap();
 
+    let failed_scheduling = db.get_failed_scheduling_ids().unwrap();
+    assert_eq!(
+        failed_scheduling.len(),
+        0,
+        "failed_scheduling: {:?}",
+        failed_scheduling
+    );
+
+    let failed_tasks = db.get_failed_task_ids().unwrap();
+    assert_eq!(failed_tasks.len(), 0, "failed_tasks: {:?}", failed_tasks);
+
     let tasks = db.get_task_ids().unwrap();
     assert_eq!(tasks.len(), 1);
 

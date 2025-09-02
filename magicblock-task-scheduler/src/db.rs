@@ -23,6 +23,16 @@ pub struct DbTask {
     pub last_execution_millis: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct FailedScheduling {
+    pub id: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FailedTask {
+    pub id: u64,
+}
+
 pub struct SchedulerDatabase {
     conn: Connection,
 }
@@ -42,6 +52,20 @@ impl SchedulerDatabase {
                 last_execution_millis INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS failed_scheduling (
+                id INTEGER PRIMARY KEY
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS failed_tasks (
+                id INTEGER PRIMARY KEY
             )",
             [],
         )?;
@@ -70,7 +94,7 @@ impl SchedulerDatabase {
             ],
         )?;
 
-        debug!("Inserted task {} into database", task.id);
+        trace!("Inserted task {} into database", task.id);
         Ok(())
     }
 
@@ -90,7 +114,54 @@ impl SchedulerDatabase {
             params![last_execution, now, task_id],
         )?;
 
-        debug!("Updated task {} after execution", task_id);
+        trace!("Updated task {} after execution", task_id);
+        Ok(())
+    }
+
+    pub fn insert_failed_scheduling(
+        &self,
+        failed_scheduling: &FailedScheduling,
+    ) -> Result<(), TaskSchedulerError> {
+        self.conn.execute(
+            "INSERT INTO failed_scheduling (id) VALUES (?)",
+            [failed_scheduling.id],
+        )?;
+        trace!(
+            "Inserted failed scheduling {} into database",
+            failed_scheduling.id
+        );
+        Ok(())
+    }
+
+    pub fn remove_failed_scheduling(
+        &self,
+        task_id: u64,
+    ) -> Result<(), TaskSchedulerError> {
+        self.conn
+            .execute("DELETE FROM failed_scheduling WHERE id = ?", [task_id])?;
+        trace!("Removed failed scheduling {} from database", task_id);
+        Ok(())
+    }
+
+    pub fn insert_failed_task(
+        &self,
+        failed_task: &FailedTask,
+    ) -> Result<(), TaskSchedulerError> {
+        self.conn.execute(
+            "INSERT INTO failed_tasks (id) VALUES (?)",
+            [failed_task.id],
+        )?;
+        trace!("Inserted failed task {} into database", failed_task.id);
+        Ok(())
+    }
+
+    pub fn remove_failed_task(
+        &self,
+        task_id: u64,
+    ) -> Result<(), TaskSchedulerError> {
+        self.conn
+            .execute("DELETE FROM failed_tasks WHERE id = ?", [task_id])?;
+        trace!("Removed failed task {} from database", task_id);
         Ok(())
     }
 
@@ -102,14 +173,14 @@ impl SchedulerDatabase {
             "UPDATE tasks SET executions_left = 0 WHERE id = ?",
             [task_id],
         )?;
-        debug!("Unscheduled task {}", task_id);
+        trace!("Unscheduled task {}", task_id);
         Ok(())
     }
 
     pub fn remove_task(&self, task_id: u64) -> Result<(), TaskSchedulerError> {
         self.conn
             .execute("DELETE FROM tasks WHERE id = ?", [task_id])?;
-        debug!("Removed task {} from database", task_id);
+        trace!("Removed task {} from database", task_id);
         Ok(())
     }
 
@@ -197,6 +268,30 @@ impl SchedulerDatabase {
         let mut stmt = self.conn.prepare(
             "SELECT id 
              FROM tasks",
+        )?;
+
+        let rows = stmt.query_map([], |row| row.get(0))?;
+
+        Ok(rows.collect::<Result<Vec<u64>, rusqlite::Error>>()?)
+    }
+
+    pub fn get_failed_scheduling_ids(
+        &self,
+    ) -> Result<Vec<u64>, TaskSchedulerError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id 
+             FROM failed_scheduling",
+        )?;
+
+        let rows = stmt.query_map([], |row| row.get(0))?;
+
+        Ok(rows.collect::<Result<Vec<u64>, rusqlite::Error>>()?)
+    }
+
+    pub fn get_failed_task_ids(&self) -> Result<Vec<u64>, TaskSchedulerError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id 
+             FROM failed_tasks",
         )?;
 
         let rows = stmt.query_map([], |row| row.get(0))?;

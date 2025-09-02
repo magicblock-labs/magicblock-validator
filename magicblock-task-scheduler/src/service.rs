@@ -21,7 +21,7 @@ use tokio::{select, time::Duration};
 use tokio_util::{sync::CancellationToken, time::DelayQueue};
 
 use crate::{
-    db::{DbTask, SchedulerDatabase},
+    db::{DbTask, FailedScheduling, FailedTask, SchedulerDatabase},
     errors::TaskSchedulerError,
 };
 
@@ -94,6 +94,11 @@ impl TaskSchedulerService {
                     if let Err(e) =
                         self.process_schedule_request(schedule_request)
                     {
+                        self.db.insert_failed_scheduling(
+                            &FailedScheduling {
+                                id: schedule_request.id,
+                            },
+                        )?;
                         error!(
                             "Failed to process schedule request {}: {}",
                             schedule_request.id, e
@@ -104,6 +109,11 @@ impl TaskSchedulerService {
                 TaskRequest::Cancel(cancel_request) => {
                     if let Err(e) = self.process_cancel_request(cancel_request)
                     {
+                        self.db.insert_failed_scheduling(
+                            &FailedScheduling {
+                                id: cancel_request.task_id,
+                            },
+                        )?;
                         error!(
                             "Failed to process cancel request for task {}: {}",
                             cancel_request.task_id, e
@@ -207,6 +217,7 @@ impl TaskSchedulerService {
         for result in output {
             if let Err(e) = result.and_then(|tx| tx.status) {
                 error!("Task {} failed to execute: {}", task.id, e);
+                self.db.insert_failed_task(&FailedTask { id: task.id })?;
                 self.db.unschedule_task(task.id)?;
                 return Err(TaskSchedulerError::Transaction(e));
             }
