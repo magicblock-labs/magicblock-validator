@@ -29,5 +29,5 @@ impl Default for TaskSchedulerConfig {
 }
 
 fn default_millis_per_tick() -> u64 {
-    50
+    200
 }
