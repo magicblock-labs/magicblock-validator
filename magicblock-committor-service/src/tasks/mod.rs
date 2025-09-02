@@ -120,7 +120,7 @@ impl BaseTask for ArgsTask {
         match self {
             Self::Commit(value) => {
                 let args = CommitStateArgs {
-                    slot: value.commit_id,
+                    nonce: value.commit_id,
                     lamports: value.committed_account.account.lamports,
                     data: value.committed_account.account.data.clone(),
                     allow_undelegation: value.allow_undelegation,
@@ -227,7 +227,7 @@ impl BaseTask for BufferTask {
             value.committed_account.account.owner,
             commit_buffer_pubkey,
             CommitStateFromBufferArgs {
-                slot: value.commit_id,
+                nonce: value.commit_id,
                 lamports: value.committed_account.account.lamports,
                 allow_undelegation: value.allow_undelegation,
             },

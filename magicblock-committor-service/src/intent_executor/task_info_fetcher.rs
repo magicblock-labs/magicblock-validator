@@ -204,7 +204,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         )
         .await?
         .into_iter()
-        .map(|metadata| metadata.last_update_external_slot);
+        .map(|metadata| metadata.last_update_nonce);
 
         // We don't care if anything changed in between with cache - just update and return our ids.
         {
