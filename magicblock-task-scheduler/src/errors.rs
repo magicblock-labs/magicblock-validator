@@ -29,4 +29,7 @@ pub enum TaskSchedulerError {
 
     #[error("Task context not found")]
     TaskContextNotFound,
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
