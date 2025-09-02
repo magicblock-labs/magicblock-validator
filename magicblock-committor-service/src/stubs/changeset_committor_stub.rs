@@ -3,6 +3,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
+
 use async_trait::async_trait;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -43,7 +44,8 @@ impl ChangesetCommittorStub {
 
     pub fn committed(&self, pubkey: &Pubkey) -> Option<Account> {
         self.committed_accounts.lock().unwrap().get(pubkey).cloned()
-    }}
+    }
+}
 
 impl BaseIntentCommittor for ChangesetCommittorStub {
     fn reserve_pubkeys_for_committee(
@@ -71,9 +73,9 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         let (sender, receiver) = oneshot::channel();
         let _ = sender.send(Ok(()));
 
-
         {
-            let mut committed_accounts = self.committed_accounts.lock().unwrap();
+            let mut committed_accounts =
+                self.committed_accounts.lock().unwrap();
             base_intents.iter().for_each(|intent| {
                 let intent_committed_accounts = intent.get_committed_accounts();
                 let Some(accounts) = intent_committed_accounts else {
@@ -81,7 +83,8 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
                 };
 
                 accounts.iter().for_each(|account| {
-                    committed_accounts.insert(account.pubkey, account.account.clone());
+                    committed_accounts
+                        .insert(account.pubkey, account.account.clone());
                 })
             })
         }

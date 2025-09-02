@@ -57,7 +57,7 @@ pub fn process_create_redelegation_intent(
             data: [CallHandlerDiscriminator::ReDelegate.to_vec()].concat(),
             escrow_index: ACTOR_ESCROW_INDEX,
         },
-        compute_untis: 150_000,
+        compute_units: 150_000,
         escrow_authority: escrow_authority.clone(),
         destination_program: destination_program.clone(),
         accounts: other_accounts,
