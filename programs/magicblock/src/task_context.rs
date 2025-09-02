@@ -173,7 +173,7 @@ impl TaskContext {
 
 // Keep the old Task struct for backward compatibility and database storage
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Task {
+pub struct CrankTask {
     /// Unique identifier for this task
     pub id: u64,
     /// Unsigned instructions to execute when triggered
@@ -186,7 +186,7 @@ pub struct Task {
     pub n_executions: u64,
 }
 
-impl Task {
+impl CrankTask {
     pub fn new(
         id: u64,
         instructions: Vec<Instruction>,
@@ -204,7 +204,7 @@ impl Task {
     }
 }
 
-impl From<&ScheduleTaskRequest> for Task {
+impl From<&ScheduleTaskRequest> for CrankTask {
     fn from(request: &ScheduleTaskRequest) -> Self {
         Self {
             id: request.id,
