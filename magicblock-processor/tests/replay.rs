@@ -52,7 +52,7 @@ async fn create_transaction_in_ledger(
         .unwrap()
         .unwrap();
 
-    // drain dispatch channels for clean experiment
+    // drain dispatch channels for clean test
     while env.dispatch.transaction_status.try_recv().is_ok() {}
     while env.dispatch.account_update.try_recv().is_ok() {}
 

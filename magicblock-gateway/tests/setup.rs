@@ -224,6 +224,20 @@ impl RpcTestEnv {
         signature
     }
 
+    /// Creates and executes transaction to transfer some lamports to account
+    pub async fn transfer_lamports(&self, recipient: Pubkey, lamports: u64) {
+        let txn = self.build_transfer_txn_with_params(
+            Pubkey::new_unique(),
+            recipient,
+            false,
+        );
+        self.execution
+            .transaction_scheduler
+            .execute(txn)
+            .await
+            .unwrap();
+    }
+
     /// Builds a transfer transaction between two new, randomly generated accounts.
     pub fn build_transfer_txn(&self) -> Transaction {
         let from = Pubkey::new_unique();
