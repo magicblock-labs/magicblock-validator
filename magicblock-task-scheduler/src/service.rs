@@ -58,6 +58,7 @@ impl TaskSchedulerService {
             pending_cancellations: HashSet::new(),
         };
         let now = chrono::Utc::now().timestamp_millis();
+        debug!("Task scheduler started at {}", now);
         for task in tasks {
             let next_execution =
                 task.last_execution_millis + task.execution_interval_millis;
