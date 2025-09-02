@@ -19,11 +19,11 @@ pub struct DbTask {
     pub instructions: Vec<Instruction>,
     /// Authority that can modify or cancel this task
     pub authority: Pubkey,
-    /// Period of the task in milliseconds
-    pub period_millis: i64,
+    /// How frequently the task should be executed, in milliseconds
+    pub execution_interval_millis: i64,
     /// Number of times this task still needs to be executed.
     pub executions_left: u64,
-    /// Timestamp of the last execution of this task in milliseconds
+    /// Timestamp of the last execution of this task in milliseconds since UNIX epoch
     pub last_execution_millis: i64,
 }
 
@@ -45,7 +45,7 @@ impl SchedulerDatabase {
                 id INTEGER PRIMARY KEY,
                 instructions BLOB NOT NULL,
                 authority TEXT NOT NULL,
-                period_millis INTEGER NOT NULL,
+                execution_interval_millis INTEGER NOT NULL,
                 executions_left INTEGER NOT NULL,
                 last_execution_millis INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
@@ -65,13 +65,13 @@ impl SchedulerDatabase {
 
         conn.execute(
             "INSERT OR REPLACE INTO tasks 
-             (id, instructions, authority, period_millis, executions_left, last_execution_millis, created_at, updated_at)
+             (id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 task.id,
                 instructions_bin,
                 authority_str,
-                task.period_millis,
+                task.execution_interval_millis,
                 task.executions_left,
                 task.last_execution_millis,
                 now,
@@ -130,7 +130,7 @@ impl SchedulerDatabase {
     ) -> Result<Option<DbTask>, TaskSchedulerError> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(
-            "SELECT id, instructions, authority, period_millis, executions_left, last_execution_millis
+            "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
              FROM tasks WHERE id = ?"
         )?;
 
@@ -155,7 +155,7 @@ impl SchedulerDatabase {
                 id: row.get(0)?,
                 instructions,
                 authority,
-                period_millis: row.get(3)?,
+                execution_interval_millis: row.get(3)?,
                 executions_left: row.get(4)?,
                 last_execution_millis: row.get(5)?,
             })
@@ -167,7 +167,7 @@ impl SchedulerDatabase {
     pub fn get_tasks(&self) -> Result<Vec<DbTask>, TaskSchedulerError> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(
-            "SELECT id, instructions, authority, period_millis, executions_left, last_execution_millis
+            "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
              FROM tasks"
         )?;
 
@@ -193,7 +193,7 @@ impl SchedulerDatabase {
                 id: row.get(0)?,
                 instructions,
                 authority,
-                period_millis: row.get(3)?,
+                execution_interval_millis: row.get(3)?,
                 executions_left: row.get(4)?,
                 last_execution_millis: row.get(5)?,
             })

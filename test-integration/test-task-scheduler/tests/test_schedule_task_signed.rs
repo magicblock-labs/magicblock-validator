@@ -96,7 +96,7 @@ fn test_schedule_task() {
     let task = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task.id, task_id);
     assert_eq!(task.authority, payer.pubkey());
-    assert_eq!(task.period_millis, 100);
+    assert_eq!(task.execution_interval_millis, 100);
     assert_eq!(task.executions_left, 0);
 
     // Check that the counter was incremented

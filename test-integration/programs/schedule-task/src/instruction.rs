@@ -13,7 +13,7 @@ use crate::state::Counter;
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct ScheduleArgs {
     pub task_id: u64,
-    pub period_millis: i64,
+    pub execution_interval_millis: i64,
     pub n_executions: u64,
     pub error: bool,
     pub signer: bool,
@@ -160,7 +160,7 @@ pub fn create_schedule_task_ix(
     task_context: Pubkey,
     magic_program: Pubkey,
     task_id: u64,
-    period_millis: i64,
+    execution_interval_millis: i64,
     n_executions: u64,
     error: bool,
     signer: bool,
@@ -177,7 +177,7 @@ pub fn create_schedule_task_ix(
         *program_id,
         &ScheduleTaskInstruction::Schedule(ScheduleArgs {
             task_id,
-            period_millis,
+            execution_interval_millis,
             n_executions,
             error,
             signer,
