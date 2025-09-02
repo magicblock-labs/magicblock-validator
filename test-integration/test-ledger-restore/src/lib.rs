@@ -127,7 +127,7 @@ pub fn setup_validator_with_local_remote(
         accounts: accounts_config.clone(),
         programs,
         task_scheduler: TaskSchedulerConfig {
-            reset_db: true,
+            reset: true,
             ..Default::default()
         },
         ..Default::default()

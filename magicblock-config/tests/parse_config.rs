@@ -293,8 +293,8 @@ fn test_everything_defined() {
                 },
             },
             task_scheduler: TaskSchedulerConfig {
-                db_path: "test.db".to_string(),
-                reset_db: true,
+                path: "test.db".to_string(),
+                reset: true,
                 millis_per_tick: 1000,
             },
         }

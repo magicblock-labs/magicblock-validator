@@ -40,14 +40,14 @@ impl TaskSchedulerService {
         token: CancellationToken,
     ) -> Result<tokio::task::JoinHandle<()>, TaskSchedulerError> {
         debug!("Initializing task scheduler service");
-        if config.reset_db {
-            if let Err(e) = std::fs::remove_file(&config.db_path) {
+        if config.reset {
+            if let Err(e) = std::fs::remove_file(&config.path) {
                 warn!("Failed to remove database file: {}", e);
             }
         }
 
         // Reschedule all persisted tasks
-        let db = SchedulerDatabase::new(&config.db_path)?;
+        let db = SchedulerDatabase::new(&config.path)?;
         let tasks = db.get_tasks()?;
         let mut service = Self {
             db,

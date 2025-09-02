@@ -280,8 +280,8 @@ mod tests {
                 },
             },
             task_scheduler: TaskSchedulerConfig {
-                db_path: "tasks.db".to_string(),
-                reset_db: true,
+                path: "tasks.db".to_string(),
+                reset: true,
                 millis_per_tick: 1000,
             },
         };
@@ -374,8 +374,8 @@ mod tests {
                 },
             },
             task_scheduler: TaskSchedulerConfig {
-                db_path: "tasks.db".to_string(),
-                reset_db: true,
+                path: "tasks.db".to_string(),
+                reset: true,
                 millis_per_tick: 1000,
             },
         };
@@ -465,8 +465,8 @@ mod tests {
                 },
             },
             task_scheduler: TaskSchedulerConfig {
-                db_path: "tasks2.db".to_string(),
-                reset_db: true,
+                path: "tasks2.db".to_string(),
+                reset: true,
                 millis_per_tick: 2000,
             },
         };
@@ -549,8 +549,8 @@ mod tests {
                 },
             },
             task_scheduler: TaskSchedulerConfig {
-                db_path: "tasks.db".to_string(),
-                reset_db: true,
+                path: "tasks.db".to_string(),
+                reset: true,
                 millis_per_tick: 1000,
             },
         };
