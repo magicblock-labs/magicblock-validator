@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, path::Path, sync::Arc};
 
 use futures_util::StreamExt;
 use log::*;
@@ -35,19 +35,20 @@ pub struct TaskSchedulerService {
 
 impl TaskSchedulerService {
     pub fn start(
+        path: &Path,
         config: &TaskSchedulerConfig,
         bank: Arc<Bank>,
         token: CancellationToken,
     ) -> Result<tokio::task::JoinHandle<()>, TaskSchedulerError> {
         debug!("Initializing task scheduler service");
         if config.reset {
-            if let Err(e) = std::fs::remove_file(&config.path) {
+            if let Err(e) = std::fs::remove_file(path) {
                 warn!("Failed to remove database file: {}", e);
             }
         }
 
         // Reschedule all persisted tasks
-        let db = SchedulerDatabase::new(&config.path)?;
+        let db = SchedulerDatabase::new(path)?;
         let tasks = db.get_tasks()?;
         let mut service = Self {
             db,
