@@ -94,7 +94,6 @@ impl CacheTaskInfoFetcher {
     }
 
     /// Fetches commit_ids using RPC
-    /// Note: remove duplicates prior to calling
     pub async fn fetch_metadata(
         rpc_client: &MagicblockRpcClient,
         pubkeys: &[Pubkey],

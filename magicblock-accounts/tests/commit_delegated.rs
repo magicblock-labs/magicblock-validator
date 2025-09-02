@@ -158,6 +158,11 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
     let result = manager.commit_delegated().await;
     // Ensure we committed the account that was due
     assert_eq!(committor_service.len(), 1);
+    // with the current account data
+    assert_eq!(
+        committor_service.committed(&commit_needed_pubkey),
+        Some(commit_needed_account_shared.into())
+    );
     // and that we returned that transaction signature for it.
     assert_eq!(result.unwrap().len(), 1);
 
