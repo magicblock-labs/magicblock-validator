@@ -5,8 +5,8 @@ use log::*;
 use magicblock_bank::bank::Bank;
 use magicblock_config::TaskSchedulerConfig;
 use magicblock_program::{
-    CancelTaskRequest, ScheduleTaskRequest, Task, TaskContext, TaskRequest,
-    TASK_CONTEXT_PUBKEY,
+    CancelTaskRequest, CrankTask, ScheduleTaskRequest, TaskContext,
+    TaskRequest, TASK_CONTEXT_PUBKEY,
 };
 use solana_sdk::{
     account::ReadableAccount,
@@ -128,7 +128,7 @@ impl TaskSchedulerService {
         schedule_request: &ScheduleTaskRequest,
     ) -> Result<(), TaskSchedulerError> {
         // Convert request to task and register in database
-        let task = Task::from(schedule_request);
+        let task = CrankTask::from(schedule_request);
         self.register_task(&task)?;
         debug!(
             "Processed schedule request for task {}",
@@ -237,7 +237,7 @@ impl TaskSchedulerService {
 
     pub fn register_task(
         &mut self,
-        task: &Task,
+        task: &CrankTask,
     ) -> Result<(), TaskSchedulerError> {
         let db_task = DbTask {
             id: task.id,

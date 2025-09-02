@@ -7,7 +7,7 @@ pub use magic_context::{FeePayerAccount, MagicContext};
 pub mod magic_scheduled_base_intent;
 pub mod task_context;
 pub use task_context::{
-    CancelTaskRequest, ScheduleTaskRequest, Task, TaskContext, TaskRequest,
+    CancelTaskRequest, CrankTask, ScheduleTaskRequest, TaskContext, TaskRequest,
 };
 pub mod magicblock_processor;
 #[cfg(test)]
