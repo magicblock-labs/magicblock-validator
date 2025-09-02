@@ -18,5 +18,5 @@ port = 10001
 
 [task-scheduler]
 millis-per-tick = 50
-db-path = "test-integration/target/test.db"
-reset-db = true
+path = "test-integration/target/test.db"
+reset = true

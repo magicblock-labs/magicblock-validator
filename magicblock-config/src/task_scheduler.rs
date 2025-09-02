@@ -12,11 +12,11 @@ pub struct TaskSchedulerConfig {
     /// The path to the task scheduler database file.
     #[derive_env_var]
     #[serde(default = "default_db_path")]
-    pub db_path: String,
+    pub path: String,
     /// If true, the task scheduler will reset the database on startup.
     #[derive_env_var]
     #[serde(default)]
-    pub reset_db: bool,
+    pub reset: bool,
     /// Determines how frequently the task scheduler will check for executable tasks.
     #[derive_env_var]
     #[serde(default = "default_millis_per_tick")]
@@ -26,8 +26,8 @@ pub struct TaskSchedulerConfig {
 impl Default for TaskSchedulerConfig {
     fn default() -> Self {
         Self {
-            db_path: default_db_path(),
-            reset_db: bool::default(),
+            path: default_db_path(),
+            reset: bool::default(),
             millis_per_tick: default_millis_per_tick(),
         }
     }

@@ -24,8 +24,8 @@ The task scheduler can be configured via the validator configuration:
 
 ```toml
 [task_scheduler]
-db_path = "/path/to/scheduler.db"
-reset_db = false
+path = "/path/to/scheduler.db"
+reset = false
 millis_per_tick = 100
 ```
 
