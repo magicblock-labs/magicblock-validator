@@ -130,9 +130,11 @@ impl SanitizeableTransaction for VersionedTransaction {
         verify: bool,
     ) -> Result<SanitizedTransaction, TransactionError> {
         println!("verifying transaction: {verify}");
-        let hash = verify
-            .then(|| self.verify_and_hash_message())
-            .unwrap_or_else(|| Ok(BlockHash::new_unique()))?;
+        let hash = if verify {
+            self.verify_and_hash_message()
+        } else {
+            Ok(BlockHash::new_unique())
+        }?;
         SanitizedTransaction::try_create(
             self,
             hash,
