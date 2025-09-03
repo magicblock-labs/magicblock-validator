@@ -297,6 +297,7 @@ impl TaskSchedulerService {
                     // HACK: we deserialize the context on every tick avoid using geyser.
                     // This will be fixed once the channel to the transaction executor is implemented.
                     // Performance should not be too bad because the context should be small.
+                    // https://github.com/magicblock-labs/magicblock-validator/issues/523
 
                     // Process any existing requests from the context
                     let Some(mut context_account) = self.bank.get_account(&TASK_CONTEXT_PUBKEY) else {
