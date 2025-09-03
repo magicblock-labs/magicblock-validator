@@ -5,14 +5,13 @@ use log::*;
 use magicblock_bank::bank::Bank;
 use magicblock_config::TaskSchedulerConfig;
 use magicblock_program::{
-    CancelTaskRequest, CrankTask, ScheduleTaskRequest, TaskContext,
-    TaskRequest, TASK_CONTEXT_PUBKEY,
+    validator::validator_authority_id, CancelTaskRequest, CrankTask,
+    ScheduleTaskRequest, TaskContext, TaskRequest, TASK_CONTEXT_PUBKEY,
 };
 use solana_sdk::{
     account::ReadableAccount,
     message::Message,
-    signature::Keypair,
-    signer::Signer,
+    signature::Signature,
     transaction::{SanitizedTransaction, Transaction},
 };
 use solana_svm::transaction_processor::ExecutionRecordingConfig;
@@ -188,34 +187,27 @@ impl TaskSchedulerService {
 
         // Execute unsigned transactions
         let blockhash = self.bank.last_blockhash();
-        let sanitized_transactions = match task
-            .instructions
-            .iter()
-            .map(|ix| {
-                // Using a fake payer to make sure the transaction has a new signature.
-                // Otherwise, the transaction will error saying already processed.
-                let fake_payer = Keypair::new();
-                let mut tx =
-                    Transaction::new_unsigned(Message::new_with_blockhash(
-                        &[ix.clone()],
-                        Some(&fake_payer.pubkey()),
-                        &blockhash,
-                    ));
-                tx.partial_sign(&[fake_payer], blockhash);
-                SanitizedTransaction::try_from_legacy_transaction(
-                    tx,
-                    &Default::default(),
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()
-        {
-            Ok(transactions) => transactions,
-            Err(e) => {
-                error!("Failed to sanitize transactions: {}", e);
-                return Err(TaskSchedulerError::Transaction(e));
-            }
-        };
-        let batch = self.bank.prepare_sanitized_batch(&sanitized_transactions);
+        let mut tx = Transaction::new_unsigned(Message::new_with_blockhash(
+            &task.instructions,
+            Some(&validator_authority_id()),
+            &blockhash,
+        ));
+        // Task can be scheduled faster than the validator's block time, which could cause duplicate transactions.
+        // Transactions are deduped by their signature, so we need to make sure the signature is unique.
+        tx.signatures[0] = Signature::new_unique();
+
+        let sanitized_transaction =
+            match SanitizedTransaction::try_from_legacy_transaction(
+                tx,
+                &Default::default(),
+            ) {
+                Ok(tx) => [tx],
+                Err(e) => {
+                    error!("Failed to sanitize transaction: {}", e);
+                    return Err(TaskSchedulerError::Transaction(e));
+                }
+            };
+        let batch = self.bank.prepare_sanitized_batch(&sanitized_transaction);
         let (output, _balances) =
             self.bank.load_execute_and_commit_transactions(
                 &batch,
