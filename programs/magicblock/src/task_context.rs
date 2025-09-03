@@ -28,7 +28,7 @@ pub struct ScheduleTaskRequest {
     /// Authority that can modify or cancel this task
     pub authority: Pubkey,
     /// How frequently the task should be executed, in milliseconds
-    pub execution_interval_millis: i64,
+    pub execution_interval_millis: u64,
     /// Number of times this task will be executed
     pub n_executions: u64,
 }
@@ -181,7 +181,7 @@ pub struct CrankTask {
     /// Authority that can modify or cancel this task
     pub authority: Pubkey,
     /// How frequently the task should be executed, in milliseconds
-    pub execution_interval_millis: i64,
+    pub execution_interval_millis: u64,
     /// Number of times this task will be executed
     pub n_executions: u64,
 }
@@ -191,7 +191,7 @@ impl CrankTask {
         id: u64,
         instructions: Vec<Instruction>,
         authority: Pubkey,
-        execution_interval_millis: i64,
+        execution_interval_millis: u64,
         n_executions: u64,
     ) -> Self {
         Self {

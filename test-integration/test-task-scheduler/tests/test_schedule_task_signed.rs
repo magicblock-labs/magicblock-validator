@@ -73,7 +73,7 @@ fn test_schedule_task() {
 
     // Schedule a task
     let task_id = 4;
-    let period_millis = 100;
+    let execution_interval_millis = 100;
     let n_executions = 3;
     let ephem_blockhash = expect!(
         ctx.try_ephem_client().and_then(|client| client
@@ -92,7 +92,7 @@ fn test_schedule_task() {
                     TASK_CONTEXT_PUBKEY,
                     MAGIC_PROGRAM_ID,
                     task_id,
-                    period_millis,
+                    execution_interval_millis,
                     n_executions,
                     false,
                     true,

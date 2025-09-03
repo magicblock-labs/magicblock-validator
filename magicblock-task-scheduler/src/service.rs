@@ -74,16 +74,13 @@ impl TaskSchedulerService {
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
         };
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = chrono::Utc::now().timestamp_millis() as u64;
         debug!("Task scheduler started at {}", now);
         for task in tasks {
             let next_execution =
                 task.last_execution_millis + task.execution_interval_millis;
-            let timeout = Duration::from_millis(if next_execution > now {
-                (next_execution - now) as u64
-            } else {
-                0
-            });
+            let timeout =
+                Duration::from_millis(next_execution.saturating_sub(now));
             let task_id = task.id;
             let key = service.task_queue.insert(task, timeout);
             service.task_queue_keys.insert(task_id, key);
@@ -235,7 +232,7 @@ impl TaskSchedulerService {
             };
             let key = self.task_queue.insert(
                 new_task,
-                Duration::from_millis(task.execution_interval_millis as u64),
+                Duration::from_millis(task.execution_interval_millis),
             );
             self.task_queue_keys.insert(task.id, key);
         }
