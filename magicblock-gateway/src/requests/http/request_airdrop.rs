@@ -30,7 +30,8 @@ impl HttpDispatcher {
             lamports,
             self.blocks.get_latest().hash,
         );
-        let txn = txn.sanitize()?;
+        // we don't need to verify transaction that we just signed
+        let txn = txn.sanitize(false)?;
         let signature = SerdeSignature(*txn.signature());
 
         self.transactions_scheduler.execute(txn).await?;

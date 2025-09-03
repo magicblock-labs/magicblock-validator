@@ -2,7 +2,9 @@ use std::str::FromStr;
 
 use log::{Level::Trace, *};
 use magicblock_accounts_db::AccountsDb;
-use magicblock_core::link::transactions::TransactionSchedulerHandle;
+use magicblock_core::link::transactions::{
+    SanitizeableTransaction, TransactionSchedulerHandle,
+};
 use num_format::{Locale, ToFormattedString};
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
@@ -119,6 +121,11 @@ async fn replay_blocks(
         // such to replay them in the order they executed we need to reverse them
         for txn in block.transactions.into_iter().rev() {
             let signature = txn.signatures[0];
+            // don't verify the signature, since we are operating on transaction
+            // restored from ledger, the verification will fail
+            let txn = txn.sanitize(false).map_err(|err| {
+                LedgerError::BlockStoreProcessor(err.to_string())
+            })?;
             let result =
                 transaction_scheduler.replay(txn).await.map_err(|err| {
                     LedgerError::BlockStoreProcessor(err.to_string())

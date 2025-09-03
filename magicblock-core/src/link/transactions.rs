@@ -17,6 +17,8 @@ use tokio::sync::{
 
 use crate::Slot;
 
+use super::blocks::BlockHash;
+
 /// The receiver end of the multi-producer, multi-consumer
 /// channel for communicating final transaction statuses.
 pub type TransactionStatusRx = MpmcReceiver<TransactionStatus>;
@@ -92,23 +94,45 @@ pub struct TransactionSimulationResult {
     pub inner_instructions: Option<InnerInstructionsList>,
 }
 
-/// A convenience trait for types that can be converted into a `SanitizedTransaction`.
+/// A trait for transaction types that can be converted into a `SanitizedTransaction`.
 ///
-/// This provides a uniform `sanitize()` method, abstracting away the boilerplate of
-/// preparing different transaction formats for processing.
+/// This provides a uniform `sanitize()` method to abstract away the boilerplate of
+/// preparing different transaction formats for processing by the SVM.
 pub trait SanitizeableTransaction {
-    fn sanitize(self) -> Result<SanitizedTransaction, TransactionError>;
+    /// Sanitizes the transaction, making it ready for processing.
+    ///
+    /// Sanitization involves verifying the transaction's structure, hashing its
+    /// message, and optionally verifying its signatures.
+    ///
+    /// # Arguments
+    /// * `verify` - If `true`, the transaction's signatures are cryptographically
+    ///   verified. This is computationally expensive and can be skipped for certain
+    ///   operations like simulations or replays
+    ///
+    /// # Returns
+    /// A `Result` containing the `SanitizedTransaction` on success, or a
+    /// `TransactionError` if sanitization fails.
+    fn sanitize(
+        self,
+        verify: bool,
+    ) -> Result<SanitizedTransaction, TransactionError>;
 }
 
 impl SanitizeableTransaction for SanitizedTransaction {
-    fn sanitize(self) -> Result<Self, TransactionError> {
+    fn sanitize(self, _: bool) -> Result<Self, TransactionError> {
         Ok(self)
     }
 }
 
 impl SanitizeableTransaction for VersionedTransaction {
-    fn sanitize(self) -> Result<SanitizedTransaction, TransactionError> {
-        let hash = self.verify_and_hash_message()?;
+    fn sanitize(
+        self,
+        verify: bool,
+    ) -> Result<SanitizedTransaction, TransactionError> {
+        println!("verifying transaction: {verify}");
+        let hash = verify
+            .then(|| self.verify_and_hash_message())
+            .unwrap_or_else(|| Ok(BlockHash::new_unique()))?;
         SanitizedTransaction::try_create(
             self,
             hash,
@@ -120,8 +144,11 @@ impl SanitizeableTransaction for VersionedTransaction {
 }
 
 impl SanitizeableTransaction for Transaction {
-    fn sanitize(self) -> Result<SanitizedTransaction, TransactionError> {
-        VersionedTransaction::from(self).sanitize()
+    fn sanitize(
+        self,
+        verify: bool,
+    ) -> Result<SanitizedTransaction, TransactionError> {
+        VersionedTransaction::from(self).sanitize(verify)
     }
 }
 
@@ -135,7 +162,7 @@ impl TransactionSchedulerHandle {
         &self,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        let transaction = txn.sanitize()?;
+        let transaction = txn.sanitize(true)?;
         let mode = TransactionProcessingMode::Execution(None);
         let txn = ProcessableTransaction { transaction, mode };
         let r = self.0.send(txn).await;
@@ -181,7 +208,7 @@ impl TransactionSchedulerHandle {
         txn: impl SanitizeableTransaction,
         mode: fn(oneshot::Sender<R>) -> TransactionProcessingMode,
     ) -> Result<R, TransactionError> {
-        let transaction = txn.sanitize()?;
+        let transaction = txn.sanitize(true)?;
         let (tx, rx) = oneshot::channel();
         let mode = mode(tx);
         let txn = ProcessableTransaction { transaction, mode };
