@@ -88,10 +88,9 @@ impl TaskSchedulerService {
         task_context: &mut TaskContext,
     ) -> Result<Vec<Result<(), TaskSchedulerError>>, TaskSchedulerError> {
         let requests = task_context.get_all_requests();
-        let mut ids = Vec::new();
 
         let mut result = Vec::with_capacity(requests.len());
-        for request in requests {
+        for request in &requests {
             trace!("Processing task scheduling request: {request:?}");
             let id = match request {
                 TaskRequest::Schedule(schedule_request) => {
@@ -133,11 +132,7 @@ impl TaskSchedulerService {
                 }
             };
 
-            ids.push(id);
-        }
-
-        for id in &ids {
-            task_context.remove_request(*id);
+            task_context.remove_request(id);
         }
 
         Ok(result)

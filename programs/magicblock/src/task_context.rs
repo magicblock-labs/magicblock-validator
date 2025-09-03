@@ -108,8 +108,8 @@ impl TaskContext {
         }
     }
 
-    pub fn get_all_requests(&self) -> Vec<&TaskRequest> {
-        self.requests.values().collect()
+    pub fn get_all_requests(&self) -> Vec<TaskRequest> {
+        self.requests.values().cloned().collect()
     }
 
     pub fn get_request(&self, request_id: u64) -> Option<&TaskRequest> {
