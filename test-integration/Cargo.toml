@@ -13,6 +13,7 @@ members = [
   "test-ledger-restore",
   "test-magicblock-api",
   "test-runner",
+  "test-fees",
   "test-table-mania",
   "test-tools",
   "test-pubsub",
@@ -54,7 +55,7 @@ program-schedulecommit-security = { path = "programs/schedulecommit-security" }
 rayon = "1.10.0"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "176540a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "9a62efa" }
 solana-program = "2.2"
 solana-program-test = "2.2"
 solana-pubkey = { version = "2.2" }
@@ -77,4 +78,5 @@ tokio = "1.0"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "176540a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "9a62efa" }
+solana-svm = { path = "/Users/gabrielepicco/Downloads/magicblock-svm" }

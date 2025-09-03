@@ -16,7 +16,7 @@ solana-test-validator \
   1000000 \
   --bpf-program \
   CoMtrr6j336NSB5PAoAWpLe5hPgkcShWKbPgHhZxaxh \
-  $DIR/../../target/deploy/magicblock_committor_program.so \ \
+  $DIR/../../target/deploy/magicblock_committor_program.so \
   --bpf-program \
   DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh \
   $DIR/../schedulecommit/elfs/dlp.so \
@@ -26,4 +26,3 @@ solana-test-validator \
   --bpf-program \
   4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr \
   $DIR/../target/deploy/program_schedulecommit_security.so
-

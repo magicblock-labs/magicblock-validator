@@ -43,7 +43,7 @@ pub(crate) async fn undelegate_commitables_ixs(
             );
         };
         let metadata = DelegationMetadata::try_from_bytes_with_discriminator(
-            metadata_acc.data(),
+            &metadata_acc.data,
         )
         .map_err(|err| {
             CommittorServiceError::FailedToDeserializeDelegationMetadata(

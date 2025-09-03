@@ -155,7 +155,7 @@ serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "176540a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "9a62efa" }
 solana-accounts-db = { version = "2.2" }
 solana-account-decoder = { version = "2.2" }
 solana-address-lookup-table-program = { version = "2.2" }
@@ -181,9 +181,7 @@ solana-rpc = "2.2"
 solana-rpc-client = { version = "2.2" }
 solana-rpc-client-api = { version = "2.2" }
 solana-sdk = { version = "2.2" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "e93eb57", features = [
-  "dev-context-only-utils",
-] }
+solana-svm = { version = "2.2", features = ["dev-context-only-utils"] }
 solana-svm-transaction = { version = "2.2" }
 solana-storage-proto = { path = "storage-proto" }
 solana-system-program = { version = "2.2" }
@@ -218,6 +216,7 @@ vergen = "8.3.1"
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "176540a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "9a62efa" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git" }
+#solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git" }
+solana-svm = { path = "/Users/gabrielepicco/Downloads/magicblock-svm" }

@@ -1,0 +1,19 @@
+[package]
+name = "test-fees"
+version.workspace = true
+edition.workspace = true
+
+[dev-dependencies]
+integration-test-tools = { workspace = true }
+log = { workspace = true }
+test-tools-core = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+program-schedulecommit = { workspace = true }
+ephemeral-rollups-sdk = { workspace = true }
+anyhow = { workspace = true }
+
+[features]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+default = []
