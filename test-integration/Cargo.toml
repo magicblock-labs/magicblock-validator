@@ -4,6 +4,7 @@ members = [
   "programs/schedulecommit",
   "programs/schedulecommit-security",
   "programs/sysvars",
+  "programs/mini",
   "schedulecommit/client",
   "test-committor-service",
   "schedulecommit/test-scenarios",
@@ -69,6 +70,8 @@ solana-pubsub-client = "2.2"
 solana-rpc-client = "2.2"
 solana-rpc-client-api = "2.2"
 solana-sdk = "2.2"
+solana-sdk-ids = { version = "2.2" }
+solana-system-interface = "1.0"
 solana-transaction-status = "2.2"
 teepee = "0.0.1"
 tempfile = "3.10.1"
