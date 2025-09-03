@@ -804,12 +804,27 @@ impl MagicValidator {
             "Task scheduler persists to: {}",
             task_scheduler_db_path.display()
         );
-        self.task_scheduler_handle = Some(TaskSchedulerService::start(
+        let task_scheduler_handle = TaskSchedulerService::start(
             &task_scheduler_db_path,
             &self.config.task_scheduler,
             self.bank.clone(),
             self.token.clone(),
-        )?);
+        )?;
+        self.task_scheduler_handle = Some(tokio::spawn(async move {
+            match task_scheduler_handle.await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    error!("An error occurred while running the task scheduler: {:?}", err);
+                    error!("Exiting process...");
+                    std::process::exit(1);
+                }
+                Err(err) => {
+                    error!("Failed to start task scheduler: {:?}", err);
+                    error!("Exiting process...");
+                    std::process::exit(1);
+                }
+            }
+        }));
 
         self.sample_performance_service
             .replace(SamplePerformanceService::new(

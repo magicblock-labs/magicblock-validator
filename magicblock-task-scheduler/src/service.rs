@@ -39,7 +39,10 @@ impl TaskSchedulerService {
         config: &TaskSchedulerConfig,
         bank: Arc<Bank>,
         token: CancellationToken,
-    ) -> Result<tokio::task::JoinHandle<()>, TaskSchedulerError> {
+    ) -> Result<
+        tokio::task::JoinHandle<Result<(), TaskSchedulerError>>,
+        TaskSchedulerError,
+    > {
         debug!("Initializing task scheduler service");
         if config.reset {
             match std::fs::remove_file(path) {
@@ -83,10 +86,11 @@ impl TaskSchedulerService {
     fn process_context_requests(
         &mut self,
         task_context: &mut TaskContext,
-    ) -> Result<usize, TaskSchedulerError> {
+    ) -> Result<Vec<Result<(), TaskSchedulerError>>, TaskSchedulerError> {
         let requests = task_context.get_all_requests();
         let mut ids = Vec::new();
 
+        let mut result = Vec::with_capacity(requests.len());
         for request in requests {
             trace!("Processing task scheduling request: {request:?}");
             let id = match request {
@@ -103,6 +107,9 @@ impl TaskSchedulerService {
                             "Failed to process schedule request {}: {}",
                             schedule_request.id, e
                         );
+                        result.push(Err(e));
+                    } else {
+                        result.push(Ok(()));
                     }
                     schedule_request.id
                 }
@@ -118,6 +125,9 @@ impl TaskSchedulerService {
                             "Failed to process cancel request for task {}: {}",
                             cancel_request.task_id, e
                         );
+                        result.push(Err(e));
+                    } else {
+                        result.push(Ok(()));
                     }
                     cancel_request.task_id
                 }
@@ -130,7 +140,7 @@ impl TaskSchedulerService {
             task_context.remove_request(*id);
         }
 
-        Ok(ids.len())
+        Ok(result)
     }
 
     fn process_schedule_request(
@@ -277,7 +287,10 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    async fn run(mut self, token: CancellationToken) {
+    async fn run(
+        mut self,
+        token: CancellationToken,
+    ) -> Result<(), TaskSchedulerError> {
         let mut interval = tokio::time::interval(self.tick_interval);
         loop {
             select! {
@@ -294,30 +307,35 @@ impl TaskSchedulerService {
                     // Process any existing requests from the context
                     let Some(mut context_account) = self.bank.get_account(&TASK_CONTEXT_PUBKEY) else {
                         error!("Task context account not found");
-                        continue;
+                        return Err(TaskSchedulerError::TaskContextNotFound);
                     };
 
                     let Ok(mut task_context) =
                         bincode::deserialize::<TaskContext>(context_account.data()) else {
                         error!("Invalid task context account");
-                        continue;
+                        return Err(TaskSchedulerError::ContextDeserialization(context_account.data().to_vec()));
                     };
 
                     match self.process_context_requests(&mut task_context) {
-                        Ok(n) if n > 0 => {
+                        Ok(result) => {
+                            let failures = result.into_iter().filter_map(|x| x.err()).collect::<Vec<_>>();
+                            if !failures.is_empty() {
+                                error!("Failed to process some context requests: {:?}", failures);
+                                return Err(TaskSchedulerError::SchedulingRequests(failures));
+                            }
+
                             // Write the updated context back to the account
                             let Ok(serialized) = bincode::serialize(&task_context) else {
                                 error!("Failed to serialize task context");
-                                continue;
+                                return Err(TaskSchedulerError::ContextSerialization(context_account.data().to_vec()));
                             };
                             context_account.set_data(serialized);
                             self.bank.store_account(TASK_CONTEXT_PUBKEY, context_account);
                         }
                         Err(e) => {
                             error!("Failed to process context requests: {}", e);
-                            continue;
+                            return Err(e);
                         }
-                        _ => {}
                     }
                 }
                 _ = token.cancelled() => {
@@ -325,5 +343,7 @@ impl TaskSchedulerService {
                 }
             }
         }
+
+        Ok(())
     }
 }
