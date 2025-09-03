@@ -55,6 +55,12 @@ pub struct ExecutionTestEnv {
     pub blocks_tx: BlockUpdateTx,
 }
 
+impl Default for ExecutionTestEnv {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExecutionTestEnv {
     /// Creates a new, fully initialized validator test environment.
     ///

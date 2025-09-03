@@ -150,8 +150,14 @@ impl TransactionExecutor {
     /// operations (like snapshotting) during transaction processing. This lock is
     /// released and re-acquired at every slot boundary. The loop multiplexes between
     /// processing new transactions and handling new block notifications.
+    //
+    // NOTE:
+    // Every executor thread is isolated and is running with its own runtime
+    // holding lock across the await is justified, since this is an intended
+    // mechanism to synchronize executors with the stop the world events
+    #[allow(clippy::await_holding_lock)]
     async fn run(mut self) {
-        let mut _guard = self.sync.read();
+        let mut guard = self.sync.read();
         let mut block_updated = self.block.subscribe();
 
         loop {
@@ -176,11 +182,11 @@ impl TransactionExecutor {
                 // When a new block is produced, transition to the new slot.
                 _ = block_updated.recv() => {
                     // Fairly release the lock to allow any pending critical operations to proceed.
-                    RwLockReadGuard::unlock_fair(_guard);
+                    RwLockReadGuard::unlock_fair(guard);
                     self.transition_to_new_slot();
                     // Re-acquire the lock to begin processing for the new slot. This will block
                     // only if a critical operation (like a snapshot) is in progress.
-                    _guard = self.sync.read();
+                    guard = self.sync.read();
                 }
                 // If the transaction channel closes, the system is shutting down.
                 else => {

@@ -93,7 +93,7 @@ async fn main() {
     info!("🧙 Magicblock Validator is running!");
     info!(
         "🏷️ Validator version: {} (Git: {})",
-        version.to_string(),
+        version,
         version.git_version
     );
     info!("-----------------------------------");

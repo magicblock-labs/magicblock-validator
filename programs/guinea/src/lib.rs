@@ -42,7 +42,7 @@ fn write_byte_to_data(
         let mut data = a.try_borrow_mut_data()?;
         let first = data
             .first_mut()
-            .ok_or_else(|| ProgramError::AccountDataTooSmall)?;
+            .ok_or(ProgramError::AccountDataTooSmall)?;
         *first = byte;
     }
     Ok(())

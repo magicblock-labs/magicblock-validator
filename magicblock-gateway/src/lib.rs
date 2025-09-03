@@ -32,7 +32,7 @@ impl JsonRpcServer {
         // initialize HTTP and Websocket servers
         let addr = config.socket_addr();
         let websocket = {
-            let mut addr = addr.clone();
+            let mut addr = addr;
             addr.set_port(config.port + 1);
             let cancel = cancel.clone();
             WebsocketServer::new(addr, &state, cancel).await?
