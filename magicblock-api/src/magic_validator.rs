@@ -66,7 +66,7 @@ use magicblock_pubsub::pubsub_service::{
 use magicblock_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
-use magicblock_task_scheduler::TaskSchedulerService;
+use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
 use magicblock_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
 };
@@ -792,12 +792,10 @@ impl MagicValidator {
         self.pubsub_handle.write().unwrap().replace(pubsub_handle);
         self.pubsub_close_handle = pubsub_close_handle;
 
-        let task_scheduler_db_path = self
-            .ledger
-            .ledger_path()
-            .parent()
-            .expect("ledger_path didn't have a parent, should never happen")
-            .join("task_scheduler.sqlite");
+        let task_scheduler_db_path =
+            SchedulerDatabase::path(self.ledger.ledger_path().parent().expect(
+                "ledger_path didn't have a parent, should never happen",
+            ));
         debug!(
             "Task scheduler persists to: {}",
             task_scheduler_db_path.display()

@@ -10578,7 +10578,9 @@ dependencies = [
 name = "test-task-scheduler"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
+ "cleanass",
  "integration-test-tools",
  "log",
  "magicblock-config",
@@ -10587,6 +10589,7 @@ dependencies = [
  "schedule-task-program",
  "solana-rpc-client",
  "solana-sdk",
+ "tempfile",
  "tokio",
 ]
 

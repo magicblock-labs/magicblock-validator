@@ -146,14 +146,6 @@ setup-task-scheduler-devnet:
 	RUN_TESTS=task-scheduler \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
-setup-task-scheduler-ephem:
-	RUN_TESTS=task-scheduler \
-	SETUP_ONLY=ephem \
-	$(MAKE) test
-setup-task-scheduler-both:
-	RUN_TESTS=task-scheduler \
-	SETUP_ONLY=both \
-	$(MAKE) test
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml

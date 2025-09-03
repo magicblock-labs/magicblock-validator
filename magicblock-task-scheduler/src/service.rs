@@ -165,11 +165,11 @@ impl TaskSchedulerService {
         &mut self,
         cancel_request: &CancelTaskRequest,
     ) -> Result<(), TaskSchedulerError> {
-        self.task_queue.remove(
-            &self.task_queue_keys.remove(&cancel_request.task_id).ok_or(
-                TaskSchedulerError::TaskNotFound(cancel_request.task_id),
-            )?,
-        );
+        // Remove the task from the queue, if it exists
+        if let Some(key) = self.task_queue_keys.remove(&cancel_request.task_id)
+        {
+            self.task_queue.remove(&key);
+        }
         // Remove task from database
         self.unregister_task(cancel_request.task_id)?;
         trace!(

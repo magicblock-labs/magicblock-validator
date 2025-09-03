@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use log::*;
@@ -38,6 +38,10 @@ pub struct SchedulerDatabase {
 }
 
 impl SchedulerDatabase {
+    pub fn path(path: &Path) -> PathBuf {
+        path.join("task_scheduler.sqlite")
+    }
+
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, TaskSchedulerError> {
         let conn = Connection::open(path)?;
 
@@ -147,10 +151,12 @@ impl SchedulerDatabase {
         &self,
         failed_task: &FailedTask,
     ) -> Result<(), TaskSchedulerError> {
-        self.conn.execute(
+        let changed_rows = self.conn.execute(
             "INSERT INTO failed_tasks (id) VALUES (?)",
             [failed_task.id],
         )?;
+        trace!("Changed rows: {}", changed_rows);
+        trace!("Failed task ids: {:?}", self.get_failed_task_ids()?);
         trace!("Inserted failed task {} into database", failed_task.id);
         Ok(())
     }
