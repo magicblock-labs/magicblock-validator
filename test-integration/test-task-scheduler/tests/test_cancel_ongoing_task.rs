@@ -72,7 +72,7 @@ fn test_cancel_ongoing_task() {
 
     // Schedule a task
     let task_id = 3;
-    let period_millis = 100;
+    let execution_interval_millis = 100;
     let n_executions = 1000000;
     let ephem_blockhash = expect!(
         ctx.try_ephem_client().and_then(|client| client
@@ -91,7 +91,7 @@ fn test_cancel_ongoing_task() {
                     TASK_CONTEXT_PUBKEY,
                     MAGIC_PROGRAM_ID,
                     task_id,
-                    period_millis,
+                    execution_interval_millis,
                     n_executions,
                     false,
                     false,

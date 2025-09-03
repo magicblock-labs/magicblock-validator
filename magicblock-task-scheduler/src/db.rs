@@ -16,11 +16,11 @@ pub struct DbTask {
     /// Authority that can modify or cancel this task
     pub authority: Pubkey,
     /// How frequently the task should be executed, in milliseconds
-    pub execution_interval_millis: i64,
+    pub execution_interval_millis: u64,
     /// Number of times this task still needs to be executed.
     pub executions_left: u64,
     /// Timestamp of the last execution of this task in milliseconds since UNIX epoch
-    pub last_execution_millis: i64,
+    pub last_execution_millis: u64,
 }
 
 #[derive(Debug, Clone)]
