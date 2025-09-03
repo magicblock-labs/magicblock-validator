@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Error, Parser};
+use magicblock_config_helpers::Merge;
 use solana_keypair::Keypair;
 
 use crate::EphemeralConfig;

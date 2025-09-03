@@ -9,35 +9,49 @@ use solana_message::{
 use super::prelude::*;
 
 impl HttpDispatcher {
+    /// Handles the `getFeeForMessage` RPC request.
+    ///
+    /// Calculates the estimated fee for a given transaction message. The calculation
+    /// accounts for the number of signatures, the validator's base fee, and any
+    /// prioritization fee requested via `ComputeBudget` instructions within the message.
     pub(crate) fn get_fee_for_message(
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
-        let message = parse_params!(request.params()?, String);
-        let message: String = some_or_err!(message);
-        let message = BASE64_STANDARD
-            .decode(message)
+        let message_b64 = parse_params!(request.params()?, String);
+        let message_b64: String = some_or_err!(message_b64);
+
+        // Decode and deserialize the transaction message.
+        let message_bytes = BASE64_STANDARD
+            .decode(message_b64)
             .map_err(RpcError::parse_error)?;
-        let message: VersionedMessage =
-            bincode::deserialize(&message).map_err(RpcError::invalid_params)?;
-        let message = SanitizedVersionedMessage::try_new(message)
-            .map_err(RpcError::transaction_verification)?;
-        let message = SanitizedMessage::try_new(
-            message,
+        let versioned_message: VersionedMessage =
+            bincode::deserialize(&message_bytes)
+                .map_err(RpcError::invalid_params)?;
+
+        // Sanitize the message for processing.
+        let sanitized_versioned_message =
+            SanitizedVersionedMessage::try_new(versioned_message)
+                .map_err(RpcError::transaction_verification)?;
+        let sanitized_message = SanitizedMessage::try_new(
+            sanitized_versioned_message,
             SimpleAddressLoader::Disabled,
             &Default::default(),
         )
         .map_err(RpcError::transaction_verification)?;
+
+        // Process any compute budget instructions to determine prioritization fee
         let budget = process_compute_budget_instructions(
-            message
+            sanitized_message
                 .program_instructions_iter()
                 .map(|(k, i)| (k, i.into())),
             &self.context.featureset,
         )
         .map(FeeBudgetLimits::from)?;
 
+        // Calculate the final fee.
         let fee = solana_fee::calculate_fee(
-            &message,
+            &sanitized_message,
             self.context.base_fee == 0,
             self.context.base_fee,
             budget.prioritization_fee,

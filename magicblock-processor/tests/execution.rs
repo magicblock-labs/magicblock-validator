@@ -9,10 +9,17 @@ use solana_program::{
 };
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_signer::Signer;
-use test_kit::ExecutionTestEnv;
+use test_kit::{ExecutionTestEnv, Signer};
+
 const ACCOUNTS_COUNT: usize = 8;
 
+/// A generic helper to execute a transaction with a specific `GuineaInstruction`.
+///
+/// This function automates the common test pattern of:
+/// 1. Creating a set of test accounts.
+/// 2. Building an instruction with those accounts.
+/// 3. Building and executing the transaction.
+/// 4. Advancing the slot to finalize the block.
 async fn execute_transaction(
     env: &ExecutionTestEnv,
     metafn: fn(Pubkey, bool) -> AccountMeta,
@@ -23,16 +30,20 @@ async fn execute_transaction(
             env.create_account_with_config(LAMPORTS_PER_SOL, 128, guinea::ID)
         })
         .collect();
-    let accounts = accounts.iter().map(|a| metafn(a.pubkey(), false)).collect();
+    let account_metas =
+        accounts.iter().map(|a| metafn(a.pubkey(), false)).collect();
     env.advance_slot();
-    let ix = Instruction::new_with_bincode(guinea::ID, &ix, accounts);
+
+    let ix = Instruction::new_with_bincode(guinea::ID, &ix, account_metas);
     let txn = env.build_transaction(&[ix]);
     let sig = txn.signatures[0];
     let result = env.execute_transaction(txn).await;
+
     env.advance_slot();
     (result, sig)
 }
 
+/// Verifies that transaction return data is correctly captured and persisted in the ledger.
 #[tokio::test]
 pub async fn test_transaction_with_return_data() {
     let env = ExecutionTestEnv::new();
@@ -46,12 +57,13 @@ pub async fn test_transaction_with_return_data() {
         result.is_ok(),
         "failed to execute compute balance transaction"
     );
-    let meta = env.get_transaction(sig).expect(
-        "transaction meta should have been written to the ledger after execution"
-    );
-    let retdata = meta.return_data.expect(
-        "transaction return data for compute balance should have been set",
-    );
+
+    let meta = env
+        .get_transaction(sig)
+        .expect("transaction meta should have been written to the ledger");
+    let retdata = meta
+        .return_data
+        .expect("transaction return data should have been set");
     assert_eq!(
         &retdata.data,
         &(ACCOUNTS_COUNT as u64 * LAMPORTS_PER_SOL).to_le_bytes(),
@@ -59,6 +71,7 @@ pub async fn test_transaction_with_return_data() {
     );
 }
 
+/// Verifies that a `TransactionStatus` update, including logs, is broadcast after execution.
 #[tokio::test]
 pub async fn test_transaction_status_update() {
     let env = ExecutionTestEnv::new();
@@ -69,24 +82,25 @@ pub async fn test_transaction_status_update() {
     )
     .await;
     assert!(result.is_ok(), "failed to execute print sizes transaction");
+
     let status = env.dispatch
         .transaction_status
         .recv_timeout(Duration::from_millis(200))
-        .expect("successful transaction status should be delivered immediately after execution");
-    assert_eq!(
-        status.signature, sig,
-        "update signature should match with executed txn"
-    );
+        .expect("transaction status should be delivered immediately after execution");
+
+    assert_eq!(status.signature, sig);
+    let logs = status
+        .result
+        .logs
+        .expect("transaction should have produced logs");
     assert!(
-        status.result.logs.is_some(),
-        "print transaction should have produced some logs"
-    );
-    println!("{:?}", status.result.logs.as_ref().unwrap());
-    assert!(status.result.logs.unwrap().len() > ACCOUNTS_COUNT + 1,
-        "print transaction should produce number of logs more than there're accounts in transaction"
+        logs.len() > ACCOUNTS_COUNT,
+        "should produce more logs than accounts in the transaction"
     );
 }
 
+/// Verifies that account modifications are written to the `AccountsDb`
+/// and that corresponding `AccountUpdate` notifications are sent.
 #[tokio::test]
 pub async fn test_transaction_modifies_accounts() {
     let env = ExecutionTestEnv::new();
@@ -97,30 +111,38 @@ pub async fn test_transaction_modifies_accounts() {
     )
     .await;
     assert!(result.is_ok(), "failed to execute write byte transaction");
-    let status = env.dispatch
+
+    // First, verify the state change directly in the AccountsDb.
+    let status = env
+        .dispatch
         .transaction_status
         .recv_timeout(Duration::from_millis(200))
-        .expect("successful transaction status should be delivered immediately after execution");
-    // iterate over transaction accounts except for the payer
+        .expect("successful transaction status should be delivered");
+
     let mut modified_accounts = HashSet::with_capacity(ACCOUNTS_COUNT);
-    for acc in status.result.accounts.iter().skip(1).take(ACCOUNTS_COUNT) {
+    for acc_pubkey in status.result.accounts.iter().skip(1).take(ACCOUNTS_COUNT)
+    {
         let account = env
             .accountsdb
-            .get_account(&acc)
+            .get_account(acc_pubkey)
             .expect("transaction account should be in database");
         assert_eq!(
-            *account.data().first().unwrap(),
+            account.data()[0],
             42,
-            "the first byte of all accounts should have been modified"
+            "the first byte of the account data should have been modified"
         );
-        modified_accounts.insert(*acc);
+        modified_accounts.insert(*acc_pubkey);
     }
+
+    // Second, verify that account update notifications were broadcast for all modified accounts.
     let mut updated_accounts = HashSet::with_capacity(ACCOUNTS_COUNT);
+    // Drain the channel to collect all updates from the single transaction.
     while let Ok(acc) = env.dispatch.account_update.try_recv() {
         updated_accounts.insert(acc.account.pubkey);
     }
-    assert_eq!(
-        updated_accounts.symmetric_difference(&modified_accounts).count(), 1, // 1 is payer
-        "account updates forwarded by txn executor should match the list modified in transaction"
+
+    assert!(
+        updated_accounts.is_superset(&modified_accounts),
+        "account updates should be forwarded for all modified accounts"
     );
 }

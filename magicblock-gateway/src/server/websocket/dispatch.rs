@@ -60,9 +60,6 @@ impl WsDispatcher {
     }
 
     /// Routes an incoming JSON-RPC request to the appropriate subscription handler.
-    ///
-    /// This function only handles subscription-related methods.
-    /// It returns an error for any other method type.
     pub(crate) async fn dispatch(
         &mut self,
         request: &mut JsonWsRequest,

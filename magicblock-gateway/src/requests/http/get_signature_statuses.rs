@@ -1,8 +1,16 @@
-use solana_transaction_status_client_types::TransactionStatus;
+use solana_transaction_status::TransactionStatus;
 
 use super::prelude::*;
 
 impl HttpDispatcher {
+    /// Handles the `getSignatureStatuses` RPC request.
+    ///
+    /// Fetches the processing status for a list of transaction signatures.
+    ///
+    /// This handler employs a two-level lookup strategy for performance: it first
+    /// checks a hot in-memory cache of recent transactions before falling back to the
+    /// persistent ledger. The returned list has the same length as the input, with
+    /// `null` entries for signatures that are not found.
     pub(crate) fn get_signature_statuses(
         &self,
         request: &mut JsonRequest,
@@ -10,31 +18,38 @@ impl HttpDispatcher {
         let signatures = parse_params!(request.params()?, Vec<SerdeSignature>);
         let signatures: Vec<_> = some_or_err!(signatures);
         let mut statuses = Vec::with_capacity(signatures.len());
-        for signature in signatures {
-            if let Some(Some(status)) = self.transactions.get(&signature.0) {
+
+        for signature in signatures.into_iter().map(Into::into) {
+            // Level 1: Check the hot in-memory cache first.
+            if let Some(Some(cached_status)) = self.transactions.get(&signature)
+            {
                 statuses.push(Some(TransactionStatus {
-                    slot: status.slot,
-                    status: status.result,
-                    confirmations: None,
-                    err: None,
+                    slot: cached_status.slot,
+                    status: cached_status.result.clone(),
+                    confirmations: None, // This validator does not track confirmations.
+                    err: None, // `status` field contains the error; `err` is deprecated.
                     confirmation_status: None,
                 }));
                 continue;
             }
-            let Some((slot, meta)) =
-                self.ledger.get_transaction_status(signature.0, Slot::MAX)?
-            else {
+
+            // Level 2: Fall back to the persistent ledger for historical lookups.
+            let ledger_status =
+                self.ledger.get_transaction_status(signature, Slot::MAX)?;
+            if let Some((slot, meta)) = ledger_status {
+                statuses.push(Some(TransactionStatus {
+                    slot,
+                    status: meta.status,
+                    confirmations: None,
+                    err: None,
+                    confirmation_status: None,
+                }));
+            } else {
+                // The signature was not found in the cache or the ledger.
                 statuses.push(None);
-                continue;
-            };
-            statuses.push(Some(TransactionStatus {
-                slot,
-                status: meta.status,
-                confirmations: None,
-                err: None,
-                confirmation_status: None,
-            }));
+            }
         }
+
         let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, statuses, slot))
     }

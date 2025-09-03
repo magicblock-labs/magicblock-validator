@@ -6,7 +6,7 @@ use std::{
 /// A thread-safe, expiring cache with lazy eviction.
 ///
 /// This cache stores key-value pairs for a specified duration (time-to-live).
-/// It is designed for concurrent access using lock-free data structures from the `scc` crate.
+/// It is designed for concurrent access using lock-free data structures.
 ///
 /// Eviction of expired entries is performed **lazily**: the cache is only cleaned
 /// when a new element is inserted via the [`push`] method. There is no background

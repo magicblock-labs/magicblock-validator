@@ -31,8 +31,6 @@ use magicblock_core::{
     Slot,
 };
 
-// --- Type Aliases for Subscription Databases ---
-
 /// Manages subscriptions to changes in specific account. Maps a `Pubkey` to its subscribers.
 pub(crate) type AccountSubscriptionsDb =
     Arc<scc::HashMap<Pubkey, UpdateSubscribers<AccountEncoder>>>;
@@ -258,8 +256,6 @@ impl SubscriptionsDb {
         SUBID_COUNTER.fetch_add(1, Ordering::Relaxed)
     }
 }
-
-// --- Subscriber Data Structures ---
 
 /// A collection of `UpdateSubscriber`s for a single subscription key (e.g., a specific account).
 /// The inner `Vec` is kept sorted by encoder to allow for efficient lookups.
