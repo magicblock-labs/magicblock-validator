@@ -51,7 +51,7 @@ async fn create_transaction_in_ledger(
     let ix = Instruction::new_with_bincode(guinea::ID, &ix, account_metas);
     let txn = env.build_transaction(&[ix]);
     let sig = txn.signatures[0];
-    env.execute_transaction(txn).await.unwrap();
+    env.execute_transaction(txn.clone()).await.unwrap();
 
     // Revert accounts to their previous state to simulate `AccountsDb` being behind the ledger.
     for (pubkey, acc) in &pre_account_states {
@@ -63,13 +63,14 @@ async fn create_transaction_in_ledger(
         .ledger
         .get_complete_transaction(sig, u64::MAX)
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .get_transaction();
 
     // Drain dispatch channels for a clean test.
     while env.dispatch.transaction_status.try_recv().is_ok() {}
     while env.dispatch.account_update.try_recv().is_ok() {}
 
-    (transaction.get_transaction(), pubkeys)
+    (transaction, pubkeys)
 }
 
 /// Verifies that `replay_transaction` correctly applies state changes to the

@@ -1,5 +1,4 @@
 use lmdb::{Cursor, RoCursor, RoTransaction};
-use log::error;
 use solana_pubkey::Pubkey;
 
 use super::{table::Table, MDB_SET_OP};
@@ -49,12 +48,7 @@ impl<'env> OffsetPubkeyIter<'env> {
 impl Iterator for OffsetPubkeyIter<'_> {
     type Item = (Offset, Pubkey);
     fn next(&mut self) -> Option<Self::Item> {
-        match self.iter.next()? {
-            Ok(entry) => Some(bytes!(#unpack, entry.1, Offset, Pubkey)),
-            Err(error) => {
-                error!("error advancing offset iterator cursor: {error}");
-                None
-            }
-        }
+        let record = self.iter.next()?.ok();
+        record.map(|entry| bytes!(#unpack, entry.1, Offset, Pubkey))
     }
 }

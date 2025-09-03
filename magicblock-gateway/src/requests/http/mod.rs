@@ -134,8 +134,8 @@ impl HttpDispatcher {
         let sanitized_tx = if sigverify {
             transaction.sanitize().map_err(RpcError::invalid_params)?
         } else {
-            // When `sigverify` is false (for simulations), we must still create a
-            // `SanitizedTransaction` but can bypass the expensive signature check.
+            // for simulations which skip verification, we must still sanitize the
+            // transaction, but we bypass the signature check (which might fail)
             SanitizedTransaction::try_create(
                 transaction,
                 BlockHash::new_unique(), // Hash is irrelevant when not verifying.
