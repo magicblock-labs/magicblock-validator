@@ -2,6 +2,8 @@ use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use thiserror::Error;
 
+use crate::intent_execution_manager::IntentExecutionManagerError;
+
 pub type CommittorServiceResult<T, E = CommittorServiceError> = Result<T, E>;
 
 #[derive(Error, Debug)]
@@ -19,6 +21,9 @@ pub enum CommittorServiceError {
 
     #[error("TableManiaError: {0} ({0:?})")]
     TableManiaError(#[from] magicblock_table_mania::error::TableManiaError),
+
+    #[error("IntentExecutionManagerError: {0} ({0:?})")]
+    IntentExecutionManagerError(#[from] IntentExecutionManagerError),
 
     #[error(
         "Failed send and confirm transaction to {0} on chain: {1} ({1:?})"

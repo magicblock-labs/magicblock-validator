@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use dlp::args::Context;
 use log::error;
 use magicblock_program::magic_scheduled_base_intent::{
-    CommitType, CommittedAccountV2, MagicBaseIntent, ScheduledBaseIntent,
+    CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
     UndelegateType,
 };
 use solana_pubkey::Pubkey;
@@ -14,7 +14,7 @@ use crate::{
         TaskInfoFetcher, TaskInfoFetcherError,
     },
     persist::IntentPersister,
-    tasks::tasks::{
+    tasks::{
         ArgsTask, BaseActionTask, BaseTask, CommitTask, FinalizeTask,
         UndelegateTask,
     },
@@ -111,7 +111,7 @@ impl TasksBuilder for TaskBuilderV1 {
         base_intent: &ScheduledBaseIntent,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
-        fn finalize_task(account: &CommittedAccountV2) -> Box<dyn BaseTask> {
+        fn finalize_task(account: &CommittedAccount) -> Box<dyn BaseTask> {
             Box::new(ArgsTask::Finalize(FinalizeTask {
                 delegated_account: account.pubkey,
             }))
@@ -119,7 +119,7 @@ impl TasksBuilder for TaskBuilderV1 {
 
         // Helper to create an undelegate task
         fn undelegate_task(
-            account: &CommittedAccountV2,
+            account: &CommittedAccount,
             rent_reimbursement: &Pubkey,
         ) -> Box<dyn BaseTask> {
             Box::new(ArgsTask::Undelegate(UndelegateTask {

@@ -15,7 +15,7 @@ use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
 use tokio_util::sync::WaitForCancellationFutureOwned;
 
 use crate::{
-    error::CommittorServiceResult,
+    error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::BroadcastedIntentExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
     types::ScheduledBaseIntentWrapper,
@@ -124,6 +124,7 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittorExt
         base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
     {
+        // Critical section
         let receivers = {
             let mut pending_messages =
                 self.pending_messages.lock().expect(POISONED_MUTEX_MSG);
@@ -137,15 +138,17 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittorExt
                             vacant.insert(sender);
                             Ok(receiver)
                         }
-                        Entry::Occupied(_) => {
-                            Err(Error::RepeatingMessageError(intent.inner.id))
-                        }
+                        Entry::Occupied(_) => Err(
+                            CommittorServiceExtError::RepeatingMessageError(
+                                intent.inner.id,
+                            ),
+                        ),
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()?
         };
 
-        self.schedule_base_intent(base_intents);
+        self.schedule_base_intent(base_intents).await??;
         let results = join_all(receivers.into_iter())
             .await
             .into_iter()
@@ -167,7 +170,7 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
     fn schedule_base_intent(
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
-    ) {
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         self.inner.schedule_base_intent(base_intents)
     }
 
@@ -221,11 +224,14 @@ impl<CC: BaseIntentCommittor> Deref for CommittorServiceExt<CC> {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum CommittorServiceExtError {
     #[error("Attempt to schedule already scheduled message id: {0}")]
     RepeatingMessageError(u64),
     #[error("RecvError: {0}")]
     RecvError(#[from] RecvError),
+    #[error("CommittorServiceError: {0:?}")]
+    CommittorServiceError(#[from] CommittorServiceError),
 }
 
-pub type BaseIntentCommitorExtResult<T, E = Error> = Result<T, E>;
+pub type BaseIntentCommitorExtResult<T, E = CommittorServiceExtError> =
+    Result<T, E>;

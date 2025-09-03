@@ -12,8 +12,8 @@ use crate::{
         task_visitors::persistor_visitor::{
             PersistorContext, PersistorVisitor,
         },
-        tasks::{ArgsTask, BaseTask, FinalizeTask},
         utils::TransactionUtils,
+        ArgsTask, BaseTask, FinalizeTask,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
@@ -81,7 +81,7 @@ impl TaskStrategist {
 
     /// Attempt to use ALTs for ALL keys in tx
     /// Returns `true` if ALTs make tx fit, otherwise `false`
-    /// TODO: optimize to use only necessary amount of pubkeys
+    /// TODO(edwin): optimize to use only necessary amount of pubkeys
     pub fn attempt_lookup_tables(tasks: &[Box<dyn BaseTask>]) -> bool {
         let placeholder = Keypair::new();
         // Gather all involved keys in tx
@@ -230,7 +230,7 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use dlp::args::Context;
     use magicblock_program::magic_scheduled_base_intent::{
-        BaseAction, CommittedAccountV2, ProgramArgs,
+        BaseAction, CommittedAccount, ProgramArgs,
     };
     use solana_account::Account;
     use solana_sdk::system_program;
@@ -238,9 +238,7 @@ mod tests {
     use super::*;
     use crate::{
         persist::IntentPersisterImpl,
-        tasks::tasks::{
-            BaseActionTask, CommitTask, TaskStrategy, UndelegateTask,
-        },
+        tasks::{BaseActionTask, CommitTask, TaskStrategy, UndelegateTask},
     };
 
     // Helper to create a simple commit task
@@ -248,11 +246,11 @@ mod tests {
         ArgsTask::Commit(CommitTask {
             commit_id,
             allow_undelegation: false,
-            committed_account: CommittedAccountV2 {
+            committed_account: CommittedAccount {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
                     lamports: 1000,
-                    data: vec![0; data_size],
+                    data: vec![1; data_size],
                     owner: system_program::id(),
                     executable: false,
                     rent_epoch: 0,
@@ -261,7 +259,7 @@ mod tests {
         })
     }
 
-    // Helper to create a base action task
+    // Helper to create a Base action task
     fn create_test_base_action_task(len: usize) -> ArgsTask {
         ArgsTask::BaseAction(BaseActionTask {
             context: Context::Commit,
@@ -382,7 +380,7 @@ mod tests {
 
     #[test]
     fn test_build_strategy_with_lookup_tables_when_needed() {
-        // TODO: ALSO MAX NUMBER OF TASKS fit with ALTs!
+        // Also max number of committed accounts fit with ALTs!
         const NUM_COMMITS: u64 = 22;
 
         let validator = Pubkey::new_unique();
@@ -474,7 +472,7 @@ mod tests {
             vec![
                 TaskStrategy::Buffer, // Commit task optimized
                 TaskStrategy::Args,   // Finalize stays
-                TaskStrategy::Args,   // L1Action stays
+                TaskStrategy::Args,   // BaseAction stays
                 TaskStrategy::Args,   // Undelegate stays
             ]
         );

@@ -15,7 +15,7 @@ use magicblock_committor_service::{
 };
 use magicblock_program::{
     magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, CommittedAccountV2, MagicBaseIntent,
+        CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
         ScheduledBaseIntent, UndelegateType,
     },
     validator::{init_validator_authority, validator_authority},
@@ -322,7 +322,7 @@ async fn commit_single_account(
     account.owner = program_flexi_counter::id();
     account.data = vec![101_u8; bytes];
 
-    let account = CommittedAccountV2 { pubkey, account };
+    let account = CommittedAccount { pubkey, account };
     let base_intent = if undelegate {
         MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
             commit_action: CommitType::Standalone(vec![account]),
@@ -593,7 +593,7 @@ async fn commit_20_accounts_1kb(
 async fn create_bundles(
     bundle_size: usize,
     bytess: &[usize],
-) -> Vec<Vec<CommittedAccountV2>> {
+) -> Vec<Vec<CommittedAccount>> {
     let mut join_set = JoinSet::new();
     for bytes in bytess {
         let bytes = *bytes;
@@ -605,7 +605,7 @@ async fn create_bundles(
 
             pda_acc.owner = program_flexi_counter::id();
             pda_acc.data = vec![0u8; bytes];
-            CommittedAccountV2 {
+            CommittedAccount {
                 pubkey: pda,
                 account: pda_acc,
             }
@@ -752,12 +752,20 @@ async fn ix_commit_local(
             .unwrap()
             .iter()
             .map(|el| (el.pubkey, el.clone()))
-            .collect::<HashMap<Pubkey, CommittedAccountV2>>();
+            .collect::<HashMap<Pubkey, CommittedAccount>>();
         let statuses = service
             .get_commit_statuses(base_intent.id)
             .await
             .unwrap()
             .unwrap();
+        debug!(
+            "{}",
+            statuses
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
 
         // When we finalize it is possible to also undelegate the account
         let expected_owner = if is_undelegate {

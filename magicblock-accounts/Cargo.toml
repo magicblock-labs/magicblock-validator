@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
 magicblock-delegation-program = { workspace = true }
 futures-util = { workspace = true }
+itertools = { workspace = true }
 log = { workspace = true }
 magicblock-account-fetcher = { workspace = true }
 magicblock-account-updates = { workspace = true }

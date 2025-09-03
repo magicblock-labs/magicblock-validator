@@ -78,9 +78,6 @@ impl IntentScheduler {
 
     /// Returns [`ScheduledBaseIntent`] if intent can be executed,
     /// otherwise consumes it and enqueues
-    ///
-    /// CRITICAL: IntentIds should be unique
-    /// Intent should be scheduled once!
     pub fn schedule(
         &mut self,
         base_intent: ScheduledBaseIntentWrapper,
@@ -603,7 +600,7 @@ mod edge_cases_test {
 
 #[cfg(test)]
 mod complete_error_test {
-    use magicblock_program::magic_scheduled_base_intent::CommittedAccountV2;
+    use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
     use solana_account::Account;
     use solana_pubkey::pubkey;
 
@@ -664,7 +661,7 @@ mod complete_error_test {
             .base_intent
             .get_committed_accounts_mut()
             .unwrap()
-            .push(CommittedAccountV2 {
+            .push(CommittedAccount {
                 pubkey: pubkey3,
                 account: Account::default(),
             });
@@ -730,7 +727,7 @@ pub(crate) fn create_test_intent(
     pubkeys: &[Pubkey],
 ) -> ScheduledBaseIntentWrapper {
     use magicblock_program::magic_scheduled_base_intent::{
-        CommitType, CommittedAccountV2, MagicBaseIntent,
+        CommitType, CommittedAccount, MagicBaseIntent,
     };
     use solana_account::Account;
     use solana_sdk::{hash::Hash, transaction::Transaction};
@@ -750,7 +747,7 @@ pub(crate) fn create_test_intent(
     if !pubkeys.is_empty() {
         let committed_accounts = pubkeys
             .iter()
-            .map(|&pubkey| CommittedAccountV2 {
+            .map(|&pubkey| CommittedAccount {
                 pubkey,
                 account: Account::default(),
             })

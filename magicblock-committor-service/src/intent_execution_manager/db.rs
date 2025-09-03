@@ -2,6 +2,7 @@ use std::{collections::VecDeque, sync::Mutex};
 
 /// DB for storing intents that overflow committor channel
 use async_trait::async_trait;
+use magicblock_metrics::metrics;
 
 use crate::types::ScheduledBaseIntentWrapper;
 
@@ -43,10 +44,10 @@ impl DB for DummyDB {
         &self,
         base_intent: ScheduledBaseIntentWrapper,
     ) -> DBResult<()> {
-        self.db
-            .lock()
-            .expect(POISONED_MUTEX_MSG)
-            .push_back(base_intent);
+        let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
+        db.push_back(base_intent);
+
+        metrics::set_committor_intents_backlog_count(db.len() as i64);
         Ok(())
     }
 
@@ -54,17 +55,21 @@ impl DB for DummyDB {
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) -> DBResult<()> {
-        self.db
-            .lock()
-            .expect(POISONED_MUTEX_MSG)
-            .extend(base_intents.into_iter());
+        let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
+        db.extend(base_intents.into_iter());
+
+        metrics::set_committor_intents_backlog_count(db.len() as i64);
         Ok(())
     }
 
     async fn pop_base_intent(
         &self,
     ) -> DBResult<Option<ScheduledBaseIntentWrapper>> {
-        Ok(self.db.lock().expect(POISONED_MUTEX_MSG).pop_front())
+        let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
+        let res = db.pop_front();
+
+        metrics::set_committor_intents_backlog_count(db.len() as i64);
+        Ok(res)
     }
 
     fn is_empty(&self) -> bool {
@@ -74,10 +79,10 @@ impl DB for DummyDB {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("StoreError: {0}")]
-    StoreError(anyhow::Error),
-    #[error("FetchError: {0}")]
-    FetchError(anyhow::Error),
+    #[error("StoreError")]
+    StoreError,
+    #[error("FetchError")]
+    FetchError,
 }
 
 pub type DBResult<T, E = Error> = Result<T, E>;

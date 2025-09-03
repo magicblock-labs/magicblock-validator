@@ -5,6 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use solana_transaction_status_client_types::{
@@ -32,12 +33,17 @@ pub struct ChangesetCommittorStub {
     reserved_pubkeys_for_committee: Arc<Mutex<HashMap<Pubkey, Pubkey>>>,
     #[allow(clippy::type_complexity)]
     committed_changesets: Arc<Mutex<HashMap<u64, ScheduledBaseIntentWrapper>>>,
+    committed_accounts: Arc<Mutex<HashMap<Pubkey, Account>>>,
 }
 
 impl ChangesetCommittorStub {
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.committed_changesets.lock().unwrap().len()
+    }
+
+    pub fn committed(&self, pubkey: &Pubkey) -> Option<Account> {
+        self.committed_accounts.lock().unwrap().get(pubkey).cloned()
     }
 }
 
@@ -63,11 +69,34 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
     fn schedule_base_intent(
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
-    ) {
-        let mut changesets = self.committed_changesets.lock().unwrap();
-        base_intents.into_iter().for_each(|intent| {
-            changesets.insert(intent.inner.id, intent);
-        });
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        let (sender, receiver) = oneshot::channel();
+        let _ = sender.send(Ok(()));
+
+        {
+            let mut committed_accounts =
+                self.committed_accounts.lock().unwrap();
+            base_intents.iter().for_each(|intent| {
+                let intent_committed_accounts = intent.get_committed_accounts();
+                let Some(accounts) = intent_committed_accounts else {
+                    return;
+                };
+
+                accounts.iter().for_each(|account| {
+                    committed_accounts
+                        .insert(account.pubkey, account.account.clone());
+                })
+            })
+        }
+
+        {
+            let mut changesets = self.committed_changesets.lock().unwrap();
+            base_intents.into_iter().for_each(|intent| {
+                changesets.insert(intent.inner.id, intent);
+            });
+        }
+
+        receiver
     }
 
     fn subscribe_for_results(
@@ -167,7 +196,7 @@ impl BaseIntentCommittorExt for ChangesetCommittorStub {
         base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
     {
-        self.schedule_base_intent(base_intents.clone());
+        self.schedule_base_intent(base_intents.clone()).await??;
         let res = base_intents
             .into_iter()
             .map(|message| {

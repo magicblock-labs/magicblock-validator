@@ -6,12 +6,8 @@ edition.workspace = true
 [dependencies]
 
 [dev-dependencies]
-tempfile = { workspace = true }
-test-ledger-restore = { workspace = true }
-magicblock-config = { workspace = true }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 integration-test-tools = { workspace = true }
 solana-sdk = { workspace = true }
-ephemeral-rollups-sdk = { workspace = true }
 magicblock-delegation-program = { workspace = true, features = ["no-entrypoint"] }
 solana-rpc-client-api = { workspace = true }

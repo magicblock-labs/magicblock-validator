@@ -2,10 +2,7 @@ use log::error;
 
 use crate::{
     persist::{CommitStrategy, IntentPersister},
-    tasks::{
-        tasks::{ArgsTask, BufferTask},
-        visitor::Visitor,
-    },
+    tasks::{visitor::Visitor, ArgsTask, BufferTask},
 };
 
 pub enum PersistorContext {

@@ -1,11 +1,10 @@
 use std::collections::HashSet;
 
 use solana_log_collector::ic_msg;
-use solana_program_runtime::{
-    __private::{InstructionError, ReadableAccount},
-    invoke_context::InvokeContext,
+use solana_program_runtime::invoke_context::InvokeContext;
+use solana_sdk::{
+    account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
 };
-use solana_sdk::pubkey::Pubkey;
 
 use crate::{
     schedule_transactions,

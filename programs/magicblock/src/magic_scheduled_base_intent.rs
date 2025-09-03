@@ -6,15 +6,15 @@ use magicblock_core::magic_program::args::{
 };
 use serde::{Deserialize, Serialize};
 use solana_log_collector::ic_msg;
-use solana_program_runtime::{
-    __private::{Hash, InstructionError, ReadableAccount, TransactionContext},
-    invoke_context::InvokeContext,
-};
+use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
-    account::{Account, AccountSharedData},
+    account::{Account, AccountSharedData, ReadableAccount},
     clock::Slot,
+    hash::Hash,
+    instruction::InstructionError,
     pubkey::Pubkey,
     transaction::Transaction,
+    transaction_context::TransactionContext,
 };
 
 use crate::{
@@ -84,13 +84,13 @@ impl ScheduledBaseIntent {
         })
     }
 
-    pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccountV2>> {
+    pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccount>> {
         self.base_intent.get_committed_accounts()
     }
 
     pub fn get_committed_accounts_mut(
         &mut self,
-    ) -> Option<&mut Vec<CommittedAccountV2>> {
+    ) -> Option<&mut Vec<CommittedAccount>> {
         self.base_intent.get_committed_accounts_mut()
     }
 
@@ -149,7 +149,7 @@ impl MagicBaseIntent {
         }
     }
 
-    pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccountV2>> {
+    pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccount>> {
         match self {
             MagicBaseIntent::BaseActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts()),
@@ -161,7 +161,7 @@ impl MagicBaseIntent {
 
     pub fn get_committed_accounts_mut(
         &mut self,
-    ) -> Option<&mut Vec<CommittedAccountV2>> {
+    ) -> Option<&mut Vec<CommittedAccount>> {
         match self {
             MagicBaseIntent::BaseActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts_mut()),
@@ -208,13 +208,11 @@ impl CommitAndUndelegate {
         })
     }
 
-    pub fn get_committed_accounts(&self) -> &Vec<CommittedAccountV2> {
+    pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {
         self.commit_action.get_committed_accounts()
     }
 
-    pub fn get_committed_accounts_mut(
-        &mut self,
-    ) -> &mut Vec<CommittedAccountV2> {
+    pub fn get_committed_accounts_mut(&mut self) -> &mut Vec<CommittedAccount> {
         self.commit_action.get_committed_accounts_mut()
     }
 
@@ -324,12 +322,12 @@ impl BaseAction {
 
 type CommittedAccountRef<'a> = (Pubkey, &'a RefCell<AccountSharedData>);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommittedAccountV2 {
+pub struct CommittedAccount {
     pub pubkey: Pubkey,
     pub account: Account,
 }
 
-impl<'a> From<CommittedAccountRef<'a>> for CommittedAccountV2 {
+impl<'a> From<CommittedAccountRef<'a>> for CommittedAccount {
     fn from(value: CommittedAccountRef<'a>) -> Self {
         Self {
             pubkey: value.0,
@@ -341,17 +339,15 @@ impl<'a> From<CommittedAccountRef<'a>> for CommittedAccountV2 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommitType {
     /// Regular commit without actions
-    /// TODO: feels like ShortMeta isn't needed
-    Standalone(Vec<CommittedAccountV2>), // accounts to commit
+    Standalone(Vec<CommittedAccount>), // accounts to commit
     /// Commits accounts and runs actions
     WithBaseActions {
-        committed_accounts: Vec<CommittedAccountV2>,
+        committed_accounts: Vec<CommittedAccount>,
         base_actions: Vec<BaseAction>,
     },
 }
 
 impl CommitType {
-    // TODO: move to processor
     fn validate_accounts(
         accounts: &[CommittedAccountRef],
         context: &ConstructionContext<'_, '_>,
@@ -385,12 +381,11 @@ impl CommitType {
     // I delegated an account, now the owner is delegation program
     // parent_program_id != Some(&acc_owner) should fail. or any modification on ER
     // ER perceives owner as old one, hence for ER those are valid txs
-    // On commit_and_undelegate and commit we will set owner to DLP, for latter temparerily
+    // On commit_and_undelegate and commit we will set owner to DLP, for latter temporarily
     // The owner shall be real owner on chain
     // So first:
     // 1. Validate
     // 2. Fetch current account states
-    // TODO: 3. switch the ownership
     pub fn extract_commit_accounts<'a>(
         account_indices: &[u8],
         transaction_context: &'a TransactionContext,
@@ -426,8 +421,7 @@ impl CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|el| {
-                        let mut committed_account: CommittedAccountV2 =
-                            el.into();
+                        let mut committed_account: CommittedAccount = el.into();
                         committed_account.account.owner = context
                             .parent_program_id
                             .unwrap_or(committed_account.account.owner);
@@ -455,8 +449,7 @@ impl CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|el| {
-                        let mut committed_account: CommittedAccountV2 =
-                            el.into();
+                        let mut committed_account: CommittedAccount = el.into();
                         committed_account.account.owner = context
                             .parent_program_id
                             .unwrap_or(committed_account.account.owner);
@@ -473,7 +466,7 @@ impl CommitType {
         }
     }
 
-    pub fn get_committed_accounts(&self) -> &Vec<CommittedAccountV2> {
+    pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
             Self::WithBaseActions {
@@ -482,9 +475,7 @@ impl CommitType {
         }
     }
 
-    pub fn get_committed_accounts_mut(
-        &mut self,
-    ) -> &mut Vec<CommittedAccountV2> {
+    pub fn get_committed_accounts_mut(&mut self) -> &mut Vec<CommittedAccount> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
             Self::WithBaseActions {

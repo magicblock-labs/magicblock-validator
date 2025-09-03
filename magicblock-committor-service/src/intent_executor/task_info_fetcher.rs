@@ -80,7 +80,7 @@ impl CacheTaskInfoFetcher {
                     return err
                 }
                 Err(TaskInfoFetcherError::MagicBlockRpcClientError(err)) => {
-                    // TODO: RPC error handlings should be more robust
+                    // TODO(edwin): RPC error handlings should be more robust
                     last_err =
                         TaskInfoFetcherError::MagicBlockRpcClientError(err)
                 }
@@ -94,7 +94,6 @@ impl CacheTaskInfoFetcher {
     }
 
     /// Fetches commit_ids using RPC
-    /// Note: remove duplicates prior to calling
     pub async fn fetch_metadata(
         rpc_client: &MagicblockRpcClient,
         pubkeys: &[Pubkey],
@@ -205,7 +204,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         )
         .await?
         .into_iter()
-        .map(|metadata| metadata.last_update_external_slot);
+        .map(|metadata| metadata.last_update_nonce);
 
         // We don't care if anything changed in between with cache - just update and return our ids.
         {

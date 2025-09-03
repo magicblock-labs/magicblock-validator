@@ -3926,6 +3926,7 @@ dependencies = [
  "async-trait",
  "conjunto-transwise",
  "futures-util",
+ "itertools 0.14.0",
  "log",
  "magicblock-account-cloner",
  "magicblock-account-dumper",
@@ -3936,7 +3937,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=00d720)",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-processor",
@@ -4004,7 +4005,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=00d720)",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-geyser-plugin",
  "magicblock-ledger",
  "magicblock-metrics",
@@ -4090,7 +4091,6 @@ dependencies = [
 name = "magicblock-committor-service"
 version = "0.1.7"
 dependencies = [
- "anyhow",
  "async-trait",
  "base64 0.21.7",
  "bincode",
@@ -4101,7 +4101,8 @@ dependencies = [
  "log",
  "lru 0.16.0",
  "magicblock-committor-program",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=00d720)",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+ "magicblock-metrics",
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
@@ -4171,7 +4172,7 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program"
 version = "1.0.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=00d720#00d72053093a9ca10f1812b4448b807a7e4036c8"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c#4af7f1cefe0915f0760ed5c38b25b7d41c31a474"
 dependencies = [
  "bincode",
  "borsh 1.5.7",
@@ -4187,7 +4188,7 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program"
 version = "1.0.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c#4af7f1cefe0915f0760ed5c38b25b7d41c31a474"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20#5fb8d20f3567113dc75c2c8047a80129f792c5bb"
 dependencies = [
  "bincode",
  "borsh 1.5.7",
@@ -4466,10 +4467,10 @@ dependencies = [
  "clap 4.5.40",
  "console-subscriber",
  "env_logger 0.11.8",
- "git-version",
  "log",
  "magicblock-api",
  "magicblock-config",
+ "magicblock-version",
  "solana-sdk",
  "test-tools",
  "tokio",
@@ -4483,7 +4484,7 @@ dependencies = [
  "log",
  "magicblock-accounts",
  "magicblock-config",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=00d720)",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-rpc-client",
@@ -4498,10 +4499,12 @@ dependencies = [
 name = "magicblock-version"
 version = "0.1.7"
 dependencies = [
+ "git-version",
  "rustc_version",
  "semver",
  "serde",
  "solana-frozen-abi-macro",
+ "solana-rpc-client-api",
  "solana-sdk",
 ]
 

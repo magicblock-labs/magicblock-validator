@@ -8,7 +8,7 @@ use crate::{
         task_info_fetcher::CacheTaskInfoFetcher, IntentExecutor,
         IntentExecutorImpl,
     },
-    transaction_preparator::transaction_preparator::TransactionPreparatorV1,
+    transaction_preparator::TransactionPreparatorV1,
     ComputeBudgetConfig,
 };
 

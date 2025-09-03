@@ -9,14 +9,15 @@ use solana_rpc_client_api::{
     custom_error::RpcCustomError,
     response::{
         Response as RpcResponse, RpcIdentity, RpcLeaderSchedule,
-        RpcSnapshotSlotInfo, RpcVersionInfo, RpcVoteAccountStatus,
+        RpcSnapshotSlotInfo, RpcVoteAccountStatus,
     },
 };
 use solana_sdk::{epoch_info::EpochInfo, slot_history::Slot};
 
 use crate::{
     json_rpc_request_processor::JsonRpcRequestProcessor,
-    rpc_health::RpcHealthStatus, traits::rpc_minimal::Minimal,
+    rpc_health::RpcHealthStatus,
+    traits::rpc_minimal::{Minimal, RpcVersionInfoExt},
     utils::verify_pubkey,
 };
 
@@ -107,23 +108,14 @@ impl Minimal for MinimalImpl {
         meta.get_transaction_count(config.unwrap_or_default())
     }
 
-    fn get_vote_accounts(
-        &self,
-        meta: Self::Metadata,
-        config: Option<RpcGetVoteAccountsConfig>,
-    ) -> Result<RpcVoteAccountStatus> {
-        Ok(RpcVoteAccountStatus {
-            current: vec![],
-            delinquent: vec![],
-        })
-    }
-
-    fn get_version(&self, _: Self::Metadata) -> Result<RpcVersionInfo> {
+    fn get_version(&self, _: Self::Metadata) -> Result<RpcVersionInfoExt> {
         debug!("get_version rpc request received");
         let version = magicblock_version::Version::default();
-        Ok(RpcVersionInfo {
-            solana_core: version.to_string(),
+        Ok(RpcVersionInfoExt {
+            solana_core: version.solana_core.to_string(),
             feature_set: Some(version.feature_set),
+            git_commit: version.git_version.to_string(),
+            magicblock_core: version.to_string(),
         })
     }
 
@@ -157,5 +149,16 @@ impl Minimal for MinimalImpl {
         let leader_schedule = [(identity, slots)].into();
 
         Ok(Some(leader_schedule))
+    }
+
+    fn get_vote_accounts(
+        &self,
+        meta: Self::Metadata,
+        config: Option<RpcGetVoteAccountsConfig>,
+    ) -> Result<RpcVoteAccountStatus> {
+        Ok(RpcVoteAccountStatus {
+            current: vec![],
+            delinquent: vec![],
+        })
     }
 }

@@ -127,10 +127,10 @@ impl CommittorProcessor {
     pub async fn schedule_base_intents(
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
-    ) {
+    ) -> CommittorServiceResult<()> {
         let intents = base_intents
             .iter()
-            .map(|nase_intent| nase_intent.inner.clone())
+            .map(|base_intent| base_intent.inner.clone())
             .collect::<Vec<_>>();
         if let Err(err) = self.persister.start_base_intents(&intents) {
             // We will still try to perform the commits, but the fact that we cannot
@@ -142,10 +142,14 @@ impl CommittorProcessor {
             );
         };
 
-        if let Err(err) = self.commits_scheduler.schedule(base_intents).await {
-            // CommittorService broken
-            panic!("Failed to schedule base intent: {}", err);
-        }
+        self.commits_scheduler
+            .schedule(base_intents)
+            .await
+            .inspect_err(|err| {
+                error!("Failed to schedule base intent: {}", err);
+            })?;
+
+        Ok(())
     }
 
     /// Creates a subscription for results of BaseIntent execution

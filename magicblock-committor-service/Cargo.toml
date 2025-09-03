@@ -11,18 +11,7 @@ edition.workspace = true
 doctest = false
 
 [dependencies]
-magicblock-committor-program = { workspace = true, features = [
-  "no-entrypoint",
-] }
-magicblock-delegation-program = { workspace = true, features = [
-  "no-entrypoint",
-] }
-magicblock-program = { workspace = true }
-magicblock-rpc-client = { workspace = true }
-magicblock-table-mania = { workspace = true }
-
 async-trait = { workspace = true }
-anyhow = { workspace = true }
 base64 = { workspace = true }
 bincode = { workspace = true }
 borsh = { workspace = true }
@@ -30,6 +19,16 @@ dyn-clone = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 lru = { workspace = true }
+magicblock-committor-program = { workspace = true, features = [
+  "no-entrypoint",
+] }
+magicblock-delegation-program = { workspace = true, features = [
+  "no-entrypoint",
+] }
+magicblock-metrics = { workspace = true }
+magicblock-program = { workspace = true }
+magicblock-rpc-client = { workspace = true }
+magicblock-table-mania = { workspace = true }
 rusqlite = { workspace = true }
 solana-account = { workspace = true }
 solana-pubkey = { workspace = true }
@@ -38,10 +37,10 @@ solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
 static_assertions = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
-tempfile = { workspace = true }
 
 [dev-dependencies]
 lazy_static = { workspace = true }

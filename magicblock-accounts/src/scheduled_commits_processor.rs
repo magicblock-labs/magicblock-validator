@@ -18,7 +18,7 @@ use magicblock_committor_service::{
 };
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
-    magic_scheduled_base_intent::{CommittedAccountV2, ScheduledBaseIntent},
+    magic_scheduled_base_intent::{CommittedAccount, ScheduledBaseIntent},
     register_scheduled_commit_sent, FeePayerAccount, SentCommit,
     TransactionScheduler,
 };
@@ -29,7 +29,9 @@ use solana_sdk::{
 use tokio::sync::{broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::{errors::AccountsResult, ScheduledCommitsProcessor};
+use crate::{
+    errors::ScheduledCommitsProcessorResult, ScheduledCommitsProcessor,
+};
 
 const POISONED_RWLOCK_MSG: &str =
     "RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned";
@@ -101,7 +103,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
             /// Returns `true` if account should be retained, `false` otherwise
             fn process_feepayer(
                 &mut self,
-                account: &mut CommittedAccountV2,
+                account: &mut CommittedAccount,
             ) -> bool {
                 let pubkey = account.pubkey;
                 let ephemeral_pubkey =
@@ -359,7 +361,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
 impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
     for ScheduledCommitsProcessorImpl<C>
 {
-    async fn process(&self) -> AccountsResult<()> {
+    async fn process(&self) -> ScheduledCommitsProcessorResult<()> {
         let scheduled_base_intent =
             self.transaction_scheduler.take_scheduled_actions();
 
@@ -392,7 +394,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
                 .collect()
         };
 
-        self.committor.schedule_base_intent(intents);
+        self.committor.schedule_base_intent(intents).await??;
         Ok(())
     }
 

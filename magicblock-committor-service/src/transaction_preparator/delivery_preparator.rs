@@ -1,6 +1,5 @@
 use std::{collections::HashSet, time::Duration};
 
-use anyhow::anyhow;
 use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all};
 use log::error;
@@ -28,8 +27,7 @@ use tokio::time::sleep;
 use crate::{
     persist::{CommitStatus, IntentPersister},
     tasks::{
-        task_strategist::TransactionStrategy,
-        tasks::{BaseTask, TaskPreparationInfo},
+        task_strategist::TransactionStrategy, BaseTask, TaskPreparationInfo,
     },
     utils::persist_status_update,
     ComputeBudgetConfig,
@@ -101,7 +99,7 @@ impl DeliveryPreparator {
         );
 
         // Initialize buffer account. Init + reallocs
-        self.initialize_buffer_account(authority, task, &preparation_info)
+        self.initialize_buffer_account(authority, &preparation_info)
             .await?;
 
         // Persist initialization success
@@ -113,7 +111,7 @@ impl DeliveryPreparator {
             update_status,
         );
 
-        // Writing chunks with some retries. Stol
+        // Writing chunks with some retries
         self.write_buffer_with_retries(authority, &preparation_info, 5)
             .await?;
         // Persist that buffer account initiated successfully
@@ -133,7 +131,6 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        _task: &dyn BaseTask,
         preparation_info: &TaskPreparationInfo,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_instructions = chunk_realloc_ixs(
@@ -178,8 +175,7 @@ impl DeliveryPreparator {
         info: &TaskPreparationInfo,
         max_retries: usize,
     ) -> DeliveryPreparatorResult<(), InternalError> {
-        let mut last_error =
-            InternalError::InternalError(anyhow!("ZeroRetriesRequested"));
+        let mut last_error = InternalError::ZeroRetriesRequestedError;
         for _ in 0..max_retries {
             let chunks =
                 match self.rpc_client.get_account(&info.chunks_pda).await {
@@ -191,10 +187,9 @@ impl DeliveryPreparator {
                             "Chunks PDA does not exist for writing. pda: {}",
                             info.chunks_pda
                         );
-                        return Err(InternalError::InternalError(anyhow!(
-                            "Chunks PDA does not exist for writing. pda: {}",
-                            info.chunks_pda
-                        )));
+                        return Err(InternalError::ChunksPDAMissingError(
+                            info.chunks_pda,
+                        ));
                     }
                     Err(err) => {
                         error!("Failed to fetch chunks PDA: {:?}", err);
@@ -230,12 +225,6 @@ impl DeliveryPreparator {
         chunks: &Chunks,
         write_instructions: &[Instruction],
     ) -> DeliveryPreparatorResult<(), InternalError> {
-        if write_instructions.len() != chunks.count() {
-            let err = anyhow!("Chunks count mismatches write instruction! chunks: {}, ixs: {}", write_instructions.len(), chunks.count());
-            error!("{}", err.to_string());
-            return Err(InternalError::InternalError(err));
-        }
-
         let missing_chunks = chunks.get_missing_chunks();
         let chunks_write_instructions = missing_chunks
             .into_iter()
@@ -269,9 +258,8 @@ impl DeliveryPreparator {
         authority: &Keypair,
         max_retries: usize,
     ) -> DeliveryPreparatorResult<(), InternalError> {
-        let mut last_error =
-            InternalError::InternalError(anyhow!("ZeroRetriesRequested"));
-        for _ in 0..max_retries {
+        let mut last_error = InternalError::ZeroRetriesRequestedError;
+        for _ in 0..MAX_RETRIES {
             match self.try_send_ixs(instructions, authority).await {
                 Ok(()) => return Ok(()),
                 Err(err) => {
@@ -343,8 +331,10 @@ impl DeliveryPreparator {
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalError {
-    #[error("InternalError: {0}")]
-    InternalError(anyhow::Error),
+    #[error("0 retries was requested")]
+    ZeroRetriesRequestedError,
+    #[error("Chunks PDA does not exist for writing. pda: {0}")]
+    ChunksPDAMissingError(Pubkey),
     #[error("BorshError: {0}")]
     BorshError(#[from] std::io::Error),
     #[error("TableManiaError: {0}")]

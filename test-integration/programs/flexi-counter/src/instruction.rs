@@ -109,8 +109,10 @@ pub enum FlexiCounterInstruction {
     /// 3.      `[write]`  Transfer destination during action
     /// 4.      `[]`       system program
     /// 5.      `[signer]` Escrow authority
+    /// ...
     /// 5+n-1   `[signer]` Escrow authority`
     /// 5+n     `[write]`  Counter pda
+    /// ...
     /// 5+2n    `[write]`  Counter pda
     CreateIntent {
         num_committees: u8,

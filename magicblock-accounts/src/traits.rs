@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use magicblock_metrics::metrics::HistogramTimer;
-use magicblock_program::magic_scheduled_base_intent::CommittedAccountV2;
+use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
     account::{Account, AccountSharedData, ReadableAccount},
@@ -11,12 +11,12 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-use crate::errors::AccountsResult;
+use crate::errors::ScheduledCommitsProcessorResult;
 
 #[async_trait]
 pub trait ScheduledCommitsProcessor: Send + Sync + 'static {
     /// Processes all commits that were scheduled and accepted
-    async fn process(&self) -> AccountsResult<()>;
+    async fn process(&self) -> ScheduledCommitsProcessorResult<()>;
 
     /// Returns the number of commits that were scheduled and accepted
     fn scheduled_commits_len(&self) -> usize;
@@ -28,8 +28,6 @@ pub trait ScheduledCommitsProcessor: Send + Sync + 'static {
     fn stop(&self);
 }
 
-// TODO(edwin): remove this
-#[derive(Clone)]
 pub struct AccountCommittee {
     /// The pubkey of the account to be committed.
     pub pubkey: Pubkey,
@@ -45,9 +43,9 @@ pub struct AccountCommittee {
     pub undelegation_requested: bool,
 }
 
-impl From<AccountCommittee> for CommittedAccountV2 {
+impl From<AccountCommittee> for CommittedAccount {
     fn from(value: AccountCommittee) -> Self {
-        CommittedAccountV2 {
+        CommittedAccount {
             pubkey: value.pubkey,
             account: Account {
                 lamports: value.account_data.lamports(),

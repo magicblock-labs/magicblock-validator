@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use log::{error, info, trace, warn};
+use magicblock_metrics::metrics;
 use tokio::{
     sync::{
         broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
@@ -149,6 +150,9 @@ where
             ));
 
             self.running_executors.push(handle);
+            metrics::set_committor_executors_busy_count(
+                self.running_executors.len() as i64,
+            );
         }
     }
 
@@ -192,9 +196,11 @@ where
                 self.inner.lock().expect(POISONED_INNER_MSG).schedule(intent)
             },
             else => {
-                // Shouldn't be possible
-                // If no executors spawned -> we can receive
-                // If can't receive -> there are running executors
+                // Shouldn't be possible:
+                // 1. If no executors spawned -> we can receive
+                // 2. If can't receive ->  there are MAX_EXECUTORS running executors
+                // We can't receive new message as there's no available Executor
+                // that could pick up the task.
                 unreachable!("next_scheduled_intent")
             }
         };
@@ -248,6 +254,8 @@ where
                 output,
             })
             .map_err(|err| {
+                // Increase failed intents metric as well
+                metrics::inc_committor_failed_intents_count();
                 (intent.inner.id, intent.trigger_type, Arc::new(err))
             });
 
@@ -300,7 +308,9 @@ mod tests {
                 IntentExecutorError as ExecutorError, IntentExecutorResult,
                 InternalError,
             },
-            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
+            task_info_fetcher::{
+                ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+            },
         },
         persist::IntentPersisterImpl,
     };
@@ -735,5 +745,7 @@ mod tests {
         fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
             None
         }
+
+        fn reset(&self, _: ResetType) {}
     }
 }

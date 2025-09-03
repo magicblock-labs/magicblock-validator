@@ -9,17 +9,18 @@ use std::{
 use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
-        task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
+        task_info_fetcher::{
+            ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+        },
         IntentExecutorImpl,
     },
-    tasks::tasks::CommitTask,
+    tasks::CommitTask,
     transaction_preparator::{
-        delivery_preparator::DeliveryPreparator,
-        transaction_preparator::TransactionPreparatorV1,
+        delivery_preparator::DeliveryPreparator, TransactionPreparatorV1,
     },
     ComputeBudgetConfig,
 };
-use magicblock_program::magic_scheduled_base_intent::CommittedAccountV2;
+use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;
@@ -108,7 +109,6 @@ impl TestFixture {
 }
 
 pub struct MockTaskInfoFetcher;
-
 #[async_trait]
 impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_next_commit_ids(
@@ -128,6 +128,8 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
         None
     }
+
+    fn reset(&self, _: ResetType) {}
 }
 
 #[allow(dead_code)]
@@ -144,7 +146,7 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
     CommitTask {
         commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
         allow_undelegation: false,
-        committed_account: CommittedAccountV2 {
+        committed_account: CommittedAccount {
             pubkey: Pubkey::new_unique(),
             account: Account {
                 lamports: 1000,
@@ -158,8 +160,8 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
 }
 
 #[allow(dead_code)]
-pub fn create_committed_account(data: &[u8]) -> CommittedAccountV2 {
-    CommittedAccountV2 {
+pub fn create_committed_account(data: &[u8]) -> CommittedAccount {
+    CommittedAccount {
         pubkey: Pubkey::new_unique(),
         account: Account {
             lamports: 1000,

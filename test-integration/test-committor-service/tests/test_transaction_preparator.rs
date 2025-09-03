@@ -5,13 +5,11 @@ use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
         task_strategist::{TaskStrategist, TransactionStrategy},
-        tasks::{
-            ArgsTask, BaseTask, BufferTask, CommitTask, FinalizeTask,
-            BaseActionTask, UndelegateTask,
-        },
         utils::TransactionUtils,
+        ArgsTask, BaseActionTask, BaseTask, BufferTask, CommitTask,
+        FinalizeTask, UndelegateTask,
     },
-    transaction_preparator::transaction_preparator::TransactionPreparator,
+    transaction_preparator::TransactionPreparator,
 };
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, ProgramArgs, ShortAccountMeta,
@@ -159,7 +157,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
 }
 
 #[tokio::test]
-async fn test_prepare_commit_tx_with_l1_actions() {
+async fn test_prepare_commit_tx_with_base_actions() {
     let fixture = TestFixture::new().await;
     let preparator = fixture.create_transaction_preparator();
 
