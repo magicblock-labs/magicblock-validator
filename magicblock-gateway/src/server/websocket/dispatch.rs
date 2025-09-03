@@ -117,7 +117,6 @@ impl WsDispatcher {
         // `remove` returns `Some(value)` if the key was present.
         // Dropping the value triggers the unsubscription logic.
         let success = self.unsubs.remove(&id).is_some();
-        println!("successfully unsubscribing from {id}: {success}");
         Ok(SubResult::Unsub(success))
     }
 }
