@@ -336,76 +336,97 @@ where
             return Ok(AccountClonerOutput::Unclonable {
                 pubkey: *pubkey,
                 reason: AccountClonerUnclonableReason::NoCloningAllowed,
-                at_slot: u64::MAX, // we should never try cloning, ever
+                at_slot: u64::MAX,
             });
         }
-        // Check for the latest updates onchain for that account
-        let last_known_update_slot = self
-            .account_updates
-            .get_last_known_update_slot(pubkey)
-            .unwrap_or(u64::MIN);
-        self.monitored_accounts.borrow_mut().promote(pubkey);
-        // Check for the happy/fast path, we may already have cloned this account before
-        match self.get_last_clone_output_from_pubkey(pubkey) {
-            // If we already cloned this account, check what the output of the clone was
-            Some(last_clone_output) => match &last_clone_output {
-                // If the previous clone succeeded, we may be able to re-use it, need to check further
-                AccountClonerOutput::Cloned {
-                    account_chain_snapshot: snapshot,
-                    ..
-                } => {
-                    // If the clone output is recent enough,
-                    // or the account is a feepayer, we don't clone again
-                    if snapshot.at_slot >= last_known_update_slot
-                        || snapshot.chain_state.is_feepayer()
-                    {
-                        Ok(last_clone_output)
-                    }
-                    // If the cloned account has been updated since clone, update the cache
-                    else {
-                        self.do_clone_and_update_cache(
-                            pubkey,
-                            ValidatorStage::Running,
-                        )
-                        .await
+
+        // Use a loop to avoid recursion
+        loop {
+            // Check for the latest updates onchain for that account
+            let last_known_update_slot = self
+                .account_updates
+                .get_last_known_update_slot(pubkey)
+                .unwrap_or(u64::MIN);
+            self.monitored_accounts.borrow_mut().promote(pubkey);
+
+            // Check for the happy/fast path, we may already have cloned this account before
+            match self.get_last_clone_output_from_pubkey(pubkey) {
+                Some(last_clone_output) => {
+                    match &last_clone_output {
+                        AccountClonerOutput::Cloned {
+                            account_chain_snapshot: snapshot,
+                            ..
+                        } => {
+                            if snapshot.at_slot >= last_known_update_slot
+                                || snapshot.chain_state.is_feepayer()
+                            {
+                                return Ok(last_clone_output);
+                            } else {
+                                // If the cloned account has been updated since clone, update the cache
+                                return self
+                                    .do_clone_and_update_cache(
+                                        pubkey,
+                                        ValidatorStage::Running,
+                                    )
+                                    .await;
+                            }
+                        }
+                        AccountClonerOutput::Unclonable {
+                            at_slot: until_slot,
+                            ..
+                        } => {
+                            if *until_slot >= last_known_update_slot {
+                                return Ok(last_clone_output);
+                            } else {
+                                // If the cloned account has been updated since clone, try to update the cache
+                                return self
+                                    .do_clone_and_update_cache(
+                                        pubkey,
+                                        ValidatorStage::Running,
+                                    )
+                                    .await;
+                            }
+                        }
                     }
                 }
-                // If the previous clone marked the account as unclonable, we may be able to re-use that output
-                AccountClonerOutput::Unclonable {
-                    at_slot: until_slot,
-                    ..
-                } => {
-                    // If the clone output is recent enough, use that
-                    if *until_slot >= last_known_update_slot {
-                        Ok(last_clone_output)
+                None => {
+                    // If we never cloned the account before, we can't use the cache
+                    match self.internal_account_provider.get_account(pubkey) {
+                        Some(acc) if acc.is_delegated() => {
+                            let res = self
+                                .do_clone_and_update_cache(
+                                    pubkey,
+                                    ValidatorStage::Hydrating {
+                                        validator_identity: self
+                                            .validator_identity,
+                                        account_owner: *acc.owner(),
+                                    },
+                                )
+                                .await;
+                            match res {
+                                Ok(_) => {
+                                    // If successful, loop back to the top to check the cache again
+                                    continue;
+                                }
+                                Err(_) => {
+                                    return Ok(AccountClonerOutput::Unclonable {
+                                        pubkey: *pubkey,
+                                        reason: AccountClonerUnclonableReason::AlreadyLocallyOverriden,
+                                        at_slot: u64::MAX,
+                                    });
+                                }
+                            }
+                        }
+                        _ => {
+                            // First time clone and update cache
+                            return self
+                                .do_clone_and_update_cache(
+                                    pubkey,
+                                    ValidatorStage::Running,
+                                )
+                                .await;
+                        }
                     }
-                    // If the cloned account has been updated since clone, try to update the cache
-                    else {
-                        self.do_clone_and_update_cache(
-                            pubkey,
-                            ValidatorStage::Running,
-                        )
-                        .await
-                    }
-                }
-            },
-            // If we never cloned the account before, we can't use the cache
-            None => {
-                // If somehow we already have this account in the bank, keep it as is
-                if self.internal_account_provider.has_account(pubkey) {
-                    Ok(AccountClonerOutput::Unclonable {
-                        pubkey: *pubkey,
-                        reason: AccountClonerUnclonableReason::AlreadyLocallyOverriden,
-                        at_slot: u64::MAX, // we will never try cloning again
-                    })
-                }
-                // If we need to clone it for the first time and update the cache
-                else {
-                    self.do_clone_and_update_cache(
-                        pubkey,
-                        ValidatorStage::Running,
-                    )
-                    .await
                 }
             }
         }
