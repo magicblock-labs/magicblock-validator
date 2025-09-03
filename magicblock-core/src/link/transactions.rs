@@ -129,7 +129,6 @@ impl SanitizeableTransaction for VersionedTransaction {
         self,
         verify: bool,
     ) -> Result<SanitizedTransaction, TransactionError> {
-        println!("verifying transaction: {verify}");
         let hash = if verify {
             self.verify_and_hash_message()
         } else {
@@ -139,7 +138,7 @@ impl SanitizeableTransaction for VersionedTransaction {
             self,
             hash,
             Some(false),
-            SimpleAddressLoader::Disabled,
+            SimpleAddressLoader::Enabled(Default::default()),
             &Default::default(),
         )
     }

@@ -3,6 +3,7 @@ use json::Serialize;
 use solana_account::ReadableAccount;
 use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
 use solana_pubkey::Pubkey;
+use solana_transaction_error::TransactionError;
 
 use crate::{
     requests::{params::SerdeSignature, payload::NotificationPayload},
@@ -107,10 +108,10 @@ impl Encoder for TransactionResultEncoder {
     ) -> Option<Bytes> {
         #[derive(Serialize)]
         struct SignatureResult {
-            err: Option<String>,
+            err: Option<TransactionError>,
         }
         let method = "signatureNotification";
-        let err = data.as_ref().map_err(|e| e.to_string()).err();
+        let err = data.as_ref().err().cloned();
         let result = SignatureResult { err };
         NotificationPayload::encode(result, slot, method, id)
     }

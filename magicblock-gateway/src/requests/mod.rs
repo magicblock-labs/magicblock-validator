@@ -84,7 +84,7 @@ pub(crate) enum JsonRpcWsMethod {
     SignatureSubscribe,
     SignatureUnsubscribe,
     SlotSubscribe,
-    SlotUnsubsribe,
+    SlotUnsubscribe,
 }
 
 /// A helper macro for easily parsing positional parameters from a JSON-RPC request.
