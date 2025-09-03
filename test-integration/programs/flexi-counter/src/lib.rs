@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use solana_program::declare_id;
 
 mod args;
