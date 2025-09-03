@@ -13,15 +13,11 @@ use magicblock_account_cloner::{
 use magicblock_account_dumper::AccountDumperStub;
 use magicblock_account_fetcher::AccountFetcherStub;
 use magicblock_account_updates::AccountUpdatesStub;
-use magicblock_accounts::{
-    errors::AccountsError, ExternalAccountsManager, LifecycleMode,
-};
-use magicblock_accounts_api::{
-    InternalAccountProvider, InternalAccountProviderStub,
-};
+use magicblock_accounts::{ExternalAccountsManager, LifecycleMode};
+use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_committor_service::stubs::ChangesetCommittorStub;
 use magicblock_config::{AccountsCloneConfig, LedgerResumeStrategyConfig};
-use solana_sdk::{account::ReadableAccount, pubkey::Pubkey};
+use solana_sdk::pubkey::Pubkey;
 use stubs::{
     account_committer_stub::AccountCommitterStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
