@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use guinea::GuineaInstruction;
+use magicblock_core::link::transactions::SanitizeableTransaction;
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -8,7 +9,7 @@ use solana_program::{
 };
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use solana_transaction::versioned::VersionedTransaction;
+use solana_transaction::sanitized::SanitizedTransaction;
 use test_kit::ExecutionTestEnv;
 
 const ACCOUNTS_COUNT: usize = 8;
@@ -27,7 +28,7 @@ async fn create_transaction_in_ledger(
     env: &ExecutionTestEnv,
     metafn: fn(Pubkey, bool) -> AccountMeta,
     ix: GuineaInstruction,
-) -> (VersionedTransaction, Vec<Pubkey>) {
+) -> (SanitizedTransaction, Vec<Pubkey>) {
     let accounts: Vec<_> = (0..ACCOUNTS_COUNT)
         .map(|_| {
             env.create_account_with_config(LAMPORTS_PER_SOL, 128, guinea::ID)
@@ -64,7 +65,9 @@ async fn create_transaction_in_ledger(
         .get_complete_transaction(sig, u64::MAX)
         .unwrap()
         .unwrap()
-        .get_transaction();
+        .get_transaction()
+        .sanitize(false)
+        .unwrap();
 
     // Drain dispatch channels for a clean test.
     while env.dispatch.transaction_status.try_recv().is_ok() {}

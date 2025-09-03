@@ -6,12 +6,9 @@ use hyper::{
     body::{Bytes, Incoming},
     Request, Response,
 };
-use magicblock_core::link::{
-    blocks::BlockHash, transactions::SanitizeableTransaction,
-};
+use magicblock_core::link::transactions::SanitizeableTransaction;
 use prelude::JsonBody;
 use solana_account::AccountSharedData;
-use solana_message::SimpleAddressLoader;
 use solana_pubkey::Pubkey;
 use solana_transaction::{
     sanitized::SanitizedTransaction, versioned::VersionedTransaction,
@@ -131,20 +128,7 @@ impl HttpDispatcher {
             })?;
         }
 
-        let sanitized_tx = if sigverify {
-            transaction.sanitize().map_err(RpcError::invalid_params)?
-        } else {
-            // for simulations which skip verification, we must still sanitize the
-            // transaction, but we bypass the signature check (which might fail)
-            SanitizedTransaction::try_create(
-                transaction,
-                BlockHash::new_unique(), // Hash is irrelevant when not verifying.
-                Some(false),
-                SimpleAddressLoader::Disabled,
-                &Default::default(),
-            )?
-        };
-        Ok(sanitized_tx)
+        Ok(transaction.sanitize(sigverify)?)
     }
 
     /// Ensures all accounts required for a transaction are present in the `AccountsDb`.
