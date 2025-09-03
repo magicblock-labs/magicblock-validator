@@ -1,6 +1,9 @@
 use std::{
     collections::VecDeque,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -17,7 +20,7 @@ use tokio::time::{self, Interval};
 /// This expirer implements a time-to-live (TTL) mechanism to mitigate this risk.
 /// Each subscription is automatically removed after a 90-second duration if it has not
 /// been fulfilled. This prevents resource leaks and protects the validator against
-/// clients that may open subscriptions and never resolve them.
+/// clients that may create subscriptions for nonexistent signatures.
 ///
 /// An instance of `SignaturesExpirer` is created for each websocket connection.
 pub(crate) struct SignaturesExpirer {
@@ -90,8 +93,8 @@ impl SignaturesExpirer {
     /// whose `ttl` has been reached.
     ///
     /// If an expired signature is found and is still marked as `subscribed`,
-    /// this method returns it so the client can be notified. If the subscription
-    /// was cancelled, it's silently discarded.
+    /// this method returns it so that it can be removed from subscriptions
+    /// database. If the subscription was resolved, it's silently discarded.
     pub(crate) async fn expire(&mut self) -> Signature {
         loop {
             // This inner block allows checking the queue multiple times per tick,
@@ -114,8 +117,8 @@ impl SignaturesExpirer {
                     break 'expire;
                 };
 
-                // Only return the sibscription hasn't resolved yet
-                if s.subscribed.load(std::sync::atomic::Ordering::Relaxed) {
+                // Only return the sibscription that hasn't resolved yet
+                if s.subscribed.load(Ordering::Relaxed) {
                     return s.signature;
                 }
             }

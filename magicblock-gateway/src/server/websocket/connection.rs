@@ -1,5 +1,8 @@
 use std::{
-    sync::{atomic::AtomicU32, Arc},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -63,8 +66,7 @@ impl ConnectionHandler {
     /// connection, which is used to push subscription notifications from the EventProcessor.
     pub(super) fn new(ws: WebsocketStream, state: ConnectionState) -> Self {
         static CONNECTION_COUNTER: AtomicU32 = AtomicU32::new(0);
-        let id = CONNECTION_COUNTER
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id = CONNECTION_COUNTER.fetch_add(1, Ordering::Relaxed);
 
         // Create a dedicated channel for this connection to receive updates.
         let (tx, updates_rx) = mpsc::channel(4096);

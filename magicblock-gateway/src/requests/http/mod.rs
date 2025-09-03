@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{mem::size_of, ops::Range};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use http_body_util::BodyExt;
@@ -14,8 +14,7 @@ use solana_account::AccountSharedData;
 use solana_message::SimpleAddressLoader;
 use solana_pubkey::Pubkey;
 use solana_transaction::{
-    sanitized::{MessageHash, SanitizedTransaction},
-    versioned::VersionedTransaction,
+    sanitized::SanitizedTransaction, versioned::VersionedTransaction,
 };
 use solana_transaction_status::UiTransactionEncoding;
 
@@ -27,29 +26,37 @@ use super::JsonHttpRequest;
 
 pub(crate) type HandlerResult = RpcResult<Response<JsonBody>>;
 
+/// An enum to efficiently represent a request body, avoiding allocation
+/// for single-chunk bodies (which are almost always the case)
 pub(crate) enum Data {
     Empty,
     SingleChunk(Bytes),
     MultiChunk(Vec<u8>),
 }
 
+/// Deserializes the raw request body bytes into a structured `JsonHttpRequest`.
 pub(crate) fn parse_body(body: Data) -> RpcResult<JsonHttpRequest> {
-    let body = match &body {
+    let body_bytes = match &body {
         Data::Empty => {
-            return Err(RpcError::invalid_request("missing request body"));
+            return Err(RpcError::invalid_request("missing request body"))
         }
         Data::SingleChunk(slice) => slice.as_ref(),
         Data::MultiChunk(vec) => vec.as_ref(),
     };
-    json::from_slice(body).map_err(Into::into)
+    json::from_slice(body_bytes).map_err(Into::into)
 }
 
+/// Asynchronously reads all data from an HTTP request body, correctly handling chunked transfers.
 pub(crate) async fn extract_bytes(
     request: Request<Incoming>,
 ) -> RpcResult<Data> {
-    let mut request = request.into_body();
+    let mut body = request.into_body();
     let mut data = Data::Empty;
-    while let Some(next) = request.frame().await {
+
+    // This loop efficiently accumulates body chunks. It starts with a zero-copy
+    // `SingleChunk` and only allocates and copies to a `MultiChunk` `Vec` if a
+    // second chunk arrives.
+    while let Some(next) = body.frame().await {
         let Ok(chunk) = next?.into_data() else {
             continue;
         };
@@ -69,7 +76,11 @@ pub(crate) async fn extract_bytes(
     Ok(data)
 }
 
+/// # HTTP Dispatcher Helpers
+///
+/// This block contains common helper methods used by various RPC request handlers.
 impl HttpDispatcher {
+    /// Fetches an account's data from the `AccountsDb`.
     async fn read_account_with_ensure(
         &self,
         pubkey: &Pubkey,
@@ -78,6 +89,15 @@ impl HttpDispatcher {
         self.accountsdb.get_account(pubkey)
     }
 
+    /// Decodes, validates, and sanitizes a transaction from its string representation.
+    ///
+    /// This is a crucial pre-processing step for both `sendTransaction` and
+    /// `simulateTransaction`. It performs the following steps:
+    /// 1. Decodes the transaction string using the specified encoding (Base58 or Base64).
+    /// 2. Deserializes the binary data into a `VersionedTransaction`.
+    /// 3. Validates the transaction's `recent_blockhash` against the ledger, optionally
+    ///    replacing it with the latest one.
+    /// 4. Sanitizes the transaction, which includes verifying signatures unless disabled.
     fn prepare_transaction(
         &self,
         txn: &str,
@@ -85,7 +105,6 @@ impl HttpDispatcher {
         sigverify: bool,
         replace_blockhash: bool,
     ) -> RpcResult<SanitizedTransaction> {
-        // decode the transaction from string using specified encoding
         let decoded = match encoding {
             UiTransactionEncoding::Base58 => {
                 bs58::decode(txn).into_vec().map_err(RpcError::parse_error)
@@ -93,40 +112,42 @@ impl HttpDispatcher {
             UiTransactionEncoding::Base64 => {
                 BASE64_STANDARD.decode(txn).map_err(RpcError::parse_error)
             }
-            _ => Err(RpcError::invalid_params("unknown transaction encoding"))?,
+            _ => Err(RpcError::invalid_params(
+                "unsupported transaction encoding",
+            )),
         }?;
-        // deserialize the transaction from bincode format
-        // NOTE: Transaction (legacy) can be directly deserialized into
-        // VersionedTransaction due to the compatible binary ABI
+
         let mut transaction: VersionedTransaction =
             bincode::deserialize(&decoded).map_err(RpcError::invalid_params)?;
-        // Verify that the transaction uses valid recent blockhash
-        if !replace_blockhash {
-            let hash = transaction.message.recent_blockhash();
-            self.blocks.get(&hash).ok_or_else(|| {
-                RpcError::transaction_verification("Blockhash not found")
-            })?;
-        } else {
+
+        if replace_blockhash {
             transaction
                 .message
                 .set_recent_blockhash(self.blocks.get_latest().hash);
+        } else {
+            let hash = transaction.message.recent_blockhash();
+            self.blocks.get(hash).ok_or_else(|| {
+                RpcError::transaction_verification("Blockhash not found")
+            })?;
         }
-        // sanitize the transaction making it processable
-        let transaction = if sigverify {
+
+        let sanitized_tx = if sigverify {
             transaction.sanitize().map_err(RpcError::invalid_params)?
         } else {
-            // for transaction simulation we bypass signature verification entirely
+            // When `sigverify` is false (for simulations), we must still create a
+            // `SanitizedTransaction` but can bypass the expensive signature check.
             SanitizedTransaction::try_create(
                 transaction,
-                MessageHash::Precomputed(BlockHash::new_unique()),
+                BlockHash::new_unique(), // Hash is irrelevant when not verifying.
                 Some(false),
                 SimpleAddressLoader::Disabled,
                 &Default::default(),
             )?
         };
-        Ok(transaction)
+        Ok(sanitized_tx)
     }
 
+    /// Ensures all accounts required for a transaction are present in the `AccountsDb`.
     async fn ensure_transaction_accounts(
         &self,
         transaction: &SanitizedTransaction,
@@ -134,8 +155,7 @@ impl HttpDispatcher {
         // TODO(thlorenz): replace the entire method call with chainlink
         let message = transaction.message();
         let reader = self.accountsdb.reader().map_err(RpcError::internal)?;
-        let accounts = message.account_keys().iter();
-        for pubkey in accounts {
+        for pubkey in message.account_keys().iter() {
             if !reader.contains(pubkey) {
                 panic!("account is not present in the database: {pubkey}");
             }
@@ -144,6 +164,7 @@ impl HttpDispatcher {
     }
 }
 
+/// A prelude module to provide common imports for all RPC handler modules.
 mod prelude {
     pub(super) use super::HandlerResult;
     pub(super) use crate::{
@@ -163,6 +184,8 @@ mod prelude {
     pub(super) use solana_pubkey::Pubkey;
 }
 
+// --- SPL Token Account Layout Constants ---
+// These constants define the data layout of a standard SPL Token account.
 const SPL_MINT_OFFSET: usize = 0;
 const SPL_OWNER_OFFSET: usize = 32;
 const SPL_DECIMALS_OFFSET: usize = 40;

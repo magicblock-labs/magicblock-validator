@@ -71,7 +71,7 @@ pub(crate) enum JsonRpcHttpMethod {
     SimulateTransaction,
 }
 
-/// All supported JSON-RPC  Websocket method names.
+/// All supported JSON-RPC Websocket method names.
 #[derive(json::Deserialize, Debug, Copy, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum JsonRpcWsMethod {

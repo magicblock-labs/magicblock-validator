@@ -5,36 +5,43 @@ use solana_transaction_status::UiTransactionEncoding;
 use super::prelude::*;
 
 impl HttpDispatcher {
+    /// Handles the `sendTransaction` RPC request.
+    ///
+    /// Submits a new transaction to the validator's processing pipeline.
+    /// The handler decodes and sanitizes the transaction, performs a robust
+    /// replay-protection check, and then forwards it directly to the execution queue.
     pub(crate) async fn send_transaction(
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
-        let (transaction, config) =
+        let (transaction_str, config) =
             parse_params!(request.params()?, String, RpcSendTransactionConfig);
-        let transaction: String = some_or_err!(transaction);
+        let transaction_str: String = some_or_err!(transaction_str);
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
+
         let transaction =
-            self.prepare_transaction(&transaction, encoding, true, false)?;
+            self.prepare_transaction(&transaction_str, encoding, true, false)?;
         let signature = *transaction.signature();
 
-        // check whether signature has been processed recently, if not then reserve the
-        // cache entry for it to prevent rapid double spending attacks. This means that
-        // only one transaction with a given signature can be processed within the cache
-        // expiration period (which is slightly greater than the blockhash validity time)
+        // Perform a replay check and reserve the signature in the cache. This prevents
+        // a transaction from being processed twice within the blockhash validity period.
         if self.transactions.contains(&signature)
             || !self.transactions.push(signature, None)
         {
-            Err(TransactionError::AlreadyProcessed)?;
+            return Err(TransactionError::AlreadyProcessed.into());
         }
 
         self.ensure_transaction_accounts(&transaction).await?;
 
+        // Based on the preflight flag, either execute and await the result,
+        // or schedule (fire-and-forget) for background processing.
         if config.skip_preflight {
             self.transactions_scheduler.schedule(transaction).await?;
         } else {
             self.transactions_scheduler.execute(transaction).await?;
         }
+
         let signature = SerdeSignature(signature);
         Ok(ResponsePayload::encode_no_context(&request.id, signature))
     }

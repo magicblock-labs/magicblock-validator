@@ -47,6 +47,12 @@ impl From<BlockHash> for Serde32Bytes {
     }
 }
 
+impl From<SerdeSignature> for Signature {
+    fn from(value: SerdeSignature) -> Self {
+        value.0
+    }
+}
+
 impl Serialize for Serde32Bytes {
     /// Serializes the 32-byte array into a Base58 encoded string.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

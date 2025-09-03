@@ -15,9 +15,6 @@ use transactions::TransactionsCache;
 /// This struct aggregates thread-safe handles (`Arc`) and concurrently accessible
 /// components (caches, databases) that need to be available across various parts
 /// of the application, such as RPC handlers and event processors.
-///
-/// It is cheaply cloneable, as cloning only increments the reference counts
-/// of the underlying shared data.
 pub struct SharedState {
     /// The public key of the validator node.
     pub(crate) context: NodeContext,

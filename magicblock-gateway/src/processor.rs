@@ -86,16 +86,21 @@ impl EventProcessor {
     /// The main event processing loop for a single worker instance.
     ///
     /// This function listens on all event channels concurrently and processes messages
-    /// as they arrive. The `tokio::select!` macro is biased to prioritize transaction
+    /// as they arrive. The `tokio::select!` macro is biased to prioritize account
     /// processing, as it is typically the most frequent and time-sensitive event.
-    /// The loop terminates when the cancellation token is triggered.
     async fn run(self, id: usize, cancel: CancellationToken) {
         info!("event processor {id} is running");
         loop {
             tokio::select! {
-                // `biased` ensures that the select macro checks branches in order,
-                // prioritizing transaction status messages over others.
                 biased;
+
+                // Process a new account state update.
+                Ok(state) = self.account_update_rx.recv_async() => {
+                    // Notify subscribers for this specific account.
+                    self.subscriptions.send_account_update(&state).await;
+                    // Notify subscribers for the program that owns the account.
+                    self.subscriptions.send_program_update(&state).await;
+                }
 
                 // Process a new transaction status update.
                 Ok(status) = self.transaction_status_rx.recv_async() => {
@@ -115,14 +120,6 @@ impl EventProcessor {
                         result: status.result.result
                     };
                     self.transactions.push(status.signature, Some(result));
-                }
-
-                // Process a new account state update.
-                Ok(state) = self.account_update_rx.recv_async() => {
-                    // Notify subscribers for this specific account.
-                    self.subscriptions.send_account_update(&state).await;
-                    // Notify subscribers for the program that owns the account.
-                    self.subscriptions.send_program_update(&state).await;
                 }
 
                 // Process a new block.

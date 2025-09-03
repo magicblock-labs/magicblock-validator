@@ -22,7 +22,7 @@ const MAX_VALID_BLOCKHASH_SLOTS: f64 = 150.0;
 /// 2.  It maintains a time-limited **cache** of recent blockhashes to validate incoming transactions.
 pub(crate) struct BlocksCache {
     /// The number of slots for which a blockhash is considered valid.
-    /// This is calculated based on the target chain's block time relative to Solana's.
+    /// This is calculated based on the host ER's block time relative to Solana's.
     block_validity: u64,
     /// The most recent block update received, protected by a `RwLock` for concurrent access.
     latest: LatestBlock,
@@ -41,7 +41,7 @@ impl BlocksCache {
     /// Creates a new `BlocksCache`.
     ///
     /// The `blocktime` parameter is used to dynamically calculate the blockhash validity
-    /// period, making the cache adaptable to chains with different block production speeds.
+    /// period, making the cache adaptable to ERss with different block production speeds.
     ///
     /// # Panics
     /// Panics if `blocktime` is zero.
@@ -49,8 +49,8 @@ impl BlocksCache {
         const BLOCK_CACHE_TTL: Duration = Duration::from_secs(60);
         assert!(blocktime != 0, "blocktime cannot be zero");
 
-        // Adjust blockhash validity based on the ratio of the current chain's block time
-        // to the standard Solana block time.
+        // Adjust blockhash validity based on the ratio of the current
+        // ER's block time to the standard Solana block time.
         let blocktime_ratio = SOLANA_BLOCK_TIME / blocktime as f64;
         let block_validity = blocktime_ratio * MAX_VALID_BLOCKHASH_SLOTS;
         let cache = ExpiringCache::new(BLOCK_CACHE_TTL);

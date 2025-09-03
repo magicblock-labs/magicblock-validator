@@ -1,6 +1,5 @@
 mod prelude {
     pub(super) use crate::{
-        error::RpcError,
         requests::{params::Serde32Bytes, JsonWsRequest as JsonRequest},
         server::websocket::dispatch::{SubResult, WsDispatcher},
         RpcResult,

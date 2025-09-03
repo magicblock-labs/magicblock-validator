@@ -141,7 +141,8 @@ impl AccountsStorage {
         // remapping with file growth, but considering that disk is limited,
         // this too can fail
         // https://github.com/magicblock-labs/magicblock-validator/issues/334
-        assert!(offset < self.meta.total_blocks as usize, "database is full");
+        let size = self.meta.total_blocks as usize;
+        assert!(offset < size, "database is full: {offset} > {size}",);
 
         // SAFETY:
         // we have validated above that we are within bounds of mmap and fetch_add
@@ -227,8 +228,9 @@ impl AccountsStorage {
                 "opening adb file from snapshot at {}",
                 dbpath.display()
             ))?;
-        // snapshot files are truncated, and contain only the actual data with no extra space to grow the
-        // database, so we readjust the file's length to the preconfigured value before performing mmap
+        // snapshot files might be truncated, and contain only the actual
+        // data with no extra space to grow the database, so we readjust the
+        // file's length to the preconfigured value before performing mmap
         adjust_database_file_size(&mut file, self.size())?;
 
         // Only accountsdb from the validator process is modifying the file contents
@@ -319,7 +321,7 @@ impl StorageMeta {
         // be large enough, due to previous call to Self::init_adb_file
         //
         // The pointer to static reference conversion is also sound, because the
-        // memmap is kept in the accountsdb for the entirety of its lifecycle
+        // memmap is kept in the AccountsDb for the entirety of its lifecycle
 
         let ptr = store.as_mut_ptr();
 
@@ -349,7 +351,7 @@ impl StorageMeta {
             total_blocks = adjusted_total_blocks;
             // and persist the new value to the disk via mmap
             // SAFETY:
-            // we just read this value, above, and now we are just overwriting it with new 4 bytes
+            // we just read this value above, and now we are just overwriting it with new 4 bytes
             unsafe {
                 (ptr.add(TOTALBLOCKS_OFFSET) as *mut u32)
                     .write(adjusted_total_blocks)

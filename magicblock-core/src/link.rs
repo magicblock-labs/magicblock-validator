@@ -17,7 +17,7 @@ const LINK_CAPACITY: usize = 16384;
 ///
 /// This struct is the primary interface for external-facing components (like the
 /// HTTP and WebSocket servers) to interact with the validator's internal core.
-/// It allows them to send commands *to* the core and receive broadcasted updates *from* it.
+/// It allows them to send commands *to* the core and receive updates *from* it.
 pub struct DispatchEndpoints {
     /// Receives the final status of processed transactions from the executor.
     pub transaction_status: TransactionStatusRx,
@@ -32,7 +32,7 @@ pub struct DispatchEndpoints {
 /// A collection of channel endpoints for the **validator's internal core**.
 ///
 /// This struct is the interface for the internal machinery (e.g., `TransactionExecutor`,
-/// `BlockProducer`) to receive commands from the dispatch side and to broadcast
+/// `BlockProducer`) to receive commands from the dispatch side and to forward
 /// updates to all listeners.
 pub struct ValidatorChannelEndpoints {
     /// Sends the final status of processed transactions to the pool of EventProccessor workers.
@@ -54,7 +54,7 @@ pub struct ValidatorChannelEndpoints {
 /// 1.  `DispatchEndpoints` for the "client" side (e.g., RPC servers).
 /// 2.  `ValidatorChannelEndpoints` for the "server" side (e.g., the transaction executor).
 pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
-    // Unbounded channels for high-throughput broadcasts where backpressure is not desired.
+    // Unbounded channels for high-throughput multicast where backpressure is not desired.
     let (transaction_status_tx, transaction_status_rx) = flume::unbounded();
     let (account_update_tx, account_update_rx) = flume::unbounded();
     let (block_update_tx, block_update_rx) = flume::unbounded();
