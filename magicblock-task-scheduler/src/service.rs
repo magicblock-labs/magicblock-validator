@@ -1,4 +1,4 @@
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use futures_util::StreamExt;
 use log::*;
@@ -18,7 +18,10 @@ use solana_sdk::{
 use solana_svm::transaction_processor::ExecutionRecordingConfig;
 use solana_timings::ExecuteTimings;
 use tokio::{select, time::Duration};
-use tokio_util::{sync::CancellationToken, time::DelayQueue};
+use tokio_util::{
+    sync::CancellationToken,
+    time::{delay_queue::Key, DelayQueue},
+};
 
 use crate::{
     db::{DbTask, FailedScheduling, FailedTask, SchedulerDatabase},
@@ -26,11 +29,16 @@ use crate::{
 };
 
 pub struct TaskSchedulerService {
+    /// Database for persisting tasks
     db: SchedulerDatabase,
+    /// Bank for executing tasks
     bank: Arc<Bank>,
+    /// Interval at which the task scheduler will check for requests in the context
     tick_interval: Duration,
+    /// Queue of tasks to execute
     task_queue: DelayQueue<DbTask>,
-    pending_cancellations: HashSet<u64>,
+    /// Map of task IDs to their corresponding keys in the task queue
+    task_queue_keys: HashMap<u64, Key>,
 }
 
 impl TaskSchedulerService {
@@ -65,7 +73,7 @@ impl TaskSchedulerService {
             bank,
             tick_interval: Duration::from_millis(config.millis_per_tick),
             task_queue: DelayQueue::new(),
-            pending_cancellations: HashSet::new(),
+            task_queue_keys: HashMap::new(),
         };
         let now = chrono::Utc::now().timestamp_millis();
         debug!("Task scheduler started at {}", now);
@@ -77,7 +85,9 @@ impl TaskSchedulerService {
             } else {
                 0
             });
-            service.task_queue.insert(task, timeout);
+            let task_id = task.id;
+            let key = service.task_queue.insert(task, timeout);
+            service.task_queue_keys.insert(task_id, key);
         }
 
         Ok(tokio::spawn(service.run(token)))
@@ -156,8 +166,11 @@ impl TaskSchedulerService {
         &mut self,
         cancel_request: &CancelTaskRequest,
     ) -> Result<(), TaskSchedulerError> {
-        // Record ID to prevent the task from being executed
-        self.pending_cancellations.insert(cancel_request.task_id);
+        self.task_queue.remove(
+            &self.task_queue_keys.remove(&cancel_request.task_id).ok_or(
+                TaskSchedulerError::TaskNotFound(cancel_request.task_id),
+            )?,
+        );
         // Remove task from database
         self.unregister_task(cancel_request.task_id)?;
         trace!(
@@ -172,12 +185,6 @@ impl TaskSchedulerService {
         task: &DbTask,
     ) -> Result<(), TaskSchedulerError> {
         trace!("Executing task {}", task.id);
-
-        if self.pending_cancellations.remove(&task.id) {
-            warn!("Task {} is pending cancellation", task.id);
-            self.db.unschedule_task(task.id)?;
-            return Ok(());
-        }
 
         // Execute unsigned transactions
         let blockhash = self.bank.last_blockhash();
@@ -223,7 +230,7 @@ impl TaskSchedulerService {
             if let Err(e) = result.and_then(|tx| tx.status) {
                 error!("Task {} failed to execute: {}", task.id, e);
                 self.db.insert_failed_task(&FailedTask { id: task.id })?;
-                self.db.unschedule_task(task.id)?;
+                self.db.remove_task(task.id)?;
                 return Err(TaskSchedulerError::Transaction(e));
             }
         }
@@ -234,10 +241,11 @@ impl TaskSchedulerService {
                 executions_left: task.executions_left - 1,
                 ..task.clone()
             };
-            self.task_queue.insert(
+            let key = self.task_queue.insert(
                 new_task,
                 Duration::from_millis(task.execution_interval_millis as u64),
             );
+            self.task_queue_keys.insert(task.id, key);
         }
 
         let current_time = chrono::Utc::now().timestamp_millis();
@@ -277,7 +285,7 @@ impl TaskSchedulerService {
         task_id: u64,
     ) -> Result<(), TaskSchedulerError> {
         self.db.remove_task(task_id)?;
-        debug!("Removed task {} from context", task_id);
+        debug!("Removed task {} from database", task_id);
 
         Ok(())
     }
@@ -290,8 +298,10 @@ impl TaskSchedulerService {
         loop {
             select! {
                 Some(task) = self.task_queue.next() => {
-                    if let Err(e) = self.execute_task(task.get_ref()) {
-                        error!("Failed to execute task {}: {}", task.get_ref().id, e);
+                    let task = task.get_ref();
+                    self.task_queue_keys.remove(&task.id);
+                    if let Err(e) = self.execute_task(task) {
+                        error!("Failed to execute task {}: {}", task.id, e);
                     }
                 }
                 _ = interval.tick() => {
