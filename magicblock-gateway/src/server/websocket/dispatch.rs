@@ -72,7 +72,7 @@ impl WsDispatcher {
             SlotSubscribe => self.slot_subscribe(),
             LogsSubscribe => self.logs_subscribe(request),
             AccountUnsubscribe | ProgramUnsubscribe | LogsUnsubscribe
-            | SlotUnsubsribe | SignatureUnsubscribe => {
+            | SlotUnsubscribe | SignatureUnsubscribe => {
                 self.unsubscribe(request)
             }
         }?;
