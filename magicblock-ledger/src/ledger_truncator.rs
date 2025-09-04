@@ -281,7 +281,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         // but it utilizes rocksdb threads, in order not to drain
         // our tokio rt threads, we split the effort in just 3 tasks
         let ledger_copy = ledger.clone();
-        spawn_blocking(move || {
+        let handler1 = spawn_blocking(move || {
             ledger_copy.compact_slot_range_cf::<Blocktime>(
                 Some(from_slot),
                 Some(to_slot + 1),
@@ -301,16 +301,20 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         });
         // Can not compact with specific range
         let ledger_copy = ledger.clone();
-        spawn_blocking(move || {
+        let handler2 = spawn_blocking(move || {
             ledger_copy.compact_slot_range_cf::<TransactionStatus>(None, None);
             ledger_copy.compact_slot_range_cf::<Transaction>(None, None);
         });
 
         let ledger_copy = ledger.clone();
-        spawn_blocking(move || {
+        let handler3 = spawn_blocking(move || {
             ledger_copy.compact_slot_range_cf::<TransactionMemos>(None, None);
             ledger_copy.compact_slot_range_cf::<AddressSignatures>(None, None);
         });
+
+        if let Err(err) = tokio::try_join!(handler1, handler2, handler3) {
+            error!("compaction aborted {}", err);
+        }
     }
 }
 
