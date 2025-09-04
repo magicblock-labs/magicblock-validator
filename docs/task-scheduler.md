@@ -13,7 +13,7 @@
 
 1. User schedules task via program instruction
 2. Task is stored in TaskContext account
-3. Task Scheduler Service monitors TaskContext via Geyser
+3. Task Scheduler Service monitors TaskContext periodically
 4. Service adds task to local database
 5. Service executes tasks at scheduled intervals
 6. Service updates task state after execution
@@ -24,7 +24,6 @@ The task scheduler can be configured via the validator configuration:
 
 ```toml
 [task_scheduler]
-path = "/path/to/scheduler.db"
 reset = false
 millis_per_tick = 100
 ```
