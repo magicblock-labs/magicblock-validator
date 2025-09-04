@@ -1,9 +1,9 @@
 #[cfg(any(test, feature = "dev-context"))]
 use crate::testing::rpc_client_mock::ChainRpcClientMock;
 #[cfg(any(test, feature = "dev-context"))]
-use dlp::state::DelegationRecord;
+use dlp::pda::delegation_record_pda_from_delegated_account;
 #[cfg(any(test, feature = "dev-context"))]
-use ephemeral_rollups_sdk::pda::delegation_record_pda_from_delegated_account;
+use dlp::state::DelegationRecord;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
 #[cfg(any(test, feature = "dev-context"))]
@@ -36,7 +36,7 @@ pub fn add_delegation_record_for(
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             data: delegation_record_to_vec(&deleg_record),
             ..Default::default()
         },
@@ -56,7 +56,7 @@ pub fn add_invalid_delegation_record_for(
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             data: invalid_data,
             ..Default::default()
         },

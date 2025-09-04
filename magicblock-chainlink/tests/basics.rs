@@ -76,11 +76,8 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
         lamports: 1_000,
         ..Default::default()
     };
-    let delegated_acc = account_shared_with_owner_and_slot(
-        &acc,
-        ephemeral_rollups_sdk::id(),
-        slot,
-    );
+    let delegated_acc =
+        account_shared_with_owner_and_slot(&acc, dlp::id(), slot);
     rpc_client.add_account(pubkey, delegated_acc.into());
     add_delegation_record_for(&rpc_client, pubkey, ctx.validator_pubkey, owner);
 
