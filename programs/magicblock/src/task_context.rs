@@ -13,6 +13,8 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 
+pub const MIN_EXECUTION_INTERVAL: u64 = 10;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TaskRequest {
     Schedule(ScheduleTaskRequest),
