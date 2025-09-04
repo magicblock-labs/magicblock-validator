@@ -103,6 +103,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC> {
     changeset_committor: Option<Arc<CC>>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
+    #[allow(dead_code)]
     validator_charges_fees: ValidatorCollectionMode,
     permissions: AccountClonerPermissions,
     fetch_retries: u64,
@@ -715,6 +716,7 @@ where
         })
     }
 
+    #[allow(dead_code)]
     fn do_clone_feepayer_account(
         &self,
         pubkey: &Pubkey,
@@ -910,6 +912,7 @@ where
             .map_err(AccountClonerError::AccountFetcherError)
     }
 
+    #[allow(dead_code)]
     async fn try_fetch_feepayer_chain_snapshot(
         &self,
         feepayer: &Pubkey,
