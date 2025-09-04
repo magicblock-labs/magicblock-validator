@@ -1,0 +1,46 @@
+[package]
+name = "magicblock-chainlink"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bincode = { workspace = true }
+env_logger = { workspace = true }
+ephemeral-rollups-sdk = { workspace = true }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+log = { workspace = true }
+lru = { workspace = true }
+magicblock-delegation-program = { workspace = true }
+mini-program = { workspace = true, optional = true, features = [
+  "no-entrypoint",
+] }
+program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
+serde_json = { workspace = true }
+solana-account = { workspace = true }
+solana-account-decoder = { workspace = true }
+solana-account-decoder-client-types = { workspace = true }
+solana-loader-v3-interface = { workspace = true, features = ["serde"] }
+solana-loader-v4-interface = { workspace = true, features = ["serde"] }
+solana-pubkey = { workspace = true }
+solana-pubsub-client = { workspace = true }
+solana-rpc-client = { workspace = true, default-features = false, features = [
+  "spinner",
+] }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+solana-sdk-ids = { workspace = true }
+solana-system-interface = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+assert_matches = { workspace = true }
+chainlink = { path = ".", features = ["dev-context"] }
+
+[features]
+default = []
+dev-context = []
