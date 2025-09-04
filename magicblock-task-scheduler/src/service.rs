@@ -162,11 +162,23 @@ impl TaskSchedulerService {
         &mut self,
         cancel_request: &CancelTaskRequest,
     ) -> Result<(), TaskSchedulerError> {
-        // Remove the task from the queue, if it exists
-        if let Some(key) = self.task_queue_keys.remove(&cancel_request.task_id)
-        {
-            self.task_queue.remove(&key);
+        let Some(task) = self.db.get_task(cancel_request.task_id)? else {
+            // Task not found in the database, cleanup the queue
+            self.remove_task_from_queue(cancel_request.task_id);
+            return Ok(());
+        };
+
+        // Check if the task authority is the same as the cancel request authority
+        if task.authority != cancel_request.authority {
+            error!(
+                "Task authority {} does not match cancel request authority {}",
+                task.authority, cancel_request.authority
+            );
+            return Ok(());
         }
+
+        self.remove_task_from_queue(cancel_request.task_id);
+
         // Remove task from database
         self.unregister_task(cancel_request.task_id)?;
         trace!(
@@ -340,5 +352,11 @@ impl TaskSchedulerService {
         }
 
         Ok(())
+    }
+
+    fn remove_task_from_queue(&mut self, task_id: u64) {
+        if let Some(key) = self.task_queue_keys.remove(&task_id) {
+            self.task_queue.remove(&key);
+        }
     }
 }
