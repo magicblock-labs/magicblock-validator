@@ -31,7 +31,7 @@ use dlp::state::DelegationRecord;
 use solana_pubkey::Pubkey;
 
 use super::errors::{ChainlinkError, ChainlinkResult};
-use ephemeral_rollups_sdk::pda::delegation_record_pda_from_delegated_account;
+use dlp::pda::delegation_record_pda_from_delegated_account;
 use tokio::task;
 
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
@@ -366,7 +366,7 @@ where
                                         account_shared_data.remote_slot();
                                     if account_shared_data
                                         .owner()
-                                        .eq(&ephemeral_rollups_sdk::id())
+                                        .eq(&dlp::id())
                                     {
                                         owned_by_deleg.push((
                                             pubkey,
@@ -1469,11 +1469,11 @@ mod tests {
         let account_owner = random_pubkey();
         const CURRENT_SLOT: u64 = 100;
 
-        // Create a delegated account (owned by ephemeral_rollups_sdk)
+        // Create a delegated account (owned by dlp)
         let account = Account {
             lamports: 1_234,
             data: vec![1, 2, 3, 4],
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             executable: false,
             rent_epoch: 0,
         };
@@ -1542,11 +1542,11 @@ mod tests {
         let account_owner = random_pubkey();
         const CURRENT_SLOT: u64 = 100;
 
-        // Create a delegated account (owned by ephemeral_rollups_sdk)
+        // Create a delegated account (owned by dlp)
         let account = Account {
             lamports: 1_234,
             data: vec![1, 2, 3, 4],
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             executable: false,
             rent_epoch: 0,
         };
@@ -1620,11 +1620,11 @@ mod tests {
 
         const CURRENT_SLOT: u64 = 100;
 
-        // Create a delegated account (owned by ephemeral_rollups_sdk)
+        // Create a delegated account (owned by dlp)
         let account = Account {
             lamports: 1_234,
             data: vec![1, 2, 3, 4],
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             executable: false,
             rent_epoch: 0,
         };
@@ -1713,7 +1713,7 @@ mod tests {
         let delegated_account = Account {
             lamports: 1_000_000,
             data: vec![1, 2, 3, 4],
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             executable: false,
             rent_epoch: 0,
         };
@@ -1721,7 +1721,7 @@ mod tests {
         let delegation_record_account = Account {
             lamports: 2_000_000,
             data: vec![100, 101, 102],
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             executable: false,
             rent_epoch: 0,
         };
@@ -1786,7 +1786,7 @@ mod tests {
             delegation_record_pubkey,
             delegation_record_account,
             CURRENT_SLOT,
-            ephemeral_rollups_sdk::id()
+            dlp::id()
         );
 
         assert_subscribed_without_delegation_record!(
@@ -1813,7 +1813,7 @@ mod tests {
         let delegated_account = Account {
             lamports: 1_000_000,
             data: vec![1, 2, 3, 4],
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             executable: false,
             rent_epoch: 0,
         };
@@ -1821,7 +1821,7 @@ mod tests {
         let invalid_delegated_account = Account {
             lamports: 500_000,
             data: vec![5, 6, 7, 8],
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             executable: false,
             rent_epoch: 0,
         };
@@ -1894,7 +1894,7 @@ mod tests {
         let account = Account {
             lamports: 1_000_000,
             data: vec![1, 2, 3, 4],
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             executable: false,
             rent_epoch: 0,
         };
@@ -1960,7 +1960,7 @@ mod tests {
         let account = Account {
             lamports: 1_000_000,
             data: vec![1, 2, 3, 4],
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             executable: false,
             rent_epoch: 0,
         };
@@ -2022,7 +2022,7 @@ mod tests {
         let account = Account {
             lamports: 1_000_000,
             data: vec![1, 2, 3, 4],
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             executable: false,
             rent_epoch: 0,
         };
@@ -2173,7 +2173,7 @@ mod tests {
         let account = Account {
             lamports: 1_000_000,
             data: vec![1, 2, 3, 4],
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             executable: false,
             rent_epoch: 0,
         };

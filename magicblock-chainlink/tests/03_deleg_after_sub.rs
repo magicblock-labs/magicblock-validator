@@ -88,11 +88,7 @@ async fn test_deleg_after_subscribe_case2() {
         info!("3. Delegate account to us");
 
         slot = rpc_client.set_slot(slot + 11);
-        let acc = account_shared_with_owner_and_slot(
-            &acc,
-            ephemeral_rollups_sdk::id(),
-            slot,
-        );
+        let acc = account_shared_with_owner_and_slot(&acc, dlp::id(), slot);
         let delegation_record = add_delegation_record_for(
             &rpc_client,
             pubkey,

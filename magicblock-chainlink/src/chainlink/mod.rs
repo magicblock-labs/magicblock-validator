@@ -1,4 +1,4 @@
-use ephemeral_rollups_sdk::pda::ephemeral_balance_pda_from_payer;
+use dlp::pda::ephemeral_balance_pda_from_payer;
 use log::*;
 use solana_account::AccountSharedData;
 use std::sync::Arc;

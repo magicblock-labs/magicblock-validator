@@ -232,7 +232,7 @@ macro_rules! assert_remain_undelegating {
             );
             assert_eq!(
                 account.owner(),
-                &ephemeral_rollups_sdk::id(),
+                &dlp::id(),
                 "Expected account {} to remain owned by the delegation program",
                 pubkey,
             );

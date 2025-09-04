@@ -84,7 +84,7 @@ async fn test_existing_account_missing_delegation_record() {
     rpc_client.add_account(
         pubkey,
         Account {
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             ..Default::default()
         },
     );
@@ -114,7 +114,7 @@ async fn test_write_existing_account_valid_delegation_record() {
     let owner = Pubkey::new_unique();
 
     let acc = Account {
-        owner: ephemeral_rollups_sdk::id(),
+        owner: dlp::id(),
         lamports: 1_234,
         ..Default::default()
     };
@@ -151,7 +151,7 @@ async fn test_write_existing_account_other_authority() {
 
     let pubkey = Pubkey::new_unique();
     let account = Account {
-        owner: ephemeral_rollups_sdk::id(),
+        owner: dlp::id(),
         ..Default::default()
     };
     rpc_client.add_account(pubkey, account);
@@ -190,7 +190,7 @@ async fn test_write_account_being_undelegated() {
 
     // The account is still delegated to us on chain
     let account = Account {
-        owner: ephemeral_rollups_sdk::id(),
+        owner: dlp::id(),
         ..Default::default()
     };
     let owner = Pubkey::new_unique();
@@ -201,7 +201,7 @@ async fn test_write_account_being_undelegated() {
     // The same account is already marked as undelegated in the bank
     // (setting the owner to the delegation program marks it as _undelegating_)
     let mut shared_data = AccountSharedData::from(Account {
-        owner: ephemeral_rollups_sdk::id(),
+        owner: dlp::id(),
         data: vec![0; 100],
         ..Default::default()
     });
@@ -230,7 +230,7 @@ async fn test_write_existing_account_invalid_delegation_record() {
     rpc_client.add_account(
         pubkey,
         Account {
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             ..Default::default()
         },
     );
@@ -239,7 +239,7 @@ async fn test_write_existing_account_invalid_delegation_record() {
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: ephemeral_rollups_sdk::id(),
+            owner: dlp::id(),
             data: vec![1, 2, 3],
             ..Default::default()
         },
