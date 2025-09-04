@@ -118,7 +118,7 @@ magicblock-config = { path = "./magicblock-config" }
 magicblock-config-helpers = { path = "./magicblock-config-helpers" }
 magicblock-config-macro = { path = "./magicblock-config-macro" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "9570abf", features = ["no-entrypoint"] }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
@@ -155,7 +155,7 @@ serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "9a62efa" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "121f23c" }
 solana-accounts-db = { version = "2.2" }
 solana-account-decoder = { version = "2.2" }
 solana-address-lookup-table-program = { version = "2.2" }
@@ -216,7 +216,6 @@ vergen = "8.3.1"
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "9a62efa" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "121f23c" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "0968d56" }
 solana-storage-proto = { path = "./storage-proto" }
-#solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git" }
-solana-svm = { path = "/Users/gabrielepicco/Downloads/magicblock-svm" }

@@ -1309,7 +1309,7 @@ dependencies = [
  "conjunto-addresses",
  "conjunto-core",
  "conjunto-providers",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c)",
  "serde",
  "solana-rpc-client",
  "solana-rpc-client-api",
@@ -3920,7 +3920,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=9570abf)",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-processor",
@@ -3988,7 +3988,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=9570abf)",
  "magicblock-geyser-plugin",
  "magicblock-ledger",
  "magicblock-metrics",
@@ -4082,7 +4082,7 @@ dependencies = [
  "lazy_static",
  "log",
  "magicblock-committor-program",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=9570abf)",
  "magicblock-rpc-client",
  "magicblock-table-mania",
  "rusqlite",
@@ -4147,6 +4147,22 @@ dependencies = [
 name = "magicblock-delegation-program"
 version = "1.0.0"
 source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c#4af7f1cefe0915f0760ed5c38b25b7d41c31a474"
+dependencies = [
+ "bincode",
+ "borsh 1.5.7",
+ "bytemuck",
+ "num_enum",
+ "paste",
+ "solana-curve25519",
+ "solana-program",
+ "solana-security-txt",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "magicblock-delegation-program"
+version = "1.0.0"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=9570abf#9570abf24ab6d03ba75ecdbf8a6a787bb0d69d3a"
 dependencies = [
  "bincode",
  "borsh 1.5.7",
@@ -4441,7 +4457,7 @@ dependencies = [
  "log",
  "magicblock-accounts",
  "magicblock-config",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=9570abf)",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-rpc-client",
@@ -6701,7 +6717,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=9a62efa#9a62efad44190731c3dc83716e7b8cbe70ff8a62"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=121f23c#121f23c8e7d26272ed0d9b432de5d181ce8c13d0"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -9534,6 +9550,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=0968d56#0968d5682b2759884002dc44810d29526e93396b"
 dependencies = [
  "ahash 0.8.12",
  "log",

@@ -392,7 +392,7 @@ where
                 None => {
                     // If we never cloned the account before, we can't use the cache
                     match self.internal_account_provider.get_account(pubkey) {
-                        Some(acc) if acc.is_delegated() => {
+                        Some(acc) if acc.delegated() => {
                             let res = self
                                 .do_clone_and_update_cache(
                                     pubkey,
@@ -570,84 +570,14 @@ where
                 let lamports =
                     max(self.clone_config.auto_airdrop_lamports, *lamports);
                 self.track_not_delegated_account(*pubkey).await?;
-                match self.validator_charges_fees {
-                    ValidatorCollectionMode::NoFees => self
-                        .do_clone_undelegated_account(
-                            pubkey,
-                            // TODO(GabrielePicco): change account fetching to return the account
-                            &Account {
-                                lamports,
-                                owner: *owner,
-                                ..Default::default()
-                            },
-                        )?,
-                    ValidatorCollectionMode::Fees => {
-                        // Fetch the associated escrowed account
-                        let escrowed_snapshot = match self
-                            .try_fetch_feepayer_chain_snapshot(pubkey, None)
-                            .await?
-                        {
-                            Some(snapshot) => snapshot,
-                            None => {
-                                return Ok(AccountClonerOutput::Unclonable {
-                                    pubkey: *pubkey,
-                                    reason: AccountClonerUnclonableReason::DoesNotHaveEscrowAccount,
-                                    at_slot: account_chain_snapshot.at_slot,
-                                });
-                            }
-                        };
-
-                        let escrowed_account = match escrowed_snapshot
-                            .chain_state
-                            .account()
-                        {
-                            Some(account) => account,
-                            None => {
-                                return Ok(AccountClonerOutput::Unclonable {
-                                    pubkey: *pubkey,
-                                    reason: AccountClonerUnclonableReason::DoesNotHaveDelegatedEscrowAccount,
-                                    at_slot: escrowed_snapshot.at_slot,
-                                });
-                            }
-                        };
-
-                        // Add the escrowed account as unclonable.
-                        // Fail cloning if the account is already present.
-                        // This prevents escrow PDA from being cloned if the lamports are mapped to the feepayer.
-                        {
-                            let mut last_clone_output = self
-                                .last_clone_output
-                                .write()
-                                .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned");
-
-                            match last_clone_output
-                                .entry(escrowed_snapshot.pubkey)
-                            {
-                                Entry::Occupied(_) => {
-                                    return Ok(AccountClonerOutput::Unclonable {
-                                        pubkey: *pubkey,
-                                        reason: AccountClonerUnclonableReason::DoesNotAllowFeepayerWithEscrowedPda,
-                                        at_slot: account_chain_snapshot.at_slot,
-                                    });
-                                }
-                                Entry::Vacant(entry) => {
-                                    entry.insert(AccountClonerOutput::Unclonable {
-                                        pubkey: escrowed_snapshot.pubkey,
-                                        reason: AccountClonerUnclonableReason::DoesNotAllowEscrowedPda,
-                                        at_slot: Slot::MAX,
-                                    });
-                                }
-                            }
-                        }
-
-                        self.do_clone_feepayer_account(
-                            pubkey,
-                            escrowed_account.lamports,
-                            owner,
-                            Some(&escrowed_snapshot.pubkey),
-                        )?
-                    }
-                }
+                self.do_clone_undelegated_account(
+                    pubkey,
+                    &Account {
+                        lamports,
+                        owner: *owner,
+                        ..Default::default()
+                    },
+                )?
             }
             // If the account is present on-chain, but not delegated, it's just readonly data
             // We need to differenciate between programs and other accounts

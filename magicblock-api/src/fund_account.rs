@@ -48,6 +48,14 @@ pub(crate) fn fund_account_with_data(
 
 pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
     fund_account(bank, validator_id, u64::MAX / 2);
+
+    // Ensure the account exists and mark it as delegated
+    if let Some(mut account) = bank.get_account(validator_id) {
+        account.set_delegated(true);
+        bank.store_account(*validator_id, account);
+    } else {
+        panic!("Validator identity {validator_id} should exist in the bank, ");
+    }
 }
 
 /// Funds the faucet account.

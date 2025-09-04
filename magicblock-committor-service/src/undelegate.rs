@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use dlp::state::DelegationMetadata;
 use magicblock_rpc_client::MagicblockRpcClient;
-use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::Instruction;
 

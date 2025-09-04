@@ -44,7 +44,7 @@ magicblock-core = { path = "../magicblock-core" }
 magicblock-committor-program = { path = "../magicblock-committor-program", features = [
   "no-entrypoint",
 ] }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "9570abf", features = ["no-entrypoint"] }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
@@ -78,5 +78,5 @@ tokio = "1.0"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "9a62efa" }
-solana-svm = { path = "/Users/gabrielepicco/Downloads/magicblock-svm" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "121f23c" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "0968d56" }

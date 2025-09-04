@@ -23,7 +23,7 @@ snapshot-frequency = 1024
 resume-strategy = { kind = "reset" }
 
 [validator]
-base-fees = 50000
+base-fees = 5000
 
 [rpc]
 port = 8899
