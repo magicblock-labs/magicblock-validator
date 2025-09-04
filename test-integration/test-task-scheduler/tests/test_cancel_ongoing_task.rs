@@ -106,7 +106,7 @@ fn test_cancel_ongoing_task() {
     );
 
     // Wait for the task to be scheduled
-    sleep(std::time::Duration::from_secs(3));
+    expect!(ctx.wait_for_delta_slot_ephem(2), validator);
 
     // Cancel the task
     expect!(
