@@ -180,7 +180,7 @@ mod test {
 
     pub fn create_complex_ix(
         payer: &Keypair,
-        pdas: &Vec<Pubkey>,
+        pdas: &[Pubkey],
         writable: bool,
         signer: bool,
     ) -> Instruction {
