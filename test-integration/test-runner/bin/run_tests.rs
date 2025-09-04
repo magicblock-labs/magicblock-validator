@@ -690,7 +690,6 @@ fn run_task_scheduler_tests(
     if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
-    eprintln!("======== RUNNING TASK SCHEDULER TESTS ========");
 
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
