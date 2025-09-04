@@ -155,9 +155,10 @@ serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "8bc6a58" }
-solana-account-decoder = { version = "2.2" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "ee2d713" }
 solana-accounts-db = { version = "2.2" }
+solana-account-decoder = { version = "2.2" }
+solana-account-decoder-client-types = { version = "2.2" }
 solana-address-lookup-table-program = { version = "2.2" }
 solana-bpf-loader-program = { version = "2.2" }
 solana-compute-budget-instruction = { version = "2.2" }
@@ -171,6 +172,8 @@ solana-hash = { version = "2.2" }
 solana-inline-spl = { version = "2.2" }
 solana-instruction = { version = "2.2" }
 solana-keypair = { version = "2.2" }
+solana-loader-v3-interface = { version = "3.0" }
+solana-loader-v4-interface = { version = "2.0" }
 solana-log-collector = { version = "2.2" }
 solana-measure = { version = "2.2" }
 solana-message = { version = "2.2" }
@@ -195,6 +198,7 @@ solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", re
   "dev-context-only-utils",
 ] }
 solana-svm-transaction = { version = "2.2" }
+solana-system-interface = { version = "1.0" }
 solana-system-program = { version = "2.2" }
 solana-system-transaction = { version = "2.2" }
 solana-timings = "2.2"
