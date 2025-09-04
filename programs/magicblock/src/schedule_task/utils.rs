@@ -38,27 +38,28 @@ pub(crate) fn check_accounts_signers(
     ix_accs_len: usize,
     accounts_start: usize,
     signers: HashSet<Pubkey>,
-) -> Result<Pubkey, InstructionError> {
+) -> Result<(), InstructionError> {
     //
     // Get the program_id of the parent instruction that invoked this one via CPI
     //
+
+    // During unit tests, we take the owner of the first account as the parent program id
+    #[cfg(test)]
+    let parent_program_id = {
+        let Ok(first_account_owner) = get_instruction_account_with_idx(
+            transaction_context,
+            accounts_start as u16,
+        ) else {
+            return Ok(());
+        };
+        Some(*first_account_owner.borrow().owner())
+    };
 
     // We cannot easily simulate the transaction being invoked via CPI
     // from the owning program during unit tests
     // Instead the integration tests ensure that this works as expected
     #[cfg(not(test))]
     let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
-
-    // During unit tests we assume the first committee has the correct program ID
-    #[cfg(test)]
-    let first_account_owner = {
-        *get_instruction_account_with_idx(
-            transaction_context,
-            accounts_start as u16,
-        )?
-        .borrow()
-        .owner()
-    };
 
     #[cfg(not(test))]
     let parent_program_id = {
@@ -74,9 +75,6 @@ pub(crate) fn check_accounts_signers(
 
         parent_program_id
     };
-
-    #[cfg(test)]
-    let parent_program_id = Some(&first_account_owner);
 
     let Some(parent_program_id) = parent_program_id else {
         ic_msg!(invoke_context, "Task ERR: failed to find parent program id");
@@ -107,5 +105,5 @@ pub(crate) fn check_accounts_signers(
         }
     }
 
-    Ok(*parent_program_id)
+    Ok(())
 }
