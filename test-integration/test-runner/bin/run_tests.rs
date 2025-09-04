@@ -506,7 +506,13 @@ fn run_fees_tests(
         let test_dir = format!("{}/../{}", manifest_dir, "test-fees");
         eprintln!("Running fees tests in {}", test_dir);
 
-        let output = match run_test(test_dir, RunTestConfig { package: Some("test-fees"), ..Default::default() }) {
+        let output = match run_test(
+            test_dir,
+            RunTestConfig {
+                package: Some("test-fees"),
+                ..Default::default()
+            },
+        ) {
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run fees tests: {:?}", err);

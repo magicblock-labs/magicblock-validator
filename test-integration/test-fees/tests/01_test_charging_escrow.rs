@@ -1,19 +1,15 @@
 use anyhow::Context;
+use ephemeral_rollups_sdk::pda::ephemeral_balance_pda_from_payer;
 use integration_test_tools::IntegrationTestContext;
 use log::*;
-use test_tools_core::init_logger;
+use program_schedulecommit::api::init_payer_escrow;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction,
-    signature::Keypair,
-    signer::Signer,
-    transaction::Transaction,
+    account::ReadableAccount, commitment_config::CommitmentConfig,
+    compute_budget::ComputeBudgetInstruction, native_token::LAMPORTS_PER_SOL,
+    signature::Keypair, signer::Signer, transaction::Transaction,
 };
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use program_schedulecommit::api::init_payer_escrow;
-use ephemeral_rollups_sdk::pda::ephemeral_balance_pda_from_payer;
-use solana_sdk::account::ReadableAccount;
-use solana_sdk::commitment_config::CommitmentConfig;
+use test_tools_core::init_logger;
 
 #[test]
 fn test_charging_escrow_with_not_delegated_feepayer() {
@@ -27,7 +23,9 @@ fn test_charging_escrow_with_not_delegated_feepayer() {
     let payer = Keypair::new();
 
     // Init and fund the escrow for the payer
-    assert!(chain_client.request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL).is_ok());
+    assert!(chain_client
+        .request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL)
+        .is_ok());
     let mut ixs = init_payer_escrow(payer.pubkey()).to_vec();
     ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(1_000_000));
     let tx = Transaction::new_signed_with_payer(
@@ -51,12 +49,18 @@ fn test_charging_escrow_with_not_delegated_feepayer() {
 
     // Assert the escrow account has been cloned in the ephemeral client
     let escrow_pda = ephemeral_balance_pda_from_payer(&payer.pubkey(), 0);
-    assert!(ephem_client.request_airdrop(&escrow_pda, LAMPORTS_PER_SOL).is_err());
+    assert!(ephem_client
+        .request_airdrop(&escrow_pda, LAMPORTS_PER_SOL)
+        .is_err());
     assert!(ephem_client.get_account(&escrow_pda).unwrap().lamports() > 0);
 
     // Record initial balances
-    let init_payer_balance = chain_client.get_account(&payer.pubkey()).map( |a| a.lamports()).unwrap_or(0);
-    let init_escrow_balance = ephem_client.get_account(&escrow_pda).unwrap().lamports();
+    let init_payer_balance = chain_client
+        .get_account(&payer.pubkey())
+        .map(|a| a.lamports())
+        .unwrap_or(0);
+    let init_escrow_balance =
+        ephem_client.get_account(&escrow_pda).unwrap().lamports();
 
     // Create an arbitrary transaction
     let ix = ComputeBudgetInstruction::set_compute_unit_limit(1_000_000);
@@ -80,8 +84,12 @@ fn test_charging_escrow_with_not_delegated_feepayer() {
     assert!(res.is_ok());
 
     // Record final balances
-    let final_payer_balance = ephem_client.get_account(&payer.pubkey()).map( |a| a.lamports()).unwrap_or(0);
-    let final_escrow_balance = ephem_client.get_account(&escrow_pda).unwrap().lamports();
+    let final_payer_balance = ephem_client
+        .get_account(&payer.pubkey())
+        .map(|a| a.lamports())
+        .unwrap_or(0);
+    let final_escrow_balance =
+        ephem_client.get_account(&escrow_pda).unwrap().lamports();
 
     // Payer balance should remain the same
     assert_eq!(init_payer_balance, final_payer_balance);

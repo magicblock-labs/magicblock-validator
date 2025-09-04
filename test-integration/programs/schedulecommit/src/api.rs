@@ -1,11 +1,14 @@
 use dlp::args::DelegateEphemeralBalanceArgs;
-use ephemeral_rollups_sdk::delegate_args::{DelegateAccountMetas, DelegateAccounts};
+use ephemeral_rollups_sdk::delegate_args::{
+    DelegateAccountMetas, DelegateAccounts,
+};
 use solana_program::{
     instruction::{AccountMeta, Instruction},
+    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     system_program,
 };
-use solana_program::native_token::LAMPORTS_PER_SOL;
+
 use crate::{
     DelegateCpiArgs, ScheduleCommitCpiArgs, ScheduleCommitInstruction,
 };
@@ -30,7 +33,12 @@ pub fn init_account_instruction(
 
 pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
     // Top-up Ix
-    let top_up_ix = dlp::instruction_builder::top_up_ephemeral_balance(payer, payer, Some(LAMPORTS_PER_SOL/3), None);
+    let top_up_ix = dlp::instruction_builder::top_up_ephemeral_balance(
+        payer,
+        payer,
+        Some(LAMPORTS_PER_SOL / 3),
+        None,
+    );
 
     // Delegate ephemeral balance Ix
     let delegate_ix = dlp::instruction_builder::delegate_ephemeral_balance(
