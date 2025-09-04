@@ -5165,8 +5165,10 @@ dependencies = [
 name = "program-flexi-counter"
 version = "0.0.0"
 dependencies = [
+ "bincode",
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
+ "serde",
  "solana-program",
 ]
 
@@ -5997,17 +5999,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f29ebaa345f945cec9fbbc532eb307f0fdad8161f281b6369539c8d84876b3d"
 dependencies = [
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "schedule-task-program"
-version = "0.0.0"
-dependencies = [
- "bincode",
- "borsh 1.5.7",
- "ephemeral-rollups-sdk",
- "serde",
- "solana-program",
 ]
 
 [[package]]
@@ -10586,7 +10577,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-program",
  "magicblock-task-scheduler",
- "schedule-task-program",
+ "program-flexi-counter",
  "solana-rpc-client",
  "solana-sdk",
  "tempfile",

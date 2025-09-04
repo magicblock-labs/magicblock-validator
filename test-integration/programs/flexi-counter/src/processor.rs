@@ -6,6 +6,7 @@ use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::{
     consts::{
         EXTERNAL_CALL_HANDLER_DISCRIMINATOR, EXTERNAL_UNDELEGATE_DISCRIMINATOR,
+        MAGIC_PROGRAM_ID,
     },
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
@@ -15,8 +16,9 @@ use ephemeral_rollups_sdk::{
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
+    instruction::{AccountMeta, Instruction},
     msg,
-    program::invoke_signed,
+    program::{invoke, invoke_signed},
     program_error::ProgramError,
     pubkey::Pubkey,
     rent::Rent,
@@ -26,9 +28,11 @@ use solana_program::{
 
 use crate::{
     instruction::{
-        DelegateArgs, FlexiCounterInstruction,
+        create_add_error_ix, create_add_ix, create_add_signed_ix, CancelArgs,
+        DelegateArgs, FlexiCounterInstruction, ScheduleArgs,
         MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
     },
+    magic_program::{CancelTaskArgs, ScheduleTaskArgs},
     processor::{
         call_handler::process_call_handler,
         schedule_intent::process_create_intent,
@@ -87,6 +91,10 @@ pub fn process(
         CreateRedelegationIntont => {
             process_create_redelegation_intent(accounts)
         }
+        Schedule(args) => process_schedule_task(accounts, args),
+        Cancel(args) => process_cancel_task(accounts, args),
+        AddError { count } => process_add_error(accounts, count),
+        AddSigned { count } => process_add_signed(accounts, count),
     }?;
     Ok(())
 }
@@ -366,4 +374,148 @@ fn process_undelegate_request(
         account_seeds,
     )?;
     Ok(())
+}
+
+fn process_schedule_task(
+    accounts: &[AccountInfo],
+    args: ScheduleArgs,
+) -> ProgramResult {
+    msg!("ScheduleTask");
+
+    let account_info_iter = &mut accounts.iter();
+    let _magic_program_info = next_account_info(account_info_iter)?;
+    let payer_info = next_account_info(account_info_iter)?;
+    let task_context_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+
+    let (counter_pda, bump) = FlexiCounter::pda(payer_info.key);
+    if counter_pda_info.key.ne(&counter_pda) {
+        msg!(
+            "Invalid counter PDA {}, should be {}",
+            counter_pda_info.key,
+            counter_pda
+        );
+        return Err(ProgramError::InvalidSeeds);
+    }
+    let bump = &[bump];
+    let seeds = FlexiCounter::seeds_with_bump(payer_info.key, bump);
+
+    let mut discriminator = vec![5_u8, 0, 0, 0];
+    let args = ScheduleTaskArgs {
+        task_id: args.task_id,
+        execution_interval_millis: args.execution_interval_millis,
+        iterations: args.iterations,
+        instructions: vec![match (args.error, args.signer) {
+            (true, false) => create_add_error_ix(*payer_info.key, 1),
+            (false, true) => create_add_signed_ix(*payer_info.key, 1),
+            _ => create_add_ix(*payer_info.key, 1),
+        }],
+    };
+    discriminator.extend_from_slice(&bincode::serialize(&args).map_err(
+        |err| {
+            msg!("ERROR: failed to serialize args {:?}", err);
+            ProgramError::InvalidArgument
+        },
+    )?);
+
+    let ix = Instruction::new_with_bytes(
+        MAGIC_PROGRAM_ID,
+        &discriminator,
+        vec![
+            AccountMeta::new(*payer_info.key, true),
+            AccountMeta::new(*task_context_info.key, false),
+            AccountMeta::new_readonly(*counter_pda_info.key, true),
+        ],
+    );
+
+    invoke_signed(
+        &ix,
+        &[
+            payer_info.clone(),
+            task_context_info.clone(),
+            counter_pda_info.clone(),
+        ],
+        &[&seeds],
+    )?;
+
+    Ok(())
+}
+
+fn process_cancel_task(
+    accounts: &[AccountInfo],
+    args: CancelArgs,
+) -> ProgramResult {
+    msg!("CancelTask");
+
+    let account_info_iter = &mut accounts.iter();
+    let _magic_program_info = next_account_info(account_info_iter)?;
+    let payer_info = next_account_info(account_info_iter)?;
+    let task_context_info = next_account_info(account_info_iter)?;
+
+    let mut discriminator = vec![6_u8, 0, 0, 0];
+    let args = CancelTaskArgs {
+        task_id: args.task_id,
+    };
+    discriminator.extend_from_slice(&bincode::serialize(&args).map_err(
+        |err| {
+            msg!("ERROR: failed to serialize args {:?}", err);
+            ProgramError::InvalidArgument
+        },
+    )?);
+
+    let ix = Instruction::new_with_bytes(
+        MAGIC_PROGRAM_ID,
+        &discriminator,
+        vec![
+            AccountMeta::new(*payer_info.key, true),
+            AccountMeta::new(*task_context_info.key, false),
+        ],
+    );
+
+    invoke(&ix, &[payer_info.clone(), task_context_info.clone()])?;
+
+    Ok(())
+}
+
+fn process_add_signed(accounts: &[AccountInfo], count: u8) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+
+    if !payer_info.is_signer {
+        msg!("Payer is not signer");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    let (counter_pda, _) = FlexiCounter::pda(payer_info.key);
+    assert_keys_equal(counter_pda_info.key, &counter_pda, || {
+        format!(
+            "Invalid counter PDA {}, should be {}",
+            counter_pda_info.key, counter_pda
+        )
+    })?;
+    if !counter_pda_info.is_writable {
+        msg!("Counter PDA is not writable");
+        return Err(ProgramError::InvalidAccountData);
+    }
+    if !counter_pda_info.is_signer {
+        msg!("Counter PDA is not signer");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    let mut counter =
+        FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
+
+    counter.count += count as u64;
+    counter.updates += 1;
+
+    let size = counter_pda_info.data_len();
+    let counter_data = to_vec(&counter)?;
+    counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
+
+    Ok(())
+}
+
+fn process_add_error(_accounts: &[AccountInfo], _count: u8) -> ProgramResult {
+    Err(ProgramError::Custom(0))
 }
