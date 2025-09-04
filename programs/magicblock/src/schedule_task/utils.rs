@@ -39,9 +39,7 @@ pub(crate) fn check_accounts_signers(
     accounts_start: usize,
     signers: HashSet<Pubkey>,
 ) -> Result<(), InstructionError> {
-    //
     // Get the program_id of the parent instruction that invoked this one via CPI
-    //
 
     // During unit tests, we take the owner of the first account as the parent program id
     #[cfg(test)]
