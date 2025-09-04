@@ -269,7 +269,7 @@ impl TaskSchedulerService {
             instructions: task.instructions.clone(),
             authority: task.authority,
             execution_interval_millis: task.execution_interval_millis,
-            executions_left: task.n_executions,
+            executions_left: task.iterations,
             last_execution_millis: 0,
         };
 

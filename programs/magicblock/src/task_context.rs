@@ -32,7 +32,7 @@ pub struct ScheduleTaskRequest {
     /// How frequently the task should be executed, in milliseconds
     pub execution_interval_millis: u64,
     /// Number of times this task will be executed
-    pub n_executions: u64,
+    pub iterations: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -185,7 +185,7 @@ pub struct CrankTask {
     /// How frequently the task should be executed, in milliseconds
     pub execution_interval_millis: u64,
     /// Number of times this task will be executed
-    pub n_executions: u64,
+    pub iterations: u64,
 }
 
 impl CrankTask {
@@ -194,14 +194,14 @@ impl CrankTask {
         instructions: Vec<Instruction>,
         authority: Pubkey,
         execution_interval_millis: u64,
-        n_executions: u64,
+        iterations: u64,
     ) -> Self {
         Self {
             id,
             instructions,
             authority,
             execution_interval_millis,
-            n_executions,
+            iterations,
         }
     }
 }
@@ -213,7 +213,7 @@ impl From<&ScheduleTaskRequest> for CrankTask {
             instructions: request.instructions.clone(),
             authority: request.authority,
             execution_interval_millis: request.execution_interval_millis,
-            n_executions: request.n_executions,
+            iterations: request.iterations,
         }
     }
 }

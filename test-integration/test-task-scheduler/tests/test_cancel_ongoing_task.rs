@@ -73,7 +73,7 @@ fn test_cancel_ongoing_task() {
     // Schedule a task
     let task_id = 3;
     let execution_interval_millis = 100;
-    let n_executions = 1000000;
+    let iterations = 1000000;
     let ephem_blockhash = expect!(
         ctx.try_ephem_client().and_then(|client| client
             .get_latest_blockhash()
@@ -92,7 +92,7 @@ fn test_cancel_ongoing_task() {
                     MAGIC_PROGRAM_ID,
                     task_id,
                     execution_interval_millis,
-                    n_executions,
+                    iterations,
                     false,
                     false,
                 )],
@@ -173,7 +173,7 @@ fn test_cancel_ongoing_task() {
     let counter =
         expect!(Counter::try_decode(&counter_account.data), validator);
     assert!(
-        counter.count < n_executions,
+        counter.count < iterations,
         cleanup(&mut validator),
         "counter.count: {}",
         counter.count,

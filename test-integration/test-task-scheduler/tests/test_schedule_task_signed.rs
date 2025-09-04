@@ -74,7 +74,7 @@ fn test_schedule_task() {
     // Schedule a task
     let task_id = 4;
     let execution_interval_millis = 100;
-    let n_executions = 3;
+    let iterations = 3;
     let ephem_blockhash = expect!(
         ctx.try_ephem_client().and_then(|client| client
             .get_latest_blockhash()
@@ -93,7 +93,7 @@ fn test_schedule_task() {
                     MAGIC_PROGRAM_ID,
                     task_id,
                     execution_interval_millis,
-                    n_executions,
+                    iterations,
                     false,
                     true,
                 )],
@@ -155,7 +155,7 @@ fn test_schedule_task() {
     let counter =
         expect!(Counter::try_decode(&counter_account.data), validator);
     assert!(
-        counter.count == n_executions,
+        counter.count == iterations,
         cleanup(&mut validator),
         "counter.count: {}",
         counter.count
