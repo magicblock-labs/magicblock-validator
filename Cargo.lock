@@ -3476,6 +3476,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86ea4e65087ff52f3862caff188d489f1fab49a0cb09e01b2e3f1a617b10aaed"
+dependencies = [
+ "hashbrown 0.15.4",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3699,6 +3708,38 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util 0.7.15",
+]
+
+[[package]]
+name = "magicblock-chainlink"
+version = "0.1.7"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "bincode",
+ "env_logger 0.11.8",
+ "futures-util",
+ "log",
+ "lru 0.16.0",
+ "magicblock-chainlink",
+ "magicblock-delegation-program",
+ "serde_json",
+ "solana-account",
+ "solana-account-decoder",
+ "solana-account-decoder-client-types",
+ "solana-loader-v3-interface",
+ "solana-loader-v4-interface",
+ "solana-pubkey",
+ "solana-pubsub-client",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "solana-sdk-ids",
+ "solana-system-interface",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
  "tokio-util 0.7.15",
 ]
 
