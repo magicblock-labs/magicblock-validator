@@ -68,3 +68,117 @@ pub(crate) fn process_cancel_task(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod test {
+    use magicblock_core::magic_program::TASK_CONTEXT_PUBKEY;
+    use solana_sdk::{
+        account::AccountSharedData,
+        instruction::{AccountMeta, Instruction, InstructionError},
+        signature::Keypair,
+        signer::Signer,
+        system_program,
+    };
+
+    use crate::{
+        magicblock_instruction::{
+            cancel_task_instruction, MagicBlockInstruction,
+        },
+        test_utils::process_instruction,
+    };
+
+    #[test]
+    fn test_process_cancel_task() {
+        let payer = Keypair::new();
+        let task_id = 1;
+
+        let ix = cancel_task_instruction(&payer.pubkey(), task_id);
+        let transaction_accounts = vec![
+            (
+                payer.pubkey(),
+                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+            ),
+            (
+                TASK_CONTEXT_PUBKEY,
+                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+            ),
+        ];
+        let expected_result = Ok(());
+
+        process_instruction(
+            &ix.data,
+            transaction_accounts,
+            ix.accounts,
+            expected_result,
+        );
+    }
+
+    #[test]
+    fn fail_process_cancel_task_wrong_context() {
+        let payer = Keypair::new();
+        let wrong_context = Keypair::new().pubkey();
+        let task_id = 1;
+
+        let account_metas = vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(wrong_context, false),
+        ];
+        let ix = Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CancelTask { task_id },
+            account_metas,
+        );
+        let transaction_accounts = vec![
+            (
+                payer.pubkey(),
+                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+            ),
+            (
+                wrong_context,
+                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+            ),
+        ];
+        let expected_result = Err(InstructionError::MissingAccount);
+
+        process_instruction(
+            &ix.data,
+            transaction_accounts,
+            ix.accounts,
+            expected_result,
+        );
+    }
+
+    #[test]
+    fn fail_unsigned_process_cancel_task() {
+        let payer = Keypair::new();
+        let task_id = 1;
+
+        let account_metas = vec![
+            AccountMeta::new(payer.pubkey(), false),
+            AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
+        ];
+        let ix = Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CancelTask { task_id },
+            account_metas,
+        );
+        let transaction_accounts = vec![
+            (
+                payer.pubkey(),
+                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+            ),
+            (
+                TASK_CONTEXT_PUBKEY,
+                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+            ),
+        ];
+        let expected_result = Err(InstructionError::MissingRequiredSignature);
+
+        process_instruction(
+            &ix.data,
+            transaction_accounts,
+            ix.accounts,
+            expected_result,
+        );
+    }
+}
