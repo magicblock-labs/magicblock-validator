@@ -1,4 +1,4 @@
-use chainlink::{
+use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     testing::{deleg::add_delegation_record_for, init_logger},
 };

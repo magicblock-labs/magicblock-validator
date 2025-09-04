@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use chainlink::testing::accounts::account_shared_with_owner;
+use magicblock_chainlink::testing::accounts::account_shared_with_owner;
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
 use solana_sdk::{

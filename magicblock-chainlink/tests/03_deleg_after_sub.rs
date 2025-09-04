@@ -1,11 +1,11 @@
-use chainlink::testing::deleg::add_delegation_record_for;
-use chainlink::testing::init_logger;
-use chainlink::{
+use log::*;
+use magicblock_chainlink::testing::deleg::add_delegation_record_for;
+use magicblock_chainlink::testing::init_logger;
+use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_subscribed,
     assert_subscribed_without_delegation_record,
 };
-use log::*;
 use solana_account::Account;
 use solana_sdk::clock::Slot;
 use utils::accounts::account_shared_with_owner_and_slot;
