@@ -49,6 +49,7 @@ impl AccountDumperBank {
         let signature = transaction.signatures[0];
         // NOTE: this is an example code, and is not supposed to be approved,
         // instead proper async handling should be implemented in the new cloning pipeline
+        #[allow(clippy::let_underscore_future)]
         let _ = self.transaction_scheduler.execute(transaction);
         Ok(signature)
     }

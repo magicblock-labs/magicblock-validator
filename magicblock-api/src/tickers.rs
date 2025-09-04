@@ -24,6 +24,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn init_slot_ticker(
     accountsdb: Arc<AccountsDb>,
     accounts_manager: Arc<AccountsManager>,

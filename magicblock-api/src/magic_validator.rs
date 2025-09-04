@@ -181,7 +181,7 @@ impl MagicValidator {
             Self::sync_validator_keypair_with_ledger(
                 ledger.ledger_path(),
                 &identity_keypair,
-                &ledger_resume_strategy,
+                ledger_resume_strategy,
             )?;
         }
 
@@ -216,7 +216,7 @@ impl MagicValidator {
         let faucet_keypair = funded_faucet(
             &accountsdb,
             ledger.ledger_path().as_path(),
-            &ledger_resume_strategy,
+            ledger_resume_strategy,
         )?;
 
         let metrics_config = &config.metrics;
