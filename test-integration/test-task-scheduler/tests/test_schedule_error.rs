@@ -106,8 +106,8 @@ fn test_schedule_error() {
         validator
     );
 
-    // Wait for the task to be scheduled
-    sleep(std::time::Duration::from_secs(3));
+    // Wait for the task to be scheduled and executed
+    expect!(ctx.wait_for_delta_slot_ephem(3), validator);
 
     // Check that the task was scheduled in the database
     let db = expect!(SchedulerDatabase::new(db_path), validator);
@@ -179,7 +179,7 @@ fn test_schedule_error() {
         validator
     );
 
-    sleep(std::time::Duration::from_secs(3));
+    expect!(ctx.wait_for_delta_slot_ephem(2), validator);
 
     // Check that the task was cancelled
     let tasks = expect!(db.get_task_ids(), validator);
