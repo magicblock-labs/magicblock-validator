@@ -61,10 +61,6 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     // Start with a conservative 128 MiB/s, adjustable via config later if needed
     options.set_ratelimiter(128 * 1024 * 1024, 100 * 1000, 10);
 
-    // Prevent large compactions from monopolizing resources
-    options.set_soft_pending_compaction_bytes_limit(8 * 1024 * 1024 * 1024); // 8 GiB
-    options.set_hard_pending_compaction_bytes_limit(32 * 1024 * 1024 * 1024); // 32 GiB
-
     // Dynamic level bytes is a good default to balance levels
     options.set_level_compaction_dynamic_level_bytes(true);
     options.set_report_bg_io_stats(true);
