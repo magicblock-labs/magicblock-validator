@@ -54,7 +54,7 @@ pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
         account.set_delegated(true);
         bank.store_account(*validator_id, account);
     } else {
-        panic!("Validator identity {validator_id} should exist in the bank, ");
+        panic!("Validator identity {validator_id} should exist in the bank");
     }
 }
 
