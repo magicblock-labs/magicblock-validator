@@ -61,7 +61,7 @@ impl JsonRpcService {
             .max_request_body_size
             .unwrap_or(MAX_REQUEST_BODY_SIZE);
 
-        let runtime = get_runtime(&config);
+        let runtime = get_runtime();
         let rpc_niceness_adj = config.rpc_niceness_adj;
 
         let startup_verification_complete =
@@ -187,10 +187,7 @@ impl JsonRpcService {
     }
 }
 
-fn get_runtime(config: &JsonRpcConfig) -> Arc<tokio::runtime::Runtime> {
-    let rpc_threads = 1.max(config.rpc_threads);
-    let rpc_niceness_adj = config.rpc_niceness_adj;
-
+fn get_runtime() -> Arc<tokio::runtime::Runtime> {
     // Comment from Solana implementation:
     // sadly, some parts of our current rpc implemention block the jsonrpc's
     // _socket-listening_ event loop for too long, due to (blocking) long IO or intesive CPU,
@@ -200,10 +197,6 @@ fn get_runtime(config: &JsonRpcConfig) -> Arc<tokio::runtime::Runtime> {
     // jsonrpc for threads when .threads(N > 1) is given.
     Arc::new(
         tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(rpc_threads)
-            .on_thread_start(move || {
-                renice_this_thread(rpc_niceness_adj).unwrap()
-            })
             .thread_name("solRpcEl")
             .enable_all()
             .build()
