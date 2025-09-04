@@ -3,7 +3,7 @@ use std::thread::sleep;
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_program::{ID as MAGIC_PROGRAM_ID, TASK_CONTEXT_PUBKEY};
-use magicblock_task_scheduler::SchedulerDatabase;
+use magicblock_task_scheduler::{db::DbTask, SchedulerDatabase};
 use program_flexi_counter::{
     instruction::{
         create_cancel_task_ix, create_delegate_ix, create_init_ix,
@@ -140,10 +140,15 @@ fn test_schedule_task() {
             .ok_or(anyhow::anyhow!("Task not found")),
         validator
     );
-    assert_eq!(task.id, task_id, cleanup(&mut validator));
-    assert_eq!(task.authority, payer.pubkey(), cleanup(&mut validator));
-    assert_eq!(task.execution_interval_millis, 100, cleanup(&mut validator));
-    assert_eq!(task.executions_left, 0, cleanup(&mut validator));
+    let expected_task = DbTask {
+        id: task_id,
+        instructions: task.instructions.clone(),
+        authority: payer.pubkey(),
+        execution_interval_millis: 100,
+        executions_left: 0,
+        last_execution_millis: task.last_execution_millis,
+    };
+    assert_eq!(task, expected_task, cleanup(&mut validator));
 
     // Check that the counter was incremented
     let counter_account = expect!(

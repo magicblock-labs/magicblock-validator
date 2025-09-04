@@ -23,6 +23,19 @@ pub struct DbTask {
     pub last_execution_millis: u64,
 }
 
+impl PartialEq for DbTask {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.instructions == other.instructions
+            && self.authority == other.authority
+            && self.execution_interval_millis == other.execution_interval_millis
+            && self.executions_left == other.executions_left
+            && self.last_execution_millis == other.last_execution_millis
+    }
+}
+
+impl Eq for DbTask {}
+
 #[derive(Debug, Clone)]
 pub struct FailedScheduling {
     pub id: u64,
