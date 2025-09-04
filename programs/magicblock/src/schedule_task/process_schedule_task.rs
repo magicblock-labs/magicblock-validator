@@ -40,7 +40,7 @@ pub(crate) fn process_schedule_task(
         })?;
 
     // Assert enough accounts
-    if ix_accs_len <= ACCOUNTS_START - 1 {
+    if ix_accs_len < ACCOUNTS_START {
         ic_msg!(
             invoke_context,
             "ScheduleTask ERR: not enough accounts to schedule task ({}), need payer, signing program and task context",
@@ -122,7 +122,7 @@ pub(crate) fn process_schedule_task(
         instructions: args.instructions,
         authority: *payer_pubkey,
         execution_interval_millis: args.execution_interval_millis,
-        n_executions: args.n_executions,
+        iterations: args.iterations,
     };
 
     let context_acc = get_instruction_account_with_idx(
@@ -160,6 +160,7 @@ mod test {
         system_program,
     };
 
+    use super::*;
     use crate::{
         magicblock_instruction::{
             schedule_task_instruction, MagicBlockInstruction,
@@ -168,8 +169,6 @@ mod test {
             process_instruction, COUNTER_PROGRAM_ID, MEMO_PROGRAM_ID,
         },
     };
-
-    use super::*;
 
     pub fn create_simple_ix(payer: &Keypair) -> Instruction {
         Instruction::new_with_borsh(
@@ -234,7 +233,7 @@ mod test {
         let args = ScheduleTaskArgs {
             task_id: 1,
             execution_interval_millis: 10,
-            n_executions: 1,
+            iterations: 1,
             instructions: vec![create_simple_ix(&payer)],
         };
         let ix = schedule_task_instruction(&payer.pubkey(), args, &pdas);
@@ -292,7 +291,7 @@ mod test {
             let args = ScheduleTaskArgs {
                 task_id: 1,
                 execution_interval_millis: 10,
-                n_executions: 1,
+                iterations: 1,
                 instructions: vec![create_complex_ix(
                     &payer, &pdas, writable, signer,
                 )],
@@ -342,7 +341,7 @@ mod test {
             let args = ScheduleTaskArgs {
                 task_id: 1,
                 execution_interval_millis: 10,
-                n_executions: 1,
+                iterations: 1,
                 instructions: vec![create_complex_ix(
                     &payer, &pdas, true, false,
                 )],
@@ -372,7 +371,7 @@ mod test {
         let args = ScheduleTaskArgs {
             task_id: 1,
             execution_interval_millis: 1000,
-            n_executions: 1,
+            iterations: 1,
             instructions: vec![],
         };
 
@@ -424,7 +423,7 @@ mod test {
         let args = ScheduleTaskArgs {
             task_id: 1,
             execution_interval_millis: 1000,
-            n_executions: 1,
+            iterations: 1,
             instructions: vec![],
         };
         let ix = schedule_task_instruction(&payer.pubkey(), args, &pdas);
@@ -454,7 +453,7 @@ mod test {
         let args = ScheduleTaskArgs {
             task_id: 1,
             execution_interval_millis: 9,
-            n_executions: 1,
+            iterations: 1,
             instructions: vec![create_simple_ix(&payer)],
         };
         let ix = schedule_task_instruction(&payer.pubkey(), args, &pdas);

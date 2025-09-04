@@ -5,7 +5,7 @@ use solana_program::instruction::Instruction;
 pub struct ScheduleTaskArgs {
     pub task_id: u64,
     pub execution_interval_millis: u64,
-    pub n_executions: u64,
+    pub iterations: u64,
     pub instructions: Vec<Instruction>,
 }
 

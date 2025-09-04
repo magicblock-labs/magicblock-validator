@@ -14,7 +14,7 @@ use crate::state::Counter;
 pub struct ScheduleArgs {
     pub task_id: u64,
     pub execution_interval_millis: u64,
-    pub n_executions: u64,
+    pub iterations: u64,
     pub error: bool,
     pub signer: bool,
 }
@@ -161,7 +161,7 @@ pub fn create_schedule_task_ix(
     magic_program: Pubkey,
     task_id: u64,
     execution_interval_millis: u64,
-    n_executions: u64,
+    iterations: u64,
     error: bool,
     signer: bool,
 ) -> Instruction {
@@ -178,7 +178,7 @@ pub fn create_schedule_task_ix(
         &ScheduleTaskInstruction::Schedule(ScheduleArgs {
             task_id,
             execution_interval_millis,
-            n_executions,
+            iterations,
             error,
             signer,
         }),

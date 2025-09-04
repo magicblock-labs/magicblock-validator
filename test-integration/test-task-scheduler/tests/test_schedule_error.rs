@@ -74,7 +74,7 @@ fn test_schedule_error() {
     // Schedule a task
     let task_id = 2;
     let execution_interval_millis = 100;
-    let n_executions = 3;
+    let iterations = 3;
     let ephem_blockhash = expect!(
         ctx.try_ephem_client().and_then(|client| client
             .get_latest_blockhash()
@@ -93,7 +93,7 @@ fn test_schedule_error() {
                     MAGIC_PROGRAM_ID,
                     task_id,
                     execution_interval_millis,
-                    n_executions,
+                    iterations,
                     true,
                     false,
                 )],

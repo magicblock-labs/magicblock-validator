@@ -129,7 +129,7 @@ fn process_schedule_task(
     let args = ScheduleTaskArgs {
         task_id: args.task_id,
         execution_interval_millis: args.execution_interval_millis,
-        n_executions: args.n_executions,
+        iterations: args.iterations,
         instructions: vec![match (args.error, args.signer) {
             (true, false) => create_increment_counter_error_ix(*payer_info.key),
             (false, true) => {
