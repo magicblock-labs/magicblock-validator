@@ -1,7 +1,6 @@
 [workspace]
 members = [
   "programs/flexi-counter",
-  "programs/schedule-task",
   "programs/schedulecommit",
   "programs/schedulecommit-security",
   "programs/sysvars",

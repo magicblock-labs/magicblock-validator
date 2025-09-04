@@ -2,6 +2,7 @@ use solana_program::declare_id;
 
 mod args;
 pub mod instruction;
+mod magic_program;
 mod processor;
 pub mod state;
 mod utils;

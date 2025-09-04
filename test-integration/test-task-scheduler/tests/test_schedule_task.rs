@@ -4,12 +4,12 @@ use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_program::{ID as MAGIC_PROGRAM_ID, TASK_CONTEXT_PUBKEY};
 use magicblock_task_scheduler::SchedulerDatabase;
-use schedule_task_program::{
+use program_flexi_counter::{
     instruction::{
-        create_cancel_task_ix, create_delegate_ix, create_init_counter_ix,
+        create_cancel_task_ix, create_delegate_ix, create_init_ix,
         create_schedule_task_ix,
     },
-    state::Counter,
+    state::FlexiCounter,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
@@ -23,7 +23,7 @@ fn test_schedule_task() {
     let db_path = SchedulerDatabase::path(temp_dir.path());
 
     let payer = Keypair::new();
-    let (counter_pda, _) = Counter::pda(&payer.pubkey());
+    let (counter_pda, _) = FlexiCounter::pda(&payer.pubkey());
 
     expect!(
         ctx.airdrop_chain(&payer.pubkey(), 10 * LAMPORTS_PER_SOL),
@@ -43,7 +43,7 @@ fn test_schedule_task() {
     expect!(
         ctx.send_transaction_chain(
             &mut Transaction::new_signed_with_payer(
-                &[create_init_counter_ix(payer.pubkey())],
+                &[create_init_ix(payer.pubkey(), "test".to_string())],
                 Some(&payer.pubkey()),
                 &[&payer],
                 blockhash,
@@ -153,7 +153,7 @@ fn test_schedule_task() {
         validator
     );
     let counter =
-        expect!(Counter::try_decode(&counter_account.data), validator);
+        expect!(FlexiCounter::try_decode(&counter_account.data), validator);
     assert!(
         counter.count == iterations,
         cleanup(&mut validator),

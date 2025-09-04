@@ -4,8 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+bincode = { workspace = true }
 borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
+serde = { workspace = true }
 solana-program = { workspace = true }
 
 [lib]
