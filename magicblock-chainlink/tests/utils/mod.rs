@@ -1,9 +1,7 @@
 #![cfg(any(test, feature = "dev-context"))]
 
 pub mod accounts;
-pub mod ixtest_context;
 pub mod logging;
-pub mod programs;
 pub mod test_context;
 
 #[allow(dead_code)]
