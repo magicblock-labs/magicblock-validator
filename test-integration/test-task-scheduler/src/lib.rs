@@ -42,7 +42,7 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
                 kind: LedgerResumeStrategyType::Reset,
                 ..Default::default()
             },
-            path: Some(temp_dir.to_string_lossy().to_string()),
+            path: temp_dir.to_string_lossy().to_string(),
             ..Default::default()
         },
         ..Default::default()

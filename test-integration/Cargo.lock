@@ -5169,6 +5169,7 @@ dependencies = [
  "bincode",
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
+ "magicblock-core 0.1.7",
  "serde",
  "solana-program",
 ]
