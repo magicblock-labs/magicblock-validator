@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use magicblock_bank::bank::Bank;
-use magicblock_config::LedgerResumeStrategy;
 use magicblock_magic_program_api::{
     self, MAGIC_CONTEXT_PUBKEY, MAGIC_CONTEXT_SIZE,
 };
