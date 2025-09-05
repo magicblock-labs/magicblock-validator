@@ -1,5 +1,5 @@
 [package]
-name = "magicblock-core"
+name = "magicblock-magic-program"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -8,4 +8,6 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-magicblock-magic-program = { workspace = true }
+solana-program = { workspace = true }
+bincode = { workspace = true }
+serde = { workspace = true, features = ["derive"] }

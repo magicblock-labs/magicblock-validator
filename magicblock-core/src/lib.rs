@@ -1,5 +1,6 @@
-pub mod magic_program;
 pub mod traits;
+
+pub use magicblock_magic_program as magic_program;
 
 /// A macro that panics when running a debug build and logs the panic message
 /// instead when running in release mode.

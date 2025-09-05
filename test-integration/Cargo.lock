@@ -3903,9 +3903,7 @@ dependencies = [
 name = "magicblock-core"
 version = "0.1.7"
 dependencies = [
- "bincode",
- "serde",
- "solana-program",
+ "magicblock-magic-program",
 ]
 
 [[package]]
@@ -4008,6 +4006,15 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.15",
+]
+
+[[package]]
+name = "magicblock-magic-program"
+version = "0.1.7"
+dependencies = [
+ "bincode",
+ "serde",
+ "solana-program",
 ]
 
 [[package]]
