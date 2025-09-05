@@ -74,7 +74,8 @@ pub fn main() {
         return;
     };
 
-    let Ok(task_scheduler_output) = run_task_scheduler_tests(&manifest_dir)
+    let Ok(task_scheduler_output) =
+        run_task_scheduler_tests(&manifest_dir, &config)
     else {
         return;
     };

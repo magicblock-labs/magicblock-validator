@@ -13,6 +13,9 @@ use ephemeral_rollups_sdk::{
     },
     ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
+use magicblock_core::magic_program::{
+    args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
+};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
@@ -32,7 +35,6 @@ use crate::{
         DelegateArgs, FlexiCounterInstruction, ScheduleArgs,
         MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
     },
-    magic_program::{CancelTaskArgs, ScheduleTaskArgs},
     processor::{
         call_handler::process_call_handler,
         schedule_intent::process_create_intent,
@@ -399,28 +401,26 @@ fn process_schedule_task(
     }
     let bump = &[bump];
     let seeds = FlexiCounter::seeds_with_bump(payer_info.key, bump);
-
-    let mut discriminator = vec![5_u8, 0, 0, 0];
-    let args = ScheduleTaskArgs {
-        task_id: args.task_id,
-        execution_interval_millis: args.execution_interval_millis,
-        iterations: args.iterations,
-        instructions: vec![match (args.error, args.signer) {
-            (true, false) => create_add_error_ix(*payer_info.key, 1),
-            (false, true) => create_add_signed_ix(*payer_info.key, 1),
-            _ => create_add_ix(*payer_info.key, 1),
-        }],
-    };
-    discriminator.extend_from_slice(&bincode::serialize(&args).map_err(
-        |err| {
-            msg!("ERROR: failed to serialize args {:?}", err);
-            ProgramError::InvalidArgument
+    let ix_data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(
+        ScheduleTaskArgs {
+            task_id: args.task_id,
+            execution_interval_millis: args.execution_interval_millis,
+            iterations: args.iterations,
+            instructions: vec![match (args.error, args.signer) {
+                (true, false) => create_add_error_ix(*payer_info.key, 1),
+                (false, true) => create_add_signed_ix(*payer_info.key, 1),
+                _ => create_add_ix(*payer_info.key, 1),
+            }],
         },
-    )?);
+    ))
+    .map_err(|err| {
+        msg!("ERROR: failed to serialize args {:?}", err);
+        ProgramError::InvalidArgument
+    })?;
 
     let ix = Instruction::new_with_bytes(
         MAGIC_PROGRAM_ID,
-        &discriminator,
+        &ix_data,
         vec![
             AccountMeta::new(*payer_info.key, true),
             AccountMeta::new(*task_context_info.key, false),
@@ -452,20 +452,17 @@ fn process_cancel_task(
     let payer_info = next_account_info(account_info_iter)?;
     let task_context_info = next_account_info(account_info_iter)?;
 
-    let mut discriminator = vec![6_u8, 0, 0, 0];
-    let args = CancelTaskArgs {
+    let ix_data = bincode::serialize(&MagicBlockInstruction::CancelTask {
         task_id: args.task_id,
-    };
-    discriminator.extend_from_slice(&bincode::serialize(&args).map_err(
-        |err| {
-            msg!("ERROR: failed to serialize args {:?}", err);
-            ProgramError::InvalidArgument
-        },
-    )?);
+    })
+    .map_err(|err| {
+        msg!("ERROR: failed to serialize args {:?}", err);
+        ProgramError::InvalidArgument
+    })?;
 
     let ix = Instruction::new_with_bytes(
         MAGIC_PROGRAM_ID,
-        &discriminator,
+        &ix_data,
         vec![
             AccountMeta::new(*payer_info.key, true),
             AccountMeta::new(*task_context_info.key, false),

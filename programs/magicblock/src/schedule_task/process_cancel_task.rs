@@ -71,7 +71,9 @@ pub(crate) fn process_cancel_task(
 
 #[cfg(test)]
 mod test {
-    use magicblock_core::magic_program::TASK_CONTEXT_PUBKEY;
+    use magicblock_core::magic_program::{
+        instruction::MagicBlockInstruction, TASK_CONTEXT_PUBKEY,
+    };
     use solana_sdk::{
         account::AccountSharedData,
         instruction::{AccountMeta, Instruction, InstructionError},
@@ -81,10 +83,7 @@ mod test {
     };
 
     use crate::{
-        magicblock_instruction::{
-            cancel_task_instruction, MagicBlockInstruction,
-        },
-        test_utils::process_instruction,
+        instruction_utils::InstructionUtils, test_utils::process_instruction,
     };
 
     #[test]
@@ -92,7 +91,8 @@ mod test {
         let payer = Keypair::new();
         let task_id = 1;
 
-        let ix = cancel_task_instruction(&payer.pubkey(), task_id);
+        let ix =
+            InstructionUtils::cancel_task_instruction(&payer.pubkey(), task_id);
         let transaction_accounts = vec![
             (
                 payer.pubkey(),

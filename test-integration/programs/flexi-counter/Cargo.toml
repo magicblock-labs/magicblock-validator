@@ -9,6 +9,7 @@ borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
 serde = { workspace = true }
 solana-program = { workspace = true }
+magicblock-core = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "lib"]

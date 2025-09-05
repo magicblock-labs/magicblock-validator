@@ -151,7 +151,9 @@ pub(crate) fn process_schedule_task(
 
 #[cfg(test)]
 mod test {
-    use magicblock_core::magic_program::TASK_CONTEXT_PUBKEY;
+    use magicblock_core::magic_program::{
+        instruction::MagicBlockInstruction, TASK_CONTEXT_PUBKEY,
+    };
     use solana_sdk::{
         account::AccountSharedData,
         instruction::{AccountMeta, Instruction},
@@ -162,12 +164,10 @@ mod test {
 
     use super::*;
     use crate::{
-        magicblock_instruction::{
-            schedule_task_instruction, MagicBlockInstruction,
-        },
         test_utils::{
             process_instruction, COUNTER_PROGRAM_ID, MEMO_PROGRAM_ID,
         },
+        utils::instruction_utils::InstructionUtils,
     };
 
     pub fn create_simple_ix(payer: &Keypair) -> Instruction {
@@ -236,7 +236,11 @@ mod test {
             iterations: 1,
             instructions: vec![create_simple_ix(&payer)],
         };
-        let ix = schedule_task_instruction(&payer.pubkey(), args, &pdas);
+        let ix = InstructionUtils::schedule_task_instruction(
+            &payer.pubkey(),
+            args,
+            &pdas,
+        );
         let transaction_accounts = vec![
             (
                 payer.pubkey(),
@@ -296,7 +300,11 @@ mod test {
                     &payer, &pdas, writable, signer,
                 )],
             };
-            let ix = schedule_task_instruction(&payer.pubkey(), args, &pdas);
+            let ix = InstructionUtils::schedule_task_instruction(
+                &payer.pubkey(),
+                args,
+                &pdas,
+            );
             process_instruction(
                 &ix.data,
                 transaction_accounts.clone(),
@@ -426,7 +434,11 @@ mod test {
             iterations: 1,
             instructions: vec![],
         };
-        let ix = schedule_task_instruction(&payer.pubkey(), args, &pdas);
+        let ix = InstructionUtils::schedule_task_instruction(
+            &payer.pubkey(),
+            args,
+            &pdas,
+        );
         let transaction_accounts = vec![
             (
                 payer.pubkey(),
@@ -456,7 +468,11 @@ mod test {
             iterations: 1,
             instructions: vec![create_simple_ix(&payer)],
         };
-        let ix = schedule_task_instruction(&payer.pubkey(), args, &pdas);
+        let ix = InstructionUtils::schedule_task_instruction(
+            &payer.pubkey(),
+            args,
+            &pdas,
+        );
         let transaction_accounts = vec![
             (
                 payer.pubkey(),

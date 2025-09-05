@@ -192,7 +192,7 @@ impl InstructionUtils {
     pub fn schedule_task(
         payer: &Keypair,
         args: ScheduleTaskArgs,
-        pdas: Vec<Pubkey>,
+        pdas: &[Pubkey],
         recent_blockhash: Hash,
     ) -> Transaction {
         let ix = Self::schedule_task_instruction(&payer.pubkey(), args, pdas);
@@ -202,7 +202,7 @@ impl InstructionUtils {
     pub fn schedule_task_instruction(
         payer: &Pubkey,
         args: ScheduleTaskArgs,
-        pdas: Vec<Pubkey>,
+        pdas: &[Pubkey],
     ) -> Instruction {
         use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
 
@@ -210,7 +210,7 @@ impl InstructionUtils {
             AccountMeta::new(*payer, true),
             AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
         ];
-        for pubkey in &pdas {
+        for pubkey in pdas {
             account_metas.push(AccountMeta::new_readonly(*pubkey, true));
         }
 

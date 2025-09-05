@@ -81,6 +81,30 @@ fn test_cancel_ongoing_task() {
             ))),
         validator
     );
+    let sim_result = expect!(
+        ctx.try_ephem_client().and_then(|client| client
+            .simulate_transaction(&mut Transaction::new_signed_with_payer(
+                &[create_schedule_task_ix(
+                    payer.pubkey(),
+                    TASK_CONTEXT_PUBKEY,
+                    MAGIC_PROGRAM_ID,
+                    task_id,
+                    execution_interval_millis,
+                    iterations,
+                    false,
+                    false,
+                )],
+                Some(&payer.pubkey()),
+                &[&payer],
+                ephem_blockhash,
+            ))
+            .map_err(|e| anyhow::anyhow!(
+                "Failed to simulate transaction: {}",
+                e
+            ))),
+        validator
+    );
+    eprintln!("sim_result: {:?}", sim_result);
     expect!(
         ctx.send_transaction_ephem(
             &mut Transaction::new_signed_with_payer(
