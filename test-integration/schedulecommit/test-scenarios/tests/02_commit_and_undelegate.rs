@@ -3,7 +3,6 @@ use integration_test_tools::{
     scheduled_commits::extract_scheduled_commit_sent_signature_from_logs,
 };
 use log::*;
-use magicblock_magic_program_api;
 use program_schedulecommit::api::{
     increase_count_instruction, schedule_commit_and_undelegate_cpi_instruction,
     schedule_commit_and_undelegate_cpi_with_mod_after_instruction,

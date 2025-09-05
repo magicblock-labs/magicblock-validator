@@ -1,6 +1,5 @@
 use integration_test_tools::run_test;
 use log::*;
-use magicblock_magic_program_api;
 use program_schedulecommit::api::schedule_commit_cpi_instruction;
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
