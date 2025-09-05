@@ -2,7 +2,7 @@ use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
-    assert_subscribed_without_delegation_record, skip_if_no_test_validator,
+    assert_subscribed_without_delegation_record,
     testing::{init_logger, utils::random_pubkey},
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
@@ -11,7 +11,6 @@ use test_chainlink::ixtest_context::IxtestContext;
 #[tokio::test]
 async fn ixtest_write_non_existing_account() {
     init_logger();
-    skip_if_no_test_validator!();
 
     let ctx = IxtestContext::init().await;
 
@@ -31,7 +30,6 @@ async fn ixtest_write_non_existing_account() {
 #[tokio::test]
 async fn ixtest_write_existing_account_undelegated() {
     init_logger();
-    skip_if_no_test_validator!();
 
     let ctx = IxtestContext::init().await;
 
@@ -52,7 +50,6 @@ async fn ixtest_write_existing_account_undelegated() {
 #[tokio::test]
 async fn ixtest_write_existing_account_valid_delegation_record() {
     init_logger();
-    skip_if_no_test_validator!();
 
     let ctx = IxtestContext::init().await;
 

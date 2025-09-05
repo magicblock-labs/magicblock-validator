@@ -2,7 +2,6 @@ use log::*;
 use magicblock_chainlink::{
     config::ChainlinkConfig,
     remote_account_provider::config::RemoteAccountProviderConfig,
-    skip_if_no_test_validator,
     testing::{init_logger, utils::random_pubkeys},
     validator_types::LifecycleMode,
 };
@@ -37,7 +36,6 @@ async fn setup(
 #[tokio::test]
 async fn ixtest_read_multiple_accounts_not_exceeding_capacity() {
     init_logger();
-    skip_if_no_test_validator!();
 
     let subscribed_accounts_lru_capacity = 5;
     let pubkeys_len = 5;
@@ -58,7 +56,6 @@ async fn ixtest_read_multiple_accounts_not_exceeding_capacity() {
 #[tokio::test]
 async fn ixtest_read_multiple_accounts_exceeding_capacity() {
     init_logger();
-    skip_if_no_test_validator!();
 
     let subscribed_accounts_lru_capacity = 5;
     let pubkeys_len = 8;

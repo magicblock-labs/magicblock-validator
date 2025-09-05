@@ -2,7 +2,7 @@ use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
-    assert_subscribed_without_delegation_record, skip_if_no_test_validator,
+    assert_subscribed_without_delegation_record,
     testing::init_logger,
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
@@ -11,7 +11,6 @@ use test_chainlink::ixtest_context::IxtestContext;
 #[tokio::test]
 async fn ixtest_deleg_after_subscribe_case2() {
     init_logger();
-    skip_if_no_test_validator!();
 
     let ctx = IxtestContext::init().await;
 

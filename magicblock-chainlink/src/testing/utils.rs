@@ -12,16 +12,6 @@ use crate::{
 pub const PUBSUB_URL: &str = "ws://localhost:7800";
 pub const RPC_URL: &str = "http://localhost:7799";
 
-#[macro_export]
-macro_rules! skip_if_no_test_validator {
-    () => {
-        if ::std::env::var("LOCAL_VALIDATOR_TESTS").is_err() {
-            eprintln!("skipping test, LOCAL_VALIDATOR_TESTS is not set");
-            return;
-        }
-    };
-}
-
 pub fn random_pubkey() -> Pubkey {
     Keypair::new().pubkey()
 }

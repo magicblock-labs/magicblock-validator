@@ -5,7 +5,6 @@ use magicblock_chainlink::{
     assert_not_subscribed, assert_subscribed_without_delegation_record,
     assert_subscribed_without_loaderv3_program_data_account,
     remote_account_provider::program_account::RemoteProgramLoader,
-    skip_if_no_test_validator,
     testing::{init_logger, utils::random_pubkey},
 };
 use solana_loader_v4_interface::state::LoaderV4Status;
@@ -16,7 +15,7 @@ use test_chainlink::accounts::{
 };
 use tokio::task;
 
-use crate::utils::{
+use test_chainlink::{
     ixtest_context::IxtestContext,
     logging::{stringify_maybe_pubkeys, stringify_pubkeys},
     programs::MEMOV2,
@@ -26,7 +25,6 @@ use crate::utils::{
 #[tokio::test]
 async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
     init_logger();
-    skip_if_no_test_validator!();
 
     let ctx = IxtestContext::init().await;
 

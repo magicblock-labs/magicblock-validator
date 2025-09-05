@@ -7,7 +7,7 @@
 // which is not yet supported by our integration harness. We add the test skeleton
 // and mark it ignored until the necessary on-chain instruction is available.
 
-use magicblock_chainlink::{skip_if_no_test_validator, testing::init_logger};
+use magicblock_chainlink::{testing::init_logger};
 
 use test_chainlink::ixtest_context::IxtestContext;
 
@@ -15,7 +15,7 @@ use test_chainlink::ixtest_context::IxtestContext;
 #[ignore = "blocked: cannot delegate to arbitrary authority in ix env yet"]
 async fn ixtest_undelegate_redelegate_to_other_in_same_slot() {
     init_logger();
-    skip_if_no_test_validator!();
+
 
     let _ctx = IxtestContext::init().await;
 
