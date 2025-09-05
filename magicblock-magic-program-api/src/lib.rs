@@ -17,6 +17,3 @@ pub const MAGIC_CONTEXT_SIZE: usize = 1024 * 1024 * 5; // 5 MB
 
 pub const TASK_CONTEXT_PUBKEY: Pubkey =
     pubkey!("TaskContext11111111111111111111111111111111");
-
-/// As tasks can accumulate, we believe it is best to use the maximum account size.
-pub const TASK_CONTEXT_SIZE: usize = 1024 * 1024 * 10; // 10 MB
