@@ -60,6 +60,7 @@ magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
 paste = "1.0"
 program-flexi-counter = { path = "./programs/flexi-counter" }
+program-mini = { path = "./programs/mini" }
 program-schedulecommit = { path = "programs/schedulecommit" }
 program-schedulecommit-security = { path = "programs/schedulecommit-security" }
 rand = "0.8.5"

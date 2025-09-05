@@ -8,6 +8,7 @@ bincode = { workspace = true }
 log = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-delegation-program = { workspace = true }
+program-mini = { workspace = true }
 program-flexi-counter = { workspace = true }
 solana-account = { workspace = true }
 solana-loader-v2-interface = { workspace = true, features = ["serde"] }

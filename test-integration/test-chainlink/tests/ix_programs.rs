@@ -10,7 +10,7 @@ use magicblock_chainlink::{
 };
 
 use log::*;
-use mini_program::common::IdlType;
+use program_mini::common::IdlType;
 use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
