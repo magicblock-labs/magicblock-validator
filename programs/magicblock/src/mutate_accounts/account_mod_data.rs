@@ -12,7 +12,7 @@ use magicblock_core::traits::PersistsAccountModData;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 
-use crate::{magicblock_instruction::MagicBlockProgramError, validator};
+use crate::{errors::MagicBlockProgramError, validator};
 
 lazy_static! {
     /// In order to modify large data chunks we cannot include all the data as part of the

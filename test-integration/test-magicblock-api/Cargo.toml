@@ -2,14 +2,11 @@
 name = "test-magicblock-api"
 version.workspace = true
 edition.workspace = true
-
 [dependencies]
 integration-test-tools = { workspace = true }
 
 [dev-dependencies]
 cleanass = { workspace = true }
-isocountry = { workspace = true }
-lazy_static = { workspace = true }
 magicblock-api = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-delegation-program = { workspace = true }
@@ -21,3 +18,5 @@ solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }
 tokio = { workspace = true }
+lazy_static = { workspace = true }
+isocountry = { workspace = true }

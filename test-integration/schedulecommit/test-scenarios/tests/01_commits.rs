@@ -1,6 +1,4 @@
-use integration_test_tools::{
-    conversions::pubkey_from_magic_program, run_test,
-};
+use integration_test_tools::run_test;
 use log::*;
 use magicblock_core::magic_program;
 use program_schedulecommit::api::schedule_commit_cpi_instruction;
@@ -43,8 +41,8 @@ fn test_committing_one_account() {
 
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
-            pubkey_from_magic_program(magic_program::id()),
-            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
+            magic_program::id(),
+            magic_program::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -93,8 +91,8 @@ fn test_committing_two_accounts() {
 
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
-            pubkey_from_magic_program(magic_program::id()),
-            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
+            magic_program::id(),
+            magic_program::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())

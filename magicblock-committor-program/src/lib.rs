@@ -6,9 +6,11 @@ pub mod instruction_chunks;
 pub mod pdas;
 mod state;
 
+pub mod instruction_builder;
+mod processor;
 mod utils;
 
-mod processor;
+// #[cfg(not(feature = "no-entrypoint"))]
 pub use processor::process;
 pub use state::{
     changeset::{

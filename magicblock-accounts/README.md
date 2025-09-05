@@ -14,8 +14,8 @@ Implements a `AccountsManager`, which is reponsible for:
   - Implemented by a `ExternalAccountsManager`
   - depends on an `InternalAccountProvider` (implemented by `BankAccountProvider`)
   - depends on an `AccountCloner` (implemented by `RemoteAccountCloner`)
-  - depends on an `AccountCommitter` (implemented by `RemoteAccountCommitter`)
   - depends on a `Transwise`
+  - denepds on a `CommittorServiceExt` that is used for Manual commits
   - Implements `ensure_accounts` function
   - Maintains a local cache of accounts already validated and cloned
 
@@ -24,9 +24,6 @@ Implements a `AccountsManager`, which is reponsible for:
 
 - `RemoteAccountCloner`
   - depends on a `Bank`
-
-- `RemoteAccountCommitter`
-  - depends on an `RpcClient`
 
 # Notes
 

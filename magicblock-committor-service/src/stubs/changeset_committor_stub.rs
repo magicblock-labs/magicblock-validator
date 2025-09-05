@@ -1,152 +1,217 @@
 use std::{
     collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use async_trait::async_trait;
-use magicblock_committor_program::Changeset;
+use solana_account::Account;
 use solana_pubkey::Pubkey;
-use solana_sdk::{hash::Hash, signature::Signature};
-use tokio::sync::oneshot;
+use solana_sdk::signature::Signature;
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
+    EncodedTransactionWithStatusMeta,
+};
+use tokio::sync::{broadcast, oneshot};
+use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 
 use crate::{
     error::CommittorServiceResult,
-    persist::{
-        BundleSignatureRow, CommitStatus, CommitStatusRow,
-        CommitStatusSignatures, CommitStrategy, CommitType,
+    intent_execution_manager::{
+        BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
     },
-    ChangesetCommittor,
+    intent_executor::ExecutionOutput,
+    persist::{CommitStatusRow, IntentPersisterImpl, MessageSignatures},
+    service_ext::{BaseIntentCommitorExtResult, BaseIntentCommittorExt},
+    types::{ScheduledBaseIntentWrapper, TriggerType},
+    BaseIntentCommittor,
 };
 
 #[derive(Default)]
 pub struct ChangesetCommittorStub {
+    cancellation_token: CancellationToken,
     reserved_pubkeys_for_committee: Arc<Mutex<HashMap<Pubkey, Pubkey>>>,
     #[allow(clippy::type_complexity)]
-    committed_changesets: Arc<Mutex<HashMap<u64, (Changeset, Hash, bool)>>>,
+    committed_changesets: Arc<Mutex<HashMap<u64, ScheduledBaseIntentWrapper>>>,
+    committed_accounts: Arc<Mutex<HashMap<Pubkey, Account>>>,
 }
 
-#[async_trait]
-impl ChangesetCommittor for ChangesetCommittorStub {
-    fn commit_changeset(
-        &self,
-        changeset: Changeset,
-        ephemeral_blockhash: Hash,
-        finalize: bool,
-    ) -> oneshot::Receiver<Option<String>> {
-        static REQ_ID: AtomicU64 = AtomicU64::new(0);
-        let reqid = REQ_ID.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.committed_changesets
-            .lock()
-            .unwrap()
-            .insert(reqid, (changeset, ephemeral_blockhash, finalize));
-        tx.send(Some(reqid.to_string())).unwrap_or_else(|_| {
-            log::error!("Failed to send commit changeset response");
-        });
-        rx
+impl ChangesetCommittorStub {
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.committed_changesets.lock().unwrap().len()
     }
 
-    fn get_commit_statuses(
-        &self,
-        reqid: String,
-    ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
-        let reqid = reqid.parse::<u64>().unwrap();
-        let commit = self.committed_changesets.lock().unwrap().remove(&reqid);
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let Some((changeset, hash, finalize)) = commit else {
-            tx.send(Ok(vec![])).unwrap_or_else(|_| {
-                log::error!("Failed to send commit status response");
-            });
-            return rx;
-        };
-        let status_rows = changeset
-            .accounts
-            .iter()
-            .map(|(pubkey, acc)| CommitStatusRow {
-                reqid: reqid.to_string(),
-                pubkey: *pubkey,
-                delegated_account_owner: acc.owner(),
-                slot: changeset.slot,
-                ephemeral_blockhash: hash,
-                undelegate: changeset.accounts_to_undelegate.contains(pubkey),
-                lamports: acc.lamports(),
-                finalize,
-                data: Some(acc.data().to_vec()),
-                commit_type: CommitType::DataAccount,
-                created_at: now(),
-                commit_status: CommitStatus::Succeeded((
-                    reqid,
-                    CommitStrategy::FromBuffer,
-                    CommitStatusSignatures {
-                        process_signature: Signature::new_unique(),
-                        finalize_signature: Some(Signature::new_unique()),
-                        undelegate_signature: None,
-                    },
-                )),
-                last_retried_at: now(),
-                retries_count: 0,
-            })
-            .collect();
-        tx.send(Ok(status_rows)).unwrap_or_else(|_| {
-            log::error!("Failed to send commit status response");
-        });
-        rx
+    pub fn committed(&self, pubkey: &Pubkey) -> Option<Account> {
+        self.committed_accounts.lock().unwrap().get(pubkey).cloned()
     }
+}
 
-    fn get_bundle_signatures(
-        &self,
-        bundle_id: u64,
-    ) -> tokio::sync::oneshot::Receiver<
-        crate::error::CommittorServiceResult<Option<BundleSignatureRow>>,
-    > {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let bundle_signature = BundleSignatureRow {
-            bundle_id,
-            processed_signature: Signature::new_unique(),
-            finalized_signature: Some(Signature::new_unique()),
-            undelegate_signature: None,
-            created_at: now(),
-        };
-        tx.send(Ok(Some(bundle_signature))).unwrap_or_else(|_| {
-            log::error!("Failed to send bundle signatures response");
-        });
-        rx
-    }
-
+impl BaseIntentCommittor for ChangesetCommittorStub {
     fn reserve_pubkeys_for_committee(
         &self,
         committee: Pubkey,
         owner: Pubkey,
     ) -> oneshot::Receiver<CommittorServiceResult<Instant>> {
         let initiated = Instant::now();
-        let (tx, rx) =
-            tokio::sync::oneshot::channel::<CommittorServiceResult<Instant>>();
+        let (tx, rx) = oneshot::channel::<CommittorServiceResult<Instant>>();
         self.reserved_pubkeys_for_committee
             .lock()
             .unwrap()
             .insert(committee, owner);
+
         tx.send(Ok(initiated)).unwrap_or_else(|_| {
             log::error!("Failed to send response");
         });
         rx
     }
 
-    async fn get_transaction_logs(
+    fn schedule_base_intent(
         &self,
-        _signature: &Signature,
-    ) -> CommittorServiceResult<Option<Vec<String>>> {
-        Ok(None)
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        let (sender, receiver) = oneshot::channel();
+        let _ = sender.send(Ok(()));
+
+        {
+            let mut committed_accounts =
+                self.committed_accounts.lock().unwrap();
+            base_intents.iter().for_each(|intent| {
+                let intent_committed_accounts = intent.get_committed_accounts();
+                let Some(accounts) = intent_committed_accounts else {
+                    return;
+                };
+
+                accounts.iter().for_each(|account| {
+                    committed_accounts
+                        .insert(account.pubkey, account.account.clone());
+                })
+            })
+        }
+
+        {
+            let mut changesets = self.committed_changesets.lock().unwrap();
+            base_intents.into_iter().for_each(|intent| {
+                changesets.insert(intent.inner.id, intent);
+            });
+        }
+
+        receiver
     }
 
-    async fn get_transaction_cus(
+    fn subscribe_for_results(
         &self,
-        _signature: &Signature,
-    ) -> CommittorServiceResult<Option<u64>> {
-        Ok(None)
+    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedIntentExecutionResult>>
+    {
+        let (_, receiver) = oneshot::channel();
+        receiver
+    }
+
+    fn get_commit_statuses(
+        &self,
+        message_id: u64,
+    ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
+        let (tx, rx) = oneshot::channel();
+
+        let commit = self
+            .committed_changesets
+            .lock()
+            .unwrap()
+            .remove(&message_id);
+        let Some(base_intent) = commit else {
+            tx.send(Ok(vec![])).unwrap_or_else(|_| {
+                log::error!("Failed to send commit status response");
+            });
+            return rx;
+        };
+
+        let status_rows =
+            IntentPersisterImpl::create_commit_rows(&base_intent.inner);
+        tx.send(Ok(status_rows)).unwrap_or_else(|_| {
+            log::error!("Failed to send commit status response");
+        });
+
+        rx
+    }
+
+    fn get_commit_signatures(
+        &self,
+        _commit_id: u64,
+        _pubkey: Pubkey,
+    ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
+    {
+        let (tx, rx) = oneshot::channel();
+        let message_signature = MessageSignatures {
+            commit_stage_signature: Signature::new_unique(),
+            finalize_stage_signature: Some(Signature::new_unique()),
+            created_at: now(),
+        };
+
+        tx.send(Ok(Some(message_signature))).unwrap_or_else(|_| {
+            log::error!("Failed to send bundle signatures response");
+        });
+
+        rx
+    }
+
+    fn get_transaction(
+        &self,
+        _: &Signature,
+    ) -> oneshot::Receiver<
+        CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
+    > {
+        let (tx, rx) = oneshot::channel();
+        if let Err(_err) =
+            tx.send(Ok(EncodedConfirmedTransactionWithStatusMeta {
+                slot: 0,
+                transaction: EncodedTransactionWithStatusMeta {
+                    transaction: EncodedTransaction::LegacyBinary(
+                        "".to_string(),
+                    ),
+                    meta: None,
+                    version: None,
+                },
+                block_time: None,
+            }))
+        {
+            log::error!("Failed to send get transaction response");
+        };
+
+        rx
+    }
+
+    fn stop(&self) {
+        self.cancellation_token.cancel();
+    }
+
+    fn stopped(&self) -> WaitForCancellationFutureOwned {
+        self.cancellation_token.clone().cancelled_owned()
+    }
+}
+
+#[async_trait]
+impl BaseIntentCommittorExt for ChangesetCommittorStub {
+    async fn schedule_base_intents_waiting(
+        &self,
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
+    {
+        self.schedule_base_intent(base_intents.clone()).await??;
+        let res = base_intents
+            .into_iter()
+            .map(|message| {
+                Ok(ExecutionOutputWrapper {
+                    id: message.inner.id,
+                    output: ExecutionOutput::TwoStage {
+                        commit_signature: Signature::new_unique(),
+                        finalize_signature: Signature::new_unique(),
+                    },
+                    trigger_type: TriggerType::OnChain,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Ok(res)
     }
 }
 

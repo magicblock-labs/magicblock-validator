@@ -1,34 +1,25 @@
-mod bundle_strategy;
-mod bundles;
-mod commit;
-mod commit_info;
-mod commit_stage;
-mod commit_strategy;
 mod compute_budget;
 pub mod config;
 mod consts;
 pub mod error;
-mod finalize;
 pub mod persist;
 mod pubkeys_provider;
 mod service;
-mod transactions;
-mod types;
-mod undelegate;
+pub mod service_ext;
+pub mod transactions;
+pub mod types;
 
+mod committor_processor;
+pub mod intent_execution_manager;
+pub mod intent_executor;
 #[cfg(feature = "dev-context-only-utils")]
 pub mod stubs;
+pub mod tasks;
+pub mod transaction_preparator;
+pub(crate) mod utils;
 
-pub use commit_info::CommitInfo;
-pub use commit_stage::CommitStage;
 pub use compute_budget::ComputeBudgetConfig;
 pub use magicblock_committor_program::{
     ChangedAccount, Changeset, ChangesetMeta,
 };
-pub use service::{ChangesetCommittor, CommittorService};
-pub fn changeset_for_slot(slot: u64) -> Changeset {
-    Changeset {
-        slot,
-        ..Changeset::default()
-    }
-}
+pub use service::{BaseIntentCommittor, CommittorService};

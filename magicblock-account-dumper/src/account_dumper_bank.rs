@@ -181,7 +181,6 @@ impl AccountDumper for AccountDumperBank {
 
         let mut program_id_modification =
             AccountModification::from((program_pubkey, program_account));
-
         // point program account to the derived program data account address
         let program_id_state =
             bincode::serialize(&UpgradeableLoaderState::Program {

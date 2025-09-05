@@ -1,6 +1,7 @@
 use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
+use borsh::BorshDeserialize;
 use log::*;
 use solana_rpc_client::rpc_client::{
     GetConfirmedSignaturesForAddress2Config, RpcClient,
@@ -274,6 +275,65 @@ impl IntegrationTestContext {
     ) -> anyhow::Result<Account> {
         self.try_chain_client().and_then(|chain_client| {
             Self::fetch_account(chain_client, pubkey, self.commitment, "chain")
+        })
+    }
+
+    pub fn fetch_chain_account_struct<T>(&self, pubkey: Pubkey) -> Result<T>
+    where
+        T: BorshDeserialize,
+    {
+        self.try_chain_client().and_then(|chain_client| {
+            Self::fetch_account_struct(
+                chain_client,
+                pubkey,
+                self.commitment,
+                "chain",
+            )
+        })
+    }
+
+    pub fn fetch_ephem_account_struct<T>(&self, pubkey: Pubkey) -> Result<T>
+    where
+        T: BorshDeserialize,
+    {
+        self.try_ephem_client().and_then(|chain_client| {
+            Self::fetch_account_struct(
+                chain_client,
+                pubkey,
+                self.commitment,
+                "ephem",
+            )
+        })
+    }
+
+    fn fetch_account_struct<T>(
+        rpc_client: &RpcClient,
+        pubkey: Pubkey,
+        commitment: CommitmentConfig,
+        cluster: &str,
+    ) -> Result<T>
+    where
+        T: BorshDeserialize,
+    {
+        let account = rpc_client
+            .get_account_with_commitment(&pubkey, commitment)
+            .with_context(|| {
+                format!(
+                    "Failed to fetch {} account data for '{:?}'",
+                    cluster, pubkey
+                )
+            })?
+            .value
+            .ok_or_else(|| {
+                anyhow::anyhow!("Account '{}' not found on {}", pubkey, cluster)
+            })?;
+
+        T::try_from_slice(&account.data).with_context(|| {
+            anyhow::anyhow!(
+                "Failed to deserialize account: {}, cluster: {}",
+                pubkey,
+                cluster
+            )
         })
     }
 

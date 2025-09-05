@@ -1,0 +1,74 @@
+use log::error;
+
+use crate::{
+    persist::{CommitStrategy, IntentPersister},
+    tasks::{visitor::Visitor, ArgsTask, BufferTask},
+};
+
+pub enum PersistorContext {
+    PersistStrategy { uses_lookup_tables: bool },
+    // Other possible persist
+}
+
+pub struct PersistorVisitor<'a, P> {
+    pub persistor: &'a P,
+    pub context: PersistorContext,
+}
+
+impl<P> Visitor for PersistorVisitor<'_, P>
+where
+    P: IntentPersister,
+{
+    fn visit_args_task(&mut self, task: &ArgsTask) {
+        match self.context {
+            PersistorContext::PersistStrategy { uses_lookup_tables } => {
+                let ArgsTask::Commit(commit_task) = task else {
+                    return;
+                };
+
+                let commit_strategy = if uses_lookup_tables {
+                    CommitStrategy::ArgsWithLookupTable
+                } else {
+                    CommitStrategy::Args
+                };
+
+                if let Err(err) = self.persistor.set_commit_strategy(
+                    commit_task.commit_id,
+                    &commit_task.committed_account.pubkey,
+                    commit_strategy,
+                ) {
+                    error!(
+                        "Failed to persist commit strategy {}: {}",
+                        commit_strategy.as_str(),
+                        err
+                    );
+                }
+            }
+        }
+    }
+
+    fn visit_buffer_task(&mut self, task: &BufferTask) {
+        match self.context {
+            PersistorContext::PersistStrategy { uses_lookup_tables } => {
+                let BufferTask::Commit(commit_task) = task;
+                let commit_strategy = if uses_lookup_tables {
+                    CommitStrategy::FromBufferWithLookupTable
+                } else {
+                    CommitStrategy::FromBuffer
+                };
+
+                if let Err(err) = self.persistor.set_commit_strategy(
+                    commit_task.commit_id,
+                    &commit_task.committed_account.pubkey,
+                    commit_strategy,
+                ) {
+                    error!(
+                        "Failed to persist commit strategy {}: {}",
+                        commit_strategy.as_str(),
+                        err
+                    );
+                }
+            }
+        }
+    }
+}

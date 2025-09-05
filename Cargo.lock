@@ -1309,7 +1309,7 @@ dependencies = [
  "conjunto-addresses",
  "conjunto-core",
  "conjunto-providers",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c)",
  "serde",
  "solana-rpc-client",
  "solana-rpc-client-api",
@@ -1878,6 +1878,12 @@ name = "downcast"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
+
+[[package]]
+name = "dyn-clone"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "eager"
@@ -3778,6 +3784,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86ea4e65087ff52f3862caff188d489f1fab49a0cb09e01b2e3f1a617b10aaed"
+dependencies = [
+ "hashbrown 0.15.4",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3847,6 +3862,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-metrics",
  "magicblock-mutator",
+ "magicblock-rpc-client",
  "solana-sdk",
  "thiserror 1.0.69",
  "tokio",
@@ -3910,6 +3926,7 @@ dependencies = [
  "async-trait",
  "conjunto-transwise",
  "futures-util",
+ "itertools 0.14.0",
  "log",
  "magicblock-account-cloner",
  "magicblock-account-dumper",
@@ -3920,7 +3937,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-processor",
@@ -3988,7 +4005,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-geyser-plugin",
  "magicblock-ledger",
  "magicblock-metrics",
@@ -4078,13 +4095,18 @@ dependencies = [
  "base64 0.21.7",
  "bincode",
  "borsh 1.5.7",
- "env_logger 0.11.8",
+ "dyn-clone",
+ "futures-util",
  "lazy_static",
  "log",
+ "lru 0.16.0",
  "magicblock-committor-program",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+ "magicblock-metrics",
+ "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
+ "rand 0.8.5",
  "rusqlite",
  "solana-account",
  "solana-pubkey",
@@ -4093,6 +4115,7 @@ dependencies = [
  "solana-sdk",
  "solana-transaction-status-client-types",
  "static_assertions",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.15",
@@ -4140,13 +4163,32 @@ dependencies = [
 name = "magicblock-core"
 version = "0.1.7"
 dependencies = [
- "solana-sdk",
+ "bincode",
+ "serde",
+ "solana-account",
+ "solana-program",
 ]
 
 [[package]]
 name = "magicblock-delegation-program"
 version = "1.0.0"
 source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c#4af7f1cefe0915f0760ed5c38b25b7d41c31a474"
+dependencies = [
+ "bincode",
+ "borsh 1.5.7",
+ "bytemuck",
+ "num_enum",
+ "paste",
+ "solana-curve25519",
+ "solana-program",
+ "solana-security-txt",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "magicblock-delegation-program"
+version = "1.0.0"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20#5fb8d20f3567113dc75c2c8047a80129f792c5bb"
 dependencies = [
  "bincode",
  "borsh 1.5.7",
@@ -4441,7 +4483,7 @@ dependencies = [
  "log",
  "magicblock-accounts",
  "magicblock-config",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-rpc-client",

@@ -199,6 +199,21 @@ lazy_static::lazy_static! {
         "evicted_accounts", "number of accounts forcefully removed from monitored list and database",
     ).unwrap();
 
+
+    // -----------------
+    // CommittorService
+    // -----------------
+    static ref COMMITTOR_INTENTS_BACKLOG_COUNT: IntGauge = IntGauge::new(
+        "committor_intent_backlog_count", "Number of intents in backlog",
+    ).unwrap();
+
+    static ref COMMITTOR_FAILED_INTENTS_COUNT: IntCounter = IntCounter::new(
+        "committor_failed_intents_count", "Number of failed to be executed intents",
+    ).unwrap();
+
+    static ref COMMITTOR_EXECUTORS_BUSY_COUNT: IntGauge = IntGauge::new(
+        "committor_executors_busy_count", "Number of busy intent executors"
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -245,6 +260,9 @@ pub(crate) fn register() {
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(SUBSCRIPTIONS_COUNT_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
+        register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
+        register!(COMMITTOR_FAILED_INTENTS_COUNT);
+        register!(COMMITTOR_EXECUTORS_BUSY_COUNT);
     });
 }
 
@@ -442,6 +460,18 @@ pub fn adjust_monitored_accounts_count(count: usize) {
 }
 pub fn inc_evicted_accounts_count() {
     EVICTED_ACCOUNTS_COUNT.inc();
+}
+
+pub fn set_committor_intents_backlog_count(value: i64) {
+    COMMITTOR_INTENTS_BACKLOG_COUNT.set(value)
+}
+
+pub fn inc_committor_failed_intents_count() {
+    COMMITTOR_FAILED_INTENTS_COUNT.inc()
+}
+
+pub fn set_committor_executors_busy_count(value: i64) {
+    COMMITTOR_EXECUTORS_BUSY_COUNT.set(value)
 }
 
 pub fn observe_flush_accounts_time<T, F>(f: F) -> T

@@ -8,4 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-solana-sdk = { workspace = true }
+solana-program = { workspace = true }
+bincode = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+solana-account = { workspace = true }
