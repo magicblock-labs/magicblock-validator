@@ -1,4 +1,3 @@
-use magicblock_magic_program_api;
 use program_schedulecommit_security::ScheduleCommitSecurityInstruction;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
