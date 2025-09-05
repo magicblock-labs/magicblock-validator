@@ -1,9 +1,9 @@
-use chainlink::{
+use log::*;
+use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_subscribed, assert_subscribed,
-    skip_if_no_test_validator, testing::init_logger,
+    testing::init_logger,
 };
-use log::*;
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::accounts::{
     sanitized_transaction_with_accounts, TransactionAccounts,
@@ -13,7 +13,6 @@ use test_chainlink::ixtest_context::IxtestContext;
 #[tokio::test]
 async fn ixtest_feepayer_with_delegated_ephemeral_balance() {
     init_logger();
-    skip_if_no_test_validator!();
     let payer_kp = Keypair::new();
 
     let ctx = IxtestContext::init().await;
@@ -48,7 +47,6 @@ async fn ixtest_feepayer_with_delegated_ephemeral_balance() {
 #[tokio::test]
 async fn ixtest_feepayer_with_undelegated_ephemeral_balance() {
     init_logger();
-    skip_if_no_test_validator!();
     let payer_kp = Keypair::new();
 
     let ctx = IxtestContext::init().await;
@@ -83,7 +81,6 @@ async fn ixtest_feepayer_with_undelegated_ephemeral_balance() {
 #[tokio::test]
 async fn ixtest_feepayer_without_ephemeral_balance() {
     init_logger();
-    skip_if_no_test_validator!();
     let payer_kp = Keypair::new();
 
     let ctx = IxtestContext::init().await;
@@ -116,7 +113,6 @@ async fn ixtest_feepayer_without_ephemeral_balance() {
 #[tokio::test]
 async fn ixtest_feepayer_delegated_to_us() {
     init_logger();
-    skip_if_no_test_validator!();
     let payer_kp = Keypair::new();
 
     let ctx = IxtestContext::init().await;

@@ -6,7 +6,6 @@ use magicblock_chainlink::{
     remote_account_provider::program_account::{
         LoadedProgram, ProgramAccountResolver, RemoteProgramLoader,
     },
-    skip_if_no_test_validator,
     testing::init_logger,
 };
 
@@ -17,11 +16,17 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
 };
-use test_chainlink::programs::{
-    airdrop_sol,
-    deploy::{compile_mini, deploy_loader_v4},
-    mini::{load_miniv2_so, load_miniv3_so},
-    send_instructions, MEMOV1, MEMOV2, MINIV2, MINIV3, MINIV3_AUTH, OTHERV1,
+use test_chainlink::{
+    assert_program_owned_by_loader, fetch_and_assert_loaded_program_v1_v2_v4,
+    fetch_and_assert_loaded_program_v3, mini_upload_idl,
+    programs::{
+        airdrop_sol,
+        deploy::{compile_mini, deploy_loader_v4},
+        mini::{load_miniv2_so, load_miniv3_so},
+        send_instructions, MEMOV1, MEMOV2, MINIV2, MINIV3, MINIV3_AUTH,
+        OTHERV1,
+    },
+    test_mini_program, test_mini_program_log_msg,
 };
 
 use test_chainlink::{ixtest_context::IxtestContext, programs::memo};
@@ -48,7 +53,6 @@ fn pretty_bytes(bytes: usize) -> String {
 // -----------------
 #[tokio::test]
 async fn ixtest_fetch_memo_v1_loader_program() {
-    skip_if_no_test_validator!();
     init_logger();
 
     // NOTE: one cannot load a newer program into the v1 loader and
@@ -113,7 +117,6 @@ async fn ixtest_fetch_memo_v1_loader_program() {
 async fn ixtest_fetch_other_v1_loader_program() {
     // This test shows that no v1 program will fail to redeploy with v4 loader
     // Not only the Memo V1
-    skip_if_no_test_validator!();
     init_logger();
 
     let auth_kp = Keypair::new();
@@ -161,7 +164,6 @@ async fn ixtest_fetch_other_v1_loader_program() {
 
 #[tokio::test]
 async fn ixtest_fetch_memo_v2_loader_program_memo_v2() {
-    skip_if_no_test_validator!();
     init_logger();
 
     // The main point of this test is to show that we can load a v2 program
@@ -234,7 +236,6 @@ async fn ixtest_fetch_memo_v2_loader_program_memo_v2() {
 
 #[tokio::test]
 async fn ixtest_fetch_mini_v2_loader_program() {
-    skip_if_no_test_validator!();
     init_logger();
 
     let auth_kp = Keypair::new();
@@ -288,7 +289,6 @@ async fn ixtest_fetch_mini_v2_loader_program() {
 
 #[tokio::test]
 async fn ixtest_fetch_mini_v3_loader_program() {
-    skip_if_no_test_validator!();
     init_logger();
 
     let auth_kp = Keypair::new();
@@ -347,7 +347,6 @@ async fn ixtest_fetch_mini_v3_loader_program() {
 
 #[tokio::test]
 async fn ixtest_fetch_mini_v4_loader_program() {
-    skip_if_no_test_validator!();
     init_logger();
 
     let prog_kp = Keypair::new();
@@ -426,7 +425,6 @@ async fn ixtest_fetch_mini_v4_loader_program() {
 // -----------------
 #[tokio::test]
 async fn ixtest_clone_memo_v1_loader_program() {
-    skip_if_no_test_validator!();
     init_logger();
 
     let ctx = IxtestContext::init().await;
@@ -452,7 +450,6 @@ async fn ixtest_clone_memo_v1_loader_program() {
 
 #[tokio::test]
 async fn ixtest_clone_memo_v2_loader_program() {
-    skip_if_no_test_validator!();
     init_logger();
 
     let ctx = IxtestContext::init().await;
@@ -479,7 +476,6 @@ async fn ixtest_clone_memo_v2_loader_program() {
 const MINI_SIZE: usize = 96504;
 #[tokio::test]
 async fn ixtest_clone_mini_v2_loader_program() {
-    skip_if_no_test_validator!();
     init_logger();
 
     let ctx = IxtestContext::init().await;
@@ -505,7 +501,6 @@ async fn ixtest_clone_mini_v2_loader_program() {
 
 #[tokio::test]
 async fn ixtest_clone_mini_v3_loader_program() {
-    skip_if_no_test_validator!();
     init_logger();
 
     let ctx = IxtestContext::init().await;
@@ -530,7 +525,6 @@ async fn ixtest_clone_mini_v3_loader_program() {
 
 #[tokio::test]
 async fn ixtest_clone_mini_v4_loader_program() {
-    skip_if_no_test_validator!();
     init_logger();
 
     let prog_kp = Keypair::new();
@@ -579,7 +573,6 @@ async fn ixtest_clone_mini_v4_loader_program() {
 
 #[tokio::test]
 async fn ixtest_clone_multiple_programs_v1_v2_v3() {
-    skip_if_no_test_validator!();
     init_logger();
 
     let ctx = IxtestContext::init().await;

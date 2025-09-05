@@ -7,18 +7,17 @@ use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_subscribed, assert_subscribed_without_delegation_record,
-    skip_if_no_test_validator, testing::init_logger,
+    testing::init_logger,
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
 
 use test_chainlink::ixtest_context::IxtestContext;
 
-use crate::utils::sleep_ms;
+use test_chainlink::sleep_ms;
 
 #[tokio::test]
 async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {
     init_logger();
-    skip_if_no_test_validator!();
 
     let ctx = IxtestContext::init().await;
 

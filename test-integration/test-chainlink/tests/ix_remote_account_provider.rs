@@ -8,7 +8,6 @@ use magicblock_chainlink::{
         chain_rpc_client::ChainRpcClientImpl, Endpoint, RemoteAccountProvider,
         RemoteAccountUpdateSource,
     },
-    skip_if_no_test_validator,
     testing::utils::{
         airdrop, await_next_slot, current_slot, dump_remote_account_lamports,
         dump_remote_account_update_source, get_remote_account_lamports,
@@ -49,7 +48,6 @@ async fn init_remote_account_provider() -> RemoteAccountProvider<
 #[tokio::test]
 async fn ixtest_get_non_existing_account() {
     init_logger();
-    skip_if_no_test_validator!();
 
     let remote_account_provider = init_remote_account_provider().await;
 
@@ -64,7 +62,6 @@ async fn ixtest_get_non_existing_account() {
 #[tokio::test]
 async fn ixtest_existing_account_for_future_slot() {
     init_logger();
-    skip_if_no_test_validator!();
 
     let remote_account_provider = init_remote_account_provider().await;
 
@@ -101,9 +98,6 @@ async fn ixtest_existing_account_for_future_slot() {
 async fn ixtest_get_existing_account_for_valid_slot() {
     init_logger();
 
-    init_logger();
-    skip_if_no_test_validator!();
-
     let remote_account_provider = init_remote_account_provider().await;
 
     let pubkey = random_pubkey();
@@ -137,7 +131,6 @@ async fn ixtest_get_existing_account_for_valid_slot() {
 #[tokio::test]
 async fn ixtest_get_multiple_accounts_for_valid_slot() {
     init_logger();
-    skip_if_no_test_validator!();
 
     let remote_account_provider = init_remote_account_provider().await;
 
