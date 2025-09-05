@@ -94,7 +94,7 @@ pub fn send_memo_tx(
                 &[&payer],
                 ephem_blockhash,
             ),
-            &[&payer]
+            &[payer]
         ),
         validator
     );
