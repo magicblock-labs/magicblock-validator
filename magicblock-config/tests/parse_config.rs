@@ -304,7 +304,6 @@ path = "/tmp/program.so"
 "#;
 
     let res = toml::from_str::<EphemeralConfig>(toml);
-    eprintln!("{:?}", res);
     assert!(res.is_err());
 }
 

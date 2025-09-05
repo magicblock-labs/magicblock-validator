@@ -15,7 +15,7 @@ use magicblock_config::{
 use solana_pubkey::pubkey;
 use url::Url;
 
-fn cargo_workspace_dir() -> PathBuf {
+fn cargo_root_dir() -> PathBuf {
     PathBuf::new().join(".").canonicalize().unwrap()
 }
 
@@ -30,9 +30,8 @@ fn parse_config_with_file(config_file_dir: &Path) -> EphemeralConfig {
 
 #[test]
 fn test_load_custom_ws_remote_toml() {
-    let workspace_dir = cargo_workspace_dir();
+    let workspace_dir = cargo_root_dir();
     let config_file_dir = workspace_dir
-        .join("magicblock-config")
         .join("tests")
         .join("fixtures")
         .join("09_custom-ws-remote.toml");
@@ -42,9 +41,8 @@ fn test_load_custom_ws_remote_toml() {
 
 #[test]
 fn test_load_replay_toml() {
-    let workspace_dir = cargo_workspace_dir();
+    let workspace_dir = cargo_root_dir();
     let config_file_dir = workspace_dir
-        .join("magicblock-config")
         .join("tests")
         .join("fixtures")
         .join("12_replay.toml");
@@ -60,9 +58,8 @@ fn test_load_replay_toml() {
 
 #[test]
 fn test_load_local_dev_with_programs_toml() {
-    let workspace_dir = cargo_workspace_dir();
+    let workspace_dir = cargo_root_dir();
     let config_file_dir = workspace_dir
-        .join("magicblock-config")
         .join("tests")
         .join("fixtures")
         .join("06_local-dev-with-programs.toml");
@@ -110,9 +107,8 @@ fn test_load_local_dev_with_programs_toml() {
 
 #[test]
 fn test_load_local_dev_with_programs_toml_envs_override() {
-    let workspace_dir = cargo_workspace_dir();
+    let workspace_dir = cargo_root_dir();
     let config_file_dir = workspace_dir
-        .join("magicblock-config")
         .join("tests")
         .join("fixtures")
         .join("06_local-dev-with-programs.toml");

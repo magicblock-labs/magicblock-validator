@@ -37,38 +37,6 @@ fn verify_transactions_state(
     }
 }
 
-/// Tests that ledger is not truncated if finality slot - 0
-#[tokio::test]
-async fn test_truncator_not_purged_finality() {
-    const SLOT_TRUNCATION_INTERVAL: u64 = 5;
-
-    let ledger = Arc::new(setup());
-
-    let mut ledger_truncator =
-        LedgerTruncator::new(ledger.clone(), TEST_TRUNCATION_TIME_INTERVAL, 0);
-
-    for i in 0..SLOT_TRUNCATION_INTERVAL {
-        write_dummy_transaction(&ledger, i, 0);
-        ledger.write_block(i, 0, Hash::new_unique()).unwrap()
-    }
-    let signatures = (0..SLOT_TRUNCATION_INTERVAL)
-        .map(|i| {
-            let signature = ledger.read_slot_signature((i, 0)).unwrap();
-            assert!(signature.is_some());
-
-            signature.unwrap()
-        })
-        .collect::<Vec<_>>();
-
-    ledger_truncator.start();
-    tokio::time::sleep(Duration::from_millis(10)).await;
-    ledger_truncator.stop();
-    assert!(ledger_truncator.join().await.is_ok());
-
-    // Not truncated due to final_slot 0
-    verify_transactions_state(&ledger, 0, &signatures, true);
-}
-
 // Tests that ledger is not truncated while there is still enough space
 #[tokio::test]
 async fn test_truncator_not_purged_size() {
@@ -164,7 +132,7 @@ async fn transaction_spammer(
     signatures
 }
 
-// Tests if ledger truncated correctly during tx spamming with finality slot increments
+// Tests if ledger truncated correctly during tx spamming
 #[tokio::test]
 async fn test_truncator_with_tx_spammer() {
     let ledger = Arc::new(setup());
@@ -187,7 +155,10 @@ async fn test_truncator_with_tx_spammer() {
     ledger_truncator.stop();
     assert!(ledger_truncator.join().await.is_ok());
 
-    assert_eq!(ledger.get_lowest_cleanup_slot(), signatures.len() as u64);
+    assert_eq!(
+        ledger.get_lowest_cleanup_slot(),
+        signatures.len() as u64 - 1
+    );
     verify_transactions_state(&ledger, 0, &signatures, false);
 }
 

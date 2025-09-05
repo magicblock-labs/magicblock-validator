@@ -1,7 +1,9 @@
 use std::sync::atomic::Ordering;
 
 use log::error;
+use solana_account::ReadableAccount;
 use solana_program::message::SanitizedMessage;
+use solana_sdk_ids::bpf_loader_upgradeable;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
     transaction_processing_result::{
@@ -187,7 +189,11 @@ impl super::TransactionExecutor {
         let accounts = executed.loaded_transaction.accounts.iter();
         for (i, acc) in accounts.enumerate() {
             // Enforce that any account intended to be writable is a delegated account.
-            if message.is_writable(i) && !acc.1.delegated() {
+            if message.is_writable(i)
+                && !acc.1.delegated()
+                && *acc.1.owner() != bpf_loader_upgradeable::ID
+            {
+                println!("account is invalid: {}\n{:?}", acc.0, acc.1);
                 return Err(TransactionError::InvalidWritableAccount);
             }
         }
