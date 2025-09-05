@@ -7,7 +7,7 @@ use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
 
 use crate::errors::TaskSchedulerError;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbTask {
     /// Unique identifier for this task
     pub id: u64,
@@ -22,19 +22,6 @@ pub struct DbTask {
     /// Timestamp of the last execution of this task in milliseconds since UNIX epoch
     pub last_execution_millis: u64,
 }
-
-impl PartialEq for DbTask {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.instructions == other.instructions
-            && self.authority == other.authority
-            && self.execution_interval_millis == other.execution_interval_millis
-            && self.executions_left == other.executions_left
-            && self.last_execution_millis == other.last_execution_millis
-    }
-}
-
-impl Eq for DbTask {}
 
 #[derive(Debug, Clone)]
 pub struct FailedScheduling {
