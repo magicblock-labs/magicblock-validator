@@ -24,7 +24,7 @@ use tokio_util::{
 
 use crate::{
     db::{DbTask, FailedScheduling, FailedTask, SchedulerDatabase},
-    errors::TaskSchedulerError,
+    errors::{TaskSchedulerError, TaskSchedulerResult},
 };
 
 pub struct TaskSchedulerService {
@@ -47,7 +47,7 @@ impl TaskSchedulerService {
         bank: Arc<Bank>,
         token: CancellationToken,
     ) -> Result<
-        tokio::task::JoinHandle<Result<(), TaskSchedulerError>>,
+        tokio::task::JoinHandle<TaskSchedulerResult<()>>,
         TaskSchedulerError,
     > {
         debug!("Initializing task scheduler service");
@@ -92,7 +92,7 @@ impl TaskSchedulerService {
     fn process_context_requests(
         &mut self,
         task_context: &mut TaskContext,
-    ) -> Result<Vec<Result<(), TaskSchedulerError>>, TaskSchedulerError> {
+    ) -> TaskSchedulerResult<Vec<TaskSchedulerError>> {
         let requests = task_context.get_all_requests();
 
         let mut result = Vec::with_capacity(requests.len());
@@ -112,9 +112,7 @@ impl TaskSchedulerService {
                             "Failed to process schedule request {}: {}",
                             schedule_request.id, e
                         );
-                        result.push(Err(e));
-                    } else {
-                        result.push(Ok(()));
+                        result.push(e);
                     }
                     schedule_request.id
                 }
@@ -130,9 +128,7 @@ impl TaskSchedulerService {
                             "Failed to process cancel request for task {}: {}",
                             cancel_request.task_id, e
                         );
-                        result.push(Err(e));
-                    } else {
-                        result.push(Ok(()));
+                        result.push(e);
                     }
                     cancel_request.task_id
                 }
@@ -147,7 +143,7 @@ impl TaskSchedulerService {
     fn process_schedule_request(
         &mut self,
         schedule_request: &ScheduleTaskRequest,
-    ) -> Result<(), TaskSchedulerError> {
+    ) -> TaskSchedulerResult<()> {
         // Convert request to task and register in database
         let task = CrankTask::from(schedule_request);
         self.register_task(&task)?;
@@ -161,7 +157,7 @@ impl TaskSchedulerService {
     fn process_cancel_request(
         &mut self,
         cancel_request: &CancelTaskRequest,
-    ) -> Result<(), TaskSchedulerError> {
+    ) -> TaskSchedulerResult<()> {
         let Some(task) = self.db.get_task(cancel_request.task_id)? else {
             // Task not found in the database, cleanup the queue
             self.remove_task_from_queue(cancel_request.task_id);
@@ -188,10 +184,7 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    fn execute_task(
-        &mut self,
-        task: &DbTask,
-    ) -> Result<(), TaskSchedulerError> {
+    fn execute_task(&mut self, task: &DbTask) -> TaskSchedulerResult<()> {
         trace!("Executing task {}", task.id);
 
         // Execute unsigned transactions
@@ -263,7 +256,7 @@ impl TaskSchedulerService {
     pub fn register_task(
         &mut self,
         task: &CrankTask,
-    ) -> Result<(), TaskSchedulerError> {
+    ) -> TaskSchedulerResult<()> {
         let db_task = DbTask {
             id: task.id,
             instructions: task.instructions.clone(),
@@ -281,10 +274,7 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    pub fn unregister_task(
-        &self,
-        task_id: u64,
-    ) -> Result<(), TaskSchedulerError> {
+    pub fn unregister_task(&self, task_id: u64) -> TaskSchedulerResult<()> {
         self.db.remove_task(task_id)?;
         debug!("Removed task {} from database", task_id);
 
@@ -294,7 +284,7 @@ impl TaskSchedulerService {
     async fn run(
         mut self,
         token: CancellationToken,
-    ) -> Result<(), TaskSchedulerError> {
+    ) -> TaskSchedulerResult<()> {
         let mut interval = tokio::time::interval(self.tick_interval);
         loop {
             select! {
@@ -324,13 +314,7 @@ impl TaskSchedulerService {
                     };
 
                     match self.process_context_requests(&mut task_context) {
-                        Ok(result) => {
-                            let failures = result.into_iter().filter_map(|x| x.err()).collect::<Vec<_>>();
-                            if !failures.is_empty() {
-                                error!("Failed to process some context requests: {:?}", failures);
-                                return Err(TaskSchedulerError::SchedulingRequests(failures));
-                            }
-
+                        Ok(result) if result.is_empty() => {
                             // Write the updated context back to the account
                             let Ok(serialized) = bincode::serialize(&task_context) else {
                                 error!("Failed to serialize task context");
@@ -338,6 +322,12 @@ impl TaskSchedulerService {
                             };
                             context_account.set_data(serialized);
                             self.bank.store_account(TASK_CONTEXT_PUBKEY, context_account);
+                        }
+                        Ok(result) => {
+                            for error in &result {
+                                error!("Failed to process some context requests: {:?}", error);
+                            }
+                            return Err(TaskSchedulerError::SchedulingRequests(result));
                         }
                         Err(e) => {
                             error!("Failed to process context requests: {}", e);

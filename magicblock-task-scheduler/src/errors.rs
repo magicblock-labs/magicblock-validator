@@ -1,6 +1,8 @@
 use solana_program::example_mocks::solana_rpc_client_api;
 use thiserror::Error;
 
+pub type TaskSchedulerResult<T> = Result<T, TaskSchedulerError>;
+
 #[derive(Error, Debug)]
 pub enum TaskSchedulerError {
     #[error(transparent)]
