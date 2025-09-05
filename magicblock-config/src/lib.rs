@@ -16,6 +16,7 @@ mod ledger;
 mod metrics;
 mod program;
 mod rpc;
+mod task_scheduler;
 mod validator;
 pub use accounts::*;
 pub use accounts_db::*;
@@ -25,6 +26,7 @@ pub use ledger::*;
 pub use metrics::*;
 pub use program::*;
 pub use rpc::*;
+pub use task_scheduler::*;
 pub use validator::*;
 
 #[derive(
@@ -66,6 +68,9 @@ pub struct EphemeralConfig {
     #[serde(default)]
     #[command(flatten)]
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    #[command(flatten)]
+    pub task_scheduler: TaskSchedulerConfig,
 }
 
 impl EphemeralConfig {
@@ -274,6 +279,10 @@ mod tests {
                     port: 9090,
                 },
             },
+            task_scheduler: TaskSchedulerConfig {
+                reset: true,
+                millis_per_tick: 1000,
+            },
         };
         let original_config = config.clone();
         let other = EphemeralConfig::default();
@@ -363,6 +372,10 @@ mod tests {
                     port: 9090,
                 },
             },
+            task_scheduler: TaskSchedulerConfig {
+                reset: true,
+                millis_per_tick: 1000,
+            },
         };
 
         config.merge(other.clone());
@@ -449,6 +462,10 @@ mod tests {
                     port: 9090,
                 },
             },
+            task_scheduler: TaskSchedulerConfig {
+                reset: true,
+                millis_per_tick: 2000,
+            },
         };
         let original_config = config.clone();
         let other = EphemeralConfig {
@@ -528,6 +545,10 @@ mod tests {
                     port: 9090,
                 },
             },
+            task_scheduler: TaskSchedulerConfig {
+                reset: true,
+                millis_per_tick: 1000,
+            },
         };
 
         config.merge(other);
@@ -574,6 +595,7 @@ mod tests {
             },
             programs: vec![],
             metrics: MetricsConfig::default(),
+            task_scheduler: TaskSchedulerConfig::default(),
         };
 
         config.merge(other.clone());

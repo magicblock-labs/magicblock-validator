@@ -37,6 +37,7 @@ magicblock-pubsub = { workspace = true }
 magicblock-rpc = { workspace = true }
 magicblock-transaction-status = { workspace = true }
 magicblock-validator-admin = { workspace = true }
+magicblock-task-scheduler = { workspace = true }
 magic-domain-program = { workspace = true }
 solana-geyser-plugin-interface = { workspace = true }
 solana-rpc-client = { workspace = true }
