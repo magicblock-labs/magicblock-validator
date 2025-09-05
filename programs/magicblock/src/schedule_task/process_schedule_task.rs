@@ -10,6 +10,7 @@ use crate::{
     task_context::{ScheduleTaskRequest, TaskContext, MIN_EXECUTION_INTERVAL},
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+        get_writable_with_idx,
     },
 };
 
@@ -61,10 +62,38 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    // Check that all writable accounts in the task instructions are present in the instruction pubkeys
+    // Check that all writable accounts in the task instructions are writable in the instruction pubkeys
     let instruction_pubkeys = (ACCOUNTS_START..ix_accs_len)
         .map(|idx| {
-            get_instruction_pubkey_with_idx(transaction_context, idx as u16)
+            let pubkey = match get_instruction_pubkey_with_idx(
+                transaction_context,
+                idx as u16,
+            ) {
+                Ok(pubkey) => pubkey,
+                Err(e) => {
+                    ic_msg!(
+                        invoke_context,
+                        "ScheduleTask ERR: failed to get instruction context: {}",
+                        e
+                    );
+                    return Err(e);
+                }
+            };
+            let writable = match get_writable_with_idx(transaction_context, idx as u16) {
+                Ok(writable) => writable,
+                Err(e) => {
+                    ic_msg!(
+                        invoke_context,
+                        "ScheduleTask ERR: failed to get writable: {}",
+                        e
+                    );
+                    return Err(e);
+                }
+            };
+            Ok((
+                pubkey,
+                writable,
+            ))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -79,7 +108,7 @@ pub(crate) fn process_schedule_task(
         .collect::<Vec<_>>();
 
     for writable_pubkey in &writable_accounts {
-        if !instruction_pubkeys.contains(&writable_pubkey) {
+        if !instruction_pubkeys.contains(&(writable_pubkey, true)) {
             ic_msg!(
                 invoke_context,
                 "ScheduleTask ERR: writable account {} not provided in instruction pubkeys",
@@ -342,7 +371,7 @@ mod test {
 
         for (writable, signer, expected_result) in [
             (true, true, Ok(())),
-            (false, true, Ok(())),
+            (false, true, Err(InstructionError::InvalidAccountOwner)),
             (true, false, Err(InstructionError::InvalidAccountOwner)),
             (false, false, Err(InstructionError::InvalidAccountOwner)),
         ] {

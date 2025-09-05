@@ -424,7 +424,7 @@ fn process_schedule_task(
         vec![
             AccountMeta::new(*payer_info.key, true),
             AccountMeta::new(*task_context_info.key, false),
-            AccountMeta::new_readonly(*counter_pda_info.key, true),
+            AccountMeta::new(*counter_pda_info.key, true),
         ],
     );
 
