@@ -9,8 +9,8 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 solana-program = { workspace = true }
-solana-system-interface = { workspace = true, features = ["bincode"] }
 solana-sdk-ids = { workspace = true }
+solana-system-interface = { workspace = true, features = ["bincode"] }
 
 [dev-dependencies]
 solana-program-test = { workspace = true }
@@ -21,3 +21,5 @@ tokio = { workspace = true, features = ["full"] }
 no-entrypoint = []
 custom-heap = []
 custom-panic = []
+cpi = ["no-entrypoint"]
+default = []
