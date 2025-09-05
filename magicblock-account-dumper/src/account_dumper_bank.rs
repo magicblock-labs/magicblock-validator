@@ -146,14 +146,7 @@ impl AccountDumper for AccountDumperBank {
         .map_err(AccountDumperError::MutatorModificationError)?;
         let program_idl_modification =
             program_idl.map(|(program_idl_pubkey, program_idl_account)| {
-                AccountModification {
-                    pubkey: program_idl_pubkey,
-                    lamports: Some(program_idl_account.lamports),
-                    owner: Some(program_idl_account.owner),
-                    executable: Some(program_idl_account.executable),
-                    data: Some(program_idl_account.data.clone()),
-                    rent_epoch: Some(program_idl_account.rent_epoch),
-                }
+                from_account(program_idl_pubkey, &program_idl_account)
             });
         let needs_upgrade = self.bank.has_account(program_id_pubkey);
         let transaction = transaction_to_clone_program(
@@ -183,14 +176,8 @@ impl AccountDumper for AccountDumperBank {
             slot,
         );
 
-        let mut program_id_modification = AccountModification {
-            pubkey: *program_pubkey,
-            lamports: Some(program_account.lamports),
-            owner: Some(program_account.owner),
-            executable: Some(program_account.executable),
-            data: Some(program_account.data.clone()),
-            rent_epoch: Some(program_account.rent_epoch),
-        };
+        let mut program_id_modification =
+            from_account(*program_pubkey, program_account);
         // point program account to the derived program data account address
         let program_id_state =
             bincode::serialize(&UpgradeableLoaderState::Program {
@@ -219,5 +206,16 @@ impl AccountDumper for AccountDumperBank {
             self.bank.last_blockhash(),
         );
         self.execute_transaction(transaction)
+    }
+}
+
+fn from_account(pubkey: Pubkey, account: &Account) -> AccountModification {
+    AccountModification {
+        pubkey,
+        lamports: Some(account.lamports),
+        owner: Some(account.owner),
+        executable: Some(account.executable),
+        data: Some(account.data.clone()),
+        rent_epoch: Some(account.rent_epoch),
     }
 }
