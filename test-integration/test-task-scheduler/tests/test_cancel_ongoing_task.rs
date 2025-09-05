@@ -1,5 +1,3 @@
-use std::thread::sleep;
-
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_program::{ID as MAGIC_PROGRAM_ID, TASK_CONTEXT_PUBKEY};
@@ -68,7 +66,7 @@ fn test_cancel_ongoing_task() {
     );
 
     // Wait for account to be delegated
-    sleep(std::time::Duration::from_secs(3));
+    expect!(ctx.wait_for_delta_slot_ephem(2), validator);
 
     // Schedule a task
     let task_id = 3;
@@ -128,7 +126,7 @@ fn test_cancel_ongoing_task() {
     );
 
     // Wait for the task to be cancelled
-    sleep(std::time::Duration::from_secs(1));
+    expect!(ctx.wait_for_delta_slot_ephem(2), validator);
 
     // Check that the task was cancelled
     let db = expect!(SchedulerDatabase::new(db_path), validator);

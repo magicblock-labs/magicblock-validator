@@ -1,5 +1,3 @@
-use std::thread::sleep;
-
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_program::{ID as MAGIC_PROGRAM_ID, TASK_CONTEXT_PUBKEY};
@@ -69,7 +67,7 @@ fn test_schedule_error() {
     );
 
     // Wait for account to be delegated
-    sleep(std::time::Duration::from_secs(3));
+    expect!(ctx.wait_for_delta_slot_ephem(2), validator);
 
     // Schedule a task
     let task_id = 2;
