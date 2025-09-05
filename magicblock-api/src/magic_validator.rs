@@ -1,6 +1,6 @@
 use std::{
     net::SocketAddr,
-    path::{Path, PathBuf},
+    path::Path,
     process,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -89,7 +89,6 @@ use solana_sdk::{
     signature::Keypair,
     signer::Signer,
 };
-use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -210,13 +209,12 @@ impl MagicValidator {
             Self::init_ledger(&config.validator_config.ledger)?;
         info!("Starting slot: {}", starting_slot);
 
-        if !config.validator_config.ledger.skip_keypair_match_check {
-            Self::sync_validator_keypair_with_ledger(
-                ledger.ledger_path(),
-                &identity_keypair,
-                ledger_resume_strategy,
-            )?;
-        }
+        Self::sync_validator_keypair_with_ledger(
+            ledger.ledger_path(),
+            &identity_keypair,
+            ledger_resume_strategy,
+            config.validator_config.ledger.skip_keypair_match_check,
+        )?;
 
         // SAFETY:
         // this code will never panic as the ledger_path always appends the
@@ -249,11 +247,8 @@ impl MagicValidator {
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
-        let faucet_keypair = funded_faucet(
-            &bank,
-            ledger.ledger_path().as_path(),
-            ledger_resume_strategy,
-        )?;
+        let faucet_keypair =
+            funded_faucet(&bank, ledger.ledger_path().as_path())?;
 
         load_programs_into_bank(
             &bank,
@@ -554,13 +549,7 @@ impl MagicValidator {
     fn init_ledger(
         ledger_config: &LedgerConfig,
     ) -> ApiResult<(Arc<Ledger>, Slot)> {
-        let ledger_path = match &ledger_config.path {
-            Some(ledger_path) => PathBuf::from(ledger_path),
-            None => {
-                let ledger_path = TempDir::new()?;
-                ledger_path.path().to_path_buf()
-            }
-        };
+        let ledger_path = Path::new(&ledger_config.path);
         let (ledger, last_slot) = ledger::init(ledger_path, ledger_config)?;
         let ledger_shared = Arc::new(ledger);
         init_persister(ledger_shared.clone());
@@ -571,13 +560,16 @@ impl MagicValidator {
         ledger_path: &Path,
         validator_keypair: &Keypair,
         resume_strategy: &LedgerResumeStrategy,
+        skip_keypair_match_check: bool,
     ) -> ApiResult<()> {
         if resume_strategy.is_removing_ledger() {
             write_validator_keypair_to_ledger(ledger_path, validator_keypair)?;
-        } else {
-            let ledger_validator_keypair =
-                read_validator_keypair_from_ledger(ledger_path)?;
-            if ledger_validator_keypair.ne(validator_keypair) {
+        } else if let Ok(ledger_validator_keypair) =
+            read_validator_keypair_from_ledger(ledger_path)
+        {
+            if ledger_validator_keypair.ne(validator_keypair)
+                && !skip_keypair_match_check
+            {
                 return Err(
                     ApiError::LedgerValidatorKeypairNotMatchingProvidedKeypair(
                         ledger_path.display().to_string(),
@@ -585,7 +577,10 @@ impl MagicValidator {
                     ),
                 );
             }
+        } else {
+            write_validator_keypair_to_ledger(ledger_path, validator_keypair)?;
         }
+
         Ok(())
     }
 
