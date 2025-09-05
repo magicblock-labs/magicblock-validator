@@ -21,6 +21,7 @@ members = [
   "magicblock-config-helpers",
   "magicblock-config-macro",
   "magicblock-core",
+  "magicblock-magic-program-api",
   "magicblock-geyser-plugin",
   "magicblock-ledger",
   "magicblock-metrics",
@@ -129,6 +130,7 @@ magicblock-mutator = { path = "./magicblock-mutator" }
 magicblock-perf-service = { path = "./magicblock-perf-service" }
 magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
+magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
 magicblock-pubsub = { path = "./magicblock-pubsub" }
 magicblock-rpc = { path = "./magicblock-rpc" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }

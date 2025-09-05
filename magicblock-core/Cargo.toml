@@ -8,7 +8,4 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-solana-program = { workspace = true }
-bincode = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-solana-account = { workspace = true }
+magicblock-magic-program-api = { workspace = true }

@@ -1,4 +1,3 @@
-use magicblock_core::magic_program;
 use program_schedulecommit::api::schedule_commit_cpi_instruction;
 use schedulecommit_client::{
     ScheduleCommitTestContext, ScheduleCommitTestContextFields,
@@ -82,8 +81,8 @@ fn test_schedule_commit_directly_with_single_ix() {
     } = ctx.fields();
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
-        magic_program::id(),
-        magic_program::MAGIC_CONTEXT_PUBKEY,
+        magicblock_magic_program_api::id(),
+        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
 
@@ -122,8 +121,8 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
 
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
-        magic_program::id(),
-        magic_program::MAGIC_CONTEXT_PUBKEY,
+        magicblock_magic_program_api::id(),
+        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
         &[payer.pubkey()],
     );
 
@@ -184,8 +183,8 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     // 2. Schedule commit
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
-        magic_program::id(),
-        magic_program::MAGIC_CONTEXT_PUBKEY,
+        magicblock_magic_program_api::id(),
+        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
 
@@ -296,8 +295,8 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
 
     let cpi_ix = schedule_commit_cpi_instruction(
         payer.pubkey(),
-        magic_program::id(),
-        magic_program::MAGIC_CONTEXT_PUBKEY,
+        magicblock_magic_program_api::id(),
+        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
         players,
         pdas,
     );

@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashSet};
 
-use magicblock_core::magic_program::args::{
+use magicblock_magic_program_api::args::{
     ActionArgs, BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
     MagicBaseIntentArgs, UndelegateTypeArgs,
 };

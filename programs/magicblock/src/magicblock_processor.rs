@@ -1,4 +1,4 @@
-use magicblock_core::magic_program::instruction::MagicBlockInstruction;
+use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 use solana_program_runtime::declare_process_instruction;
 use solana_sdk::program_utils::limited_deserialize;
 
