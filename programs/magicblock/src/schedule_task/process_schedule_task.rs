@@ -180,7 +180,7 @@ pub(crate) fn process_schedule_task(
 
 #[cfg(test)]
 mod test {
-    use magicblock_core::magic_program::{
+    use magicblock_magic_program_api::{
         instruction::MagicBlockInstruction, TASK_CONTEXT_PUBKEY,
     };
     use solana_sdk::{

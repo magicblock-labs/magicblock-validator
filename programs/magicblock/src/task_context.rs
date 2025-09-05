@@ -3,7 +3,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-use magicblock_magic_program_api::TASK_CONTEXT_SIZE;
 use serde::{Deserialize, Serialize};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -53,9 +52,6 @@ pub struct TaskContext {
 }
 
 impl TaskContext {
-    pub const SIZE: usize = TASK_CONTEXT_SIZE;
-    pub const ZERO: [u8; Self::SIZE] = [0; Self::SIZE];
-
     pub fn schedule_task(
         invoke_context: &InvokeContext,
         context_account: &RefCell<AccountSharedData>,

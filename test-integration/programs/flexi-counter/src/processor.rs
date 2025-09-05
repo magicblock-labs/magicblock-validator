@@ -13,7 +13,7 @@ use ephemeral_rollups_sdk::{
     },
     ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
-use magicblock_core::magic_program::{
+use magicblock_magic_program_api::{
     args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
 };
 use solana_program::{
