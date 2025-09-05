@@ -102,6 +102,15 @@ pub(crate) fn get_instruction_pubkey_with_idx(
     Ok(pubkey)
 }
 
+pub(crate) fn get_writable_with_idx(
+    transaction_context: &TransactionContext,
+    idx: u16,
+) -> Result<bool, InstructionError> {
+    let ix_ctx = transaction_context.get_current_instruction_context()?;
+    let writable = ix_ctx.is_instruction_account_writable(idx)?;
+    Ok(writable)
+}
+
 pub(crate) fn get_instruction_account_short_meta_with_idx(
     transaction_context: &TransactionContext,
     idx: u16,

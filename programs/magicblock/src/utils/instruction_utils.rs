@@ -211,7 +211,7 @@ impl InstructionUtils {
             AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
         ];
         for pubkey in pdas {
-            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+            account_metas.push(AccountMeta::new(*pubkey, true));
         }
 
         Instruction::new_with_bincode(
