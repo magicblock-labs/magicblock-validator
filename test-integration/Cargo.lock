@@ -3621,9 +3621,9 @@ dependencies = [
  "magicblock-accounts-api",
  "magicblock-committor-service",
  "magicblock-config",
- "magicblock-core 0.1.7",
  "magicblock-metrics",
  "magicblock-mutator",
+ "magicblock-program",
  "magicblock-rpc-client",
  "solana-sdk",
  "thiserror 1.0.69",
@@ -3696,6 +3696,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-core 0.1.7",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+ "magicblock-magic-program-api",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-processor",
@@ -3764,6 +3765,7 @@ dependencies = [
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-geyser-plugin",
  "magicblock-ledger",
+ "magicblock-magic-program-api",
  "magicblock-metrics",
  "magicblock-perf-service",
  "magicblock-processor",
@@ -3903,7 +3905,7 @@ dependencies = [
 name = "magicblock-core"
 version = "0.1.7"
 dependencies = [
- "magicblock-magic-program",
+ "magicblock-magic-program-api",
 ]
 
 [[package]]
@@ -4009,7 +4011,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-magic-program"
+name = "magicblock-magic-program-api"
 version = "0.1.7"
 dependencies = [
  "bincode",
@@ -4081,6 +4083,7 @@ dependencies = [
  "bincode",
  "lazy_static",
  "magicblock-core 0.1.7",
+ "magicblock-magic-program-api",
  "magicblock-metrics",
  "num-derive",
  "num-traits",

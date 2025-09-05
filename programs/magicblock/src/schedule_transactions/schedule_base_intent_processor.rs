@@ -1,4 +1,4 @@
-use magicblock_core::magic_program::args::MagicBaseIntentArgs;
+use magicblock_magic_program_api::args::MagicBaseIntentArgs;
 use solana_sdk::instruction::InstructionError;
 
 use crate::{

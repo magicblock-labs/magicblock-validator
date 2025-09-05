@@ -2,7 +2,9 @@ use std::path::Path;
 
 use magicblock_bank::bank::Bank;
 use magicblock_config::LedgerResumeStrategy;
-use magicblock_core::magic_program;
+use magicblock_magic_program_api::{
+    self, MAGIC_CONTEXT_PUBKEY, MAGIC_CONTEXT_SIZE,
+};
 use solana_sdk::{
     account::Account, clock::Epoch, pubkey::Pubkey, signature::Keypair,
     signer::Signer, system_program,
@@ -74,8 +76,8 @@ pub(crate) fn funded_faucet(
 pub(crate) fn fund_magic_context(bank: &Bank) {
     fund_account_with_data(
         bank,
-        &magic_program::MAGIC_CONTEXT_PUBKEY,
+        &MAGIC_CONTEXT_PUBKEY,
         u64::MAX,
-        vec![0; magic_program::MAGIC_CONTEXT_SIZE],
+        vec![0; MAGIC_CONTEXT_SIZE],
     );
 }

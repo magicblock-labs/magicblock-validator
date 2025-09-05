@@ -1,5 +1,5 @@
 [package]
-name = "magicblock-magic-program"
+name = "magicblock-magic-program-api"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
