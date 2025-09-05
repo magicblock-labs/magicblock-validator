@@ -808,6 +808,12 @@ impl MagicValidator {
             self.bank.clone(),
             self.token.clone(),
         )?;
+        // TODO: we should shutdown gracefully.
+        // This is discussed in this comment:
+        // https://github.com/magicblock-labs/magicblock-validator/pull/493#discussion_r2324560798
+        // However there is no proper solution for this right now.
+        // An issue to create a shutdown system is open here:
+        // https://github.com/magicblock-labs/magicblock-validator/issues/524
         self.task_scheduler_handle = Some(tokio::spawn(async move {
             match task_scheduler_handle.await {
                 Ok(Ok(())) => {}
