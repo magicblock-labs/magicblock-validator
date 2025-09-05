@@ -33,7 +33,7 @@ id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 path = "../schedulecommit/elfs/dlp.so"
 
 [[program]]
-id = "CoMtrr6j336NSB5PAoAWpLe5hPgkcShWKbPgHhZxaxh"
+id = "ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq"
 path = "../../target/deploy/magicblock_committor_program.so"
 
 [[program]]

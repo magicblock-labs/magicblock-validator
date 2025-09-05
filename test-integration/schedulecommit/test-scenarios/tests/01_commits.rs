@@ -23,7 +23,7 @@ mod utils;
 //  protocol fees vault:      7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg
 //  validator fees vault:     DUH8h7rYjdTPYyBUEGAUwZv9ffz5wiM45GdYWYzogXjp
 //  delegation program:       DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh
-//  committor program:        CoMtrr6j336NSB5PAoAWpLe5hPgkcShWKbPgHhZxaxh
+//  committor program:        ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq
 
 #[test]
 fn test_committing_one_account() {
