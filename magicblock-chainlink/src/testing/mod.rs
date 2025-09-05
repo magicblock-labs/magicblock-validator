@@ -1,6 +1,8 @@
 #[cfg(any(test, feature = "dev-context"))]
 pub mod accounts;
 #[cfg(any(test, feature = "dev-context"))]
+pub mod chain_pubsub;
+#[cfg(any(test, feature = "dev-context"))]
 pub mod cloner_stub;
 #[cfg(any(test, feature = "dev-context"))]
 pub mod deleg;

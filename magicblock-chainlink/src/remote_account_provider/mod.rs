@@ -35,7 +35,7 @@ use tokio::{
     task::{self, JoinSet},
 };
 
-mod chain_pubsub_actor;
+pub(crate) mod chain_pubsub_actor;
 pub mod chain_pubsub_client;
 pub mod chain_rpc_client;
 pub mod config;
