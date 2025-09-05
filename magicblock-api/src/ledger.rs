@@ -17,38 +17,33 @@ use crate::errors::{ApiError, ApiResult};
 // Init
 // -----------------
 pub(crate) fn init(
-    ledger_path: PathBuf,
+    ledger_path: &Path,
     ledger_config: &LedgerConfig,
 ) -> ApiResult<(Ledger, Slot)> {
     let resume_strategy = &ledger_config.resume_strategy();
     let starting_slot = match resume_strategy {
         LedgerResumeStrategy::Resume { .. } => {
-            let previous_ledger = Ledger::open(ledger_path.as_path())?;
+            let previous_ledger = Ledger::open(ledger_path)?;
             previous_ledger.get_max_blockhash().map(|(slot, _)| slot)?
         }
         LedgerResumeStrategy::Reset { slot, .. } => *slot,
     };
 
     if resume_strategy.is_removing_ledger() {
-        remove_ledger_directory_if_exists(
-            ledger_path.as_path(),
-            resume_strategy,
-        )
-        .map_err(|err| {
-            error!(
-                "Error: Unable to remove {}: {}",
-                ledger_path.display(),
-                err
-            );
-            ApiError::UnableToCleanLedgerDirectory(
-                ledger_path.display().to_string(),
-            )
-        })?;
+        remove_ledger_directory_if_exists(ledger_path, resume_strategy)
+            .map_err(|err| {
+                error!(
+                    "Error: Unable to remove {}: {}",
+                    ledger_path.display(),
+                    err
+                );
+                ApiError::UnableToCleanLedgerDirectory(
+                    ledger_path.display().to_string(),
+                )
+            })?;
     }
 
-    fs::create_dir_all(&ledger_path)?;
-
-    Ok((Ledger::open(ledger_path.as_path())?, starting_slot))
+    Ok((Ledger::open(ledger_path)?, starting_slot))
 }
 
 // -----------------

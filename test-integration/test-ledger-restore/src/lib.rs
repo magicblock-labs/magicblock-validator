@@ -61,7 +61,7 @@ pub fn setup_offline_validator(
         ledger: LedgerConfig {
             resume_strategy_config: resume_strategy.into(),
             skip_keypair_match_check,
-            path: Some(ledger_path.display().to_string()),
+            path: ledger_path.display().to_string(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         },
         accounts: accounts_config.clone(),
@@ -121,7 +121,7 @@ pub fn setup_validator_with_local_remote(
         ledger: LedgerConfig {
             resume_strategy_config,
             skip_keypair_match_check,
-            path: Some(ledger_path.display().to_string()),
+            path: ledger_path.display().to_string(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         },
         accounts: accounts_config.clone(),
