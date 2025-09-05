@@ -187,7 +187,7 @@ pub mod resolve_deploy {
     #[macro_export]
     macro_rules! fetch_and_assert_loaded_program_v3 {
         ($rpc_client:expr, $program_id:expr, $expected:expr) => {{
-            use chainlink::remote_account_provider::program_account::{
+            use magicblock_chainlink::remote_account_provider::program_account::{
                 get_loaderv3_get_program_data_address, ProgramAccountResolver,
             };
             let program_data_addr =
@@ -250,7 +250,7 @@ pub mod memo {
 #[allow(unused)]
 pub mod mini {
     use super::send_instructions;
-    use mini_program::{common::IdlType, sdk};
+    use program_mini::{common::IdlType, sdk};
     use solana_pubkey::Pubkey;
     use solana_rpc_client::nonblocking::rpc_client::RpcClient;
     use solana_sdk::{
@@ -268,17 +268,17 @@ pub mod mini {
             .join("target")
             .join("deploy")
             .join(version)
-            .join("mini_program.so")
+            .join("program_mini.so")
     }
 
     pub fn load_miniv2_so() -> Vec<u8> {
         std::fs::read(program_path("miniv2"))
-            .expect("Failed to read mini_program.so")
+            .expect("Failed to read program_mini.so")
     }
 
     pub fn load_miniv3_so() -> Vec<u8> {
         std::fs::read(program_path("miniv3"))
-            .expect("Failed to read mini_program.so")
+            .expect("Failed to read program_mini.so")
     }
 
     // -----------------
@@ -328,7 +328,7 @@ pub mod mini {
     #[macro_export]
     macro_rules! mini_upload_idl {
         ($rpc_client:expr, $auth_kp:expr, $program_id:expr, $idl_type:expr, $idl:expr) => {{
-            use $crate::utils::programs::mini::send_and_confirm_upload_idl_transaction;
+            use $crate::programs::mini::send_and_confirm_upload_idl_transaction;
             let sig = send_and_confirm_upload_idl_transaction(
                 $rpc_client,
                 $auth_kp,
@@ -337,9 +337,12 @@ pub mod mini {
                 $idl,
             )
             .await;
-            let uploaded_idl =
-                $crate::utils::programs::mini::get_idl($rpc_client, $program_id, $idl_type)
-                    .await;
+            let uploaded_idl = $crate::programs::mini::get_idl(
+                $rpc_client,
+                $program_id,
+                $idl_type,
+            )
+            .await;
             assert!(uploaded_idl.is_some(), "Uploaded IDL should not be None");
             debug!(
                 "Uploaded {} IDL: '{}' via {sig}",
@@ -450,22 +453,27 @@ pub mod mini {
         ($rpc_client:expr, $program_id:expr, $auth_kp:expr) => {{
             use log::*;
             // Initialize the counter
-            let init_signature = $crate::utils::programs::mini::send_and_confirm_init_transaction(
+            let init_signature =
+                $crate::programs::mini::send_and_confirm_init_transaction(
+                    $rpc_client,
+                    $program_id,
+                    $auth_kp,
+                )
+                .await;
+
+            debug!("Initialized counter with signature {}", init_signature);
+            let counter_value = $crate::programs::mini::get_counter(
                 $rpc_client,
                 $program_id,
                 $auth_kp,
             )
             .await;
-
-            debug!("Initialized counter with signature {}", init_signature);
-            let counter_value =
-                $crate::utils::programs::mini::get_counter($rpc_client, $program_id, $auth_kp).await;
             assert_eq!(counter_value, 0, "Counter should be initialized to 0");
             debug!("Counter value after init: {}", counter_value);
 
             // Increment the counter
             let increment_signature =
-                $crate::utils::programs::mini::send_and_confirm_increment_transaction(
+                $crate::programs::mini::send_and_confirm_increment_transaction(
                     $rpc_client,
                     $program_id,
                     $auth_kp,
@@ -475,8 +483,12 @@ pub mod mini {
                 "Incremented counter with signature {}",
                 increment_signature
             );
-            let counter_value =
-                $crate::utils::programs::mini::get_counter($rpc_client, $program_id, $auth_kp).await;
+            let counter_value = $crate::programs::mini::get_counter(
+                $rpc_client,
+                $program_id,
+                $auth_kp,
+            )
+            .await;
             debug!("Counter value after first increment: {}", counter_value);
             assert_eq!(
                 counter_value, 1,
@@ -485,7 +497,7 @@ pub mod mini {
 
             // Increment the counter again
             let increment_signature =
-                $crate::utils::programs::mini::send_and_confirm_increment_transaction(
+                $crate::programs::mini::send_and_confirm_increment_transaction(
                     $rpc_client,
                     $program_id,
                     $auth_kp,
@@ -495,8 +507,12 @@ pub mod mini {
                 "Incremented counter again with signature {}",
                 increment_signature
             );
-            let counter_value =
-                $crate::utils::programs::mini::get_counter($rpc_client, $program_id, $auth_kp).await;
+            let counter_value = $crate::programs::mini::get_counter(
+                $rpc_client,
+                $program_id,
+                $auth_kp,
+            )
+            .await;
             debug!("Counter value after second increment: {}", counter_value);
             assert_eq!(
                 counter_value, 2,
@@ -510,12 +526,14 @@ pub mod mini {
     macro_rules! test_mini_program_log_msg {
         ($rpc_client:expr, $program_id:expr, $auth_kp:expr, $msg:expr) => {{
             use log::*;
-            let log_msg_signature = $crate::utils::programs::mini::send_and_confirm_log_msg_transaction(
-                $rpc_client,
-                $program_id,
-                $auth_kp,
-                $msg,
-            ).await;
+            let log_msg_signature =
+                $crate::programs::mini::send_and_confirm_log_msg_transaction(
+                    $rpc_client,
+                    $program_id,
+                    $auth_kp,
+                    $msg,
+                )
+                .await;
             debug!("Sent log message with signature {}", log_msg_signature);
         }};
     }
@@ -524,7 +542,7 @@ pub mod mini {
 #[allow(unused)]
 pub mod deploy {
     use super::{airdrop_sol, send_instructions, CHUNK_SIZE};
-    use crate::utils::programs::{mini, try_send_instructions};
+    use crate::programs::{mini, try_send_instructions};
     use log::*;
     use solana_loader_v4_interface::instruction::LoaderV4Instruction as LoaderInstructionV4;
     use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -748,7 +766,7 @@ pub mod not_working {
     use solana_system_interface::instruction as system_instruction;
     use std::sync::Arc;
 
-    use chainlink::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
+    use magicblock_chainlink::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
 
     use super::{airdrop_sol, send_transaction, CHUNK_SIZE};
     pub async fn deploy_loader_v1(

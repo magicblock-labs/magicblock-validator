@@ -10287,6 +10287,7 @@ dependencies = [
  "magicblock-chainlink",
  "magicblock-delegation-program",
  "program-flexi-counter",
+ "program-mini",
  "solana-account",
  "solana-loader-v2-interface",
  "solana-loader-v3-interface",
