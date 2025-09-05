@@ -19,6 +19,10 @@ path = "../schedulecommit/elfs/dlp.so"
 id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
 path = "../schedulecommit/elfs/mdp.so"
 
+[[program]]
+id = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+path = "<remote>"
+
 [rpc]
 port = 7799
 

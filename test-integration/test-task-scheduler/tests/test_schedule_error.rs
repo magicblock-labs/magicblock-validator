@@ -13,7 +13,7 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use test_task_scheduler::setup_validator;
+use test_task_scheduler::{send_memo_tx, setup_validator};
 
 // Test that a task with an error is unscheduled
 #[test]
@@ -69,19 +69,13 @@ fn test_schedule_error() {
     // Wait for account to be delegated
     expect!(ctx.wait_for_delta_slot_ephem(2), validator);
 
+    // Noop tx to make sure the noop program is cloned
+    let ephem_blockhash = send_memo_tx(&ctx, &payer, &mut validator);
+
     // Schedule a task
     let task_id = 2;
     let execution_interval_millis = 100;
     let iterations = 3;
-    let ephem_blockhash = expect!(
-        ctx.try_ephem_client().and_then(|client| client
-            .get_latest_blockhash()
-            .map_err(|e| anyhow::anyhow!(
-                "Failed to get latest blockhash: {}",
-                e
-            ))),
-        validator
-    );
     expect!(
         ctx.send_transaction_ephem(
             &mut Transaction::new_signed_with_payer(
