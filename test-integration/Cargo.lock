@@ -5758,40 +5758,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "schedulecommit-committor-service"
-version = "0.0.0"
-dependencies = [
- "log",
- "magicblock-committor-program",
- "magicblock-committor-service",
- "magicblock-delegation-program",
- "magicblock-rpc-client",
- "program-flexi-counter",
- "solana-account",
- "solana-pubkey",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-sdk",
- "tokio",
-]
-
-[[package]]
-name = "schedulecommit-test-scenarios"
-version = "0.0.0"
-dependencies = [
- "ephemeral-rollups-sdk",
- "integration-test-tools",
- "log",
- "magicblock-core",
- "program-schedulecommit",
- "schedulecommit-client",
- "solana-program",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-sdk",
-]
-
-[[package]]
 name = "schedulecommit-test-security"
 version = "0.0.0"
 dependencies = [
@@ -10323,6 +10289,8 @@ dependencies = [
  "program-flexi-counter",
  "solana-account",
  "solana-loader-v2-interface",
+ "solana-loader-v3-interface",
+ "solana-loader-v4-interface",
  "solana-pubkey",
  "solana-rpc-client",
  "solana-rpc-client-api",
@@ -10330,37 +10298,6 @@ dependencies = [
  "solana-sdk-ids",
  "solana-system-interface",
  "tokio",
-]
-
-[[package]]
-name = "test-cloning"
-version = "0.0.0"
-dependencies = [
- "integration-test-tools",
- "solana-sdk",
-]
-
-[[package]]
-name = "test-config"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "cleanass",
- "integration-test-tools",
- "log",
- "magicblock-config",
- "program-flexi-counter",
- "solana-rpc-client",
- "solana-sdk",
- "tempfile",
-]
-
-[[package]]
-name = "test-issues"
-version = "0.0.0"
-dependencies = [
- "integration-test-tools",
- "log",
 ]
 
 [[package]]
@@ -10419,20 +10356,6 @@ dependencies = [
  "ctrlc",
  "integration-test-tools",
  "teepee",
-]
-
-[[package]]
-name = "test-table-mania"
-version = "0.0.0"
-dependencies = [
- "log",
- "magicblock-rpc-client",
- "magicblock-table-mania",
- "paste",
- "solana-pubkey",
- "solana-rpc-client",
- "solana-sdk",
- "tokio",
 ]
 
 [[package]]
