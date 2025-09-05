@@ -1,6 +1,6 @@
 use integration_test_tools::run_test;
 use log::*;
-use magicblock_core::magic_program;
+use magicblock_magic_program_api;
 use program_schedulecommit::api::schedule_commit_cpi_instruction;
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
@@ -41,8 +41,8 @@ fn test_committing_one_account() {
 
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
-            magic_program::id(),
-            magic_program::MAGIC_CONTEXT_PUBKEY,
+            magicblock_magic_program_api::id(),
+            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -91,8 +91,8 @@ fn test_committing_two_accounts() {
 
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
-            magic_program::id(),
-            magic_program::MAGIC_CONTEXT_PUBKEY,
+            magicblock_magic_program_api::id(),
+            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())

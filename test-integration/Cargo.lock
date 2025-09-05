@@ -6018,6 +6018,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "magicblock-core 0.1.7",
+ "magicblock-magic-program-api",
  "program-schedulecommit",
  "schedulecommit-client",
  "solana-program",
@@ -6033,6 +6034,7 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "magicblock-core 0.1.7",
+ "magicblock-magic-program-api",
  "program-schedulecommit",
  "program-schedulecommit-security",
  "schedulecommit-client",
