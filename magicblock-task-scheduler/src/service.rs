@@ -216,7 +216,7 @@ impl TaskSchedulerService {
         let mut tx = Transaction::new_unsigned(Message::new(
             &[noop_instruction]
                 .into_iter()
-                .chain(task.instructions.clone().into_iter())
+                .chain(task.instructions.clone())
                 .collect::<Vec<_>>(),
             Some(&validator_authority_id()),
         ));
