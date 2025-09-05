@@ -1,17 +1,26 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use futures_util::StreamExt;
 use log::*;
 use magicblock_bank::bank::Bank;
 use magicblock_config::TaskSchedulerConfig;
 use magicblock_program::{
-    validator::validator_authority_id, CancelTaskRequest, CrankTask,
-    ScheduleTaskRequest, TaskContext, TaskRequest, TASK_CONTEXT_PUBKEY,
+    validator::{validator_authority, validator_authority_id},
+    CancelTaskRequest, CrankTask, ScheduleTaskRequest, TaskContext,
+    TaskRequest, TASK_CONTEXT_PUBKEY,
 };
 use solana_sdk::{
     account::ReadableAccount,
+    instruction::Instruction,
     message::Message,
-    signature::Signature,
+    pubkey::Pubkey,
     transaction::{SanitizedTransaction, Transaction},
 };
 use solana_svm::transaction_processor::ExecutionRecordingConfig;
@@ -27,6 +36,9 @@ use crate::{
     errors::{TaskSchedulerError, TaskSchedulerResult},
 };
 
+const MEMO_PROGRAM_ID: Pubkey =
+    Pubkey::from_str_const("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+
 pub struct TaskSchedulerService {
     /// Database for persisting tasks
     db: SchedulerDatabase,
@@ -38,6 +50,8 @@ pub struct TaskSchedulerService {
     task_queue: DelayQueue<DbTask>,
     /// Map of task IDs to their corresponding keys in the task queue
     task_queue_keys: HashMap<u64, Key>,
+    /// Counter used to make each transaction unique
+    tx_counter: AtomicU64,
 }
 
 impl TaskSchedulerService {
@@ -73,6 +87,7 @@ impl TaskSchedulerService {
             tick_interval: Duration::from_millis(config.millis_per_tick),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            tx_counter: AtomicU64::default(),
         };
         let now = chrono::Utc::now().timestamp_millis() as u64;
         debug!("Task scheduler started at {}", now);
@@ -188,15 +203,24 @@ impl TaskSchedulerService {
         trace!("Executing task {}", task.id);
 
         // Execute unsigned transactions
+        // We prepend a noop instruction to make each transaction unique.
         let blockhash = self.bank.last_blockhash();
-        let mut tx = Transaction::new_unsigned(Message::new_with_blockhash(
-            &task.instructions,
+        let noop_instruction = Instruction::new_with_bytes(
+            MEMO_PROGRAM_ID,
+            &self
+                .tx_counter
+                .fetch_add(1, Ordering::Relaxed)
+                .to_le_bytes(),
+            vec![],
+        );
+        let mut tx = Transaction::new_unsigned(Message::new(
+            &[noop_instruction]
+                .into_iter()
+                .chain(task.instructions.clone().into_iter())
+                .collect::<Vec<_>>(),
             Some(&validator_authority_id()),
-            &blockhash,
         ));
-        // Task can be scheduled faster than the validator's block time, which could cause duplicate transactions.
-        // Transactions are deduped by their signature, so we need to make sure the signature is unique.
-        tx.signatures[0] = Signature::new_unique();
+        tx.partial_sign(&[validator_authority()], blockhash);
 
         let sanitized_transaction =
             match SanitizedTransaction::try_from_legacy_transaction(

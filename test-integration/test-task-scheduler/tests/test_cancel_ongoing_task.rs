@@ -13,7 +13,7 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use test_task_scheduler::setup_validator;
+use test_task_scheduler::{send_memo_tx, setup_validator};
 
 #[test]
 fn test_cancel_ongoing_task() {
@@ -68,19 +68,13 @@ fn test_cancel_ongoing_task() {
     // Wait for account to be delegated
     expect!(ctx.wait_for_delta_slot_ephem(2), validator);
 
+    // Noop tx to make sure the noop program is cloned
+    let ephem_blockhash = send_memo_tx(&ctx, &payer, &mut validator);
+
     // Schedule a task
     let task_id = 3;
     let execution_interval_millis = 100;
     let iterations = 1000000;
-    let ephem_blockhash = expect!(
-        ctx.try_ephem_client().and_then(|client| client
-            .get_latest_blockhash()
-            .map_err(|e| anyhow::anyhow!(
-                "Failed to get latest blockhash: {}",
-                e
-            ))),
-        validator
-    );
     let sim_result = expect!(
         ctx.try_ephem_client().and_then(|client| client
             .simulate_transaction(&mut Transaction::new_signed_with_payer(
