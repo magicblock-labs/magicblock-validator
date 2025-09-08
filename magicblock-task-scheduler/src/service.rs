@@ -213,15 +213,21 @@ impl TaskSchedulerService {
                 .to_le_bytes(),
             vec![],
         );
-        let mut tx = Transaction::new_unsigned(Message::new(
-            &[noop_instruction]
-                .into_iter()
-                .chain(task.instructions.clone())
-                .collect::<Vec<_>>(),
-            Some(&validator_authority_id()),
-        ));
-        tx.partial_sign(&[validator_authority()], blockhash);
+        let tx = Transaction::new(
+            &[validator_authority()],
+            Message::new(
+                &[noop_instruction]
+                    .into_iter()
+                    .chain(task.instructions.clone())
+                    .collect::<Vec<_>>(),
+                Some(&validator_authority_id()),
+            ),
+            blockhash,
+        );
 
+        // TODO: transaction should be sent to the transaction executor.
+        // This is a work in progress and this should be updated once implemented.
+        // https://github.com/magicblock-labs/magicblock-validator/issues/523
         let sanitized_transaction =
             match SanitizedTransaction::try_from_legacy_transaction(
                 tx,

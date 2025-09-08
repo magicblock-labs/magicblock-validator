@@ -74,6 +74,18 @@ pub enum FlexiCounterInstruction {
     /// 1. `[write]` The counter PDA account that will be updated.
     Add { count: u8 },
 
+    /// Updates the FlexiCounter by adding the count to it without a signer.
+    ///
+    /// Accounts:
+    /// 0. `[write]` The counter PDA account that will be updated.
+    AddUnsigned { count: u8 },
+
+    /// Adds the count to the counter with an error.
+    ///
+    /// Accounts:
+    /// 0. `[write]` The counter PDA account that will be updated.
+    AddError { count: u8 },
+
     /// Updates the FlexiCounter by multiplying  the count with the multiplier.
     ///
     /// Accounts:
@@ -168,20 +180,6 @@ pub enum FlexiCounterInstruction {
     /// 1. `[signer]` The payer that created and is cancelling the task.
     /// 2. `[write]`  Task context account.
     Cancel(CancelArgs),
-
-    /// Adds the count to the counter using a signer.
-    ///
-    /// Accounts:
-    /// 0. `[signer]` The payer that created the account.
-    /// 1. `[signer, write]` The counter PDA account that will be updated.
-    AddSigned { count: u8 },
-
-    /// Adds the count to the counter with an error.
-    ///
-    /// Accounts:
-    /// 0. `[signer]` The payer that created the account.
-    /// 1. `[write]` The counter PDA account that will be updated.
-    AddError { count: u8 },
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -231,6 +229,28 @@ pub fn create_add_ix(payer: Pubkey, count: u8) -> Instruction {
     Instruction::new_with_borsh(
         *program_id,
         &FlexiCounterInstruction::Add { count },
+        accounts,
+    )
+}
+
+pub fn create_add_unsigned_ix(payer: Pubkey, count: u8) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    let accounts = vec![AccountMeta::new(pda, false)];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::AddUnsigned { count },
+        accounts,
+    )
+}
+
+pub fn create_add_error_ix(payer: Pubkey, count: u8) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    let accounts = vec![AccountMeta::new(pda, false)];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::AddError { count },
         accounts,
     )
 }
@@ -458,36 +478,6 @@ pub fn create_cancel_task_ix(
     Instruction::new_with_borsh(
         *program_id,
         &FlexiCounterInstruction::Cancel(CancelArgs { task_id }),
-        accounts,
-    )
-}
-
-pub fn create_add_signed_ix(payer: Pubkey, count: u8) -> Instruction {
-    let program_id = &crate::id();
-    let (pda, _) = FlexiCounter::pda(&payer);
-    let accounts = vec![
-        AccountMeta::new_readonly(payer, true),
-        AccountMeta::new(pda, true),
-    ];
-
-    Instruction::new_with_borsh(
-        *program_id,
-        &FlexiCounterInstruction::AddSigned { count },
-        accounts,
-    )
-}
-
-pub fn create_add_error_ix(payer: Pubkey, count: u8) -> Instruction {
-    let program_id = &crate::id();
-    let (pda, _) = FlexiCounter::pda(&payer);
-    let accounts = vec![
-        AccountMeta::new_readonly(payer, true),
-        AccountMeta::new(pda, false),
-    ];
-
-    Instruction::new_with_borsh(
-        *program_id,
-        &FlexiCounterInstruction::AddError { count },
         accounts,
     )
 }

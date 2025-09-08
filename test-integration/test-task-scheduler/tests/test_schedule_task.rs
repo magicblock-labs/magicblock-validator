@@ -158,6 +158,26 @@ fn test_schedule_task() {
     );
 
     // Cancel the task
+    let sim = expect!(
+        ctx.try_ephem_client().and_then(|client| client
+            .simulate_transaction(&Transaction::new_signed_with_payer(
+                &[create_cancel_task_ix(
+                    payer.pubkey(),
+                    TASK_CONTEXT_PUBKEY,
+                    MAGIC_PROGRAM_ID,
+                    task_id,
+                )],
+                Some(&payer.pubkey()),
+                &[&payer],
+                ephem_blockhash,
+            ),)
+            .map_err(|e| anyhow::anyhow!(
+                "Failed to simulate transaction: {}",
+                e
+            ))),
+        validator
+    );
+    eprintln!("sim: {:?}", sim);
     expect!(
         ctx.send_transaction_ephem(
             &mut Transaction::new_signed_with_payer(
