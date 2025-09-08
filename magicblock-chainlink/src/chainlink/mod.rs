@@ -1,5 +1,6 @@
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use log::*;
+use magicblock_core::traits::AccountsBank;
 use solana_account::AccountSharedData;
 use std::sync::Arc;
 use tokio::{sync::mpsc, task};
@@ -11,7 +12,6 @@ use solana_sdk::{
 };
 
 use crate::{
-    accounts_bank::AccountsBank,
     cloner::Cloner,
     config::ChainlinkConfig,
     fetch_cloner::FetchAndCloneResult,
@@ -72,7 +72,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         })
     }
 
-    pub async fn try_new_from_urls(
+    pub async fn try_new_from_endpoints(
         endpoints: &[Endpoint<'_>],
         commitment: CommitmentConfig,
         accounts_bank: &Arc<V>,

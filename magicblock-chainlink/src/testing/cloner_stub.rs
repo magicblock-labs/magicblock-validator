@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::{
-    accounts_bank::{mock::AccountsBankStub, AccountsBank},
+    accounts_bank::mock::AccountsBankStub,
     cloner::{errors::ClonerResult, Cloner},
     remote_account_provider::program_account::LoadedProgram,
 };
@@ -35,6 +35,8 @@ impl ClonerStub {
 
     #[allow(dead_code)]
     pub fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+        use magicblock_core::traits::AccountsBank;
+
         self.accounts_bank.get_account(pubkey)
     }
 

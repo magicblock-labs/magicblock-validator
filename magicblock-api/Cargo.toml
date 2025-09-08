@@ -23,6 +23,7 @@ magicblock-account-updates = { workspace = true }
 magicblock-accounts = { workspace = true }
 magicblock-accounts-api = { workspace = true }
 magicblock-accounts-db = { workspace = true }
+magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }

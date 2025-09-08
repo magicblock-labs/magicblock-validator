@@ -1,17 +1,10 @@
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 
-// -----------------
-// Trait
-// -----------------
-pub trait AccountsBank: Send + Sync + 'static {
-    fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
-    fn remove_account(&self, pubkey: &Pubkey);
-}
-
 #[cfg(any(test, feature = "dev-context"))]
 pub mod mock {
     use log::*;
+    use magicblock_core::traits::AccountsBank;
     use solana_account::WritableAccount;
     use std::{collections::HashMap, fmt, sync::Mutex};
 

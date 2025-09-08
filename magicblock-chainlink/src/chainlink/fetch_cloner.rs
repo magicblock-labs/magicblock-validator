@@ -1,4 +1,5 @@
 use log::*;
+use magicblock_core::traits::AccountsBank;
 use solana_account::{AccountSharedData, ReadableAccount};
 use std::{
     collections::{HashMap, HashSet},
@@ -14,7 +15,6 @@ use tokio::{
 };
 
 use crate::{
-    accounts_bank::AccountsBank,
     chainlink::blacklisted_accounts::blacklisted_accounts,
     cloner::Cloner,
     remote_account_provider::{

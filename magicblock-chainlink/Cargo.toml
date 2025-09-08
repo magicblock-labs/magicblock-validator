@@ -10,6 +10,7 @@ env_logger = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 lru = { workspace = true }
+magicblock-core = { workspace = true }
 magicblock-delegation-program = { workspace = true }
 serde_json = { workspace = true }
 solana-account = { workspace = true }
