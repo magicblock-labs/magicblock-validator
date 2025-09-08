@@ -4,15 +4,23 @@ use magicblock_magic_program_api::args::ScheduleTaskArgs;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
+#[cfg(test)]
+use solana_sdk::{signature::Keypair, signer::Signer};
 
+#[cfg(not(test))]
+use crate::validator::validator_authority_id;
 use crate::{
-    schedule_task::utils::{check_accounts_signers, check_task_context_id},
+    schedule_task::utils::check_task_context_id,
     task_context::{ScheduleTaskRequest, TaskContext, MIN_EXECUTION_INTERVAL},
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        get_writable_with_idx,
     },
 };
+
+#[cfg(test)]
+lazy_static::lazy_static! {
+    static ref VALIDATOR_AUTHORITY_ID: Pubkey = Keypair::new().pubkey();
+}
 
 pub(crate) fn process_schedule_task(
     signers: HashSet<Pubkey>,
@@ -62,71 +70,6 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    // Check that all writable accounts in the task instructions are writable in the instruction pubkeys
-    let instruction_pubkeys = (ACCOUNTS_START..ix_accs_len)
-        .map(|idx| {
-            let pubkey = match get_instruction_pubkey_with_idx(
-                transaction_context,
-                idx as u16,
-            ) {
-                Ok(pubkey) => pubkey,
-                Err(e) => {
-                    ic_msg!(
-                        invoke_context,
-                        "ScheduleTask ERR: failed to get instruction context: {}",
-                        e
-                    );
-                    return Err(e);
-                }
-            };
-            let writable = match get_writable_with_idx(transaction_context, idx as u16) {
-                Ok(writable) => writable,
-                Err(e) => {
-                    ic_msg!(
-                        invoke_context,
-                        "ScheduleTask ERR: failed to get writable: {}",
-                        e
-                    );
-                    return Err(e);
-                }
-            };
-            Ok((
-                pubkey,
-                writable,
-            ))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let writable_accounts = args
-        .instructions
-        .iter()
-        .flat_map(|ix| {
-            ix.accounts
-                .iter()
-                .filter_map(|acc| acc.is_writable.then_some(acc.pubkey))
-        })
-        .collect::<Vec<_>>();
-
-    for writable_pubkey in &writable_accounts {
-        if !instruction_pubkeys.contains(&(writable_pubkey, true)) {
-            ic_msg!(
-                invoke_context,
-                "ScheduleTask ERR: writable account {} not provided in instruction pubkeys",
-                writable_pubkey
-            );
-            return Err(InstructionError::InvalidAccountOwner);
-        }
-    }
-
-    // Assert all provided accounts are signers or owned by the invoking program
-    check_accounts_signers(
-        invoke_context,
-        transaction_context,
-        ix_accs_len,
-        ACCOUNTS_START,
-        signers,
-    )?;
-
     // Enforce minimal execution interval
     if args.execution_interval_millis < MIN_EXECUTION_INTERVAL {
         ic_msg!(
@@ -144,6 +87,19 @@ pub(crate) fn process_schedule_task(
             "ScheduleTask ERR: instructions must be non-empty"
         );
         return Err(InstructionError::InvalidInstructionData);
+    }
+
+    // Assert that the task instructions do not have signers aside from the validator authority
+    for instruction in &args.instructions {
+        for account in &instruction.accounts {
+            #[cfg(not(test))]
+            let val_id = validator_authority_id();
+            #[cfg(test)]
+            let val_id = *VALIDATOR_AUTHORITY_ID;
+            if account.is_signer && account.pubkey.ne(&val_id) {
+                return Err(InstructionError::MissingRequiredSignature);
+            }
+        }
     }
 
     let schedule_request = ScheduleTaskRequest {
@@ -199,16 +155,11 @@ mod test {
         utils::instruction_utils::InstructionUtils,
     };
 
-    pub fn create_simple_ix(payer: &Keypair) -> Instruction {
-        Instruction::new_with_borsh(
-            MEMO_PROGRAM_ID,
-            b"test memo",
-            vec![AccountMeta::new_readonly(payer.pubkey(), true)],
-        )
+    fn create_simple_ix() -> Instruction {
+        Instruction::new_with_borsh(MEMO_PROGRAM_ID, b"test memo", vec![])
     }
 
-    pub fn create_complex_ix(
-        payer: &Keypair,
+    fn create_complex_ix(
         pdas: &[Pubkey],
         writable: bool,
         signer: bool,
@@ -216,61 +167,26 @@ mod test {
         Instruction::new_with_borsh(
             COUNTER_PROGRAM_ID,
             b"",
-            vec![AccountMeta::new_readonly(payer.pubkey(), true)]
-                .into_iter()
-                .chain(pdas.iter().map(|pda| {
+            pdas.iter()
+                .map(|pda| {
                     if writable {
                         AccountMeta::new(*pda, signer)
                     } else {
                         AccountMeta::new_readonly(*pda, signer)
                     }
-                }))
+                })
                 .collect(),
         )
     }
 
-    pub fn schedule_task_instruction_test(
-        payer: &Pubkey,
-        args: ScheduleTaskArgs,
-        pdas: &[Pubkey],
-        writable: bool,
-        signer: bool,
-    ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new(*payer, true),
-            AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
-        ];
-        for pubkey in pdas {
-            if writable {
-                account_metas.push(AccountMeta::new(*pubkey, signer));
-            } else {
-                account_metas.push(AccountMeta::new_readonly(*pubkey, signer));
-            }
-        }
-
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::ScheduleTask(args),
-            account_metas,
-        )
-    }
-
-    #[test]
-    fn test_process_schedule_task_simple() {
-        let pdas = vec![];
+    fn setup_accounts(
+        n_pdas: usize,
+    ) -> (Keypair, Vec<Pubkey>, Vec<(Pubkey, AccountSharedData)>) {
         let payer = Keypair::new();
-        let args = ScheduleTaskArgs {
-            task_id: 1,
-            execution_interval_millis: 10,
-            iterations: 1,
-            instructions: vec![create_simple_ix(&payer)],
-        };
-        let ix = InstructionUtils::schedule_task_instruction(
-            &payer.pubkey(),
-            args,
-            &pdas,
-        );
-        let transaction_accounts = vec![
+        let pdas = (0..n_pdas)
+            .map(|_| Keypair::new().pubkey())
+            .collect::<Vec<_>>();
+        let mut transaction_accounts = vec![
             (
                 payer.pubkey(),
                 AccountSharedData::new(u64::MAX, 0, &system_program::id()),
@@ -280,170 +196,117 @@ mod test {
                 AccountSharedData::new(u64::MAX, 0, &system_program::id()),
             ),
         ];
-        let expected_result = Ok(());
+        transaction_accounts.extend(
+            pdas.iter()
+                .map(|pda| {
+                    (
+                        *pda,
+                        AccountSharedData::new(
+                            u64::MAX,
+                            0,
+                            &Keypair::new().pubkey(),
+                        ),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+        (payer, pdas, transaction_accounts)
+    }
+
+    fn setup_simple_ix_test() -> (Vec<(Pubkey, AccountSharedData)>, Instruction)
+    {
+        let (payer, _pdas, transaction_accounts) = setup_accounts(0);
+
+        let args = ScheduleTaskArgs {
+            task_id: 1,
+            execution_interval_millis: 10,
+            iterations: 1,
+            instructions: vec![create_simple_ix()],
+        };
+        let ix =
+            InstructionUtils::schedule_task_instruction(&payer.pubkey(), args);
+
+        (transaction_accounts, ix)
+    }
+
+    fn setup_complex_ix_test(
+        n_pdas: usize,
+        writable: bool,
+        signer: bool,
+    ) -> (Vec<(Pubkey, AccountSharedData)>, Instruction) {
+        let (payer, pdas, transaction_accounts) = setup_accounts(n_pdas);
+
+        let args = ScheduleTaskArgs {
+            task_id: 1,
+            execution_interval_millis: 10,
+            iterations: 1,
+            instructions: vec![create_complex_ix(&pdas, writable, signer)],
+        };
+        let ix =
+            InstructionUtils::schedule_task_instruction(&payer.pubkey(), args);
+
+        (transaction_accounts, ix)
+    }
+
+    #[test]
+    fn test_process_schedule_task_simple() {
+        let (transaction_accounts, ix) = setup_simple_ix_test();
         process_instruction(
             &ix.data,
             transaction_accounts,
             ix.accounts,
-            expected_result,
+            Ok(()),
         );
     }
 
     #[test]
     fn test_process_schedule_complex_task() {
-        let pda1 = Keypair::new();
-        let pda2 = Keypair::new();
-        let pdas = vec![pda1.pubkey(), pda2.pubkey()];
-        let payer = Keypair::new();
+        let (tx_accs, ix) = setup_complex_ix_test(2, false, false);
+        process_instruction(&ix.data, tx_accs, ix.accounts, Ok(()));
 
-        let transaction_accounts = vec![
-            (
-                payer.pubkey(),
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
-            ),
-            (
-                TASK_CONTEXT_PUBKEY,
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
-            ),
-            (
-                pda1.pubkey(),
-                AccountSharedData::new(u64::MAX, 0, &COUNTER_PROGRAM_ID),
-            ),
-            (
-                pda2.pubkey(),
-                AccountSharedData::new(u64::MAX, 0, &COUNTER_PROGRAM_ID),
-            ),
-        ];
-        let expected_result = Ok(());
-
-        // Writable accounts must be signers or owned by the invoking program (the owner of the first PDA)
-        // This is always the case in this test
-        for (writable, signer) in
-            [(true, true), (false, true), (true, false), (false, false)]
-        {
-            let args = ScheduleTaskArgs {
-                task_id: 1,
-                execution_interval_millis: 10,
-                iterations: 1,
-                instructions: vec![create_complex_ix(
-                    &payer, &pdas, writable, signer,
-                )],
-            };
-            let ix = InstructionUtils::schedule_task_instruction(
-                &payer.pubkey(),
-                args,
-                &pdas,
-            );
-            process_instruction(
-                &ix.data,
-                transaction_accounts.clone(),
-                ix.accounts,
-                expected_result.clone(),
-            );
-        }
+        let (tx_accs, ix) = setup_complex_ix_test(2, true, false);
+        process_instruction(&ix.data, tx_accs, ix.accounts, Ok(()));
     }
 
     #[test]
-    fn fail_process_schedule_task_with_foreign_accounts() {
-        let pda1 = Keypair::new();
-        let pda2 = Keypair::new();
-        let pdas = vec![pda1.pubkey(), pda2.pubkey()];
-        let payer = Keypair::new();
+    fn fail_process_schedule_task_with_instructions_signers() {
+        // Read only signer
+        let (tx_accs, ix) = setup_complex_ix_test(2, false, true);
+        process_instruction(
+            &ix.data,
+            tx_accs,
+            ix.accounts,
+            Err(InstructionError::MissingRequiredSignature),
+        );
 
-        let transaction_accounts = vec![
-            (
-                payer.pubkey(),
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
-            ),
-            (
-                TASK_CONTEXT_PUBKEY,
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
-            ),
-            (
-                pda1.pubkey(),
-                AccountSharedData::new(u64::MAX, 0, &COUNTER_PROGRAM_ID),
-            ),
-            (
-                pda2.pubkey(),
-                AccountSharedData::new(u64::MAX, 0, &MEMO_PROGRAM_ID), // Wrong owner
-            ),
-        ];
-
-        for (writable, signer, expected_result) in [
-            (true, true, Ok(())),
-            (false, true, Err(InstructionError::InvalidAccountOwner)),
-            (true, false, Err(InstructionError::InvalidAccountOwner)),
-            (false, false, Err(InstructionError::InvalidAccountOwner)),
-        ] {
-            let args = ScheduleTaskArgs {
-                task_id: 1,
-                execution_interval_millis: 10,
-                iterations: 1,
-                instructions: vec![create_complex_ix(
-                    &payer, &pdas, true, false,
-                )],
-            };
-            let ix = schedule_task_instruction_test(
-                &payer.pubkey(),
-                args,
-                &pdas,
-                writable,
-                signer,
-            );
-            process_instruction(
-                &ix.data,
-                transaction_accounts.clone(),
-                ix.accounts,
-                expected_result,
-            );
-        }
+        // Writable signer
+        let (tx_accs, ix) = setup_complex_ix_test(2, true, true);
+        process_instruction(
+            &ix.data,
+            tx_accs,
+            ix.accounts,
+            Err(InstructionError::MissingRequiredSignature),
+        );
     }
 
     #[test]
     fn fail_unsigned_process_schedule_task() {
-        let pda1 = Keypair::new().pubkey();
-        let pda2 = Keypair::new().pubkey();
-        let pdas = vec![pda1, pda2];
-        let payer = Keypair::new();
+        let (payer, _pdas, transaction_accounts) = setup_accounts(0);
         let args = ScheduleTaskArgs {
             task_id: 1,
             execution_interval_millis: 1000,
             iterations: 1,
-            instructions: vec![],
+            instructions: vec![create_simple_ix()],
         };
-
-        let mut account_metas = vec![
+        let account_metas = vec![
             AccountMeta::new(payer.pubkey(), false),
             AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
         ];
-        for pubkey in pdas {
-            account_metas.push(AccountMeta::new_readonly(pubkey, true));
-        }
-
         let ix = Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleTask(args),
             account_metas,
         );
-
-        let transaction_accounts = vec![
-            (
-                payer.pubkey(),
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
-            ),
-            (
-                TASK_CONTEXT_PUBKEY,
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
-            ),
-            (
-                pda1,
-                AccountSharedData::new(u64::MAX, 0, &COUNTER_PROGRAM_ID),
-            ),
-            (
-                pda2,
-                AccountSharedData::new(u64::MAX, 0, &COUNTER_PROGRAM_ID),
-            ),
-        ];
         let expected_result = Err(InstructionError::MissingRequiredSignature);
         process_instruction(
             &ix.data,
@@ -455,69 +318,39 @@ mod test {
 
     #[test]
     fn fail_process_schedule_empty_task() {
-        let pdas = vec![];
-        let payer = Keypair::new();
+        let (payer, _pdas, transaction_accounts) = setup_accounts(0);
         let args = ScheduleTaskArgs {
             task_id: 1,
             execution_interval_millis: 1000,
             iterations: 1,
             instructions: vec![],
         };
-        let ix = InstructionUtils::schedule_task_instruction(
-            &payer.pubkey(),
-            args,
-            &pdas,
-        );
-        let transaction_accounts = vec![
-            (
-                payer.pubkey(),
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
-            ),
-            (
-                TASK_CONTEXT_PUBKEY,
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
-            ),
-        ];
-        let expected_result = Err(InstructionError::InvalidInstructionData);
+        let ix =
+            InstructionUtils::schedule_task_instruction(&payer.pubkey(), args);
         process_instruction(
             &ix.data,
             transaction_accounts,
             ix.accounts,
-            expected_result,
+            Err(InstructionError::InvalidInstructionData),
         );
     }
 
     #[test]
     fn fail_process_schedule_invalid_execution_interval() {
-        let pdas = vec![];
-        let payer = Keypair::new();
+        let (payer, _pdas, transaction_accounts) = setup_accounts(0);
         let args = ScheduleTaskArgs {
             task_id: 1,
             execution_interval_millis: 9,
             iterations: 1,
-            instructions: vec![create_simple_ix(&payer)],
+            instructions: vec![create_simple_ix()],
         };
-        let ix = InstructionUtils::schedule_task_instruction(
-            &payer.pubkey(),
-            args,
-            &pdas,
-        );
-        let transaction_accounts = vec![
-            (
-                payer.pubkey(),
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
-            ),
-            (
-                TASK_CONTEXT_PUBKEY,
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
-            ),
-        ];
-        let expected_result = Err(InstructionError::InvalidInstructionData);
+        let ix =
+            InstructionUtils::schedule_task_instruction(&payer.pubkey(), args);
         process_instruction(
             &ix.data,
             transaction_accounts,
             ix.accounts,
-            expected_result,
+            Err(InstructionError::InvalidInstructionData),
         );
     }
 }

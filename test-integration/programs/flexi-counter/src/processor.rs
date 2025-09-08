@@ -31,7 +31,7 @@ use solana_program::{
 
 use crate::{
     instruction::{
-        create_add_error_ix, create_add_ix, create_add_signed_ix, CancelArgs,
+        create_add_error_ix, create_add_ix, create_add_unsigned_ix, CancelArgs,
         DelegateArgs, FlexiCounterInstruction, ScheduleArgs,
         MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
     },
@@ -72,6 +72,8 @@ pub fn process(
             invocation_count,
         } => process_realloc(accounts, bytes, invocation_count),
         Add { count } => process_add(accounts, count),
+        AddUnsigned { count } => process_add_unsigned(accounts, count),
+        AddError { count } => process_add_error(accounts, count),
         Mul { multiplier } => process_mul(accounts, multiplier),
         Delegate(args) => process_delegate(accounts, &args),
         AddAndScheduleCommit { count, undelegate } => {
@@ -95,8 +97,6 @@ pub fn process(
         }
         Schedule(args) => process_schedule_task(accounts, args),
         Cancel(args) => process_cancel_task(accounts, args),
-        AddError { count } => process_add_error(accounts, count),
-        AddSigned { count } => process_add_signed(accounts, count),
     }?;
     Ok(())
 }
@@ -198,6 +198,29 @@ fn process_add(accounts: &[AccountInfo], count: u8) -> ProgramResult {
     let counter_pda_info = next_account_info(account_info_iter)?;
 
     add(payer_info, counter_pda_info, count)
+}
+
+fn process_add_unsigned(accounts: &[AccountInfo], count: u8) -> ProgramResult {
+    msg!("Add {}", count);
+
+    let account_info_iter = &mut accounts.iter();
+    let counter_pda_info = next_account_info(account_info_iter)?;
+
+    let mut counter =
+        FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
+
+    counter.count += count as u64;
+    counter.updates += 1;
+
+    let size = counter_pda_info.data_len();
+    let counter_data = to_vec(&counter)?;
+    counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
+
+    Ok(())
+}
+
+fn process_add_error(_accounts: &[AccountInfo], _count: u8) -> ProgramResult {
+    Err(ProgramError::Custom(0))
 }
 
 fn add(
@@ -408,8 +431,8 @@ fn process_schedule_task(
             iterations: args.iterations,
             instructions: vec![match (args.error, args.signer) {
                 (true, false) => create_add_error_ix(*payer_info.key, 1),
-                (false, true) => create_add_signed_ix(*payer_info.key, 1),
-                _ => create_add_ix(*payer_info.key, 1),
+                (false, true) => create_add_ix(*payer_info.key, 1),
+                _ => create_add_unsigned_ix(*payer_info.key, 1),
             }],
         },
     ))
@@ -472,47 +495,4 @@ fn process_cancel_task(
     invoke(&ix, &[payer_info.clone(), task_context_info.clone()])?;
 
     Ok(())
-}
-
-fn process_add_signed(accounts: &[AccountInfo], count: u8) -> ProgramResult {
-    let account_info_iter = &mut accounts.iter();
-    let payer_info = next_account_info(account_info_iter)?;
-    let counter_pda_info = next_account_info(account_info_iter)?;
-
-    if !payer_info.is_signer {
-        msg!("Payer is not signer");
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    let (counter_pda, _) = FlexiCounter::pda(payer_info.key);
-    assert_keys_equal(counter_pda_info.key, &counter_pda, || {
-        format!(
-            "Invalid counter PDA {}, should be {}",
-            counter_pda_info.key, counter_pda
-        )
-    })?;
-    if !counter_pda_info.is_writable {
-        msg!("Counter PDA is not writable");
-        return Err(ProgramError::InvalidAccountData);
-    }
-    if !counter_pda_info.is_signer {
-        msg!("Counter PDA is not signer");
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    let mut counter =
-        FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
-
-    counter.count += count as u64;
-    counter.updates += 1;
-
-    let size = counter_pda_info.data_len();
-    let counter_data = to_vec(&counter)?;
-    counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
-
-    Ok(())
-}
-
-fn process_add_error(_accounts: &[AccountInfo], _count: u8) -> ProgramResult {
-    Err(ProgramError::Custom(0))
 }

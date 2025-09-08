@@ -143,12 +143,6 @@ impl TaskContext {
         F: FnOnce(&mut TaskContext),
     {
         let context_data = &mut context_account.borrow_mut();
-        ic_msg!(invoke_context, "TaskContext: {:?}", context_data.capacity());
-        ic_msg!(
-            invoke_context,
-            "TaskContext: {:?}",
-            context_data.data().len()
-        );
         let mut context =
             TaskContext::deserialize(context_data).map_err(|err| {
                 ic_msg!(
