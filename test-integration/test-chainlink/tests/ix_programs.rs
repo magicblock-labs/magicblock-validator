@@ -473,7 +473,7 @@ async fn ixtest_clone_memo_v2_loader_program() {
     );
 }
 
-const MINI_SIZE: usize = 96504;
+const MINI_SIZE: usize = 91200;
 #[tokio::test]
 async fn ixtest_clone_mini_v2_loader_program() {
     init_logger();
