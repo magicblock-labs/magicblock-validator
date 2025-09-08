@@ -47,7 +47,9 @@ magicblock-committor-program = { path = "../magicblock-committor-program", featu
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = ["no-entrypoint"] }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = [
+  "no-entrypoint",
+] }
 magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
@@ -59,7 +61,7 @@ rand = "0.8.5"
 rayon = "1.10.0"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "ee2d713" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "8bc6a58" }
 solana-program = "2.2"
 solana-program-test = "2.2"
 solana-pubkey = { version = "2.2" }
@@ -82,4 +84,4 @@ toml = "0.8.13"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "ee2d713" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "8bc6a58" }

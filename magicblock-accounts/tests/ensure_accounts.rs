@@ -17,8 +17,9 @@ use magicblock_accounts::{ExternalAccountsManager, LifecycleMode};
 use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_committor_service::stubs::ChangesetCommittorStub;
 use magicblock_config::{AccountsCloneConfig, LedgerResumeStrategyConfig};
+use magicblock_ledger::LatestBlock;
 use solana_sdk::pubkey::Pubkey;
-use test_tools_core::init_logger;
+use test_kit::ExecutionTestEnv;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -39,7 +40,12 @@ fn setup_with_lifecycle(
     account_dumper: AccountDumperStub,
     changeset_committor_stub: Arc<ChangesetCommittorStub>,
     lifecycle: LifecycleMode,
-) -> (StubbedAccountsManager, CancellationToken, JoinHandle<()>) {
+) -> (
+    StubbedAccountsManager,
+    CancellationToken,
+    JoinHandle<()>,
+    ExecutionTestEnv,
+) {
     let cancellation_token = CancellationToken::new();
 
     let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
@@ -67,6 +73,7 @@ fn setup_with_lifecycle(
                 .await
         })
     };
+    let execution = ExecutionTestEnv::new();
 
     let external_account_manager = ExternalAccountsManager {
         internal_account_provider,
@@ -76,11 +83,14 @@ fn setup_with_lifecycle(
         committor_service: Some(changeset_committor_stub),
         lifecycle,
         external_commitable_accounts: Default::default(),
+        internal_transaction_scheduler: execution.transaction_scheduler.clone(),
+        latest_block: LatestBlock::default(),
     };
     (
         external_account_manager,
         cancellation_token,
         remote_account_cloner_worker_handle,
+        execution,
     )
 }
 
@@ -90,7 +100,12 @@ fn setup_ephem(
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
     changeset_committor_stub: Arc<ChangesetCommittorStub>,
-) -> (StubbedAccountsManager, CancellationToken, JoinHandle<()>) {
+) -> (
+    StubbedAccountsManager,
+    CancellationToken,
+    JoinHandle<()>,
+    ExecutionTestEnv,
+) {
     setup_with_lifecycle(
         internal_account_provider,
         account_fetcher,
@@ -109,7 +124,7 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
     let account_dumper = AccountDumperStub::default();
     let changeset_committor_stub = Arc::new(ChangesetCommittorStub::default());
 
-    let (manager, cancel, handle) = setup_ephem(
+    let (manager, cancel, handle, _ex) = setup_ephem(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -154,7 +169,7 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
     let account_dumper = AccountDumperStub::default();
     let changeset_committor_stub = Arc::new(ChangesetCommittorStub::default());
 
-    let (manager, cancel, handle) = setup_ephem(
+    let (manager, cancel, handle, _ex) = setup_ephem(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -197,7 +212,7 @@ async fn test_ensure_readonly_account_cloned_but_not_in_our_validator() {
     let account_dumper = AccountDumperStub::default();
     let changeset_committor_stub = Arc::new(ChangesetCommittorStub::default());
 
-    let (manager, cancel, handle) = setup_ephem(
+    let (manager, cancel, handle, _ex) = setup_ephem(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -249,7 +264,7 @@ async fn test_ensure_readonly_account_cloned_but_has_been_updated_on_chain() {
     let account_dumper = AccountDumperStub::default();
     let changeset_committor_stub = Arc::new(ChangesetCommittorStub::default());
 
-    let (manager, cancel, handle) = setup_ephem(
+    let (manager, cancel, handle, _ex) = setup_ephem(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -307,7 +322,7 @@ async fn test_ensure_readonly_account_cloned_and_no_recent_update_on_chain() {
     let account_dumper = AccountDumperStub::default();
     let changeset_committor_stub = Arc::new(ChangesetCommittorStub::default());
 
-    let (manager, cancel, handle) = setup_ephem(
+    let (manager, cancel, handle, _ex) = setup_ephem(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -362,7 +377,7 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
     let account_dumper = AccountDumperStub::default();
     let changeset_committor_stub = Arc::new(ChangesetCommittorStub::default());
 
-    let (manager, cancel, handle) = setup_ephem(
+    let (manager, cancel, handle, _ex) = setup_ephem(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -413,7 +428,7 @@ async fn test_ensure_one_delegated_and_one_feepayer_account_writable() {
 
     // Note: since we use a writable new account, we need to allow it as part of the configuration
     // We can't use an ephemeral's configuration, that forbids new accounts to be writable
-    let (manager, cancel, handle) = setup_with_lifecycle(
+    let (manager, cancel, handle, _ex) = setup_with_lifecycle(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -463,7 +478,7 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
     let account_dumper = AccountDumperStub::default();
     let changeset_committor_stub = Arc::new(ChangesetCommittorStub::default());
 
-    let (manager, cancel, handle) = setup_ephem(
+    let (manager, cancel, handle, _ex) = setup_ephem(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -610,7 +625,7 @@ async fn test_ensure_accounts_seen_as_readonly_can_be_used_as_writable_later() {
     let account_dumper = AccountDumperStub::default();
     let changeset_committor_stub = Arc::new(ChangesetCommittorStub::default());
 
-    let (manager, cancel, handle) = setup_ephem(
+    let (manager, cancel, handle, _ex) = setup_ephem(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -703,7 +718,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
     let account_dumper = AccountDumperStub::default();
     let changeset_committor_stub = Arc::new(ChangesetCommittorStub::default());
 
-    let (manager, cancel, handle) = setup_ephem(
+    let (manager, cancel, handle, _ex) = setup_ephem(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -772,7 +787,7 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
     let account_dumper = AccountDumperStub::default();
     let changeset_committor_stub = Arc::new(ChangesetCommittorStub::default());
 
-    let (manager, cancel, handle) = setup_ephem(
+    let (manager, cancel, handle, _ex) = setup_ephem(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -857,7 +872,7 @@ async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
     let account_dumper = AccountDumperStub::default();
     let changeset_committor_stub = Arc::new(ChangesetCommittorStub::default());
 
-    let (manager, cancel, handle) = setup_ephem(
+    let (manager, cancel, handle, _ex) = setup_ephem(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),

@@ -1,7 +1,5 @@
 use std::{
-    net::SocketAddr,
     path::Path,
-    process,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -51,7 +49,7 @@ use magicblock_gateway::{
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
-    Ledger,
+    LatestBlock, Ledger,
 };
 use magicblock_metrics::MetricsService;
 use magicblock_processor::{
@@ -59,8 +57,9 @@ use magicblock_processor::{
     scheduler::{state::TransactionSchedulerState, TransactionScheduler},
 };
 use magicblock_program::{
-    init_persister, validator, validator::validator_authority,
-    TransactionScheduler,
+    init_persister,
+    validator::{self, validator_authority},
+    TransactionScheduler as ActionTransactionScheduler,
 };
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use mdp::state::{
@@ -77,6 +76,7 @@ use solana_sdk::{
     signature::Keypair,
     signer::Signer,
 };
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -187,7 +187,7 @@ impl MagicValidator {
             ledger.ledger_path(),
             &identity_keypair,
             ledger_resume_strategy,
-            config.validator_config.ledger.skip_keypair_match_check,
+            config.ledger.skip_keypair_match_check,
         )?;
 
         // SAFETY:
@@ -217,9 +217,9 @@ impl MagicValidator {
         );
 
         fund_validator_identity(&accountsdb, &validator_pubkey);
-        fund_magic_context(&bank);
+        fund_magic_context(&accountsdb);
         let faucet_keypair =
-            funded_faucet(&bank, ledger.ledger_path().as_path())?;
+            funded_faucet(&accountsdb, ledger.ledger_path().as_path())?;
 
         let metrics_config = &config.metrics;
         let accountsdb = Arc::new(accountsdb);
@@ -325,27 +325,28 @@ impl MagicValidator {
             config.ledger.resume_strategy_config.clone(),
         );
 
+        validator::init_validator_authority(identity_keypair);
         let scheduled_commits_processor = if can_clone {
             Some(Arc::new(ScheduledCommitsProcessorImpl::new(
-                bank.clone(),
+                accountsdb.clone(),
                 remote_account_cloner_worker.get_last_clone_output(),
                 committor_service
                     .clone()
                     .expect("When clone enabled committor has to exist!"),
-                transaction_status_sender.clone(),
+                dispatch.transaction_scheduler.clone(),
             )))
         } else {
             None
         };
 
         let accounts_manager = Self::init_accounts_manager(
-            &bank,
+            &accountsdb,
             &committor_service,
             RemoteAccountClonerClient::new(&remote_account_cloner_worker),
-            &config.validator_config,
+            &config,
+            dispatch.transaction_scheduler.clone(),
+            ledger.latest_block().clone(),
         );
-
-        validator::init_validator_authority(identity_keypair);
 
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
@@ -421,11 +422,12 @@ impl MagicValidator {
     }
 
     fn init_accounts_manager(
-        bank: &Arc<Bank>,
+        bank: &Arc<AccountsDb>,
         commitor_service: &Option<Arc<CommittorService>>,
         remote_account_cloner_client: RemoteAccountClonerClient,
         config: &EphemeralConfig,
         transaction_scheduler: TransactionSchedulerHandle,
+        latest_block: LatestBlock,
     ) -> Arc<AccountsManager> {
         let accounts_config = try_convert_accounts_config(&config.accounts)
             .expect(
@@ -440,6 +442,7 @@ impl MagicValidator {
             remote_account_cloner_client,
             accounts_config,
             transaction_scheduler,
+            latest_block,
         )
         .expect("Failed to create accounts manager");
 
@@ -497,6 +500,13 @@ impl MagicValidator {
         // we have this number for our max blockhash age in slots, which correspond to 60 seconds
         let max_block_age =
             SOLANA_VALID_BLOCKHASH_AGE / self.config.validator.millis_per_slot;
+        let slot_to_continue_at = process_ledger(
+            &self.ledger,
+            &self.accountsdb,
+            self.transaction_scheduler.clone(),
+            max_block_age,
+        )
+        .await?;
 
         // The transactions to schedule and accept account commits re-run when we
         // process the ledger, however we do not want to re-commit them.
@@ -504,24 +514,12 @@ impl MagicValidator {
         // scheduled commits and we clear all scheduled commits before fully starting the
         // validator.
         let scheduled_commits =
-            TransactionScheduler::default().scheduled_actions_len();
+            ActionTransactionScheduler::default().scheduled_actions_len();
         debug!(
             "Found {} scheduled commits while processing ledger, clearing them",
             scheduled_commits
         );
-        TransactionScheduler::default().clear_scheduled_actions();
-
-        // The transactions to schedule and accept account commits re-run when we
-        // process the ledger, however we do not want to re-commit them.
-        // Thus while the ledger is processed we don't yet run the machinery to handle
-        // scheduled commits and we clear all scheduled commits before fully starting the
-        // validator.
-        let scheduled_commits = self.accounts_manager.scheduled_commits_len();
-        debug!(
-            "Found {} scheduled commits while processing ledger, clearing them",
-            scheduled_commits
-        );
-        self.accounts_manager.clear_scheduled_commits();
+        ActionTransactionScheduler::default().clear_scheduled_actions();
 
         // We want the next transaction either due to hydrating of cloned accounts or
         // user request to be processed in the next slot such that it doesn't become
@@ -637,43 +635,15 @@ impl MagicValidator {
 
         self.claim_fees_task.start(self.config.clone());
 
-        self.transaction_listener.run(true, self.bank.clone());
-
         self.slot_ticker = Some(init_slot_ticker(
-            &self.bank,
+            self.accountsdb.clone(),
             &self.scheduled_commits_processor,
-            self.transaction_status_sender.clone(),
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
+            self.transaction_scheduler.clone(),
+            self.block_udpate_tx.clone(),
             self.exit.clone(),
         ));
-||||||| ancestor
-        self.transaction_listener.run(true, self.bank.clone());
-
-        self.slot_ticker = Some(init_slot_ticker(
-            &self.bank,
-            &self.accounts_manager,
-            self.committor_service.clone(),
-            self.ledger.clone(),
-            Duration::from_millis(self.config.validator.millis_per_slot),
-            self.exit.clone(),
-        ));
-=======
-        self.slot_ticker = {
-            let accountsdb = self.accountsdb.clone();
-            let accounts_manager = self.accounts_manager.clone();
-            let task = init_slot_ticker(
-                accountsdb,
-                accounts_manager,
-                self.committor_service.clone(),
-                self.ledger.clone(),
-                Duration::from_millis(self.config.validator.millis_per_slot),
-                self.transaction_scheduler.clone(),
-                self.block_udpate_tx.clone(),
-                self.exit.clone(),
-            );
-            Some(tokio::spawn(task))
-        };
 
         self.commit_accounts_ticker = {
             let token = self.token.clone();
@@ -764,8 +734,6 @@ impl MagicValidator {
 
     pub async fn stop(mut self) {
         self.exit.store(true, Ordering::Relaxed);
-        self.rpc_service.close();
-        PubsubService::close(&self.pubsub_close_handle);
 
         // Ordering is important here
         // Commitor service shall be stopped last

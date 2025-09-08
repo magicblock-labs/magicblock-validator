@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use magicblock_accounts_db::AccountsDb;
-use magicblock_bank::bank::Bank;
 use magicblock_core::magic_program;
 use magicblock_program::MAGIC_CONTEXT_SIZE;
 use solana_sdk::{

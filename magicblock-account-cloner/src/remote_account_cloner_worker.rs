@@ -392,7 +392,7 @@ where
                 None => {
                     // If we never cloned the account before, we can't use the cache
                     match self.internal_account_provider.get_account(pubkey) {
-                        Some(acc) if acc.is_delegated() => {
+                        Some(acc) if acc.delegated() => {
                             let res = self
                                 .do_clone_and_update_cache(
                                     pubkey,

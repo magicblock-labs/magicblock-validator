@@ -12,7 +12,6 @@ use magicblock_core::{
         },
         DispatchEndpoints,
     },
-    magic_program::Pubkey,
     Slot,
 };
 use magicblock_ledger::Ledger;
@@ -22,7 +21,9 @@ use magicblock_processor::{
 };
 use solana_account::AccountSharedData;
 use solana_keypair::Keypair;
-use solana_program::{hash::Hasher, native_token::LAMPORTS_PER_SOL};
+use solana_program::{
+    hash::Hasher, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey,
+};
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;

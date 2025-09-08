@@ -3634,6 +3634,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+ "magicblock-ledger",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-processor",
@@ -3641,6 +3642,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
+ "test-kit",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.15",
@@ -3699,13 +3701,6 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
- "magicblock-geyser-plugin",
-||||||| ancestor
- "magicblock-geyser-plugin",
-=======
->>>>>>> theirs
-||||||| ancestor
-=======
  "magicblock-gateway",
  "magicblock-ledger",
  "magicblock-metrics",
@@ -3819,9 +3814,19 @@ name = "magicblock-core"
 version = "0.1.7"
 dependencies = [
  "bincode",
+ "flume",
  "serde",
  "solana-account",
+ "solana-account-decoder",
+ "solana-hash",
  "solana-program",
+ "solana-pubkey",
+ "solana-signature",
+ "solana-transaction",
+ "solana-transaction-context",
+ "solana-transaction-error",
+ "solana-transaction-status-client-types",
+ "tokio",
 ]
 
 [[package]]
@@ -3857,24 +3862,47 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-geyser-plugin"
+name = "magicblock-gateway"
 version = "0.1.7"
 dependencies = [
- "agave-geyser-plugin-interface",
- "anyhow",
  "base64 0.21.7",
+ "bincode",
  "bs58",
- "cargo-lock",
- "expiring-hashmap",
+ "fastwebsockets",
  "flume",
- "geyser-grpc-proto",
- "git-version",
- "hostname",
+ "futures 0.3.31",
+ "http-body-util",
+ "hyper 1.6.0",
+ "hyper-util",
  "log",
- "magicblock-transaction-status",
+ "magicblock-accounts-db",
+ "magicblock-config",
+ "magicblock-core",
+ "magicblock-ledger",
+ "magicblock-version",
+ "parking_lot 0.12.4",
  "scc",
  "serde",
- "solana-sdk",
+ "solana-account",
+ "solana-account-decoder",
+ "solana-compute-budget-instruction",
+ "solana-feature-set",
+ "solana-fee",
+ "solana-fee-structure",
+ "solana-hash",
+ "solana-keypair",
+ "solana-message",
+ "solana-pubkey",
+ "solana-pubsub-client",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-signature",
+ "solana-system-transaction",
+ "solana-transaction",
+ "solana-transaction-context",
+ "solana-transaction-error",
+ "solana-transaction-status",
+ "solana-transaction-status-client-types",
  "sonic-rs",
  "test-kit",
  "tokio",
@@ -5837,9 +5865,9 @@ dependencies = [
 
 [[package]]
 name = "scc"
-version = "2.3.4"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22b2d775fb28f245817589471dd49c5edf64237f4a19d10ce9a92ff4651a27f4"
+checksum = "46e6f046b7fef48e2660c57ed794263155d713de679057f2d0c169bfc6e756cc"
 dependencies = [
  "sdd",
 ]
@@ -5871,9 +5899,9 @@ dependencies = [
 
 [[package]]
 name = "sdd"
-version = "3.0.8"
+version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "584e070911c7017da6cb2eb0788d09f43d789029b5877d3e5ecc8acf86ceee21"
+checksum = "490dcfcbfef26be6800d11870ff2df8774fa6e86d047e3e8c8a76b25655e41ca"
 
 [[package]]
 name = "security-framework"
@@ -6226,7 +6254,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=ee2d713#ee2d7136a60dd675605f8540fc0e6f9ea8c6d961"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=8bc6a58#8bc6a588204cd9564c66dcb7f3a65606d9c9c0a0"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -9028,7 +9056,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=0f18aa3#0f18aa3efa0b4063260c29f13688a70c0a48fa85"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=3e6c209#3e6c209efc4a289aac14a9cc0436b835b9224195"
 dependencies = [
  "ahash 0.8.12",
  "log",

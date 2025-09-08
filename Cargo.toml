@@ -112,7 +112,10 @@ magicblock-config = { path = "./magicblock-config" }
 magicblock-config-helpers = { path = "./magicblock-config-helpers" }
 magicblock-config-macro = { path = "./magicblock-config-macro" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = ["no-entrypoint"] }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = [
+  "no-entrypoint",
+] }
+magicblock-gateway = { path = "./magicblock-gateway" }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-metrics = { path = "./magicblock-metrics" }
@@ -144,12 +147,13 @@ rand = "0.8.5"
 rayon = "1.10.0"
 rusqlite = { version = "0.34.0", features = ["bundled"] } # bundled sqlite 3.44
 rustc_version = "0.4"
+scc = "2.4"
 semver = "1.0.22"
 serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "176540a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "8bc6a58" }
 solana-account-decoder = { version = "2.2" }
 solana-accounts-db = { version = "2.2" }
 solana-address-lookup-table-program = { version = "2.2" }
@@ -176,12 +180,16 @@ solana-program-test = "2.2"
 solana-pubkey = { version = "2.2" }
 solana-pubsub-client = { version = "2.2" }
 solana-rayon-threadlimit = { version = "2.2" }
+solana-rent-collector = { version = "2.2" }
 solana-rpc = "2.2"
 solana-rpc-client = { version = "2.2" }
 solana-rpc-client-api = { version = "2.2" }
 solana-sdk = { version = "2.2" }
+solana-sdk-ids = { version = "2.2" }
+solana-signature = { version = "2.2" }
+solana-signer = { version = "2.2" }
 solana-storage-proto = { path = "storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "e93eb57", features = [
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "3e6c209", features = [
   "dev-context-only-utils",
 ] }
 solana-svm-transaction = { version = "2.2" }
@@ -214,6 +222,6 @@ vergen = "8.3.1"
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "ee2d713" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "8bc6a58" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "0f18aa3" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "3e6c209" }

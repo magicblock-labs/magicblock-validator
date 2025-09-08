@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use magicblock_bank::bank::Bank;
-use solana_sdk::{
-    account::AccountSharedData, clock::Slot, hash::Hash, pubkey::Pubkey,
-};
+use magicblock_accounts_db::AccountsDb;
+use solana_account::AccountSharedData;
+use solana_pubkey::Pubkey;
 
 use crate::InternalAccountProvider;
 
@@ -32,8 +31,5 @@ impl InternalAccountProvider for AccountsDbProvider {
     }
     fn get_slot(&self) -> u64 {
         self.0.slot()
-    }
-    fn get_blockhash(&self) -> Hash {
-        self.bank.last_blockhash()
     }
 }

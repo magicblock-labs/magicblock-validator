@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use conjunto_transwise::AccountChainSnapshot;
 use log::{debug, error, info, warn};
 use magicblock_account_cloner::{AccountClonerOutput, CloneOutputMap};
-use magicblock_bank::bank::Bank;
+use magicblock_accounts_db::AccountsDb;
 use magicblock_committor_service::{
     intent_execution_manager::{
         BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
@@ -16,13 +16,12 @@ use magicblock_committor_service::{
     types::{ScheduledBaseIntentWrapper, TriggerType},
     BaseIntentCommittor,
 };
-use magicblock_processor::execute_transaction::execute_legacy_transaction;
+use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_program::{
     magic_scheduled_base_intent::{CommittedAccount, ScheduledBaseIntent},
     register_scheduled_commit_sent, FeePayerAccount, SentCommit,
     TransactionScheduler,
 };
-use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     hash::Hash, pubkey::Pubkey, signature::Signature, transaction::Transaction,
 };
@@ -39,7 +38,7 @@ const POISONED_MUTEX_MSG: &str =
     "Mutex of RemoteScheduledCommitsProcessor.intents_meta_map is poisoned";
 
 pub struct ScheduledCommitsProcessorImpl<C: BaseIntentCommittor> {
-    bank: Arc<Bank>,
+    bank: Arc<AccountsDb>,
     committor: Arc<C>,
     cancellation_token: CancellationToken,
     intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
@@ -49,20 +48,19 @@ pub struct ScheduledCommitsProcessorImpl<C: BaseIntentCommittor> {
 
 impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
     pub fn new(
-        bank: Arc<Bank>,
+        bank: Arc<AccountsDb>,
         cloned_accounts: CloneOutputMap,
         committor: Arc<C>,
-        transaction_status_sender: TransactionStatusSender,
+        internal_transaction_scheduler: TransactionSchedulerHandle,
     ) -> Self {
         let result_subscriber = committor.subscribe_for_results();
         let intents_meta_map = Arc::new(Mutex::default());
         let cancellation_token = CancellationToken::new();
         tokio::spawn(Self::result_processor(
-            bank.clone(),
             result_subscriber,
             cancellation_token.clone(),
             intents_meta_map.clone(),
-            transaction_status_sender,
+            internal_transaction_scheduler.clone(),
         ));
 
         Self {
@@ -95,7 +93,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
         struct Processor<'a> {
             excluded_pubkeys: HashSet<Pubkey>,
             feepayers: HashSet<FeePayerAccount>,
-            bank: &'a Bank,
+            bank: &'a AccountsDb,
         }
 
         impl Processor<'_> {
@@ -180,13 +178,12 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
     }
 
     async fn result_processor(
-        bank: Arc<Bank>,
         result_subscriber: oneshot::Receiver<
             broadcast::Receiver<BroadcastedIntentExecutionResult>,
         >,
         cancellation_token: CancellationToken,
         intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-        transaction_status_sender: TransactionStatusSender,
+        internal_transaction_scheduler: TransactionSchedulerHandle,
     ) {
         const SUBSCRIPTION_ERR_MSG: &str =
             "Failed to get subscription of results of BaseIntents execution";
@@ -251,8 +248,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
                 Ok(value) => {
                     Self::process_intent_result(
                         intent_id,
-                        &bank,
-                        &transaction_status_sender,
+                        &internal_transaction_scheduler,
                         value,
                         intent_meta,
                     )
@@ -264,8 +260,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
                             warn!("Empty intent was scheduled!");
                             Self::process_empty_intent(
                                 intent_id,
-                                &bank,
-                                &transaction_status_sender,
+                                &internal_transaction_scheduler,
                                 intent_meta
                             ).await;
                         }
@@ -280,8 +275,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
 
     async fn process_intent_result(
         intent_id: u64,
-        bank: &Arc<Bank>,
-        transaction_status_sender: &TransactionStatusSender,
+        internal_transaction_scheduler: &TransactionSchedulerHandle,
         execution_outcome: ExecutionOutputWrapper,
         mut intent_meta: ScheduledBaseIntentMeta,
     ) {
@@ -297,11 +291,10 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
         let sent_commit =
             Self::build_sent_commit(intent_id, chain_signatures, intent_meta);
         register_scheduled_commit_sent(sent_commit);
-        match execute_legacy_transaction(
-            intent_sent_transaction,
-            bank,
-            Some(transaction_status_sender),
-        ) {
+        match internal_transaction_scheduler
+            .execute(intent_sent_transaction)
+            .await
+        {
             Ok(signature) => debug!(
                 "Signaled sent commit with internal signature: {:?}",
                 signature
@@ -314,8 +307,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
 
     async fn process_empty_intent(
         intent_id: u64,
-        bank: &Arc<Bank>,
-        transaction_status_sender: &TransactionStatusSender,
+        internal_transaction_scheduler: &TransactionSchedulerHandle,
         mut intent_meta: ScheduledBaseIntentMeta,
     ) {
         let intent_sent_transaction =
@@ -323,11 +315,10 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
         let sent_commit =
             Self::build_sent_commit(intent_id, vec![], intent_meta);
         register_scheduled_commit_sent(sent_commit);
-        match execute_legacy_transaction(
-            intent_sent_transaction,
-            bank,
-            Some(transaction_status_sender),
-        ) {
+        match internal_transaction_scheduler
+            .execute(intent_sent_transaction)
+            .await
+        {
             Ok(signature) => debug!(
                 "Signaled sent commit with internal signature: {:?}",
                 signature

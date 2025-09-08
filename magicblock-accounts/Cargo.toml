@@ -16,13 +16,14 @@ itertools = { workspace = true }
 log = { workspace = true }
 
 magicblock-account-fetcher = { workspace = true }
-magicblock-account-updates = { workspace = true }
-magicblock-account-dumper = { workspace = true }
 magicblock-account-cloner = { workspace = true }
+magicblock-account-dumper = { workspace = true }
+magicblock-account-updates = { workspace = true }
 magicblock-accounts-api = { workspace = true }
 magicblock-accounts-db = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-ledger = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-mutator = { workspace = true }
 magicblock-processor = { workspace = true }
@@ -41,4 +42,5 @@ magicblock-committor-service = { workspace = true, features = [
   "dev-context-only-utils",
 ] }
 magicblock-config = { workspace = true }
+test-kit = { workspace = true }
 tokio-util = { workspace = true }

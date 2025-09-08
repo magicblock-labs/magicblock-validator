@@ -11,6 +11,8 @@ use magicblock_account_cloner::{AccountClonerOutput, AccountClonerStub};
 use magicblock_accounts::{ExternalAccountsManager, LifecycleMode};
 use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_committor_service::stubs::ChangesetCommittorStub;
+use magicblock_core::link::transactions::TransactionSchedulerHandle;
+use magicblock_ledger::LatestBlock;
 use magicblock_program::validator::generate_validator_authority_if_needed;
 use solana_sdk::{
     account::{Account, AccountSharedData},
@@ -18,8 +20,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Signature,
 };
-use test_tools_core::init_logger;
-
+use test_kit::{init_logger, ExecutionTestEnv};
 mod stubs;
 
 type StubbedAccountsManager = ExternalAccountsManager<
@@ -34,6 +35,7 @@ fn setup(
     internal_account_provider: InternalAccountProviderStub,
     account_cloner: AccountClonerStub,
     committor_service: Arc<ChangesetCommittorStub>,
+    internal_transaction_scheduler: TransactionSchedulerHandle,
 ) -> StubbedAccountsManager {
     ExternalAccountsManager {
         internal_account_provider,
@@ -43,6 +45,8 @@ fn setup(
         committor_service: Some(committor_service),
         lifecycle: LifecycleMode::Ephemeral,
         external_commitable_accounts: Default::default(),
+        internal_transaction_scheduler,
+        latest_block: LatestBlock::default(),
     }
 }
 
@@ -97,11 +101,13 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_cloner = AccountClonerStub::default();
     let committor_service = Arc::new(ChangesetCommittorStub::default());
+    let execution = ExecutionTestEnv::new();
 
     let manager = setup(
         internal_account_provider.clone(),
         account_cloner.clone(),
         committor_service.clone(),
+        execution.transaction_scheduler.clone(),
     );
 
     // Clone the accounts through a dummy transaction

@@ -29,7 +29,10 @@ use magicblock_committor_service::{
     transactions::MAX_PROCESS_PER_TX,
     types::{ScheduledBaseIntentWrapper, TriggerType},
 };
-use magicblock_core::magic_program;
+use magicblock_core::{
+    link::transactions::TransactionSchedulerHandle, magic_program,
+};
+use magicblock_ledger::LatestBlock;
 use magicblock_program::{
     magic_scheduled_base_intent::{
         CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
@@ -94,7 +97,6 @@ impl ExternalCommitableAccount {
     }
 }
 
-#[derive(Debug)]
 pub struct ExternalAccountsManager<IAP, ACL, TAE, TAV, CC>
 where
     IAP: InternalAccountProvider,
@@ -111,6 +113,8 @@ where
     pub lifecycle: LifecycleMode,
     pub external_commitable_accounts:
         RwLock<HashMap<Pubkey, ExternalCommitableAccount>>,
+    pub internal_transaction_scheduler: TransactionSchedulerHandle,
+    pub latest_block: LatestBlock,
 }
 
 impl<IAP, ACL, TAE, TAV, CC> ExternalAccountsManager<IAP, ACL, TAE, TAV, CC>
@@ -381,7 +385,7 @@ where
         static MESSAGE_ID: AtomicU64 = AtomicU64::new(u64::MAX - 1);
 
         let slot = self.internal_account_provider.get_slot();
-        let blockhash = self.internal_account_provider.get_blockhash();
+        let blockhash = self.latest_block.load().blockhash;
 
         // Deduce accounts that should be committed
         let committees = accounts_to_be_committed
