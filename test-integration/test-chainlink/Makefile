@@ -17,14 +17,12 @@ chainlink-dirs:
 	@echo "TEST_CHAINLINK_DEPLOY_DIR: $(TEST_CHAINLINK_DEPLOY_DIR)"
 
 chainlink-prep-programs:
-	$(MAKE) chainlink-prep-memo-v1
-	$(MAKE) chainlink-prep-memo-v2
-	$(MAKE) chainlink-prep-other-v1
 	$(MAKE) chainlink-build-mini-v2
 	$(MAKE) chainlink-build-mini-v3
 
-## For now we get it from mainnet, later we'll just save it somewhere so we
-## can run all our tests offline
+# chainlink-prep-memo-v1, chainlink-prep-memo-v2 and chainlink-prep-other-v1
+# only need to run in order to refresh the account data and then copy it to
+# ../configs/accounts/
 chainlink-prep-memo-v1:
 	mkdir -p $(TEST_CHAINLINK_DEPLOY_DIR) && \
 	solana account $(CHAINLINK_MEMOV1) --output json > $(TEST_CHAINLINK_DEPLOY_DIR)/memo_v1.json
@@ -37,6 +35,8 @@ chainlink-prep-other-v1:
 	mkdir -p $(TEST_CHAINLINK_DEPLOY_DIR) && \
 	solana account $(CHAINLINK_OTHERV1) --output json > $(TEST_CHAINLINK_DEPLOY_DIR)/other_v1.json
 
+# The chainlink-build-mini-v* tasks run fresh anytime in order to pick up changes
+# to the mini-program code.
 chainlink-build-mini-v2:
 	mkdir -p $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2 && \
 	MINI_PROGRAM_ID=$(CHAINLINK_MINIV2) \

@@ -34,6 +34,10 @@ pub fn main() {
     else {
         return;
     };
+    let Ok(chainlink_output) = run_chainlink_tests(&manifest_dir, &config)
+    else {
+        return;
+    };
     let Ok(cloning_output) = run_cloning_tests(&manifest_dir, &config) else {
         return;
     };
@@ -74,6 +78,7 @@ pub fn main() {
     // Assert that all tests passed
     assert_cargo_tests_passed(security_output, "security");
     assert_cargo_tests_passed(scenarios_output, "scenarios");
+    assert_cargo_tests_passed(chainlink_output, "chainlink");
     assert_cargo_tests_passed(cloning_output, "cloning");
     assert_cargo_tests_passed(
         issues_frequent_commits_output,
@@ -138,6 +143,70 @@ fn run_restore_ledger_tests(
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run restore ledger tests: {:?}", err);
+                cleanup_devnet_only(&mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+        cleanup_devnet_only(&mut devnet_validator);
+        Ok(output)
+    } else {
+        let devnet_validator =
+            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        wait_for_ctrlc(devnet_validator, None, success_output())
+    }
+}
+
+fn run_chainlink_tests(
+    manifest_dir: &str,
+    config: &TestConfigViaEnvVars,
+) -> Result<Output, Box<dyn Error>> {
+    const TEST_NAME: &str = "chainlink";
+    if config.skip_entirely(TEST_NAME) {
+        return Ok(success_output());
+    }
+    let loaded_chain_accounts = {
+        let mut loaded_chain_accounts =
+            LoadedAccounts::with_delegation_program_test_authority();
+        loaded_chain_accounts.add(&[
+            (
+                "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo",
+                "memo_v1.json",
+            ),
+            (
+                "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+                "memo_v2.json",
+            ),
+            (
+                "BL5oAaURQwAVVHcgrucxJe3H5K57kCQ5Q8ys7dctqfV8",
+                "old_program_v1.json",
+            ),
+            (
+                "MiniV21111111111111111111111111111111111111",
+                "target/deploy/miniv2/program_mini.json",
+            ),
+        ]);
+        loaded_chain_accounts
+    };
+    let start_devnet_validator = || match start_validator(
+        "chainlink-conf.devnet.toml",
+        ValidatorCluster::Chain(None),
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+    if config.run_test(TEST_NAME) {
+        eprintln!("======== RUNNING CHAINLINK TESTS ========");
+        let mut devnet_validator = start_devnet_validator();
+        let test_chainlink_dir =
+            format!("{}/../{}", manifest_dir, "test-chainlink");
+        eprintln!("Running chainlink tests in {}", test_chainlink_dir);
+        let output = match run_test(test_chainlink_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run chainlink tests: {:?}", err);
                 cleanup_devnet_only(&mut devnet_validator);
                 return Err(err.into());
             }

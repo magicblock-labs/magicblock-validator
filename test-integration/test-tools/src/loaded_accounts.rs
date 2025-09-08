@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use solana_pubkey::pubkey;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 
@@ -20,6 +22,7 @@ pub const DLP_TEST_AUTHORITY_BYTES: [u8; 64] = [
 pub struct LoadedAccounts {
     validator_authority_kp: Keypair,
     luzid_authority: Pubkey,
+    extra_accounts: Vec<(String, String)>,
 }
 
 impl Default for LoadedAccounts {
@@ -30,6 +33,7 @@ impl Default for LoadedAccounts {
             luzid_authority: pubkey!(
                 "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm"
             ),
+            extra_accounts: vec![],
         }
     }
 }
@@ -41,6 +45,7 @@ impl LoadedAccounts {
             luzid_authority: pubkey!(
                 "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm"
             ),
+            extra_accounts: vec![],
         }
     }
 
@@ -59,6 +64,7 @@ impl LoadedAccounts {
             luzid_authority: pubkey!(
                 "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm"
             ),
+            extra_accounts: vec![],
         }
     }
 
@@ -85,5 +91,31 @@ impl LoadedAccounts {
     }
     pub fn protocol_fees_vault(&self) -> Pubkey {
         dlp::pda::fees_vault_pda()
+    }
+    pub fn extra_accounts(
+        &self,
+        workspace_dir: &PathBuf,
+        accounts_dir: &PathBuf,
+    ) -> Vec<(String, String)> {
+        self.extra_accounts
+            .iter()
+            .map(|(k, v)| {
+                // Either we have a relative path to the root dir or
+                // just a filename of an account in the accounts dir
+                let path = if v.contains("/") {
+                    workspace_dir.join(v)
+                } else {
+                    accounts_dir.join(v)
+                };
+                (k.clone(), path.to_string_lossy().to_string())
+            })
+            .collect::<Vec<_>>()
+    }
+
+    pub fn add(&mut self, accounts: &[(&str, &str)]) {
+        for (pubkey, filename) in accounts {
+            self.extra_accounts
+                .push((pubkey.to_string(), filename.to_string()));
+        }
     }
 }

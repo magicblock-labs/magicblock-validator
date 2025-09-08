@@ -62,6 +62,13 @@ setup-issues-frequent-commits-both:
 	SETUP_ONLY=both \
 	$(MAKE) test
 
+test-chainlink:
+	RUN_TESTS=chainlink \
+	$(MAKE) test
+setup-chainlink-devnet:
+	RUN_TESTS=chainlink \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
 test-cloning:
 	RUN_TESTS=cloning \
 	$(MAKE) test
@@ -167,4 +174,4 @@ ci-fmt:
 ci-lint:
 	cargo clippy --all-targets -- -D warnings
 
-.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list ci-fmt ci-lint
+.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-chainlink setup-chainlink-devnet test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list ci-fmt ci-lint

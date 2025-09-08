@@ -88,40 +88,42 @@ pub fn start_test_validator_with_config(
     let accounts = [
         (
             loaded_accounts.validator_authority().to_string(),
-            "validator-authority.json",
+            "validator-authority.json".to_string(),
         ),
         (
             loaded_accounts.luzid_authority().to_string(),
-            "luzid-authority.json",
+            "luzid-authority.json".to_string(),
         ),
         (
             loaded_accounts.validator_fees_vault().to_string(),
-            "validator-fees-vault.json",
+            "validator-fees-vault.json".to_string(),
         ),
         (
             loaded_accounts.protocol_fees_vault().to_string(),
-            "protocol-fees-vault.json",
+            "protocol-fees-vault.json".to_string(),
         ),
         (
             "9yXjZTevvMp1XgZSZEaziPRgFiXtAQChpnP2oX9eCpvt".to_string(),
-            "non-delegated-cloneable-account1.json",
+            "non-delegated-cloneable-account1.json".to_string(),
         ),
         (
             "BHBuATGifAD4JbRpM5nVdyhKzPgv3p2CxLEHAqwBzAj5".to_string(),
-            "non-delegated-cloneable-account2.json",
+            "non-delegated-cloneable-account2.json".to_string(),
         ),
         (
             "2o48ieM95rmHqMWC5B3tTX4DL7cLm4m1Kuwjay3keQSv".to_string(),
-            "non-delegated-cloneable-account3.json",
+            "non-delegated-cloneable-account3.json".to_string(),
         ),
         (
             "2EmfL3MqL3YHABudGNmajjCpR13NNEn9Y4LWxbDm6SwR".to_string(),
-            "non-delegated-cloneable-account4.json",
+            "non-delegated-cloneable-account4.json".to_string(),
         ),
     ];
+    let resolved_extra_accounts =
+        loaded_accounts.extra_accounts(workspace_dir, &accounts_dir);
+    let accounts = accounts.iter().chain(&resolved_extra_accounts);
 
     let account_args = accounts
-        .iter()
         .flat_map(|(account, file)| {
             let account_path = accounts_dir.join(file).canonicalize().unwrap();
             vec![
