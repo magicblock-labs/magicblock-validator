@@ -27,8 +27,7 @@ list:
 list-programs:
 	@echo $(PROGRAMS_SO)
 
-	#$(PROGRAMS_SO)
-test:
+test: $(PROGRAMS_SO)
 	$(MAKE) chainlink-prep-programs -C ./test-chainlink && \
 	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \

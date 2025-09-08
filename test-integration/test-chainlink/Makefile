@@ -1,0 +1,72 @@
+TEST_CHAINLINK_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+TEST_CHAINLINK_WS_ROOT := $(TEST_CHAINLINK_DIR)../
+TEST_CHAINLINK_DEPLOY_DIR := $(TEST_CHAINLINK_WS_ROOT)target/deploy
+TEST_CHAINLINK_MINI_PROGRAM_DIR := $(TEST_CHAINLINK_WS_ROOT)programs/mini/
+
+CHAINLINK_MEMOV1=Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo
+CHAINLINK_MEMOV2=MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr
+CHAINLINK_OTHERV1=BL5oAaURQwAVVHcgrucxJe3H5K57kCQ5Q8ys7dctqfV8
+CHAINLINK_MINIV2=MiniV21111111111111111111111111111111111111
+CHAINLINK_MINIV3=MiniV31111111111111111111111111111111111111
+
+chainlink-list:
+	@LC_ALL=C $(MAKE) -pRrq -f $(firstword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/(^|\n)# Files(\n|$$)/,/(^|\n)# Finished Make data base/ {if ($$1 !~ "^[#.]") {print $$1}}' | sort | egrep -v -e '^[^[:alnum:]]' -e '^$@$$'
+
+chainlink-dirs:
+	@echo "TEST_CHAINLINK_DIR: $(TEST_CHAINLINK_DIR)"
+	@echo "TEST_CHAINLINK_DEPLOY_DIR: $(TEST_CHAINLINK_DEPLOY_DIR)"
+
+chainlink-prep-programs:
+	$(MAKE) chainlink-prep-memo-v1
+	$(MAKE) chainlink-prep-memo-v2
+	$(MAKE) chainlink-prep-other-v1
+	$(MAKE) chainlink-build-mini-v2
+	$(MAKE) chainlink-build-mini-v3
+
+## For now we get it from mainnet, later we'll just save it somewhere so we
+## can run all our tests offline
+chainlink-prep-memo-v1:
+	mkdir -p $(TEST_CHAINLINK_DEPLOY_DIR) && \
+	solana account $(CHAINLINK_MEMOV1) --output json > $(TEST_CHAINLINK_DEPLOY_DIR)/memo_v1.json
+
+chainlink-prep-memo-v2:
+	mkdir -p $(TEST_CHAINLINK_DEPLOY_DIR) && \
+	solana account $(CHAINLINK_MEMOV2) --output json > $(TEST_CHAINLINK_DEPLOY_DIR)/memo_v2.json
+
+chainlink-prep-other-v1:
+	mkdir -p $(TEST_CHAINLINK_DEPLOY_DIR) && \
+	solana account $(CHAINLINK_OTHERV1) --output json > $(TEST_CHAINLINK_DEPLOY_DIR)/other_v1.json
+
+chainlink-build-mini-v2:
+	mkdir -p $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2 && \
+	MINI_PROGRAM_ID=$(CHAINLINK_MINIV2) \
+	cargo build-sbf \
+		--manifest-path $(TEST_CHAINLINK_MINI_PROGRAM_DIR)Cargo.toml \
+		--sbf-out-dir $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2 && \
+	base64 -i $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.so -o $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/mini_program.base64 && \
+	JSON_CONTENT='{\n \
+		"pubkey": "MiniV21111111111111111111111111111111111111",\n \
+		"account": {\n \
+			"lamports": 1551155440,\n \
+			"data": [\n \
+				"<base64 encoded data>",\n \
+				"base64"\n \
+			], \n \
+			"owner": "BPFLoader2111111111111111111111111111111111",\n \
+			"executable": true,\n \
+			"rentEpoch": 18446744073709551615,\n \
+			"space": 79061\n \
+		}\n \
+	}' && \
+	BASE64_DATA=$$(cat $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/mini_program.base64) && \
+	echo "$${JSON_CONTENT/<base64 encoded data>/$$BASE64_DATA}" > $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json
+
+
+chainlink-build-mini-v3:
+	mkdir -p $(TEST_CHAINLINK_DEPLOY_DIR)/miniv3 && \
+	MINI_PROGRAM_ID=$(CHAINLINK_MINIV3) \
+	cargo build-sbf \
+		--manifest-path $(TEST_CHAINLINK_MINI_PROGRAM_DIR)Cargo.toml \
+		--sbf-out-dir $(TEST_CHAINLINK_DEPLOY_DIR)/miniv3
+
+.PHONY: chainlink-prep-memo-v1 chainlink-prep-memo-v2 chainlink-prep-other-v1 chainlink-build-mini-v2 chainlink-build-mini-v3 chainlink-chainlink-prep-programs chainlink-list chainlink-dirs
