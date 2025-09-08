@@ -15,8 +15,8 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     // Background thread prioritization: give flushes more threads, limit compaction threads (low-priority)
     let mut env = rocksdb::Env::new().unwrap();
     let cpus_env = num_cpus::get() as i32;
-    // Low-priority threads are used for compaction. Keep them small to favor foreground writes.
-    let low_pri = (cpus_env / 4).clamp(1, 2);
+    // Low-priority threads are used for compaction. Keep them minimal to reduce contention with RPC.
+    let low_pri = 1; // conservative: a single compaction thread
     env.set_background_threads(low_pri);
     // High-priority threads are used for flush. Keep a few to avoid memtable flush backlog.
     let high_pri = cpus_env.clamp(2, 4);
@@ -44,12 +44,12 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     options.set_enable_pipelined_write(true);
     options.set_enable_write_thread_adaptive_yield(true);
 
-    // Background jobs: enough to keep up, not to starve CPU
-    // Cap at 8 or number of CPUs, whichever is smaller but at least 4
+    // Background jobs: keep compaction concurrency conservative to reduce spikes
     let cpus = num_cpus::get() as i32;
-    let max_jobs = cpus.clamp(4, 8);
+    let max_jobs = std::cmp::min(cpus, 4);
     options.set_max_background_jobs(max_jobs);
-    options.set_max_subcompactions(2);
+    // Avoid subcompactions to limit IO/CPU burst during manual compaction
+    options.set_max_subcompactions(1);
 
     // Use direct IO for compaction/flush to avoid page cache contention
     options.set_use_direct_reads(true);
@@ -58,8 +58,8 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
 
     // Throttle background compaction/flush IO to avoid starving foreground ops
     // RateLimiter parameters: rate_bytes_per_sec, refill_period_us, fairness
-    // Start with a conservative 128 MiB/s, adjustable via config later if needed
-    options.set_ratelimiter(128 * 1024 * 1024, 100 * 1000, 10);
+    // Lower to 64 MiB/s to further reduce IO bursts during compaction
+    options.set_ratelimiter(64 * 1024 * 1024, 100 * 1000, 10);
 
     // Prevent large compactions from monopolizing resources
     options.set_soft_pending_compaction_bytes_limit(8 * 1024 * 1024 * 1024); // 8 GiB
