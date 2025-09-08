@@ -289,7 +289,7 @@ impl IxtestContext {
             counter_pda,
             program_flexi_counter::id(),
             dlp::args::CommitStateArgs {
-                slot: 1,
+                nonce: 1,
                 lamports: 1_000_000,
                 allow_undelegation: true,
                 data: vec![0, 1, 0],

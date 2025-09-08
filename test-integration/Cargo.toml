@@ -70,6 +70,8 @@ schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "8bc6a58" }
 solana-loader-v2-interface = "2.2"
+solana-loader-v3-interface = "4.0"
+solana-loader-v4-interface = "2.1"
 solana-program = "2.2"
 solana-program-test = "2.2"
 solana-pubkey = { version = "2.2" }
