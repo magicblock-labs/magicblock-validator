@@ -10,6 +10,7 @@ edition.workspace = true
 [dependencies]
 bincode = { workspace = true }
 log = { workspace = true }
+magicblock-core = { workspace = true }
 magicblock-program = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }

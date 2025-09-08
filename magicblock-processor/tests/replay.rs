@@ -1,3 +1,4 @@
+use magicblock_core::traits::AccountsBank;
 use std::time::Duration;
 
 use guinea::GuineaInstruction;

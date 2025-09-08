@@ -1,3 +1,4 @@
+use magicblock_core::traits::AccountsBank;
 use std::{mem::size_of, ops::Range};
 
 use base64::{prelude::BASE64_STANDARD, Engine};

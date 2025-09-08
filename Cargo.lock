@@ -3257,6 +3257,7 @@ name = "ledger-stats"
 version = "0.0.0"
 dependencies = [
  "magicblock-accounts-db",
+ "magicblock-core",
  "magicblock-ledger",
  "num-format",
  "pretty-hex",
@@ -3654,6 +3655,7 @@ name = "magicblock-accounts-api"
 version = "0.1.7"
 dependencies = [
  "magicblock-accounts-db",
+ "magicblock-core",
  "solana-account",
  "solana-pubkey",
 ]
@@ -3666,6 +3668,7 @@ dependencies = [
  "lmdb-rkv",
  "log",
  "magicblock-config",
+ "magicblock-core",
  "memmap2 0.9.5",
  "parking_lot 0.12.4",
  "reflink-copy",
@@ -3995,6 +3998,7 @@ dependencies = [
  "assert_matches",
  "bincode",
  "log",
+ "magicblock-core",
  "magicblock-program",
  "solana-rpc-client",
  "solana-rpc-client-api",

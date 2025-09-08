@@ -6,6 +6,7 @@ use std::{
 };
 
 use magicblock_config::AccountsDbConfig;
+use magicblock_core::traits::AccountsBank;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 

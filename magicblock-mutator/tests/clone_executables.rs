@@ -1,5 +1,6 @@
 use assert_matches::assert_matches;
 use log::*;
+use magicblock_core::traits::AccountsBank;
 use magicblock_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
 use magicblock_program::{
     test_utils::ensure_started_validator,

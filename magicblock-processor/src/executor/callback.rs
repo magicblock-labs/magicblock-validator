@@ -1,3 +1,4 @@
+use magicblock_core::traits::AccountsBank;
 use solana_account::{AccountSharedData, WritableAccount};
 use solana_feature_set::FeatureSet;
 use solana_fee::FeeFeatures;

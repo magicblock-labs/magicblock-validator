@@ -1,3 +1,4 @@
+use magicblock_core::traits::AccountsBank;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},

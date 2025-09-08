@@ -6,6 +6,7 @@ use index::{
 };
 use log::{error, warn};
 use magicblock_config::AccountsDbConfig;
+use magicblock_core::traits::AccountsBank;
 use parking_lot::RwLock;
 use snapshot::SnapshotEngine;
 use solana_account::{
@@ -77,20 +78,6 @@ impl AccountsDb {
             ..Default::default()
         };
         Self::new(&config, directory, 0)
-    }
-
-    /// Read account from with given pubkey from the database (if exists)
-    #[inline(always)]
-    pub fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
-        let offset = self.index.get_account_offset(pubkey).ok()?;
-        Some(self.storage.read_account(offset))
-    }
-
-    pub fn remove_account(&self, pubkey: &Pubkey) {
-        let _ = self
-            .index
-            .remove_account(pubkey)
-            .inspect_err(log_err!("removing an account {}", pubkey));
     }
 
     /// Insert account with given pubkey into the database
@@ -325,6 +312,22 @@ impl AccountsDb {
     /// while some critical operation, like snapshotting is in progress
     pub fn synchronizer(&self) -> StWLock {
         self.synchronizer.clone()
+    }
+}
+
+impl AccountsBank for AccountsDb {
+    /// Read account from with given pubkey from the database (if exists)
+    #[inline(always)]
+    fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+        let offset = self.index.get_account_offset(pubkey).ok()?;
+        Some(self.storage.read_account(offset))
+    }
+
+    fn remove_account(&self, pubkey: &Pubkey) {
+        let _ = self
+            .index
+            .remove_account(pubkey)
+            .inspect_err(log_err!("removing an account {}", pubkey));
     }
 }
 

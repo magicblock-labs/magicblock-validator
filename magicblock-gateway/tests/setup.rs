@@ -7,6 +7,7 @@ use std::{
 
 use magicblock_config::RpcConfig;
 use magicblock_core::link::accounts::LockedAccount;
+use magicblock_core::traits::AccountsBank;
 use magicblock_core::Slot;
 use magicblock_gateway::{
     state::{NodeContext, SharedState},

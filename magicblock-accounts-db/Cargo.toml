@@ -25,6 +25,7 @@ serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 log = { workspace = true }
 magicblock-config = { workspace = true }
+magicblock-core = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

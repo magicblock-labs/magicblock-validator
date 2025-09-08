@@ -17,6 +17,7 @@ use magicblock_committor_service::{
     BaseIntentCommittor,
 };
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
+use magicblock_core::traits::AccountsBank;
 use magicblock_program::{
     magic_scheduled_base_intent::{CommittedAccount, ScheduledBaseIntent},
     register_scheduled_commit_sent, FeePayerAccount, SentCommit,
