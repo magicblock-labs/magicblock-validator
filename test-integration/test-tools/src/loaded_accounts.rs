@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use solana_pubkey::pubkey;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
@@ -94,8 +94,8 @@ impl LoadedAccounts {
     }
     pub fn extra_accounts(
         &self,
-        workspace_dir: &PathBuf,
-        accounts_dir: &PathBuf,
+        workspace_dir: &Path,
+        accounts_dir: &Path,
     ) -> Vec<(String, String)> {
         self.extra_accounts
             .iter()
