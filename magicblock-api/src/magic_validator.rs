@@ -529,7 +529,7 @@ impl MagicValidator {
             pubsub_socket_addr: Some(*pubsub_config.socket()),
             enable_rpc_transaction_history: true,
             disable_sigverify: !config.validator.sigverify,
-
+            rpc_threads: 8,
             ..Default::default()
         };
 
