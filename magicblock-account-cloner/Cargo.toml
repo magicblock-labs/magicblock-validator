@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
 flume = { workspace = true }
 futures-util = { workspace = true }
@@ -16,12 +17,16 @@ magicblock-account-fetcher = { workspace = true }
 magicblock-account-updates = { workspace = true }
 magicblock-account-dumper = { workspace = true }
 magicblock-accounts-api = { workspace = true }
+magicblock-accounts-db = { workspace = true }
 magicblock-rpc-client = { workspace = true }
+magicblock-chainlink = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-committor-service = { workspace = true }
+magicblock-ledger = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-mutator = { workspace = true }
+magicblock-program = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

@@ -1,4 +1,5 @@
 #![cfg(any(test, feature = "dev-context"))]
+use async_trait::async_trait;
 use std::fmt;
 use std::sync::Arc;
 
@@ -62,8 +63,9 @@ impl ClonerStub {
 }
 
 #[cfg(any(test, feature = "dev-context"))]
+#[async_trait]
 impl Cloner for ClonerStub {
-    fn clone_account(
+    async fn clone_account(
         &self,
         pubkey: Pubkey,
         account: AccountSharedData,
@@ -72,7 +74,10 @@ impl Cloner for ClonerStub {
         Ok(Signature::default())
     }
 
-    fn clone_program(&self, program: LoadedProgram) -> ClonerResult<Signature> {
+    async fn clone_program(
+        &self,
+        program: LoadedProgram,
+    ) -> ClonerResult<Signature> {
         use solana_account::WritableAccount;
         use solana_loader_v4_interface::state::LoaderV4State;
         use solana_sdk::rent::Rent;

@@ -122,11 +122,12 @@ impl LoadedProgram {
         }
     }
 
-    pub fn into_unsigned_deploy_transaction_v4(
-        self,
-        recent_blockhash: Hash,
-        payer: &Pubkey,
-    ) -> ClonerResult<Transaction> {
+    /// Creates the instructions to deploy this program into our validator
+    /// NOTE: uses the same authority as the remote program.
+    /// TODO: @@@ this may not work, in that case use auth of the validator
+    /// initially and then add mutation instruction to change auth to the
+    /// remote auth.
+    pub fn try_into_deploy_ixs_v4(self) -> ClonerResult<Vec<Instruction>> {
         let Self {
             program_id,
             authority,
@@ -200,16 +201,12 @@ impl LoadedProgram {
             }
         };
 
-        let tx = Transaction::new_with_payer(
-            &[
-                create_program_account_instruction,
-                set_length_instruction,
-                write_instruction,
-                deploy_instruction,
-            ],
-            Some(payer),
-        );
-        Ok(tx)
+        Ok(vec![
+            create_program_account_instruction,
+            set_length_instruction,
+            write_instruction,
+            deploy_instruction,
+        ])
     }
 }
 

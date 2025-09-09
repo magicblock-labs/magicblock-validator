@@ -1,5 +1,6 @@
 mod account_cloner;
 mod account_cloner_stub;
+pub mod chainext;
 mod remote_account_cloner_client;
 mod remote_account_cloner_worker;
 

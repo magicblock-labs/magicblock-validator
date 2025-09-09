@@ -26,6 +26,7 @@ solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 solana-sdk-ids = { workspace = true }
 solana-system-interface = { workspace = true }
+solana-transaction-error = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }

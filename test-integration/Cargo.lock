@@ -3500,6 +3500,7 @@ dependencies = [
 name = "magicblock-account-cloner"
 version = "0.1.7"
 dependencies = [
+ "async-trait",
  "conjunto-transwise",
  "flume",
  "futures-util",
@@ -3509,11 +3510,15 @@ dependencies = [
  "magicblock-account-fetcher",
  "magicblock-account-updates",
  "magicblock-accounts-api",
+ "magicblock-accounts-db",
+ "magicblock-chainlink",
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core 0.1.7",
+ "magicblock-ledger",
  "magicblock-metrics",
  "magicblock-mutator",
+ "magicblock-program",
  "magicblock-rpc-client",
  "solana-sdk",
  "thiserror 1.0.69",
@@ -3698,6 +3703,7 @@ dependencies = [
  "solana-sdk",
  "solana-sdk-ids",
  "solana-system-interface",
+ "solana-transaction-error",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",

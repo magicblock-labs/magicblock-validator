@@ -449,6 +449,36 @@ impl MagicValidator {
         Arc::new(accounts_manager)
     }
 
+    /*
+        fn init_chainlink(
+            &self,
+            rpc_config: &RpcProviderConfig,
+            accounts: &magicblock_accounts::AccountsConfig,
+            validator_pubkey: Pubkey,
+            faucet_pubkey: Pubkey,
+        ) {
+    use magicblock_chainlink::{remote_account_provider::Endpoint, Chainlink};
+            let endpoints = accounts
+                .remote_cluster
+                .ws_urls()
+                .iter()
+                .map(|pubsub_url| Endpoint {
+                    rpc_url: rpc_config.url(),
+                    pubsub_url,
+                })
+                .collect::<Vec<_>>();
+
+            let cloner = todo!("real cloner");
+            let chainlink = Chainlink::try_new_from_endpoints(
+                &endpoints,
+                cloner,
+                rpc_config.commitment(),
+                validator_pubkey,
+                faucet_pubkey,
+            );
+        }
+        */
+
     fn init_ledger(
         ledger_config: &LedgerConfig,
     ) -> ApiResult<(Arc<Ledger>, Slot)> {

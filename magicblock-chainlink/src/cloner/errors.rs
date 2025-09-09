@@ -8,4 +8,6 @@ pub enum ClonerError {
     BincodeError(#[from] bincode::Error),
     #[error(transparent)]
     TryFromIntError(#[from] std::num::TryFromIntError),
+    #[error(transparent)]
+    TransactionError(#[from] solana_transaction_error::TransactionError),
 }

@@ -155,7 +155,9 @@ where
                     )
                     .await;
                 if let Some(account) = resolved_account {
-                    if let Err(err) = cloner.clone_account(pubkey, account) {
+                    if let Err(err) =
+                        cloner.clone_account(pubkey, account).await
+                    {
                         error!(
                             "Failed to clone account {pubkey} into bank: {err}"
                         );
@@ -742,11 +744,13 @@ where
                     account.owner()
                 );
             }
-            self.cloner.clone_account(pubkey, account)?;
+            // TODO: @@ maybe parallelize
+            self.cloner.clone_account(pubkey, account).await?;
         }
 
         for acc in loaded_programs {
-            self.cloner.clone_program(acc)?;
+            // TODO: @@ maybe parallelize
+            self.cloner.clone_program(acc).await?;
         }
 
         Ok(FetchAndCloneResult {
