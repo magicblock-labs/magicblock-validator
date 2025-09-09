@@ -1,5 +1,9 @@
 #![allow(unused)]
 use log::*;
+use solana_sdk::hash::Hash;
+use solana_sdk::instruction::{AccountMeta, Instruction};
+use solana_sdk::native_token::LAMPORTS_PER_SOL;
+use solana_sdk::transaction::Transaction;
 use std::{fmt, sync::Arc};
 
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -7,11 +11,14 @@ use solana_loader_v3_interface::{
     get_program_data_address as get_program_data_v3_address,
     state::UpgradeableLoaderState as LoaderV3State,
 };
+use solana_loader_v4_interface::instruction::LoaderV4Instruction as LoaderInstructionV4;
 use solana_loader_v4_interface::state::{LoaderV4State, LoaderV4Status};
 use solana_pubkey::Pubkey;
 use solana_sdk::{pubkey, rent::Rent};
 use solana_sdk_ids::bpf_loader_upgradeable;
+use solana_system_interface::instruction as system_instruction;
 
+use crate::cloner::errors::ClonerResult;
 use crate::remote_account_provider::{
     ChainPubsubClient, ChainRpcClient, RemoteAccountProvider,
     RemoteAccountProviderError, RemoteAccountProviderResult,
@@ -103,6 +110,106 @@ impl LoadedProgram {
     pub fn lamports(&self) -> u64 {
         let size = self.program_data.len();
         Rent::default().minimum_balance(size)
+    }
+
+    pub fn loader_id(&self) -> Pubkey {
+        use RemoteProgramLoader::*;
+        match self.loader {
+            V1 => LOADER_V1,
+            V2 => LOADER_V2,
+            V3 => LOADER_V3,
+            V4 => LOADER_V4,
+        }
+    }
+
+    pub fn into_unsigned_deploy_transaction_v4(
+        self,
+        recent_blockhash: Hash,
+        payer: &Pubkey,
+    ) -> ClonerResult<Transaction> {
+        let Self {
+            program_id,
+            authority,
+            program_data,
+            loader,
+            ..
+        } = self;
+        let size = program_data.len() + 1024;
+        let lamports = Rent::default().minimum_balance(size);
+
+        // 1. Set program length to initialize and allocate space
+        let create_program_account_instruction =
+            system_instruction::create_account(
+                &authority,
+                &program_id,
+                lamports,
+                0,
+                &LOADER_V4,
+            );
+
+        let set_length_instruction = {
+            let loader_instruction = LoaderInstructionV4::SetProgramLength {
+                new_size: size.try_into()?,
+            };
+
+            Instruction {
+                program_id: LOADER_V4,
+                accounts: vec![
+                    // [writable] The program account to change the size of
+                    AccountMeta::new(program_id, false),
+                    // [signer] The authority of the program
+                    AccountMeta::new_readonly(authority, true),
+                ],
+                data: bincode::serialize(&loader_instruction)?,
+            }
+        };
+
+        // 2. Write program data in one huge chunk since the transaction is
+        //    internal and has no size limit
+        let write_instruction = {
+            let loader_instruction = LoaderInstructionV4::Write {
+                offset: 0,
+                bytes: program_data.clone(),
+            };
+
+            Instruction {
+                program_id: LOADER_V4,
+                accounts: vec![
+                    // [writable] The program account to write data to
+                    AccountMeta::new(program_id, false),
+                    // [signer] The authority of the program
+                    AccountMeta::new_readonly(authority, true),
+                ],
+                data: bincode::serialize(&loader_instruction)?,
+            }
+        };
+
+        // 3. Deploy the program to make it executable
+        let deploy_instruction = {
+            let loader_instruction = LoaderInstructionV4::Deploy;
+
+            Instruction {
+                program_id: LOADER_V4,
+                accounts: vec![
+                    // [writable] The program account to deploy
+                    AccountMeta::new(program_id, false),
+                    // [signer] The authority of the program
+                    AccountMeta::new_readonly(authority, true),
+                ],
+                data: bincode::serialize(&loader_instruction)?,
+            }
+        };
+
+        let tx = Transaction::new_with_payer(
+            &[
+                create_program_account_instruction,
+                set_length_instruction,
+                write_instruction,
+                deploy_instruction,
+            ],
+            Some(payer),
+        );
+        Ok(tx)
     }
 }
 
