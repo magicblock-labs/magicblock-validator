@@ -379,7 +379,7 @@ impl AccountsDbIndex {
             blocks = space;
             let new_offset = offset.saturating_add(blocks);
             let index_value = bytes!(#pack, new_offset, u32, remainder, u32);
-            cursor.put(&remainder.to_be_bytes(), &index_value, WEMPTY)?;
+            cursor.put(&remainder.to_le_bytes(), &index_value, WEMPTY)?;
         }
 
         drop(cursor);
