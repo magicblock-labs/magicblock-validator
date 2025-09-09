@@ -9,20 +9,26 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     options.create_if_missing(true);
     options.create_missing_column_families(true);
 
-    // Per the docs, a good value for this is the number of cores on the machine
-    options.increase_parallelism(num_cpus::get() as i32);
-
     // Background thread prioritization: give flushes more threads, limit compaction threads (low-priority)
     let mut env = rocksdb::Env::new().unwrap();
     let cpus_env = num_cpus::get() as i32;
+
+    // Bottom-priority are used for bottommost compactions. Keep it minimal - 1
+    let bottom_pri = 1;
+    env.set_bottom_priority_background_threads(bottom_pri);
     // Low-priority threads are used for compaction. Keep them small to favor foreground writes.
-    let low_pri = (cpus_env / 4).clamp(1, 2);
+    let low_pri = 1;
     env.set_background_threads(low_pri);
     // High-priority threads are used for flush. Keep a few to avoid memtable flush backlog.
     let high_pri = cpus_env.clamp(2, 4);
     env.set_high_priority_background_threads(high_pri);
     options.set_env(&env);
 
+    // For every job RocksDB picks a thread from available pools
+    // Limit is to number of overall threads
+    let max_jobs = bottom_pri + low_pri + high_pri;
+    options.set_max_background_jobs(max_jobs);
+    
     // Bound WAL size
     options.set_max_total_wal_size(4 * 1024 * 1024 * 1024);
 
@@ -43,13 +49,6 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     options.set_allow_concurrent_memtable_write(true);
     options.set_enable_pipelined_write(true);
     options.set_enable_write_thread_adaptive_yield(true);
-
-    // Background jobs: enough to keep up, not to starve CPU
-    // Cap at 8 or number of CPUs, whichever is smaller but at least 4
-    let cpus = num_cpus::get() as i32;
-    let max_jobs = cpus.clamp(4, 8);
-    options.set_max_background_jobs(max_jobs);
-    options.set_max_subcompactions(2);
 
     // Use direct IO for compaction/flush to avoid page cache contention
     options.set_use_direct_reads(true);
