@@ -297,7 +297,7 @@ fn test_recycle_allocation_split() {
     assert_eq!(
         tenv.get_delloactions_count(),
         1,
-        "the number of deallocations should have decreased after recycling"
+        "the number of deallocations should have increased after account removal"
     );
 
     let result = tenv
