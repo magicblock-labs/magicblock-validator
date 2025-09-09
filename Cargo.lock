@@ -6254,7 +6254,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=8bc6a58#8bc6a588204cd9564c66dcb7f3a65606d9c9c0a0"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=a892d2a#a892d2aff374f260535a4499e00bbe5752a2d29c"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -9056,7 +9056,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=3e6c209#3e6c209efc4a289aac14a9cc0436b835b9224195"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2#11bbaf2249aeb16cec4111e86f2e18a0c45ff1f2"
 dependencies = [
  "ahash 0.8.12",
  "log",

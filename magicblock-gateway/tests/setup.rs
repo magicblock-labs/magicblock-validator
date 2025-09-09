@@ -48,7 +48,7 @@ pub struct RpcTestEnv {
 
 impl RpcTestEnv {
     // --- Constants ---
-    pub const BASE_FEE: u64 = 1000;
+    pub const BASE_FEE: u64 = ExecutionTestEnv::BASE_FEE;
     pub const INIT_ACCOUNT_BALANCE: u64 = 10_000_000_000;
     pub const TRANSFER_AMOUNT: u64 = 1000;
 

@@ -58,17 +58,24 @@ impl Default for LatestBlock {
 }
 
 impl LatestBlock {
+    /// Atomically loads a snapshot of the latest block information.
+    /// This provides a high-performance, lock-free read.
     pub fn load(&self) -> Guard<Arc<LatestBlockInner>> {
         self.inner.load()
     }
 
+    /// Atomically updates the latest block information and notifies all subscribers.
+    /// This is the "writer" method for the single-writer, multi-reader pattern.
     pub fn store(&self, slot: u64, blockhash: Hash, timestamp: i64) {
         let block = LatestBlockInner::new(slot, blockhash, timestamp);
         self.inner.store(block.into());
-        // we don't care if there're active listeners
+        // Broadcast the update. It's okay if there are no active listeners.
         let _ = self.notifier.send(());
     }
 
+    /// Creates a new receiver to listen for block updates.
+    /// Each receiver created via this method will be notified when `store` is called.
+    /// This allows multiple components to react to new blocks concurrently.
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
         self.notifier.subscribe()
     }

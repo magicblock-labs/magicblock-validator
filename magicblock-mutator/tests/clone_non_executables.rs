@@ -53,6 +53,9 @@ async fn clone_non_executable_without_data() {
 
     test_env.fund_account(LUZIFER, u64::MAX / 2);
     test_env.fund_account(validator_authority_id(), u64::MAX / 2);
+    let mut authority = test_env.get_account(validator_authority_id());
+    authority.as_borrowed_mut().unwrap().set_privileged(true);
+    authority.commmit();
     let slot = test_env.advance_slot();
 
     let txn = verified_tx_to_clone_non_executable_from_devnet(
@@ -66,7 +69,7 @@ async fn clone_non_executable_without_data() {
         .await
         .expect("failed to clone non-exec account from devnet");
 
-    let solx_tips = test_env.accountsdb.get_account(&SOLX_TIPS).unwrap().into();
+    let solx_tips = test_env.get_account(SOLX_TIPS).account.into();
 
     trace!("SolxTips account: {:#?}", solx_tips);
 
@@ -96,6 +99,9 @@ async fn clone_non_executable_with_data() {
 
     test_env.fund_account(LUZIFER, u64::MAX / 2);
     test_env.fund_account(validator_authority_id(), u64::MAX / 2);
+    let mut authority = test_env.get_account(validator_authority_id());
+    authority.as_borrowed_mut().unwrap().set_privileged(true);
+    authority.commmit();
     let slot = test_env.advance_slot();
     let txn = verified_tx_to_clone_non_executable_from_devnet(
         &SOLX_POST,
