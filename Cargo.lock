@@ -4018,6 +4018,7 @@ dependencies = [
  "magicblock-rpc",
  "magicblock-transaction-status",
  "magicblock-validator-admin",
+ "num_cpus",
  "paste",
  "solana-geyser-plugin-manager",
  "solana-rpc",
