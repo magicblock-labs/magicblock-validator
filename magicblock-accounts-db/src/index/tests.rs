@@ -256,7 +256,7 @@ fn test_recycle_allocation_after_realloc() {
     assert_eq!(
         tenv.get_delloactions_count(),
         0,
-        "the number of deallocations should have decresed after recycling"
+        "the number of deallocations should have decreased after recycling"
     );
     let result = tenv.try_recycle_allocation(new_allocation.blocks);
     assert!(
@@ -278,7 +278,48 @@ fn test_recycle_allocation_after_realloc() {
     assert_eq!(
         tenv.get_delloactions_count(),
         0,
-        "the number of deallocations should have decresed after recycling"
+        "the number of deallocations should have decreased after recycling"
+    );
+}
+
+#[test]
+fn test_recycle_allocation_split() {
+    let tenv = setup();
+    let IndexAccount {
+        pubkey,
+        owner,
+        allocation,
+    } = tenv.account();
+
+    tenv.insert_account(&pubkey, &owner, allocation)
+        .expect("failed to insert account");
+    tenv.remove_account(&pubkey).unwrap();
+    assert_eq!(
+        tenv.get_delloactions_count(),
+        1,
+        "the number of deallocations should have decreased after recycling"
+    );
+
+    let result = tenv
+        .try_recycle_allocation(allocation.blocks / 2)
+        .expect("failed to recycle allocation");
+    assert_eq!(result.blocks, allocation.blocks / 2);
+    assert_eq!(result.offset, allocation.offset);
+    let result = tenv
+        .try_recycle_allocation(allocation.blocks / 2)
+        .expect("failed to recycle allocation");
+    assert_eq!(result.blocks, allocation.blocks / 2);
+    assert!(result.offset > allocation.offset);
+
+    assert_eq!(
+        tenv.get_delloactions_count(),
+        0,
+        "the number of deallocations should have decreased after recycling"
+    );
+    let result = tenv.try_recycle_allocation(allocation.blocks);
+    assert!(
+        matches!(result, Err(AccountsDbError::NotFound)),
+        "deallocations index should have run out of existing allocations"
     );
 }
 
