@@ -14,7 +14,6 @@ magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-processor = { workspace = true }
 
-
 solana-account = { workspace = true }
 solana-instruction = { workspace = true }
 solana-keypair = { workspace = true }

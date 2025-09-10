@@ -1,3 +1,4 @@
+use magicblock_core::traits::AccountsBank;
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
@@ -268,10 +269,7 @@ impl ExecutionTestEnv {
             .inspect_err(|err| error!("failed to replay transaction: {err}"))
     }
 
-    pub fn get_account<'db>(
-        &'db self,
-        pubkey: Pubkey,
-    ) -> CommitableAccount<'db> {
+    pub fn get_account(&self, pubkey: Pubkey) -> CommitableAccount<'_> {
         let account = self
             .accountsdb
             .get_account(&pubkey)

@@ -5,16 +5,13 @@ use std::{
     thread,
 };
 
-use magicblock_config::RpcConfig;
-use magicblock_core::link::accounts::LockedAccount;
-use magicblock_core::traits::AccountsBank;
-use magicblock_core::Slot;
 use magicblock_aperture::{
     state::{NodeContext, SharedState},
     JsonRpcServer,
 };
 use magicblock_config::RpcConfig;
 use magicblock_core::link::accounts::LockedAccount;
+use magicblock_core::traits::AccountsBank;
 use magicblock_core::Slot;
 use magicblock_ledger::LatestBlock;
 use solana_account::{ReadableAccount, WritableAccount};
