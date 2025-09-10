@@ -3808,6 +3808,7 @@ dependencies = [
  "bs58",
  "clap 4.5.41",
  "isocountry",
+ "magicblock-chainlink",
  "magicblock-config-helpers",
  "magicblock-config-macro",
  "serde",

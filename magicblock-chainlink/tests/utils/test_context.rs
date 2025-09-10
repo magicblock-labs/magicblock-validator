@@ -1,13 +1,13 @@
 #![allow(unused)]
 use super::accounts::account_shared_with_owner_and_slot;
 use log::*;
+use magicblock_chainlink::config::LifecycleMode;
 use magicblock_chainlink::errors::ChainlinkResult;
 use magicblock_chainlink::fetch_cloner::{FetchAndCloneResult, FetchCloner};
 use magicblock_chainlink::remote_account_provider::config::RemoteAccountProviderConfig;
 use magicblock_chainlink::remote_account_provider::RemoteAccountProvider;
 use magicblock_chainlink::testing::accounts::account_shared_with_owner;
 use magicblock_chainlink::testing::deleg::add_delegation_record_for;
-use magicblock_chainlink::validator_types::LifecycleMode;
 use magicblock_chainlink::Chainlink;
 use solana_sdk::clock::Slot;
 use std::sync::Arc;

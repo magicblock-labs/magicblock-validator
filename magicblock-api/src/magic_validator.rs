@@ -10,9 +10,9 @@ use std::{
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
-    map_committor_request_result, standard_blacklisted_accounts,
-    RemoteAccountClonerClient, RemoteAccountClonerWorker,
-    ValidatorCollectionMode,
+    chainext::ChainlinkCloner, map_committor_request_result,
+    standard_blacklisted_accounts, RemoteAccountClonerClient,
+    RemoteAccountClonerWorker, ValidatorCollectionMode,
 };
 use magicblock_account_dumper::AccountDumperBank;
 use magicblock_account_fetcher::{
@@ -31,6 +31,13 @@ use magicblock_accounts_db::AccountsDb;
 use magicblock_aperture::{
     state::{NodeContext, SharedState},
     JsonRpcServer,
+};
+use magicblock_chainlink::{
+    config::ChainlinkConfig,
+    remote_account_provider::{
+        chain_pubsub_client::ChainPubsubClientImpl,
+        chain_rpc_client::ChainRpcClientImpl,
+    },
 };
 use magicblock_committor_service::{
     config::ChainConfig, service_ext::CommittorServiceExt, BaseIntentCommittor,
@@ -449,35 +456,58 @@ impl MagicValidator {
         Arc::new(accounts_manager)
     }
 
-    /*
-        fn init_chainlink(
-            &self,
-            rpc_config: &RpcProviderConfig,
-            accounts: &magicblock_accounts::AccountsConfig,
-            validator_pubkey: Pubkey,
-            faucet_pubkey: Pubkey,
-        ) {
-    use magicblock_chainlink::{remote_account_provider::Endpoint, Chainlink};
-            let endpoints = accounts
-                .remote_cluster
-                .ws_urls()
-                .iter()
-                .map(|pubsub_url| Endpoint {
-                    rpc_url: rpc_config.url(),
-                    pubsub_url,
-                })
-                .collect::<Vec<_>>();
+    fn init_chainlink(
+        rpc_config: &RpcProviderConfig,
+        accounts: &magicblock_accounts::AccountsConfig,
+        transaction_scheduler: &TransactionSchedulerHandle,
+        latest_block: &LatestBlock,
+        accountsdb: &Arc<AccountsDb>,
+        validator_pubkey: Pubkey,
+        faucet_pubkey: Pubkey,
+    ) {
+        use magicblock_chainlink::{
+            remote_account_provider::Endpoint, Chainlink,
+        };
+        let endpoints = accounts
+            .remote_cluster
+            .ws_urls()
+            .into_iter()
+            .map(|pubsub_url| Endpoint {
+                rpc_url: rpc_config.url(),
+                pubsub_url: pubsub_url.as_str(),
+            })
+            .collect::<Vec<_>>();
 
-            let cloner = todo!("real cloner");
-            let chainlink = Chainlink::try_new_from_endpoints(
-                &endpoints,
-                cloner,
-                rpc_config.commitment(),
-                validator_pubkey,
-                faucet_pubkey,
-            );
-        }
-        */
+        let cloner = ChainlinkCloner::new(
+            transaction_scheduler.clone(),
+            latest_block.clone(),
+        );
+        let cloner = Arc::new(cloner);
+        let accounts_bank = accountsdb.clone();
+        let config = ChainlinkConfig::default_with_lifecycle_mode(
+            LifecycleMode::Ephemeral.into(),
+        );
+        let commitment_config = {
+            let level = rpc_config
+                .commitment()
+                .unwrap_or(CommitmentLevel::Confirmed);
+            CommitmentConfig { commitment: level }
+        };
+        let chainlink = Chainlink::<
+            ChainRpcClientImpl,
+            ChainPubsubClientImpl,
+            _,
+            _,
+        >::try_new_from_endpoints(
+            &endpoints,
+            commitment_config,
+            &accounts_bank,
+            &cloner,
+            validator_pubkey,
+            faucet_pubkey,
+            config,
+        );
+    }
 
     fn init_ledger(
         ledger_config: &LedgerConfig,

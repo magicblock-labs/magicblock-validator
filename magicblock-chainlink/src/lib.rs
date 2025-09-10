@@ -4,7 +4,6 @@ pub mod chainlink;
 pub mod cloner;
 pub mod remote_account_provider;
 pub mod submux;
-pub mod validator_types;
 
 pub use chainlink::*;
 

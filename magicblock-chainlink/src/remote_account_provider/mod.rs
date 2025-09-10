@@ -964,6 +964,7 @@ fn account_slots(accs: &[RemoteAccount]) -> Vec<u64> {
 #[cfg(test)]
 mod test {
     use crate::{
+        config::LifecycleMode,
         testing::{
             init_logger,
             rpc_client_mock::{
@@ -971,7 +972,6 @@ mod test {
             },
             utils::random_pubkey,
         },
-        validator_types::LifecycleMode,
     };
     use solana_system_interface::program as system_program;
 

@@ -1,4 +1,4 @@
-use crate::validator_types::LifecycleMode;
+use crate::config::LifecycleMode;
 
 use super::{RemoteAccountProviderError, RemoteAccountProviderResult};
 

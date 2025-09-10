@@ -1206,6 +1206,7 @@ mod tests {
         accounts_bank::mock::AccountsBankStub,
         assert_not_subscribed, assert_subscribed,
         assert_subscribed_without_delegation_record,
+        config::LifecycleMode,
         remote_account_provider::{
             chain_pubsub_client::mock::ChainPubsubClientMock,
             config::RemoteAccountProviderConfig, RemoteAccountProvider,
@@ -1223,7 +1224,6 @@ mod tests {
             rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
             utils::random_pubkey,
         },
-        validator_types::LifecycleMode,
     };
     use solana_account::Account;
     use solana_account::{AccountSharedData, WritableAccount};
