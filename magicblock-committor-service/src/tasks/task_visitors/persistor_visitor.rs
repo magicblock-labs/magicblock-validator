@@ -2,7 +2,10 @@ use log::error;
 
 use crate::{
     persist::{CommitStrategy, IntentPersister},
-    tasks::{visitor::Visitor, ArgsTask, BufferTask},
+    tasks::{
+        visitor::Visitor, ArgsTask, ArgsTaskType, BaseTask, BufferTask,
+        BufferTaskType,
+    },
 };
 
 pub enum PersistorContext {
@@ -22,7 +25,8 @@ where
     fn visit_args_task(&mut self, task: &ArgsTask) {
         match self.context {
             PersistorContext::PersistStrategy { uses_lookup_tables } => {
-                let ArgsTask::Commit(commit_task) = task else {
+                let ArgsTaskType::Commit(ref commit_task) = task.task_type
+                else {
                     return;
                 };
 
@@ -50,7 +54,7 @@ where
     fn visit_buffer_task(&mut self, task: &BufferTask) {
         match self.context {
             PersistorContext::PersistStrategy { uses_lookup_tables } => {
-                let BufferTask::Commit(commit_task) = task;
+                let BufferTaskType::Commit(ref commit_task) = task.task_type;
                 let commit_strategy = if uses_lookup_tables {
                     CommitStrategy::FromBufferWithLookupTable
                 } else {
@@ -71,4 +75,7 @@ where
             }
         }
     }
+
+    fn visit_args_task_mut(&mut self, _: &mut ArgsTaskType) {}
+    fn visit_buffer_task_mut(&mut self, _: &mut BufferTask) {}
 }

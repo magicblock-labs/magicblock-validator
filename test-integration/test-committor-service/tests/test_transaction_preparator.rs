@@ -6,7 +6,7 @@ use magicblock_committor_service::{
     tasks::{
         task_strategist::{TaskStrategist, TransactionStrategy},
         utils::TransactionUtils,
-        ArgsTask, BaseActionTask, BaseTask, BufferTask, CommitTask,
+        ArgsTaskType, BaseActionTask, BaseTask, BufferTask, CommitTask,
         FinalizeTask, UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
@@ -33,12 +33,12 @@ async fn test_prepare_commit_tx_with_single_account() {
     let committed_account = create_committed_account(&account_data);
 
     let tasks = vec![
-        Box::new(ArgsTask::Commit(CommitTask {
+        Box::new(ArgsTaskType::Commit(CommitTask {
             commit_id: 1,
             committed_account: committed_account.clone(),
             allow_undelegation: true,
         })) as Box<dyn BaseTask>,
-        Box::new(ArgsTask::Finalize(FinalizeTask {
+        Box::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
         })),
     ];
@@ -95,7 +95,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     // Create test data
     let tasks = vec![
         // account 1
-        Box::new(ArgsTask::Commit(CommitTask {
+        Box::new(ArgsTaskType::Commit(CommitTask {
             commit_id: 1,
             committed_account: committed_account1.clone(),
             allow_undelegation: true,
@@ -103,11 +103,11 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
         // account 2
         Box::new(buffer_commit_task.clone()),
         // finalize account 1
-        Box::new(ArgsTask::Finalize(FinalizeTask {
+        Box::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account1.pubkey,
         })),
         // finalize account 2
-        Box::new(ArgsTask::Finalize(FinalizeTask {
+        Box::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account2.pubkey,
         })),
     ];
@@ -186,11 +186,11 @@ async fn test_prepare_commit_tx_with_base_actions() {
         // commit account
         Box::new(buffer_commit_task.clone()) as Box<dyn BaseTask>,
         // finalize account
-        Box::new(ArgsTask::Finalize(FinalizeTask {
+        Box::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
         })),
         // BaseAction
-        Box::new(ArgsTask::BaseAction(BaseActionTask {
+        Box::new(ArgsTaskType::BaseAction(BaseActionTask {
             context: Context::Commit,
             action: base_action,
         })),
@@ -251,11 +251,11 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
     let committed_account = create_committed_account(&[1, 2, 3]);
     let tasks: Vec<Box<dyn BaseTask>> = vec![
         // finalize account
-        Box::new(ArgsTask::Finalize(FinalizeTask {
+        Box::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
         })),
         // BaseAction
-        Box::new(ArgsTask::Undelegate(UndelegateTask {
+        Box::new(ArgsTaskType::Undelegate(UndelegateTask {
             delegated_account: committed_account.pubkey,
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),

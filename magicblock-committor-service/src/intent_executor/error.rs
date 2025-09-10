@@ -33,6 +33,12 @@ impl InternalError {
 pub enum IntentExecutorError {
     #[error("EmptyIntentError")]
     EmptyIntentError,
+    #[error("User supplied action are ill-formed!")]
+    ActionsError,
+    #[error("Accounts committed with an invalid Commit id")]
+    CommitIDError, // This shouldn't ever occur as we handling this case
+    #[error("Max instruction trace length exceeded")]
+    CpiLimitError,
     #[error("Failed to fit in single TX")]
     FailedToFitError,
     #[error("SignerError: {0}")]

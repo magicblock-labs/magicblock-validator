@@ -1,5 +1,6 @@
 use std::collections::BinaryHeap;
 
+use rusqlite::Transaction;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     signature::Keypair,
@@ -13,7 +14,7 @@ use crate::{
             PersistorContext, PersistorVisitor,
         },
         utils::TransactionUtils,
-        ArgsTask, BaseTask, FinalizeTask,
+        ArgsTaskType, BaseTask, FinalizeTask,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
@@ -21,6 +22,25 @@ use crate::{
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<Box<dyn BaseTask>>,
     pub lookup_tables_keys: Vec<Pubkey>,
+}
+
+impl TransactionStrategy {
+    /// In case old strategy used ALTs recalculate old value
+    /// NOTE: this can be used when full revaluation is unnecessary, like:
+    /// some tasks were reset, number of tasks didn't increase
+    pub fn dummy_revaluate_alts(&mut self, authority: &Pubkey) -> Vec<Pubkey> {
+        if self.lookup_tables_keys.is_empty() {
+            vec![]
+        } else {
+            std::mem::replace(
+                &mut self.lookup_tables_keys,
+                TaskStrategist::collect_lookup_table_keys(
+                    &authority,
+                    &self.optimized_tasks,
+                ),
+            )
+        }
+    }
 }
 
 pub struct TaskStrategist;
@@ -179,7 +199,7 @@ impl TaskStrategist {
 
             let task = {
                 // This is tmp task that will be replaced by old or optimized one
-                let tmp_task = ArgsTask::Finalize(FinalizeTask {
+                let tmp_task = ArgsTaskType::Finalize(FinalizeTask {
                     delegated_account: Pubkey::new_unique(),
                 });
                 let tmp_task = Box::new(tmp_task) as Box<dyn BaseTask>;
@@ -242,8 +262,11 @@ mod tests {
     };
 
     // Helper to create a simple commit task
-    fn create_test_commit_task(commit_id: u64, data_size: usize) -> ArgsTask {
-        ArgsTask::Commit(CommitTask {
+    fn create_test_commit_task(
+        commit_id: u64,
+        data_size: usize,
+    ) -> ArgsTaskType {
+        ArgsTaskType::Commit(CommitTask {
             commit_id,
             allow_undelegation: false,
             committed_account: CommittedAccount {
@@ -260,8 +283,8 @@ mod tests {
     }
 
     // Helper to create a Base action task
-    fn create_test_base_action_task(len: usize) -> ArgsTask {
-        ArgsTask::BaseAction(BaseActionTask {
+    fn create_test_base_action_task(len: usize) -> ArgsTaskType {
+        ArgsTaskType::BaseAction(BaseActionTask {
             context: Context::Commit,
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
@@ -277,15 +300,15 @@ mod tests {
     }
 
     // Helper to create a finalize task
-    fn create_test_finalize_task() -> ArgsTask {
-        ArgsTask::Finalize(FinalizeTask {
+    fn create_test_finalize_task() -> ArgsTaskType {
+        ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: Pubkey::new_unique(),
         })
     }
 
     // Helper to create an undelegate task
-    fn create_test_undelegate_task() -> ArgsTask {
-        ArgsTask::Undelegate(UndelegateTask {
+    fn create_test_undelegate_task() -> ArgsTaskType {
+        ArgsTaskType::Undelegate(UndelegateTask {
             delegated_account: Pubkey::new_unique(),
             owner_program: system_program::id(),
             rent_reimbursement: Pubkey::new_unique(),

@@ -4,7 +4,7 @@ use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
         task_strategist::{TaskStrategist, TransactionStrategy},
-        ArgsTask, BaseTask, BufferTask,
+        ArgsTaskType, BaseTask, BufferTask,
     },
 };
 use solana_sdk::signer::Signer;
@@ -38,7 +38,7 @@ async fn test_prepare_10kb_buffer() {
 
     // Verify the buffer account was created and initialized
     let preparation_info = strategy.optimized_tasks[0]
-        .preparation_info(&fixture.authority.pubkey())
+        .preparation_state(&fixture.authority.pubkey())
         .expect("Task should have preparation info");
 
     // Check buffer account exists
@@ -103,7 +103,7 @@ async fn test_prepare_multiple_buffers() {
 
     // Verify the buffer account was created and initialized
     let preparation_infos = strategy.optimized_tasks.iter().map(|el| {
-        el.preparation_info(&fixture.authority.pubkey())
+        el.preparation_state(&fixture.authority.pubkey())
             .expect("Task should have preparation info")
     });
 
@@ -152,7 +152,7 @@ async fn test_lookup_tables() {
     let tasks = datas
         .iter()
         .map(|data| {
-            let task = ArgsTask::Commit(create_commit_task(data.as_slice()));
+            let task = ArgsTaskType::Commit(create_commit_task(data.as_slice()));
             Box::new(task) as Box<dyn BaseTask>
         })
         .collect::<Vec<_>>();
