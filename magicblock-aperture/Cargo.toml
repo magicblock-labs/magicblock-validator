@@ -1,5 +1,5 @@
 [package]
-name = "magicblock-gateway"
+name = "magicblock-aperture"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true

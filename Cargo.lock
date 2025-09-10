@@ -3685,6 +3685,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "magicblock-aperture"
+version = "0.1.7"
+dependencies = [
+ "base64 0.21.7",
+ "bincode",
+ "bs58",
+ "fastwebsockets",
+ "flume",
+ "futures 0.3.31",
+ "http-body-util",
+ "hyper 1.6.0",
+ "hyper-util",
+ "log",
+ "magicblock-accounts-db",
+ "magicblock-config",
+ "magicblock-core",
+ "magicblock-ledger",
+ "magicblock-version",
+ "parking_lot 0.12.4",
+ "scc",
+ "serde",
+ "solana-account",
+ "solana-account-decoder",
+ "solana-compute-budget-instruction",
+ "solana-feature-set",
+ "solana-fee",
+ "solana-fee-structure",
+ "solana-hash",
+ "solana-keypair",
+ "solana-message",
+ "solana-pubkey",
+ "solana-pubsub-client",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-signature",
+ "solana-system-transaction",
+ "solana-transaction",
+ "solana-transaction-context",
+ "solana-transaction-error",
+ "solana-transaction-status",
+ "solana-transaction-status-client-types",
+ "sonic-rs",
+ "test-kit",
+ "tokio",
+ "tokio-util 0.7.15",
+]
+
+[[package]]
 name = "magicblock-api"
 version = "0.1.7"
 dependencies = [
@@ -3706,11 +3754,11 @@ dependencies = [
  "magicblock-accounts-api",
  "magicblock-accounts-db",
  "magicblock-chainlink",
+ "magicblock-aperture",
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
- "magicblock-gateway",
  "magicblock-ledger",
  "magicblock-metrics",
  "magicblock-processor",
@@ -3902,54 +3950,6 @@ dependencies = [
  "solana-program",
  "solana-security-txt",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "magicblock-gateway"
-version = "0.1.7"
-dependencies = [
- "base64 0.21.7",
- "bincode",
- "bs58",
- "fastwebsockets",
- "flume",
- "futures 0.3.31",
- "http-body-util",
- "hyper 1.6.0",
- "hyper-util",
- "log",
- "magicblock-accounts-db",
- "magicblock-config",
- "magicblock-core",
- "magicblock-ledger",
- "magicblock-version",
- "parking_lot 0.12.4",
- "scc",
- "serde",
- "solana-account",
- "solana-account-decoder",
- "solana-compute-budget-instruction",
- "solana-feature-set",
- "solana-fee",
- "solana-fee-structure",
- "solana-hash",
- "solana-keypair",
- "solana-message",
- "solana-pubkey",
- "solana-pubsub-client",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-signature",
- "solana-system-transaction",
- "solana-transaction",
- "solana-transaction-context",
- "solana-transaction-error",
- "solana-transaction-status",
- "solana-transaction-status-client-types",
- "sonic-rs",
- "test-kit",
- "tokio",
- "tokio-util 0.7.15",
 ]
 
 [[package]]

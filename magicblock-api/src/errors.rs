@@ -13,7 +13,7 @@ pub enum ApiError {
     ConfigError(#[from] magicblock_config::errors::ConfigError),
 
     #[error("RPC service error: {0}")]
-    RpcError(#[from] magicblock_gateway::error::RpcError),
+    RpcError(#[from] magicblock_aperture::error::RpcError),
 
     #[error("Accounts error: {0}")]
     AccountsError(#[from] magicblock_accounts::errors::AccountsError),

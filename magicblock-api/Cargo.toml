@@ -27,7 +27,7 @@ magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
-magicblock-gateway = { workspace = true }
+magicblock-aperture = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-processor = { workspace = true }

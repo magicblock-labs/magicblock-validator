@@ -28,6 +28,10 @@ use magicblock_accounts::{
 };
 use magicblock_accounts_api::AccountsDbProvider;
 use magicblock_accounts_db::AccountsDb;
+use magicblock_aperture::{
+    state::{NodeContext, SharedState},
+    JsonRpcServer,
+};
 use magicblock_committor_service::{
     config::ChainConfig, service_ext::CommittorServiceExt, BaseIntentCommittor,
     CommittorService, ComputeBudgetConfig,
@@ -41,10 +45,6 @@ use magicblock_core::{
         blocks::BlockUpdateTx, link, transactions::TransactionSchedulerHandle,
     },
     Slot,
-};
-use magicblock_gateway::{
-    state::{NodeContext, SharedState},
-    JsonRpcServer,
 };
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
