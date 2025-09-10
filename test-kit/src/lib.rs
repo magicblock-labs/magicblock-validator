@@ -1,4 +1,8 @@
-use std::{sync::Arc, thread};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+    thread,
+};
 
 use log::error;
 use magicblock_accounts_db::AccountsDb;
@@ -63,15 +67,29 @@ impl Default for ExecutionTestEnv {
 }
 
 impl ExecutionTestEnv {
-    /// Creates a new, fully initialized validator test environment.
+    pub const BASE_FEE: u64 = 1000;
+
+    /// Creates a new, fully initialized execution test environment.
     ///
-    /// This function sets up a complete validator stack in memory:
+    /// This function sets up a complete validator stack:
     /// 1.  Creates temporary on-disk storage for the accounts database and ledger.
     /// 2.  Initializes all the communication channels between the API layer and the core.
     /// 3.  Spawns a `TransactionScheduler` with one worker thread.
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
     pub fn new() -> Self {
+        Self::new_with_fee(Self::BASE_FEE)
+    }
+
+    /// Creates a new, fully initialized validator test environment with given base fee
+    ///
+    /// This function sets up a complete validator stack:
+    /// 1.  Creates temporary on-disk storage for the accounts database and ledger.
+    /// 2.  Initializes all the communication channels between the API layer and the core.
+    /// 3.  Spawns a `TransactionScheduler` with one worker thread.
+    /// 4.  Pre-loads a test program (`guinea`) for use in tests.
+    /// 5.  Funds a default `payer` keypair with 1 SOL.
+    pub fn new_with_fee(fee: u64) -> Self {
         init_logger!();
         let dir =
             tempfile::tempdir().expect("creating temp dir for validator state");
@@ -83,7 +101,7 @@ impl ExecutionTestEnv {
 
         let (dispatch, validator_channels) = link();
         let blockhash = ledger.latest_block().load().blockhash;
-        let environment = build_svm_env(&accountsdb, blockhash, 0);
+        let environment = build_svm_env(&accountsdb, blockhash, fee);
         let payer = Keypair::new();
 
         let this = Self {
@@ -248,6 +266,50 @@ impl ExecutionTestEnv {
             .replay(txn)
             .await
             .inspect_err(|err| error!("failed to replay transaction: {err}"))
+    }
+
+    pub fn get_account<'db>(
+        &'db self,
+        pubkey: Pubkey,
+    ) -> CommitableAccount<'db> {
+        let account = self
+            .accountsdb
+            .get_account(&pubkey)
+            .expect("only existing accounts should be requested during tests");
+        CommitableAccount {
+            pubkey,
+            account,
+            db: &self.accountsdb,
+        }
+    }
+
+    pub fn get_payer(&self) -> CommitableAccount {
+        self.get_account(self.payer.pubkey())
+    }
+}
+
+pub struct CommitableAccount<'db> {
+    pub pubkey: Pubkey,
+    pub account: AccountSharedData,
+    pub db: &'db AccountsDb,
+}
+
+impl CommitableAccount<'_> {
+    pub fn commmit(self) {
+        self.db.insert_account(&self.pubkey, &self.account);
+    }
+}
+
+impl Deref for CommitableAccount<'_> {
+    type Target = AccountSharedData;
+    fn deref(&self) -> &Self::Target {
+        &self.account
+    }
+}
+
+impl DerefMut for CommitableAccount<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.account
     }
 }
 

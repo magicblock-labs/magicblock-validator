@@ -1,9 +1,6 @@
 use std::sync::atomic::Ordering;
 
 use log::error;
-use solana_account::ReadableAccount;
-use solana_program::message::SanitizedMessage;
-use solana_sdk_ids::bpf_loader_upgradeable;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
     transaction_processing_result::{
@@ -11,7 +8,6 @@ use solana_svm::{
     },
 };
 use solana_transaction::sanitized::SanitizedTransaction;
-use solana_transaction_error::TransactionError;
 use solana_transaction_status::{
     map_inner_instructions, TransactionStatusMeta,
 };
@@ -19,9 +15,8 @@ use solana_transaction_status::{
 use magicblock_core::link::{
     accounts::{AccountWithSlot, LockedAccount},
     transactions::{
-        TransactionExecutionResult, TransactionResult,
-        TransactionSimulationResult, TransactionStatus, TxnExecutionResultTx,
-        TxnSimulationResultTx,
+        TransactionExecutionResult, TransactionSimulationResult,
+        TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
     },
 };
 
@@ -62,7 +57,7 @@ impl super::TransactionExecutor {
             }
 
             // Otherwise, check that the transaction didn't violate any permissions
-            Self::validate_account_access(txn.message(), &processed)?;
+            // Self::validate_account_access(txn.message(), &processed)?;
             // And commit the account state changes if all is good
             self.commit_accounts(&mut processed, is_replay);
 
@@ -145,59 +140,6 @@ impl super::TransactionExecutor {
             "single transaction result is always present in the output",
         );
         (result, output.balances)
-    }
-
-    /// Validates that a processed transaction did not
-    /// attempt to write to any non-delegated accounts.
-    ///
-    /// This is a critical security check to prevent privilege escalation.
-    /// It ensures that any account modification is restricted to accounts
-    /// that have been explicitly delegated to this validator node.
-    ///
-    /// ## Logic
-    /// The validation enforces a simple, powerful rule: **any account that is ultimately
-    /// written to must be a delegated account.** This covers all scenarios:
-    ///
-    /// 1.  **Standard Writable Accounts**: Any account marked as writable in the transaction
-    ///     message is checked to ensure it is delegated.
-    /// 2.  **Fee Payer**: The SVM may perform an "escrow swap" for the fee payer. This
-    ///     check ensures that the final account whose balance is modified to pay the
-    ///     fee is a delegated account.
-    /// 3.  **Read-only Accounts**: Accounts marked as read-only are ignored, as they
-    ///     do not modify state.
-    ///
-    /// # Arguments
-    /// * `message` - The original, sanitized transaction message, used to check which
-    ///   accounts were intended to be writable.
-    /// * `result` - The output from the SVM, containing the list of accounts that were
-    ///   actually loaded and potentially modified.
-    ///
-    /// # Returns
-    /// - `Ok(())` if all writable account access is valid.
-    /// - `Err(TransactionError::InvalidWritableAccount)` if the transaction attempted
-    ///   to write to a non-delegated account.
-    fn validate_account_access(
-        message: &SanitizedMessage,
-        result: &ProcessedTransaction,
-    ) -> TransactionResult {
-        // If the transaction failed to load, its accounts weren't processed,
-        // so there's nothing to validate. No state will be persisted.
-        let ProcessedTransaction::Executed(executed) = result else {
-            return Ok(());
-        };
-
-        let accounts = executed.loaded_transaction.accounts.iter();
-        for (i, acc) in accounts.enumerate() {
-            // Enforce that any account intended to be writable is a delegated account.
-            if message.is_writable(i)
-                && !acc.1.delegated()
-                && *acc.1.owner() != bpf_loader_upgradeable::ID
-            {
-                println!("account is invalid: {}\n{:?}", acc.0, acc.1);
-                return Err(TransactionError::InvalidWritableAccount);
-            }
-        }
-        Ok(())
     }
 
     /// A helper method that persists a transaction and its metadata to

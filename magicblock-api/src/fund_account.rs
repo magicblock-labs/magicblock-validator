@@ -4,7 +4,9 @@ use magicblock_accounts_db::AccountsDb;
 use magicblock_core::magic_program;
 use magicblock_program::MAGIC_CONTEXT_SIZE;
 use solana_sdk::{
-    account::AccountSharedData, pubkey::Pubkey, signature::Keypair,
+    account::{AccountSharedData, WritableAccount},
+    pubkey::Pubkey,
+    signature::Keypair,
     signer::Signer,
 };
 
@@ -27,10 +29,14 @@ pub(crate) fn fund_account_with_data(
     lamports: u64,
     size: usize,
 ) {
-    accountsdb.insert_account(
-        pubkey,
-        &AccountSharedData::new(lamports, size, &Default::default()),
-    );
+    let account = if let Some(mut acc) = accountsdb.get_account(pubkey) {
+        acc.set_lamports(lamports);
+        acc.set_data(vec![0; size]);
+        acc
+    } else {
+        AccountSharedData::new(lamports, size, &Default::default())
+    };
+    accountsdb.insert_account(pubkey, &account);
 }
 
 pub(crate) fn fund_validator_identity(

@@ -21,11 +21,21 @@ pub enum GuineaInstruction {
     PrintSizes,
     WriteByteToData(u8),
     Transfer(u64),
+    Resize(usize),
 }
 
 fn compute_balances(accounts: slice::Iter<AccountInfo>) {
     let total = accounts.map(|a| a.lamports()).sum::<u64>();
     set_return_data(&total.to_le_bytes());
+}
+
+fn resize_account(
+    mut accounts: slice::Iter<AccountInfo>,
+    size: usize,
+) -> ProgramResult {
+    let account = next_account_info(&mut accounts)?;
+    account.realloc(size, false)?;
+    Ok(())
 }
 
 fn print_sizes(accounts: slice::Iter<AccountInfo>) {
@@ -40,9 +50,8 @@ fn write_byte_to_data(
 ) -> ProgramResult {
     for a in accounts {
         let mut data = a.try_borrow_mut_data()?;
-        let first = data
-            .first_mut()
-            .ok_or(ProgramError::AccountDataTooSmall)?;
+        let first =
+            data.first_mut().ok_or(ProgramError::AccountDataTooSmall)?;
         *first = byte;
     }
     Ok(())
@@ -92,6 +101,7 @@ fn process_instruction(
             write_byte_to_data(accounts, byte)?
         }
         GuineaInstruction::Transfer(lamports) => transfer(accounts, lamports)?,
+        GuineaInstruction::Resize(size) => resize_account(accounts, size)?,
     }
     Ok(())
 }

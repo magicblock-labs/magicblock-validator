@@ -147,7 +147,7 @@ protobuf-src = "1.1"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10.0"
-rusqlite = { version = "0.34.0", features = ["bundled"] } # bundled sqlite 3.44
+rusqlite = { version = "0.34.0", features = ["bundled"] }                                           # bundled sqlite 3.44
 rustc_version = "0.4"
 scc = "2.4"
 semver = "1.0.22"
@@ -155,9 +155,9 @@ serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "8bc6a58" }
-solana-accounts-db = { version = "2.2" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "a892d2a" }
 solana-account-decoder = { version = "2.2" }
+solana-accounts-db = { version = "2.2" }
 solana-account-decoder-client-types = { version = "2.2" }
 solana-address-lookup-table-program = { version = "2.2" }
 solana-bpf-loader-program = { version = "2.2" }
@@ -194,9 +194,6 @@ solana-sdk-ids = { version = "2.2" }
 solana-signature = { version = "2.2" }
 solana-signer = { version = "2.2" }
 solana-storage-proto = { path = "storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "3e6c209", features = [
-  "dev-context-only-utils",
-] }
 solana-svm-transaction = { version = "2.2" }
 solana-system-interface = { version = "1.0" }
 solana-system-program = { version = "2.2" }
@@ -224,10 +221,15 @@ trybuild = "1.0"
 url = "2.5.0"
 vergen = "8.3.1"
 
+[workspace.dependencies.solana-svm]
+git = "https://github.com/magicblock-labs/magicblock-svm.git"
+rev = "11bbaf2"
+features = ["dev-context-only-utils"]
+
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "8bc6a58" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "a892d2a" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "3e6c209" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "11bbaf2" }

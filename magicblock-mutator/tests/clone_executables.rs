@@ -89,9 +89,13 @@ async fn verified_tx_to_clone_executable_from_devnet_as_upgrade(
 async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
     skip_if_devnet_down!();
     ensure_started_validator(&mut Default::default());
-    let test_env = ExecutionTestEnv::new();
+    let test_env = ExecutionTestEnv::new_with_fee(0);
     test_env.fund_account(LUZIFER, u64::MAX / 2);
     test_env.fund_account(validator_authority_id(), u64::MAX / 2);
+    // ensure that the validator keypair has privileged access
+    let mut authority = test_env.get_account(validator_authority_id());
+    authority.as_borrowed_mut().unwrap().set_privileged(true);
+    authority.commmit();
 
     test_env.advance_slot(); // We don't want to stay on slot 0
 
@@ -191,7 +195,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
         assert!(sig_status.is_some());
 
         // Accounts checks
-        let author_acc = test_env.accountsdb.get_account(&author).unwrap();
+        let author_acc = test_env.get_account(author);
         assert_eq!(author_acc.data().len(), 0);
         assert_eq!(author_acc.owner(), &system_program::ID);
         assert_eq!(author_acc.lamports(), LAMPORTS_PER_SOL);
