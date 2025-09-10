@@ -100,6 +100,7 @@ impl JsonRpcService {
         let max_request_body_size = self.max_request_body_size;
 
         let close_handle_rc = self.close_handle.clone();
+        let executor = runtime::Handle::current();
         let thread_handle = thread::Builder::new()
             .name("solJsonRpcSvc".to_string())
             .spawn(move || {
@@ -116,7 +117,6 @@ impl JsonRpcService {
                 let health = RpcHealth::new(startup_verification_complete);
                 let request_middleware = RpcRequestMiddleware::new(health);
 
-                let executor = runtime::Handle::current();
                 let server = ServerBuilder::with_meta_extractor(
                     io,
                     move |_req: &hyper::Request<hyper::Body>| {
