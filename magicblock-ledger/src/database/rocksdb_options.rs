@@ -25,8 +25,8 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     options.set_env(&env);
 
     // For every job RocksDB picks a thread from available pools
-    // Limit is to number of overall threads
-    let max_jobs = bottom_pri + low_pri + high_pri;
+    // Here we select ceiling so RocksDB doesn't use all of HIGH + LOW + BOTTOM threads
+    let max_jobs = std::cmp::max(high_pri, bottom_pri + low_pri);
     options.set_max_background_jobs(max_jobs);
     
     // Bound WAL size
