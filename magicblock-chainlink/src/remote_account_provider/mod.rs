@@ -115,10 +115,10 @@ impl Default for MatchSlotsConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Endpoint<'a> {
-    pub rpc_url: &'a str,
-    pub pubsub_url: &'a str,
+#[derive(Debug, Clone)]
+pub struct Endpoint {
+    pub rpc_url: String,
+    pub pubsub_url: String,
 }
 
 impl
@@ -128,7 +128,7 @@ impl
     >
 {
     pub async fn try_from_urls_and_config(
-        endpoints: &[Endpoint<'_>],
+        endpoints: &[Endpoint],
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
@@ -232,7 +232,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     }
 
     pub async fn try_new_from_urls(
-        endpoints: &[Endpoint<'_>],
+        endpoints: &[Endpoint],
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
@@ -253,7 +253,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // Build RPC clients (use the first one for now)
         let rpc_client = {
             let first = &endpoints[0];
-            ChainRpcClientImpl::new_from_url(first.rpc_url, commitment)
+            ChainRpcClientImpl::new_from_url(first.rpc_url.as_str(), commitment)
         };
 
         // Build pubsub clients and wrap them into a SubMuxClient
@@ -261,7 +261,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             Vec::with_capacity(endpoints.len());
         for ep in endpoints {
             let client = ChainPubsubClientImpl::try_new_from_url(
-                ep.pubsub_url,
+                ep.pubsub_url.as_str(),
                 commitment,
             )
             .await?;

@@ -11,8 +11,8 @@ use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
     chainext::ChainlinkCloner, map_committor_request_result,
-    standard_blacklisted_accounts, RemoteAccountClonerClient,
-    RemoteAccountClonerWorker, ValidatorCollectionMode,
+    standard_blacklisted_accounts, RemoteAccountClonerWorker,
+    ValidatorCollectionMode,
 };
 use magicblock_account_dumper::AccountDumperBank;
 use magicblock_account_fetcher::{
@@ -23,8 +23,7 @@ use magicblock_account_updates::{
 };
 use magicblock_accounts::{
     scheduled_commits_processor::ScheduledCommitsProcessorImpl,
-    utils::try_rpc_cluster_from_cluster, AccountsManager,
-    ScheduledCommitsProcessor,
+    utils::try_rpc_cluster_from_cluster, ScheduledCommitsProcessor,
 };
 use magicblock_accounts_api::AccountsDbProvider;
 use magicblock_accounts_db::AccountsDb;
@@ -38,10 +37,12 @@ use magicblock_chainlink::{
         chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
     },
+    submux::SubMuxClient,
+    Chainlink,
 };
 use magicblock_committor_service::{
-    config::ChainConfig, service_ext::CommittorServiceExt, BaseIntentCommittor,
-    CommittorService, ComputeBudgetConfig,
+    config::ChainConfig, BaseIntentCommittor, CommittorService,
+    ComputeBudgetConfig,
 };
 use magicblock_config::{
     EphemeralConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
@@ -99,11 +100,15 @@ use crate::{
         write_validator_keypair_to_ledger,
     },
     slot::advance_slot_and_update_ledger,
-    tickers::{
-        init_commit_accounts_ticker, init_slot_ticker,
-        init_system_metrics_ticker,
-    },
+    tickers::{init_slot_ticker, init_system_metrics_ticker},
 };
+
+type ChainlinkImpl = Chainlink<
+    ChainRpcClientImpl,
+    SubMuxClient<ChainPubsubClientImpl>,
+    AccountsDb,
+    ChainlinkCloner,
+>;
 
 // -----------------
 // MagicValidatorConfig
@@ -132,7 +137,6 @@ pub struct MagicValidator {
     ledger: Arc<Ledger>,
     ledger_truncator: LedgerTruncator,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
-    commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
     scheduled_commits_processor:
         Option<Arc<ScheduledCommitsProcessorImpl<CommittorService>>>,
     remote_account_fetcher_worker: Option<RemoteAccountFetcherWorker>,
@@ -152,7 +156,8 @@ pub struct MagicValidator {
         >,
     >,
     remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
-    accounts_manager: Arc<AccountsManager>,
+    #[allow(unused)]
+    chainlink: ChainlinkImpl,
     committor_service: Option<Arc<CommittorService>>,
     rpc_handle: JoinHandle<()>,
     identity: Pubkey,
@@ -346,6 +351,8 @@ impl MagicValidator {
             None
         };
 
+        // TODO: @@@ remove this
+        /*
         let accounts_manager = Self::init_accounts_manager(
             &accountsdb,
             &committor_service,
@@ -354,6 +361,18 @@ impl MagicValidator {
             dispatch.transaction_scheduler.clone(),
             ledger.latest_block().clone(),
         );
+        */
+
+        let chainlink = Self::init_chainlink(
+            &remote_rpc_config,
+            &config,
+            &dispatch.transaction_scheduler,
+            &ledger.latest_block().clone(),
+            &accountsdb,
+            validator_pubkey,
+            faucet_keypair.pubkey(),
+        )
+        .await?;
 
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
@@ -405,7 +424,6 @@ impl MagicValidator {
             exit,
             _metrics: metrics,
             slot_ticker: None,
-            commit_accounts_ticker: None,
             scheduled_commits_processor,
             remote_account_fetcher_worker: Some(remote_account_fetcher_worker),
             remote_account_fetcher_handle: None,
@@ -419,7 +437,7 @@ impl MagicValidator {
             token,
             ledger,
             ledger_truncator,
-            accounts_manager,
+            chainlink,
             claim_fees_task: ClaimFeesTask::new(),
             rpc_handle,
             identity: validator_pubkey,
@@ -428,6 +446,7 @@ impl MagicValidator {
         })
     }
 
+    /* TODO: @@@ properly remove
     fn init_accounts_manager(
         bank: &Arc<AccountsDb>,
         commitor_service: &Option<Arc<CommittorService>>,
@@ -455,26 +474,28 @@ impl MagicValidator {
 
         Arc::new(accounts_manager)
     }
+    */
 
-    fn init_chainlink(
+    async fn init_chainlink(
         rpc_config: &RpcProviderConfig,
-        accounts: &magicblock_accounts::AccountsConfig,
+        config: &EphemeralConfig,
         transaction_scheduler: &TransactionSchedulerHandle,
         latest_block: &LatestBlock,
         accountsdb: &Arc<AccountsDb>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
-    ) {
-        use magicblock_chainlink::{
-            remote_account_provider::Endpoint, Chainlink,
-        };
+    ) -> ApiResult<ChainlinkImpl> {
+        use magicblock_chainlink::remote_account_provider::Endpoint;
+        let accounts = try_convert_accounts_config(&config.accounts).expect(
+            "Failed to derive accounts config from provided magicblock config",
+        );
         let endpoints = accounts
             .remote_cluster
             .ws_urls()
             .into_iter()
             .map(|pubsub_url| Endpoint {
-                rpc_url: rpc_config.url(),
-                pubsub_url: pubsub_url.as_str(),
+                rpc_url: rpc_config.url().to_string(),
+                pubsub_url,
             })
             .collect::<Vec<_>>();
 
@@ -493,12 +514,7 @@ impl MagicValidator {
                 .unwrap_or(CommitmentLevel::Confirmed);
             CommitmentConfig { commitment: level }
         };
-        let chainlink = Chainlink::<
-            ChainRpcClientImpl,
-            ChainPubsubClientImpl,
-            _,
-            _,
-        >::try_new_from_endpoints(
+        Ok(ChainlinkImpl::try_new_from_endpoints(
             &endpoints,
             commitment_config,
             &accounts_bank,
@@ -506,7 +522,8 @@ impl MagicValidator {
             validator_pubkey,
             faucet_pubkey,
             config,
-        );
+        )
+        .await?)
     }
 
     fn init_ledger(
@@ -705,6 +722,8 @@ impl MagicValidator {
             self.exit.clone(),
         ));
 
+        // TODO: @@@ remove this properly (now covered by tasks)
+        /*
         self.commit_accounts_ticker = {
             let token = self.token.clone();
             let account_manager = self.accounts_manager.clone();
@@ -715,6 +734,7 @@ impl MagicValidator {
                 init_commit_accounts_ticker(account_manager, tick, token);
             Some(tokio::spawn(task))
         };
+        */
 
         // NOTE: these need to startup in the right order, otherwise some worker
         //       that may be needed, i.e. during hydration after ledger replay

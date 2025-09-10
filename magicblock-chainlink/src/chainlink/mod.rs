@@ -19,6 +19,7 @@ use crate::{
         ChainPubsubClient, ChainPubsubClientImpl, ChainRpcClient,
         ChainRpcClientImpl, Endpoint, RemoteAccountProvider,
     },
+    submux::SubMuxClient,
 };
 use fetch_cloner::FetchCloner;
 
@@ -73,7 +74,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     }
 
     pub async fn try_new_from_endpoints(
-        endpoints: &[Endpoint<'_>],
+        endpoints: &[Endpoint],
         commitment: CommitmentConfig,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
@@ -83,7 +84,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     ) -> ChainlinkResult<
         Chainlink<
             ChainRpcClientImpl,
-            crate::submux::SubMuxClient<ChainPubsubClientImpl>,
+            SubMuxClient<ChainPubsubClientImpl>,
             V,
             C,
         >,

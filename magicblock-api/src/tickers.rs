@@ -8,7 +8,7 @@ use std::{
 };
 
 use log::*;
-use magicblock_accounts::{AccountsManager, ScheduledCommitsProcessor};
+use magicblock_accounts::ScheduledCommitsProcessor;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
     link::{blocks::BlockUpdateTx, transactions::TransactionSchedulerHandle},
@@ -102,6 +102,7 @@ async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
     }
 }
 
+/* TODO: @@@ remove properly
 pub async fn init_commit_accounts_ticker(
     manager: Arc<AccountsManager>,
     tick_duration: Duration,
@@ -129,6 +130,7 @@ pub async fn init_commit_accounts_ticker(
         }
     }
 }
+*/
 
 #[allow(unused_variables)]
 pub fn init_system_metrics_ticker(
