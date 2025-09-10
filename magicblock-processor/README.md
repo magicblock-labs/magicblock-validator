@@ -4,7 +4,7 @@ Core transaction processing engine for the Magicblock validator.
 
 ## Overview
 
-This crate is the heart of the validator's execution layer. It provides a high-performance, parallel transaction processing pipeline built around the Solana Virtual Machine (SVM). Its primary responsibility is to take sanitized transactions from the rest of the system (e.g., the RPC gateway), execute or simulate them, commit the resulting state changes, and broadcast the outcomes.
+This crate is the heart of the validator's execution layer. It provides a high-performance, parallel transaction processing pipeline built around the Solana Virtual Machine (SVM). Its primary responsibility is to take sanitized transactions from the rest of the system (e.g., `aperture`), execute or simulate them, commit the resulting state changes, and broadcast the outcomes.
 
 The design is centered around a central **Scheduler** that distributes work to a pool of isolated **Executor** workers, enabling concurrent transaction processing.
 
@@ -15,7 +15,7 @@ The architecture is designed for performance and clear separation of concerns, r
 -   **`TransactionScheduler`**: The central coordinator and single entry point for all transactions. It receives transactions from a global queue and dispatches them to available `TransactionExecutor` workers.
 -   **`TransactionExecutor`**: The workhorse of the system. Each executor runs in its own dedicated OS thread with a private Tokio runtime. It is responsible for the entire lifecycle of a single transaction: loading accounts, executing with the SVM, committing state changes to the `AccountsDb` and `Ledger`, and broadcasting the results.
 -   **`TransactionSchedulerState`**: A shared context object that acts as a dependency container. It holds `Arc` handles to global state (like `AccountsDb` and `Ledger`) and the communication channels required for the scheduler and executors to operate.
--   **`link` function**: A helper method that creates the paired MPSC and Flume channels connecting the processor to the rest of the validator (the "dispatch" side). This decouples the processing core from the API/gateway layer.
+-   **`link` function**: A helper method that creates the paired MPSC and Flume channels connecting the processor to the rest of the validator (the "dispatch" side). This decouples the processing core from the external API layer.
 
 ---
 

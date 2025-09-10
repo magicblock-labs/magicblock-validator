@@ -19,7 +19,7 @@ members = [
   "magicblock-config-helpers",
   "magicblock-config-macro",
   "magicblock-core",
-  "magicblock-gateway",
+  "magicblock-aperture",
   "magicblock-ledger",
   "magicblock-metrics",
   "magicblock-mutator",
@@ -115,7 +115,7 @@ magicblock-core = { path = "./magicblock-core" }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = [
   "no-entrypoint",
 ] }
-magicblock-gateway = { path = "./magicblock-gateway" }
+magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-metrics = { path = "./magicblock-metrics" }

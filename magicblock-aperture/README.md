@@ -1,27 +1,29 @@
-# Magicblock Gateway
+# Magicblock Aperture
 
-Provides the JSON-RPC (HTTP) and Pub/Sub (WebSocket) API Gateway for the Magicblock validator.
+Provides the JSON-RPC (HTTP) and Pub/Sub (WebSocket) API Server for the Magicblock validator.
 
 ## Overview
 
-This crate serves as the primary external interface for the validator, allowing clients to query the ledger, submit transactions, and subscribe to real-time events. It is a high-performance, asynchronous server built on Hyper, Tokio, and fastwebsockets.
+This crate serves as the primary external interface for the validator, allowing clients to query the ledger, submit transactions, and subscribe to real-time events. It is a high-performance, asynchronous server built with low level libraries for maximum control over implementation.
 
 It provides two core services running on adjacent ports:
 1.  **JSON-RPC Server (HTTP):** Handles traditional request/response RPC methods like `getAccountInfo`, `getTransaction`, and `sendTransaction`.
 2.  **Pub/Sub Server (WebSocket):** Manages persistent connections for clients to subscribe to streams of data, such as `accountSubscribe` or `slotSubscribe`.
 
-The gateway is designed to be a lean API layer for transaction execution, that validates and sanitizes incoming transaction requests, before dispatching them to the `magicblock-processor` crate for heavy computation.
+The server is designed to be a lean API layer that validates and sanitizes incoming requests before dispatching them to the `magicblock-processor` crate for heavy computation.
 
+## A Note on Naming
 
+The name "Aperture" was chosen to reflect the crate's role as a controlled opening into the validator's core.  Much like a camera's aperture controls the flow of light, this server carefully manages the flow of information—RPC requests flowing in, and state data flowing out—without exposing the internal machinery directly.
 
 ---
 
 ## Key Components
 
-The gateway's architecture is divided into logical components for handling HTTP and WebSocket traffic, all underpinned by a shared state.
+The server's architecture is divided into logical components for handling HTTP and WebSocket traffic, all underpinned by a shared state.
 
 ### HTTP Server
--   **`HttpServer`**: The low-level server built on Hyper that accepts TCP connections and manages the HTTP 1/2 protocols.
+-   **`HttpServer`**: The low-level server built on Hyper that accepts TCP connections and manages the HTTP 1/2 protocol.
 -   **`HttpDispatcher`**: The central router for all HTTP requests. It deserializes incoming JSON, identifies the RPC method, and calls the appropriate handler function. It holds a reference to the `SharedState` to access caches and databases.
 
 ### WebSocket Server
@@ -42,7 +44,7 @@ The gateway's architecture is divided into logical components for handling HTTP 
 1.  A client sends a `sendTransaction` request to the HTTP port.
 2.  The `HttpServer` accepts the connection and passes the request to the `HttpDispatcher`.
 3.  The `HttpDispatcher` parses the request and calls the `send_transaction` handler.
-4.  The handler decodes and sanitizes the transaction, checks for recent duplicates in the `TransactionsCache`.
+4.  The handler decodes and sanitizes the transaction, checks for recent duplicates in the `TransactionsCache`, and performs a preflight simulation by default.
 5.  If validation passes, it sends the transaction to the `magicblock-processor` via the `transaction_scheduler` channel.
 6.  The handler awaits a successful execution result from the processor.
 7.  A JSON-RPC response containing the transaction signature is serialized and sent back to the client.
@@ -66,6 +68,6 @@ The gateway's architecture is divided into logical components for handling HTTP 
 
 -   **Asynchronous & Non-blocking**: Built on Tokio and Hyper for high concurrency.
 -   **Graceful Shutdown**: Utilizes `CancellationToken`s and RAII guards (`Shutdown`) to ensure the server and all active connections can terminate cleanly.
--   **Performant Lookups**: Employs a two-level caching strategy for transaction statuses and various other tricks to minimize database loads.
+-   **Performant Lookups**: Employs a two-level caching strategy for transaction statuses and server-side filtering for `getProgramAccounts` to minimize database load.
 -   **Solana API Compatibility**: Implements a large subset of the standard Solana JSON-RPC methods and subscription types.
 
