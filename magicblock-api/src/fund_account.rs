@@ -5,8 +5,12 @@ use magicblock_magic_program_api::{
     self, MAGIC_CONTEXT_PUBKEY, MAGIC_CONTEXT_SIZE,
 };
 use solana_sdk::{
-    account::Account, clock::Epoch, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, system_program,
+    account::{Account, WritableAccount},
+    clock::Epoch,
+    pubkey::Pubkey,
+    signature::Keypair,
+    signer::Signer,
+    system_program,
 };
 
 use crate::{
@@ -15,17 +19,7 @@ use crate::{
 };
 
 pub(crate) fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
-    bank.store_account(
-        *pubkey,
-        Account {
-            lamports,
-            data: vec![],
-            owner: system_program::id(),
-            executable: false,
-            rent_epoch: Epoch::MAX,
-        }
-        .into(),
-    );
+    fund_account_with_data(bank, pubkey, lamports, vec![]);
 }
 
 pub(crate) fn fund_account_with_data(
@@ -34,17 +28,23 @@ pub(crate) fn fund_account_with_data(
     lamports: u64,
     data: Vec<u8>,
 ) {
-    bank.store_account(
-        *pubkey,
-        Account {
-            lamports,
-            data,
-            owner: system_program::id(),
-            executable: false,
-            rent_epoch: Epoch::MAX,
-        }
-        .into(),
-    );
+    if let Some(mut acc) = bank.get_account(pubkey) {
+        acc.set_lamports(lamports);
+        acc.set_data(data);
+        bank.store_account(*pubkey, acc);
+    } else {
+        bank.store_account(
+            *pubkey,
+            Account {
+                lamports,
+                data,
+                owner: system_program::id(),
+                executable: false,
+                rent_epoch: Epoch::MAX,
+            }
+            .into(),
+        );
+    }
 }
 
 pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
