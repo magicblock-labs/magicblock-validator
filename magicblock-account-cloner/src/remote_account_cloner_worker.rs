@@ -523,17 +523,27 @@ where
                             >= self
                                 .account_updates
                                 .get_first_subscribed_slot(pubkey)
-                                .unwrap_or(u64::MAX)
+                                .unwrap_or(u64::MIN)
                         {
                             break account_chain_snapshot;
                         }
                         // If we failed to fetch too many time, stop here
                         if fetch_count >= self.fetch_retries {
                             return if min_context_slot.is_none() {
+                                error!("Failed to get satisfactory slot for {} after {fetch_count} tries, current update slot {}, first subscribed slot {:?}",
+                                    pubkey,
+                                    account_chain_snapshot.at_slot,
+                                    self.account_updates.get_first_subscribed_slot(pubkey),
+                                );
                                 Err(
                                     AccountClonerError::FailedToGetSubscriptionSlot,
                                 )
                             } else {
+                                error!("Failed to fetch satisfactory slot for {} after {fetch_count} tries, current update slot {}, first subscribed slot {:?}",
+                                    pubkey,
+                                    account_chain_snapshot.at_slot,
+                                    self.account_updates.get_first_subscribed_slot(pubkey),
+                                );
                                 Err(
                                     AccountClonerError::FailedToFetchSatisfactorySlot,
                                 )
