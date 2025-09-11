@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 
 use connection::ConnectionHandler;
 use fastwebsockets::upgrade::upgrade;
@@ -63,12 +63,10 @@ impl WebsocketServer {
     /// Initializes the WebSocket server by binding a TCP
     /// listener and preparing the shared connection state.
     pub(crate) async fn new(
-        addr: SocketAddr,
+        socket: TcpListener,
         state: &SharedState,
         cancel: CancellationToken,
     ) -> RpcResult<Self> {
-        let socket =
-            TcpListener::bind(addr).await.map_err(RpcError::internal)?;
         let (shutdown, rx) = Shutdown::new();
         let state = ConnectionState {
             subscriptions: state.subscriptions.clone(),

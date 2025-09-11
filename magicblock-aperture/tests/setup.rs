@@ -1,12 +1,14 @@
 #![allow(unused)]
 
 use std::{
+    hash::Hash,
     os::fd::AsFd,
     sync::{
         atomic::{AtomicU16, Ordering},
         Arc,
     },
     thread,
+    time::Instant,
 };
 
 use magicblock_accounts_db::AccountsDb;
@@ -73,49 +75,41 @@ impl RpcTestEnv {
     /// 4.  Connects an `RpcClient` and `PubsubClient` to the running server.
     pub async fn new() -> Self {
         const BLOCK_TIME_MS: u64 = 50;
-        static PORT: AtomicU16 = AtomicU16::new(13001);
 
         let execution = ExecutionTestEnv::new();
-
-        // Use an atomic counter to ensure each test instance gets a unique port.
-        let config = loop {
-            let port = PORT.fetch_add(2, Ordering::Relaxed);
-            let addr = "0.0.0.0".parse().unwrap();
-            let config = RpcConfig { addr, port };
-            if TcpListener::bind((addr, port)).await.is_ok() {
-                break config;
-            };
-        };
 
         let faucet = Keypair::new();
         execution.fund_account(faucet.pubkey(), Self::INIT_ACCOUNT_BALANCE);
 
-        let node_context = NodeContext {
-            identity: execution.payer.pubkey(),
-            faucet: Some(faucet),
-            base_fee: Self::BASE_FEE,
-            featureset: Default::default(),
+        // Try to find a free port, this is handy when using nextest
+        // where each test needs to run in a separate process.
+        let (server, config) = loop {
+            let port: u16 = rand::random_range(7000..u16::MAX);
+            let node_context = NodeContext {
+                identity: execution.payer.pubkey(),
+                faucet: Some(faucet.insecure_clone()),
+                base_fee: Self::BASE_FEE,
+                featureset: Default::default(),
+            };
+            let state = SharedState::new(
+                node_context,
+                execution.accountsdb.clone(),
+                execution.ledger.clone(),
+                chainlink(&execution.accountsdb),
+                BLOCK_TIME_MS,
+            );
+            let cancel = CancellationToken::new();
+            let addr = "0.0.0.0".parse().unwrap();
+            let config = RpcConfig { addr, port };
+            let server =
+                JsonRpcServer::new(&config, state, &execution.dispatch, cancel)
+                    .await;
+            if let Ok(server) = server {
+                break (server, config);
+            }
         };
-        let state = SharedState::new(
-            node_context,
-            execution.accountsdb.clone(),
-            execution.ledger.clone(),
-            chainlink(&execution.accountsdb),
-            BLOCK_TIME_MS,
-        );
-        let cancel = CancellationToken::new();
 
-        let rpc_server =
-            JsonRpcServer::new(&config, state, &execution.dispatch, cancel)
-                .await
-                .unwrap_or_else(|e| {
-                    panic!(
-                        "failed to start RPC service with config {:?}: {}",
-                        config, e
-                    )
-                });
-
-        tokio::spawn(rpc_server.run());
+        tokio::spawn(server.run());
 
         let rpc_url = format!("http://{}:{}", config.addr, config.port);
         let pubsub_url = format!("ws://{}:{}", config.addr, config.port + 1);
