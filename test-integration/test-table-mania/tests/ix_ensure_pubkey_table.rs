@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use log::*;
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
-use test_tools_core::init_logger;
+use test_kit::init_logger;
 mod utils;
 
 #[tokio::test]

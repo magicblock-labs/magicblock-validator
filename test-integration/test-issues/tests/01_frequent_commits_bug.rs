@@ -1,6 +1,6 @@
 use integration_test_tools::IntegrationTestContext;
 use log::*;
-use test_tools_core::init_logger;
+use test_kit::init_logger;
 
 #[test]
 fn test_frequent_commits_do_not_run_when_no_accounts_need_to_be_committed() {

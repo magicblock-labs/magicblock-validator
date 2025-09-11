@@ -6,7 +6,7 @@ use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{signer::Signer, transaction::Transaction};
-use test_tools_core::init_logger;
+use test_kit::init_logger;
 use utils::{
     assert_one_committee_synchronized_count,
     assert_one_committee_was_committed,

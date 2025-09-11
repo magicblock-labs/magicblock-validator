@@ -8,7 +8,7 @@ use test_config::{
     count_lookup_table_transactions_on_chain, delegate_and_clone,
     start_validator_with_clone_config, wait_for_startup,
 };
-use test_tools_core::init_logger;
+use test_kit::init_logger;
 
 fn lookup_table_interaction(
     config: PrepareLookupTables,

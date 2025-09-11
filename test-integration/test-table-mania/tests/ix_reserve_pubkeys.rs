@@ -5,7 +5,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk::{
     address_lookup_table::state::LOOKUP_TABLE_MAX_ADDRESSES, signature::Keypair,
 };
-use test_tools_core::init_logger;
+use test_kit::init_logger;
 use tokio::task::JoinSet;
 mod utils;
 

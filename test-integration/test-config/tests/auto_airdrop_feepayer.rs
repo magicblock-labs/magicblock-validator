@@ -9,7 +9,7 @@ use magicblock_config::{
     RemoteCluster, RemoteConfig,
 };
 use solana_sdk::{signature::Keypair, signer::Signer, system_instruction};
-use test_tools_core::init_logger;
+use test_kit::init_logger;
 
 #[test]
 fn test_auto_airdrop_feepayer_balance_after_tx() {

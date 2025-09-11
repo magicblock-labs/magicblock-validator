@@ -6,7 +6,7 @@ use log::*;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
     cloner::Cloner,
-    config::ChainlinkConfig,
+    config::{ChainlinkConfig, LifecycleMode},
     fetch_cloner::FetchCloner,
     native_program_accounts,
     remote_account_provider::{
@@ -20,7 +20,6 @@ use magicblock_chainlink::{
     },
     submux::SubMuxClient,
     testing::cloner_stub::ClonerStub,
-    validator_types::LifecycleMode,
     Chainlink,
 };
 use program_flexi_counter::state::FlexiCounter;
@@ -88,8 +87,8 @@ impl IxtestContext {
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let (fetch_cloner, remote_account_provider) = {
             let endpoints = [Endpoint {
-                rpc_url: RPC_URL,
-                pubsub_url: "ws://localhost:7800",
+                rpc_url: RPC_URL.to_string(),
+                pubsub_url: "ws://localhost:7800".to_string(),
             }];
             // Add all native programs
             let native_programs = native_program_accounts();
@@ -99,7 +98,10 @@ impl IxtestContext {
                 &(native_loader::id().to_bytes().into()),
             );
             for pubkey in native_programs {
-                cloner.clone_account(pubkey, program_stub.clone()).unwrap();
+                cloner
+                    .clone_account(pubkey, program_stub.clone())
+                    .await
+                    .unwrap();
             }
             let remote_account_provider =
                 RemoteAccountProvider::try_from_urls_and_config(

@@ -6,6 +6,7 @@ edition.workspace = true
 [dev-dependencies]
 integration-test-tools = { workspace = true }
 log = { workspace = true }
+test-kit = { workspace = true }
 
 [features]
 no-entrypoint = []

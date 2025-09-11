@@ -2316,6 +2316,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "guinea"
+version = "0.1.7"
+dependencies = [
+ "bincode",
+ "serde",
+ "solana-program",
+]
+
+[[package]]
 name = "h2"
 version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5839,6 +5848,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
+ "test-kit",
  "tokio",
 ]
 
@@ -5856,6 +5866,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
+ "test-kit",
 ]
 
 [[package]]
@@ -10455,6 +10466,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-sdk",
  "tempfile",
+ "test-kit",
 ]
 
 [[package]]
@@ -10463,6 +10475,30 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "log",
+ "test-kit",
+]
+
+[[package]]
+name = "test-kit"
+version = "0.1.7"
+dependencies = [
+ "env_logger 0.11.8",
+ "guinea",
+ "log",
+ "magicblock-accounts-db",
+ "magicblock-core 0.1.7",
+ "magicblock-ledger",
+ "magicblock-processor",
+ "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git?rev=a892d2a)",
+ "solana-instruction",
+ "solana-keypair",
+ "solana-program",
+ "solana-rpc-client",
+ "solana-signature",
+ "solana-signer",
+ "solana-transaction",
+ "solana-transaction-status-client-types",
+ "tempfile",
 ]
 
 [[package]]
@@ -10545,6 +10581,7 @@ dependencies = [
  "solana-pubkey",
  "solana-rpc-client",
  "solana-sdk",
+ "test-kit",
  "tokio",
 ]
 

@@ -12,7 +12,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, native_token::LAMPORTS_PER_SOL,
     signature::Keypair, signer::Signer,
 };
-use test_tools_core::init_logger;
+use test_kit::init_logger;
 
 mod utils;
 

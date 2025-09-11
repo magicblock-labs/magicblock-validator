@@ -13,3 +13,4 @@ program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 tempfile = { workspace = true }
+test-kit = { workspace = true }

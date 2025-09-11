@@ -1,9 +1,9 @@
 use log::*;
 use magicblock_chainlink::{
     config::ChainlinkConfig,
+    config::LifecycleMode,
     remote_account_provider::config::RemoteAccountProviderConfig,
     testing::{init_logger, utils::random_pubkeys},
-    validator_types::LifecycleMode,
 };
 
 use test_chainlink::ixtest_context::IxtestContext;

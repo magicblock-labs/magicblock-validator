@@ -26,7 +26,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use test_tools_core::init_logger;
+use test_kit::init_logger;
 use utils::{
     assert_is_instruction_error,
     assert_one_committee_account_was_undelegated_on_chain,

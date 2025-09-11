@@ -1,7 +1,7 @@
 use log::{debug, info};
+use magicblock_chainlink::config::LifecycleMode;
 use magicblock_chainlink::remote_account_provider::config::RemoteAccountProviderConfig;
 use magicblock_chainlink::submux::SubMuxClient;
-use magicblock_chainlink::validator_types::LifecycleMode;
 use magicblock_chainlink::{
     remote_account_provider::{
         chain_pubsub_client::ChainPubsubClientImpl,
@@ -27,8 +27,8 @@ async fn init_remote_account_provider() -> RemoteAccountProvider<
 > {
     let (fwd_tx, _fwd_rx) = mpsc::channel(100);
     let endpoints = [Endpoint {
-        rpc_url: RPC_URL,
-        pubsub_url: PUBSUB_URL,
+        rpc_url: RPC_URL.to_string(),
+        pubsub_url: PUBSUB_URL.to_string(),
     }];
     RemoteAccountProvider::<
         ChainRpcClientImpl,
