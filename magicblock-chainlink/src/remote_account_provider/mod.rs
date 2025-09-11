@@ -1,5 +1,7 @@
 use config::RemoteAccountProviderConfig;
 use lru_cache::AccountsLruCache;
+#[cfg(any(test, feature = "dev-context"))]
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
