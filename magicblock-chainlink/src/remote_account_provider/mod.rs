@@ -23,7 +23,6 @@ pub use remote_account::RemoteAccountUpdateSource;
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_pubkey::Pubkey;
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig,
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,

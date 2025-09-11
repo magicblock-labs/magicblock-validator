@@ -1,5 +1,3 @@
-use solana_account::AccountSharedData;
-use solana_pubkey::Pubkey;
 
 #[cfg(any(test, feature = "dev-context"))]
 pub mod mock {
