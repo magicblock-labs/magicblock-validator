@@ -13,7 +13,7 @@ use integration_test_tools::{
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategyConfig,
     LedgerResumeStrategyType, LifecycleMode, RemoteCluster, RemoteConfig,
-    TaskSchedulerConfig,
+    TaskSchedulerConfig, ValidatorConfig,
 };
 use solana_sdk::{
     hash::Hash, instruction::Instruction, pubkey::Pubkey, signature::Keypair,
@@ -23,6 +23,8 @@ use tempfile::TempDir;
 
 pub const MEMO_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+
+pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;
 
 pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
@@ -42,7 +44,11 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
         accounts: accounts_config,
         task_scheduler: TaskSchedulerConfig {
             reset: true,
-            millis_per_tick: 50,
+            millis_per_tick: TASK_SCHEDULER_TICK_MILLIS,
+        },
+        validator: ValidatorConfig {
+            millis_per_slot: TASK_SCHEDULER_TICK_MILLIS,
+            ..Default::default()
         },
         ledger: LedgerConfig {
             resume_strategy_config: LedgerResumeStrategyConfig {

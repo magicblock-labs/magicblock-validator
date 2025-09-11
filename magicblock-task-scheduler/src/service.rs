@@ -12,18 +12,22 @@ use log::*;
 use magicblock_bank::bank::Bank;
 use magicblock_config::TaskSchedulerConfig;
 use magicblock_program::{
+    instruction_utils::InstructionUtils,
     validator::{validator_authority, validator_authority_id},
     CancelTaskRequest, CrankTask, ScheduleTaskRequest, TaskContext,
     TaskRequest, TASK_CONTEXT_PUBKEY,
 };
 use solana_sdk::{
-    account::ReadableAccount,
+    account::{ReadableAccount, WritableAccount},
     instruction::Instruction,
     message::Message,
     pubkey::Pubkey,
     transaction::{SanitizedTransaction, Transaction},
 };
-use solana_svm::transaction_processor::ExecutionRecordingConfig;
+use solana_svm::{
+    transaction_commit_result::TransactionCommitResult,
+    transaction_processor::ExecutionRecordingConfig,
+};
 use solana_timings::ExecuteTimings;
 use tokio::{select, time::Duration};
 use tokio_util::{
@@ -108,12 +112,11 @@ impl TaskSchedulerService {
         &mut self,
         task_context: &mut TaskContext,
     ) -> TaskSchedulerResult<Vec<TaskSchedulerError>> {
-        let requests = task_context.get_all_requests();
-
+        let requests = &task_context.requests;
         let mut result = Vec::with_capacity(requests.len());
-        for request in &requests {
+        for request in requests {
             trace!("Processing task scheduling request: {request:?}");
-            let id = match request {
+            match request {
                 TaskRequest::Schedule(schedule_request) => {
                     if let Err(e) =
                         self.process_schedule_request(schedule_request)
@@ -129,7 +132,6 @@ impl TaskSchedulerService {
                         );
                         result.push(e);
                     }
-                    schedule_request.id
                 }
                 TaskRequest::Cancel(cancel_request) => {
                     if let Err(e) = self.process_cancel_request(cancel_request)
@@ -145,11 +147,8 @@ impl TaskSchedulerService {
                         );
                         result.push(e);
                     }
-                    cancel_request.task_id
                 }
             };
-
-            task_context.remove_request(id);
         }
 
         Ok(result)
@@ -202,52 +201,7 @@ impl TaskSchedulerService {
     fn execute_task(&mut self, task: &DbTask) -> TaskSchedulerResult<()> {
         trace!("Executing task {}", task.id);
 
-        // Execute unsigned transactions
-        // We prepend a noop instruction to make each transaction unique.
-        let blockhash = self.bank.last_blockhash();
-        let noop_instruction = Instruction::new_with_bytes(
-            MEMO_PROGRAM_ID,
-            &self
-                .tx_counter
-                .fetch_add(1, Ordering::Relaxed)
-                .to_le_bytes(),
-            vec![],
-        );
-        let tx = Transaction::new(
-            &[validator_authority()],
-            Message::new(
-                &[noop_instruction]
-                    .into_iter()
-                    .chain(task.instructions.clone())
-                    .collect::<Vec<_>>(),
-                Some(&validator_authority_id()),
-            ),
-            blockhash,
-        );
-
-        // TODO: transaction should be sent to the transaction executor.
-        // This is a work in progress and this should be updated once implemented.
-        // https://github.com/magicblock-labs/magicblock-validator/issues/523
-        let sanitized_transaction =
-            match SanitizedTransaction::try_from_legacy_transaction(
-                tx,
-                &Default::default(),
-            ) {
-                Ok(tx) => [tx],
-                Err(e) => {
-                    error!("Failed to sanitize transaction: {}", e);
-                    return Err(TaskSchedulerError::Transaction(e));
-                }
-            };
-        let batch = self.bank.prepare_sanitized_batch(&sanitized_transaction);
-        let (output, _balances) =
-            self.bank.load_execute_and_commit_transactions(
-                &batch,
-                false,
-                ExecutionRecordingConfig::new_single_setting(true),
-                &mut ExecuteTimings::default(),
-                None,
-            );
+        let output = self.process_transaction(task.instructions.clone())?;
 
         // If any instruction fails, the task is cancelled
         for result in output {
@@ -338,20 +292,36 @@ impl TaskSchedulerService {
                     };
 
                     let Ok(mut task_context) =
-                        bincode::deserialize::<TaskContext>(context_account.data()) else {
+                        bincode::deserialize::<TaskContext>(context_account.data_as_mut_slice()) else {
                         error!("Invalid task context account");
                         return Err(TaskSchedulerError::ContextDeserialization(context_account.data().to_vec()));
                     };
 
+                    trace!("Task context deserialized: {:?}", task_context);
+
                     match self.process_context_requests(&mut task_context) {
                         Ok(result) if result.is_empty() => {
-                            // Write the updated context back to the account
-                            let Ok(serialized) = bincode::serialize(&task_context) else {
-                                error!("Failed to serialize task context");
-                                return Err(TaskSchedulerError::ContextSerialization(context_account.data().to_vec()));
-                            };
-                            context_account.set_data(serialized);
-                            self.bank.store_account(TASK_CONTEXT_PUBKEY, context_account);
+                            if task_context.requests.is_empty() {
+                                // Nothing to do because there are no requests in the context
+                                continue;
+                            }
+
+                            // All requests were processed successfully, reset the context
+                            // We need to freeze the bank to avoid race conditions
+                            // This is done with an instruction to the magic program.
+                            // It avoids race conditions with write access to accountsDb
+                            trace!("Resetting task context");
+                            let output = self.process_transaction(vec![
+                                InstructionUtils::process_tasks_instruction(
+                                    &validator_authority_id(),
+                                ),
+                            ])?;
+                            for result in output {
+                                if let Err(e) = result.and_then(|tx| tx.status) {
+                                    error!("Failed to reset task context: {}", e);
+                                    return Err(TaskSchedulerError::Transaction(e));
+                                }
+                            }
                         }
                         Ok(result) => {
                             for error in &result {
@@ -378,5 +348,59 @@ impl TaskSchedulerService {
         if let Some(key) = self.task_queue_keys.remove(&task_id) {
             self.task_queue.remove(&key);
         }
+    }
+
+    fn process_transaction(
+        &self,
+        instructions: Vec<Instruction>,
+    ) -> TaskSchedulerResult<Vec<TransactionCommitResult>> {
+        // Execute unsigned transactions
+        // We prepend a noop instruction to make each transaction unique.
+        let blockhash = self.bank.last_blockhash();
+        let noop_instruction = Instruction::new_with_bytes(
+            MEMO_PROGRAM_ID,
+            &self
+                .tx_counter
+                .fetch_add(1, Ordering::Relaxed)
+                .to_le_bytes(),
+            vec![],
+        );
+        let tx = Transaction::new(
+            &[validator_authority()],
+            Message::new(
+                &[noop_instruction]
+                    .into_iter()
+                    .chain(instructions)
+                    .collect::<Vec<_>>(),
+                Some(&validator_authority_id()),
+            ),
+            blockhash,
+        );
+
+        // TODO: transaction should be sent to the transaction executor.
+        // This is a work in progress and this should be updated once implemented.
+        // https://github.com/magicblock-labs/magicblock-validator/issues/523
+        let sanitized_transaction =
+            match SanitizedTransaction::try_from_legacy_transaction(
+                tx,
+                &Default::default(),
+            ) {
+                Ok(tx) => [tx],
+                Err(e) => {
+                    error!("Failed to sanitize transaction: {}", e);
+                    return Err(TaskSchedulerError::Transaction(e));
+                }
+            };
+        let batch = self.bank.prepare_sanitized_batch(&sanitized_transaction);
+        let (output, _balances) =
+            self.bank.load_execute_and_commit_transactions(
+                &batch,
+                false,
+                ExecutionRecordingConfig::new_single_setting(true),
+                &mut ExecuteTimings::default(),
+                None,
+            );
+
+        Ok(output)
     }
 }

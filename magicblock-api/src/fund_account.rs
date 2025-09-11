@@ -2,9 +2,9 @@ use std::path::Path;
 
 use magicblock_bank::bank::Bank;
 use magicblock_magic_program_api::{
-    self, MAGIC_CONTEXT_PUBKEY, MAGIC_CONTEXT_SIZE,
+    self, MAGIC_CONTEXT_PUBKEY, TASK_CONTEXT_PUBKEY,
 };
-use magicblock_program::{TaskContext, TASK_CONTEXT_PUBKEY};
+use magicblock_program::{MagicContext, TaskContext};
 use solana_sdk::{
     account::{Account, WritableAccount},
     clock::Epoch,
@@ -78,7 +78,7 @@ pub(crate) fn fund_magic_context(bank: &Bank) {
         bank,
         &MAGIC_CONTEXT_PUBKEY,
         u64::MAX,
-        vec![0; MAGIC_CONTEXT_SIZE],
+        MagicContext::ZERO.to_vec(),
     );
 }
 
@@ -89,6 +89,6 @@ pub(crate) fn fund_task_context(bank: &Bank) {
         bank,
         &TASK_CONTEXT_PUBKEY,
         u64::MAX,
-        vec![0; core::mem::size_of::<TaskContext>()],
+        TaskContext::ZERO.to_vec(),
     );
 }

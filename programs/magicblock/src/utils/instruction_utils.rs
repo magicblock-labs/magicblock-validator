@@ -247,6 +247,32 @@ impl InstructionUtils {
     }
 
     // -----------------
+    // Process Tasks
+    // -----------------
+    pub fn process_tasks(
+        authority: &Keypair,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::process_tasks_instruction(&authority.pubkey());
+        Self::into_transaction(authority, ix, recent_blockhash)
+    }
+
+    pub fn process_tasks_instruction(authority: &Pubkey) -> Instruction {
+        use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
+
+        let account_metas = vec![
+            AccountMeta::new(*authority, true),
+            AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
+        ];
+
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ProcessTasks,
+            account_metas,
+        )
+    }
+
+    // -----------------
     // Utils
     // -----------------
     pub(crate) fn into_transaction(

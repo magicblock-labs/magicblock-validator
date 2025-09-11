@@ -85,6 +85,13 @@ pub enum MagicBlockInstruction {
     CancelTask {
         task_id: u64,
     },
+
+    /// Process all tasks
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]`         Validator authority
+    /// - **1.** `[WRITE]`          Task context account
+    ProcessTasks,
 }
 
 impl MagicBlockInstruction {
