@@ -92,7 +92,8 @@ impl ChainlinkCloner {
                 let validator_kp = validator_authority();
                 // All other versions are loaded via the LoaderV4, no matter what
                 // the original loader was. We do this via a proper upgrade instruction.
-                let deploy_ixs = program.try_into_deploy_ixs_v4()?;
+                let deploy_ixs =
+                    program.try_into_deploy_ixs_v4(validator_kp.pubkey())?;
                 let tx = Transaction::new_signed_with_payer(
                     &deploy_ixs,
                     Some(&validator_kp.pubkey()),

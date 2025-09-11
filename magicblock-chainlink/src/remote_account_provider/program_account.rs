@@ -127,14 +127,19 @@ impl LoadedProgram {
     /// TODO: @@@ this may not work, in that case use auth of the validator
     /// initially and then add mutation instruction to change auth to the
     /// remote auth.
-    pub fn try_into_deploy_ixs_v4(self) -> ClonerResult<Vec<Instruction>> {
+    pub fn try_into_deploy_ixs_v4(
+        self,
+        auth: Pubkey,
+    ) -> ClonerResult<Vec<Instruction>> {
         let Self {
             program_id,
-            authority,
+            authority: _,
             program_data,
             loader,
             ..
         } = self;
+        // TODO: @@@ mutate back/forth to real chain auth
+        let authority = auth;
         let size = program_data.len() + 1024;
         let lamports = Rent::default().minimum_balance(size);
 
