@@ -192,22 +192,28 @@ impl InstructionUtils {
     pub fn schedule_task(
         payer: &Keypair,
         args: ScheduleTaskArgs,
+        accounts: &[Pubkey],
         recent_blockhash: Hash,
     ) -> Transaction {
-        let ix = Self::schedule_task_instruction(&payer.pubkey(), args);
+        let ix =
+            Self::schedule_task_instruction(&payer.pubkey(), args, accounts);
         Self::into_transaction(payer, ix, recent_blockhash)
     }
 
     pub fn schedule_task_instruction(
         payer: &Pubkey,
         args: ScheduleTaskArgs,
+        accounts: &[Pubkey],
     ) -> Instruction {
         use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
 
-        let account_metas = vec![
+        let mut account_metas = vec![
             AccountMeta::new(*payer, true),
             AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
         ];
+        for account in accounts {
+            account_metas.push(AccountMeta::new_readonly(*account, true));
+        }
 
         Instruction::new_with_bincode(
             crate::id(),
