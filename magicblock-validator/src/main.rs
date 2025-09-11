@@ -11,10 +11,11 @@ use solana_sdk::signature::Signer;
 use crate::shutdown::Shutdown;
 
 fn init_logger() {
+    let mut builder = env_logger::builder();
+    builder.format_timestamp_micros().is_test(false);
+
     if let Ok(style) = std::env::var("RUST_LOG_STYLE") {
         use std::io::Write;
-        let mut builder = env_logger::builder();
-        builder.format_timestamp_micros().is_test(false);
         match style.as_str() {
             "EPHEM" => {
                 builder.format(|buf, record| {
@@ -42,8 +43,10 @@ fn init_logger() {
             }
             _ => {}
         }
-        let _ = builder.try_init();
     }
+    let _ = builder.try_init().inspect_err(|err| {
+        eprintln!("Failed to init logger: {}", err);
+    });
 }
 
 #[tokio::main]
@@ -93,8 +96,7 @@ async fn main() {
     info!("🧙 Magicblock Validator is running!");
     info!(
         "🏷️ Validator version: {} (Git: {})",
-        version,
-        version.git_version
+        version, version.git_version
     );
     info!("-----------------------------------");
     info!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
