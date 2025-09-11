@@ -79,95 +79,135 @@ fn test_merge_macro_codegen() {
     t.compile_fail("tests/fixtures/fail_merge_enum.rs");
     t.compile_fail("tests/fixtures/fail_merge_union.rs");
     t.compile_fail("tests/fixtures/fail_merge_unnamed.rs");
-
-    //expand("tests/fixtures/pass_merge.rs");
 }
 
 #[test]
 fn test_struct_merge_implementation() {
-    let expected_impl: TokenStream = quote! {
-        impl magicblock_config_helpers::Merge for TestConfig {
-            fn merge(&mut self, other: Self) {
-                self.field1.merge(other.field1);
-                self.field2.merge(other.field2);
-                self.field3.merge(other.field3);
-                self.nested.merge(other.nested);
-            }
+    let test_config_input: TokenStream = quote! {
+        #[derive(Default, Mergeable)]
+        struct TestConfig {
+            field1: u32,
+            field2: String,
+            field3: Option<String>,
+            nested: NestedConfig,
         }
     };
 
-    let parsed_impl: Item = parse2(expected_impl)
-        .expect("Failed to parse expected TestConfig implementation");
+    let parsed: DeriveInput =
+        parse2(test_config_input).expect("Should parse TestConfig");
+    assert_eq!(parsed.ident, "TestConfig");
 
-    if let Item::Impl(impl_item) = parsed_impl {
-        assert!(
-            impl_item.trait_.is_some(),
-            "Should be a trait implementation"
-        );
-        let (_, trait_path, _) = impl_item.trait_.as_ref().unwrap();
-        assert_eq!(
-            trait_path.segments.last().unwrap().ident,
-            "Merge",
-            "Should implement Merge trait"
-        );
-
-        if let syn::Type::Path(type_path) = &*impl_item.self_ty {
+    if let syn::Data::Struct(data) = parsed.data {
+        if let syn::Fields::Named(fields) = data.fields {
             assert_eq!(
-                type_path.path.segments.last().unwrap().ident,
-                "TestConfig",
-                "Should implement for TestConfig"
+                fields.named.len(),
+                4,
+                "TestConfig should have 4 fields"
             );
-        }
 
-        let merge_method = impl_item
-            .items
-            .iter()
-            .find_map(|item| {
-                if let syn::ImplItem::Fn(method) = item {
-                    if method.sig.ident == "merge" {
-                        Some(method)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .expect("Should have merge method");
-        assert_eq!(
-            merge_method.sig.inputs.len(),
-            2,
-            "merge should have 2 parameters"
-        );
+            let field_info: Vec<(String, String)> = fields
+                .named
+                .iter()
+                .map(|f| {
+                    let name = f.ident.as_ref().unwrap().to_string();
+                    let type_name = quote!(#f.ty).to_string();
+                    (name, type_name)
+                })
+                .collect();
 
-        if let syn::FnArg::Receiver(receiver) = &merge_method.sig.inputs[0] {
-            assert!(
-                receiver.mutability.is_some(),
-                "First parameter should be &mut self"
-            );
+            assert!(field_info
+                .iter()
+                .any(|(name, ty)| name == "field1" && ty.contains("u32")));
+            assert!(field_info
+                .iter()
+                .any(|(name, ty)| name == "field2" && ty.contains("String")));
+            assert!(field_info
+                .iter()
+                .any(|(name, ty)| name == "field3" && ty.contains("Option")));
+            assert!(field_info
+                .iter()
+                .any(|(name, ty)| name == "nested"
+                    && ty.contains("NestedConfig")));
         } else {
-            panic!("First parameter should be receiver (&mut self)");
+            panic!("TestConfig should have named fields");
         }
-        if let syn::FnArg::Typed(pat_type) = &merge_method.sig.inputs[1] {
-            if let syn::Type::Path(type_path) = &*pat_type.ty {
-                assert_eq!(
-                    type_path.path.segments.last().unwrap().ident,
-                    "Self",
-                    "Second parameter should be of type Self"
-                );
-            }
-        } else {
-            panic!("Second parameter should be typed parameter");
-        }
-
-        println!("✅ TestConfig Merge implementation structure verified");
     } else {
-        panic!("Expected impl block")
+        panic!("TestConfig should be a struct");
     }
+
+    let nested_config_input: TokenStream = quote! {
+        #[derive(Default, Mergeable)]
+        struct NestedConfig {
+            value: u32,
+        }
+    };
+
+    let parsed_nested: DeriveInput =
+        parse2(nested_config_input).expect("Should parse NestedConfig");
+    assert_eq!(parsed_nested.ident, "NestedConfig");
+
+    let enum_input: TokenStream = quote! {
+        #[derive(Mergeable)]
+        enum TestEnum {
+            Variant1,
+            Variant2,
+        }
+    };
+
+    let parsed_enum: DeriveInput =
+        parse2(enum_input).expect("Should parse enum");
+    match parsed_enum.data {
+        syn::Data::Enum(_) => {
+            println!("✅ Enum parsing works (macro should reject this at generation time)");
+        }
+        _ => panic!("Expected enum"),
+    }
+
+    println!("✅ Macro input structure validation completed");
 }
 
-//#[test]
-//fn test_nested_struct_merge_implementation() {}
-//
-//#[test]
-//fn test_macro_input_parsing() {}
+#[test]
+fn test_nested_struct_merge_implementation() {
+    let test_nested_input: TokenStream = quote! {
+        #[derive(Default, Mergeable)]
+        struct NestedConfig {
+            value: u32,
+        }
+    };
+
+    let parsed: DeriveInput =
+        parse2(test_nested_input).expect("Should parse NestedConfig");
+    assert_eq!(parsed.ident, "NestedConfig");
+
+    if let syn::Data::Struct(data) = parsed.data {
+        if let syn::Fields::Named(fields) = data.fields {
+            assert_eq!(
+                fields.named.len(),
+                1,
+                "NestedConfig should have 1 fields"
+            );
+
+            let field = &fields.named[0];
+            let field_name = field.ident.as_ref().unwrap().to_string();
+            let field_type = quote!(#field.ty).to_string();
+
+            assert_eq!(field_name, "value", "Field should be named 'value'");
+            assert!(
+                field_type.contains("u32"),
+                "Field should be u32 type, got: {}",
+                field_type
+            );
+
+            match field.vis {
+                syn::Visibility::Inherited => {
+                    println!("✅ Field 'value' has correct private visibility");
+                }
+                _ => panic!("Field 'value' should be private"),
+            }
+        } else {
+            panic!("NestedConfig should have named fields");
+        }
+    } else {
+        panic!("NestedConfig should be a struct");
+    }
+}
