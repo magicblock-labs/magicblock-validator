@@ -161,7 +161,7 @@ pub async fn process_ledger(
     // Since transactions may refer to blockhashes that were present when they
     // ran initially we ensure that they are present during replay as well
     let blockhashes_only_starting_slot = (full_process_starting_slot > max_age)
-        .then_some(full_process_starting_slot - max_age)
+        .then(|| full_process_starting_slot - max_age)
         .unwrap_or_default();
     debug!(
         "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
