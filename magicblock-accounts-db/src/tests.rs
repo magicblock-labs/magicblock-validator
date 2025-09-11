@@ -597,7 +597,7 @@ fn init_test_env() -> AdbTestEnv {
 
 impl AdbTestEnv {
     fn account(&self) -> AccountWithPubkey {
-        Self::account_with_size(&self, SPACE)
+        Self::account_with_size(self, SPACE)
     }
     fn account_with_size(&self, size: usize) -> AccountWithPubkey {
         let pubkey = Pubkey::new_unique();

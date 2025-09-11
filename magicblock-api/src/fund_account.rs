@@ -31,7 +31,7 @@ pub(crate) fn fund_account_with_data(
     if let Some(mut acc) = bank.get_account(pubkey) {
         acc.set_lamports(lamports);
         acc.set_data(data);
-        bank.store_account(pubkey, &acc);
+        bank.store_account(*pubkey, acc);
     } else {
         bank.store_account(
             *pubkey,
