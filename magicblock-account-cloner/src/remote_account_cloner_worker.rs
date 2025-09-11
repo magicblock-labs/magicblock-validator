@@ -508,10 +508,10 @@ where
 
             // Fetch the account, repeat and retry until we have a satisfactory response
             let mut fetch_count = 0;
+            let min_context_slot =
+                self.account_updates.get_last_known_update_slot(&clock::ID);
             loop {
                 fetch_count += 1;
-                let min_context_slot =
-                    self.account_updates.get_last_known_update_slot(&clock::ID);
                 match self
                     .fetch_account_chain_snapshot(pubkey, min_context_slot)
                     .await
@@ -523,17 +523,27 @@ where
                             >= self
                                 .account_updates
                                 .get_first_subscribed_slot(pubkey)
-                                .unwrap_or(u64::MAX)
+                                .unwrap_or(u64::MIN)
                         {
                             break account_chain_snapshot;
                         }
                         // If we failed to fetch too many time, stop here
                         if fetch_count >= self.fetch_retries {
                             return if min_context_slot.is_none() {
+                                error!("Failed to get satisfactory slot for {} after {fetch_count} tries, current update slot {}, first subscribed slot {:?}",
+                                    pubkey,
+                                    account_chain_snapshot.at_slot,
+                                    self.account_updates.get_first_subscribed_slot(pubkey),
+                                );
                                 Err(
                                     AccountClonerError::FailedToGetSubscriptionSlot,
                                 )
                             } else {
+                                error!("Failed to fetch satisfactory slot for {} after {fetch_count} tries, current update slot {}, first subscribed slot {:?}",
+                                    pubkey,
+                                    account_chain_snapshot.at_slot,
+                                    self.account_updates.get_first_subscribed_slot(pubkey),
+                                );
                                 Err(
                                     AccountClonerError::FailedToFetchSatisfactorySlot,
                                 )
