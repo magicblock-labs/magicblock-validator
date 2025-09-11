@@ -15,6 +15,7 @@ use crate::{
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
+    TaskRequest,
 };
 
 #[cfg(test)]
@@ -114,16 +115,10 @@ pub(crate) fn process_schedule_task(
         transaction_context,
         TASK_CONTEXT_IDX,
     )?;
-
-    TaskContext::schedule_task(invoke_context, context_acc, schedule_request)
-        .map_err(|err| {
-        ic_msg!(
-            invoke_context,
-            "ScheduleTask ERR: failed to schedule task: {}",
-            err
-        );
-        InstructionError::GenericError
-    })?;
+    TaskContext::add_request(
+        context_acc,
+        TaskRequest::Schedule(schedule_request),
+    )?;
 
     ic_msg!(
         invoke_context,
