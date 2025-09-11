@@ -16,9 +16,6 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     // Bottom-priority are used for bottommost compactions. Keep it minimal - 1
     let bottom_pri = 1;
     env.set_bottom_priority_background_threads(bottom_pri);
-    // Low-priority threads are used for compaction. Keep them small to favor foreground writes.
-    let low_pri = 1;
-    env.set_background_threads(low_pri);
     // High-priority threads are used for flush. Keep a few to avoid memtable flush backlog.
     let high_pri = cpus_env.clamp(2, 4);
     env.set_high_priority_background_threads(high_pri);
@@ -26,7 +23,8 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
 
     // For every job RocksDB picks a thread from available pools
     // Here we select ceiling so RocksDB doesn't use all of HIGH + LOW + BOTTOM threads
-    let max_jobs = std::cmp::max(high_pri, bottom_pri + low_pri);
+    // By default num of threads in LOW is 1
+    let max_jobs = std::cmp::max(high_pri + 1, bottom_pri);
     options.set_max_background_jobs(max_jobs);
     
     // Bound WAL size
