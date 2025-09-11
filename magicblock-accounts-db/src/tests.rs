@@ -541,6 +541,23 @@ fn test_many_insertions_to_accountsdb() {
     });
 }
 
+#[test]
+fn test_reallocation_split() {
+    let tenv = init_test_env();
+    const SIZE: usize = 1024;
+    tenv.account();
+    let account1 = tenv.account_with_size(SIZE * 2);
+    let data_ptr1 = account1.account.data().as_ptr();
+    let account2 = tenv.account_with_size(SIZE);
+    let data_ptr2 = account2.account.data().as_ptr();
+    tenv.remove_account(&account1.pubkey);
+    let account3 = tenv.account_with_size(SIZE / 4);
+    let account4 = tenv.account_with_size(SIZE / 4);
+    assert_eq!(account3.account.data().as_ptr(), data_ptr1);
+    assert!(account4.account.data().as_ptr() < data_ptr2);
+    assert!(account4.account.data().as_ptr() > data_ptr1);
+}
+
 // ==============================================================
 // ==============================================================
 //                      UTILITY CODE BELOW
@@ -580,8 +597,11 @@ fn init_test_env() -> AdbTestEnv {
 
 impl AdbTestEnv {
     fn account(&self) -> AccountWithPubkey {
+        Self::account_with_size(self, SPACE)
+    }
+    fn account_with_size(&self, size: usize) -> AccountWithPubkey {
         let pubkey = Pubkey::new_unique();
-        let mut account = AccountSharedData::new(LAMPORTS, SPACE, &OWNER);
+        let mut account = AccountSharedData::new(LAMPORTS, size, &OWNER);
         account.data_as_mut_slice()[..INIT_DATA_LEN]
             .copy_from_slice(ACCOUNT_DATA);
         self.adb.insert_account(&pubkey, &account);
