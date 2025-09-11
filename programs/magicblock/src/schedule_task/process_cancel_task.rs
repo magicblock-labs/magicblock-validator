@@ -76,6 +76,7 @@ mod test {
 
     use crate::{
         instruction_utils::InstructionUtils, test_utils::process_instruction,
+        TaskContext,
     };
 
     #[test]
@@ -92,7 +93,11 @@ mod test {
             ),
             (
                 TASK_CONTEXT_PUBKEY,
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+                AccountSharedData::new(
+                    u64::MAX,
+                    TaskContext::SIZE,
+                    &system_program::id(),
+                ),
             ),
         ];
         let expected_result = Ok(());
@@ -127,7 +132,11 @@ mod test {
             ),
             (
                 wrong_context,
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+                AccountSharedData::new(
+                    u64::MAX,
+                    TaskContext::SIZE,
+                    &system_program::id(),
+                ),
             ),
         ];
         let expected_result = Err(InstructionError::MissingAccount);
@@ -161,7 +170,11 @@ mod test {
             ),
             (
                 TASK_CONTEXT_PUBKEY,
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+                AccountSharedData::new(
+                    u64::MAX,
+                    TaskContext::SIZE,
+                    &system_program::id(),
+                ),
             ),
         ];
         let expected_result = Err(InstructionError::MissingRequiredSignature);

@@ -77,102 +77,138 @@ mod test {
     };
 
     use crate::{
-        instruction_utils::InstructionUtils, test_utils::process_instruction,
+        instruction_utils::InstructionUtils,
+        test_utils::process_instruction,
+        validator::{
+            generate_validator_authority_if_needed, validator_authority_id,
+        },
+        TaskContext,
     };
 
     #[test]
-    fn test_process_cancel_task() {
-        let payer = Keypair::new();
-        let task_id = 1;
+    fn test_process_tasks() {
+        generate_validator_authority_if_needed();
 
-        let ix =
-            InstructionUtils::cancel_task_instruction(&payer.pubkey(), task_id);
+        let ix = InstructionUtils::process_tasks_instruction(
+            &validator_authority_id(),
+        );
         let transaction_accounts = vec![
             (
-                payer.pubkey(),
+                validator_authority_id(),
                 AccountSharedData::new(u64::MAX, 0, &system_program::id()),
             ),
             (
                 TASK_CONTEXT_PUBKEY,
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+                AccountSharedData::new(
+                    u64::MAX,
+                    TaskContext::SIZE,
+                    &system_program::id(),
+                ),
             ),
         ];
-        let expected_result = Ok(());
 
         process_instruction(
             &ix.data,
             transaction_accounts,
             ix.accounts,
-            expected_result,
+            Ok(()),
         );
     }
 
     #[test]
-    fn fail_process_cancel_task_wrong_context() {
-        let payer = Keypair::new();
-        let wrong_context = Keypair::new().pubkey();
-        let task_id = 1;
+    fn fail_process_tasks_wrong_context() {
+        generate_validator_authority_if_needed();
 
-        let account_metas = vec![
-            AccountMeta::new(payer.pubkey(), true),
-            AccountMeta::new(wrong_context, false),
-        ];
-        let ix = Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::CancelTask { task_id },
-            account_metas,
+        let ix = InstructionUtils::process_tasks_instruction(
+            &validator_authority_id(),
         );
+        let wrong_context = Keypair::new().pubkey();
         let transaction_accounts = vec![
             (
-                payer.pubkey(),
+                validator_authority_id(),
                 AccountSharedData::new(u64::MAX, 0, &system_program::id()),
             ),
             (
                 wrong_context,
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+                AccountSharedData::new(
+                    u64::MAX,
+                    TaskContext::SIZE,
+                    &system_program::id(),
+                ),
             ),
         ];
-        let expected_result = Err(InstructionError::MissingAccount);
 
         process_instruction(
             &ix.data,
             transaction_accounts,
             ix.accounts,
-            expected_result,
+            Err(InstructionError::MissingAccount),
         );
     }
 
     #[test]
-    fn fail_unsigned_process_cancel_task() {
-        let payer = Keypair::new();
-        let task_id = 1;
+    fn fail_process_tasks_wrong_authority() {
+        generate_validator_authority_if_needed();
 
-        let account_metas = vec![
-            AccountMeta::new(payer.pubkey(), false),
-            AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
-        ];
-        let ix = Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::CancelTask { task_id },
-            account_metas,
-        );
+        let wrong_authority = Keypair::new().pubkey();
+        let ix = InstructionUtils::process_tasks_instruction(&wrong_authority);
         let transaction_accounts = vec![
             (
-                payer.pubkey(),
+                wrong_authority,
                 AccountSharedData::new(u64::MAX, 0, &system_program::id()),
             ),
             (
                 TASK_CONTEXT_PUBKEY,
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+                AccountSharedData::new(
+                    u64::MAX,
+                    TaskContext::SIZE,
+                    &system_program::id(),
+                ),
             ),
         ];
-        let expected_result = Err(InstructionError::MissingRequiredSignature);
 
         process_instruction(
             &ix.data,
             transaction_accounts,
             ix.accounts,
-            expected_result,
+            Err(InstructionError::MissingRequiredSignature),
+        );
+    }
+
+    #[test]
+    fn fail_unsigned_process_tasks() {
+        generate_validator_authority_if_needed();
+
+        let account_metas = vec![
+            AccountMeta::new(validator_authority_id(), false),
+            AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
+        ];
+        let ix = Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ProcessTasks,
+            account_metas,
+        );
+
+        let transaction_accounts = vec![
+            (
+                validator_authority_id(),
+                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+            ),
+            (
+                TASK_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    TaskContext::SIZE,
+                    &system_program::id(),
+                ),
+            ),
+        ];
+
+        process_instruction(
+            &ix.data,
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::MissingRequiredSignature),
         );
     }
 }

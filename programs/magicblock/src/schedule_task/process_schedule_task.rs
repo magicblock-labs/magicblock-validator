@@ -4,24 +4,16 @@ use magicblock_magic_program_api::args::ScheduleTaskArgs;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
-#[cfg(test)]
-use solana_sdk::{signature::Keypair, signer::Signer};
 
-#[cfg(not(test))]
-use crate::validator::validator_authority_id;
 use crate::{
     schedule_task::utils::check_task_context_id,
     task_context::{ScheduleTaskRequest, TaskContext, MIN_EXECUTION_INTERVAL},
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
+    validator::validator_authority_id,
     TaskRequest,
 };
-
-#[cfg(test)]
-lazy_static::lazy_static! {
-    static ref VALIDATOR_AUTHORITY_ID: Pubkey = Keypair::new().pubkey();
-}
 
 pub(crate) fn process_schedule_task(
     signers: HashSet<Pubkey>,
@@ -97,15 +89,12 @@ pub(crate) fn process_schedule_task(
         ..ix_ctx.get_number_of_instruction_accounts() as usize)
         .map(|i| {
             get_instruction_pubkey_with_idx(transaction_context, i as u16)
-                .and_then(|pk| Ok(*pk))
+                .copied()
         })
         .collect::<Result<Vec<_>, _>>()?;
     for instruction in &args.instructions {
         for account in &instruction.accounts {
-            #[cfg(not(test))]
             let val_id = validator_authority_id();
-            #[cfg(test)]
-            let val_id = *VALIDATOR_AUTHORITY_ID;
             if account.is_signer && account.pubkey.ne(&val_id) {
                 return Err(InstructionError::MissingRequiredSignature);
             }
@@ -161,6 +150,7 @@ mod test {
             process_instruction, COUNTER_PROGRAM_ID, MEMO_PROGRAM_ID,
         },
         utils::instruction_utils::InstructionUtils,
+        validator::generate_validator_authority_if_needed,
     };
 
     fn create_simple_ix() -> Instruction {
@@ -190,6 +180,7 @@ mod test {
     fn setup_accounts(
         n_pdas: usize,
     ) -> (Keypair, Vec<Pubkey>, Vec<(Pubkey, AccountSharedData)>) {
+        generate_validator_authority_if_needed();
         let payer = Keypair::new();
         let pdas = (0..n_pdas)
             .map(|_| Keypair::new().pubkey())
