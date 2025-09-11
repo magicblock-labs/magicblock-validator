@@ -1,9 +1,13 @@
 use std::{
-    sync::atomic::{AtomicU32, Ordering},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
 use hyper::body::Bytes;
+use magicblock_accounts_db::AccountsDb;
 use tokio::sync::mpsc::{channel, Receiver};
 
 use solana_pubkey::Pubkey;
@@ -16,12 +20,14 @@ use test_kit::{
     AccountMeta, ExecutionTestEnv, Instruction, Signer,
 };
 
-use crate::server::websocket::dispatch::WsConnectionChannel;
 use crate::{
     encoder::{AccountEncoder, ProgramAccountEncoder, TransactionLogsEncoder},
     state::SharedState,
     utils::ProgramFilters,
     EventProcessor,
+};
+use crate::{
+    server::websocket::dispatch::WsConnectionChannel, state::ChainlinkImpl,
 };
 
 /// A test helper to create a unique WebSocket connection channel pair.
@@ -31,6 +37,11 @@ fn ws_channel() -> (WsConnectionChannel, Receiver<Bytes>) {
     let (tx, rx) = channel(64);
     let tx = WsConnectionChannel { id, tx };
     (tx, rx)
+}
+
+fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
+    ChainlinkImpl::try_new(accounts_db, None)
+        .expect("Failed to create Chainlink")
 }
 
 mod event_processor {
@@ -52,6 +63,7 @@ mod event_processor {
             node_context,
             env.accountsdb.clone(),
             env.ledger.clone(),
+            chainlink(&env.accountsdb),
             50,
         );
         let cancel = CancellationToken::new();

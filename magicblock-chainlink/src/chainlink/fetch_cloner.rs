@@ -85,6 +85,41 @@ impl FetchAndCloneResult {
             .map(|(p, _)| *p)
             .collect()
     }
+
+    pub fn is_ok(&self) -> bool {
+        self.not_found_on_chain.is_empty()
+            && self.missing_delegation_record.is_empty()
+    }
+}
+
+impl fmt::Display for FetchAndCloneResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_ok() {
+            write!(f, "All accounts fetched and cloned successfully")
+        } else {
+            if !self.not_found_on_chain.is_empty() {
+                writeln!(
+                    f,
+                    "Accounts not found on chain: {:?}",
+                    self.not_found_on_chain
+                        .iter()
+                        .map(|(p, _)| p.to_string())
+                        .collect::<Vec<_>>()
+                )?;
+            }
+            if !self.missing_delegation_record.is_empty() {
+                writeln!(
+                    f,
+                    "Accounts missing delegation record: {:?}",
+                    self.missing_delegation_record
+                        .iter()
+                        .map(|(p, _)| p.to_string())
+                        .collect::<Vec<_>>()
+                )?;
+            }
+            Ok(())
+        }
+    }
 }
 
 impl<T, U, V, C> FetchCloner<T, U, V, C>
@@ -1229,14 +1264,6 @@ mod tests {
     use solana_account::{AccountSharedData, WritableAccount};
     use std::{collections::HashMap, sync::Arc};
     use tokio::sync::mpsc;
-
-    impl FetchAndCloneResult {
-        #[allow(unused)]
-        pub fn is_ok(&self) -> bool {
-            self.not_found_on_chain.is_empty()
-                && self.missing_delegation_record.is_empty()
-        }
-    }
 
     macro_rules! _cloned_account {
         ($bank:expr,

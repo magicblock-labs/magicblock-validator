@@ -27,7 +27,9 @@ parking_lot = { workspace = true }
 flume = { workspace = true }
 
 # magicblock
+magicblock-account-cloner = { workspace = true }
 magicblock-accounts-db = { workspace = true }
+magicblock-chainlink = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }

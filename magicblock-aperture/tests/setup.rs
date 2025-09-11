@@ -1,12 +1,16 @@
 #![allow(unused)]
 
 use std::{
-    sync::atomic::{AtomicU16, Ordering},
+    sync::{
+        atomic::{AtomicU16, Ordering},
+        Arc,
+    },
     thread,
 };
 
+use magicblock_accounts_db::AccountsDb;
 use magicblock_aperture::{
-    state::{NodeContext, SharedState},
+    state::{ChainlinkImpl, NodeContext, SharedState},
     JsonRpcServer,
 };
 use magicblock_config::RpcConfig;
@@ -47,6 +51,11 @@ pub struct RpcTestEnv {
     pub block: LatestBlock,
 }
 
+fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
+    ChainlinkImpl::try_new(accounts_db, None)
+        .expect("Failed to create Chainlink")
+}
+
 impl RpcTestEnv {
     // --- Constants ---
     pub const BASE_FEE: u64 = ExecutionTestEnv::BASE_FEE;
@@ -84,6 +93,7 @@ impl RpcTestEnv {
             node_context,
             execution.accountsdb.clone(),
             execution.ledger.clone(),
+            chainlink(&execution.accountsdb),
             BLOCK_TIME_MS,
         );
         let cancel = CancellationToken::new();

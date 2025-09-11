@@ -1,3 +1,4 @@
+use log::*;
 use magicblock_core::traits::AccountsBank;
 use std::{mem::size_of, ops::Range};
 
@@ -137,15 +138,27 @@ impl HttpDispatcher {
         &self,
         transaction: &SanitizedTransaction,
     ) -> RpcResult<()> {
-        // TODO(thlorenz): replace the entire method call with chainlink
-        let message = transaction.message();
-        let reader = self.accountsdb.reader().map_err(RpcError::internal)?;
-        for pubkey in message.account_keys().iter() {
-            if !reader.contains(pubkey) {
-                panic!("account is not present in the database: {pubkey}");
+        match self
+            .chainlink
+            .ensure_transaction_accounts(transaction)
+            .await
+        {
+            Ok(res) if res.is_ok() => Ok(()),
+            Ok(res) => {
+                debug!(
+                    "Transaction {} account resolution encountered issues:\n{res}",
+                     transaction.signature());
+                Ok(())
+            }
+            Err(err) => {
+                // Non-OK result indicates a general failure to guarantee
+                // all accounts, i.e. we may be disconnected, weren't able to
+                // setup a subscription, etc.
+                // In that case we don't even want to run the transaction.
+                warn!("Failed to ensure transaction accounts: {:?}", err);
+                Err(RpcError::transaction_verification(err.to_string()))
             }
         }
-        Ok(())
     }
 }
 

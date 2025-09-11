@@ -2,13 +2,29 @@ use std::{sync::Arc, time::Duration};
 
 use blocks::BlocksCache;
 use cache::ExpiringCache;
+use magicblock_account_cloner::chainext::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
+use magicblock_chainlink::{
+    remote_account_provider::{
+        chain_pubsub_client::ChainPubsubClientImpl,
+        chain_rpc_client::ChainRpcClientImpl,
+    },
+    submux::SubMuxClient,
+    Chainlink,
+};
 use magicblock_ledger::Ledger;
 use solana_feature_set::FeatureSet;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use subscriptions::SubscriptionsDb;
 use transactions::TransactionsCache;
+
+pub type ChainlinkImpl = Chainlink<
+    ChainRpcClientImpl,
+    SubMuxClient<ChainPubsubClientImpl>,
+    AccountsDb,
+    ChainlinkCloner,
+>;
 
 /// A container for the shared, global state of the RPC service.
 ///
@@ -22,6 +38,8 @@ pub struct SharedState {
     pub(crate) accountsdb: Arc<AccountsDb>,
     /// A thread-safe handle to the blockchain ledger for accessing historical data.
     pub(crate) ledger: Arc<Ledger>,
+    /// Chainlink provides synchronization of on-chain accounts
+    pub(crate) chainlink: ChainlinkImpl,
     /// A cache for recently processed transaction signatures to prevent replay attacks
     /// and to serve `getSignatureStatuses` requests efficiently.
     pub(crate) transactions: TransactionsCache,
@@ -59,6 +77,7 @@ impl SharedState {
         context: NodeContext,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
+        chainlink: ChainlinkImpl,
         blocktime: u64,
     ) -> Self {
         const TRANSACTIONS_CACHE_TTL: Duration = Duration::from_secs(75);
@@ -69,6 +88,7 @@ impl SharedState {
             transactions: ExpiringCache::new(TRANSACTIONS_CACHE_TTL).into(),
             blocks: BlocksCache::new(blocktime, latest).into(),
             ledger,
+            chainlink,
             subscriptions: Default::default(),
         }
     }

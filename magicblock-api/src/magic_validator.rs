@@ -156,8 +156,6 @@ pub struct MagicValidator {
         >,
     >,
     remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
-    #[allow(unused)]
-    chainlink: ChainlinkImpl,
     committor_service: Option<Arc<CommittorService>>,
     rpc_handle: JoinHandle<()>,
     identity: Pubkey,
@@ -407,6 +405,7 @@ impl MagicValidator {
             node_context,
             accountsdb.clone(),
             ledger.clone(),
+            chainlink,
             config.validator.millis_per_slot,
         );
         let rpc = JsonRpcServer::new(
@@ -437,7 +436,6 @@ impl MagicValidator {
             token,
             ledger,
             ledger_truncator,
-            chainlink,
             claim_fees_task: ClaimFeesTask::new(),
             rpc_handle,
             identity: validator_pubkey,

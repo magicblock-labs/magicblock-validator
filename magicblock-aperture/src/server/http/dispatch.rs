@@ -14,8 +14,8 @@ use crate::{
         JsonHttpRequest,
     },
     state::{
-        blocks::BlocksCache, transactions::TransactionsCache, NodeContext,
-        SharedState,
+        blocks::BlocksCache, transactions::TransactionsCache, ChainlinkImpl,
+        NodeContext, SharedState,
     },
     utils::JsonBody,
 };
@@ -33,6 +33,10 @@ pub(crate) struct HttpDispatcher {
     pub(crate) accountsdb: Arc<AccountsDb>,
     /// A handle to the blockchain ledger.
     pub(crate) ledger: Arc<Ledger>,
+    /// Chainlink provides synchronization of on-chain accounts and
+    /// fetches accounts used in a specific transaction as well as those
+    /// required when getting account info, etc.
+    pub(crate) chainlink: ChainlinkImpl,
     /// A handle to the transaction signatures cache.
     pub(crate) transactions: TransactionsCache,
     /// A handle to the recent blocks cache.
@@ -55,6 +59,7 @@ impl HttpDispatcher {
             context: state.context,
             accountsdb: state.accountsdb.clone(),
             ledger: state.ledger.clone(),
+            chainlink: state.chainlink,
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             transactions_scheduler: channels.transaction_scheduler.clone(),
