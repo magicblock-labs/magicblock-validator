@@ -84,7 +84,17 @@ impl HttpDispatcher {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
-        // TODO(thlorenz): use chainlink
+        debug!("Ensuring account {pubkey}");
+        let _ = self
+            .chainlink
+            .ensure_accounts(&[*pubkey])
+            .await
+            .inspect_err(|e| {
+                // There is nothing we can do if fetching the account fails
+                // Log the error and return whatever is in the accounts db
+                error!("Failed to ensure account {pubkey}: {e}");
+            });
+        debug!("Reading account {pubkey} from accountsdb");
         self.accountsdb.get_account(pubkey)
     }
 
