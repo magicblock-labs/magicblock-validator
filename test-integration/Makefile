@@ -76,6 +76,10 @@ setup-cloning-devnet:
 	RUN_TESTS=cloning \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-cloning-ephem:
+	RUN_TESTS=cloning \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-cloning-both:
 	RUN_TESTS=cloning \
 	SETUP_ONLY=both \
