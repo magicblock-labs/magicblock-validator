@@ -40,11 +40,14 @@ pub(crate) fn fund_account_with_data(
     accountsdb.insert_account(pubkey, &account);
 }
 
-pub(crate) fn fund_validator_identity(
+pub(crate) fn init_validator_identity(
     accountsdb: &AccountsDb,
     validator_id: &Pubkey,
 ) {
     fund_account(accountsdb, validator_id, u64::MAX / 2);
+    let mut authority = accountsdb.get_account(validator_id).unwrap();
+    authority.as_borrowed_mut().unwrap().set_privileged(true);
+    accountsdb.insert_account(validator_id, &authority);
 }
 
 /// Funds the faucet account.
