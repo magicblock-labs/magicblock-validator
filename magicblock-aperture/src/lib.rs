@@ -4,6 +4,7 @@ use magicblock_core::link::DispatchEndpoints;
 use processor::EventProcessor;
 use server::{http::HttpServer, websocket::WebsocketServer};
 use state::SharedState;
+use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 type RpcResult<T> = Result<T, RpcError>;
@@ -22,6 +23,12 @@ impl JsonRpcServer {
         dispatch: &DispatchEndpoints,
         cancel: CancellationToken,
     ) -> RpcResult<Self> {
+        // try to bind to socket before spawning anything (handy in tests)
+        let mut addr = config.socket_addr();
+        let http = TcpListener::bind(addr).await.map_err(RpcError::internal)?;
+        addr.set_port(config.port + 1);
+        let ws = TcpListener::bind(addr).await.map_err(RpcError::internal)?;
+
         // Start up an event processor task, which will handle forwarding of any validator
         // originating event to client subscribers, or use them to update server's caches
         //
@@ -30,14 +37,13 @@ impl JsonRpcServer {
         EventProcessor::start(&state, dispatch, 1, cancel.clone());
 
         // initialize HTTP and Websocket servers
-        let addr = config.socket_addr();
         let websocket = {
             let mut addr = addr;
             addr.set_port(config.port + 1);
             let cancel = cancel.clone();
-            WebsocketServer::new(addr, &state, cancel).await?
+            WebsocketServer::new(ws, &state, cancel).await?
         };
-        let http = HttpServer::new(addr, state, cancel, dispatch).await?;
+        let http = HttpServer::new(http, state, cancel, dispatch).await?;
         Ok(Self { http, websocket })
     }
 

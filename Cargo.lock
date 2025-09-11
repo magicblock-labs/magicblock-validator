@@ -3696,6 +3696,7 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-version",
  "parking_lot 0.12.4",
+ "rand 0.9.1",
  "scc",
  "serde",
  "solana-account",

@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 
 use dispatch::HttpDispatcher;
 use hyper::service::service_fn;
@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use magicblock_core::link::DispatchEndpoints;
 
-use crate::{error::RpcError, state::SharedState, RpcResult};
+use crate::{state::SharedState, RpcResult};
 
 use super::Shutdown;
 
@@ -40,13 +40,11 @@ pub(crate) struct HttpServer {
 impl HttpServer {
     /// Initializes the HTTP server by binding to an address and setting up shutdown signaling.
     pub(crate) async fn new(
-        addr: SocketAddr,
+        socket: TcpListener,
         state: SharedState,
         cancel: CancellationToken,
         dispatch: &DispatchEndpoints,
     ) -> RpcResult<Self> {
-        let socket =
-            TcpListener::bind(addr).await.map_err(RpcError::internal)?;
         let (shutdown, shutdown_rx) = Shutdown::new();
 
         Ok(Self {
