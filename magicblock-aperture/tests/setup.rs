@@ -1,6 +1,7 @@
 #![allow(unused)]
 
 use std::{
+    os::fd::AsFd,
     sync::{
         atomic::{AtomicU16, Ordering},
         Arc,
@@ -29,6 +30,7 @@ use test_kit::{
     guinea::{self, GuineaInstruction},
     AccountMeta, ExecutionTestEnv, Instruction, Signer,
 };
+use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 pub const TOKEN_PROGRAM_ID: Pubkey =
@@ -76,9 +78,14 @@ impl RpcTestEnv {
         let execution = ExecutionTestEnv::new();
 
         // Use an atomic counter to ensure each test instance gets a unique port.
-        let port = PORT.fetch_add(2, Ordering::Relaxed);
-        let addr = "0.0.0.0".parse().unwrap();
-        let config = RpcConfig { addr, port };
+        let config = loop {
+            let port = PORT.fetch_add(2, Ordering::Relaxed);
+            let addr = "0.0.0.0".parse().unwrap();
+            let config = RpcConfig { addr, port };
+            if TcpListener::bind((addr, port)).await.is_ok() {
+                break config;
+            };
+        };
 
         let faucet = Keypair::new();
         execution.fund_account(faucet.pubkey(), Self::INIT_ACCOUNT_BALANCE);
@@ -110,8 +117,8 @@ impl RpcTestEnv {
 
         tokio::spawn(rpc_server.run());
 
-        let rpc_url = format!("http://{addr}:{port}");
-        let pubsub_url = format!("ws://{addr}:{}", port + 1);
+        let rpc_url = format!("http://{}:{}", config.addr, config.port);
+        let pubsub_url = format!("ws://{}:{}", config.addr, config.port + 1);
 
         let rpc = RpcClient::new(rpc_url);
         let pubsub = PubsubClient::new(&pubsub_url)
