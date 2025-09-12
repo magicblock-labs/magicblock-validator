@@ -6,6 +6,7 @@ TRACE_ARR=(
 	"magicblock=trace,"
 	"solana_geyser_plugin_manager=trace,"
 	"solana_svm=trace,"
+  "solana_runtime=trace,"
 	"test_tools=trace,"
 )
 
@@ -15,6 +16,7 @@ DEBUG_ARR=(
 	"magicblock=debug,"
 	"solana_geyser_plugin_manager=debug,"
 	"solana_svm=debug,"
+  "solana_runtime=debug,"
 	"test_tools=debug,"
 )
 
@@ -24,6 +26,7 @@ INFO_ARR=(
 	"magicblock=info,"
 	"solana_geyser_plugin_manager=info,"
 	"solana_svm=info,"
+  "solana_runtime=info,"
 	"test_tools=info,"
 )
 
