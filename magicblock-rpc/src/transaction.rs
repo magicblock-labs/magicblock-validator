@@ -189,9 +189,11 @@ pub(crate) async fn send_transaction(
     }
 
     if let Some(preflight_bank) = preflight_bank {
+        let _guard = meta.transaction_lock.lock().await;
         meta.transaction_preflight(preflight_bank, &sanitized_transaction)?;
     }
 
+    let _guard = meta.transaction_lock.lock().await;
     metrics::observe_transaction_execution_time(|| {
         execute_sanitized_transaction(
             sanitized_transaction,

@@ -42,6 +42,7 @@ use solana_transaction_status::{
     EncodedConfirmedTransactionWithStatusMeta, TransactionConfirmationStatus,
     TransactionStatus, UiInnerInstructions, UiTransactionEncoding,
 };
+use tokio::sync::Mutex;
 
 use crate::{
     account_resolver::{encode_account, get_encoded_account},
@@ -99,6 +100,7 @@ pub struct JsonRpcRequestProcessor {
     pub faucet_keypair: Arc<Keypair>,
 
     pub accounts_manager: Arc<AccountsManager>,
+    pub transaction_lock: Arc<Mutex<()>>,
 }
 impl Metadata for JsonRpcRequestProcessor {}
 
@@ -120,6 +122,7 @@ impl JsonRpcRequestProcessor {
             faucet_keypair: Arc::new(faucet_keypair),
             genesis_hash,
             accounts_manager,
+            transaction_lock: Default::default(),
         }
     }
 
