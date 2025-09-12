@@ -10,11 +10,12 @@ use std::{
 
 use log::{info, warn};
 use memmap2::MmapMut;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLockWriteGuard};
 use reflink::reflink;
 
 use crate::{error::AccountsDbError, log_err, storage::ADB_FILE, AdbResult};
 
+#[cfg_attr(test, derive(Debug))]
 pub struct SnapshotEngine {
     /// directory path where database files are kept
     dbpath: PathBuf,
@@ -48,7 +49,12 @@ impl SnapshotEngine {
 
     /// Take snapshot of database directory, this operation
     /// assumes that no writers are currently active
-    pub(crate) fn snapshot(&self, slot: u64, mmap: &[u8]) -> AdbResult<()> {
+    pub(crate) fn snapshot(
+        &self,
+        slot: u64,
+        mmap: &[u8],
+        lock: RwLockWriteGuard<()>,
+    ) -> AdbResult<()> {
         let slot = SnapSlot(slot);
         // this lock is always free, as we take StWLock higher up in the call stack and
         // only one thread can take snapshots, namely the one that advances the slot
@@ -64,7 +70,11 @@ impl SnapshotEngine {
         if self.is_cow_supported {
             self.reflink_dir(&snapout)?;
         } else {
-            rcopy_dir(&self.dbpath, &snapout, mmap)?;
+            let source = self.dbpath.clone();
+            let destination = snapout.clone();
+            let mmap = mmap.to_vec();
+            drop(lock);
+            rcopy_dir(&source, &destination, &mmap)?;
         }
         snapshots.push_back(snapout);
         Ok(())
@@ -280,12 +290,9 @@ fn rcopy_dir(src: &Path, dst: &Path, mmap: &[u8]) -> io::Result<()> {
                     "memory mapping the snapshot file for the accountsdb file",
                 ))?;
             dst.copy_from_slice(mmap);
-            // we move the flushing to separate thread to avoid blocking
-            std::thread::spawn(move || {
-                dst.flush().inspect_err(log_err!(
-                    "flushing accounts.db file after mmap copy"
-                ))
-            });
+            dst.flush().inspect_err(log_err!(
+                "flushing accounts.db file after mmap copy"
+            ))?;
         } else {
             std::fs::copy(&src, &dst)?;
         }
