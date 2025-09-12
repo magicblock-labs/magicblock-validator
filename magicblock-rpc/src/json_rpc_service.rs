@@ -16,6 +16,7 @@ use magicblock_bank::bank::Bank;
 use magicblock_ledger::Ledger;
 use solana_perf::thread::renice_this_thread;
 use solana_sdk::{hash::Hash, signature::Keypair};
+use tokio::runtime;
 use tokio::runtime::Runtime;
 
 use crate::{
@@ -119,6 +120,7 @@ impl JsonRpcService {
 
                 let health = RpcHealth::new(startup_verification_complete);
                 let request_middleware = RpcRequestMiddleware::new(health);
+                let executor = runtime::Handle::current();
 
                 let rpc_threads = 1.max(request_processor.config.rpc_threads);
                 let server = ServerBuilder::with_meta_extractor(
@@ -129,6 +131,7 @@ impl JsonRpcService {
                 )
                     .event_loop_executor(runtime)
                     .threads(rpc_threads)
+                    .event_loop_executor(executor)
                     .cors(DomainsValidation::AllowOnly(vec![
                         AccessControlAllowOrigin::Any,
                     ]))
