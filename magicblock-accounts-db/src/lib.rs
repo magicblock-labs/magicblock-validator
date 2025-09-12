@@ -23,6 +23,7 @@ pub type StWLock = Arc<RwLock<()>>;
 pub const ACCOUNTSDB_DIR: &str = "accountsdb";
 const ACCOUNTSDB_SUB_DIR: &str = concatcp!(ACCOUNTSDB_DIR, "/main");
 
+#[cfg_attr(test, derive(Debug))]
 pub struct AccountsDb {
     /// Main accounts storage, where actual account records are kept
     storage: AccountsStorage,
@@ -242,9 +243,15 @@ impl AccountsDb {
         self.storage.get_slot()
     }
 
+    /// Temporary hack for overriding accountsdb slot without snapshot checks
+    // TODO(bmuddha): remove with the ledger rewrite
+    pub fn override_slot(&self, slot: u64) {
+        self.storage.set_slot(slot);
+    }
+
     /// Set latest observed slot
     #[inline(always)]
-    pub fn set_slot(&self, slot: u64) {
+    pub fn set_slot(self: &Arc<Self>, slot: u64) {
         const PREEMPTIVE_FLUSHING_THRESHOLD: u64 = 5;
         self.storage.set_slot(slot);
         let remainder = slot % self.snapshot_frequency;
@@ -264,19 +271,28 @@ impl AccountsDb {
         if remainder != 0 {
             return;
         }
-        // acquire the lock, effectively stopping the world, nothing should be able
-        // to modify underlying accounts database while this lock is active
-        let _locked = self.lock.write();
-        // flush everything before taking the snapshot, in order to ensure consistent state
-        self.flush(true);
+        let this = self.clone();
+        // Since `set_slot` is usually invoked in async context, we don't want to
+        // ever block it. Here we move the whole lock acquisition and snapshotting
+        // to a separate thread, considering that snapshot taking is extremely rare
+        // operation, the overhead should be negligible
+        std::thread::spawn(move || {
+            // acquire the lock, effectively stopping the world, nothing should be able
+            // to modify underlying accounts database while this lock is active
+            let locked = this.lock.write();
+            // flush everything before taking the snapshot, in order to ensure consistent state
+            this.flush(true);
 
-        let used_storage = self.storage.utilized_mmap();
-        if let Err(err) = self.snapshot_engine.snapshot(slot, used_storage) {
-            warn!(
-                "failed to take snapshot at {}, slot {slot}: {err}",
-                self.snapshot_engine.database_path().display()
-            );
-        }
+            let used_storage = this.storage.utilized_mmap();
+            if let Err(err) =
+                this.snapshot_engine.snapshot(slot, used_storage, locked)
+            {
+                error!(
+                    "failed to take snapshot at {}, slot {slot}: {err}",
+                    this.snapshot_engine.database_path().display()
+                );
+            }
+        });
     }
 
     /// Returns slot of latest snapshot or None
