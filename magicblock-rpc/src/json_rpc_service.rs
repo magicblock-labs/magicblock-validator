@@ -16,7 +16,7 @@ use magicblock_bank::bank::Bank;
 use magicblock_ledger::Ledger;
 use solana_perf::thread::renice_this_thread;
 use solana_sdk::{hash::Hash, signature::Keypair};
-use tokio::runtime::Runtime;
+use tokio::{runtime, runtime::Runtime};
 
 use crate::{
     handlers::{
@@ -100,7 +100,7 @@ impl JsonRpcService {
             self.startup_verification_complete.clone();
         let request_processor = self.request_processor.clone();
         let rpc_addr = self.rpc_addr;
-        let runtime = self.runtime.handle().clone();
+        let executor = runtime::Handle::current();
         let max_request_body_size = self.max_request_body_size;
 
         let close_handle_rc = self.close_handle.clone();
@@ -126,7 +126,7 @@ impl JsonRpcService {
                         request_processor.clone()
                     },
                 )
-                    .event_loop_executor(runtime)
+                    .event_loop_executor(executor)
                     .threads(1)
                     .cors(DomainsValidation::AllowOnly(vec![
                         AccessControlAllowOrigin::Any,
