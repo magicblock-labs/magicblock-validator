@@ -120,6 +120,7 @@ impl JsonRpcService {
                 let health = RpcHealth::new(startup_verification_complete);
                 let request_middleware = RpcRequestMiddleware::new(health);
 
+                let rpc_threads = 1.max(request_processor.config.rpc_threads);
                 let server = ServerBuilder::with_meta_extractor(
                     io,
                     move |_req: &hyper::Request<hyper::Body>| {
@@ -127,7 +128,7 @@ impl JsonRpcService {
                     },
                 )
                     .event_loop_executor(runtime)
-                    .threads(1)
+                    .threads(rpc_threads)
                     .cors(DomainsValidation::AllowOnly(vec![
                         AccessControlAllowOrigin::Any,
                     ]))
