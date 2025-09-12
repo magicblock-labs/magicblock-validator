@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use solana_program::instruction::Instruction;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionArgs {
@@ -58,4 +59,12 @@ pub enum MagicBaseIntentArgs {
     BaseActions(Vec<BaseActionArgs>),
     Commit(CommitTypeArgs),
     CommitAndUndelegate(CommitAndUndelegateArgs),
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct ScheduleTaskArgs {
+    pub task_id: u64,
+    pub execution_interval_millis: u64,
+    pub iterations: u64,
+    pub instructions: Vec<Instruction>,
 }

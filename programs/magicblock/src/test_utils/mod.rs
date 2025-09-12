@@ -14,6 +14,11 @@ use super::*;
 use crate::validator;
 
 pub const AUTHORITY_BALANCE: u64 = u64::MAX / 2;
+pub const MEMO_PROGRAM_ID: Pubkey =
+    Pubkey::from_str_const("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+pub const COUNTER_PROGRAM_ID: Pubkey =
+    Pubkey::from_str_const("2jQZbSfAfqT5nZHGrLpDG2vXuEGtTgZYnNy7AZEjMCYz");
+
 pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {
     validator::generate_validator_authority_if_needed();
     let validator_authority_id = validator::validator_authority_id();
