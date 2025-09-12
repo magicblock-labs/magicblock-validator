@@ -45,7 +45,7 @@ pub fn execute_sanitized_transaction(
     // If we choose this as a long term solution we need to lock simulations/preflight with the
     // same mutex once we enable them again
     // Work tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/181
-    let _execution_guard = TRANSACTION_INDEX_LOCK.write();
+    // let _execution_guard = TRANSACTION_INDEX_LOCK.write();
 
     let batch = bank.prepare_sanitized_batch(txs);
 
