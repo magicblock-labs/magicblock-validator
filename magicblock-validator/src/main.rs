@@ -1,8 +1,5 @@
 mod shutdown;
 
-use std::string;
-
-use clap::error::ContextValue::String;
 use log::*;
 use magicblock_api::{
     ledger,
@@ -103,8 +100,7 @@ async fn main() {
     println!("🧙 Magicblock Validator is running! 🪄✦");
     println!(
         "🏷️ Validator version: {} (Git: {})",
-        version.to_string(),
-        version.git_version
+        version, version.git_version
     );
     println!("-----------------------------------");
     println!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
