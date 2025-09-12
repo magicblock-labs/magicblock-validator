@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use dlp::args::DelegateEphemeralBalanceArgs;
+use integration_test_tools::dlp_interface;
 use log::*;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
@@ -147,19 +148,19 @@ impl IxtestContext {
         }
     }
 
-    pub fn counter_pda(&self, counter_auth: &Pubkey) -> Pubkey {
-        FlexiCounter::pda(counter_auth).0
-    }
-
     pub fn delegation_record_pubkey(&self, pubkey: &Pubkey) -> Pubkey {
-        dlp::pda::delegation_record_pda_from_delegated_account(pubkey)
+        dlp_interface::delegation_record_pubkey(pubkey)
     }
 
     pub fn ephemeral_balance_pda_from_payer_pubkey(
         &self,
         payer: &Pubkey,
     ) -> Pubkey {
-        dlp::pda::ephemeral_balance_pda_from_payer(payer, 0)
+        dlp_interface::ephemeral_balance_pda_from_payer_pubkey(payer)
+    }
+
+    pub fn counter_pda(&self, counter_auth: &Pubkey) -> Pubkey {
+        FlexiCounter::pda(counter_auth).0
     }
 
     pub async fn init_counter(&self, counter_auth: &Keypair) -> &Self {
@@ -345,36 +346,14 @@ impl IxtestContext {
         sol: u64,
         delegate: bool,
     ) -> (Pubkey, Pubkey) {
-        let topup_ix = dlp::instruction_builder::top_up_ephemeral_balance(
-            payer.pubkey(),
-            payer.pubkey(),
-            Some(sol * LAMPORTS_PER_SOL),
-            None,
-        );
-        let mut ixs = vec![topup_ix];
-        if delegate {
-            let delegate_ix =
-                dlp::instruction_builder::delegate_ephemeral_balance(
-                    payer.pubkey(),
-                    payer.pubkey(),
-                    DelegateEphemeralBalanceArgs::default(),
-                );
-            ixs.push(delegate_ix);
-        }
-        let sig = send_instructions(
+        dlp_interface::top_up_ephemeral_fee_balance(
             &self.rpc_client,
-            &ixs,
-            &[payer],
-            "topup ephemeral",
+            &payer,
+            payer.pubkey(),
+            sol,
+            delegate,
         )
-        .await;
-        let (ephemeral_balance_pda, deleg_record) =
-            self.escrow_pdas(&payer.pubkey());
-        debug!(
-            "Top-up ephemeral balance {} {ephemeral_balance_pda} sig: {sig}",
-            payer.pubkey()
-        );
-        (ephemeral_balance_pda, deleg_record)
+        .await
     }
 
     pub fn escrow_pdas(&self, payer: &Pubkey) -> (Pubkey, Pubkey) {
