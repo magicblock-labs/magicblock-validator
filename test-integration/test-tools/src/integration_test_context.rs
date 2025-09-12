@@ -3,8 +3,9 @@ use std::{str::FromStr, thread::sleep, time::Duration};
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
 use log::*;
-use solana_rpc_client::rpc_client::{
-    GetConfirmedSignaturesForAddress2Config, RpcClient,
+use solana_rpc_client::{
+    nonblocking,
+    rpc_client::{GetConfirmedSignaturesForAddress2Config, RpcClient},
 };
 use solana_rpc_client_api::{
     client_error,
@@ -19,6 +20,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
     instruction::Instruction,
+    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
@@ -28,9 +30,20 @@ use solana_transaction_status::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
 
+use crate::dlp_interface;
+
 const URL_CHAIN: &str = "http://localhost:7799";
 const WS_URL_CHAIN: &str = "ws://localhost:7800";
 const URL_EPHEM: &str = "http://localhost:8899";
+
+fn async_rpc_client(
+    rpc_client: &RpcClient,
+) -> nonblocking::rpc_client::RpcClient {
+    nonblocking::rpc_client::RpcClient::new_with_commitment(
+        rpc_client.url(),
+        rpc_client.commitment(),
+    )
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionStatusWithSignature {
@@ -429,6 +442,33 @@ impl IntegrationTestContext {
         self.try_ephem_client().and_then(|ephem_client| {
             Self::airdrop(ephem_client, pubkey, lamports, self.commitment)
         })
+    }
+    pub async fn airdrop_chain_escrowed(
+        &self,
+        payer: &Keypair,
+        lamports: u64,
+    ) -> anyhow::Result<(Signature, Signature, Pubkey, Pubkey)> {
+        let rpc_client = async_rpc_client(self.try_chain_client()?);
+        // 1. Airdrop funds to the payer itself
+        let airdrop_sig = self.airdrop_chain(&payer.pubkey(), lamports)?;
+
+        // 2. Top up the ephemeral fee balance account from the payer
+        let (escrow_sig, ephemeral_balance_pda, deleg_record) =
+            dlp_interface::top_up_ephemeral_fee_balance(
+                &rpc_client,
+                payer,
+                payer.pubkey(),
+                lamports / LAMPORTS_PER_SOL,
+                false,
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to airdrop escrowed chain account from '{}'",
+                    payer.pubkey()
+                )
+            })?;
+        Ok((airdrop_sig, escrow_sig, ephemeral_balance_pda, deleg_record))
     }
 
     pub fn airdrop(

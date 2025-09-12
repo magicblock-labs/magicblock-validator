@@ -1,3 +1,4 @@
+use anyhow::Context;
 use dlp::args::DelegateEphemeralBalanceArgs;
 use log::*;
 use solana_pubkey::Pubkey;
@@ -17,7 +18,7 @@ pub async fn top_up_ephemeral_fee_balance(
     recvr: Pubkey,
     sol: u64,
     delegate: bool,
-) -> (Pubkey, Pubkey) {
+) -> anyhow::Result<(Signature, Pubkey, Pubkey)> {
     let topup_ix = dlp::instruction_builder::top_up_ephemeral_balance(
         payer.pubkey(),
         recvr,
@@ -33,14 +34,14 @@ pub async fn top_up_ephemeral_fee_balance(
         );
         ixs.push(delegate_ix);
     }
-    let sig =
-        send_instructions(&rpc_client, &ixs, &[payer], "topup ephemeral").await;
+    let sig = send_instructions(&rpc_client, &ixs, &[payer], "topup ephemeral")
+        .await?;
     let (ephemeral_balance_pda, deleg_record) = escrow_pdas(&recvr);
     debug!(
         "Top-up ephemeral balance {} {ephemeral_balance_pda} sig: {sig}",
         payer.pubkey()
     );
-    (ephemeral_balance_pda, deleg_record)
+    Ok((sig, ephemeral_balance_pda, deleg_record))
 }
 
 pub fn escrow_pdas(payer: &Pubkey) -> (Pubkey, Pubkey) {
@@ -64,7 +65,7 @@ async fn send_transaction(
     rpc_client: &RpcClient,
     transaction: &Transaction,
     label: &str,
-) -> Signature {
+) -> anyhow::Result<Signature> {
     rpc_client
         .send_and_confirm_transaction_with_spinner_and_config(
             transaction,
@@ -75,11 +76,7 @@ async fn send_transaction(
             },
         )
         .await
-        .inspect_err(|err| {
-            error!("{label} encountered error:{err:#?}");
-            info!("Signature: {}", transaction.signatures[0]);
-        })
-        .expect("Failed to send and confirm transaction")
+        .with_context(|| format!("Failed to send and confirm {label}"))
 }
 
 async fn send_instructions(
@@ -87,7 +84,7 @@ async fn send_instructions(
     ixs: &[Instruction],
     signers: &[&Keypair],
     label: &str,
-) -> Signature {
+) -> anyhow::Result<Signature> {
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
         .await

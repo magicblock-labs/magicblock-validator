@@ -43,6 +43,10 @@ path = "../schedulecommit/elfs/dlp.so"
 id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
 path = "../schedulecommit/elfs/mdp.so"
 
+[[program]]
+id = "MiniV31111111111111111111111111111111111111"
+path = "../target/deploy/miniv3/program_mini.so"
+auth = "MiniV3AUTH111111111111111111111111111111111"
 
 [rpc]
 port = 7799

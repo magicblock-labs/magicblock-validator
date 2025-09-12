@@ -354,6 +354,11 @@ impl IxtestContext {
             delegate,
         )
         .await
+        .inspect_err(|err| {
+            error!("{label} encountered error:{err:#?}");
+            info!("Signature: {}", transaction.signatures[0]);
+        })
+        .expect("Failed to send and confirm transaction")
     }
 
     pub fn escrow_pdas(&self, payer: &Pubkey) -> (Pubkey, Pubkey) {
