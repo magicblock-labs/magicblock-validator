@@ -22,6 +22,7 @@ use solana_sdk::{
     instruction::Instruction,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
+    rent::Rent,
     signature::{Keypair, Signature},
     signer::Signer,
     transaction::{Transaction, TransactionError},
@@ -443,22 +444,32 @@ impl IntegrationTestContext {
             Self::airdrop(ephem_client, pubkey, lamports, self.commitment)
         })
     }
+    /// Airdrop lamports to the payer on-chain account and
+    /// then top up the ephemeral fee balance with half of that
     pub async fn airdrop_chain_escrowed(
         &self,
         payer: &Keypair,
         lamports: u64,
-    ) -> anyhow::Result<(Signature, Signature, Pubkey, Pubkey)> {
-        let rpc_client = async_rpc_client(self.try_chain_client()?);
+    ) -> anyhow::Result<(Signature, Signature, Pubkey, Pubkey, u64)> {
         // 1. Airdrop funds to the payer itself
         let airdrop_sig = self.airdrop_chain(&payer.pubkey(), lamports)?;
+        debug!(
+            "Airdropped {} lamports to {} ({})",
+            lamports,
+            payer.pubkey(),
+            airdrop_sig
+        );
 
         // 2. Top up the ephemeral fee balance account from the payer
+        let rpc_client = async_rpc_client(self.try_chain_client()?);
+        let topup_sol = (lamports / 2) / LAMPORTS_PER_SOL;
+
         let (escrow_sig, ephemeral_balance_pda, deleg_record) =
             dlp_interface::top_up_ephemeral_fee_balance(
                 &rpc_client,
                 payer,
                 payer.pubkey(),
-                lamports / LAMPORTS_PER_SOL,
+                topup_sol,
                 false,
             )
             .await
@@ -468,7 +479,15 @@ impl IntegrationTestContext {
                     payer.pubkey()
                 )
             })?;
-        Ok((airdrop_sig, escrow_sig, ephemeral_balance_pda, deleg_record))
+        let escrow_lamports =
+            topup_sol * LAMPORTS_PER_SOL + Rent::default().minimum_balance(0);
+        Ok((
+            airdrop_sig,
+            escrow_sig,
+            ephemeral_balance_pda,
+            deleg_record,
+            escrow_lamports,
+        ))
     }
 
     pub fn airdrop(

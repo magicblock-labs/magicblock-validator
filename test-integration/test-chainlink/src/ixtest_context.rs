@@ -346,19 +346,23 @@ impl IxtestContext {
         sol: u64,
         delegate: bool,
     ) -> (Pubkey, Pubkey) {
-        dlp_interface::top_up_ephemeral_fee_balance(
-            &self.rpc_client,
-            &payer,
-            payer.pubkey(),
-            sol,
-            delegate,
-        )
-        .await
-        .inspect_err(|err| {
-            error!("{label} encountered error:{err:#?}");
-            info!("Signature: {}", transaction.signatures[0]);
-        })
-        .expect("Failed to send and confirm transaction")
+        let (sig, ephemeral_balance_pda, deleg_record) =
+            dlp_interface::top_up_ephemeral_fee_balance(
+                &self.rpc_client,
+                &payer,
+                payer.pubkey(),
+                sol,
+                delegate,
+            )
+            .await
+            .inspect_err(|err| {
+                error!(
+                    "Topping up balance for {} encountered error:{err:#?}",
+                    payer.pubkey()
+                );
+            })
+            .expect("Failed to send and confirm transaction");
+        (ephemeral_balance_pda, deleg_record)
     }
 
     pub fn escrow_pdas(&self, payer: &Pubkey) -> (Pubkey, Pubkey) {

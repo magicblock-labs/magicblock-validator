@@ -10451,7 +10451,10 @@ name = "test-cloning"
 version = "0.0.0"
 dependencies = [
  "integration-test-tools",
+ "log",
  "solana-sdk",
+ "test-kit",
+ "tokio",
 ]
 
 [[package]]
