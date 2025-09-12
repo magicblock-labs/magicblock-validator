@@ -36,7 +36,6 @@ use crate::{
 pub struct JsonRpcService {
     rpc_addr: SocketAddr,
     rpc_niceness_adj: i8,
-    runtime: Arc<Runtime>,
     request_processor: JsonRpcRequestProcessor,
     startup_verification_complete: Arc<AtomicBool>,
     max_request_body_size: usize,
@@ -82,7 +81,6 @@ impl JsonRpcService {
             rpc_addr,
             rpc_niceness_adj,
             max_request_body_size,
-            runtime,
             request_processor,
             startup_verification_complete,
             rpc_thread_handle: Default::default(),
