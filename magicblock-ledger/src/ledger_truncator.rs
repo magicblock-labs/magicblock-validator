@@ -3,7 +3,7 @@ use std::{cmp::min, sync::Arc, time::Duration};
 use log::{error, info, warn};
 use solana_measure::measure::Measure;
 use tokio::{
-    task::{JoinError, JoinHandle, JoinSet},
+    task::{JoinError, JoinHandle},
     time::interval,
 };
 use tokio_util::sync::CancellationToken;
@@ -245,46 +245,31 @@ impl LedgerTrunctationWorker {
         // but it utilizes rocksdb threads, in order not to drain
         // our tokio rt threads, we split the effort in just 3 tasks
         let mut measure = Measure::start("Manual compaction");
-        let mut join_set = JoinSet::new();
-        join_set.spawn({
-            let ledger = ledger.clone();
-            async move {
-                ledger.compact_slot_range_cf::<Blocktime>(
-                    Some(from_slot),
-                    Some(to_slot + 1),
-                );
-                ledger.compact_slot_range_cf::<Blockhash>(
-                    Some(from_slot),
-                    Some(to_slot + 1),
-                );
-                ledger.compact_slot_range_cf::<PerfSamples>(
-                    Some(from_slot),
-                    Some(to_slot + 1),
-                );
-                ledger.compact_slot_range_cf::<SlotSignatures>(
-                    Some((from_slot, u32::MIN)),
-                    Some((to_slot + 1, u32::MAX)),
-                );
-            }
+        let ledger = ledger.clone();
+        let compaction = tokio::task::spawn_blocking(move || {
+            ledger.compact_slot_range_cf::<Blocktime>(
+                Some(from_slot),
+                Some(to_slot + 1),
+            );
+            ledger.compact_slot_range_cf::<Blockhash>(
+                Some(from_slot),
+                Some(to_slot + 1),
+            );
+            ledger.compact_slot_range_cf::<PerfSamples>(
+                Some(from_slot),
+                Some(to_slot + 1),
+            );
+            ledger.compact_slot_range_cf::<SlotSignatures>(
+                Some((from_slot, u32::MIN)),
+                Some((to_slot + 1, u32::MAX)),
+            );
+            ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
+            ledger.compact_slot_range_cf::<Transaction>(None, None);
+            ledger.compact_slot_range_cf::<TransactionMemos>(None, None);
+            ledger.compact_slot_range_cf::<AddressSignatures>(None, None);
         });
 
-        // Can not compact with specific range
-        join_set.spawn({
-            let ledger = ledger.clone();
-            async move {
-                ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
-                ledger.compact_slot_range_cf::<Transaction>(None, None);
-            }
-        });
-        join_set.spawn({
-            let ledger = ledger.clone();
-            async move {
-                ledger.compact_slot_range_cf::<TransactionMemos>(None, None);
-                ledger.compact_slot_range_cf::<AddressSignatures>(None, None);
-            }
-        });
-
-        let _ = join_set.join_all().await;
+        let _ = compaction.await;
         measure.stop();
         info!("Manual compaction took: {measure}");
     }

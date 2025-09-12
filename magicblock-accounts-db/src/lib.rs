@@ -22,13 +22,14 @@ pub type StWLock = Arc<RwLock<()>>;
 
 pub const ACCOUNTSDB_DIR: &str = "accountsdb";
 
+#[cfg_attr(test, derive(Debug))]
 pub struct AccountsDb {
     /// Main accounts storage, where actual account records are kept
     storage: AccountsStorage,
     /// Index manager, used for various lookup operations
     index: AccountsDbIndex,
-    /// Snapshots manager, boxed for cache efficiency, as this field is rarely used
-    snapshot_engine: Box<SnapshotEngine>,
+    /// Snapshots manager
+    snapshot_engine: Arc<SnapshotEngine>,
     /// Synchronization lock, employed for preventing other threads from
     /// writing to accountsdb, currently used for snapshotting only
     synchronizer: StWLock,
@@ -233,25 +234,33 @@ impl AccountsDb {
 
     /// Set latest observed slot
     #[inline(always)]
-    pub fn set_slot(&self, slot: u64) {
+    pub fn set_slot(self: &Arc<Self>, slot: u64) {
         self.storage.set_slot(slot);
 
         if 0 != slot % self.snapshot_frequency {
             return;
         }
-        // acquire the lock, effectively stopping the world, nothing should be able
-        // to modify underlying accounts database while this lock is active
-        let _locked = self.synchronizer.write();
-        // flush everything before taking the snapshot, in order to ensure consistent state
-        self.flush();
+        let this = self.clone();
+        // Since `set_slot` is usually invoked in async context, we don't want to
+        // ever block it. Here we move the whole lock acquisition and snapshotting
+        // to a seperate thread, considering that snapshot taking is extremely rare
+        // operation, the overhead should be negligible
+        std::thread::spawn(move || {
+            // acquire the lock, effectively stopping the world, nothing should be able
+            // to modify underlying accounts database while this lock is active
+            let _locked = this.synchronizer.write();
+            // flush everything before taking the snapshot, in order to ensure consistent state
+            this.flush();
 
-        let used_storage = self.storage.utilized_mmap();
-        if let Err(err) = self.snapshot_engine.snapshot(slot, used_storage) {
-            warn!(
-                "failed to take snapshot at {}, slot {slot}: {err}",
-                self.snapshot_engine.database_path().display()
-            );
-        }
+            let used_storage = this.storage.utilized_mmap();
+            if let Err(err) = this.snapshot_engine.snapshot(slot, used_storage)
+            {
+                warn!(
+                    "failed to take snapshot at {}, slot {slot}: {err}",
+                    this.snapshot_engine.database_path().display()
+                );
+            }
+        });
     }
 
     /// Checks whether AccountsDB has "freshness", not exceeding given slot

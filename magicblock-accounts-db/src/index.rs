@@ -27,6 +27,7 @@ const DEALLOCATIONS_INDEX: &str = "deallocations-idx";
 const OWNERS_INDEX: &str = "owners-idx";
 
 /// LMDB Index manager
+#[cfg_attr(test, derive(Debug))]
 pub(crate) struct AccountsDbIndex {
     /// Accounts Index, used for searching accounts by offset in the main storage
     ///

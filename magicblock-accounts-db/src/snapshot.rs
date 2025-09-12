@@ -1,11 +1,10 @@
 use std::{
     collections::VecDeque,
     ffi::OsStr,
-    fs,
-    fs::File,
-    io,
-    io::Write,
+    fs::{self, File},
+    io::{self, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use log::{info, warn};
@@ -17,6 +16,7 @@ use crate::{
     error::AccountsDbError, log_err, storage::ADB_FILE, AccountsDbResult,
 };
 
+#[cfg_attr(test, derive(Debug))]
 pub struct SnapshotEngine {
     /// directory path where database files are kept
     dbpath: PathBuf,
@@ -35,12 +35,12 @@ impl SnapshotEngine {
     pub(crate) fn new(
         dbpath: PathBuf,
         max_count: usize,
-    ) -> AccountsDbResult<Box<Self>> {
+    ) -> AccountsDbResult<Arc<Self>> {
         let is_cow_supported = Self::supports_cow(&dbpath)
             .inspect_err(log_err!("cow support check"))?;
         let snapshots = Self::read_snapshots(&dbpath, max_count)?.into();
 
-        Ok(Box::new(Self {
+        Ok(Arc::new(Self {
             dbpath,
             is_cow_supported,
             snapshots,

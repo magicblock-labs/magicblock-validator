@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use magicblock_accounts_db::AccountsDb;
@@ -7,7 +8,7 @@ use solana_sdk::clock::Slot;
 use solana_sdk::hash::Hasher;
 
 pub fn advance_slot_and_update_ledger(
-    accountsdb: &AccountsDb,
+    accountsdb: &Arc<AccountsDb>,
     ledger: &Ledger,
     block_update_tx: &BlockUpdateTx,
 ) -> (LedgerResult<()>, Slot) {
@@ -29,7 +30,7 @@ pub fn advance_slot_and_update_ledger(
 
     // current slot is "finalized", and next slot becomes active
     let next_slot = current_slot + 1;
-    // NOTE:
+
     // Each time we advance the slot, we check if a snapshot should be taken.
     // If the current slot is a multiple of the preconfigured snapshot frequency,
     // the AccountsDB will enforce a global lock before taking the snapshot. This
@@ -39,6 +40,7 @@ pub fn advance_slot_and_update_ledger(
     // should not exceed a few milliseconds.
     accountsdb.set_slot(next_slot);
 
+    // NOTE:
     // As we have a single node network, we have no option but to use the time from host machine
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -56,6 +58,7 @@ pub fn advance_slot_and_update_ledger(
             time: timestamp,
         },
     };
+
     let _ = block_update_tx.send(update);
 
     (ledger_result, next_slot)
