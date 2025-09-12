@@ -5,6 +5,7 @@ use lmdb::{
 
 use super::WEMPTY;
 
+#[cfg_attr(test, derive(Debug))]
 pub(super) struct Table {
     db: Database,
 }

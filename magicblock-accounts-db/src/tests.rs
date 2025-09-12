@@ -1,13 +1,9 @@
-use std::{
-    collections::HashSet,
-    ops::{Deref, DerefMut},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{collections::HashSet, ops::Deref, sync::Arc};
 
 use magicblock_config::AccountsDbConfig;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
+use tempfile::TempDir;
 
 use crate::{error::AccountsDbError, storage::ADB_FILE, AccountsDb, StWLock};
 
@@ -277,12 +273,11 @@ fn test_restore_from_snapshot() {
     );
     tenv.set_slot(SNAPSHOT_FREQUENCY * 3);
 
-    assert!(
-        matches!(
-            tenv.ensure_at_most(SNAPSHOT_FREQUENCY * 2),
-            Ok(SNAPSHOT_FREQUENCY)
-        ),
-        "failed to rollback to snapshot"
+    tenv = tenv.ensure_at_most(SNAPSHOT_FREQUENCY * 2);
+    assert_eq!(
+        tenv.slot(),
+        SNAPSHOT_FREQUENCY,
+        "slot should have been rolled back"
     );
 
     let acc_rolledback = tenv
@@ -317,10 +312,8 @@ fn test_get_all_accounts_after_rollback() {
         post_snap_pks.push(acc.pubkey);
     }
 
-    assert!(
-        matches!(tenv.ensure_at_most(ITERS), Ok(ITERS)),
-        "failed to rollback to snapshot"
-    );
+    tenv = tenv.ensure_at_most(ITERS);
+    assert_eq!(tenv.slot(), ITERS, "failed to rollback to snapshot");
 
     let asserter = |(pk, acc): (_, AccountSharedData)| {
         assert_eq!(
@@ -364,8 +357,7 @@ fn test_db_size_after_rollback() {
         .expect("failed to get metadata for adb file")
         .len();
 
-    tenv.ensure_at_most(last_slot)
-        .expect("failed to rollback accounts database");
+    tenv = tenv.ensure_at_most(last_slot);
 
     assert_eq!(
         tenv.storage_size(),
@@ -570,35 +562,35 @@ struct AccountWithPubkey {
 }
 
 struct AdbTestEnv {
-    adb: AccountsDb,
-    directory: PathBuf,
+    adb: Arc<AccountsDb>,
+    _directory: TempDir,
 }
 
-pub fn init_db() -> (AccountsDb, PathBuf) {
+pub fn init_db() -> (Arc<AccountsDb>, TempDir) {
     let _ = env_logger::builder()
         .filter_level(log::LevelFilter::Warn)
         .is_test(true)
         .try_init();
-    let directory = tempfile::tempdir()
-        .expect("failed to create temporary directory")
-        .keep();
+    let directory =
+        tempfile::tempdir().expect("failed to create temporary directory");
     let config = AccountsDbConfig::temp_for_tests(SNAPSHOT_FREQUENCY);
-    let lock = StWLock::default();
 
-    let adb = AccountsDb::new(&config, &directory, lock)
-        .expect("expected to initialize ADB");
+    let adb = AccountsDb::new(&config, directory.path(), StWLock::default())
+        .expect("expected to initialize ADB")
+        .into();
     (adb, directory)
 }
 
 fn init_test_env() -> AdbTestEnv {
-    let (adb, directory) = init_db();
-    AdbTestEnv { adb, directory }
+    let (adb, _directory) = init_db();
+    AdbTestEnv { adb, _directory }
 }
 
 impl AdbTestEnv {
     fn account(&self) -> AccountWithPubkey {
-        Self::account_with_size(self, SPACE)
+        self.account_with_size(SPACE)
     }
+
     fn account_with_size(&self, size: usize) -> AccountWithPubkey {
         let pubkey = Pubkey::new_unique();
         let mut account = AccountSharedData::new(LAMPORTS, size, &OWNER);
@@ -610,23 +602,28 @@ impl AdbTestEnv {
             .expect("failed to refetch newly inserted account");
         AccountWithPubkey { pubkey, account }
     }
+
+    fn set_slot(&self, slot: u64) {
+        self.adb.set_slot(slot);
+        while Arc::strong_count(&self.adb) > 1 {
+            std::thread::yield_now();
+        }
+    }
+
+    fn ensure_at_most(mut self, slot: u64) -> Self {
+        let mut accountsdb = Arc::try_unwrap(self.adb)
+            .expect("this is the only Arc reference to accountsdb");
+        accountsdb
+            .ensure_at_most(slot)
+            .expect("failed to rollback accounts database");
+        self.adb = Arc::new(accountsdb);
+        self
+    }
 }
 
 impl Deref for AdbTestEnv {
-    type Target = AccountsDb;
+    type Target = Arc<AccountsDb>;
     fn deref(&self) -> &Self::Target {
         &self.adb
-    }
-}
-
-impl DerefMut for AdbTestEnv {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.adb
-    }
-}
-
-impl Drop for AdbTestEnv {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.directory);
     }
 }
