@@ -16,8 +16,7 @@ use magicblock_bank::bank::Bank;
 use magicblock_ledger::Ledger;
 use solana_perf::thread::renice_this_thread;
 use solana_sdk::{hash::Hash, signature::Keypair};
-use tokio::runtime;
-use tokio::runtime::Runtime;
+use tokio::{runtime, runtime::Runtime};
 
 use crate::{
     handlers::{
