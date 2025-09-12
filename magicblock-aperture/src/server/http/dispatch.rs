@@ -1,6 +1,6 @@
 use std::{convert::Infallible, sync::Arc};
 
-use hyper::{body::Incoming, Request, Response};
+use hyper::{body::Incoming, Method, Request, Response};
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
     transactions::TransactionSchedulerHandle, DispatchEndpoints,
@@ -82,6 +82,9 @@ impl HttpDispatcher {
         self: Arc<Self>,
         request: Request<Incoming>,
     ) -> Result<Response<JsonBody>, Infallible> {
+        if request.method() == Method::OPTIONS {
+            return Self::handle_cors_preflight();
+        }
         // A local macro to simplify error handling. If a Result is an Err,
         // it immediately formats it into a JSON-RPC error response and returns.
         macro_rules! unwrap {
@@ -100,9 +103,9 @@ impl HttpDispatcher {
         let mut request = unwrap!(parse_body(body), None);
         // Resolve the handler for request and process it
         let response = self.process(&mut request).await;
-
-        // Format the final response, handling any errors from the execution stage.
-        Ok(unwrap!(response, Some(&request.id)))
+        // Handle any errors from the execution stage
+        let response = unwrap!(response, Some(&request.id));
+        Ok(response)
     }
 
     async fn process(&self, request: &mut JsonHttpRequest) -> HandlerResult {
@@ -148,6 +151,7 @@ impl HttpDispatcher {
             GetTokenLargestAccounts => self.get_token_largest_accounts(request),
             GetTokenSupply => self.get_token_supply(request),
             GetTransaction => self.get_transaction(request),
+            GetTransactionCount => self.get_transaction_count(request),
             GetVersion => self.get_version(request),
             IsBlockhashValid => self.is_blockhash_valid(request),
             MinimumLedgerSlot => self.get_first_available_block(request),
@@ -155,5 +159,26 @@ impl HttpDispatcher {
             SendTransaction => self.send_transaction(request).await,
             SimulateTransaction => self.simulate_transaction(request).await,
         }
+    }
+
+    /// Handles CORS preflight OPTIONS requests.
+    ///
+    /// Responds with a `200 OK` and the necessary `Access-Control-*` headers to
+    /// authorize subsequent `POST` requests from any origin (e.g. explorers)
+    fn handle_cors_preflight() -> Result<Response<JsonBody>, Infallible> {
+        use hyper::header::{
+            ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
+            ACCESS_CONTROL_ALLOW_ORIGIN,
+        };
+
+        let response = Response::builder()
+            .header(ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .header(ACCESS_CONTROL_ALLOW_METHODS, "POST, OPTIONS")
+            .header(ACCESS_CONTROL_ALLOW_HEADERS, "*")
+            .body(JsonBody::from(""))
+            // SAFETY: This is safe with static, valid headers
+            .expect("Building CORS response failed");
+
+        Ok(response)
     }
 }

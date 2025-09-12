@@ -63,6 +63,7 @@ pub(crate) enum JsonRpcHttpMethod {
     GetTokenLargestAccounts,
     GetTokenSupply,
     GetTransaction,
+    GetTransactionCount,
     GetVersion,
     IsBlockhashValid,
     MinimumLedgerSlot,
