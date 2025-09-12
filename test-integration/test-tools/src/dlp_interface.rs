@@ -1,5 +1,5 @@
 use anyhow::Context;
-use dlp::args::DelegateEphemeralBalanceArgs;
+use dlp::args::{DelegateArgs, DelegateEphemeralBalanceArgs};
 use log::*;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -17,7 +17,7 @@ pub async fn top_up_ephemeral_fee_balance(
     payer: &Keypair,
     recvr: Pubkey,
     sol: u64,
-    delegate: bool,
+    validator: Option<Pubkey>,
 ) -> anyhow::Result<(Signature, Pubkey, Pubkey)> {
     let topup_ix = dlp::instruction_builder::top_up_ephemeral_balance(
         payer.pubkey(),
@@ -26,11 +26,17 @@ pub async fn top_up_ephemeral_fee_balance(
         None,
     );
     let mut ixs = vec![topup_ix];
-    if delegate {
+    if let Some(validator) = validator {
         let delegate_ix = dlp::instruction_builder::delegate_ephemeral_balance(
             payer.pubkey(),
             recvr,
-            DelegateEphemeralBalanceArgs::default(),
+            DelegateEphemeralBalanceArgs {
+                delegate_args: DelegateArgs {
+                    validator: Some(validator),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         );
         ixs.push(delegate_ix);
     }
@@ -38,8 +44,9 @@ pub async fn top_up_ephemeral_fee_balance(
         .await?;
     let (ephemeral_balance_pda, deleg_record) = escrow_pdas(&recvr);
     debug!(
-        "Top-up ephemeral balance {} {ephemeral_balance_pda} sig: {sig}",
-        payer.pubkey()
+        "Top-up ephemeral balance {} {ephemeral_balance_pda} sig: {sig}, validator_id: {}",
+        payer.pubkey(),
+        validator.map_or("None".to_string(), |v| v.to_string())
     );
     Ok((sig, ephemeral_balance_pda, deleg_record))
 }

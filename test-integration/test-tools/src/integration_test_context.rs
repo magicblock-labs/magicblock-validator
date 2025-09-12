@@ -119,7 +119,7 @@ impl IntegrationTestContext {
             Self::url_ephem().to_string(),
             commitment,
         );
-        let validator_identity = chain_client.get_identity()?;
+        let validator_identity = ephem_client.get_identity()?;
         let chain_blockhash = chain_client.get_latest_blockhash()?;
         let ephem_blockhash = ephem_client.get_latest_blockhash()?;
 
@@ -470,7 +470,7 @@ impl IntegrationTestContext {
                 payer,
                 payer.pubkey(),
                 topup_sol,
-                false,
+                self.ephem_validator_identity,
             )
             .await
             .with_context(|| {
@@ -771,15 +771,13 @@ impl IntegrationTestContext {
     ) -> Result<Signature, client_error::Error> {
         let blockhash = rpc_client.get_latest_blockhash()?;
         tx.sign(signers, blockhash);
-        let sig = rpc_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                tx,
-                CommitmentConfig::confirmed(),
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            )?;
+        let sig = rpc_client.send_transaction_with_config(
+            tx,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )?;
         Ok(sig)
     }
 
@@ -812,6 +810,11 @@ impl IntegrationTestContext {
         payer: &Keypair,
         commitment: CommitmentConfig,
     ) -> Result<(Signature, bool), client_error::Error> {
+        debug!(
+            "Sending transaction {} instructions, payer: {}",
+            payer.pubkey(),
+            ixs.len()
+        );
         let sig = Self::send_instructions_with_payer(rpc_client, ixs, payer)?;
         debug!("Confirming transaction with signature: {}", sig);
         Self::confirm_transaction(&sig, rpc_client, commitment)

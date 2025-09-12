@@ -10,14 +10,6 @@ fn random_pubkey() -> Pubkey {
     Keypair::new().pubkey()
 }
 
-fn oncurve_keypair() -> Keypair {
-    let mut kp = Keypair::new();
-    while !kp.pubkey().is_on_curve() {
-        kp = Keypair::new();
-    }
-    kp
-}
-
 #[test]
 fn test_get_account_info_non_existing() {
     init_logger!();
@@ -66,7 +58,7 @@ async fn test_get_account_info_escrowed() {
     let ctx = IntegrationTestContext::try_new().unwrap();
 
     // 1. Create account with 4 SOL + escrow 2 SOL
-    let kp = oncurve_keypair();
+    let kp = Keypair::new();
     let (
         airdrop_sig,
         escrow_sig,

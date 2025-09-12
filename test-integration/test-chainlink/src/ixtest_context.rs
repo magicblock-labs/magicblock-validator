@@ -346,13 +346,14 @@ impl IxtestContext {
         sol: u64,
         delegate: bool,
     ) -> (Pubkey, Pubkey) {
+        let validator = delegate.then_some(self.validator_kp.pubkey());
         let (sig, ephemeral_balance_pda, deleg_record) =
             dlp_interface::top_up_ephemeral_fee_balance(
                 &self.rpc_client,
                 &payer,
                 payer.pubkey(),
                 sol,
-                delegate,
+                validator,
             )
             .await
             .inspect_err(|err| {
