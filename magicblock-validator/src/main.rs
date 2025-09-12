@@ -1,5 +1,8 @@
 mod shutdown;
 
+use std::string;
+
+use clap::error::ContextValue::String;
 use log::*;
 use magicblock_api::{
     ledger,
@@ -72,7 +75,7 @@ async fn main() {
     let rpc_host = mb_config.config.rpc.addr;
 
     let validator_keypair = mb_config.validator_keypair();
-    info!("Validator identity: {}", validator_keypair.pubkey());
+    let validator_identity = validator_keypair.pubkey();
 
     let geyser_grpc_config = mb_config.config.geyser_grpc.clone();
     let init_geyser_service_config =
@@ -96,19 +99,24 @@ async fn main() {
 
     api.start().await.expect("Failed to start validator");
     let version = magicblock_version::Version::default();
-    info!("");
-    info!("🧙 Magicblock Validator is running!");
-    info!(
+    println!();
+    println!("🧙 Magicblock Validator is running! 🪄✦");
+    println!(
         "🏷️ Validator version: {} (Git: {})",
         version.to_string(),
         version.git_version
     );
-    info!("-----------------------------------");
-    info!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
-    info!("🔌 WebSocket endpoint: ws://{}:{}", rpc_host, ws_port);
-    info!("-----------------------------------");
-    info!("Ready for connections!");
-    info!("");
+    println!("-----------------------------------");
+    println!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
+    println!("🔌 WebSocket endpoint: ws://{}:{}", rpc_host, ws_port);
+    println!("🖥️ Validator identity: {}", validator_identity);
+    println!(
+        "🗄️ Ledger location:    {}",
+        api.ledger().ledger_path().to_str().unwrap_or("")
+    );
+    println!("-----------------------------------");
+    println!("Ready for connections!");
+    println!();
 
     if let Err(err) = Shutdown::wait().await {
         error!("Failed to gracefully shutdown: {}", err);
