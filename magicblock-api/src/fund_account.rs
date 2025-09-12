@@ -1,11 +1,16 @@
 use std::path::Path;
 
 use magicblock_bank::bank::Bank;
-use magicblock_config::LedgerResumeStrategy;
-use magicblock_core::magic_program;
+use magicblock_magic_program_api::{
+    self, MAGIC_CONTEXT_PUBKEY, MAGIC_CONTEXT_SIZE,
+};
 use solana_sdk::{
-    account::Account, clock::Epoch, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, system_program,
+    account::{Account, WritableAccount},
+    clock::Epoch,
+    pubkey::Pubkey,
+    signature::Keypair,
+    signer::Signer,
+    system_program,
 };
 
 use crate::{
@@ -14,17 +19,7 @@ use crate::{
 };
 
 pub(crate) fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
-    bank.store_account(
-        *pubkey,
-        Account {
-            lamports,
-            data: vec![],
-            owner: system_program::id(),
-            executable: false,
-            rent_epoch: Epoch::MAX,
-        }
-        .into(),
-    );
+    fund_account_with_data(bank, pubkey, lamports, vec![]);
 }
 
 pub(crate) fn fund_account_with_data(
@@ -33,17 +28,23 @@ pub(crate) fn fund_account_with_data(
     lamports: u64,
     data: Vec<u8>,
 ) {
-    bank.store_account(
-        *pubkey,
-        Account {
-            lamports,
-            data,
-            owner: system_program::id(),
-            executable: false,
-            rent_epoch: Epoch::MAX,
-        }
-        .into(),
-    );
+    if let Some(mut acc) = bank.get_account(pubkey) {
+        acc.set_lamports(lamports);
+        acc.set_data(data);
+        bank.store_account(*pubkey, acc);
+    } else {
+        bank.store_account(
+            *pubkey,
+            Account {
+                lamports,
+                data,
+                owner: system_program::id(),
+                executable: false,
+                rent_epoch: Epoch::MAX,
+            }
+            .into(),
+        );
+    }
 }
 
 pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
@@ -57,14 +58,14 @@ pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
 pub(crate) fn funded_faucet(
     bank: &Bank,
     ledger_path: &Path,
-    resume_strategy: &LedgerResumeStrategy,
 ) -> ApiResult<Keypair> {
-    let faucet_keypair = if resume_strategy.is_removing_ledger() {
-        let faucet_keypair = Keypair::new();
-        write_faucet_keypair_to_ledger(ledger_path, &faucet_keypair)?;
-        faucet_keypair
-    } else {
-        read_faucet_keypair_from_ledger(ledger_path)?
+    let faucet_keypair = match read_faucet_keypair_from_ledger(ledger_path) {
+        Ok(faucet_keypair) => faucet_keypair,
+        Err(_) => {
+            let faucet_keypair = Keypair::new();
+            write_faucet_keypair_to_ledger(ledger_path, &faucet_keypair)?;
+            faucet_keypair
+        }
     };
 
     fund_account(bank, &faucet_keypair.pubkey(), u64::MAX / 2);
@@ -74,8 +75,8 @@ pub(crate) fn funded_faucet(
 pub(crate) fn fund_magic_context(bank: &Bank) {
     fund_account_with_data(
         bank,
-        &magic_program::MAGIC_CONTEXT_PUBKEY,
+        &MAGIC_CONTEXT_PUBKEY,
         u64::MAX,
-        vec![0; magic_program::MAGIC_CONTEXT_SIZE],
+        vec![0; MAGIC_CONTEXT_SIZE],
     );
 }

@@ -98,6 +98,45 @@ pub enum FlexiCounterInstruction {
     /// 1. `[write]`  The target PDA account of the payer that will be updated.
     /// 2. `[]`  The source PDA account whose count will be added.
     AddCounter,
+
+    /// Creates intent that will schedule intent with some action
+    /// Actions will call back our program
+    ///
+    /// Accounts:
+    /// 0.      `[]`       Destination program
+    /// 1.      `[]`       MagicContext (used to record scheduled commit)
+    /// 2.      `[]`       MagicBlock Program (used to schedule commit)
+    /// 3.      `[write]`  Transfer destination during action
+    /// 4.      `[]`       system program
+    /// 5.      `[signer]` Escrow authority
+    /// ...
+    /// 5+n-1   `[signer]` Escrow authority`
+    /// 5+n     `[write]`  Counter pda
+    /// ...
+    /// 5+2n    `[write]`  Counter pda
+    CreateIntent {
+        num_committees: u8,
+        counter_diffs: Vec<i64>,
+        is_undelegate: bool,
+        compute_units: u32,
+    },
+
+    /// Creates intent that will undelegate an account,
+    /// and delegate is back in an Action
+    /// NOTE: This will be abled in the future and left as an example for now
+    ///
+    /// Accounts:
+    /// 0. `[signer]` The payer that is delegating the account. Escrow authority
+    /// 1. `[write]` The counter PDA account that will be delegated.
+    /// 2. `[]` The owner program of the delegated account
+    /// 3. `[write]` The buffer account of the delegated account
+    /// 4. `[write]` The delegation record account of the delegated account
+    /// 5. `[write]` The delegation metadata account of the delegated account
+    /// 6. `[]` The delegation program
+    /// 7. `[]` The system program
+    /// 8. `[write]` The Magic Context
+    /// 9. `[]` The Magic Program
+    CreateRedelegationIntont,
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -226,5 +265,101 @@ pub fn create_add_counter_ix(
         *program_id,
         &FlexiCounterInstruction::AddCounter,
         accounts,
+    )
+}
+
+pub fn create_intent_single_committee_ix(
+    payer: Pubkey,
+    transfer_destination: Pubkey,
+    counter_diff: i64,
+    is_undelegate: bool,
+    compute_units: u32,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (counter, _) = FlexiCounter::pda(&payer);
+    let accounts = vec![
+        AccountMeta::new_readonly(crate::id(), false),
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new(transfer_destination, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new(payer, true),
+        AccountMeta::new(counter, false),
+    ];
+
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::CreateIntent {
+            num_committees: 1,
+            // Has no effect in non-undelegate case
+            counter_diffs: vec![counter_diff],
+            is_undelegate,
+            compute_units,
+        },
+        accounts,
+    )
+}
+
+pub fn create_intent_ix(
+    payers: Vec<Pubkey>,
+    transfer_destination: Pubkey,
+    counter_diffs: Vec<i64>,
+    is_undelegate: bool,
+    compute_units: u32,
+) -> Instruction {
+    let program_id = &crate::id();
+
+    let payers_meta = payers.iter().map(|payer| AccountMeta::new(*payer, true));
+    let counter_metas = payers
+        .iter()
+        .map(|payer| AccountMeta::new(FlexiCounter::pda(payer).0, false));
+    let mut accounts = vec![
+        AccountMeta::new_readonly(crate::id(), false),
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new(transfer_destination, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+    accounts.extend(payers_meta);
+    accounts.extend(counter_metas);
+
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::CreateIntent {
+            num_committees: payers.len() as u8,
+            // Has no effect in non-undelegate case
+            counter_diffs,
+            is_undelegate,
+            compute_units,
+        },
+        accounts,
+    )
+}
+
+pub fn create_redelegation_intent_ix(payer: Pubkey) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+
+    let delegate_accounts = DelegateAccounts::new(pda, *program_id);
+    // NOTE: accounts like: buffer, delegation_record & delegation_metadata can't be writable
+    // The reason is - ER accepts only delegated account as writable
+    // There will be a functionality in sdk that will allow to specify overwrites for Base Layer execution
+    let account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(delegate_accounts.delegated_account, false),
+        AccountMeta::new_readonly(delegate_accounts.owner_program, false),
+        AccountMeta::new_readonly(delegate_accounts.delegate_buffer, false),
+        AccountMeta::new_readonly(delegate_accounts.delegation_record, false),
+        AccountMeta::new_readonly(delegate_accounts.delegation_metadata, false),
+        AccountMeta::new_readonly(delegate_accounts.delegation_program, false),
+        AccountMeta::new_readonly(delegate_accounts.system_program, false),
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+    ];
+
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::CreateRedelegationIntont,
+        account_metas,
     )
 }

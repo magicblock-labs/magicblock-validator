@@ -1,13 +1,13 @@
+use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 use solana_program_runtime::declare_process_instruction;
 use solana_sdk::program_utils::limited_deserialize;
 
 use crate::{
-    magicblock_instruction::MagicBlockInstruction,
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
     schedule_transactions::{
-        process_accept_scheduled_commits, process_schedule_commit,
-        ProcessScheduleCommitOptions,
+        process_accept_scheduled_commits, process_schedule_base_intent,
+        process_schedule_commit, ProcessScheduleCommitOptions,
     },
 };
 
@@ -59,6 +59,9 @@ declare_process_instruction!(
                     transaction_context,
                     id,
                 )
+            }
+            MagicBlockInstruction::ScheduleBaseIntent(args) => {
+                process_schedule_base_intent(signers, invoke_context, args)
             }
         }
     }

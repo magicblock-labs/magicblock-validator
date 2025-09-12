@@ -1,22 +1,13 @@
 use std::mem;
 
-use magicblock_core::magic_program;
+use magicblock_magic_program_api::MAGIC_CONTEXT_SIZE;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
-    clock::Slot,
-    hash::Hash,
     pubkey::Pubkey,
-    transaction::Transaction,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommittedAccount {
-    pub pubkey: Pubkey,
-    // TODO(GabrielePicco): We should read the owner from the delegation record rather
-    // than deriving/storing it. To remove once the cloning pipeline allow us to easily access the owner.
-    pub owner: Pubkey,
-}
+use crate::magic_scheduled_base_intent::ScheduledBaseIntent;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FeePayerAccount {
@@ -24,24 +15,14 @@ pub struct FeePayerAccount {
     pub delegated_pda: Pubkey,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScheduledCommit {
-    pub id: u64,
-    pub slot: Slot,
-    pub blockhash: Hash,
-    pub accounts: Vec<CommittedAccount>,
-    pub payer: Pubkey,
-    pub commit_sent_transaction: Transaction,
-    pub request_undelegation: bool,
-}
-
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MagicContext {
-    pub scheduled_commits: Vec<ScheduledCommit>,
+    pub intent_id: u64,
+    pub scheduled_base_intents: Vec<ScheduledBaseIntent>,
 }
 
 impl MagicContext {
-    pub const SIZE: usize = magic_program::MAGIC_CONTEXT_SIZE;
+    pub const SIZE: usize = MAGIC_CONTEXT_SIZE;
     pub const ZERO: [u8; Self::SIZE] = [0; Self::SIZE];
     pub(crate) fn deserialize(
         data: &AccountSharedData,
@@ -53,12 +34,24 @@ impl MagicContext {
         }
     }
 
-    pub(crate) fn add_scheduled_commit(&mut self, commit: ScheduledCommit) {
-        self.scheduled_commits.push(commit);
+    pub(crate) fn next_intent_id(&mut self) -> u64 {
+        let output = self.intent_id;
+        self.intent_id = self.intent_id.wrapping_add(1);
+
+        output
     }
 
-    pub(crate) fn take_scheduled_commits(&mut self) -> Vec<ScheduledCommit> {
-        mem::take(&mut self.scheduled_commits)
+    pub(crate) fn add_scheduled_action(
+        &mut self,
+        base_intent: ScheduledBaseIntent,
+    ) {
+        self.scheduled_base_intents.push(base_intent);
+    }
+
+    pub(crate) fn take_scheduled_commits(
+        &mut self,
+    ) -> Vec<ScheduledBaseIntent> {
+        mem::take(&mut self.scheduled_base_intents)
     }
 
     pub fn has_scheduled_commits(data: &[u8]) -> bool {

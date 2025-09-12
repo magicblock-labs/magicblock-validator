@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
 magicblock-delegation-program = { workspace = true }
 futures-util = { workspace = true }
+itertools = { workspace = true }
 log = { workspace = true }
 magicblock-account-fetcher = { workspace = true }
 magicblock-account-updates = { workspace = true }
@@ -21,6 +22,7 @@ magicblock-accounts-api = { workspace = true }
 magicblock-bank = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-mutator = { workspace = true }
 magicblock-processor = { workspace = true }
@@ -30,6 +32,7 @@ solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
 

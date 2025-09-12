@@ -1,14 +1,10 @@
-use std::sync::Arc;
-
-use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use thiserror::Error;
 
-use crate::{persist::CommitStrategy, CommitInfo};
+use crate::intent_execution_manager::IntentExecutionManagerError;
 
-pub type CommittorServiceResult<T> =
-    std::result::Result<T, CommittorServiceError>;
+pub type CommittorServiceResult<T, E = CommittorServiceError> = Result<T, E>;
 
 #[derive(Error, Debug)]
 pub enum CommittorServiceError {
@@ -18,9 +14,6 @@ pub enum CommittorServiceError {
     #[error("CommitPersistError: {0} ({0:?})")]
     CommitPersistError(#[from] crate::persist::error::CommitPersistError),
 
-    #[error(transparent)]
-    RecvError(#[from] tokio::sync::oneshot::error::RecvError),
-
     #[error("MagicBlockRpcClientError: {0} ({0:?})")]
     MagicBlockRpcClientError(
         #[from] magicblock_rpc_client::MagicBlockRpcClientError,
@@ -28,6 +21,9 @@ pub enum CommittorServiceError {
 
     #[error("TableManiaError: {0} ({0:?})")]
     TableManiaError(#[from] magicblock_table_mania::error::TableManiaError),
+
+    #[error("IntentExecutionManagerError: {0} ({0:?})")]
+    IntentExecutionManagerError(#[from] IntentExecutionManagerError),
 
     #[error(
         "Failed send and confirm transaction to {0} on chain: {1} ({1:?})"
@@ -86,32 +82,4 @@ impl CommittorServiceError {
             _ => None,
         }
     }
-}
-
-pub type CommitAccountResult<T> = std::result::Result<T, CommitAccountError>;
-#[derive(Error, Debug)]
-/// Specific error that always includes the commit info
-pub enum CommitAccountError {
-    #[error("Failed to init buffer and chunk account: {0}")]
-    InitBufferAndChunkAccounts(String, Box<CommitInfo>, CommitStrategy),
-
-    #[error("Failed to get chunks account: ({0:?})")]
-    GetChunksAccount(
-        Option<MagicBlockRpcClientError>,
-        Arc<CommitInfo>,
-        CommitStrategy,
-    ),
-
-    #[error("Failed to deserialize chunks account: {0} ({0:?})")]
-    DeserializeChunksAccount(std::io::Error, Arc<CommitInfo>, CommitStrategy),
-
-    #[error("Failed to affect remaining size via realloc buffer after max retries. Last error {0}")]
-    ReallocBufferRanOutOfRetries(String, Arc<CommitInfo>, CommitStrategy),
-
-    #[error("Failed to write complete chunks of commit data after max retries. Last write error {0:?}")]
-    WriteChunksRanOutOfRetries(
-        Option<magicblock_rpc_client::MagicBlockRpcClientError>,
-        Arc<CommitInfo>,
-        CommitStrategy,
-    ),
 }

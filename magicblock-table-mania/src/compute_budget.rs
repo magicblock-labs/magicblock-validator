@@ -13,15 +13,15 @@ const SAFETY_MULTIPLIER: u32 = 12;
 /// Compute units required to create and extend a lookup table, with the initial
 /// pubkeys. This is the same no matter how many pubkeys are added to the table
 /// initially.
-/// The added 250 ensure we don't run out of CUs due to variation in the PDA derivation.
+/// The added 400 ensure we don't run out of CUs due to variation in the PDA derivation.
 /// Only the create table instruction has one, see
 /// https://github.com/solana-program/address-lookup-table/blob/main/program/src/processor.rs .
 /// This test repo (https://github.com/thlorenz/create-program-address-cus) verified
 /// that the variation is around 25 CUs, but to be on the safe side we add 10x that.
-pub const CREATE_AND_EXTEND_TABLE_CUS: u32 = (2_400 + 250) * SAFETY_MULTIPLIER;
+pub const CREATE_AND_EXTEND_TABLE_CUS: u32 = (2_400 + 400) * SAFETY_MULTIPLIER;
 /// Compute units required to extend a lookup table with additional pubkeys
 /// This is the same no matter how many pubkeys are added to the table.
-pub const EXTEND_TABLE_CUS: u32 = 1_200 * SAFETY_MULTIPLIER;
+pub const EXTEND_TABLE_CUS: u32 = 1_300 * SAFETY_MULTIPLIER;
 /// Compute units required to deactivate a lookup table.
 pub const DEACTIVATE_TABLE_CUS: u32 = 1_050 * SAFETY_MULTIPLIER;
 /// Compute units required to close a lookup table.

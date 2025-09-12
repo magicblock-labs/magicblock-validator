@@ -4,11 +4,11 @@ use dlp::instruction_builder::validator_claim_fees;
 use integration_test_tools::{
     loaded_accounts::LoadedAccounts, IntegrationTestContext,
 };
-use magicblock_program::Pubkey;
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
+    pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
 };

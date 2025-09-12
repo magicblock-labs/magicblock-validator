@@ -10,9 +10,9 @@ use magicblock_account_fetcher::AccountFetcherError;
 use magicblock_account_updates::AccountUpdatesError;
 use magicblock_committor_service::{
     error::{CommittorServiceError, CommittorServiceResult},
-    ChangesetCommittor,
+    BaseIntentCommittor,
 };
-use magicblock_core::magic_program;
+use magicblock_rpc_client::MagicblockRpcClient;
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
 use tokio::sync::oneshot::{self, Sender};
@@ -76,9 +76,9 @@ pub enum AccountClonerUnclonableReason {
     DelegatedAccountsNotClonedWhileHydrating,
 }
 
-pub async fn map_committor_request_result<T, CC: ChangesetCommittor>(
+pub async fn map_committor_request_result<T, CC: BaseIntentCommittor>(
     res: oneshot::Receiver<CommittorServiceResult<T>>,
-    changeset_committor: Arc<CC>,
+    intent_committor: Arc<CC>,
 ) -> AccountClonerResult<T> {
     match res.await.map_err(|err| {
         // Send request error
@@ -96,10 +96,21 @@ pub async fn map_committor_request_result<T, CC: ChangesetCommittor>(
                             format!("{:?}", table_mania_err),
                         ));
                     };
-                    let cus =
-                        changeset_committor.get_transaction_cus(&sig).await;
-                    let logs =
-                        changeset_committor.get_transaction_logs(&sig).await;
+                    let (logs, cus) = if let Ok(Ok(transaction)) =
+                        intent_committor.get_transaction(&sig).await
+                    {
+                        let cus = MagicblockRpcClient::get_cus_from_transaction(
+                            &transaction,
+                        );
+                        let logs =
+                            MagicblockRpcClient::get_logs_from_transaction(
+                                &transaction,
+                            );
+                        (logs, cus)
+                    } else {
+                        (None, None)
+                    };
+
                     let cus_str = cus
                         .map(|cus| format!("{:?}", cus))
                         .unwrap_or("N/A".to_string());
@@ -198,8 +209,8 @@ pub fn standard_blacklisted_accounts(
     blacklisted_accounts.insert(solana_sdk::sysvar::slot_history::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::stake_history::ID);
     blacklisted_accounts.insert(NATIVE_SOL_ID);
-    blacklisted_accounts.insert(magic_program::ID);
-    blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
+    blacklisted_accounts.insert(magicblock_program::ID);
+    blacklisted_accounts.insert(magicblock_program::MAGIC_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
     blacklisted_accounts.insert(*faucet_id);
     blacklisted_accounts

@@ -1,0 +1,13 @@
+[package]
+name = "test-schedule-intent"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
+integration-test-tools = { workspace = true }
+solana-sdk = { workspace = true }
+magicblock-delegation-program = { workspace = true, features = ["no-entrypoint"] }
+solana-rpc-client-api = { workspace = true }

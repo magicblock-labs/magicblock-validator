@@ -1,7 +1,9 @@
 use std::io;
 
 use log::info;
-use tokio::{signal, signal::unix::SignalKind};
+use tokio::signal;
+#[cfg(unix)]
+use tokio::signal::unix::SignalKind;
 
 pub struct Shutdown;
 impl Shutdown {

@@ -18,10 +18,6 @@ use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_committor_service::stubs::ChangesetCommittorStub;
 use magicblock_config::{AccountsCloneConfig, LedgerResumeStrategyConfig};
 use solana_sdk::pubkey::Pubkey;
-use stubs::{
-    account_committer_stub::AccountCommitterStub,
-    scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
-};
 use test_tools_core::init_logger;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -31,10 +27,9 @@ mod stubs;
 type StubbedAccountsManager = ExternalAccountsManager<
     InternalAccountProviderStub,
     RemoteAccountClonerClient,
-    AccountCommitterStub,
     TransactionAccountsExtractorImpl,
     TransactionAccountsValidatorImpl,
-    ScheduledCommitsProcessorStub,
+    ChangesetCommittorStub,
 >;
 
 fn setup_with_lifecycle(
@@ -52,7 +47,7 @@ fn setup_with_lifecycle(
         account_fetcher,
         account_updates,
         account_dumper,
-        Some(changeset_committor_stub),
+        Some(changeset_committor_stub.clone()),
         None,
         HashSet::new(),
         ValidatorCollectionMode::NoFees,
@@ -76,10 +71,9 @@ fn setup_with_lifecycle(
     let external_account_manager = ExternalAccountsManager {
         internal_account_provider,
         account_cloner: remote_account_cloner_client,
-        account_committer: Arc::new(AccountCommitterStub::default()),
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
-        scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
+        committor_service: Some(changeset_committor_stub),
         lifecycle,
         external_commitable_accounts: Default::default(),
     };

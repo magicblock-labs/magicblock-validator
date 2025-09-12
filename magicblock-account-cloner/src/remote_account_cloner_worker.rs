@@ -17,7 +17,7 @@ use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::{AccountUpdates, AccountUpdatesResult};
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::ChangesetCommittor;
+use magicblock_committor_service::BaseIntentCommittor;
 use magicblock_config::{
     AccountsCloneConfig, LedgerResumeStrategyConfig, PrepareLookupTables,
 };
@@ -137,7 +137,7 @@ where
     AFE: AccountFetcher,
     AUP: AccountUpdates,
     ADU: AccountDumper,
-    CC: ChangesetCommittor,
+    CC: BaseIntentCommittor,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -508,10 +508,10 @@ where
 
             // Fetch the account, repeat and retry until we have a satisfactory response
             let mut fetch_count = 0;
+            let min_context_slot =
+                self.account_updates.get_last_known_update_slot(&clock::ID);
             loop {
                 fetch_count += 1;
-                let min_context_slot =
-                    self.account_updates.get_last_known_update_slot(&clock::ID);
                 match self
                     .fetch_account_chain_snapshot(pubkey, min_context_slot)
                     .await
@@ -523,17 +523,27 @@ where
                             >= self
                                 .account_updates
                                 .get_first_subscribed_slot(pubkey)
-                                .unwrap_or(u64::MAX)
+                                .unwrap_or(u64::MIN)
                         {
                             break account_chain_snapshot;
                         }
                         // If we failed to fetch too many time, stop here
                         if fetch_count >= self.fetch_retries {
                             return if min_context_slot.is_none() {
+                                error!("Failed to get satisfactory slot for {} after {fetch_count} tries, current update slot {}, first subscribed slot {:?}",
+                                    pubkey,
+                                    account_chain_snapshot.at_slot,
+                                    self.account_updates.get_first_subscribed_slot(pubkey),
+                                );
                                 Err(
                                     AccountClonerError::FailedToGetSubscriptionSlot,
                                 )
                             } else {
+                                error!("Failed to fetch satisfactory slot for {} after {fetch_count} tries, current update slot {}, first subscribed slot {:?}",
+                                    pubkey,
+                                    account_chain_snapshot.at_slot,
+                                    self.account_updates.get_first_subscribed_slot(pubkey),
+                                );
                                 Err(
                                     AccountClonerError::FailedToFetchSatisfactorySlot,
                                 )
@@ -737,11 +747,10 @@ where
 
                 // Allow the committer service to reserve pubkeys in lookup tables
                 // that could be needed when we commit this account
-                if let Some(committor) = self.changeset_committor.as_ref() {
+                if let Some(committor) = self.changeset_committor.clone() {
                     if self.clone_config.prepare_lookup_tables
                         == PrepareLookupTables::Always
                     {
-                        let committor = Arc::clone(committor);
                         let pubkey = *pubkey;
                         let owner = delegation_record.owner;
                         tokio::spawn(async move {

@@ -2,8 +2,7 @@ mod accounts_manager;
 mod config;
 pub mod errors;
 mod external_accounts_manager;
-mod remote_account_committer;
-mod remote_scheduled_commits_processor;
+pub mod scheduled_commits_processor;
 mod traits;
 pub mod utils;
 

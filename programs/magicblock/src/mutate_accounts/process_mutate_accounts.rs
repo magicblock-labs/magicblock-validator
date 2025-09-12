@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use magicblock_magic_program_api::instruction::AccountModificationForInstruction;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
@@ -11,9 +12,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    magicblock_instruction::{
-        AccountModificationForInstruction, MagicBlockProgramError,
-    },
+    errors::MagicBlockProgramError,
     mutate_accounts::account_mod_data::resolve_account_mod_data,
     validator::validator_authority_id,
 };
@@ -269,6 +268,7 @@ mod tests {
     use std::collections::HashMap;
 
     use assert_matches::assert_matches;
+    use magicblock_magic_program_api::instruction::AccountModification;
     use solana_sdk::{
         account::{Account, AccountSharedData},
         pubkey::Pubkey,
@@ -277,9 +277,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        magicblock_instruction::{
-            modify_accounts_instruction, AccountModification,
-        },
+        instruction_utils::InstructionUtils,
         test_utils::{
             ensure_started_validator, process_instruction, AUTHORITY_BALANCE,
         },
@@ -309,7 +307,9 @@ mod tests {
             data: Some(vec![1, 2, 3, 4, 5]),
             rent_epoch: Some(88),
         };
-        let ix = modify_accounts_instruction(vec![modification.clone()]);
+        let ix = InstructionUtils::modify_accounts_instruction(vec![
+            modification.clone(),
+        ]);
         let transaction_accounts = ix
             .accounts
             .iter()
@@ -376,7 +376,7 @@ mod tests {
         };
         ensure_started_validator(&mut account_data);
 
-        let ix = modify_accounts_instruction(vec![
+        let ix = InstructionUtils::modify_accounts_instruction(vec![
             AccountModification {
                 pubkey: mod_key1,
                 lamports: Some(300),
@@ -473,7 +473,7 @@ mod tests {
         };
         ensure_started_validator(&mut account_data);
 
-        let ix = modify_accounts_instruction(vec![
+        let ix = InstructionUtils::modify_accounts_instruction(vec![
             AccountModification {
                 pubkey: mod_key1,
                 lamports: Some(1000),

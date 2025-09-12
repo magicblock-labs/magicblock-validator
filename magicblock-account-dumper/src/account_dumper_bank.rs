@@ -146,10 +146,7 @@ impl AccountDumper for AccountDumperBank {
         .map_err(AccountDumperError::MutatorModificationError)?;
         let program_idl_modification =
             program_idl.map(|(program_idl_pubkey, program_idl_account)| {
-                AccountModification::from((
-                    &program_idl_pubkey,
-                    &program_idl_account,
-                ))
+                from_account(program_idl_pubkey, &program_idl_account)
             });
         let needs_upgrade = self.bank.has_account(program_id_pubkey);
         let transaction = transaction_to_clone_program(
@@ -180,8 +177,7 @@ impl AccountDumper for AccountDumperBank {
         );
 
         let mut program_id_modification =
-            AccountModification::from((program_pubkey, program_account));
-
+            from_account(*program_pubkey, program_account);
         // point program account to the derived program data account address
         let program_id_state =
             bincode::serialize(&UpgradeableLoaderState::Program {
@@ -210,5 +206,16 @@ impl AccountDumper for AccountDumperBank {
             self.bank.last_blockhash(),
         );
         self.execute_transaction(transaction)
+    }
+}
+
+fn from_account(pubkey: Pubkey, account: &Account) -> AccountModification {
+    AccountModification {
+        pubkey,
+        lamports: Some(account.lamports),
+        owner: Some(account.owner),
+        executable: Some(account.executable),
+        data: Some(account.data.clone()),
+        rent_epoch: Some(account.rent_epoch),
     }
 }

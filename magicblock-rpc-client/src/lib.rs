@@ -530,9 +530,9 @@ impl MagicblockRpcClient {
     }
 
     pub fn get_logs_from_transaction(
-        tx: EncodedConfirmedTransactionWithStatusMeta,
+        tx: &EncodedConfirmedTransactionWithStatusMeta,
     ) -> Option<Vec<String>> {
-        tx.transaction.meta?.log_messages.into()
+        tx.transaction.meta.as_ref()?.log_messages.clone().into()
     }
 
     pub async fn get_transaction_logs(
@@ -541,13 +541,18 @@ impl MagicblockRpcClient {
         config: Option<RpcTransactionConfig>,
     ) -> MagicBlockRpcClientResult<Option<Vec<String>>> {
         let tx = self.get_transaction(signature, config).await?;
-        Ok(Self::get_logs_from_transaction(tx))
+        Ok(Self::get_logs_from_transaction(&tx))
     }
 
     pub fn get_cus_from_transaction(
-        tx: EncodedConfirmedTransactionWithStatusMeta,
+        tx: &EncodedConfirmedTransactionWithStatusMeta,
     ) -> Option<u64> {
-        tx.transaction.meta?.compute_units_consumed.into()
+        tx.transaction
+            .meta
+            .as_ref()?
+            .compute_units_consumed
+            .clone()
+            .into()
     }
 
     pub async fn get_transaction_cus(
@@ -556,6 +561,6 @@ impl MagicblockRpcClient {
         config: Option<RpcTransactionConfig>,
     ) -> MagicBlockRpcClientResult<Option<u64>> {
         let tx = self.get_transaction(signature, config).await?;
-        Ok(Self::get_cus_from_transaction(tx))
+        Ok(Self::get_cus_from_transaction(&tx))
     }
 }

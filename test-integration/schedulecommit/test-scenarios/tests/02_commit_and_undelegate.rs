@@ -1,9 +1,8 @@
 use integration_test_tools::{
-    conversions::pubkey_from_magic_program, run_test,
+    run_test,
     scheduled_commits::extract_scheduled_commit_sent_signature_from_logs,
 };
 use log::*;
-use magicblock_core::magic_program;
 use program_schedulecommit::api::{
     increase_count_instruction, schedule_commit_and_undelegate_cpi_instruction,
     schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
@@ -60,8 +59,8 @@ fn commit_and_undelegate_one_account(
     let ix = if modify_after {
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
             payer.pubkey(),
-            pubkey_from_magic_program(magic_program::id()),
-            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
+            magicblock_magic_program_api::id(),
+            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -71,8 +70,8 @@ fn commit_and_undelegate_one_account(
     } else {
         schedule_commit_and_undelegate_cpi_instruction(
             payer.pubkey(),
-            pubkey_from_magic_program(magic_program::id()),
-            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
+            magicblock_magic_program_api::id(),
+            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -121,8 +120,8 @@ fn commit_and_undelegate_two_accounts(
     let ix = if modify_after {
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
             payer.pubkey(),
-            pubkey_from_magic_program(magic_program::id()),
-            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
+            magicblock_magic_program_api::id(),
+            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -132,8 +131,8 @@ fn commit_and_undelegate_two_accounts(
     } else {
         schedule_commit_and_undelegate_cpi_instruction(
             payer.pubkey(),
-            pubkey_from_magic_program(magic_program::id()),
-            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
+            magicblock_magic_program_api::id(),
+            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())

@@ -65,6 +65,12 @@ pub fn main() {
         return;
     };
 
+    let Ok(schedule_intents_output) =
+        run_schedule_intents_tests(&manifest_dir, &config)
+    else {
+        return;
+    };
+
     // Assert that all tests passed
     assert_cargo_tests_passed(security_output, "security");
     assert_cargo_tests_passed(scenarios_output, "scenarios");
@@ -79,6 +85,7 @@ pub fn main() {
     assert_cargo_tests_passed(committor_output, "committor");
     assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
     assert_cargo_tests_passed(config_output, "config");
+    assert_cargo_tests_passed(schedule_intents_output, "schedule_intents");
 }
 
 fn success_output() -> Output {
@@ -203,10 +210,8 @@ fn run_table_mania_and_committor_tests(
         };
 
         let committor_test_output = if run_committor {
-            let test_committor_dir = format!(
-                "{}/../{}",
-                manifest_dir, "schedulecommit/committor-service"
-            );
+            let test_committor_dir =
+                format!("{}/../{}", manifest_dir, "test-committor-service");
             eprintln!("Running committor tests in {}", test_committor_dir);
             match run_test(test_committor_dir, Default::default()) {
                 Ok(output) => output,
@@ -466,6 +471,7 @@ fn run_magicblock_api_tests(
     if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
+
     let start_devnet_validator = || match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
@@ -604,6 +610,66 @@ fn run_config_tests(
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         wait_for_ctrlc(devnet_validator, None, success_output())
+    }
+}
+
+fn run_schedule_intents_tests(
+    manifest_dir: &str,
+    config: &TestConfigViaEnvVars,
+) -> Result<Output, Box<dyn Error>> {
+    const TEST_NAME: &str = "schedule_intents";
+    if config.skip_entirely(TEST_NAME) {
+        return Ok(success_output());
+    }
+
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+    let start_devnet_validator = || match start_validator(
+        "config-conf.devnet.toml",
+        ValidatorCluster::Chain(None),
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+    let start_ephem_validator = || match start_validator(
+        "schedulecommit-conf.ephem.frequent-commits.toml",
+        ValidatorCluster::Ephem,
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start ephemeral validator properly");
+        }
+    };
+
+    if config.run_test(TEST_NAME) {
+        eprintln!("======== RUNNING ISSUES TESTS - Schedule Intents ========");
+
+        let mut devnet_validator = start_devnet_validator();
+        let mut ephem_validator = start_ephem_validator();
+
+        let test_intents_dir =
+            format!("{}/../{}", manifest_dir, "test-schedule-intent");
+        eprintln!("Running schedule intents tests in {}", test_intents_dir);
+        let test_output = match run_test(test_intents_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run issues: {:?}", err);
+                cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+        Ok(test_output)
+    } else {
+        let devnet_validator =
+            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let ephem_validator =
+            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
+        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
     }
 }
 

@@ -1,30 +1,27 @@
 use std::{path::Path, sync::Arc, time::Instant};
 
-use async_trait::async_trait;
 use log::*;
-use magicblock_committor_program::Changeset;
-use magicblock_rpc_client::MagicblockRpcClient;
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    hash::Hash,
-    signature::{Keypair, Signature},
-};
+use solana_sdk::signature::{Keypair, Signature};
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::{
     select,
     sync::{
+        broadcast,
         mpsc::{self, error::TrySendError},
         oneshot,
     },
 };
-use tokio_util::sync::CancellationToken;
+use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 
 use crate::{
-    commit::CommittorProcessor,
+    committor_processor::CommittorProcessor,
     config::ChainConfig,
-    error::{CommittorServiceError, CommittorServiceResult},
-    persist::{BundleSignatureRow, CommitStatusRow},
+    error::CommittorServiceResult,
+    intent_execution_manager::BroadcastedIntentExecutionResult,
+    persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
+    types::ScheduledBaseIntentWrapper,
 };
 
 #[derive(Debug)]
@@ -55,25 +52,21 @@ pub enum CommittorMessage {
         /// Called once the pubkeys have been released
         respond_to: oneshot::Sender<()>,
     },
-    CommitChangeset {
-        /// Called once the changeset has been committed
-        respond_to: oneshot::Sender<Option<String>>,
-        /// The changeset to commit
-        changeset: Changeset,
-        /// The blockhash in the ephemeral at the time the commit was requested
-        ephemeral_blockhash: Hash,
-        /// If `true`, account commits will be finalized after they were processed
-        finalize: bool,
+    ScheduleBaseIntents {
+        /// The [`ScheduledBaseIntent`]s to commit
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        respond_to: oneshot::Sender<CommittorServiceResult<()>>,
     },
     GetCommitStatuses {
         respond_to:
             oneshot::Sender<CommittorServiceResult<Vec<CommitStatusRow>>>,
-        reqid: String,
+        message_id: u64,
     },
-    GetBundleSignatures {
+    GetCommitSignatures {
         respond_to:
-            oneshot::Sender<CommittorServiceResult<Option<BundleSignatureRow>>>,
-        bundle_id: u64,
+            oneshot::Sender<CommittorServiceResult<Option<MessageSignatures>>>,
+        commit_id: u64,
+        pubkey: Pubkey,
     },
     GetLookupTables {
         respond_to: oneshot::Sender<LookupTables>,
@@ -83,6 +76,11 @@ pub enum CommittorMessage {
             CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
         >,
         signature: Signature,
+    },
+    SubscribeForResults {
+        respond_to: oneshot::Sender<
+            broadcast::Receiver<BroadcastedIntentExecutionResult>,
+        >,
     },
 }
 
@@ -109,6 +107,7 @@ impl CommittorActor {
             persist_file,
             chain_config,
         )?);
+
         Ok(Self {
             receiver,
             processor,
@@ -163,55 +162,36 @@ impl CommittorActor {
                     }
                 });
             }
-            CommitChangeset {
-                changeset,
-                ephemeral_blockhash,
+            ScheduleBaseIntents {
+                base_intents,
                 respond_to,
-                finalize,
             } => {
-                let processor = self.processor.clone();
-                tokio::task::spawn(async move {
-                    let reqid = processor
-                        .commit_changeset(
-                            changeset,
-                            finalize,
-                            ephemeral_blockhash,
-                        )
-                        .await;
-                    if let Err(e) = respond_to.send(reqid) {
-                        error!("Failed to send response {:?}", e);
-                    }
-                });
+                let result =
+                    self.processor.schedule_base_intents(base_intents).await;
+                if let Err(e) = respond_to.send(result) {
+                    error!("Failed to send response {:?}", e);
+                }
             }
-            GetCommitStatuses { reqid, respond_to } => {
+            GetCommitStatuses {
+                message_id,
+                respond_to,
+            } => {
                 let commit_statuses =
-                    self.processor.get_commit_statuses(&reqid);
+                    self.processor.get_commit_statuses(message_id);
                 if let Err(e) = respond_to.send(commit_statuses) {
                     error!("Failed to send response {:?}", e);
                 }
             }
-            GetBundleSignatures {
-                bundle_id,
+            GetCommitSignatures {
+                commit_id,
                 respond_to,
+                pubkey,
             } => {
-                let sig = self.processor.get_signature(bundle_id);
+                let sig =
+                    self.processor.get_commit_signature(commit_id, pubkey);
                 if let Err(e) = respond_to.send(sig) {
                     error!("Failed to send response {:?}", e);
                 }
-            }
-            GetLookupTables { respond_to } => {
-                let processor = self.processor.clone();
-                tokio::task::spawn(async move {
-                    let active_tables = processor.active_lookup_tables().await;
-                    let released_tables =
-                        processor.released_lookup_tables().await;
-                    if let Err(e) = respond_to.send(LookupTables {
-                        active: active_tables,
-                        released: released_tables,
-                    }) {
-                        error!("Failed to send response {:?}", e);
-                    }
-                });
             }
             GetTransaction {
                 signature,
@@ -228,6 +208,23 @@ impl CommittorActor {
                         error!( "Failed to send response for GetTransactionLogs: {:?}", err);
                     }
                 });
+            }
+            GetLookupTables { respond_to } => {
+                let active_tables = self.processor.active_lookup_tables().await;
+                let released_tables =
+                    self.processor.released_lookup_tables().await;
+                if let Err(e) = respond_to.send(LookupTables {
+                    active: active_tables,
+                    released: released_tables,
+                }) {
+                    error!("Failed to send response {:?}", e);
+                }
+            }
+            SubscribeForResults { respond_to } => {
+                let subscription = self.processor.subscribe_for_results();
+                if let Err(err) = respond_to.send(subscription) {
+                    error!("Failed to send response {:?}", err);
+                }
             }
         }
     }
@@ -256,8 +253,6 @@ impl CommittorActor {
 pub struct CommittorService {
     sender: mpsc::Sender<CommittorMessage>,
     cancel_token: CancellationToken,
-    #[allow(unused)]
-    chain_config: ChainConfig,
 }
 
 impl CommittorService {
@@ -278,7 +273,7 @@ impl CommittorService {
                 receiver,
                 authority,
                 persist_file,
-                chain_config.clone(),
+                chain_config,
             )?;
             tokio::spawn(async move {
                 actor.run(cancel_token).await;
@@ -287,7 +282,6 @@ impl CommittorService {
         Ok(Self {
             sender,
             cancel_token,
-            chain_config,
         })
     }
 
@@ -309,15 +303,17 @@ impl CommittorService {
         rx
     }
 
-    pub fn get_bundle_signatures(
+    pub fn get_commit_signatures(
         &self,
-        bundle_id: u64,
-    ) -> oneshot::Receiver<CommittorServiceResult<Option<BundleSignatureRow>>>
+        commit_id: u64,
+        pubkey: Pubkey,
+    ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
     {
         let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::GetBundleSignatures {
+        self.try_send(CommittorMessage::GetCommitSignatures {
             respond_to: tx,
-            bundle_id,
+            commit_id,
+            pubkey,
         });
         rx
     }
@@ -326,10 +322,6 @@ impl CommittorService {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::GetLookupTables { respond_to: tx });
         rx
-    }
-
-    pub fn stop(&self) {
-        self.cancel_token.cancel();
     }
 
     fn try_send(&self, msg: CommittorMessage) {
@@ -348,8 +340,7 @@ impl CommittorService {
     }
 }
 
-#[async_trait]
-impl ChangesetCommittor for CommittorService {
+impl BaseIntentCommittor for CommittorService {
     fn reserve_pubkeys_for_committee(
         &self,
         committee: Pubkey,
@@ -365,76 +356,79 @@ impl ChangesetCommittor for CommittorService {
         rx
     }
 
-    fn commit_changeset(
+    fn schedule_base_intent(
         &self,
-        changeset: Changeset,
-        ephemeral_blockhash: Hash,
-        finalize: bool,
-    ) -> oneshot::Receiver<Option<String>> {
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::CommitChangeset {
+        self.try_send(CommittorMessage::ScheduleBaseIntents {
+            base_intents,
             respond_to: tx,
-            changeset,
-            ephemeral_blockhash,
-            finalize,
         });
         rx
     }
 
     fn get_commit_statuses(
         &self,
-        reqid: String,
+        message_id: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::GetCommitStatuses {
             respond_to: tx,
-            reqid,
+            message_id,
         });
         rx
     }
 
-    fn get_bundle_signatures(
+    fn get_commit_signatures(
         &self,
-        bundle_id: u64,
-    ) -> oneshot::Receiver<CommittorServiceResult<Option<BundleSignatureRow>>>
+        commit_id: u64,
+        pubkey: Pubkey,
+    ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
     {
         let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::GetBundleSignatures {
+        self.try_send(CommittorMessage::GetCommitSignatures {
             respond_to: tx,
-            bundle_id,
+            commit_id,
+            pubkey,
         });
         rx
     }
 
-    async fn get_transaction_logs(
+    fn subscribe_for_results(
         &self,
-        signature: &Signature,
-    ) -> CommittorServiceResult<Option<Vec<String>>> {
+    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedIntentExecutionResult>>
+    {
         let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::GetTransaction {
-            respond_to: tx,
-            signature: *signature,
-        });
-        let tx = rx.await.map_err(CommittorServiceError::RecvError)??;
-        Ok(MagicblockRpcClient::get_logs_from_transaction(tx))
+        self.try_send(CommittorMessage::SubscribeForResults { respond_to: tx });
+        rx
     }
 
-    async fn get_transaction_cus(
+    fn get_transaction(
         &self,
         signature: &Signature,
-    ) -> CommittorServiceResult<Option<u64>> {
+    ) -> oneshot::Receiver<
+        CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
+    > {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::GetTransaction {
             respond_to: tx,
             signature: *signature,
         });
-        let tx = rx.await.map_err(CommittorServiceError::RecvError)??;
-        Ok(MagicblockRpcClient::get_cus_from_transaction(tx))
+
+        rx
+    }
+
+    fn stop(&self) {
+        self.cancel_token.cancel();
+    }
+
+    fn stopped(&self) -> WaitForCancellationFutureOwned {
+        self.cancel_token.clone().cancelled_owned()
     }
 }
 
-#[async_trait]
-pub trait ChangesetCommittor: Send + Sync + 'static {
+pub trait BaseIntentCommittor: Send + Sync + 'static {
     /// Reserves pubkeys used in most commits in a lookup table
     fn reserve_pubkeys_for_committee(
         &self,
@@ -442,33 +436,40 @@ pub trait ChangesetCommittor: Send + Sync + 'static {
         owner: Pubkey,
     ) -> oneshot::Receiver<CommittorServiceResult<Instant>>;
 
-    /// Commits the changeset and returns the reqid
-    fn commit_changeset(
+    /// Commits the changeset and returns
+    fn schedule_base_intent(
         &self,
-        changeset: Changeset,
-        ephemeral_blockhash: Hash,
-        finalize: bool,
-    ) -> oneshot::Receiver<Option<String>>;
+        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
-    /// Gets statuses of accounts that were committed as part of a request with provided reqid
+    /// Subscribes for results of BaseIntent execution
+    fn subscribe_for_results(
+        &self,
+    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedIntentExecutionResult>>;
+
+    /// Gets statuses of accounts that were committed as part of a request with provided message_id
     fn get_commit_statuses(
         &self,
-        reqid: String,
+        message_id: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>>;
 
-    /// Gets signatures of commits processed as part of the bundle with the provided bundle_id
-    fn get_bundle_signatures(
+    /// Gets signatures for commit of particular accounts
+    fn get_commit_signatures(
         &self,
-        bundle_id: u64,
-    ) -> oneshot::Receiver<CommittorServiceResult<Option<BundleSignatureRow>>>;
+        commit_id: u64,
+        pubkey: Pubkey,
+    ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>;
 
-    async fn get_transaction_logs(
+    fn get_transaction(
         &self,
         signature: &Signature,
-    ) -> CommittorServiceResult<Option<Vec<String>>>;
+    ) -> oneshot::Receiver<
+        CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
+    >;
 
-    async fn get_transaction_cus(
-        &self,
-        signature: &Signature,
-    ) -> CommittorServiceResult<Option<u64>>;
+    /// Stops Committor service
+    fn stop(&self);
+
+    /// Returns future which resolves once committor `stop` got called
+    fn stopped(&self) -> WaitForCancellationFutureOwned;
 }

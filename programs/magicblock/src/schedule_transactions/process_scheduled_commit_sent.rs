@@ -19,7 +19,7 @@ use crate::{
 
 #[derive(Default, Debug, Clone)]
 pub struct SentCommit {
-    pub commit_id: u64,
+    pub message_id: u64,
     pub slot: Slot,
     pub blockhash: Hash,
     pub payer: Pubkey,
@@ -48,7 +48,7 @@ struct SentCommitPrintable {
 impl From<SentCommit> for SentCommitPrintable {
     fn from(commit: SentCommit) -> Self {
         Self {
-            id: commit.commit_id,
+            id: commit.message_id,
             slot: commit.slot,
             blockhash: commit.blockhash.to_string(),
             payer: commit.payer.to_string(),
@@ -90,7 +90,7 @@ lazy_static! {
 }
 
 pub fn register_scheduled_commit_sent(commit: SentCommit) {
-    let id = commit.commit_id;
+    let id = commit.message_id;
     SENT_COMMITS
         .write()
         .expect("SENT_COMMITS lock poisoned")
@@ -240,7 +240,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        magicblock_instruction::scheduled_commit_sent_instruction,
+        instruction_utils::InstructionUtils,
         test_utils::{ensure_started_validator, process_instruction},
         validator,
     };
@@ -251,7 +251,7 @@ mod tests {
         let payer = Pubkey::new_unique();
         let acc = Pubkey::new_unique();
         SentCommit {
-            commit_id,
+            message_id: commit_id,
             slot,
             blockhash: Hash::default(),
             payer,
@@ -292,10 +292,10 @@ mod tests {
 
         ensure_started_validator(&mut account_data);
 
-        let mut ix = scheduled_commit_sent_instruction(
+        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(
             &crate::id(),
             &validator::validator_authority_id(),
-            commit.commit_id,
+            commit.message_id,
         );
         ix.accounts[1].is_signer = false;
 
@@ -309,7 +309,7 @@ mod tests {
         );
 
         assert!(
-            get_scheduled_commit(commit.commit_id).is_some(),
+            get_scheduled_commit(commit.message_id).is_some(),
             "does not remove scheduled commit data"
         );
     }
@@ -329,10 +329,10 @@ mod tests {
         };
         ensure_started_validator(&mut account_data);
 
-        let ix = scheduled_commit_sent_instruction(
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
             &crate::id(),
             &fake_validator.pubkey(),
-            commit.commit_id,
+            commit.message_id,
         );
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
@@ -344,7 +344,7 @@ mod tests {
         );
 
         assert!(
-            get_scheduled_commit(commit.commit_id).is_some(),
+            get_scheduled_commit(commit.message_id).is_some(),
             "does not remove scheduled commit data"
         );
     }
@@ -364,10 +364,10 @@ mod tests {
         };
         ensure_started_validator(&mut account_data);
 
-        let ix = scheduled_commit_sent_instruction(
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
             &fake_program.pubkey(),
             &validator::validator_authority_id(),
-            commit.commit_id,
+            commit.message_id,
         );
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
@@ -380,7 +380,7 @@ mod tests {
         );
 
         assert!(
-            get_scheduled_commit(commit.commit_id).is_some(),
+            get_scheduled_commit(commit.message_id).is_some(),
             "does not remove scheduled commit data"
         );
     }
@@ -393,10 +393,10 @@ mod tests {
 
         ensure_started_validator(&mut account_data);
 
-        let ix = scheduled_commit_sent_instruction(
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
             &crate::id(),
             &validator::validator_authority_id(),
-            commit.commit_id,
+            commit.message_id,
         );
 
         let transaction_accounts =
@@ -409,7 +409,7 @@ mod tests {
         );
 
         assert!(
-            get_scheduled_commit(commit.commit_id).is_none(),
+            get_scheduled_commit(commit.message_id).is_none(),
             "removes scheduled commit data"
         );
     }

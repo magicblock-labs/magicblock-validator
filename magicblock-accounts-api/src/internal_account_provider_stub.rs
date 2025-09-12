@@ -3,13 +3,16 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use solana_sdk::{account::AccountSharedData, clock::Slot, pubkey::Pubkey};
+use solana_sdk::{
+    account::AccountSharedData, clock::Slot, hash::Hash, pubkey::Pubkey,
+};
 
 use crate::InternalAccountProvider;
 
 #[derive(Debug, Clone, Default)]
 pub struct InternalAccountProviderStub {
     slot: Slot,
+    hash: Hash,
     accounts: Arc<RwLock<HashMap<Pubkey, AccountSharedData>>>,
 }
 
@@ -36,5 +39,8 @@ impl InternalAccountProvider for InternalAccountProviderStub {
     }
     fn get_slot(&self) -> Slot {
         self.slot
+    }
+    fn get_blockhash(&self) -> Hash {
+        self.hash
     }
 }

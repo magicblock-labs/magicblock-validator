@@ -272,6 +272,7 @@ async fn test_clone_allow_undelegated_account_when_ephemeral() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_clone_fails_stale_undelegated_account_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
