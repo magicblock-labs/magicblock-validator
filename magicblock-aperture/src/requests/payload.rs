@@ -100,22 +100,22 @@ impl<T: Serialize> NotificationPayload<T> {
 }
 
 impl<'id> ResponseErrorPayload<'id> {
-    /// Constructs a full HTTP response for a JSON-RPC error.
+    /// Constructs an HTTP response for a JSON-RPC error.
     pub(crate) fn encode(
         id: Option<&'id Value>,
         error: RpcError,
     ) -> Response<JsonBody> {
-        let this = Self {
+        let payload = Self {
             jsonrpc: "2.0",
             error,
             id,
         };
-        Response::new(JsonBody::from(this))
+        build_json_response(payload)
     }
 }
 
 impl<'id, T: Serialize> ResponsePayload<'id, PayloadResult<T>> {
-    /// Constructs a full HTTP response for a successful result that includes a `context` object.
+    /// Constructs an HTTP response for a successful result with a `context` object.
     pub(crate) fn encode(
         id: &'id Value,
         value: T,
@@ -123,31 +123,47 @@ impl<'id, T: Serialize> ResponsePayload<'id, PayloadResult<T>> {
     ) -> Response<JsonBody> {
         let context = PayloadContext { slot };
         let result = PayloadResult { value, context };
-        let this = Self {
+        let payload = Self {
             jsonrpc: "2.0",
             id,
             result,
         };
-        Response::new(JsonBody::from(this))
+        build_json_response(payload)
     }
 }
 
 impl<'id, T: Serialize> ResponsePayload<'id, T> {
-    /// Constructs a full HTTP response for a successful result that does not require a `context` object.
+    /// Constructs an HTTP response for a successful result without a `context` object.
     pub(crate) fn encode_no_context(
         id: &'id Value,
         result: T,
     ) -> Response<JsonBody> {
-        Response::new(Self::encode_no_context_raw(id, result))
-    }
-
-    /// Serializes a payload into a `JsonBody` without wrapping it in an `HTTP Response`.
-    pub(crate) fn encode_no_context_raw(id: &'id Value, result: T) -> JsonBody {
-        let this = Self {
+        let payload = Self {
             jsonrpc: "2.0",
             id,
             result,
         };
-        JsonBody::from(this)
+        build_json_response(payload)
     }
+
+    /// Serializes a payload into a `JsonBody` without the HTTP wrapper.
+    pub(crate) fn encode_no_context_raw(id: &'id Value, result: T) -> JsonBody {
+        let payload = Self {
+            jsonrpc: "2.0",
+            id,
+            result,
+        };
+        JsonBody::from(payload)
+    }
+}
+
+/// Builds a standard `200 OK` JSON HTTP response with appropriate headers.
+fn build_json_response<T: Serialize>(payload: T) -> Response<JsonBody> {
+    use hyper::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
+    Response::builder()
+        .header(CONTENT_TYPE, "application/json")
+        .header(ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .body(JsonBody::from(payload))
+        // SAFETY: Safe with static values
+        .expect("Building JSON response failed")
 }

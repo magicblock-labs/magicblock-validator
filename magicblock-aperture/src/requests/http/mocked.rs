@@ -22,12 +22,22 @@ impl HttpDispatcher {
     /// identity as the current slot leader.
     pub(crate) fn get_slot_leader(
         &self,
-        request: &mut JsonRequest,
+        request: &JsonRequest,
     ) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
             Serde32Bytes::from(self.context.identity),
         ))
+    }
+
+    /// Handles the `getTransactionCount` RPC request.
+    /// currently we don't keep track of transaction count,
+    /// but with new the new ledger implementation will
+    pub(crate) fn get_transaction_count(
+        &self,
+        request: &JsonRequest,
+    ) -> HandlerResult {
+        Ok(ResponsePayload::encode_no_context(&request.id, 0))
     }
 
     /// Handles the `getSlotLeaders` RPC request.
@@ -101,10 +111,10 @@ impl HttpDispatcher {
     /// This is a **mocked implementation** that returns a supply struct with all values set to zero.
     pub(crate) fn get_supply(&self, request: &JsonRequest) -> HandlerResult {
         let supply = RpcSupply {
-            total: 0,
-            non_circulating: 0,
+            total: u64::MAX,
+            non_circulating: u64::MAX / 2,
             non_circulating_accounts: vec![],
-            circulating: 0,
+            circulating: u64::MAX / 2,
         };
         Ok(ResponsePayload::encode(
             &request.id,
@@ -153,7 +163,7 @@ impl HttpDispatcher {
         let info = json::json! {{
             "epoch": 0,
             "slotIndex": 0,
-            "slotsInEpoch": 0,
+            "slotsInEpoch": u64::MAX,
             "absoluteSlot": 0,
             "blockHeight": 0,
             "transactionCount": Some(0),
@@ -171,7 +181,7 @@ impl HttpDispatcher {
             "firstNormalEpoch": 0,
             "firstNormalSlot": 0,
             "leaderScheduleSlotOffset": 0,
-            "slotsPerEpoch": 0,
+            "slotsPerEpoch": u64::MAX,
             "warmup": true
         }};
         Ok(ResponsePayload::encode_no_context(&request.id, schedule))
