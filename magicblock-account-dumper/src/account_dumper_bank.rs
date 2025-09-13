@@ -6,26 +6,14 @@ use magicblock_core::link::{
     blocks::BlockHash, transactions::TransactionSchedulerHandle,
 };
 use magicblock_mutator::{
-    program::{
-        create_program_buffer_modification, create_program_data_modification,
-        create_program_modifications, ProgramModifications,
-    },
-    transactions::{
-        transaction_to_clone_program, transaction_to_clone_regular_account,
-    },
-    AccountModification,
+    transactions::transaction_to_clone_regular_account, AccountModification,
 };
 use solana_sdk::{
-    account::Account,
-    bpf_loader_upgradeable::{
-        self, get_program_data_address, UpgradeableLoaderState,
-    },
-    pubkey::Pubkey,
-    signature::Signature,
+    account::Account, pubkey::Pubkey, signature::Signature,
     transaction::Transaction,
 };
 
-use crate::{AccountDumper, AccountDumperError, AccountDumperResult};
+use crate::{AccountDumper, AccountDumperResult};
 
 pub struct AccountDumperBank {
     accountsdb: Arc<AccountsDb>,
@@ -129,12 +117,14 @@ impl AccountDumper for AccountDumperBank {
 
     fn dump_program_accounts(
         &self,
-        program_id_pubkey: &Pubkey,
-        program_id_account: &Account,
-        program_data_pubkey: &Pubkey,
-        program_data_account: &Account,
-        program_idl: Option<(Pubkey, Account)>,
+        _program_id_pubkey: &Pubkey,
+        _program_id_account: &Account,
+        _program_data_pubkey: &Pubkey,
+        _program_data_account: &Account,
+        _program_idl: Option<(Pubkey, Account)>,
     ) -> AccountDumperResult<Signature> {
+        todo!("@@@ deprecated, remove soon");
+        /*
         let ProgramModifications {
             program_id_modification,
             program_data_modification,
@@ -166,13 +156,16 @@ impl AccountDumper for AccountDumperBank {
             BlockHash::new_unique(),
         );
         self.execute_transaction(transaction)
+        */
     }
 
     fn dump_program_account_with_old_bpf(
         &self,
-        program_pubkey: &Pubkey,
-        program_account: &Account,
+        _program_pubkey: &Pubkey,
+        _program_account: &Account,
     ) -> AccountDumperResult<Signature> {
+        todo!("@@@ deprecated, remove soon");
+        /*
         // derive program data account address, as expected by upgradeable BPF loader
         let programdata_address = get_program_data_address(program_pubkey);
         let slot = self.accountsdb.slot();
@@ -216,5 +209,6 @@ impl AccountDumper for AccountDumperBank {
             BlockHash::new_unique(),
         );
         self.execute_transaction(transaction)
+        */
     }
 }

@@ -1,3 +1,4 @@
+use log::*;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_transaction_error::TransactionError;
 use solana_transaction_status::UiTransactionEncoding;
@@ -31,7 +32,9 @@ impl HttpDispatcher {
         {
             return Err(TransactionError::AlreadyProcessed.into());
         }
+        debug!("Received transaction: {signature}, ensuring accounts");
         self.ensure_transaction_accounts(&transaction).await?;
+        debug!("Scheduling transaction: {signature}");
 
         // Based on the preflight flag, either execute and await the result,
         // or schedule (fire-and-forget) for background processing.
