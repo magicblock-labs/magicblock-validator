@@ -202,6 +202,14 @@ pub(crate) fn process_mutate_accounts(
             );
             account.borrow_mut().set_rent_epoch(rent_epoch);
         }
+        if let Some(delegated) = modification.delegated {
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: setting delegated to {}",
+                delegated
+            );
+            account.borrow_mut().set_delegated(delegated);
+        }
     }
 
     if lamports_to_debit != 0 {
@@ -306,6 +314,7 @@ mod tests {
             executable: Some(true),
             data: Some(vec![1, 2, 3, 4, 5]),
             rent_epoch: Some(88),
+            delegated: Some(true),
         };
         let ix = InstructionUtils::modify_accounts_instruction(vec![
             modification.clone(),
@@ -329,10 +338,11 @@ mod tests {
 
         assert_eq!(accounts.len(), 2);
 
-        let account_authority: Account =
-            accounts.drain(0..1).next().unwrap().into();
+        let account_authority: AccountSharedData =
+            accounts.drain(0..1).next().unwrap();
+        assert!(!account_authority.delegated());
         assert_matches!(
-            account_authority,
+            account_authority.into(),
             Account {
                 lamports,
                 owner,
@@ -345,10 +355,11 @@ mod tests {
                 assert!(data.is_empty());
             }
         );
-        let modified_account: Account =
-            accounts.drain(0..1).next().unwrap().into();
+        let modified_account: AccountSharedData =
+            accounts.drain(0..1).next().unwrap();
+        assert!(modified_account.delegated());
         assert_matches!(
-            modified_account,
+            modified_account.into(),
             Account {
                 lamports: 200,
                 owner: owner_key,
@@ -407,10 +418,10 @@ mod tests {
 
         assert_eq!(accounts.len(), 3);
 
-        let account_authority: Account =
-            accounts.drain(0..1).next().unwrap().into();
+        let account_authority = accounts.drain(0..1).next().unwrap();
+        assert!(!account_authority.delegated());
         assert_matches!(
-            account_authority,
+            account_authority.into(),
             Account {
                 lamports,
                 owner,
@@ -423,10 +434,10 @@ mod tests {
                 assert!(data.is_empty());
             }
         );
-        let modified_account1: Account =
-            accounts.drain(0..1).next().unwrap().into();
+        let modified_account1 = accounts.drain(0..1).next().unwrap();
+        assert!(!modified_account1.delegated());
         assert_matches!(
-            modified_account1,
+            modified_account1.into(),
             Account {
                 lamports: 300,
                 owner: _,
@@ -437,10 +448,10 @@ mod tests {
                 assert!(data.is_empty());
             }
         );
-        let modified_account2: Account =
-            accounts.drain(0..1).next().unwrap().into();
+        let modified_account2 = accounts.drain(0..1).next().unwrap();
+        assert!(!modified_account2.delegated());
         assert_matches!(
-            modified_account2,
+            modified_account2.into(),
             Account {
                 lamports: 400,
                 owner: _,
@@ -478,6 +489,7 @@ mod tests {
                 pubkey: mod_key1,
                 lamports: Some(1000),
                 data: Some(vec![1, 2, 3, 4, 5]),
+                delegated: Some(true),
                 ..Default::default()
             },
             AccountModification {
@@ -497,6 +509,7 @@ mod tests {
                 executable: Some(true),
                 data: Some(vec![16, 17, 18, 19, 20]),
                 rent_epoch: Some(91),
+                delegated: Some(true),
                 ..Default::default()
             },
         ]);
@@ -518,10 +531,10 @@ mod tests {
             Ok(()),
         );
 
-        let account_authority: Account =
-            accounts.drain(0..1).next().unwrap().into();
+        let account_authority = accounts.drain(0..1).next().unwrap();
+        assert!(!account_authority.delegated());
         assert_matches!(
-            account_authority,
+            account_authority.into(),
             Account {
                 lamports,
                 owner,
@@ -535,10 +548,10 @@ mod tests {
             }
         );
 
-        let modified_account1: Account =
-            accounts.drain(0..1).next().unwrap().into();
+        let modified_account1 = accounts.drain(0..1).next().unwrap();
+        assert!(modified_account1.delegated());
         assert_matches!(
-            modified_account1,
+            modified_account1.into(),
             Account {
                 lamports: 1000,
                 owner: _,
@@ -550,10 +563,10 @@ mod tests {
             }
         );
 
-        let modified_account2: Account =
-            accounts.drain(0..1).next().unwrap().into();
+        let modified_account2 = accounts.drain(0..1).next().unwrap();
+        assert!(!modified_account2.delegated());
         assert_matches!(
-            modified_account2,
+            modified_account2.into(),
             Account {
                 lamports: 200,
                 owner,
@@ -566,10 +579,10 @@ mod tests {
             }
         );
 
-        let modified_account3: Account =
-            accounts.drain(0..1).next().unwrap().into();
+        let modified_account3 = accounts.drain(0..1).next().unwrap();
+        assert!(!modified_account3.delegated());
         assert_matches!(
-            modified_account3,
+            modified_account3.into(),
             Account {
                 lamports: 3000,
                 owner: _,
@@ -581,10 +594,10 @@ mod tests {
             }
         );
 
-        let modified_account4: Account =
-            accounts.drain(0..1).next().unwrap().into();
+        let modified_account4 = accounts.drain(0..1).next().unwrap();
+        assert!(modified_account4.delegated());
         assert_matches!(
-            modified_account4,
+            modified_account4.into(),
             Account {
                 lamports: 100,
                 owner: _,

@@ -58,6 +58,7 @@ impl ChainlinkCloner {
             rent_epoch: Some(account.rent_epoch()),
             data: Some(account.data().to_owned()),
             executable: Some(account.executable()),
+            delegated: Some(account.delegated()),
         };
         InstructionUtils::modify_accounts(
             vec![account_modification],
@@ -82,6 +83,7 @@ impl ChainlinkCloner {
                     rent_epoch: Some(0),
                     data: Some(program.program_data),
                     executable: Some(true),
+                    delegated: Some(false),
                 };
                 Ok(InstructionUtils::modify_accounts(
                     vec![program_modification],
