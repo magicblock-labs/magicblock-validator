@@ -336,7 +336,9 @@ impl DeliveryPreparator {
         lookup_table_keys: &[Pubkey],
     ) {
         self.table_mania
-            .release_pubkeys(&HashSet::from(lookup_table_keys))
+            .release_pubkeys(&HashSet::from_iter(
+                lookup_table_keys.iter().cloned(),
+            ))
             .await;
         todo!()
     }

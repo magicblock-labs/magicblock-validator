@@ -1,6 +1,5 @@
 use std::collections::BinaryHeap;
 
-use rusqlite::Transaction;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     signature::Keypair,
@@ -14,7 +13,7 @@ use crate::{
             PersistorContext, PersistorVisitor,
         },
         utils::TransactionUtils,
-        ArgsTaskType, BaseTask, FinalizeTask,
+        ArgsTask, ArgsTaskType, BaseTask, FinalizeTask,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
@@ -199,9 +198,10 @@ impl TaskStrategist {
 
             let task = {
                 // This is tmp task that will be replaced by old or optimized one
-                let tmp_task = ArgsTaskType::Finalize(FinalizeTask {
-                    delegated_account: Pubkey::new_unique(),
-                });
+                let tmp_task =
+                    ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+                        delegated_account: Pubkey::new_unique(),
+                    }));
                 let tmp_task = Box::new(tmp_task) as Box<dyn BaseTask>;
                 std::mem::replace(&mut tasks[index], tmp_task)
             };

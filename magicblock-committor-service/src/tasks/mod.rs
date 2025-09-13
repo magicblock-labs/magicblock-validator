@@ -204,7 +204,7 @@ impl BaseTask for ArgsTask {
     fn optimize(
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
-        match *self {
+        match self.task_type {
             ArgsTaskType::Commit(value) => {
                 Ok(Box::new(BufferTask::new_preparation_required(
                     BufferTaskType::Commit(value),
@@ -264,7 +264,7 @@ impl BaseTask for ArgsTask {
             return;
         };
 
-        *commit_task.commit_id = commit_id;
+        commit_task.commit_id = commit_id;
     }
 }
 
@@ -359,7 +359,7 @@ impl BaseTask for BufferTask {
         if matches!(new_state, PreparationState::NotNeeded) {
             Err(BaseTaskError::PreparationStateTransitionError)
         } else {
-            *self.preparation_state = new_state;
+            self.preparation_state = new_state;
             Ok(())
         }
     }

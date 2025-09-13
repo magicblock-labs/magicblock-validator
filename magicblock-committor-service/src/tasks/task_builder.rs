@@ -15,8 +15,8 @@ use crate::{
     },
     persist::IntentPersister,
     tasks::{
-        ArgsTaskType, BaseActionTask, BaseTask, CommitTask, FinalizeTask,
-        UndelegateTask,
+        ArgsTask, ArgsTaskType, BaseActionTask, BaseTask, CommitTask,
+        FinalizeTask, UndelegateTask,
     },
 };
 
@@ -57,8 +57,9 @@ impl TasksBuilder for TaskBuilderV1 {
                             context: Context::Standalone,
                             action: el.clone(),
                         };
-                        Box::new(ArgsTaskType::BaseAction(task))
-                            as Box<dyn BaseTask>
+                        let task =
+                            ArgsTask::new(ArgsTaskType::BaseAction(task));
+                        Box::new(task) as Box<dyn BaseTask>
                     })
                     .collect();
 
@@ -98,7 +99,7 @@ impl TasksBuilder for TaskBuilderV1 {
                     committed_account: account.clone(),
                 });
 
-                Box::new(task) as Box<dyn BaseTask>
+                Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
             })
             .collect();
 
@@ -112,9 +113,10 @@ impl TasksBuilder for TaskBuilderV1 {
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
         fn finalize_task(account: &CommittedAccount) -> Box<dyn BaseTask> {
-            Box::new(ArgsTaskType::Finalize(FinalizeTask {
+            let task_type = ArgsTaskType::Finalize(FinalizeTask {
                 delegated_account: account.pubkey,
-            }))
+            });
+            Box::new(ArgsTask::new(task_type))
         }
 
         // Helper to create an undelegate task
@@ -122,11 +124,12 @@ impl TasksBuilder for TaskBuilderV1 {
             account: &CommittedAccount,
             rent_reimbursement: &Pubkey,
         ) -> Box<dyn BaseTask> {
-            Box::new(ArgsTaskType::Undelegate(UndelegateTask {
+            let task_type = ArgsTaskType::Undelegate(UndelegateTask {
                 delegated_account: account.pubkey,
                 owner_program: account.account.owner,
                 rent_reimbursement: *rent_reimbursement,
-            }))
+            });
+            Box::new(ArgsTask::new(task_type))
         }
 
         // Helper to process commit types
@@ -148,8 +151,9 @@ impl TasksBuilder for TaskBuilderV1 {
                             context: Context::Commit,
                             action: action.clone(),
                         };
-                        Box::new(ArgsTaskType::BaseAction(task))
-                            as Box<dyn BaseTask>
+                        let task =
+                            ArgsTask::new(ArgsTaskType::BaseAction(task));
+                        Box::new(task) as Box<dyn BaseTask>
                     }));
                     tasks
                 }
@@ -187,8 +191,9 @@ impl TasksBuilder for TaskBuilderV1 {
                                 context: Context::Undelegate,
                                 action: action.clone(),
                             };
-                            Box::new(ArgsTaskType::BaseAction(task))
-                                as Box<dyn BaseTask>
+                            let task =
+                                ArgsTask::new(ArgsTaskType::BaseAction(task));
+                            Box::new(task) as Box<dyn BaseTask>
                         }));
 
                         Ok(tasks)

@@ -1,11 +1,8 @@
-use magicblock_committor_program::instruction_builder::close_buffer::{
-    create_close_ix, CreateCloseIxArgs,
-};
 use solana_pubkey::Pubkey;
-use solana_sdk::instruction::Instruction;
 
 use crate::tasks::{
-    visitor::Visitor, ArgsTask, ArgsTaskType, BufferTask, BufferTaskType,
+    visitor::Visitor, ArgsTask, ArgsTaskType, BaseTask, BufferTask,
+    BufferTaskType,
 };
 
 pub struct CommitMeta {
@@ -48,7 +45,7 @@ impl Visitor for TaskVisitorUtils {
             return;
         };
 
-        let BufferTaskType::Commit(ref commit_task) = task;
+        let BufferTaskType::Commit(ref commit_task) = task.task_type;
         *commit_meta = Some(CommitMeta {
             committed_pubkey: commit_task.committed_account.pubkey,
             commit_id: commit_task.commit_id,

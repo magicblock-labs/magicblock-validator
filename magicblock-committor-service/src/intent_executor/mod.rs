@@ -14,8 +14,7 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
-use rusqlite::Transaction;
-use solana_pubkey::{pubkey, Pubkey};
+use solana_pubkey::Pubkey;
 use solana_rpc_client_api::client_error::ErrorKind;
 use solana_sdk::{
     instruction::InstructionError,
@@ -184,7 +183,6 @@ where
 
             Ok(output)
         } else {
-            trace!("Executing intent in two stages");
             // Build strategy for Commit stage
             let commit_strategy = TaskStrategist::build_strategy(
                 commit_tasks,
@@ -200,36 +198,15 @@ where
             )?;
 
             // TODO: move and handle retries within those/
+            trace!("Executing intent in two stages");
             let output = self
-                .execute_two_stages(
+                .two_stage_execution_flow(
+                    base_intent,
                     commit_strategy,
                     finalize_strategy,
                     persister,
                 )
                 .await?;
-
-            // Cleanup
-            {
-                let authority_copy = self.authority.insecure_clone();
-                tokio::spawn(async move {
-                    self.transaction_preparator
-                        .cleanup_for_strategy(&authority_copy, commit_strategy)
-                        .await;
-                });
-            }
-
-            {
-                let authority_copy = self.authority.insecure_clone();
-                tokio::spawn(async move {
-                    self.transaction_preparator
-                        .cleanup_for_strategy(
-                            &authority_copy,
-                            &finalize_strategy.optimized_tasks,
-                            &finalize_strategy.lookup_tables_keys,
-                        )
-                        .await;
-                });
-            }
 
             Ok(output)
         }
@@ -243,6 +220,8 @@ where
         mut transaction_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
+        const RECURSION_CEILING: u8 = 10;
+
         // Prepare everythig for execution
         let prepared_message = self
             .transaction_preparator
@@ -254,176 +233,123 @@ where
             .await
             .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
 
-        let authority_copy = self.authority.insecure_clone();
-        let transaction_preparator_copy = self.transaction_preparator.clone();
+        let mut to_cleanup = Vec::new();
+        let mut i = 0;
+        let (outcome, cleanup) = loop {
+            i += 1;
 
-        let result = self
-            .execute_message_with_retries(
-                prepared_message,
-                &transaction_strategy.optimized_tasks,
-            )
-            .await;
-        match result {
-            Ok(value) => {
-                tokio::spawn(async move {
-                    transaction_preparator_copy
-                        .cleanup_for_strategy(
-                            &authority_copy,
-                            &transaction_strategy.optimized_tasks,
-                            &transaction_strategy.lookup_tables_keys,
-                        )
-                        .await
-                });
-
-                Ok(ExecutionOutput::SingleStage(value))
-            }
-            Err(TransactionStrategyExecutionError::ActionsError) => {
-                // Strip away actions
-                let (optimized_tasks, action_tasks) = transaction_strategy
-                    .optimized_tasks
-                    .into_iter()
-                    .partition(|el| el.task_type() != TaskType::Action);
-                transaction_strategy.optimized_tasks = optimized_tasks;
-
-                let old_alts = transaction_strategy
-                    .dummy_revaluate_alts(&authority_copy.pubkey());
-                // Retry
-                let res = self
-                    .single_stage_execution_flow(
-                        base_intent,
+            let result = self
+                .execute_message_with_retries(
+                    prepared_message.clone(),
+                    &transaction_strategy.optimized_tasks,
+                )
+                .await;
+            let (res, cleanup) = match result {
+                // break with result, strategy that was executed at this point has to be returned for cleanup
+                Ok(value) => {
+                    break (
+                        Ok(ExecutionOutput::SingleStage(value)),
                         transaction_strategy,
-                        persister,
-                    )
-                    .await;
+                    );
+                }
+                res @ Err(TransactionStrategyExecutionError::ActionsError) => {
+                    // Here we patch strategy for it to be retried in next iteration
+                    // & we also record data that has to be cleaned up after patch
+                    let (optimized_tasks, action_tasks) = transaction_strategy
+                        .optimized_tasks
+                        .into_iter()
+                        .partition(|el| {
+                            // Strip away actions
+                            el.task_type() != TaskType::Action
+                        });
+                    transaction_strategy.optimized_tasks = optimized_tasks;
 
-                // Cleanup. TODO(edwin): improve
-                tokio::spawn(async move {
-                    transaction_preparator_copy
-                        .cleanup_for_strategy(
-                            &authority_copy,
-                            &action_tasks,
-                            &old_alts,
-                        )
-                        .await
-                });
+                    let old_alts = transaction_strategy
+                        .dummy_revaluate_alts(&self.authority.pubkey());
 
-                res
-            }
-            Err(TransactionStrategyExecutionError::CommitIDError) => {
-                // TODO(edwin): unwrap
-                let committed_pubkeys =
-                    base_intent.get_committed_pubkeys().unwrap();
-                let to_cleanup = self
-                    .handle_commit_id_error(
-                        &committed_pubkeys,
-                        &mut transaction_strategy,
-                    )
-                    .await?;
-
-                // Retry
-                let res = self
-                    .single_stage_execution_flow(
-                        base_intent,
-                        transaction_strategy,
-                        persister,
-                    )
-                    .await;
-
-                // TODO: improve
-                tokio::spawn(async move {
-                    transaction_preparator_copy
-                        .cleanup_for_strategy(
-                            &authority_copy,
-                            &to_cleanup.optimized_tasks,
-                            &to_cleanup.lookup_tables_keys,
-                        )
-                        .await
-                });
-
-                res
-            }
-            Err(TransactionStrategyExecutionError::CpiLimitError) => {
-                // We encountered error "Max instruction trace length exceeded"
-                // All the tasks a prepared to be executed at this point
-                // We attempt Two stages commit flow, need to split tasks up
-                // TODO(edwin): doesn't take in account Standalone Action. problem?
-                let (commit_stage_tasks, finalize_stage_tasks): (
-                    Vec<_>,
-                    Vec<_>,
-                ) = transaction_strategy
-                    .optimized_tasks
-                    .into_iter()
-                    .partition(|el| el.task_type() == TaskType::Commit);
-
-                let commit_alt_pubkeys =
-                    if transaction_strategy.lookup_tables_keys.is_empty() {
-                        vec![]
-                    } else {
-                        TaskStrategist::collect_lookup_table_keys(
-                            &self.authority.pubkey(),
-                            &commit_stage_tasks,
-                        )
+                    let to_cleanup = TransactionStrategy {
+                        optimized_tasks: action_tasks,
+                        lookup_tables_keys: old_alts,
                     };
-                let commit_strategy = TransactionStrategy {
-                    optimized_tasks: commit_stage_tasks,
-                    lookup_tables_keys: commit_alt_pubkeys,
-                };
 
-                let finalize_alt_pubkeys =
-                    if transaction_strategy.lookup_tables_keys.is_empty() {
-                        vec![]
-                    } else {
-                        TaskStrategist::collect_lookup_table_keys(
-                            &self.authority.pubkey(),
-                            &finalize_stage_tasks,
+                    (res, to_cleanup)
+                }
+                res @ Err(TransactionStrategyExecutionError::CommitIDError) => {
+                    // Here we patch strategy for it to be retried in next iteration
+                    // & we also record data that has to be cleaned up after patch
+                    // TODO(edwin): unwrap
+                    let committed_pubkeys =
+                        base_intent.get_committed_pubkeys().unwrap();
+                    let to_cleanup = self
+                        .handle_commit_id_error(
+                            &committed_pubkeys,
+                            &mut transaction_strategy,
                         )
-                    };
-                let finalize_strategy = TransactionStrategy {
-                    optimized_tasks: finalize_stage_tasks,
-                    lookup_tables_keys: finalize_alt_pubkeys,
-                };
+                        .await?;
 
-                let res = self
-                    .two_stage_execution_flow(
-                        base_intent,
-                        commit_strategy,
-                        finalize_strategy,
-                        persister,
-                    )
-                    .await;
+                    (res, to_cleanup)
+                }
+                Err(TransactionStrategyExecutionError::CpiLimitError) => {
+                    // With actions, we can't predict num of CPIs
+                    // If we get here we will try to switch from Single stage to Two Stage commit
+                    // Note that this not necessarily will pass at the end due to the same reason
+                    let (commit_strategy, finalize_strategy, to_cleanup) =
+                        self.handle_cpi_limit_error(transaction_strategy);
 
-                // TODO: improve
-                tokio::spawn(async move {
-                    transaction_preparator_copy
-                        .cleanup_for_strategy(
-                            &authority_copy,
-                            &[],
-                            &transaction_strategy.lookup_tables_keys,
+                    let res = self
+                        .two_stage_execution_flow(
+                            base_intent,
+                            commit_strategy,
+                            finalize_strategy,
+                            persister,
                         )
-                        .await
-                });
-                res
+                        .await;
+
+                    // Break right away with result from Two stage commit
+                    // & return strategy that has to be cleaned up
+                    break (res, to_cleanup);
+                }
+                Err(TransactionStrategyExecutionError::InternalError(err)) => {
+                    // Error that we can't handle - break with cleanup data
+                    let signature = err.signature();
+                    let res = Err(IntentExecutorError::FailedToFinalizeError {
+                        err,
+                        commit_signature: signature,
+                        finalize_signature: signature,
+                    });
+
+                    break (res, transaction_strategy);
+                }
+            };
+
+            if i == RECURSION_CEILING {
+                error!(
+                    "CRITICAL! Recursion ceiling reached in intent execution."
+                );
+                let res = res
+                    .map(|signature| ExecutionOutput::SingleStage(signature))
+                    .map_err(|err| {
+                        IntentExecutorError::from_strategy_execution_error(
+                            err,
+                            |internal_err| {
+                                let signature = internal_err.signature();
+                                IntentExecutorError::FailedToFinalizeError {
+                                    err: internal_err,
+                                    commit_signature: signature,
+                                    finalize_signature: signature,
+                                }
+                            },
+                        )
+                    });
+
+                break (res, cleanup);
+            } else {
+                to_cleanup.push(cleanup);
             }
-            Err(TransactionStrategyExecutionError::InternalError(err)) => {
-                // Init cleanup of background
-                tokio::spawn(async move {
-                    transaction_preparator_copy
-                        .cleanup_for_strategy(
-                            &authority_copy,
-                            &transaction_strategy.optimized_tasks,
-                            &transaction_strategy.lookup_tables_keys,
-                        )
-                        .await
-                });
+        };
 
-                let signature = err.signature();
-                Err(IntentExecutorError::FailedToFinalizeError {
-                    err,
-                    commit_signature: signature,
-                    finalize_signature: signature,
-                })
-            }
-        }
+        to_cleanup.push(cleanup);
+        outcome
     }
 
     pub async fn two_stage_execution_flow<P: IntentPersister>(
@@ -433,91 +359,148 @@ where
         mut finalize_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        // Prepare everything for Commit stage execution
-        let commit_message = self
-            .transaction_preparator
-            .prepare_for_strategy(
-                &self.authority,
-                &mut commit_strategy,
-                persister,
-            )
-            .await
-            .map_err(IntentExecutorError::FailedCommitPreparationError)?;
-
-        let result = self
-            .execute_message_with_retries(
-                commit_message,
-                &commit_strategy.optimized_tasks,
-            )
-            .await;
-
-        let authority_copy = self.authority.insecure_clone();
-        let transaction_preparator_copy = self.transaction_preparator.clone();
-        let commit_signature = match result {
-            Ok(value) => Ok(value),
-            Err(TransactionStrategyExecutionError::CommitIDError) => {
-                //TODO: unwrap
-                let committed_pubkeys =
-                    base_intent.get_committed_pubkeys().unwrap();
-                let to_cleanup = self
-                    .handle_commit_id_error(
-                        &committed_pubkeys,
-                        &mut commit_strategy,
-                    )
-                    .await?;
-
-                // Retry
-                let res = self
-                    .two_stage_execution_flow(
-                        base_intent,
-                        commit_strategy,
-                        finalize_strategy,
-                        persister,
-                    )
-                    .await;
-
-                // TODO: improve
-                tokio::spawn(async move {
-                    transaction_preparator_copy
-                        .cleanup_for_strategy(
-                            &authority_copy,
-                            &to_cleanup.optimized_tasks,
-                            &to_cleanup.lookup_tables_keys,
-                        )
-                        .await
-                });
-
-                return res;
-            }
-            // TODO: logs?
-            // Unexpected here?
-            Err(TransactionStrategyExecutionError::ActionsError) => {
-                Err(IntentExecutorError::ActionsError)
-            }
-            // Can't handle - propagate
-            Err(TransactionStrategyExecutionError::CpiLimitError) => {
-                Err(IntentExecutorError::CpiLimitError)
-            }
-            // Can't handle - propagate
-            Err(TransactionStrategyExecutionError::InternalError(err)) => {
-                let signature = err.signature();
-                Err(IntentExecutorError::FailedToCommitError { err, signature })
-            }
-        }?;
-
-        let finalize_message = self
-            .transaction_preparator
-            .prepare_for_strategy(
-                &self.authority,
-                &mut finalize_strategy,
-                persister,
-            )
-            .await
-            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
-
-        let result = self
-            .execute_message_with_retries(finalize_message, &finalize_strategy)
-            .await;
+        // const FINALIZE_MAX_RETRIES: usize = 10;
+        //
+        // // Prepare everything for Commit stage execution
+        // let commit_message = self
+        //     .transaction_preparator
+        //     .prepare_for_strategy(
+        //         &self.authority,
+        //         &mut commit_strategy,
+        //         persister,
+        //     )
+        //     .await
+        //     .map_err(IntentExecutorError::FailedCommitPreparationError)?;
+        //
+        // let result = self
+        //     .execute_message_with_retries(
+        //         commit_message,
+        //         &commit_strategy.optimized_tasks,
+        //     )
+        //     .await;
+        //
+        // let authority_copy = self.authority.insecure_clone();
+        // let transaction_preparator_copy = self.transaction_preparator.clone();
+        // let commit_signature = match result {
+        //     Ok(value) => Ok(value),
+        //     Err(TransactionStrategyExecutionError::CommitIDError) => {
+        //         //TODO: unwrap
+        //         let committed_pubkeys =
+        //             base_intent.get_committed_pubkeys().unwrap();
+        //         let to_cleanup = self
+        //             .handle_commit_id_error(
+        //                 &committed_pubkeys,
+        //                 &mut commit_strategy,
+        //             )
+        //             .await?;
+        //
+        //         // Retry
+        //         let res = self
+        //             .two_stage_execution_flow(
+        //                 base_intent,
+        //                 commit_strategy,
+        //                 finalize_strategy,
+        //                 persister,
+        //             )
+        //             .await;
+        //
+        //         // TODO: improve
+        //         tokio::spawn(async move {
+        //             transaction_preparator_copy
+        //                 .cleanup_for_strategy(
+        //                     &authority_copy,
+        //                     &to_cleanup.optimized_tasks,
+        //                     &to_cleanup.lookup_tables_keys,
+        //                 )
+        //                 .await
+        //         });
+        //
+        //         return res;
+        //     }
+        //     // TODO: logs?
+        //     // Unexpected here?
+        //     Err(TransactionStrategyExecutionError::ActionsError) => {
+        //         Err(IntentExecutorError::ActionsError)
+        //     }
+        //     // Can't handle - propagate
+        //     Err(TransactionStrategyExecutionError::CpiLimitError) => {
+        //         Err(IntentExecutorError::CpiLimitError)
+        //     }
+        //     // Can't handle - propagate
+        //     Err(TransactionStrategyExecutionError::InternalError(err)) => {
+        //         let signature = err.signature();
+        //         Err(IntentExecutorError::FailedToCommitError { err, signature })
+        //     }
+        // }?;
+        //
+        // let finalize_message = self
+        //     .transaction_preparator
+        //     .prepare_for_strategy(
+        //         &self.authority,
+        //         &mut finalize_strategy,
+        //         persister,
+        //     )
+        //     .await
+        //     .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
+        //
+        // let mut i = 0;
+        // let mut to_cleanup = Vec::new();
+        // let finalize_signature = loop {
+        //     i += 1;
+        //     let result = self
+        //         .execute_message_with_retries(
+        //             finalize_message.clone(),
+        //             &finalize_strategy.optimized_tasks,
+        //         )
+        //         .await;
+        //
+        //     if i == FINALIZE_MAX_RETRIES {
+        //         // TODO: improve
+        //         break match result {
+        //             Ok(value) => Ok(value),
+        //             Err(TransactionStrategyExecutionError::CommitIDError) => {
+        //                 Err(IntentExecutorError::CommitIDError)
+        //             }
+        //             Err(TransactionStrategyExecutionError::CpiLimitError) => {
+        //                 Err(IntentExecutorError::CpiLimitError)
+        //             }
+        //             Err(TransactionStrategyExecutionError::ActionsError) => {
+        //                 Err(IntentExecutorError::ActionsError)
+        //             }
+        //             Err(TransactionStrategyExecutionError::InternalError(
+        //                 err,
+        //             )) => {
+        //                 let finalize_signature = err.signature();
+        //                 Err(IntentExecutorError::FailedToFinalizeError {
+        //                     err,
+        //                     commit_signature: Some(commit_signature),
+        //                     finalize_signature,
+        //                 })
+        //             }
+        //         };
+        //     }
+        //
+        //     match result {
+        //         Ok(value) => break Ok(value),
+        //         Err(TransactionStrategyExecutionError::ActionsError) => {
+        //             let cleanup =
+        //                 self.handle_actions_error(&mut finalize_strategy);
+        //             to_cleanup.push(cleanup);
+        //         }
+        //         Err(TransactionStrategyExecutionError::CommitIDError) => {
+        //             // Unexpected - break the loop
+        //             warn!("Unexpected CommitIdError in finalize stage!");
+        //             break Err(IntentExecutorError::CommitIDError);
+        //         }
+        //         Err(TransactionStrategyExecutionError::CpiLimitError) => {}
+        //         Err(TransactionStrategyExecutionError::InternalError(err)) => {}
+        //     };
+        // }?;
+        //
+        // Ok(ExecutionOutput::TwoStage {
+        //     commit_signature,
+        //     finalize_signature,
+        // })
         todo!()
     }
 
@@ -572,67 +555,81 @@ where
         })
     }
 
-    /// Executes Intent in 2 stage: Commit & Finalize
-    async fn execute_two_stages<P: IntentPersister>(
+    /// Handles actions error, stripping away actions
+    /// Returns [`TransactionStrategy`] to be cleaned up
+    fn handle_actions_error(
         &self,
-        commit_strategy: &TransactionStrategy,
-        finalize_strategy: &TransactionStrategy,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<ExecutionOutput> {
-        // Prepare everything for Commit stage execution
-        let result = self
-            .transaction_preparator
-            .prepare_for_strategy(&self.authority, commit_strategy, persister)
-            .await;
+        strategy: &mut TransactionStrategy,
+    ) -> TransactionStrategy {
+        // Strip away actions
+        let (optimized_tasks, action_tasks) = strategy
+            .optimized_tasks
+            .drain(..)
+            .into_iter()
+            .partition(|el| el.task_type() != TaskType::Action);
+        strategy.optimized_tasks = optimized_tasks;
 
-        // TODO: improve this, the thing is from delivery preparator we shall get only RpcError
-        let prepared_commit_message = match result {
-            Ok(value) => Ok(value),
-            Err(TransactionPreparatorError::FailedToFitError) => {
-                unreachable!("This is checked in TaskBuilder!")
-            }
-            err @ Err(TransactionPreparatorError::SignerError(_)) => err,
-            err @ Err(TransactionPreparatorError::DeliveryPreparationError(
-                _,
-            )) => err,
+        let old_alts = strategy.dummy_revaluate_alts(&self.authority.pubkey());
+
+        TransactionStrategy {
+            optimized_tasks: action_tasks,
+            lookup_tables_keys: old_alts,
         }
-        .map_err(IntentExecutorError::FailedCommitPreparationError)?;
+    }
 
-        let commit_signature = self
-            .send_prepared_message(prepared_commit_message)
-            .await
-            .map_err(|err| {
-                let signature = err.signature();
-                IntentExecutorError::FailedToCommitError { err, signature }
-            })?
-            .into_signature();
-        trace!("Commit stage succeeded: {}", commit_signature);
+    /// Handle CPI limit error, splits single strategy flow into 2
+    /// Returns Commit stage strategy, Finalize stage strategy and strategy to clean up
+    fn handle_cpi_limit_error(
+        &self,
+        strategy: TransactionStrategy,
+    ) -> (
+        TransactionStrategy,
+        TransactionStrategy,
+        TransactionStrategy,
+    ) {
+        // We encountered error "Max instruction trace length exceeded"
+        // All the tasks a prepared to be executed at this point
+        // We attempt Two stages commit flow, need to split tasks up
+        // TODO(edwin): doesn't take in account Standalone Action. problem?
+        let (commit_stage_tasks, finalize_stage_tasks): (Vec<_>, Vec<_>) =
+            strategy
+                .optimized_tasks
+                .into_iter()
+                .partition(|el| el.task_type() == TaskType::Commit);
 
-        // Prepare everything for Finalize stage execution
-        let prepared_finalize_message = self
-            .transaction_preparator
-            .prepare_for_strategy(&self.authority, finalize_strategy, persister)
-            .await
-            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
+        let commit_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
+            vec![]
+        } else {
+            TaskStrategist::collect_lookup_table_keys(
+                &self.authority.pubkey(),
+                &commit_stage_tasks,
+            )
+        };
+        let commit_strategy = TransactionStrategy {
+            optimized_tasks: commit_stage_tasks,
+            lookup_tables_keys: commit_alt_pubkeys,
+        };
 
-        let finalize_signature = self
-            .send_prepared_message(prepared_finalize_message)
-            .await
-            .map_err(|err| {
-                let finalize_signature = err.signature();
-                IntentExecutorError::FailedToFinalizeError {
-                    err,
-                    commit_signature: Some(commit_signature),
-                    finalize_signature,
-                }
-            })?
-            .into_signature();
-        trace!("Finalize stage succeeded: {}", finalize_signature);
+        let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
+            vec![]
+        } else {
+            TaskStrategist::collect_lookup_table_keys(
+                &self.authority.pubkey(),
+                &finalize_stage_tasks,
+            )
+        };
+        let finalize_strategy = TransactionStrategy {
+            optimized_tasks: finalize_stage_tasks,
+            lookup_tables_keys: finalize_alt_pubkeys,
+        };
 
-        Ok(ExecutionOutput::TwoStage {
-            commit_signature,
-            finalize_signature,
-        })
+        // We tasksto clean up only ALTs
+        let to_cleanup = TransactionStrategy {
+            optimized_tasks: vec![],
+            lookup_tables_keys: strategy.lookup_tables_keys,
+        };
+
+        (commit_strategy, finalize_strategy, to_cleanup)
     }
 
     /// Shared helper for sending transactions
@@ -708,6 +705,10 @@ where
 
                 return;
             }
+            // TODO(edwin): Should we moe this inside InternalError?
+            Err(IntentExecutorError::CommitIDError)
+            | Err(IntentExecutorError::ActionsError)
+            | Err(IntentExecutorError::CpiLimitError) => None,
             Err(IntentExecutorError::EmptyIntentError)
             | Err(IntentExecutorError::FailedToFitError)
             | Err(IntentExecutorError::TaskBuilderError(_))

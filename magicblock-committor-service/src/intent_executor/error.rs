@@ -1,9 +1,5 @@
 use magicblock_rpc_client::MagicBlockRpcClientError;
-use solana_sdk::{
-    instruction::InstructionError,
-    signature::{Signature, SignerError},
-    transaction::TransactionError,
-};
+use solana_sdk::signature::{Signature, SignerError};
 
 use crate::{
     tasks::{
@@ -63,6 +59,31 @@ pub enum IntentExecutorError {
     FailedCommitPreparationError(#[source] TransactionPreparatorError),
     #[error("FailedFinalizePreparationError: {0}")]
     FailedFinalizePreparationError(#[source] TransactionPreparatorError),
+}
+
+impl IntentExecutorError {
+    pub fn from_strategy_execution_error<F>(
+        error: TransactionStrategyExecutionError,
+        converter: F,
+    ) -> IntentExecutorError
+    where
+        F: FnOnce(InternalError) -> IntentExecutorError,
+    {
+        match error {
+            TransactionStrategyExecutionError::ActionsError => {
+                IntentExecutorError::ActionsError
+            }
+            TransactionStrategyExecutionError::CpiLimitError => {
+                IntentExecutorError::CpiLimitError
+            }
+            TransactionStrategyExecutionError::CommitIDError => {
+                IntentExecutorError::CommitIDError
+            }
+            TransactionStrategyExecutionError::InternalError(err) => {
+                converter(err)
+            }
+        }
+    }
 }
 
 /// Those are the errors that may occur during Commit/Finalize stages on Base layer
