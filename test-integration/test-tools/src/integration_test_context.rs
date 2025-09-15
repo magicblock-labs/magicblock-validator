@@ -351,6 +351,34 @@ impl IntegrationTestContext {
         })
     }
 
+    pub fn fetch_chain_multiple_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> anyhow::Result<Vec<Option<Account>>> {
+        self.try_chain_client().and_then(|chain_client| {
+            Self::fetch_multiple_accounts(
+                chain_client,
+                pubkeys,
+                self.commitment,
+                "chain",
+            )
+        })
+    }
+
+    pub fn fetch_ephem_multiple_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> anyhow::Result<Vec<Option<Account>>> {
+        self.try_ephem_client().and_then(|ephem_client| {
+            Self::fetch_multiple_accounts(
+                ephem_client,
+                pubkeys,
+                self.commitment,
+                "ephemeral",
+            )
+        })
+    }
+
     fn fetch_account(
         rpc_client: &RpcClient,
         pubkey: Pubkey,
@@ -369,6 +397,23 @@ impl IntegrationTestContext {
             .ok_or_else(|| {
                 anyhow::anyhow!("Account '{}' not found on {}", pubkey, cluster)
             })
+    }
+
+    fn fetch_multiple_accounts(
+        rpc_client: &RpcClient,
+        pubkeys: &[Pubkey],
+        commitment: CommitmentConfig,
+        cluster: &str,
+    ) -> anyhow::Result<Vec<Option<Account>>> {
+        Ok(rpc_client
+            .get_multiple_accounts_with_commitment(pubkeys, commitment)
+            .with_context(|| {
+                format!(
+                    "Failed to fetch {} multiple account data for '{:?}'",
+                    cluster, pubkeys
+                )
+            })?
+            .value)
     }
 
     pub fn fetch_ephem_account_balance(

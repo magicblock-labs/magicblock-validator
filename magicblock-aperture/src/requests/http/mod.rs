@@ -79,7 +79,8 @@ pub(crate) async fn extract_bytes(
 ///
 /// This block contains common helper methods used by various RPC request handlers.
 impl HttpDispatcher {
-    /// Fetches an account's data from the `AccountsDb`.
+    /// Fetches an account's data from the `AccountsDb` filling it in from chain
+    /// as needed.
     async fn read_account_with_ensure(
         &self,
         pubkey: &Pubkey,
@@ -94,8 +95,36 @@ impl HttpDispatcher {
                 // Log the error and return whatever is in the accounts db
                 error!("Failed to ensure account {pubkey}: {e}");
             });
-        debug!("Reading account {pubkey} from accountsdb");
         self.accountsdb.get_account(pubkey)
+    }
+
+    /// Fetches multiple account's data from the `AccountsDb` filling them in from chain
+    /// as needed.
+    async fn read_accounts_with_ensure(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> Vec<Option<AccountSharedData>> {
+        if log::log_enabled!(log::Level::Debug) {
+            let pubkeys = pubkeys
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            debug!("Ensuring accounts {pubkeys}");
+        }
+        let _ =
+            self.chainlink
+                .ensure_accounts(pubkeys)
+                .await
+                .inspect_err(|e| {
+                    // There is nothing we can do if fetching the accounts fails
+                    // Log the error and return whatever is in the accounts db
+                    error!("Failed to ensure accounts: {e}");
+                });
+        pubkeys
+            .iter()
+            .map(|pubkey| self.accountsdb.get_account(pubkey))
+            .collect()
     }
 
     /// Decodes, validates, and sanitizes a transaction from its string representation.
