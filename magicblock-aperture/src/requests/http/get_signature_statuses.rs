@@ -1,6 +1,11 @@
-use solana_transaction_status::TransactionStatus;
+use solana_transaction_status::{
+    TransactionConfirmationStatus, TransactionStatus,
+};
 
 use super::prelude::*;
+
+const DEFAULT_CONFIRMATION_STATUS: Option<TransactionConfirmationStatus> =
+    Some(TransactionConfirmationStatus::Finalized);
 
 impl HttpDispatcher {
     /// Handles the `getSignatureStatuses` RPC request.
@@ -28,7 +33,7 @@ impl HttpDispatcher {
                     status: cached_status.result.clone(),
                     confirmations: None, // This validator does not track confirmations.
                     err: None, // `status` field contains the error; `err` is deprecated.
-                    confirmation_status: None,
+                    confirmation_status: DEFAULT_CONFIRMATION_STATUS,
                 }));
                 continue;
             }
@@ -42,7 +47,7 @@ impl HttpDispatcher {
                     status: meta.status,
                     confirmations: None,
                     err: None,
-                    confirmation_status: None,
+                    confirmation_status: DEFAULT_CONFIRMATION_STATUS,
                 }));
             } else {
                 // The signature was not found in the cache or the ledger.
