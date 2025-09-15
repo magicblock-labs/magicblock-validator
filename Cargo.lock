@@ -4037,6 +4037,7 @@ dependencies = [
  "solana-feature-set",
  "solana-fee",
  "solana-fee-structure",
+ "solana-loader-v4-program",
  "solana-program",
  "solana-program-runtime",
  "solana-pubkey",
