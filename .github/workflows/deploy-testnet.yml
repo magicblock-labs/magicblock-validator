@@ -6,16 +6,66 @@ on:
   pull_request:
     branches: [ master ]
     types: [ closed ]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        default: 'master'
+        required: true
 
 jobs:
-  trigger-deploy:
-    if: github.event_name == 'push' || (github.event.pull_request.merged == true)
+  check-authorization:
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    outputs:
+      authorized: ${{ steps.auth.outputs.authorized }}
     steps:
-      - name: Checkout this magicblock-validator
-        uses: actions/checkout@v2
+      - name: Check user authorization
+        id: auth
+        run: |
+          AUTHORIZED_USERS="${{ secrets.AUTHORIZED_USERS }}"
+          USER="${{ github.actor }}"
+          IFS=' ' read -ra AUTH_ARRAY <<< "$AUTHORIZED_USERS"
+          
+          if [[ " ${AUTH_ARRAY[@]} " =~ " ${USER} " ]]; then
+            echo "User $USER is authorized"
+            echo "authorized=true" >> $GITHUB_OUTPUT
+          else
+            echo "User $USER is not authorized"
+            echo "Authorized users: $AUTHORIZED_USERS"
+            echo "authorized=false" >> $GITHUB_OUTPUT
+          fi
+
+  trigger-deploy:
+    runs-on: ubuntu-latest
+    needs: [check-authorization]
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'workflow_dispatch' && needs.check-authorization.outputs.authorized == 'true')
+    steps:
+      - name: Determine branch to deploy
+        id: determine_branch
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            BRANCH="master"
+            echo "Deploy triggered by push to master"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            BRANCH="master"
+            echo "Deploy triggered by merged PR to master"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            BRANCH="${{ github.event.inputs.branch }}"
+            echo "Manual deploy for branch: $BRANCH"
+          fi
+          
+          echo "Will deploy branch: $BRANCH"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           path: magicblock-validator
+          ref: ${{ steps.determine_branch.outputs.branch }}
 
       - name: Trigger deploy workflow
         uses: ./magicblock-validator/.github/actions/repository-dispatch
@@ -23,4 +73,13 @@ jobs:
           token: ${{ secrets.DEPLOY_TRIGGER_TOKEN }}
           repository: magicblock-labs/validator-deployment
           event-type: auto-deploy
-          client-payload: '{"project": "magicblock-validator", "deploy_target": "testnet", "branch": "master", "triggered_by": "${{ github.actor }}", "source_repo": "${{ github.repository }}", "source_sha": "${{ github.sha }}"}'
+          client-payload: |
+            {
+              "project": "magicblock-validator",
+              "deploy_target": "testnet",
+              "branch": "${{ steps.determine_branch.outputs.branch }}",
+              "triggered_by": "${{ github.actor }}",
+              "source_repo": "${{ github.repository }}",
+              "source_sha": "${{ github.sha }}",
+              "timestamp": "${{ github.run_id }}"
+            }
