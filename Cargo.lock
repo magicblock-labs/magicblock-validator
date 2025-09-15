@@ -781,6 +781,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "boxcar"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
+
+[[package]]
 name = "brotli"
 version = "8.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1479,6 +1485,7 @@ dependencies = [
  "once_cell",
  "parking_lot_core 0.9.11",
  "rayon",
+ "serde",
 ]
 
 [[package]]
@@ -7268,6 +7275,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-frozen-abi"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ac93e831736e9cbd1571c5c692fa7533a304f184f77cba52e5b83c4c7eeebda"
+dependencies = [
+ "boxcar",
+ "bs58",
+ "bv",
+ "bytes",
+ "dashmap",
+ "im",
+ "log",
+ "memmap2 0.5.10",
+ "serde",
+ "serde_derive",
+ "serde_with",
+ "sha2 0.10.9",
+ "solana-frozen-abi-macro",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "solana-frozen-abi-macro"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7387,6 +7416,8 @@ dependencies = [
  "serde",
  "serde_derive",
  "solana-atomic-u64",
+ "solana-frozen-abi",
+ "solana-frozen-abi-macro",
  "solana-sanitize",
  "wasm-bindgen",
 ]
@@ -7687,23 +7718,35 @@ dependencies = [
 [[package]]
 name = "solana-message"
 version = "2.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "268486ba8a294ed22a4d7c1ec05f540c3dbe71cfa7c6c54b6d4d13668d895678"
 dependencies = [
+ "anyhow",
  "bincode",
+ "bitflags 2.9.1",
  "blake3",
+ "borsh 1.5.7",
+ "itertools 0.14.0",
  "lazy_static",
  "serde",
  "serde_derive",
+ "serde_json",
  "solana-bincode",
+ "solana-frozen-abi",
+ "solana-frozen-abi-macro",
  "solana-hash",
  "solana-instruction",
+ "solana-logger",
+ "solana-message",
+ "solana-nonce",
+ "solana-program",
  "solana-pubkey",
  "solana-sanitize",
  "solana-sdk-ids",
+ "solana-sha256-hasher",
  "solana-short-vec",
  "solana-system-interface",
+ "solana-sysvar",
  "solana-transaction-error",
+ "static_assertions",
  "wasm-bindgen",
 ]
 
@@ -8172,6 +8215,8 @@ dependencies = [
  "solana-atomic-u64",
  "solana-decode-error",
  "solana-define-syscall",
+ "solana-frozen-abi",
+ "solana-frozen-abi-macro",
  "solana-sanitize",
  "solana-sha256-hasher",
  "wasm-bindgen",

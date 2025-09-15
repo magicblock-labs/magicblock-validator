@@ -41,7 +41,7 @@ itertools = { workspace = true }
 serde_json = { workspace = true }
 solana-message = { path = ".", features = ["dev-context-only-utils"] }
 solana-nonce = { workspace = true }
-solana-program = { path = "../program" }
+solana-program = { workspace = true }
 solana-sha256-hasher = { workspace = true }
 solana-sysvar = { workspace = true }
 static_assertions = { workspace = true }
