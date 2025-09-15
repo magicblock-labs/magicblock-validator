@@ -2,7 +2,8 @@
 use serde_derive::{Deserialize, Serialize};
 #[cfg(feature = "frozen-abi")]
 use solana_frozen_abi_macro::AbiExample;
-use {solana_pubkey::Pubkey, solana_sanitize::Sanitize};
+use solana_pubkey::Pubkey;
+use solana_sanitize::Sanitize;
 
 /// A compact encoding of an instruction.
 ///
@@ -33,7 +34,11 @@ impl Sanitize for CompiledInstruction {}
 
 impl CompiledInstruction {
     #[cfg(feature = "bincode")]
-    pub fn new<T: serde::Serialize>(program_ids_index: u8, data: &T, accounts: Vec<u8>) -> Self {
+    pub fn new<T: serde::Serialize>(
+        program_ids_index: u8,
+        data: &T,
+        accounts: Vec<u8>,
+    ) -> Self {
         let data = bincode::serialize(data).unwrap();
         Self {
             program_id_index: program_ids_index,
@@ -42,7 +47,11 @@ impl CompiledInstruction {
         }
     }
 
-    pub fn new_from_raw_parts(program_id_index: u8, data: Vec<u8>, accounts: Vec<u8>) -> Self {
+    pub fn new_from_raw_parts(
+        program_id_index: u8,
+        data: Vec<u8>,
+        accounts: Vec<u8>,
+    ) -> Self {
         Self {
             program_id_index,
             accounts,

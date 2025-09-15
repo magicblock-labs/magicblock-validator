@@ -9,23 +9,23 @@
 //! [`v0`]: crate::v0
 //! [future message format]: https://docs.solanalabs.com/proposals/versioned-transactions
 
+use std::collections::HashSet;
+
 pub use loaded::*;
 #[cfg(feature = "serde")]
 use serde_derive::{Deserialize, Serialize};
 #[cfg(feature = "frozen-abi")]
 use solana_frozen_abi_macro::AbiExample;
-use {
-    crate::{
-        compiled_instruction::CompiledInstruction,
-        compiled_keys::{CompileError, CompiledKeys},
-        AccountKeys, AddressLookupTableAccount, MessageHeader,
-    },
-    solana_hash::Hash,
-    solana_instruction::Instruction,
-    solana_pubkey::Pubkey,
-    solana_sanitize::SanitizeError,
-    solana_sdk_ids::bpf_loader_upgradeable,
-    std::collections::HashSet,
+use solana_hash::Hash;
+use solana_instruction::Instruction;
+use solana_pubkey::Pubkey;
+use solana_sanitize::SanitizeError;
+use solana_sdk_ids::bpf_loader_upgradeable;
+
+use crate::{
+    compiled_instruction::CompiledInstruction,
+    compiled_keys::{CompileError, CompiledKeys},
+    AccountKeys, AddressLookupTableAccount, MessageHeader,
 };
 
 mod loaded;
@@ -103,15 +103,17 @@ impl Message {
     /// Sanitize message fields and compiled instruction indexes
     pub fn sanitize(&self) -> Result<(), SanitizeError> {
         let num_static_account_keys = self.account_keys.len();
-        if usize::from(self.header.num_required_signatures)
-            .saturating_add(usize::from(self.header.num_readonly_unsigned_accounts))
-            > num_static_account_keys
+        if usize::from(self.header.num_required_signatures).saturating_add(
+            usize::from(self.header.num_readonly_unsigned_accounts),
+        ) > num_static_account_keys
         {
             return Err(SanitizeError::IndexOutOfBounds);
         }
 
         // there should be at least 1 RW fee-payer account.
-        if self.header.num_readonly_signed_accounts >= self.header.num_required_signatures {
+        if self.header.num_readonly_signed_accounts
+            >= self.header.num_required_signatures
+        {
             return Err(SanitizeError::InvalidValue);
         }
 
@@ -128,7 +130,8 @@ impl Message {
                     return Err(SanitizeError::InvalidValue);
                 }
 
-                total_lookup_keys = total_lookup_keys.saturating_add(num_lookup_indexes);
+                total_lookup_keys =
+                    total_lookup_keys.saturating_add(num_lookup_indexes);
             }
             total_lookup_keys
         };
@@ -144,7 +147,8 @@ impl Message {
         // since account indices are encoded as `u8`
         // Note that this is different from the per-transaction account load cap
         // as defined in `Bank::get_transaction_account_lock_limit`
-        let total_account_keys = num_static_account_keys.saturating_add(num_dynamic_account_keys);
+        let total_account_keys =
+            num_static_account_keys.saturating_add(num_dynamic_account_keys);
         if total_account_keys > 256 {
             return Err(SanitizeError::IndexOutOfBounds);
         }
@@ -268,10 +272,13 @@ impl Message {
         address_lookup_table_accounts: &[AddressLookupTableAccount],
         recent_blockhash: Hash,
     ) -> Result<Self, CompileError> {
-        let mut compiled_keys = CompiledKeys::compile(instructions, Some(*payer));
+        let mut compiled_keys =
+            CompiledKeys::compile(instructions, Some(*payer));
 
-        let mut address_table_lookups = Vec::with_capacity(address_lookup_table_accounts.len());
-        let mut loaded_addresses_list = Vec::with_capacity(address_lookup_table_accounts.len());
+        let mut address_table_lookups =
+            Vec::with_capacity(address_lookup_table_accounts.len());
+        let mut loaded_addresses_list =
+            Vec::with_capacity(address_lookup_table_accounts.len());
         for lookup_table_account in address_lookup_table_accounts {
             if let Some((lookup, loaded_addresses)) =
                 compiled_keys.try_extract_table_lookup(lookup_table_account)?
@@ -281,10 +288,12 @@ impl Message {
             }
         }
 
-        let (header, static_keys) = compiled_keys.try_into_message_components()?;
+        let (header, static_keys) =
+            compiled_keys.try_into_message_components()?;
         let dynamic_keys = loaded_addresses_list.into_iter().collect();
         let account_keys = AccountKeys::new(&static_keys, Some(&dynamic_keys));
-        let instructions = account_keys.try_compile_instructions(instructions)?;
+        let instructions =
+            account_keys.try_compile_instructions(instructions)?;
 
         Ok(Self {
             header,
@@ -319,7 +328,8 @@ impl Message {
         let num_account_keys = self.account_keys.len();
         let num_signed_accounts = usize::from(header.num_required_signatures);
         if key_index >= num_account_keys {
-            let loaded_addresses_index = key_index.saturating_sub(num_account_keys);
+            let loaded_addresses_index =
+                key_index.saturating_sub(num_account_keys);
             let num_writable_dynamic_addresses = self
                 .address_table_lookups
                 .iter()
@@ -327,14 +337,20 @@ impl Message {
                 .sum();
             loaded_addresses_index < num_writable_dynamic_addresses
         } else if key_index >= num_signed_accounts {
-            let num_unsigned_accounts = num_account_keys.saturating_sub(num_signed_accounts);
+            let num_unsigned_accounts =
+                num_account_keys.saturating_sub(num_signed_accounts);
             let num_writable_unsigned_accounts = num_unsigned_accounts
-                .saturating_sub(usize::from(header.num_readonly_unsigned_accounts));
-            let unsigned_account_index = key_index.saturating_sub(num_signed_accounts);
+                .saturating_sub(usize::from(
+                    header.num_readonly_unsigned_accounts,
+                ));
+            let unsigned_account_index =
+                key_index.saturating_sub(num_signed_accounts);
             unsigned_account_index < num_writable_unsigned_accounts
         } else {
             let num_writable_signed_accounts = num_signed_accounts
-                .saturating_sub(usize::from(header.num_readonly_signed_accounts));
+                .saturating_sub(usize::from(
+                    header.num_readonly_signed_accounts,
+                ));
             key_index < num_writable_signed_accounts
         }
     }
@@ -385,7 +401,10 @@ impl Message {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::VersionedMessage, solana_instruction::AccountMeta};
+    use solana_instruction::AccountMeta;
+
+    use super::*;
+    use crate::VersionedMessage;
 
     #[test]
     fn test_sanitize() {
@@ -697,7 +716,9 @@ mod tests {
                     num_readonly_unsigned_accounts: 1
                 },
                 recent_blockhash,
-                account_keys: vec![keys[0], keys[1], keys[2], keys[3], program_id],
+                account_keys: vec![
+                    keys[0], keys[1], keys[2], keys[3], program_id
+                ],
                 instructions: vec![CompiledInstruction {
                     program_id_index: 4,
                     accounts: vec![1, 2, 3, 5, 6],
@@ -767,11 +788,21 @@ mod tests {
 
         let reserved_account_keys = HashSet::from([key1]);
 
-        assert!(!message.is_account_maybe_reserved(0, Some(&reserved_account_keys)));
-        assert!(message.is_account_maybe_reserved(1, Some(&reserved_account_keys)));
-        assert!(!message.is_account_maybe_reserved(2, Some(&reserved_account_keys)));
-        assert!(!message.is_account_maybe_reserved(3, Some(&reserved_account_keys)));
-        assert!(!message.is_account_maybe_reserved(4, Some(&reserved_account_keys)));
+        assert!(
+            !message.is_account_maybe_reserved(0, Some(&reserved_account_keys))
+        );
+        assert!(
+            message.is_account_maybe_reserved(1, Some(&reserved_account_keys))
+        );
+        assert!(
+            !message.is_account_maybe_reserved(2, Some(&reserved_account_keys))
+        );
+        assert!(
+            !message.is_account_maybe_reserved(3, Some(&reserved_account_keys))
+        );
+        assert!(
+            !message.is_account_maybe_reserved(4, Some(&reserved_account_keys))
+        );
         assert!(!message.is_account_maybe_reserved(0, None));
         assert!(!message.is_account_maybe_reserved(1, None));
         assert!(!message.is_account_maybe_reserved(2, None));

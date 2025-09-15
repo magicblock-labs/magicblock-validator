@@ -1,21 +1,22 @@
+use std::{borrow::Cow, collections::HashSet, convert::TryFrom};
+
+use solana_hash::Hash;
+use solana_instruction::{BorrowedAccountMeta, BorrowedInstruction};
+use solana_pubkey::Pubkey;
+use solana_sanitize::Sanitize;
+use solana_sdk_ids::{ed25519_program, secp256k1_program, secp256r1_program};
 #[deprecated(
     since = "2.1.0",
     note = "Use solana_transaction_error::SanitizeMessageError instead"
 )]
 pub use solana_transaction_error::SanitizeMessageError;
-use {
-    crate::{
-        compiled_instruction::CompiledInstruction,
-        legacy,
-        v0::{self, LoadedAddresses},
-        AccountKeys, AddressLoader, MessageHeader, SanitizedVersionedMessage, VersionedMessage,
-    },
-    solana_hash::Hash,
-    solana_instruction::{BorrowedAccountMeta, BorrowedInstruction},
-    solana_pubkey::Pubkey,
-    solana_sanitize::Sanitize,
-    solana_sdk_ids::{ed25519_program, secp256k1_program, secp256r1_program},
-    std::{borrow::Cow, collections::HashSet, convert::TryFrom},
+
+use crate::{
+    compiled_instruction::CompiledInstruction,
+    legacy,
+    v0::{self, LoadedAddresses},
+    AccountKeys, AddressLoader, MessageHeader, SanitizedVersionedMessage,
+    VersionedMessage,
 };
 
 // inlined to avoid solana_nonce dep
@@ -37,7 +38,10 @@ pub struct LegacyMessage<'a> {
 }
 
 impl LegacyMessage<'_> {
-    pub fn new(message: legacy::Message, reserved_account_keys: &HashSet<Pubkey>) -> Self {
+    pub fn new(
+        message: legacy::Message,
+        reserved_account_keys: &HashSet<Pubkey>,
+    ) -> Self {
         let is_writable_account_cache = message
             .account_keys
             .iter()
@@ -96,12 +100,12 @@ impl SanitizedMessage {
         reserved_account_keys: &HashSet<Pubkey>,
     ) -> Result<Self, SanitizeMessageError> {
         Ok(match sanitized_msg.message {
-            VersionedMessage::Legacy(message) => {
-                SanitizedMessage::Legacy(LegacyMessage::new(message, reserved_account_keys))
-            }
+            VersionedMessage::Legacy(message) => SanitizedMessage::Legacy(
+                LegacyMessage::new(message, reserved_account_keys),
+            ),
             VersionedMessage::V0(message) => {
-                let loaded_addresses =
-                    address_loader.load_addresses(&message.address_table_lookups)?;
+                let loaded_addresses = address_loader
+                    .load_addresses(&message.address_table_lookups)?;
                 SanitizedMessage::V0(v0::LoadedMessage::new(
                     message,
                     loaded_addresses,
@@ -159,7 +163,9 @@ impl SanitizedMessage {
     /// The hash of a recent block, used for timing out a transaction
     pub fn recent_blockhash(&self) -> &Hash {
         match self {
-            Self::Legacy(legacy_message) => &legacy_message.message.recent_blockhash,
+            Self::Legacy(legacy_message) => {
+                &legacy_message.message.recent_blockhash
+            }
             Self::V0(loaded_msg) => &loaded_msg.message.recent_blockhash,
         }
     }
@@ -168,7 +174,9 @@ impl SanitizedMessage {
     /// one atomic transaction if all succeed.
     pub fn instructions(&self) -> &[CompiledInstruction] {
         match self {
-            Self::Legacy(legacy_message) => &legacy_message.message.instructions,
+            Self::Legacy(legacy_message) => {
+                &legacy_message.message.instructions
+            }
             Self::V0(loaded_msg) => &loaded_msg.message.instructions,
         }
     }
@@ -191,7 +199,9 @@ impl SanitizedMessage {
     /// Return the list of statically included account keys.
     pub fn static_account_keys(&self) -> &[Pubkey] {
         match self {
-            Self::Legacy(legacy_message) => &legacy_message.message.account_keys,
+            Self::Legacy(legacy_message) => {
+                &legacy_message.message.account_keys
+            }
             Self::V0(loaded_msg) => &loaded_msg.message.account_keys,
         }
     }
@@ -205,7 +215,9 @@ impl SanitizedMessage {
     }
 
     /// Returns the list of account keys used for account lookup tables.
-    pub fn message_address_table_lookups(&self) -> &[v0::MessageAddressTableLookup] {
+    pub fn message_address_table_lookups(
+        &self,
+    ) -> &[v0::MessageAddressTableLookup] {
         match self {
             Self::Legacy(_message) => &[],
             Self::V0(message) => &message.message.address_table_lookups,
@@ -214,7 +226,10 @@ impl SanitizedMessage {
 
     /// Returns true if the account at the specified index is an input to some
     /// program instruction in this message.
-    #[deprecated(since = "2.0.0", note = "Please use `is_instruction_account` instead")]
+    #[deprecated(
+        since = "2.0.0",
+        note = "Please use `is_instruction_account` instead"
+    )]
     pub fn is_key_passed_to_program(&self, key_index: usize) -> bool {
         self.is_instruction_account(key_index)
     }
@@ -235,7 +250,9 @@ impl SanitizedMessage {
     /// program in this message.
     pub fn is_invoked(&self, key_index: usize) -> bool {
         match self {
-            Self::Legacy(message) => message.is_key_called_as_program(key_index),
+            Self::Legacy(message) => {
+                message.is_key_called_as_program(key_index)
+            }
             Self::V0(message) => message.is_key_called_as_program(key_index),
         }
     }
@@ -280,8 +297,12 @@ impl SanitizedMessage {
             .map(|keys| keys.readonly.len())
             .unwrap_or_default();
         loaded_readonly_addresses
-            .saturating_add(usize::from(self.header().num_readonly_signed_accounts))
-            .saturating_add(usize::from(self.header().num_readonly_unsigned_accounts))
+            .saturating_add(usize::from(
+                self.header().num_readonly_signed_accounts,
+            ))
+            .saturating_add(usize::from(
+                self.header().num_readonly_unsigned_accounts,
+            ))
     }
 
     /// Decompile message instructions without cloning account keys
@@ -320,7 +341,10 @@ impl SanitizedMessage {
     }
 
     /// Get a list of signers for the instruction at the given index
-    pub fn get_ix_signers(&self, ix_index: usize) -> impl Iterator<Item = &Pubkey> {
+    pub fn get_ix_signers(
+        &self,
+        ix_index: usize,
+    ) -> impl Iterator<Item = &Pubkey> {
         self.instructions()
             .get(ix_index)
             .into_iter()
@@ -330,7 +354,9 @@ impl SanitizedMessage {
                     .copied()
                     .map(usize::from)
                     .filter(|index| self.is_signer(*index))
-                    .filter_map(|signer_index| self.account_keys().get(signer_index))
+                    .filter_map(|signer_index| {
+                        self.account_keys().get(signer_index)
+                    })
             })
     }
 
@@ -391,7 +417,9 @@ impl SanitizedMessage {
     /// return detailed signature counts
     pub fn get_signature_details(&self) -> TransactionSignatureDetails {
         let mut transaction_signature_details = TransactionSignatureDetails {
-            num_transaction_signatures: u64::from(self.header().num_required_signatures),
+            num_transaction_signatures: u64::from(
+                self.header().num_required_signatures,
+            ),
             ..TransactionSignatureDetails::default()
         };
 
@@ -399,21 +427,24 @@ impl SanitizedMessage {
         for (program_id, instruction) in self.program_instructions_iter() {
             if secp256k1_program::check_id(program_id) {
                 if let Some(num_verifies) = instruction.data.first() {
-                    transaction_signature_details.num_secp256k1_instruction_signatures =
+                    transaction_signature_details
+                        .num_secp256k1_instruction_signatures =
                         transaction_signature_details
                             .num_secp256k1_instruction_signatures
                             .saturating_add(u64::from(*num_verifies));
                 }
             } else if ed25519_program::check_id(program_id) {
                 if let Some(num_verifies) = instruction.data.first() {
-                    transaction_signature_details.num_ed25519_instruction_signatures =
+                    transaction_signature_details
+                        .num_ed25519_instruction_signatures =
                         transaction_signature_details
                             .num_ed25519_instruction_signatures
                             .saturating_add(u64::from(*num_verifies));
                 }
             } else if secp256r1_program::check_id(program_id) {
                 if let Some(num_verifies) = instruction.data.first() {
-                    transaction_signature_details.num_secp256r1_instruction_signatures =
+                    transaction_signature_details
+                        .num_secp256r1_instruction_signatures =
                         transaction_signature_details
                             .num_secp256r1_instruction_signatures
                             .saturating_add(u64::from(*num_verifies));
@@ -481,7 +512,10 @@ impl TransactionSignatureDetails {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::v0, std::collections::HashSet};
+    use std::collections::HashSet;
+
+    use super::*;
+    use crate::v0;
 
     #[test]
     fn test_try_from_legacy_message() {
@@ -698,8 +732,10 @@ mod tests {
         let loader_key = Pubkey::new_unique();
 
         let loader_instr = CompiledInstruction::new(2, &(), vec![0, 1]);
-        let mock_secp256k1_instr = CompiledInstruction::new(3, &[1u8; 10], vec![]);
-        let mock_ed25519_instr = CompiledInstruction::new(4, &[5u8; 10], vec![]);
+        let mock_secp256k1_instr =
+            CompiledInstruction::new(3, &[1u8; 10], vec![]);
+        let mock_ed25519_instr =
+            CompiledInstruction::new(4, &[5u8; 10], vec![]);
 
         let message = SanitizedMessage::try_from_legacy_message(
             legacy::Message::new_with_compiled_instructions(

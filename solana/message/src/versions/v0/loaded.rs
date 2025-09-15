@@ -1,11 +1,11 @@
+use std::{borrow::Cow, collections::HashSet};
+
 #[cfg(feature = "serde")]
 use serde_derive::{Deserialize, Serialize};
-use {
-    crate::{v0, AccountKeys},
-    solana_pubkey::Pubkey,
-    solana_sdk_ids::bpf_loader_upgradeable,
-    std::{borrow::Cow, collections::HashSet},
-};
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::bpf_loader_upgradeable;
+
+use crate::{v0, AccountKeys};
 
 /// Combination of a version #0 message and its loaded addresses
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -84,12 +84,17 @@ impl<'a> LoadedMessage<'a> {
         loaded_message
     }
 
-    fn set_is_writable_account_cache(&mut self, reserved_account_keys: &HashSet<Pubkey>) {
+    fn set_is_writable_account_cache(
+        &mut self,
+        reserved_account_keys: &HashSet<Pubkey>,
+    ) {
         let is_writable_account_cache = self
             .account_keys()
             .iter()
             .enumerate()
-            .map(|(i, _key)| self.is_writable_internal(i, reserved_account_keys))
+            .map(|(i, _key)| {
+                self.is_writable_internal(i, reserved_account_keys)
+            })
             .collect::<Vec<_>>();
         let _ = std::mem::replace(
             &mut self.is_writable_account_cache,
@@ -99,7 +104,10 @@ impl<'a> LoadedMessage<'a> {
 
     /// Returns the full list of static and dynamic account keys that are loaded for this message.
     pub fn account_keys(&self) -> AccountKeys {
-        AccountKeys::new(&self.message.account_keys, Some(&self.loaded_addresses))
+        AccountKeys::new(
+            &self.message.account_keys,
+            Some(&self.loaded_addresses),
+        )
     }
 
     /// Returns the list of static account keys that are loaded for this message.
@@ -120,17 +128,24 @@ impl<'a> LoadedMessage<'a> {
         let num_account_keys = self.message.account_keys.len();
         let num_signed_accounts = usize::from(header.num_required_signatures);
         if key_index >= num_account_keys {
-            let loaded_addresses_index = key_index.saturating_sub(num_account_keys);
+            let loaded_addresses_index =
+                key_index.saturating_sub(num_account_keys);
             loaded_addresses_index < self.loaded_addresses.writable.len()
         } else if key_index >= num_signed_accounts {
-            let num_unsigned_accounts = num_account_keys.saturating_sub(num_signed_accounts);
+            let num_unsigned_accounts =
+                num_account_keys.saturating_sub(num_signed_accounts);
             let num_writable_unsigned_accounts = num_unsigned_accounts
-                .saturating_sub(usize::from(header.num_readonly_unsigned_accounts));
-            let unsigned_account_index = key_index.saturating_sub(num_signed_accounts);
+                .saturating_sub(usize::from(
+                    header.num_readonly_unsigned_accounts,
+                ));
+            let unsigned_account_index =
+                key_index.saturating_sub(num_signed_accounts);
             unsigned_account_index < num_writable_unsigned_accounts
         } else {
             let num_writable_signed_accounts = num_signed_accounts
-                .saturating_sub(usize::from(header.num_readonly_signed_accounts));
+                .saturating_sub(usize::from(
+                    header.num_readonly_signed_accounts,
+                ));
             key_index < num_writable_signed_accounts
         }
     }
@@ -143,7 +158,8 @@ impl<'a> LoadedMessage<'a> {
     ) -> bool {
         if self.is_writable_index(key_index) {
             if let Some(key) = self.account_keys().get(key_index) {
-                return !(reserved_account_keys.contains(key) || self.demote_program_id(key_index));
+                return !(reserved_account_keys.contains(key)
+                    || self.demote_program_id(key_index));
             }
         }
         false
@@ -161,7 +177,8 @@ impl<'a> LoadedMessage<'a> {
     }
 
     pub fn demote_program_id(&self, i: usize) -> bool {
-        self.is_key_called_as_program(i) && !self.is_upgradeable_loader_present()
+        self.is_key_called_as_program(i)
+            && !self.is_upgradeable_loader_present()
     }
 
     /// Returns true if the account at the specified index is called as a program by an instruction
@@ -186,12 +203,11 @@ impl<'a> LoadedMessage<'a> {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::{compiled_instruction::CompiledInstruction, MessageHeader},
-        itertools::Itertools,
-        solana_sdk_ids::{system_program, sysvar},
-    };
+    use itertools::Itertools;
+    use solana_sdk_ids::{system_program, sysvar};
+
+    use super::*;
+    use crate::{compiled_instruction::CompiledInstruction, MessageHeader};
 
     fn check_test_loaded_message() -> (LoadedMessage<'static>, [Pubkey; 6]) {
         let key0 = Pubkey::new_unique();
@@ -272,7 +288,8 @@ mod tests {
 
     #[test]
     fn test_is_writable() {
-        let reserved_account_keys = HashSet::from_iter([sysvar::clock::id(), system_program::id()]);
+        let reserved_account_keys =
+            HashSet::from_iter([sysvar::clock::id(), system_program::id()]);
         let create_message_with_keys = |keys: Vec<Pubkey>| {
             LoadedMessage::new(
                 v0::Message {
@@ -296,19 +313,34 @@ mod tests {
         let key1 = Pubkey::new_unique();
         let key2 = Pubkey::new_unique();
         {
-            let message = create_message_with_keys(vec![sysvar::clock::id(), key0, key1, key2]);
+            let message = create_message_with_keys(vec![
+                sysvar::clock::id(),
+                key0,
+                key1,
+                key2,
+            ]);
             assert!(message.is_writable_index(0));
             assert!(!message.is_writable(0));
         }
 
         {
-            let message = create_message_with_keys(vec![system_program::id(), key0, key1, key2]);
+            let message = create_message_with_keys(vec![
+                system_program::id(),
+                key0,
+                key1,
+                key2,
+            ]);
             assert!(message.is_writable_index(0));
             assert!(!message.is_writable(0));
         }
 
         {
-            let message = create_message_with_keys(vec![key0, key1, system_program::id(), key2]);
+            let message = create_message_with_keys(vec![
+                key0,
+                key1,
+                system_program::id(),
+                key2,
+            ]);
             assert!(message.is_writable_index(2));
             assert!(!message.is_writable(2));
         }

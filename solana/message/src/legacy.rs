@@ -11,26 +11,28 @@
 
 #![allow(clippy::arithmetic_side_effects)]
 
+use std::{collections::HashSet, convert::TryFrom, str::FromStr};
+
 #[allow(deprecated)]
 pub use builtins::{BUILTIN_PROGRAMS_KEYS, MAYBE_BUILTIN_KEY_OR_SYSVAR};
 #[cfg(feature = "serde")]
 use serde_derive::{Deserialize, Serialize};
 #[cfg(feature = "frozen-abi")]
 use solana_frozen_abi_macro::{frozen_abi, AbiExample};
+use solana_hash::Hash;
+use solana_instruction::Instruction;
+use solana_pubkey::Pubkey;
+use solana_sanitize::{Sanitize, SanitizeError};
+use solana_sdk_ids::{
+    bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, system_program,
+    sysvar,
+};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
-use {
-    crate::{
-        compiled_instruction::CompiledInstruction, compiled_keys::CompiledKeys, MessageHeader,
-    },
-    solana_hash::Hash,
-    solana_instruction::Instruction,
-    solana_pubkey::Pubkey,
-    solana_sanitize::{Sanitize, SanitizeError},
-    solana_sdk_ids::{
-        bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, system_program, sysvar,
-    },
-    std::{collections::HashSet, convert::TryFrom, str::FromStr},
+
+use crate::{
+    compiled_instruction::CompiledInstruction, compiled_keys::CompiledKeys,
+    MessageHeader,
 };
 
 // copied from deprecated code in solana_program::sysvar to avoid a dependency.
@@ -63,7 +65,9 @@ fn is_sysvar_id(id: &Pubkey) -> bool {
 )]
 #[allow(deprecated)]
 mod builtins {
-    use {super::*, lazy_static::lazy_static};
+    use lazy_static::lazy_static;
+
+    use super::*;
 
     lazy_static! {
         pub static ref BUILTIN_PROGRAMS_KEYS: [Pubkey; 10] = {
@@ -114,7 +118,10 @@ fn position(keys: &[Pubkey], key: &Pubkey) -> u8 {
     keys.iter().position(|k| k == key).unwrap() as u8
 }
 
-fn compile_instruction(ix: &Instruction, keys: &[Pubkey]) -> CompiledInstruction {
+fn compile_instruction(
+    ix: &Instruction,
+    keys: &[Pubkey],
+) -> CompiledInstruction {
     let accounts: Vec<_> = ix
         .accounts
         .iter()
@@ -128,7 +135,10 @@ fn compile_instruction(ix: &Instruction, keys: &[Pubkey]) -> CompiledInstruction
     }
 }
 
-fn compile_instructions(ixs: &[Instruction], keys: &[Pubkey]) -> Vec<CompiledInstruction> {
+fn compile_instructions(
+    ixs: &[Instruction],
+    keys: &[Pubkey],
+) -> Vec<CompiledInstruction> {
     ixs.iter().map(|ix| compile_instruction(ix, keys)).collect()
 }
 
@@ -219,7 +229,9 @@ impl Sanitize for Message {
         }
 
         // there should be at least 1 RW fee-payer account.
-        if self.header.num_readonly_signed_accounts >= self.header.num_required_signatures {
+        if self.header.num_readonly_signed_accounts
+            >= self.header.num_required_signatures
+        {
             return Err(SanitizeError::IndexOutOfBounds);
         }
 
@@ -521,10 +533,11 @@ impl Message {
         nonce_account_pubkey: &Pubkey,
         nonce_authority_pubkey: &Pubkey,
     ) -> Self {
-        let nonce_ix = solana_system_interface::instruction::advance_nonce_account(
-            nonce_account_pubkey,
-            nonce_authority_pubkey,
-        );
+        let nonce_ix =
+            solana_system_interface::instruction::advance_nonce_account(
+                nonce_account_pubkey,
+                nonce_authority_pubkey,
+            );
         instructions.insert(0, nonce_ix);
         Self::new(&instructions, payer)
     }
@@ -550,7 +563,11 @@ impl Message {
     }
 
     /// Compute the blake3 hash of this transaction's message.
-    #[cfg(all(not(target_os = "solana"), feature = "bincode", feature = "blake3"))]
+    #[cfg(all(
+        not(target_os = "solana"),
+        feature = "bincode",
+        feature = "blake3"
+    ))]
     pub fn hash(&self) -> Hash {
         let message_bytes = self.serialize();
         Self::hash_raw_message(&message_bytes)
@@ -559,7 +576,8 @@ impl Message {
     /// Compute the blake3 hash of a raw transaction message.
     #[cfg(all(not(target_os = "solana"), feature = "blake3"))]
     pub fn hash_raw_message(message_bytes: &[u8]) -> Hash {
-        use {blake3::traits::digest::Digest, solana_hash::HASH_BYTES};
+        use blake3::traits::digest::Digest;
+        use solana_hash::HASH_BYTES;
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"solana-tx-message-v1");
         hasher.update(message_bytes);
@@ -578,12 +596,17 @@ impl Message {
 
     pub fn program_id(&self, instruction_index: usize) -> Option<&Pubkey> {
         Some(
-            &self.account_keys[self.instructions.get(instruction_index)?.program_id_index as usize],
+            &self.account_keys[self
+                .instructions
+                .get(instruction_index)?
+                .program_id_index as usize],
         )
     }
 
     pub fn program_index(&self, instruction_index: usize) -> Option<usize> {
-        Some(self.instructions.get(instruction_index)?.program_id_index as usize)
+        Some(
+            self.instructions.get(instruction_index)?.program_id_index as usize,
+        )
     }
 
     pub fn program_ids(&self) -> Vec<&Pubkey> {
@@ -593,7 +616,10 @@ impl Message {
             .collect()
     }
 
-    #[deprecated(since = "2.0.0", note = "Please use `is_instruction_account` instead")]
+    #[deprecated(
+        since = "2.0.0",
+        note = "Please use `is_instruction_account` instead"
+    )]
     pub fn is_key_passed_to_program(&self, key_index: usize) -> bool {
         self.is_instruction_account(key_index)
     }
@@ -625,7 +651,8 @@ impl Message {
         note = "Please use `is_key_called_as_program` and `is_instruction_account` directly"
     )]
     pub fn is_non_loader_key(&self, key_index: usize) -> bool {
-        !self.is_key_called_as_program(key_index) || self.is_instruction_account(key_index)
+        !self.is_key_called_as_program(key_index)
+            || self.is_instruction_account(key_index)
     }
 
     pub fn program_position(&self, index: usize) -> Option<usize> {
@@ -640,14 +667,15 @@ impl Message {
     }
 
     pub fn demote_program_id(&self, i: usize) -> bool {
-        self.is_key_called_as_program(i) && !self.is_upgradeable_loader_present()
+        self.is_key_called_as_program(i)
+            && !self.is_upgradeable_loader_present()
     }
 
     /// Returns true if the account at the specified index was requested to be
     /// writable. This method should not be used directly.
     pub(super) fn is_writable_index(&self, i: usize) -> bool {
-        i < (self.header.num_required_signatures - self.header.num_readonly_signed_accounts)
-            as usize
+        i < (self.header.num_required_signatures
+            - self.header.num_readonly_signed_accounts) as usize
             || (i >= self.header.num_required_signatures as usize
                 && i < self.account_keys.len()
                     - self.header.num_readonly_unsigned_accounts as usize)
@@ -657,7 +685,10 @@ impl Message {
     /// instructions in this message. Since the dynamic set of reserved accounts
     /// isn't used here to demote write locks, this shouldn't be used in the
     /// runtime.
-    #[deprecated(since = "2.0.0", note = "Please use `is_maybe_writable` instead")]
+    #[deprecated(
+        since = "2.0.0",
+        note = "Please use `is_maybe_writable` instead"
+    )]
     #[allow(deprecated)]
     pub fn is_writable(&self, i: usize) -> bool {
         (self.is_writable_index(i))
@@ -735,14 +766,18 @@ impl Message {
 #[cfg(test)]
 mod tests {
     #![allow(deprecated)]
-    use {
-        super::*, crate::MESSAGE_HEADER_LENGTH, solana_instruction::AccountMeta,
-        solana_sha256_hasher::hash, std::collections::HashSet,
-    };
+    use std::collections::HashSet;
+
+    use solana_instruction::AccountMeta;
+    use solana_sha256_hasher::hash;
+
+    use super::*;
+    use crate::MESSAGE_HEADER_LENGTH;
 
     #[test]
     fn test_builtin_program_keys() {
-        let keys: HashSet<Pubkey> = BUILTIN_PROGRAMS_KEYS.iter().copied().collect();
+        let keys: HashSet<Pubkey> =
+            BUILTIN_PROGRAMS_KEYS.iter().copied().collect();
         assert_eq!(keys.len(), 10);
         for k in keys {
             let k = format!("{k}");
@@ -766,11 +801,19 @@ mod tests {
     fn test_message_signed_keys_len() {
         let program_id = Pubkey::default();
         let id0 = Pubkey::default();
-        let ix = Instruction::new_with_bincode(program_id, &0, vec![AccountMeta::new(id0, false)]);
+        let ix = Instruction::new_with_bincode(
+            program_id,
+            &0,
+            vec![AccountMeta::new(id0, false)],
+        );
         let message = Message::new(&[ix], None);
         assert_eq!(message.header.num_required_signatures, 0);
 
-        let ix = Instruction::new_with_bincode(program_id, &0, vec![AccountMeta::new(id0, true)]);
+        let ix = Instruction::new_with_bincode(
+            program_id,
+            &0,
+            vec![AccountMeta::new(id0, true)],
+        );
         let message = Message::new(&[ix], Some(&id0));
         assert_eq!(message.header.num_required_signatures, 1);
     }
@@ -783,9 +826,21 @@ mod tests {
         let id1 = Pubkey::new_unique();
         let message = Message::new(
             &[
-                Instruction::new_with_bincode(program_id0, &0, vec![AccountMeta::new(id0, false)]),
-                Instruction::new_with_bincode(program_id1, &0, vec![AccountMeta::new(id1, true)]),
-                Instruction::new_with_bincode(program_id0, &0, vec![AccountMeta::new(id1, false)]),
+                Instruction::new_with_bincode(
+                    program_id0,
+                    &0,
+                    vec![AccountMeta::new(id0, false)],
+                ),
+                Instruction::new_with_bincode(
+                    program_id1,
+                    &0,
+                    vec![AccountMeta::new(id1, true)],
+                ),
+                Instruction::new_with_bincode(
+                    program_id0,
+                    &0,
+                    vec![AccountMeta::new(id1, false)],
+                ),
             ],
             Some(&id1),
         );
@@ -809,11 +864,19 @@ mod tests {
         let payer = Pubkey::new_unique();
         let id0 = Pubkey::default();
 
-        let ix = Instruction::new_with_bincode(program_id, &0, vec![AccountMeta::new(id0, false)]);
+        let ix = Instruction::new_with_bincode(
+            program_id,
+            &0,
+            vec![AccountMeta::new(id0, false)],
+        );
         let message = Message::new(&[ix], Some(&payer));
         assert_eq!(message.header.num_required_signatures, 1);
 
-        let ix = Instruction::new_with_bincode(program_id, &0, vec![AccountMeta::new(id0, true)]);
+        let ix = Instruction::new_with_bincode(
+            program_id,
+            &0,
+            vec![AccountMeta::new(id0, true)],
+        );
         let message = Message::new(&[ix], Some(&payer));
         assert_eq!(message.header.num_required_signatures, 2);
 
@@ -833,8 +896,16 @@ mod tests {
         let id = Pubkey::new_unique();
         let message = Message::new(
             &[
-                Instruction::new_with_bincode(program_id0, &0, vec![AccountMeta::new(id, false)]),
-                Instruction::new_with_bincode(program_id1, &0, vec![AccountMeta::new(id, true)]),
+                Instruction::new_with_bincode(
+                    program_id0,
+                    &0,
+                    vec![AccountMeta::new(id, false)],
+                ),
+                Instruction::new_with_bincode(
+                    program_id1,
+                    &0,
+                    vec![AccountMeta::new(id, true)],
+                ),
             ],
             Some(&id),
         );
@@ -914,9 +985,15 @@ mod tests {
 
         let reserved_account_keys = HashSet::from([key1]);
 
-        assert!(!message.is_account_maybe_reserved(0, Some(&reserved_account_keys)));
-        assert!(message.is_account_maybe_reserved(1, Some(&reserved_account_keys)));
-        assert!(!message.is_account_maybe_reserved(2, Some(&reserved_account_keys)));
+        assert!(
+            !message.is_account_maybe_reserved(0, Some(&reserved_account_keys))
+        );
+        assert!(
+            message.is_account_maybe_reserved(1, Some(&reserved_account_keys))
+        );
+        assert!(
+            !message.is_account_maybe_reserved(2, Some(&reserved_account_keys))
+        );
         assert!(!message.is_account_maybe_reserved(0, None));
         assert!(!message.is_account_maybe_reserved(1, None));
         assert!(!message.is_account_maybe_reserved(2, None));
@@ -982,7 +1059,8 @@ mod tests {
     #[test]
     fn test_message_header_len_constant() {
         assert_eq!(
-            bincode::serialized_size(&MessageHeader::default()).unwrap() as usize,
+            bincode::serialized_size(&MessageHeader::default()).unwrap()
+                as usize,
             MESSAGE_HEADER_LENGTH
         );
     }
@@ -991,15 +1069,35 @@ mod tests {
     fn test_message_hash() {
         // when this test fails, it's most likely due to a new serialized format of a message.
         // in this case, the domain prefix `solana-tx-message-v1` should be updated.
-        let program_id0 = Pubkey::from_str("4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM").unwrap();
-        let program_id1 = Pubkey::from_str("8opHzTAnfzRpPEx21XtnrVTX28YQuCpAjcn1PczScKh").unwrap();
-        let id0 = Pubkey::from_str("CiDwVBFgWV9E5MvXWoLgnEgn2hK7rJikbvfWavzAQz3").unwrap();
-        let id1 = Pubkey::from_str("GcdayuLaLyrdmUu324nahyv33G5poQdLUEZ1nEytDeP").unwrap();
-        let id2 = Pubkey::from_str("LX3EUdRUBUa3TbsYXLEUdj9J3prXkWXvLYSWyYyc2Jj").unwrap();
-        let id3 = Pubkey::from_str("QRSsyMWN1yHT9ir42bgNZUNZ4PdEhcSWCrL2AryKpy5").unwrap();
+        let program_id0 =
+            Pubkey::from_str("4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM")
+                .unwrap();
+        let program_id1 =
+            Pubkey::from_str("8opHzTAnfzRpPEx21XtnrVTX28YQuCpAjcn1PczScKh")
+                .unwrap();
+        let id0 =
+            Pubkey::from_str("CiDwVBFgWV9E5MvXWoLgnEgn2hK7rJikbvfWavzAQz3")
+                .unwrap();
+        let id1 =
+            Pubkey::from_str("GcdayuLaLyrdmUu324nahyv33G5poQdLUEZ1nEytDeP")
+                .unwrap();
+        let id2 =
+            Pubkey::from_str("LX3EUdRUBUa3TbsYXLEUdj9J3prXkWXvLYSWyYyc2Jj")
+                .unwrap();
+        let id3 =
+            Pubkey::from_str("QRSsyMWN1yHT9ir42bgNZUNZ4PdEhcSWCrL2AryKpy5")
+                .unwrap();
         let instructions = vec![
-            Instruction::new_with_bincode(program_id0, &0, vec![AccountMeta::new(id0, false)]),
-            Instruction::new_with_bincode(program_id0, &0, vec![AccountMeta::new(id1, true)]),
+            Instruction::new_with_bincode(
+                program_id0,
+                &0,
+                vec![AccountMeta::new(id0, false)],
+            ),
+            Instruction::new_with_bincode(
+                program_id0,
+                &0,
+                vec![AccountMeta::new(id1, true)],
+            ),
             Instruction::new_with_bincode(
                 program_id1,
                 &0,
@@ -1015,7 +1113,8 @@ mod tests {
         let message = Message::new(&instructions, Some(&id1));
         assert_eq!(
             message.hash(),
-            Hash::from_str("7VWCF4quo2CcWQFNUayZiorxpiR5ix8YzLebrXKf3fMF").unwrap()
+            Hash::from_str("7VWCF4quo2CcWQFNUayZiorxpiR5ix8YzLebrXKf3fMF")
+                .unwrap()
         )
     }
 

@@ -1,8 +1,11 @@
-use {
-    crate::{compiled_instruction::CompiledInstruction, v0::LoadedAddresses, CompileError},
-    solana_instruction::Instruction,
-    solana_pubkey::Pubkey,
-    std::{collections::BTreeMap, iter::zip, ops::Index},
+use std::{collections::BTreeMap, iter::zip, ops::Index};
+
+use solana_instruction::Instruction;
+use solana_pubkey::Pubkey;
+
+use crate::{
+    compiled_instruction::CompiledInstruction, v0::LoadedAddresses,
+    CompileError,
 };
 
 /// Collection of static and dynamically loaded keys used to load accounts
@@ -22,7 +25,10 @@ impl Index<usize> for AccountKeys<'_> {
 }
 
 impl<'a> AccountKeys<'a> {
-    pub fn new(static_keys: &'a [Pubkey], dynamic_keys: Option<&'a LoadedAddresses>) -> Self {
+    pub fn new(
+        static_keys: &'a [Pubkey],
+        dynamic_keys: Option<&'a LoadedAddresses>,
+    ) -> Self {
         Self {
             static_keys,
             dynamic_keys,
@@ -91,7 +97,10 @@ impl<'a> AccountKeys<'a> {
     ///
     /// Panics when compiling fails. See [`AccountKeys::try_compile_instructions`]
     /// for a full description of failure scenarios.
-    pub fn compile_instructions(&self, instructions: &[Instruction]) -> Vec<CompiledInstruction> {
+    pub fn compile_instructions(
+        &self,
+        instructions: &[Instruction],
+    ) -> Vec<CompiledInstruction> {
         self.try_compile_instructions(instructions)
             .expect("compilation failure")
     }
@@ -112,7 +121,8 @@ impl<'a> AccountKeys<'a> {
     ) -> Result<Vec<CompiledInstruction>, CompileError> {
         let mut account_index_map = BTreeMap::<&Pubkey, u8>::new();
         for (index, key) in self.iter().enumerate() {
-            let index = u8::try_from(index).map_err(|_| CompileError::AccountIndexOverflow)?;
+            let index = u8::try_from(index)
+                .map_err(|_| CompileError::AccountIndexOverflow)?;
             account_index_map.insert(key, index);
         }
 
@@ -150,7 +160,9 @@ impl PartialEq for AccountKeys<'_> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, solana_instruction::AccountMeta};
+    use solana_instruction::AccountMeta;
+
+    use super::*;
 
     fn test_account_keys() -> [Pubkey; 6] {
         let key0 = Pubkey::new_unique();
@@ -187,7 +199,8 @@ mod tests {
     fn test_len() {
         let keys = test_account_keys();
 
-        let static_keys = vec![keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]];
+        let static_keys =
+            vec![keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]];
         let account_keys = AccountKeys::new(&static_keys, None);
 
         assert_eq!(account_keys.len(), keys.len());
@@ -211,7 +224,8 @@ mod tests {
     fn test_iter() {
         let keys = test_account_keys();
 
-        let static_keys = vec![keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]];
+        let static_keys =
+            vec![keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]];
         let account_keys = AccountKeys::new(&static_keys, None);
 
         assert!(account_keys.iter().eq(keys.iter()));

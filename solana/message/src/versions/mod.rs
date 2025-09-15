@@ -1,15 +1,10 @@
+use std::collections::HashSet;
+
 #[cfg(feature = "frozen-abi")]
 use solana_frozen_abi_macro::{frozen_abi, AbiEnumVisitor, AbiExample};
-use {
-    crate::{
-        compiled_instruction::CompiledInstruction, legacy::Message as LegacyMessage,
-        v0::MessageAddressTableLookup, MessageHeader,
-    },
-    solana_hash::Hash,
-    solana_pubkey::Pubkey,
-    solana_sanitize::{Sanitize, SanitizeError},
-    std::collections::HashSet,
-};
+use solana_hash::Hash;
+use solana_pubkey::Pubkey;
+use solana_sanitize::{Sanitize, SanitizeError};
 #[cfg(feature = "serde")]
 use {
     serde::{
@@ -18,6 +13,12 @@ use {
     },
     serde_derive::{Deserialize, Serialize},
     std::fmt,
+};
+
+use crate::{
+    compiled_instruction::CompiledInstruction,
+    legacy::Message as LegacyMessage, v0::MessageAddressTableLookup,
+    MessageHeader,
 };
 
 mod sanitized;
@@ -69,7 +70,9 @@ impl VersionedMessage {
         }
     }
 
-    pub fn address_table_lookups(&self) -> Option<&[MessageAddressTableLookup]> {
+    pub fn address_table_lookups(
+        &self,
+    ) -> Option<&[MessageAddressTableLookup]> {
         match self {
             Self::Legacy(_) => None,
             Self::V0(message) => Some(&message.address_table_lookups),
@@ -92,12 +95,19 @@ impl VersionedMessage {
         reserved_account_keys: Option<&HashSet<Pubkey>>,
     ) -> bool {
         match self {
-            Self::Legacy(message) => message.is_maybe_writable(index, reserved_account_keys),
-            Self::V0(message) => message.is_maybe_writable(index, reserved_account_keys),
+            Self::Legacy(message) => {
+                message.is_maybe_writable(index, reserved_account_keys)
+            }
+            Self::V0(message) => {
+                message.is_maybe_writable(index, reserved_account_keys)
+            }
         }
     }
 
-    #[deprecated(since = "2.0.0", note = "Please use `is_instruction_account` instead")]
+    #[deprecated(
+        since = "2.0.0",
+        note = "Please use `is_instruction_account` instead"
+    )]
     pub fn is_key_passed_to_program(&self, key_index: usize) -> bool {
         self.is_instruction_account(key_index)
     }
@@ -116,7 +126,9 @@ impl VersionedMessage {
 
     pub fn is_invoked(&self, key_index: usize) -> bool {
         match self {
-            Self::Legacy(message) => message.is_key_called_as_program(key_index),
+            Self::Legacy(message) => {
+                message.is_key_called_as_program(key_index)
+            }
             Self::V0(message) => message.is_key_called_as_program(key_index),
         }
     }
@@ -136,7 +148,9 @@ impl VersionedMessage {
 
     pub fn set_recent_blockhash(&mut self, recent_blockhash: Hash) {
         match self {
-            Self::Legacy(message) => message.recent_blockhash = recent_blockhash,
+            Self::Legacy(message) => {
+                message.recent_blockhash = recent_blockhash
+            }
             Self::V0(message) => message.recent_blockhash = recent_blockhash,
         }
     }
@@ -169,7 +183,8 @@ impl VersionedMessage {
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"solana-tx-message-v1");
         hasher.update(message_bytes);
-        let hash_bytes: [u8; solana_hash::HASH_BYTES] = hasher.finalize().into();
+        let hash_bytes: [u8; solana_hash::HASH_BYTES] =
+            hasher.finalize().into();
         hash_bytes.into()
     }
 }
@@ -227,9 +242,15 @@ impl<'de> serde::Deserialize<'de> for MessagePrefix {
             // with this function instead of visit_u8. This approach is
             // necessary because serde_json directly calls visit_u64 for
             // unsigned integers.
-            fn visit_u64<E: de::Error>(self, value: u64) -> Result<MessagePrefix, E> {
+            fn visit_u64<E: de::Error>(
+                self,
+                value: u64,
+            ) -> Result<MessagePrefix, E> {
                 if value > u8::MAX as u64 {
-                    Err(de::Error::invalid_type(Unexpected::Unsigned(value), &self))?;
+                    Err(de::Error::invalid_type(
+                        Unexpected::Unsigned(value),
+                        &self,
+                    ))?;
                 }
 
                 let byte = value as u8;
@@ -260,7 +281,10 @@ impl<'de> serde::Deserialize<'de> for VersionedMessage {
                 formatter.write_str("message bytes")
             }
 
-            fn visit_seq<A>(self, mut seq: A) -> Result<VersionedMessage, A::Error>
+            fn visit_seq<A>(
+                self,
+                mut seq: A,
+            ) -> Result<VersionedMessage, A::Error>
             where
                 A: SeqAccess<'de>,
             {
@@ -275,10 +299,16 @@ impl<'de> serde::Deserialize<'de> for VersionedMessage {
                         struct RemainingLegacyMessage {
                             pub num_readonly_signed_accounts: u8,
                             pub num_readonly_unsigned_accounts: u8,
-                            #[cfg_attr(feature = "serde", serde(with = "solana_short_vec"))]
+                            #[cfg_attr(
+                                feature = "serde",
+                                serde(with = "solana_short_vec")
+                            )]
                             pub account_keys: Vec<Pubkey>,
                             pub recent_blockhash: Hash,
-                            #[cfg_attr(feature = "serde", serde(with = "solana_short_vec"))]
+                            #[cfg_attr(
+                                feature = "serde",
+                                serde(with = "solana_short_vec")
+                            )]
                             pub instructions: Vec<CompiledInstruction>,
                         }
 
@@ -291,7 +321,8 @@ impl<'de> serde::Deserialize<'de> for VersionedMessage {
                         Ok(VersionedMessage::Legacy(LegacyMessage {
                             header: MessageHeader {
                                 num_required_signatures,
-                                num_readonly_signed_accounts: message.num_readonly_signed_accounts,
+                                num_readonly_signed_accounts: message
+                                    .num_readonly_signed_accounts,
                                 num_readonly_unsigned_accounts: message
                                     .num_readonly_unsigned_accounts,
                             },
@@ -303,19 +334,21 @@ impl<'de> serde::Deserialize<'de> for VersionedMessage {
                     MessagePrefix::Versioned(version) => {
                         match version {
                             0 => {
-                                Ok(VersionedMessage::V0(seq.next_element()?.ok_or_else(
-                                    || {
+                                Ok(VersionedMessage::V0(
+                                    seq.next_element()?.ok_or_else(|| {
                                         // will never happen since tuple length is always 2
                                         de::Error::invalid_length(1, &self)
-                                    },
-                                )?))
+                                    })?,
+                                ))
                             }
                             127 => {
                                 // 0xff is used as the first byte of the off-chain messages
                                 // which corresponds to version 127 of the versioned messages.
                                 // This explicit check is added to prevent the usage of version 127
                                 // in the runtime as a valid transaction.
-                                Err(de::Error::custom("off-chain messages are not accepted"))
+                                Err(de::Error::custom(
+                                    "off-chain messages are not accepted",
+                                ))
                             }
                             _ => Err(de::Error::invalid_value(
                                 de::Unexpected::Unsigned(version as u64),
@@ -333,11 +366,10 @@ impl<'de> serde::Deserialize<'de> for VersionedMessage {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::v0::MessageAddressTableLookup,
-        solana_instruction::{AccountMeta, Instruction},
-    };
+    use solana_instruction::{AccountMeta, Instruction};
+
+    use super::*;
+    use crate::v0::MessageAddressTableLookup;
 
     #[test]
     fn test_legacy_message_serialization() {
@@ -348,8 +380,16 @@ mod tests {
         let id2 = Pubkey::new_unique();
         let id3 = Pubkey::new_unique();
         let instructions = vec![
-            Instruction::new_with_bincode(program_id0, &0, vec![AccountMeta::new(id0, false)]),
-            Instruction::new_with_bincode(program_id0, &0, vec![AccountMeta::new(id1, true)]),
+            Instruction::new_with_bincode(
+                program_id0,
+                &0,
+                vec![AccountMeta::new(id0, false)],
+            ),
+            Instruction::new_with_bincode(
+                program_id0,
+                &0,
+                vec![AccountMeta::new(id1, true)],
+            ),
             Instruction::new_with_bincode(
                 program_id1,
                 &0,
@@ -371,7 +411,8 @@ mod tests {
             let bytes = bincode::serialize(&message).unwrap();
             assert_eq!(bytes, bincode::serialize(&wrapped_message).unwrap());
 
-            let message_from_bytes: LegacyMessage = bincode::deserialize(&bytes).unwrap();
+            let message_from_bytes: LegacyMessage =
+                bincode::deserialize(&bytes).unwrap();
             let wrapped_message_from_bytes: VersionedMessage =
                 bincode::deserialize(&bytes).unwrap();
 
@@ -382,7 +423,8 @@ mod tests {
         // serde_json
         {
             let string = serde_json::to_string(&message).unwrap();
-            let message_from_string: LegacyMessage = serde_json::from_str(&string).unwrap();
+            let message_from_string: LegacyMessage =
+                serde_json::from_str(&string).unwrap();
             assert_eq!(message, message_from_string);
         }
     }
@@ -417,11 +459,13 @@ mod tests {
         });
 
         let bytes = bincode::serialize(&message).unwrap();
-        let message_from_bytes: VersionedMessage = bincode::deserialize(&bytes).unwrap();
+        let message_from_bytes: VersionedMessage =
+            bincode::deserialize(&bytes).unwrap();
         assert_eq!(message, message_from_bytes);
 
         let string = serde_json::to_string(&message).unwrap();
-        let message_from_string: VersionedMessage = serde_json::from_str(&string).unwrap();
+        let message_from_string: VersionedMessage =
+            serde_json::from_str(&string).unwrap();
         assert_eq!(message, message_from_string);
     }
 }

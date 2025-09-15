@@ -1,7 +1,8 @@
-use {
-    super::VersionedMessage, crate::compiled_instruction::CompiledInstruction,
-    solana_pubkey::Pubkey, solana_sanitize::SanitizeError,
-};
+use solana_pubkey::Pubkey;
+use solana_sanitize::SanitizeError;
+
+use super::VersionedMessage;
+use crate::compiled_instruction::CompiledInstruction;
 
 /// Wraps a sanitized `VersionedMessage` to provide a safe API
 #[derive(Clone, Debug, PartialEq, Eq)]

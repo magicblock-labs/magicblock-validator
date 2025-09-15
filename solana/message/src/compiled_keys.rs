@@ -1,11 +1,14 @@
+use core::fmt;
+use std::collections::BTreeMap;
+
+use solana_instruction::Instruction;
+use solana_pubkey::Pubkey;
+
+use crate::MessageHeader;
 #[cfg(not(target_os = "solana"))]
 use crate::{
     v0::{LoadedAddresses, MessageAddressTableLookup},
     AddressLookupTableAccount,
-};
-use {
-    crate::MessageHeader, core::fmt, solana_instruction::Instruction, solana_pubkey::Pubkey,
-    std::collections::BTreeMap,
 };
 
 /// A helper struct to collect pubkeys compiled for a set of instructions
@@ -52,7 +55,10 @@ struct CompiledKeyMeta {
 impl CompiledKeys {
     /// Compiles the pubkeys referenced by a list of instructions and organizes by
     /// signer/non-signer and writable/readonly.
-    pub(crate) fn compile(instructions: &[Instruction], payer: Option<Pubkey>) -> Self {
+    pub(crate) fn compile(
+        instructions: &[Instruction],
+        payer: Option<Pubkey>,
+    ) -> Self {
         let mut key_meta_map = BTreeMap::<Pubkey, CompiledKeyMeta>::new();
         for ix in instructions {
             let meta = key_meta_map.entry(ix.program_id).or_default();
@@ -92,23 +98,27 @@ impl CompiledKeys {
 
         let writable_signer_keys: Vec<Pubkey> = payer
             .into_iter()
-            .chain(
-                key_meta_map
-                    .iter()
-                    .filter_map(|(key, meta)| (meta.is_signer && meta.is_writable).then_some(*key)),
-            )
+            .chain(key_meta_map.iter().filter_map(|(key, meta)| {
+                (meta.is_signer && meta.is_writable).then_some(*key)
+            }))
             .collect();
         let readonly_signer_keys: Vec<Pubkey> = key_meta_map
             .iter()
-            .filter_map(|(key, meta)| (meta.is_signer && !meta.is_writable).then_some(*key))
+            .filter_map(|(key, meta)| {
+                (meta.is_signer && !meta.is_writable).then_some(*key)
+            })
             .collect();
         let writable_non_signer_keys: Vec<Pubkey> = key_meta_map
             .iter()
-            .filter_map(|(key, meta)| (!meta.is_signer && meta.is_writable).then_some(*key))
+            .filter_map(|(key, meta)| {
+                (!meta.is_signer && meta.is_writable).then_some(*key)
+            })
             .collect();
         let readonly_non_signer_keys: Vec<Pubkey> = key_meta_map
             .iter()
-            .filter_map(|(key, meta)| (!meta.is_signer && !meta.is_writable).then_some(*key))
+            .filter_map(|(key, meta)| {
+                (!meta.is_signer && !meta.is_writable).then_some(*key)
+            })
             .collect();
 
         let signers_len = writable_signer_keys
@@ -117,8 +127,12 @@ impl CompiledKeys {
 
         let header = MessageHeader {
             num_required_signatures: try_into_u8(signers_len)?,
-            num_readonly_signed_accounts: try_into_u8(readonly_signer_keys.len())?,
-            num_readonly_unsigned_accounts: try_into_u8(readonly_non_signer_keys.len())?,
+            num_readonly_signed_accounts: try_into_u8(
+                readonly_signer_keys.len(),
+            )?,
+            num_readonly_unsigned_accounts: try_into_u8(
+                readonly_non_signer_keys.len(),
+            )?,
         };
 
         let static_account_keys = std::iter::empty()
@@ -135,15 +149,20 @@ impl CompiledKeys {
     pub(crate) fn try_extract_table_lookup(
         &mut self,
         lookup_table_account: &AddressLookupTableAccount,
-    ) -> Result<Option<(MessageAddressTableLookup, LoadedAddresses)>, CompileError> {
+    ) -> Result<
+        Option<(MessageAddressTableLookup, LoadedAddresses)>,
+        CompileError,
+    > {
         let (writable_indexes, drained_writable_keys) = self
-            .try_drain_keys_found_in_lookup_table(&lookup_table_account.addresses, |meta| {
-                !meta.is_signer && !meta.is_invoked && meta.is_writable
-            })?;
+            .try_drain_keys_found_in_lookup_table(
+                &lookup_table_account.addresses,
+                |meta| !meta.is_signer && !meta.is_invoked && meta.is_writable,
+            )?;
         let (readonly_indexes, drained_readonly_keys) = self
-            .try_drain_keys_found_in_lookup_table(&lookup_table_account.addresses, |meta| {
-                !meta.is_signer && !meta.is_invoked && !meta.is_writable
-            })?;
+            .try_drain_keys_found_in_lookup_table(
+                &lookup_table_account.addresses,
+                |meta| !meta.is_signer && !meta.is_invoked && !meta.is_writable,
+            )?;
 
         // Don't extract lookup if no keys were found
         if writable_indexes.is_empty() && readonly_indexes.is_empty() {
@@ -179,8 +198,10 @@ impl CompiledKeys {
         {
             for (key_index, key) in lookup_table_addresses.iter().enumerate() {
                 if key == search_key {
-                    let lookup_table_index = u8::try_from(key_index)
-                        .map_err(|_| CompileError::AddressTableLookupIndexOverflow)?;
+                    let lookup_table_index =
+                        u8::try_from(key_index).map_err(|_| {
+                            CompileError::AddressTableLookupIndexOverflow
+                        })?;
 
                     lookup_table_indexes.push(lookup_table_index);
                     drained_keys.push(*search_key);
@@ -199,7 +220,10 @@ impl CompiledKeys {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, bitflags::bitflags, solana_instruction::AccountMeta};
+    use bitflags::bitflags;
+    use solana_instruction::AccountMeta;
+
+    use super::*;
 
     bitflags! {
         #[derive(Clone, Copy)]
@@ -269,8 +293,14 @@ mod tests {
                     (id2, KeyFlags::WRITABLE.into()),
                     (id3, (KeyFlags::SIGNER | KeyFlags::WRITABLE).into()),
                     (program_id0, KeyFlags::INVOKED.into()),
-                    (program_id1, (KeyFlags::INVOKED | KeyFlags::SIGNER).into()),
-                    (program_id2, (KeyFlags::INVOKED | KeyFlags::WRITABLE).into()),
+                    (
+                        program_id1,
+                        (KeyFlags::INVOKED | KeyFlags::SIGNER).into()
+                    ),
+                    (
+                        program_id2,
+                        (KeyFlags::INVOKED | KeyFlags::WRITABLE).into()
+                    ),
                     (program_id3, KeyFlags::all().into()),
                 ]),
             }
@@ -370,7 +400,11 @@ mod tests {
                         AccountMeta::new(id0, false),
                     ],
                 ),
-                Instruction::new_with_bincode(program_id, &0, vec![AccountMeta::new(id0, false)]),
+                Instruction::new_with_bincode(
+                    program_id,
+                    &0,
+                    vec![AccountMeta::new(id0, false)],
+                ),
             ],
             None,
         );
@@ -435,7 +469,8 @@ mod tests {
             let test_keys = CompiledKeys {
                 payer: None,
                 key_meta_map: BTreeMap::from_iter(
-                    (0..TOO_MANY_KEYS).map(|_| (Pubkey::new_unique(), key_flags.into())),
+                    (0..TOO_MANY_KEYS)
+                        .map(|_| (Pubkey::new_unique(), key_flags.into())),
                 ),
             };
 
@@ -531,7 +566,8 @@ mod tests {
         };
 
         const MAX_LENGTH_WITHOUT_OVERFLOW: usize = u8::MAX as usize + 1;
-        let mut addresses = vec![Pubkey::default(); MAX_LENGTH_WITHOUT_OVERFLOW];
+        let mut addresses =
+            vec![Pubkey::default(); MAX_LENGTH_WITHOUT_OVERFLOW];
         addresses.push(writable_key);
 
         let lookup_table_account = AddressLookupTableAccount {
@@ -578,10 +614,10 @@ mod tests {
             Pubkey::new_unique(),
         ];
 
-        let drain_result = compiled_keys
-            .try_drain_keys_found_in_lookup_table(&lookup_table_addresses, |meta| {
-                !meta.is_writable
-            });
+        let drain_result = compiled_keys.try_drain_keys_found_in_lookup_table(
+            &lookup_table_addresses,
+            |meta| !meta.is_writable,
+        );
         assert_eq!(drain_result.as_ref().err(), None);
         let (lookup_table_indexes, drained_keys) = drain_result.unwrap();
 
@@ -603,8 +639,10 @@ mod tests {
             Pubkey::new_unique(),
         ];
 
-        let drain_result =
-            compiled_keys.try_drain_keys_found_in_lookup_table(&lookup_table_addresses, |_| true);
+        let drain_result = compiled_keys.try_drain_keys_found_in_lookup_table(
+            &lookup_table_addresses,
+            |_| true,
+        );
         assert_eq!(drain_result.as_ref().err(), None);
         let (lookup_table_indexes, drained_keys) = drain_result.unwrap();
 
@@ -631,8 +669,10 @@ mod tests {
 
         let lookup_table_addresses = vec![];
 
-        let drain_result =
-            compiled_keys.try_drain_keys_found_in_lookup_table(&lookup_table_addresses, |_| true);
+        let drain_result = compiled_keys.try_drain_keys_found_in_lookup_table(
+            &lookup_table_addresses,
+            |_| true,
+        );
         assert_eq!(drain_result.as_ref().err(), None);
         let (lookup_table_indexes, drained_keys) = drain_result.unwrap();
 
@@ -650,11 +690,14 @@ mod tests {
         };
 
         const MAX_LENGTH_WITHOUT_OVERFLOW: usize = u8::MAX as usize + 1;
-        let mut lookup_table_addresses = vec![Pubkey::default(); MAX_LENGTH_WITHOUT_OVERFLOW];
+        let mut lookup_table_addresses =
+            vec![Pubkey::default(); MAX_LENGTH_WITHOUT_OVERFLOW];
         lookup_table_addresses.push(key);
 
-        let drain_result =
-            compiled_keys.try_drain_keys_found_in_lookup_table(&lookup_table_addresses, |_| true);
+        let drain_result = compiled_keys.try_drain_keys_found_in_lookup_table(
+            &lookup_table_addresses,
+            |_| true,
+        );
         assert_eq!(
             drain_result.err(),
             Some(CompileError::AddressTableLookupIndexOverflow)
