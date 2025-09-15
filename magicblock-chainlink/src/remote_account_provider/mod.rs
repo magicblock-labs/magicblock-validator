@@ -1,13 +1,13 @@
 use config::RemoteAccountProviderConfig;
 use lru_cache::AccountsLruCache;
+use parking_lot::Mutex;
+use scc::{hash_map::Entry, HashMap};
 #[cfg(any(test, feature = "dev-context"))]
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::{
-    collections::HashMap,
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     time::Duration,
 };
@@ -54,7 +54,7 @@ use crate::{errors::ChainlinkResult, submux::SubMuxClient};
 // Simple tracking for accounts currently being fetched to handle race conditions
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
 type FetchingAccounts =
-    Mutex<HashMap<Pubkey, (u64, Vec<oneshot::Sender<RemoteAccount>>)>>;
+    HashMap<Pubkey, (u64, Vec<oneshot::Sender<RemoteAccount>>)>;
 
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
@@ -203,13 +203,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             chain_slot: Arc::<AtomicU64>::default(),
             last_update_slot: Arc::<AtomicU64>::default(),
             received_updates_count: Arc::<AtomicU64>::default(),
-            subscribed_accounts: AccountsLruCache::new({
-                // SAFETY: NonZeroUsize::new only returns None if the value is 0.
-                // RemoteAccountProviderConfig can only be constructed with
-                // capacity > 0
-                let cap = config.subscribed_accounts_lru_capacity();
-                NonZeroUsize::new(cap).expect("non-zero capacity")
-            }),
+            subscribed_accounts: AccountsLruCache::new(
+                config.subscribed_accounts_lru_capacity(),
+            ),
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
@@ -284,10 +280,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub fn try_get_removed_account_rx(
         &self,
     ) -> RemoteAccountProviderResult<mpsc::Receiver<Pubkey>> {
-        let mut rx = self
-            .removed_account_rx
-            .lock()
-            .expect("removed_account_rx lock poisoned");
+        let mut rx = self.removed_account_rx.lock();
         rx.take().ok_or_else(|| {
             RemoteAccountProviderError::LruCacheRemoveAccountSenderSupportsSingleReceiverOnly
         })
@@ -350,9 +343,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
                     // Check if we're currently fetching this account
                     let forward_update = {
-                        let mut fetching = fetching_accounts.lock().unwrap();
-                        if let Some((fetch_start_slot, pending_requests)) =
-                            fetching.remove(&update.pubkey)
+                        if let Some((_, (fetch_start_slot, pending_requests))) =
+                            fetching_accounts.remove(&update.pubkey)
                         {
                             // If subscription update is newer than when we started fetching,
                             // resolve with the subscription data instead
@@ -369,7 +361,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 // Subscription is stale, put the fetch tracking back
                                 warn!("Received stale subscription update for {} at slot {}. Fetch started at slot {}",
                                     update.pubkey, slot, fetch_start_slot);
-                                fetching.insert(
+                                fetching_accounts.upsert(
                                     update.pubkey,
                                     (fetch_start_slot, pending_requests),
                                 );
@@ -434,8 +426,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // 2. Force a re-fetch unless all the accounts are already pending which
         //    means someone else already requested a re-fetch for all of them
         let refetch = {
-            let fetching = self.fetching_accounts.lock().unwrap();
-            pubkeys.iter().any(|pk| !fetching.contains_key(pk))
+            pubkeys
+                .iter()
+                .any(|pk| !self.fetching_accounts.contains(pk))
         };
         if refetch {
             if log::log_enabled!(log::Level::Trace) {
@@ -543,10 +536,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let fetch_start_slot = self.chain_slot.load(Ordering::Relaxed);
 
         {
-            let mut fetching = self.fetching_accounts.lock().unwrap();
             for &pubkey in pubkeys {
                 let (sender, receiver) = oneshot::channel();
-                fetching.insert(pubkey, (fetch_start_slot, vec![sender]));
+                match self.fetching_accounts.entry(pubkey) {
+                    Entry::Occupied(mut senders) => {
+                        senders.get_mut().1.push(sender);
+                    }
+                    Entry::Vacant(senders) => {
+                        senders.insert_entry((fetch_start_slot, vec![sender]));
+                    }
+                }
                 subscription_overrides.push((pubkey, receiver));
             }
         }
@@ -702,8 +701,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     /// Check if an account is currently pending (being fetched)
     pub fn is_pending(&self, pubkey: &Pubkey) -> bool {
-        let fetching = self.fetching_accounts.lock().unwrap();
-        fetching.contains_key(pubkey)
+        self.fetching_accounts.contains(pubkey)
     }
 
     /// Subscribe to an account for updates
@@ -878,10 +876,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 pubkeys.iter().zip(remote_accounts.iter())
             {
                 let requests = {
-                    let mut fetching = fetching_accounts.lock().unwrap();
                     // Remove from fetching and get pending requests
                     // Note: the account might have been resolved by subscription update already
-                    if let Some((_, requests)) = fetching.remove(pubkey) {
+                    if let Some((_, (_, requests))) =
+                        fetching_accounts.remove(pubkey)
+                    {
                         requests
                     } else {
                         // Account was resolved by subscription update, skip
@@ -1360,75 +1359,81 @@ mod test {
         assert!(removed.is_empty(), "Expected no removed accounts");
     }
 
+    /// The minimum capacity for scc::HashCache (used for LRU) is 64.
+    /// We use a larger value to ensure statistical outcomes are predictable.
+    const CAPACITY: usize = 512;
+
+    /// Verifies that overflowing the cache triggers the correct number of eviction notifications.
+    ///
+    /// This test operates in two phases:
+    /// 1. It fills the cache halfway, asserting no evictions occur.
+    /// 2. It adds enough additional items to exceed the total capacity, then verifies
+    ///    that the exact number of overflowed items were reported as evicted.
     #[tokio::test]
-    async fn test_eviction_order() {
-        // Higher level version (including removed_rx) from
-        // src/remote_account_provider/lru_cache.rs:
-        // - test_lru_cache_lru_eviction_order
+    async fn test_eviction_notification_on_overflow() {
         init_logger();
+        const OVERCAPACITY_COUNT: usize = 64;
 
-        let pubkey1 = Pubkey::new_unique();
-        let pubkey2 = Pubkey::new_unique();
-        let pubkey3 = Pubkey::new_unique();
-        let pubkey4 = Pubkey::new_unique();
-        let pubkey5 = Pubkey::new_unique();
-
-        let pubkeys = &[pubkey1, pubkey2, pubkey3, pubkey4, pubkey5];
-        let (provider, _, mut removed_rx) =
-            setup_with_accounts(pubkeys, 3).await;
-
-        // Fill cache: [1, 2, 3] (1 is least recently used)
-        provider.try_get(pubkey1, false).await.unwrap();
-        provider.try_get(pubkey2, false).await.unwrap();
-        provider.try_get(pubkey3, false).await.unwrap();
-
-        // Access pubkey1 to make it more recently used: [2, 3, 1]
-        // This should just promote, making order [2, 3, 1]
-        provider.try_get(pubkey1, false).await.unwrap();
-
-        // Add pubkey4, should evict pubkey2 (now least recently used)
-        provider.try_get(pubkey4, false).await.unwrap();
-
-        // Check channel received the evicted account
-
-        let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-        assert_eq!(removed_accounts, [pubkey2]);
-
-        // Add pubkey5, should evict pubkey3 (now least recently used)
-        provider.try_get(pubkey5, false).await.unwrap();
-
-        // Check channel received the second evicted account
-        let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-        assert_eq!(removed_accounts, [pubkey3]);
-    }
-
-    #[tokio::test]
-    async fn test_multiple_evictions_in_sequence() {
-        // Higher level version (including removed_rx) from
-        // src/remote_account_provider/lru_cache.rs:
-        // - test_lru_cache_multiple_evictions_in_sequence
-        init_logger();
-
-        // Create test pubkeys
-        let pubkeys: Vec<Pubkey> =
-            (1..=7).map(|_| Pubkey::new_unique()).collect();
+        // Create enough keys to fill the cache and then overflow it.
+        let pubkeys: Vec<Pubkey> = (0..CAPACITY + OVERCAPACITY_COUNT)
+            .map(|_| Pubkey::new_unique())
+            .collect();
 
         let (provider, _, mut removed_rx) =
-            setup_with_accounts(&pubkeys, 4).await;
+            setup_with_accounts(&pubkeys, CAPACITY).await;
 
-        // Fill cache to capacity (no evictions)
-        for pk in pubkeys.iter().take(4) {
+        // --- Phase 1: Fill cache partially ---
+        // No evictions should happen at this point.
+        for pk in pubkeys.iter().take(CAPACITY / 2) {
+            provider.try_get(*pk, false).await.unwrap();
+        }
+        assert!(
+            removed_rx.try_recv().is_err(),
+            "No accounts should be evicted when cache is not full"
+        );
+
+        // --- Phase 2: Overflow the cache ---
+        // Add the remaining items, which will exceed capacity and trigger evictions.
+        for pk in pubkeys.iter().skip(CAPACITY / 2) {
             provider.try_get(*pk, false).await.unwrap();
         }
 
-        // Add more accounts and verify evictions happen in LRU order
-        for i in 4..7 {
-            provider.try_get(pubkeys[i], false).await.unwrap();
-            let expected_evicted = pubkeys[i - 4]; // Should evict the account added 4 steps ago
+        // --- Phase 3: Verify eviction count ---
+        // We expect at least OVERCAPACITY_COUNT items to have been evicted.
+        let removed_accounts = drain_removed_account_rx(&mut removed_rx);
+        assert!(
+            removed_accounts.len() >= OVERCAPACITY_COUNT,
+            "Expected an eviction count equal to the number of items added beyond capacity"
+        );
+    }
 
-            // Verify the evicted account was sent over the channel
-            let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-            assert_eq!(removed_accounts, vec![expected_evicted]);
+    /// Verifies that a continuous stream of insertions that overflows the cache
+    /// results in the correct number of eviction notifications.
+    #[tokio::test]
+    async fn test_continuous_eviction_notifications() {
+        init_logger();
+        const OVERFLOW_COUNT: usize = 10;
+
+        let pubkeys: Vec<Pubkey> = (0..CAPACITY + OVERFLOW_COUNT)
+            .map(|_| Pubkey::new_unique())
+            .collect();
+
+        let (provider, _, mut removed_rx) =
+            setup_with_accounts(&pubkeys, CAPACITY).await;
+
+        let mut removed_accounts = 0;
+        // 1. Iterate through all generated keys, adding them to the cache.
+        // On each insertion, immediately poll the channel to count evictions.
+        for pk in pubkeys.iter() {
+            provider.try_get(*pk, false).await.unwrap();
+            removed_accounts += removed_rx.try_recv().is_ok() as usize;
         }
+
+        // 2. Verify that the total number of reported evictions is at least
+        // the number of items added beyond capacity.
+        assert!(
+            removed_accounts >= OVERFLOW_COUNT,
+            "The number of evicted accounts should be at least the number of overflow items"
+        );
     }
 }

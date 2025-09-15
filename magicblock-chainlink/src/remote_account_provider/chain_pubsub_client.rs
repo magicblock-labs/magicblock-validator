@@ -1,5 +1,6 @@
 use log::*;
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use solana_pubkey::Pubkey;
@@ -98,7 +99,6 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
         // the updates stream.
         self.updates_rcvr
             .lock()
-            .unwrap()
             .take()
             .expect("ChainPubsubClientImpl::take_updates called more than once")
     }
@@ -140,6 +140,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 #[cfg(any(test, feature = "dev-context"))]
 pub mod mock {
     use log::*;
+    use scc::HashSet;
     use solana_account::Account;
     use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
     use solana_rpc_client_api::response::{
@@ -148,7 +149,6 @@ pub mod mock {
     use solana_sdk::clock::Slot;
 
     use super::*;
-    use std::collections::HashSet;
     use std::sync::{
         atomic::{AtomicU64, Ordering},
         Mutex,
@@ -158,7 +158,7 @@ pub mod mock {
     pub struct ChainPubsubClientMock {
         updates_sndr: mpsc::Sender<SubscriptionUpdate>,
         updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
-        subscribed_pubkeys: Arc<Mutex<HashSet<Pubkey>>>,
+        subscribed_pubkeys: Arc<HashSet<Pubkey>>,
         recycle_calls: Arc<AtomicU64>,
     }
 
@@ -170,7 +170,7 @@ pub mod mock {
             Self {
                 updates_sndr,
                 updates_rcvr: Arc::new(Mutex::new(Some(updates_rcvr))),
-                subscribed_pubkeys: Arc::new(Mutex::new(HashSet::new())),
+                subscribed_pubkeys: Arc::new(HashSet::new()),
                 recycle_calls: Arc::new(AtomicU64::new(0)),
             }
         }
@@ -180,8 +180,7 @@ pub mod mock {
         }
 
         async fn send(&self, update: SubscriptionUpdate) {
-            let subscribed_pubkeys =
-                self.subscribed_pubkeys.lock().unwrap().clone();
+            let subscribed_pubkeys = self.subscribed_pubkeys.clone();
             if subscribed_pubkeys.contains(&update.pubkey) {
                 let _ =
                     self.updates_sndr.send(update).await.inspect_err(|err| {
@@ -237,9 +236,7 @@ pub mod mock {
             &self,
             pubkey: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
-            let mut subscribed_pubkeys =
-                self.subscribed_pubkeys.lock().unwrap();
-            subscribed_pubkeys.insert(pubkey);
+            let _ = self.subscribed_pubkeys.insert(pubkey);
             Ok(())
         }
 
@@ -247,9 +244,7 @@ pub mod mock {
             &self,
             pubkey: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
-            let mut subscribed_pubkeys =
-                self.subscribed_pubkeys.lock().unwrap();
-            subscribed_pubkeys.remove(&pubkey);
+            self.subscribed_pubkeys.remove(&pubkey);
             Ok(())
         }
 

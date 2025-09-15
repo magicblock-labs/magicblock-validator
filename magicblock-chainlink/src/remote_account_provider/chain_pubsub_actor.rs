@@ -1,13 +1,11 @@
 use log::*;
+use scc::HashMap;
 use solana_rpc_client_api::response::Response as RpcResponse;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::sysvar::clock;
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Mutex,
-};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamExt;
 
@@ -71,13 +69,13 @@ pub struct ChainPubsubActor {
     /// Sends subscribe/unsubscribe messages to this actor
     messages_sender: mpsc::Sender<ChainPubsubActorMessage>,
     /// Map of subscriptions we are holding
-    subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+    subscriptions: Arc<HashMap<Pubkey, AccountSubscription>>,
     /// Sends updates for any account subscription that is received via
     /// the [Self::pubsub_client]
     subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
-    /// The tasks that watch subscriptions via the [Self::pubsub_client] and
-    /// channel them into the [Self::subscription_updates_sender]
-    subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
+    /// The cancellation token for the tasks that watch subscriptions via the
+    /// [Self::pubsub_client] and channel them into the [Self::subscription_updates_sender]
+    subscription_watchers: Arc<CancellationToken>,
     /// The token to use to cancel all subscriptions and shut down the
     /// message listener, essentially shutting down whis actor
     shutdown_token: CancellationToken,
@@ -123,16 +121,15 @@ impl ChainPubsubActor {
             mpsc::channel(SUBSCRIPTION_UPDATE_CHANNEL_SIZE);
         let (messages_sender, messages_receiver) =
             mpsc::channel(MESSAGE_CHANNEL_SIZE);
-        let subscription_watchers =
-            Arc::new(Mutex::new(tokio::task::JoinSet::new()));
         let shutdown_token = CancellationToken::new();
+        let subscription_watchers = Arc::new(shutdown_token.child_token());
         let me = Self {
             pubsub_client_config,
             pubsub_client,
             messages_sender,
             subscriptions: Default::default(),
-            subscription_updates_sender,
             subscription_watchers,
+            subscription_updates_sender,
             shutdown_token,
         };
         me.start_worker(messages_receiver);
@@ -144,15 +141,9 @@ impl ChainPubsubActor {
 
     pub async fn shutdown(&self) {
         info!("Shutting down ChainPubsubActor");
-        let subs = self
-            .subscriptions
-            .lock()
-            .unwrap()
-            .drain()
-            .collect::<Vec<_>>();
-        for (_, sub) in subs {
-            sub.cancellation_token.cancel();
-        }
+        self.subscriptions
+            .scan_async(|_, sub| sub.cancellation_token.cancel())
+            .await;
         self.shutdown_token.cancel();
         // TODO:
         // let mut subs = self.subscription_watchers.lock().unwrap();;
@@ -208,9 +199,9 @@ impl ChainPubsubActor {
     }
 
     async fn handle_msg(
-        subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        subscriptions: Arc<HashMap<Pubkey, AccountSubscription>>,
         pubsub_client: Arc<PubsubClient>,
-        subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
+        subscription_watchers: Arc<CancellationToken>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         pubsub_client_config: PubsubClientConfig,
         msg: ChainPubsubActorMessage,
@@ -222,8 +213,8 @@ impl ChainPubsubActor {
                     pubkey,
                     response,
                     subscriptions,
-                    pubsub_client.clone(),
                     subscription_watchers,
+                    pubsub_client.clone(),
                     subscription_updates_sender,
                     commitment_config,
                 );
@@ -234,7 +225,7 @@ impl ChainPubsubActor {
                 response,
             } => {
                 if let Some(AccountSubscription { cancellation_token }) =
-                    subscriptions.lock().unwrap().remove(&pubkey)
+                    subscriptions.remove(&pubkey).map(|e| e.1)
                 {
                     cancellation_token.cancel();
                     let _ = response.send(Ok(()));
@@ -271,9 +262,9 @@ impl ChainPubsubActor {
     fn add_sub(
         pubkey: Pubkey,
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-        subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        subs: Arc<HashMap<Pubkey, AccountSubscription>>,
+        subscription_watchers: Arc<CancellationToken>,
         pubsub_client: Arc<PubsubClient>,
-        subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         commitment_config: CommitmentConfig,
     ) {
@@ -285,14 +276,14 @@ impl ChainPubsubActor {
             ..Default::default()
         };
 
-        let cancellation_token = CancellationToken::new();
+        let cancellation_token = subscription_watchers.child_token();
 
-        let mut sub_joinset = subscription_watchers.lock().unwrap();
-        sub_joinset.spawn(async move {
+        tokio::spawn(async move {
             // Attempt to subscribe to the account
             let (mut update_stream, unsubscribe) = match pubsub_client
                 .account_subscribe(&pubkey, Some(config))
-                .await {
+                .await
+            {
                 Ok(res) => res,
                 Err(err) => {
                     let _ = sub_response.send(Err(err.into()));
@@ -302,9 +293,12 @@ impl ChainPubsubActor {
 
             // Then track the subscription and confirm to the requester that the
             // subscription was made
-            subs.lock().unwrap().insert(pubkey, AccountSubscription {
-                cancellation_token: cancellation_token.clone(),
-            });
+            subs.upsert(
+                pubkey,
+                AccountSubscription {
+                    cancellation_token: cancellation_token.clone(),
+                },
+            );
 
             let _ = sub_response.send(Ok(()));
 
@@ -340,8 +334,8 @@ impl ChainPubsubActor {
     }
 
     async fn recycle_connections(
-        subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-        subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
+        subscriptions: Arc<HashMap<Pubkey, AccountSubscription>>,
+        subscription_watchers: Arc<CancellationToken>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         pubsub_client_config: PubsubClientConfig,
     ) -> RemoteAccountProviderResult<Arc<PubsubClient>> {
@@ -366,15 +360,14 @@ impl ChainPubsubActor {
         };
 
         // Cancel all current subscriptions and collect pubkeys to re-subscribe later
-        let drained = {
-            let mut subs_lock = subscriptions.lock().unwrap();
-            std::mem::take(&mut *subs_lock)
-        };
         let mut to_resubscribe = HashSet::new();
-        for (pk, AccountSubscription { cancellation_token }) in drained {
-            to_resubscribe.insert(pk);
-            cancellation_token.cancel();
-        }
+        subscriptions.prune(
+            |pk, AccountSubscription { cancellation_token }| {
+                to_resubscribe.insert(*pk);
+                cancellation_token.cancel();
+                None
+            },
+        );
         debug!(
             "RecycleConnections: cancelled {} subscriptions",
             to_resubscribe.len()
@@ -382,15 +375,7 @@ impl ChainPubsubActor {
 
         // Abort and await all watcher tasks and add fresh joinset
         debug!("RecycleConnections: aborting watcher tasks");
-        let mut old_joinset = {
-            let mut watchers = subscription_watchers
-                .lock()
-                .expect("subscription_watchers lock poisonde");
-            std::mem::replace(&mut *watchers, tokio::task::JoinSet::new())
-        };
-        old_joinset.abort_all();
-        while let Some(_res) = old_joinset.join_next().await {}
-        debug!("RecycleConnections: watcher tasks terminated");
+        subscription_watchers.cancel();
 
         // Re-subscribe to all accounts
         debug!(
@@ -404,8 +389,8 @@ impl ChainPubsubActor {
                 pk,
                 tx,
                 subscriptions.clone(),
-                new_client.clone(),
                 subscription_watchers.clone(),
+                new_client.clone(),
                 subscription_updates_sender.clone(),
                 commitment_config,
             );

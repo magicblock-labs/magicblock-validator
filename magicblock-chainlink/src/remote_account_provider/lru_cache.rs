@@ -1,8 +1,8 @@
 use log::*;
+use scc::HashCache;
 use solana_sdk::sysvar;
-use std::{collections::HashSet, num::NonZeroUsize, sync::Mutex};
+use std::collections::HashSet;
 
-use lru::LruCache;
 use solana_pubkey::Pubkey;
 
 /// A simple wrapper around [lru::LruCache].
@@ -11,7 +11,7 @@ use solana_pubkey::Pubkey;
 /// the [Self::removed_account_rx] channel.
 pub struct AccountsLruCache {
     /// Tracks which accounts are currently subscribed to
-    subscribed_accounts: Mutex<LruCache<Pubkey, ()>>,
+    subscribed_accounts: HashCache<Pubkey, ()>,
     accounts_to_never_evict: HashSet<Pubkey>,
 }
 
@@ -22,13 +22,10 @@ fn accounts_to_never_evict() -> HashSet<Pubkey> {
 }
 
 impl AccountsLruCache {
-    pub fn new(capacity: NonZeroUsize) -> Self {
+    pub fn new(capacity: usize) -> Self {
         let accounts_to_never_evict = accounts_to_never_evict();
         Self {
-            // SAFETY: NonZeroUsize::new only returns None if the value is 0.
-            // RemoteAccountProviderConfig can only be constructed with
-            // capacity > 0 thus the capacity here is guaranteed to be non-zero.
-            subscribed_accounts: Mutex::new(LruCache::new(capacity)),
+            subscribed_accounts: HashCache::with_capacity(capacity, capacity),
             accounts_to_never_evict,
         }
     }
@@ -43,12 +40,8 @@ impl AccountsLruCache {
             trace!("Promoting: {pubkeys}");
         }
 
-        let mut subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
-        for key in pubkeys {
-            subs.promote(key);
+        for &key in pubkeys {
+            self.subscribed_accounts.get(key);
         }
     }
 
@@ -61,12 +54,8 @@ impl AccountsLruCache {
             return None;
         }
 
-        let mut subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
         // If the pubkey is already in the cache, we just promote it
-        if subs.promote(&pubkey) {
+        if self.subscribed_accounts.get(&pubkey).is_some() {
             trace!("Account promoted: {pubkey}");
             return None;
         }
@@ -74,9 +63,12 @@ impl AccountsLruCache {
 
         // Otherwise we add it new and possibly deal with an eviction
         // on the caller side
-        let evicted = subs
-            .push(pubkey, ())
-            .map(|(evicted_pubkey, _)| evicted_pubkey);
+        let evicted = self
+            .subscribed_accounts
+            .put(pubkey, ())
+            .ok()
+            .flatten()
+            .map(|(k, _)| k);
 
         if let Some(evicted_pubkey) = evicted {
             debug_assert_ne!(
@@ -90,11 +82,7 @@ impl AccountsLruCache {
     }
 
     pub fn contains(&self, pubkey: &Pubkey) -> bool {
-        let subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
-        subs.contains(pubkey)
+        self.subscribed_accounts.contains(pubkey)
     }
 
     pub fn remove(&self, pubkey: &Pubkey) -> bool {
@@ -102,138 +90,142 @@ impl AccountsLruCache {
             !self.accounts_to_never_evict.contains(pubkey),
             "Cannot remove an account that is not supposed to be evicted: {pubkey}"
         );
-        let mut subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
-        if subs.pop(pubkey).is_some() {
-            trace!("Removed account: {pubkey}");
-            true
-        } else {
-            false
-        }
+        self.subscribed_accounts.remove(pubkey).is_some()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::num::NonZeroUsize;
+    /// The minimum capacity for scc::HashCache is 64. We use a higher value
+    /// to make statistical outcomes in tests highly predictable.
+    const CAPACITY: usize = 512;
 
-    #[tokio::test]
-    async fn test_lru_cache_add_accounts_up_to_limit_no_eviction() {
-        let capacity = NonZeroUsize::new(3).unwrap();
-        let cache = AccountsLruCache::new(capacity);
-
-        let pubkey1 = Pubkey::new_unique();
-        let pubkey2 = Pubkey::new_unique();
-        let pubkey3 = Pubkey::new_unique();
-
-        // Add three accounts (up to limit)
-        let evicted1 = cache.add(pubkey1);
-        let evicted2 = cache.add(pubkey2);
-        let evicted3 = cache.add(pubkey3);
-
-        // No evictions should occur
-        assert_eq!(evicted1, None);
-        assert_eq!(evicted2, None);
-        assert_eq!(evicted3, None);
-    }
-
-    #[tokio::test]
-    async fn test_lru_cache_add_same_account_multiple_times_no_eviction() {
-        let capacity = NonZeroUsize::new(3).unwrap();
-        let cache = AccountsLruCache::new(capacity);
-
+    /// Tests basic insertion and upsert functionality well below the capacity limit.
+    #[test]
+    fn test_add_and_upsert_within_capacity() {
+        let cache = AccountsLruCache::new(CAPACITY);
         let pubkey1 = Pubkey::new_unique();
         let pubkey2 = Pubkey::new_unique();
 
-        // Add two different accounts first
-        let evicted1 = cache.add(pubkey1);
-        let evicted2 = cache.add(pubkey2);
-
-        // Add the same accounts multiple times
-        let evicted3 = cache.add(pubkey1); // Should just promote
-        let evicted4 = cache.add(pubkey2); // Should just promote
-        let evicted5 = cache.add(pubkey1); // Should just promote
-
-        // No evictions should occur
-        assert_eq!(evicted1, None);
-        assert_eq!(evicted2, None);
-        assert_eq!(evicted3, None);
-        assert_eq!(evicted4, None);
-        assert_eq!(evicted5, None);
-    }
-
-    #[tokio::test]
-    async fn test_lru_cache_eviction_when_exceeding_limit() {
-        let capacity = NonZeroUsize::new(3).unwrap();
-        let cache = AccountsLruCache::new(capacity);
-
-        let pubkey1 = Pubkey::new_unique();
-        let pubkey2 = Pubkey::new_unique();
-        let pubkey3 = Pubkey::new_unique();
-        let pubkey4 = Pubkey::new_unique();
-
-        // Fill cache to capacity
         cache.add(pubkey1);
         cache.add(pubkey2);
-        cache.add(pubkey3);
+        assert_eq!(cache.subscribed_accounts.len(), 2);
 
-        // Add a fourth account, which should evict the least recently used (pubkey1)
-        let evicted = cache.add(pubkey4);
-        assert_eq!(evicted, Some(pubkey1));
+        // Re-adding (upserting) an existing key should not change the size
+        // and should not cause an eviction of other keys.
+        let evicted = cache.add(pubkey1);
+        assert_eq!(evicted, None, "Upserting should not cause an eviction");
+        assert_eq!(
+            cache.subscribed_accounts.len(),
+            2,
+            "Cache size should not change on upsert"
+        );
     }
 
-    #[tokio::test]
-    async fn test_lru_cache_lru_eviction_order() {
-        let capacity = NonZeroUsize::new(3).unwrap();
-        let cache = AccountsLruCache::new(capacity);
+    /// Verifies that the cache's size is strictly bounded by its capacity,
+    /// even after a large number of insertions.
+    #[test]
+    fn test_cache_size_is_bounded_after_many_insertions() {
+        let cache = AccountsLruCache::new(CAPACITY);
 
-        let pubkey1 = Pubkey::new_unique();
-        let pubkey2 = Pubkey::new_unique();
-        let pubkey3 = Pubkey::new_unique();
-        let pubkey4 = Pubkey::new_unique();
-        let pubkey5 = Pubkey::new_unique();
+        // Insert three times the capacity, forcing many evictions.
+        for _ in 0..(CAPACITY * 3) {
+            cache.add(Pubkey::new_unique());
+        }
 
-        // Fill cache: [1, 2, 3] (1 is least recently used)
-        cache.add(pubkey1);
-        cache.add(pubkey2);
-        cache.add(pubkey3);
-
-        // Access pubkey1 to make it more recently used: [2, 3, 1]
-        cache.add(pubkey1); // This should just promote, making order [2, 3, 1]
-
-        // Add pubkey4, should evict pubkey2 (now least recently used)
-        let evicted = cache.add(pubkey4);
-        assert_eq!(evicted, Some(pubkey2));
-
-        // Add pubkey5, should evict pubkey3 (now least recently used)
-        let evicted = cache.add(pubkey5);
-        assert_eq!(evicted, Some(pubkey3));
+        // The primary guarantee is that the cache does not grow beyond its limit.
+        // After this many insertions, it should be exactly full.
+        assert_eq!(
+            cache.subscribed_accounts.len(),
+            CAPACITY,
+            "Cache length should be at capacity after many insertions"
+        );
     }
 
-    #[tokio::test]
-    async fn test_lru_cache_multiple_evictions_in_sequence() {
-        let capacity = NonZeroUsize::new(4).unwrap();
-        let cache = AccountsLruCache::new(capacity);
+    /// This test covers a hybrid scenario:
+    /// 1. A phase with no evictions.
+    /// 2. A phase where evictions are guaranteed.
+    #[test]
+    fn test_hybrid_no_eviction_then_eviction() {
+        let cache = AccountsLruCache::new(CAPACITY);
 
-        // Create test pubkeys
-        let pubkeys: Vec<Pubkey> =
-            (1..=7).map(|_| Pubkey::new_unique()).collect();
+        // --- Phase 1: No Evictions ---
+        // Add half the capacity. Evictions are statistically impossible here.
+        for _ in 0..(CAPACITY / 2) {
+            cache.add(Pubkey::new_unique());
+        }
+        assert_eq!(cache.subscribed_accounts.len(), CAPACITY / 2);
 
-        // Fill cache to capacity (no evictions)
-        for pk in pubkeys.iter().take(4) {
-            let evicted = cache.add(*pk);
-            assert_eq!(evicted, None);
+        // --- Phase 2: Guaranteed Evictions ---
+        // Add more items to fill the cache and force evictions.
+        let mut eviction_count = 0;
+        for _ in 0..(CAPACITY) {
+            // Add enough to definitely overflow
+            if cache.add(Pubkey::new_unique()).is_some() {
+                eviction_count += 1;
+            }
         }
 
-        // Add more accounts and verify evictions happen in LRU order
-        for i in 4..7 {
-            let evicted = cache.add(pubkeys[i]);
-            let expected_evicted = pubkeys[i - 4]; // Should evict the account added 4 steps ago
+        // After the churn, the cache should be full.
+        assert_eq!(cache.subscribed_accounts.len(), CAPACITY);
+        assert!(
+            eviction_count > 0,
+            "At least one eviction should have occurred in the second phase"
+        );
+    }
 
-            assert_eq!(evicted, Some(expected_evicted));
+    /// Tests that `promote_multi` makes keys "stickier" and far less likely to be
+    /// evicted compared to non-promoted keys during churn.
+    #[test]
+    fn test_promote_multi_dramatically_reduces_eviction_likelihood() {
+        let cache = AccountsLruCache::new(CAPACITY);
+        let keys: Vec<Pubkey> =
+            (0..CAPACITY).map(|_| Pubkey::new_unique()).collect();
+
+        // 1. Populate the cache completely.
+        for key in &keys {
+            cache.add(*key);
         }
+
+        // 2. Divide keys into two groups: those to promote and those to leave alone.
+        let (keys_to_promote, keys_not_promoted) = keys.split_at(CAPACITY / 2);
+        let promote_refs: Vec<&Pubkey> = keys_to_promote
+            .iter()
+            .filter(|k| cache.contains(k))
+            .collect();
+
+        // 4. Force heavy churn by replacing 100% of the cache capacity with new items.
+        for _ in 0..CAPACITY {
+            // Continuously promote the first group, making them "hot".
+            cache.promote_multi(&promote_refs);
+            cache.add(Pubkey::new_unique());
+        }
+
+        // 5. Verify the survival rates.
+        let promoted_survivors =
+            keys_to_promote.iter().filter(|k| cache.contains(k)).count();
+        let non_promoted_survivors = keys_not_promoted
+            .iter()
+            .filter(|k| cache.contains(k))
+            .count();
+
+        let promoted_survival_rate =
+            promoted_survivors as f64 / promote_refs.len() as f64;
+        let non_promoted_survival_rate =
+            non_promoted_survivors as f64 / keys_not_promoted.len() as f64;
+
+        // Assert that the promoted keys had a very high survival rate.
+        assert!(
+            promoted_survival_rate > 0.95,
+            "Expected a very high survival rate (>95%) for promoted keys, but got {:.2}",
+            promoted_survival_rate
+        );
+
+        // Assert that promotion provided a significant advantage.
+        assert!(
+            promoted_survival_rate > non_promoted_survival_rate,
+            "Promoted keys should have a higher survival rate than non-promoted ones"
+        );
     }
 }

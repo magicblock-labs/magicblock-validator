@@ -1,12 +1,13 @@
 use log::*;
 use magicblock_core::traits::AccountsBank;
+use scc::{hash_map::Entry, HashMap};
 use solana_account::{AccountSharedData, ReadableAccount};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     fmt,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc,
     },
 };
 use tokio::{
@@ -48,7 +49,7 @@ where
     remote_account_provider: Arc<RemoteAccountProvider<T, U>>,
     /// Tracks pending account fetch requests to avoid duplicate fetches in parallel
     /// Once an account is fetched and cloned into the bank, it's removed from here
-    pending_requests: Arc<Mutex<HashMap<Pubkey, RemoteAccountRequests>>>,
+    pending_requests: Arc<HashMap<Pubkey, RemoteAccountRequests>>,
     /// Counter to track the number of fetch operations for testing deduplication
     fetch_count: Arc<AtomicU64>,
 
@@ -145,7 +146,7 @@ where
             accounts_bank: accounts_bank.clone(),
             cloner: cloner.clone(),
             validator_pubkey,
-            pending_requests: Arc::new(Mutex::new(HashMap::new())),
+            pending_requests: Arc::new(HashMap::new()),
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
         };
@@ -830,11 +831,6 @@ where
 
         // Check pending requests and bank synchronously
         {
-            let mut pending = self
-                .pending_requests
-                .lock()
-                .expect("pending_requests lock poisoned");
-
             for &pubkey in pubkeys {
                 // Check synchronously if account is in bank
                 if self.accounts_bank.get_account(&pubkey).is_some() {
@@ -844,20 +840,21 @@ where
                 }
 
                 // Check if account fetch is already pending
-                if let Some(requests) = pending.get_mut(&pubkey) {
-                    let (sender, receiver) = oneshot::channel();
-                    requests.push(sender);
-                    await_pending.push((pubkey, receiver));
-                    continue;
-                }
+                match self.pending_requests.entry(pubkey) {
+                    Entry::Occupied(mut requests) => {
+                        let (sender, receiver) = oneshot::channel();
+                        requests.get_mut().push(sender);
+                        await_pending.push((pubkey, receiver));
+                        continue;
+                    }
+                    Entry::Vacant(e) => {
+                        // or reserve an entry if the fetch request is new
+                        e.insert_entry(vec![]);
+                    }
+                };
 
                 // Account needs to be fetched - add to fetch list
                 fetch_new.push(pubkey);
-            }
-
-            // Create pending entries for accounts we need to fetch
-            for &pubkey in &fetch_new {
-                pending.insert(pubkey, vec![]);
             }
         }
 
@@ -875,12 +872,10 @@ where
         // Clear pending requests for fetched accounts - pending requesters can get
         // the accounts from the bank now since fetch_and_clone_accounts succeeded
         {
-            let mut pending = self
-                .pending_requests
-                .lock()
-                .expect("pending_requests lock poisoned");
             for &pubkey in &fetch_new {
-                if let Some(requests) = pending.remove(&pubkey) {
+                if let Some((_, requests)) =
+                    self.pending_requests.remove(&pubkey)
+                {
                     // We signal completion but don't send the actual account data since:
                     // 1. The account is now in the bank if it was successfully cloned
                     // 2. If there was an error, the result will contain the error info

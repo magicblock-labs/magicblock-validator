@@ -2,31 +2,31 @@
 pub mod mock {
     use log::*;
     use magicblock_core::traits::AccountsBank;
+    use scc::HashMap;
     use solana_account::{AccountSharedData, WritableAccount};
     use solana_pubkey::Pubkey;
-    use std::{collections::HashMap, fmt, sync::Mutex};
+    use std::fmt;
 
     use crate::blacklisted_accounts;
 
     #[derive(Default)]
     pub struct AccountsBankStub {
-        pub accounts: Mutex<HashMap<Pubkey, AccountSharedData>>,
+        pub accounts: HashMap<Pubkey, AccountSharedData>,
     }
 
     impl AccountsBankStub {
         pub fn insert(&self, pubkey: Pubkey, account: AccountSharedData) {
             trace!("Inserting account: {pubkey}");
-            self.accounts.lock().unwrap().insert(pubkey, account);
+            self.accounts.upsert(pubkey, account);
         }
 
         pub fn get(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
-            self.accounts.lock().unwrap().get(pubkey).cloned()
+            self.accounts.get(pubkey).map(|acc| acc.get().clone())
         }
 
         pub fn set_owner(&self, pubkey: &Pubkey, owner: Pubkey) -> &Self {
             trace!("Setting owner for account: {pubkey} to {owner}");
-            let mut accounts = self.accounts.lock().unwrap();
-            if let Some(account) = accounts.get_mut(pubkey) {
+            if let Some(mut account) = self.accounts.get(pubkey) {
                 account.set_owner(owner);
             } else {
                 panic!("Account not found in bank: {pubkey}");
@@ -36,8 +36,7 @@ pub mod mock {
 
         fn set_delegated(&self, pubkey: &Pubkey, delegated: bool) -> &Self {
             trace!("Setting delegated for account: {pubkey} to {delegated}");
-            let mut accounts = self.accounts.lock().unwrap();
-            if let Some(account) = accounts.get_mut(pubkey) {
+            if let Some(mut account) = self.accounts.get(pubkey) {
                 account.set_delegated(delegated);
             } else {
                 panic!("Account not found in bank: {pubkey}");
@@ -69,42 +68,34 @@ pub mod mock {
             output.push_str("AccountsBank {\n");
             let blacklisted_accounts =
                 blacklisted_accounts(&Pubkey::default(), &Pubkey::default());
-            for pubkey in self.accounts.lock().unwrap().keys() {
-                if !include_blacklisted && blacklisted_accounts.contains(pubkey)
-                {
-                    continue;
+            self.accounts.scan(|pk, _| {
+                if !include_blacklisted && blacklisted_accounts.contains(pk) {
+                    return;
                 }
-                output.push_str(&format!("{pubkey},\n"));
-            }
+                output.push_str(&format!("{pk},\n"));
+            });
             output.push_str("} ");
-            output.push_str(&format!(
-                "{} total",
-                self.accounts.lock().unwrap().len()
-            ));
+            output.push_str(&format!("{} total", self.accounts.len()));
             output
         }
     }
 
     impl AccountsBank for AccountsBankStub {
         fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
-            self.accounts.lock().unwrap().get(pubkey).cloned()
+            self.get(pubkey)
         }
         fn remove_account(&self, pubkey: &Pubkey) {
-            self.accounts.lock().unwrap().remove(pubkey);
+            self.accounts.remove(pubkey);
         }
     }
 
     impl fmt::Display for AccountsBankStub {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "AccountsBankStub {{")?;
-            for (pubkey, acc) in self.accounts.lock().unwrap().iter() {
-                write!(f, "\n  - {pubkey}{acc:?}")?;
-            }
-            write!(
-                f,
-                "}}\nTotal {} accounts",
-                self.accounts.lock().unwrap().len()
-            )
+            self.accounts.scan(|pubkey, acc| {
+                let _ = write!(f, "\n  - {pubkey}{acc:?}");
+            });
+            write!(f, "}}\nTotal {} accounts", self.accounts.len())
         }
     }
 }

@@ -1,7 +1,8 @@
 use log::*;
+use scc::{hash_map::Entry, HashMap};
 use std::{
     cmp,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashSet, VecDeque},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -110,7 +111,7 @@ pub struct SubMuxClient<T: ChainPubsubClient> {
     /// Deduplication cache keyed by (pubkey, slot) storing the last time
     /// we forwarded such an update. Prevents forwarding identical updates
     /// seen from multiple inner clients within dedup_window.
-    dedup_cache: Arc<Mutex<HashMap<(Pubkey, u64), Instant>>>,
+    dedup_cache: Arc<HashMap<(Pubkey, u64), Instant>>,
     /// Time window during which identical updates are suppressed.
     dedup_window: Duration,
     /// When debouncing is enabled for a pubkey, at most one update per
@@ -122,7 +123,7 @@ pub struct SubMuxClient<T: ChainPubsubClient> {
     debounce_detection_window: Duration,
     /// Per-account debounce state tracking (enabled/disabled, arrivals,
     /// next-allowed-forward timestamp and pending update).
-    debounce_states: Arc<Mutex<HashMap<Pubkey, DebounceState>>>,
+    debounce_states: Arc<HashMap<Pubkey, DebounceState>>,
     /// Accounts that should never be debounced, namely the clock sysvar account
     /// which we use to track the latest remote slot.
     never_debounce: HashSet<Pubkey>,
@@ -146,8 +147,8 @@ pub struct SubMuxClientConfig {
 // clippy::too_many_arguments and to keep spawn sites concise.
 struct ForwarderParams {
     tx: mpsc::Sender<SubscriptionUpdate>,
-    cache: Arc<Mutex<HashMap<(Pubkey, u64), Instant>>>,
-    debounce_states: Arc<Mutex<HashMap<Pubkey, DebounceState>>>,
+    cache: Arc<HashMap<(Pubkey, u64), Instant>>,
+    debounce_states: Arc<HashMap<Pubkey, DebounceState>>,
     window: Duration,
     debounce_interval: Duration,
     detection_window: Duration,
@@ -181,8 +182,8 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
         mux_config: SubMuxClientConfig,
     ) -> Self {
         let (out_tx, out_rx) = mpsc::channel(SUBMUX_OUT_CHANNEL_SIZE);
-        let dedup_cache = Arc::new(Mutex::new(HashMap::new()));
-        let debounce_states = Arc::new(Mutex::new(HashMap::new()));
+        let dedup_cache = Arc::new(HashMap::new());
+        let debounce_states = Arc::new(HashMap::new());
         let dedup_window = Duration::from_millis(
             config.dedupe_window_millis.unwrap_or(DEDUP_WINDOW_MILLIS),
         );
@@ -223,8 +224,7 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
             loop {
                 tokio::time::sleep(window).await;
                 let now = Instant::now();
-                let mut map = cache.lock().unwrap();
-                map.retain(|_, ts| now.duration_since(*ts) <= window);
+                cache.retain(|_, ts| now.duration_since(*ts) <= window);
             }
         });
     }
@@ -251,10 +251,10 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
                 tokio::time::sleep(tick).await;
                 let now = Instant::now();
                 let mut to_forward = vec![];
-                {
-                    let mut map =
-                        states.lock().expect("debounce_states lock poisoned");
-                    for debounce_state in map.values_mut() {
+                // we need to mutably iterate over the entire scc::HashMap,
+                // which is only possible via retain API
+                states
+                    .retain_async(|_, debounce_state| {
                         if let DebounceState::Enabled {
                             next_allowed_forward,
                             pending,
@@ -268,8 +268,9 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
                                 }
                             }
                         }
-                    }
-                }
+                        true
+                    })
+                    .await;
                 for update in to_forward {
                     let _ = out_tx.send(update).await;
                 }
@@ -378,30 +379,29 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
     }
 
     fn should_forward_dedup(
-        cache: &Arc<Mutex<HashMap<(Pubkey, u64), Instant>>>,
+        cache: &Arc<HashMap<(Pubkey, u64), Instant>>,
         key: (Pubkey, u64),
         now: Instant,
         window: Duration,
     ) -> bool {
-        let mut map = cache.lock().unwrap();
-        match map.get_mut(&key) {
-            Some(ts) => {
+        match cache.entry(key) {
+            Entry::Occupied(mut ts) => {
                 if now.duration_since(*ts) > window {
-                    *ts = now;
+                    *ts.get_mut() = now;
                     true
                 } else {
                     false
                 }
             }
-            None => {
-                map.insert(key, now);
+            Entry::Vacant(e) => {
+                e.insert_entry(now);
                 true
             }
         }
     }
 
     fn handle_debounce_and_maybe_forward(
-        debounce_states: &Arc<Mutex<HashMap<Pubkey, DebounceState>>>,
+        debounce_states: &Arc<HashMap<Pubkey, DebounceState>>,
         update: SubscriptionUpdate,
         now: Instant,
         detection_window: Duration,
@@ -411,15 +411,12 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
         let pubkey = update.pubkey;
         let mut maybe_forward_now = None;
         {
-            let mut states = debounce_states
-                .lock()
-                .expect("debounce_states lock poisoned");
-            let debounce_state = states.entry(pubkey).or_insert_with(|| {
-                DebounceState::Disabled {
+            let mut debounce_state = debounce_states
+                .entry(pubkey)
+                .or_insert_with(|| DebounceState::Disabled {
                     pubkey,
                     arrivals: VecDeque::new(),
-                }
-            });
+                });
 
             // prune and push current
             let arrivals_len = {
@@ -477,7 +474,7 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
                 );
             }
 
-            match debounce_state {
+            match debounce_state.get_mut() {
                 DebounceState::Disabled { .. } => {
                     maybe_forward_now = Some(update);
                 }
@@ -506,11 +503,7 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
 
     #[cfg(test)]
     fn get_debounce_state(&self, pubkey: Pubkey) -> Option<DebounceState> {
-        let states = self
-            .debounce_states
-            .lock()
-            .expect("debounce_states lock poisoned");
-        states.get(&pubkey).cloned()
+        self.debounce_states.read(&pubkey, |_, v| v.clone())
     }
 }
 
