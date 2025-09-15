@@ -1,5 +1,3 @@
-use std::convert::identity;
-
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
 use super::prelude::*;
