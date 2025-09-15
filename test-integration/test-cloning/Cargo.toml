@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dev-dependencies]
+program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 integration-test-tools = { workspace = true }
 log = { workspace = true }
 solana-sdk = { workspace = true }

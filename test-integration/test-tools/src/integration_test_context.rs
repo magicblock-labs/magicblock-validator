@@ -774,7 +774,7 @@ impl IntegrationTestContext {
         let sig = rpc_client.send_transaction_with_config(
             tx,
             RpcSendTransactionConfig {
-                skip_preflight: false,
+                skip_preflight: true,
                 ..Default::default()
             },
         )?;
