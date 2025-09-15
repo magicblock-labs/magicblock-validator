@@ -3,9 +3,6 @@ name: Deploy to Testnet
 on:
   push:
     branches: [ master ]
-  pull_request:
-    branches: [ master ]
-    types: [ closed ]
   workflow_dispatch:
     inputs:
       branch:
@@ -23,16 +20,16 @@ jobs:
       - name: Check user authorization
         id: auth
         run: |
-          AUTHORIZED_USERS="${{ secrets.AUTHORIZED_USERS }}"
+          TEST_NODE_MANUAL_DEPLOY_AUTHORIZED_USERS="${{ secrets.TEST_NODE_MANUAL_DEPLOY_AUTHORIZED_USERS }}"
           USER="${{ github.actor }}"
-          IFS=' ' read -ra AUTH_ARRAY <<< "$AUTHORIZED_USERS"
+          IFS=' ' read -ra AUTH_ARRAY <<< "$TEST_NODE_MANUAL_DEPLOY_AUTHORIZED_USERS"
           
           if [[ " ${AUTH_ARRAY[@]} " =~ " ${USER} " ]]; then
             echo "User $USER is authorized"
             echo "authorized=true" >> $GITHUB_OUTPUT
           else
             echo "User $USER is not authorized"
-            echo "Authorized users: $AUTHORIZED_USERS"
+            echo "Authorized users: $TEST_NODE_MANUAL_DEPLOY_AUTHORIZED_USERS"
             echo "authorized=false" >> $GITHUB_OUTPUT
           fi
 
@@ -41,7 +38,6 @@ jobs:
     needs: [check-authorization]
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
       (github.event_name == 'workflow_dispatch' && needs.check-authorization.outputs.authorized == 'true')
     steps:
       - name: Determine branch to deploy
@@ -49,17 +45,17 @@ jobs:
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             BRANCH="master"
+            EVENT_TYPE="auto-deploy"
             echo "Deploy triggered by push to master"
-          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            BRANCH="master"
-            echo "Deploy triggered by merged PR to master"
           elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             BRANCH="${{ github.event.inputs.branch }}"
+            EVENT_TYPE="manual-deploy"
             echo "Manual deploy for branch: $BRANCH"
           fi
           
           echo "Will deploy branch: $BRANCH"
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "event_type=$EVENT_TYPE" >> $GITHUB_OUTPUT
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -72,7 +68,7 @@ jobs:
         with:
           token: ${{ secrets.DEPLOY_TRIGGER_TOKEN }}
           repository: magicblock-labs/validator-deployment
-          event-type: auto-deploy
+          event-type: ${{ steps.determine_branch.outputs.event_type }}
           client-payload: |
             {
               "project": "magicblock-validator",
