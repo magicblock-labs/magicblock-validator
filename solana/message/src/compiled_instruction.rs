@@ -26,7 +26,7 @@ pub struct CompiledInstruction {
     #[cfg_attr(feature = "serde", serde(with = "solana_short_vec"))]
     pub accounts: Vec<u8>,
     /// The program input data.
-    #[cfg_attr(feature = "serde", serde(with = "solana_short_vec"))]
+    // NOTE: we don't limit data length to max u16 to allow larger account mutations
     pub data: Vec<u8>,
 }
 
