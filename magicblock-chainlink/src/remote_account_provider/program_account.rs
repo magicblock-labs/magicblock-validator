@@ -130,10 +130,10 @@ impl LoadedProgram {
     /// TODO: @@@ this may not work, in that case use auth of the validator
     /// initially and then add mutation instruction to change auth to the
     /// remote auth.
-    pub fn try_into_deploy_ixs_v4(
+    pub fn try_into_deploy_data_and_ixs_v4(
         self,
         auth: Pubkey,
-    ) -> ClonerResult<Vec<Instruction>> {
+    ) -> ClonerResult<(Vec<u8>, Instruction)> {
         let Self {
             program_id,
             authority: _,
@@ -143,52 +143,15 @@ impl LoadedProgram {
         } = self;
         // TODO: @@@ mutate back/forth to real chain auth
         let authority = auth;
-        let size = LoaderV4State::program_data_offset() + program_data.len();
-
-        // 1. Set program length to initialize and allocate space
-        let set_length_instruction = {
-            let loader_instruction = LoaderInstructionV4::SetProgramLength {
-                new_size: size.try_into()?,
-            };
-
-            Instruction {
-                program_id: LOADER_V4,
-                accounts: vec![
-                    // [writable] The program account to change the size of
-                    AccountMeta::new(program_id, false),
-                    // [signer] The authority of the program
-                    AccountMeta::new_readonly(authority, true),
-                ],
-                data: bincode::serialize(&loader_instruction)?,
-            }
+        let loader4_state = LoaderV4State {
+            slot: 10,
+            authority_address_or_next_version: authority,
+            status: LoaderV4Status::Retracted,
         };
+        // TODO: @@@ (fix unwrap)
+        let state_data = state_data_v4(&loader4_state, &program_data).unwrap();
+        let size = state_data.len();
 
-        // 2. Write program data in one huge chunk since the transaction is
-        //    internal and has no size limit
-        const CHUNK_SIZE: usize = 800;
-        let write_instructions = program_data
-            .chunks(CHUNK_SIZE)
-            .enumerate()
-            .map(|(i, chunk)| {
-                let loader_instruction = LoaderInstructionV4::Write {
-                    offset: (i * CHUNK_SIZE) as u32,
-                    bytes: chunk.to_vec(),
-                };
-
-                Instruction {
-                    program_id: LOADER_V4,
-                    accounts: vec![
-                        // [writable] The program account to write data to
-                        AccountMeta::new(program_id, false),
-                        // [signer] The authority of the program
-                        AccountMeta::new_readonly(authority, true),
-                    ],
-                    data: bincode::serialize(&loader_instruction).unwrap(),
-                }
-            })
-            .collect::<Vec<_>>();
-
-        // 3. Deploy the program to make it executable
         let deploy_instruction = {
             let loader_instruction = LoaderInstructionV4::Deploy;
 
@@ -204,11 +167,7 @@ impl LoadedProgram {
             }
         };
 
-        let all_ixs = std::iter::once(set_length_instruction)
-            .chain(write_instructions.into_iter())
-            .chain(std::iter::once(deploy_instruction))
-            .collect::<Vec<_>>();
-        Ok(all_ixs)
+        Ok((state_data, deploy_instruction))
     }
 }
 
@@ -450,6 +409,26 @@ fn get_state_v4(
     })
 }
 
+// -----------------
+// Loader State Serialization
+// -----------------
+fn state_data_v4(
+    loader_state: &LoaderV4State,
+    program_data: &[u8],
+) -> RemoteAccountProviderResult<Vec<u8>> {
+    let state_metadata = unsafe {
+        std::slice::from_raw_parts(
+            (loader_state as *const LoaderV4State) as *const u8,
+            LoaderV4State::program_data_offset(),
+        )
+    };
+    let mut state_data =
+        Vec::with_capacity(state_metadata.len() + program_data.len());
+    state_data.extend_from_slice(state_metadata);
+    state_data.extend_from_slice(program_data);
+    Ok(state_data)
+}
+
 #[cfg(test)]
 mod tests {
     use solana_sdk::{signature::Keypair, signer::Signer};
@@ -461,7 +440,7 @@ mod tests {
         // Ensuring that the instructions are created correctly and we can
         // create a signed transaction from them
         let validator_kp = Keypair::new();
-        let deploy_ixs = LoadedProgram {
+        let (_, deploy_ix) = LoadedProgram {
             program_id: Pubkey::new_unique(),
             authority: Pubkey::new_unique(),
             program_data: vec![1, 2, 3, 4, 5],
@@ -469,13 +448,13 @@ mod tests {
             loader_status: LoaderV4Status::Deployed,
             remote_slot: 0,
         }
-        .try_into_deploy_ixs_v4(validator_kp.pubkey())
+        .try_into_deploy_data_and_ixs_v4(validator_kp.pubkey())
         .unwrap();
         let recent_blockhash = Hash::new_unique();
 
         // This would fail if we had invalid/missing signers
         Transaction::new_signed_with_payer(
-            &deploy_ixs,
+            &[deploy_ix],
             Some(&validator_kp.pubkey()),
             &[&validator_kp],
             recent_blockhash,

@@ -14,7 +14,6 @@ use magicblock_program::{
 };
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
-    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::Signature,
     transaction::Transaction,
@@ -97,33 +96,28 @@ impl ChainlinkCloner {
                 // All other versions are loaded via the LoaderV4, no matter what
                 // the original loader was. We do this via a proper upgrade instruction.
 
-                let size = loader_v4::LoaderV4State::program_data_offset()
-                    + program.program_data.len();
-                let lamports = Rent::default().minimum_balance(size)
-                    + 5000 * LAMPORTS_PER_SOL;
-                debug!(
-                    "Cloning program {}, size {}, lamports {}",
-                    program.program_id, size, lamports
-                );
-                let loaderv4_state = loader_v4::LoaderV4State {
-                    slot: 0,
-                    authority_address_or_next_version: validator_kp.pubkey(),
-                    status: loader_v4::LoaderV4Status::Deployed,
-                };
+                debug!("Cloning program {}", program.program_id);
+                let program_id = program.program_id;
+                // Create and initialize the program account in retracted state
+                // and then deploy it
+                let (loader_state, deploy_ix) = program
+                    .try_into_deploy_data_and_ixs_v4(validator_kp.pubkey())?;
+
+                let lamports =
+                    Rent::default().minimum_balance(loader_state.len());
+
                 let mods = vec![AccountModification {
-                    pubkey: program.program_id,
+                    pubkey: program_id,
                     lamports: Some(lamports),
                     owner: Some(loader_v4::id()),
+                    executable: Some(true),
+                    data: Some(loader_state),
                     ..Default::default()
                 }];
                 let init_program_account_ix =
                     InstructionUtils::modify_accounts_instruction(mods);
-                let deploy_ixs =
-                    program.try_into_deploy_ixs_v4(validator_kp.pubkey())?;
-                let ixs = vec![init_program_account_ix]
-                    .into_iter()
-                    .chain(deploy_ixs)
-                    .collect::<Vec<_>>();
+
+                let ixs = vec![init_program_account_ix, deploy_ix];
                 let tx = Transaction::new_signed_with_payer(
                     &ixs,
                     Some(&validator_kp.pubkey()),
