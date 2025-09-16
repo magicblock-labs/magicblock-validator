@@ -84,6 +84,7 @@ solana-system-interface = "1.0"
 solana-transaction-status = "2.2"
 teepee = "0.0.1"
 tempfile = "3.10.1"
+test-chainlink = { path = "./test-chainlink" }
 test-config = { path = "test-config" }
 test-ledger-restore = { path = "./test-ledger-restore" }
 test-kit = { path = "../test-kit" }

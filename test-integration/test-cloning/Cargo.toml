@@ -7,6 +7,7 @@ edition.workspace = true
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 integration-test-tools = { workspace = true }
 log = { workspace = true }
+test-chainlink = { workspace = true }
 solana-sdk = { workspace = true }
 test-kit = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
