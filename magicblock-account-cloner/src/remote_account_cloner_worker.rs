@@ -581,8 +581,8 @@ where
                     max(self.clone_config.auto_airdrop_lamports, *lamports);
                 self.track_not_delegated_account(*pubkey).await?;
                 match self.validator_charges_fees {
-                    ValidatorCollectionMode::NoFees => self
-                        .do_clone_undelegated_account(
+                    ValidatorCollectionMode::NoFees => {
+                        self.do_clone_undelegated_account(
                             pubkey,
                             // TODO(GabrielePicco): change account fetching to return the account
                             &Account {
@@ -590,7 +590,9 @@ where
                                 owner: *owner,
                                 ..Default::default()
                             },
-                        )?,
+                        )
+                        .await?
+                    }
                     ValidatorCollectionMode::Fees => {
                         // Fetch the associated escrowed account
                         let escrowed_snapshot = match self
@@ -655,7 +657,8 @@ where
                             escrowed_account.lamports,
                             owner,
                             Some(&escrowed_snapshot.pubkey),
-                        )?
+                        )
+                        .await?
                     }
                 }
             }
@@ -700,7 +703,7 @@ where
                     // Keep track of non-delegated accounts, removing any stale ones,
                     // which were evicted from monitored accounts cache
                     self.track_not_delegated_account(*pubkey).await?;
-                    self.do_clone_undelegated_account(pubkey, account)?
+                    self.do_clone_undelegated_account(pubkey, account).await?
                 }
             }
             // If the account delegated on-chain, we need to apply some overrides
@@ -784,7 +787,8 @@ where
                         ..account.clone()
                     },
                     delegation_record,
-                )?
+                )
+                .await?
             }
         };
         // Return the result
@@ -794,7 +798,7 @@ where
         })
     }
 
-    fn do_clone_feepayer_account(
+    async fn do_clone_feepayer_account(
         &self,
         pubkey: &Pubkey,
         lamports: u64,
@@ -803,6 +807,7 @@ where
     ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_feepayer_account(pubkey, lamports, owner)
+            .await
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::FeePayer {
@@ -812,13 +817,14 @@ where
             })
     }
 
-    fn do_clone_undelegated_account(
+    async fn do_clone_undelegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
     ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_undelegated_account(pubkey, account)
+            .await
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(
@@ -830,7 +836,7 @@ where
             })
     }
 
-    fn do_clone_delegated_account(
+    async fn do_clone_delegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
@@ -855,6 +861,7 @@ where
         // If its the first time we're seeing this delegated account, dump it to the bank
         self.account_dumper
             .dump_delegated_account(pubkey, account, &record.owner)
+            .await
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::Delegated {
@@ -883,11 +890,13 @@ where
             // clone such programs like normal accounts
             return Err(AccountClonerError::ProgramDataDoesNotExist);
         } else if account.owner == solana_sdk::bpf_loader::ID {
-            let signature =
-                self.account_dumper.dump_program_account_with_old_bpf(
+            let signature = self
+                .account_dumper
+                .dump_program_account_with_old_bpf(
                     program_id_pubkey,
                     program_id_account,
-                )?;
+                )
+                .await?;
             return Ok(signature);
         }
 
@@ -917,6 +926,7 @@ where
                 program_data_account,
                 idl_account,
             )
+            .await
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::Program {
