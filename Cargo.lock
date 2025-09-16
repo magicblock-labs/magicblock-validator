@@ -2073,7 +2073,7 @@ dependencies = [
 
 [[package]]
 name = "expiring-hashmap"
-version = "0.1.7"
+version = "0.2.1"
 
 [[package]]
 name = "fake-simd"
@@ -2477,7 +2477,7 @@ dependencies = [
 
 [[package]]
 name = "geyser-grpc-proto"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3846,7 +3846,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "conjunto-transwise",
  "flume",
@@ -3871,7 +3871,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-dumper"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "bincode",
  "magicblock-bank",
@@ -3884,7 +3884,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-fetcher"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "conjunto-transwise",
@@ -3900,7 +3900,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-updates"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "bincode",
  "conjunto-transwise",
@@ -3921,7 +3921,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "conjunto-transwise",
@@ -3956,7 +3956,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-api"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "magicblock-bank",
  "solana-sdk",
@@ -3964,7 +3964,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "const_format",
  "env_logger 0.11.8",
@@ -3983,7 +3983,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "agave-geyser-plugin-interface",
  "anyhow",
@@ -4019,6 +4019,7 @@ dependencies = [
  "magicblock-task-scheduler",
  "magicblock-transaction-status",
  "magicblock-validator-admin",
+ "num_cpus",
  "paste",
  "solana-geyser-plugin-manager",
  "solana-rpc",
@@ -4033,7 +4034,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-bank"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "agave-geyser-plugin-interface",
  "assert_matches",
@@ -4075,7 +4076,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "borsh 1.5.7",
  "borsh-derive 1.5.7",
@@ -4092,7 +4093,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -4126,7 +4127,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "bs58 0.4.0",
  "clap 4.5.40",
@@ -4144,11 +4145,11 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config-helpers"
-version = "0.1.7"
+version = "0.2.1"
 
 [[package]]
 name = "magicblock-config-macro"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "cargo-expand",
  "clap 4.5.40",
@@ -4164,7 +4165,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "magicblock-magic-program-api",
 ]
@@ -4203,7 +4204,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-geyser-plugin"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "agave-geyser-plugin-interface",
  "anyhow",
@@ -4232,7 +4233,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "bincode",
  "byteorder",
@@ -4251,7 +4252,7 @@ dependencies = [
  "solana-measure",
  "solana-metrics",
  "solana-sdk",
- "solana-storage-proto 0.1.7",
+ "solana-storage-proto 0.2.1",
  "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
  "solana-timings",
  "solana-transaction-status",
@@ -4264,7 +4265,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "bincode",
  "serde",
@@ -4273,7 +4274,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "http-body-util",
  "hyper 1.6.0",
@@ -4287,7 +4288,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-mutator"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "assert_matches",
  "bincode",
@@ -4304,7 +4305,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-perf-service"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "log",
  "magicblock-bank",
@@ -4313,7 +4314,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "lazy_static",
  "log",
@@ -4334,7 +4335,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "assert_matches",
  "bincode",
@@ -4356,7 +4357,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-pubsub"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "bincode",
  "geyser-grpc-proto",
@@ -4378,7 +4379,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "base64 0.21.7",
  "bincode",
@@ -4413,7 +4414,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "env_logger 0.11.8",
  "log",
@@ -4427,7 +4428,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "ed25519-dalek",
  "log",
@@ -4471,7 +4472,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-tokens"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "log",
  "magicblock-bank",
@@ -4486,7 +4487,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-transaction-status"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "crossbeam-channel",
  "log",
@@ -4498,7 +4499,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "clap 4.5.40",
  "console-subscriber",
@@ -4514,7 +4515,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "log",
@@ -4533,7 +4534,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "git-version",
  "rustc_version",
@@ -9524,7 +9525,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "bincode",
  "bs58 0.4.0",
@@ -11003,7 +11004,7 @@ checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
 name = "test-tools"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "log",
  "magicblock-accounts-db",
@@ -11023,7 +11024,7 @@ dependencies = [
 
 [[package]]
 name = "test-tools-core"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "env_logger 0.11.8",
  "log",

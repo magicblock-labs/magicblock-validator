@@ -24,6 +24,7 @@ const BLOCKSIZE_OFFSET: usize = SLOT_OFFSET + size_of::<u64>();
 const TOTALBLOCKS_OFFSET: usize = BLOCKSIZE_OFFSET + size_of::<u32>();
 const DEALLOCATED_OFFSET: usize = TOTALBLOCKS_OFFSET + size_of::<u32>();
 
+#[cfg_attr(test, derive(Debug))]
 pub(crate) struct AccountsStorage {
     meta: StorageMeta,
     /// a mutable pointer into memory mapped region
@@ -52,6 +53,7 @@ pub(crate) struct AccountsStorage {
 /// | total blocks  | total number of blocks  | 4            |
 /// | deallocated   | deallocated block count | 4            |
 /// ----------------------------------------------------------
+#[cfg_attr(test, derive(Debug))]
 struct StorageMeta {
     /// offset into memory map, where next allocation will be served
     head: &'static AtomicU64,

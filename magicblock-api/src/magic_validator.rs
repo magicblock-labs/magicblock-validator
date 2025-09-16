@@ -525,6 +525,8 @@ impl MagicValidator {
         config: &EphemeralConfig,
     ) -> ApiResult<JsonRpcService> {
         let rpc_socket_addr = SocketAddr::new(config.rpc.addr, config.rpc.port);
+        let available = num_cpus::get();
+        let rpc_threads = std::cmp::max(1, available / 2);
         let rpc_json_config = JsonRpcConfig {
             slot_duration: Duration::from_millis(
                 config.validator.millis_per_slot,
@@ -535,7 +537,7 @@ impl MagicValidator {
             pubsub_socket_addr: Some(*pubsub_config.socket()),
             enable_rpc_transaction_history: true,
             disable_sigverify: !config.validator.sigverify,
-
+            rpc_threads,
             ..Default::default()
         };
 

@@ -152,7 +152,7 @@ impl ForkGraph for SimpleForkGraph {
 //#[derive(Debug)]
 pub struct Bank {
     /// Shared reference to accounts database
-    pub accounts_db: AccountsDb,
+    pub accounts_db: Arc<AccountsDb>,
 
     /// Bank epoch
     epoch: Epoch,
@@ -441,7 +441,7 @@ impl Bank {
         // this is the only place where we have a mutable access to the AccountsDb
         // before it's wrapped in Arc, and thus becomes immutable
         if adb_init_slot_override {
-            accounts_db.set_slot(adb_init_slot);
+            accounts_db.override_slot(adb_init_slot);
         }
         accounts_db.ensure_at_most(adb_init_slot)?;
 
@@ -511,7 +511,7 @@ impl Bank {
         feature_set.activate(&curve25519_restrict_msm_length::ID, 0);
 
         let mut bank = Self {
-            accounts_db: adb,
+            accounts_db: adb.into(),
             epoch: Epoch::default(),
             epoch_schedule: EpochSchedule::default(),
             is_delta: AtomicBool::default(),
