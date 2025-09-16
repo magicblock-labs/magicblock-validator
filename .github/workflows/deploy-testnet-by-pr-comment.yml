@@ -1,0 +1,158 @@
+name: Deploy to Testnet by PR Comment
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  add-deploy-comment:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'master'
+    steps:
+      - name: Add or update deploy link comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const repoOwner = context.repo.owner;
+            const repoName = context.repo.repo;
+            const branch = context.payload.pull_request.head.ref;
+            const workflow = 'deploy-testnet.yml';
+            const url = `https://github.com/${repoOwner}/${repoName}/actions/workflows/${workflow}/run?ref=${branch}`;
+
+            const commentBody = `### Manual Deploy Available
+
+            You can trigger a manual deploy of this PR branch to **testnet**:
+
+            [Deploy to Testnet 🚀](${url})
+
+            **Alternative**: Comment \`/deploy\` on this PR to trigger deployment directly.
+
+            > ⚠️ **Note**: Manual deploy requires authorization. Only authorized users can trigger deployments.
+
+            _Comment updated automatically when the PR is synchronized._`;
+
+            const comments = await github.rest.issues.listComments({
+              owner: repoOwner,
+              repo: repoName,
+              issue_number: prNumber
+            });
+
+            const existing = comments.data.find(c => c.user.type === 'Bot' && c.body.includes('Manual Deploy Available'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: repoOwner,
+                repo: repoName,
+                comment_id: existing.id,
+                body: commentBody
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: repoOwner,
+                repo: repoName,
+                issue_number: prNumber,
+                body: commentBody
+              });
+            }
+
+  trigger-deploy-from-comment:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issue_comment' && 
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/deploy')
+    steps:
+      - name: Validate comment is deploy command & check authorization
+        id: validate
+        run: |
+          # Trim the comment body
+          BODY="${{ github.event.comment.body }}"
+          BODY_TRIM="$(echo "$BODY" | xargs)"
+          if [ "$BODY_TRIM" != "/deploy" ]; then
+            echo "Not a deploy command (trimmed body: '$BODY_TRIM'), skipping."
+            exit 0
+          fi
+
+          # Load authorized users (space-separated)
+          AUTH="${{ secrets.TEST_NODE_MANUAL_DEPLOY_AUTHORIZED_USERS }}"
+          IFS=' ' read -ra AUTH_ARR <<< "$AUTH"
+          USER="${{ github.actor }}"
+          authorized=false
+          for u in "${AUTH_ARR[@]}"; do
+            if [ "$u" = "$USER" ]; then
+              authorized=true
+              break
+            fi
+          done
+
+          if [ "$authorized" != "true" ]; then
+            echo "Unauthorized user: $USER"
+            exit 1
+          fi
+
+      - name: Get PR branch
+        id: get_branch
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.issue.number;
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            core.setOutput('branch', pr.data.head.ref);
+
+      - name: Trigger main deploy workflow (workflow_dispatch)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const branch = '${{ steps.get_branch.outputs.branch }}';
+            // pass requested_by so the main workflow check can trust who requested the deploy
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'deploy-testnet.yml',
+              ref: 'master',
+              inputs: {
+                branch: branch,
+                requested_by: context.actor
+              }
+            });
+
+      - name: Add success comment
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: `🚀 Deploy triggered for branch \`${{ steps.get_branch.outputs.branch }}\` by @${context.actor}. (You can follow progress in Actions.)`
+            });
+
+      - name: Add failure comment
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: `❌ Failed to trigger deploy for branch \`${{ steps.get_branch.outputs.branch }}\`. Make sure you have permission or use the manual deploy link in the PR comment.`
+            });
