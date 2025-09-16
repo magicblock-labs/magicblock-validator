@@ -10467,6 +10467,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "program-flexi-counter",
+ "program-mini",
  "solana-sdk",
  "test-chainlink",
  "test-kit",
