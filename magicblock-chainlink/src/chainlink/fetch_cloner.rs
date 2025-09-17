@@ -19,8 +19,8 @@ use crate::{
     cloner::Cloner,
     remote_account_provider::{
         program_account::{
-            get_loaderv3_get_program_data_address, ProgramAccountResolver,
-            LOADER_V3,
+            get_loaderv3_get_program_data_address, LoadedProgram,
+            ProgramAccountResolver, LOADER_V3,
         },
         ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
         MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
@@ -190,7 +190,26 @@ where
                     )
                     .await;
                 if let Some(account) = resolved_account {
-                    if let Err(err) =
+                    // TODO: @@@ do everything we do in magicblock-chainlink/src/chainlink/fetch_cloner.rs
+                    // including handling LoaderV3 program accounts especially
+                    if account.executable() {
+                        let loaded_program = ProgramAccountResolver::try_new(
+                            pubkey,
+                            *account.owner(),
+                            Some(account),
+                            None,
+                        )
+                        // TODO: @@@ handle error properly
+                        .unwrap()
+                        .into_loaded_program();
+                        if let Err(err) =
+                            cloner.clone_program(loaded_program).await
+                        {
+                            error!(
+                            "Failed to clone account {pubkey} into bank: {err}"
+                        );
+                        }
+                    } else if let Err(err) =
                         cloner.clone_account(pubkey, account).await
                     {
                         error!(
