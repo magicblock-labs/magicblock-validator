@@ -81,7 +81,7 @@ impl ChainlinkCloner {
         &self,
         program: LoadedProgram,
         recent_blockhash: Hash,
-    ) -> ClonerResult<Transaction> {
+    ) -> ClonerResult<Option<Transaction>> {
         use RemoteProgramLoader::*;
         match program.loader {
             V1 => {
@@ -103,12 +103,12 @@ impl ChainlinkCloner {
                         modifications.program_data_modification,
                     ]);
 
-                Ok(Transaction::new_signed_with_payer(
+                Ok(Some(Transaction::new_signed_with_payer(
                     &[mod_ix],
                     Some(&validator_kp.pubkey()),
                     &[&validator_kp],
                     recent_blockhash,
-                ))
+                )))
             }
             _ => {
                 let validator_kp = validator_authority();
@@ -117,6 +117,20 @@ impl ChainlinkCloner {
 
                 debug!("Cloning program {}", program.program_id);
                 let program_id = program.program_id;
+
+                // We don't allow  users to retract the program in the ER, since in that case any
+                // accounts of that program still in the ER could never be committed nor
+                // undelegated
+                if matches!(
+                    program.loader_status,
+                    loader_v4::LoaderV4Status::Retracted
+                ) {
+                    debug!(
+                        "Program {} is currently retracted on chain, won't clone until it is deployed again",
+                        program.program_id
+                    );
+                    return Ok(None);
+                }
                 // Create and initialize the program account in retracted state
                 // and then deploy it
                 let (loader_state, deploy_ix) = program
@@ -144,7 +158,7 @@ impl ChainlinkCloner {
                     recent_blockhash,
                 );
 
-                Ok(tx)
+                Ok(Some(tx))
             }
         }
     }
@@ -157,6 +171,7 @@ impl Cloner for ChainlinkCloner {
         pubkey: Pubkey,
         account: AccountSharedData,
     ) -> ClonerResult<Signature> {
+        debug!("Cloning account {pubkey}: {account:#?}");
         let recent_blockhash = self.block.load().blockhash;
         let tx = self.transaction_to_clone_regular_account(
             &pubkey,
@@ -171,15 +186,19 @@ impl Cloner for ChainlinkCloner {
         program: LoadedProgram,
     ) -> ClonerResult<Signature> {
         let recent_blockhash = self.block.load().blockhash;
-        let tx =
-            self.try_transaction_to_clone_program(program, recent_blockhash)?;
-        let res = self.send_transaction(tx).await?;
-        // After cloning a program we need to wait at least one slot for it to become
-        // usable, so we do that here
-        let current_slot = self.accounts_db.slot();
-        while self.accounts_db.slot() == current_slot {
-            tokio::time::sleep(Duration::from_millis(25)).await;
+        if let Some(tx) =
+            self.try_transaction_to_clone_program(program, recent_blockhash)?
+        {
+            let res = self.send_transaction(tx).await?;
+            // After cloning a program we need to wait at least one slot for it to become
+            // usable, so we do that here
+            let current_slot = self.accounts_db.slot();
+            while self.accounts_db.slot() == current_slot {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            Ok(res)
+        } else {
+            Ok(Signature::default()) // No-op, program was retracted
         }
-        Ok(res)
     }
 }
