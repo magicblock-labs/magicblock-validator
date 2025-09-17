@@ -97,9 +97,9 @@ async fn test_transfer_from_escrow_to_delegated_account() {
         "\nEscrowed balance: {escrowed_balance}\nEscrow balance  : {escrow_balance}\nCounter balance : {counter_balance}"
     );
     // Received 1 SOL then transferred 0.5 SOL + tx fee
-    assert!(0.4 <= escrowed_balance && escrowed_balance <= 0.5);
+    assert!((0.4..=0.5).contains(&escrowed_balance));
     // Airdropped 2 SOL - escrowed half
     assert!(escrow_balance >= 1.0);
     // Received 0.5 SOL
-    assert!(0.5 <= counter_balance && counter_balance < 0.6);
+    assert!((0.5..0.6).contains(&counter_balance));
 }

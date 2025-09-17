@@ -40,7 +40,7 @@ pub async fn top_up_ephemeral_fee_balance(
         );
         ixs.push(delegate_ix);
     }
-    let sig = send_instructions(&rpc_client, &ixs, &[payer], "topup ephemeral")
+    let sig = send_instructions(rpc_client, &ixs, &[payer], "topup ephemeral")
         .await?;
     let (ephemeral_balance_pda, deleg_record) = escrow_pdas(&recvr);
     debug!(

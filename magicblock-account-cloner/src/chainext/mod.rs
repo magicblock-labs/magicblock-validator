@@ -9,9 +9,7 @@ use magicblock_chainlink::{
         LoadedProgram, RemoteProgramLoader,
     },
 };
-use magicblock_core::{
-    link::transactions::TransactionSchedulerHandle, traits::AccountsBank,
-};
+use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_ledger::LatestBlock;
 use magicblock_mutator::AccountModification;
 use magicblock_program::{

@@ -350,7 +350,7 @@ impl IxtestContext {
         let (sig, ephemeral_balance_pda, deleg_record) =
             dlp_interface::top_up_ephemeral_fee_balance(
                 &self.rpc_client,
-                &payer,
+                payer,
                 payer.pubkey(),
                 sol,
                 validator,
