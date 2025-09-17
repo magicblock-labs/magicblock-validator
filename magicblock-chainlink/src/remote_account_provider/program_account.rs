@@ -144,7 +144,7 @@ impl LoadedProgram {
         // TODO: @@@ mutate back/forth to real chain auth
         let authority = auth;
         let loader4_state = LoaderV4State {
-            slot: 10,
+            slot: 1,
             authority_address_or_next_version: authority,
             status: LoaderV4Status::Retracted,
         };

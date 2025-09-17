@@ -15,11 +15,6 @@ async fn test_clone_mini_v3_loader_program() {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
-    let program_acc = ctx
-        .fetch_ephem_account(MINIV3)
-        .expect("failed to fetch mini v3 loader program account");
-    debug!("{:#?}", program_acc);
-
     let sdk = MiniSdk::new(MINIV3);
     let payer = Keypair::new();
     ctx.airdrop_chain_escrowed(&payer, LAMPORTS_PER_SOL)
