@@ -51,10 +51,12 @@ pub fn start_magic_block_validator_with_config(
     if release {
         command.arg("--release");
     }
+    let rust_log_style =
+        std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
         .arg("--")
         .arg(config_path)
-        .env("RUST_LOG_STYLE", log_suffix)
+        .env("RUST_LOG_STYLE", rust_log_style)
         .env("VALIDATOR_KEYPAIR", keypair_base58.clone())
         .current_dir(root_dir);
 
@@ -141,10 +143,12 @@ pub fn start_test_validator_with_config(
         script.push_str(&format!(" \\\n  {}", arg));
     }
     let mut command = process::Command::new("solana-test-validator");
+    let rust_log_style =
+        std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
         .args(args)
         .env("RUST_LOG", "solana=warn")
-        .env("RUST_LOG_STYLE", log_suffix)
+        .env("RUST_LOG_STYLE", rust_log_style)
         .current_dir(root_dir);
 
     eprintln!("Starting test validator with {:?}", command);
