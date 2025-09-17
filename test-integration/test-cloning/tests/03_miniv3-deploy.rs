@@ -44,4 +44,13 @@ async fn test_clone_mini_v4_loader_program() {
         false,
     )
     .await;
+
+    let sdk = MiniSdk::new(MINIV3);
+    let payer = Keypair::new();
+    ctx.airdrop_chain_escrowed(&payer, LAMPORTS_PER_SOL)
+        .await
+        .unwrap();
+    let ix = sdk.log_msg_instruction(&payer.pubkey(), "Hello World");
+    ctx.send_and_confirm_instructions_with_payer_ephem(&[ix], &payer)
+        .unwrap();
 }
