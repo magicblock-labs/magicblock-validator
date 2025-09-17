@@ -45,7 +45,7 @@ async fn test_clone_mini_v4_loader_program() {
     )
     .await;
 
-    let sdk = MiniSdk::new(MINIV3);
+    let sdk = MiniSdk::new(prog_kp.pubkey());
     let payer = Keypair::new();
     ctx.airdrop_chain_escrowed(&payer, LAMPORTS_PER_SOL)
         .await
