@@ -248,6 +248,15 @@ impl IntegrationTestContext {
         Ok(chain_client)
     }
 
+    pub fn try_chain_client_async(
+        &self,
+    ) -> anyhow::Result<nonblocking::rpc_client::RpcClient> {
+        let Some(chain_client) = self.chain_client.as_ref() else {
+            return Err(anyhow::anyhow!("Chain client not available"));
+        };
+        Ok(async_rpc_client(chain_client))
+    }
+
     pub fn try_ephem_client(&self) -> anyhow::Result<&RpcClient> {
         let Some(ephem_client) = self.ephem_client.as_ref() else {
             return Err(anyhow::anyhow!("Ephem client not available"));
