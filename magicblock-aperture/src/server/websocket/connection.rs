@@ -30,40 +30,37 @@ use super::{
     ConnectionState,
 };
 
-/// A type alias for the underlying WebSocket stream provided by `fastwebsockets`.
-type WebsocketStream = WebSocket<TokioIo<Upgraded>>;
-/// A type alias for a unique identifier assigned to each WebSocket connection.
+/// The underlying WebSocket stream provided by `fastwebsockets`.
+pub(crate) type WebsocketStream = WebSocket<TokioIo<Upgraded>>;
+/// A unique identifier assigned to each WebSocket connection.
 pub(crate) type ConnectionID = u32;
 
-/// Manages the lifecycle and bi-directional communication of a single WebSocket connection.
+/// Manages the lifecycle and state of a single WebSocket connection.
 ///
 /// This handler is responsible for:
-/// - Reading and parsing RPC requests from the client.
-/// - Dispatching requests to the `WsDispatcher` for processing.
-/// - Receiving subscription notifications from various events and pushing them to the client.
-/// - Handling keep-alive pings and detecting inactive connections.
+/// - Reading and dispatching RPC requests from the client.
+/// - Pushing subscription notifications from the server to the client.
+/// - Handling keep-alive pings to detect and close inactive connections.
 /// - Participating in the server's graceful shutdown mechanism.
 pub(super) struct ConnectionHandler {
     /// The server's global cancellation token for graceful shutdown.
     cancel: CancellationToken,
     /// The underlying WebSocket stream for reading and writing frames.
     ws: WebsocketStream,
-    /// The request dispatcher for this specific connection. It manages all active
-    /// subscriptions for this client.
+    /// Manages all active subscriptions and RPC logic for this client.
     dispatcher: WsDispatcher,
-    /// A channel for receiving subscription updates (e.g., account changes, slot updates)
-    /// from the server's background `EventProcessor`s.
+    /// Receives subscription updates from the server's `EventProcessor`.
     updates_rx: Receiver<Bytes>,
-    /// A clone of the server's `Shutdown` handle. Its presence in this struct ensures
-    /// that the server will not fully shut down until this connection is terminated.
+    /// A RAII guard that keeps the server alive until the connection is dropped.
     _sd: Arc<Shutdown>,
 }
 
 impl ConnectionHandler {
-    /// Creates a new handler for an established WebSocket connection.
+    /// Initializes a new handler for an established WebSocket connection.
     ///
-    /// This function generates a unique ID and creates a dedicated MPSC channel for this
-    /// connection, which is used to push subscription notifications from the EventProcessor.
+    /// This generates a globally unique ID and creates a dedicated MPSC
+    /// channel for this connection, which is used to push subscription
+    /// notifications from the server's backend.
     pub(super) fn new(ws: WebsocketStream, state: ConnectionState) -> Self {
         static CONNECTION_COUNTER: AtomicU32 = AtomicU32::new(0);
         let id = CONNECTION_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -84,16 +81,16 @@ impl ConnectionHandler {
         }
     }
 
-    /// The main event loop for the WebSocket connection.
+    /// Runs the main event loop for the WebSocket connection.
     ///
-    /// This long-running task uses `tokio::select!` to concurrently handle multiple
-    /// asynchronous events:
-    /// - **Incoming client messages**: Parses and dispatches RPC requests.
-    /// - **Outgoing subscription notifications**: Pushes updates from the server to the client.
-    /// - **Keep-alive**: Sends periodic pings and closes the connection if it becomes inactive.
-    /// - **Shutdown**: Listens for the global server shutdown signal.
+    /// This task uses `tokio::select!` to concurrently handle events:
+    /// - Incoming client messages for RPC requests.
+    /// - Outgoing subscription notifications from the server backend.
+    /// - Periodic keep-alive pings and inactivity checks.
+    /// - The global server shutdown signal.
     ///
-    /// The loop terminates upon any I/O error, an inactivity timeout, or a shutdown signal.
+    /// The loop terminates upon any I/O error, an inactivity timeout, or when
+    /// the shutdown signal is received.
     pub(super) async fn run(mut self) {
         const MAX_INACTIVE_INTERVAL: Duration = Duration::from_secs(60);
         let mut last_activity = Instant::now();
@@ -101,7 +98,6 @@ impl ConnectionHandler {
 
         loop {
             tokio::select! {
-                // Prioritize reading frames from the client.
                 biased;
 
                 // 1. Handle an incoming frame from the client's WebSocket.
@@ -167,20 +163,20 @@ impl ConnectionHandler {
                 }
             }
         }
-        // send a close frame (best effort) to the client
+        // Send a close frame (best effort) to the client.
         let frame =
             Frame::close(CloseCode::Away.into(), b"server is shutting down");
         let _ = self.ws.write_frame(frame).await;
     }
 
-    /// Formats and sends a standard JSON-RPC success response to the client.
+    /// Formats and sends a standard JSON-RPC success response.
     async fn report_success(&mut self, result: WsDispatchResult) -> bool {
         let payload =
             ResponsePayload::encode_no_context_raw(&result.id, result.result);
         self.send(payload.0).await.is_ok()
     }
 
-    /// Formats and sends a standard JSON-RPC error response to the client.
+    /// Formats and sends a standard JSON-RPC error response.
     async fn report_failure(
         &mut self,
         id: Option<&Value>,

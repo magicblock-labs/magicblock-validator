@@ -2,6 +2,7 @@
 
 use std::{
     hash::Hash,
+    io::Write,
     os::fd::AsFd,
     sync::{
         atomic::{AtomicU16, Ordering},
@@ -74,6 +75,7 @@ impl RpcTestEnv {
     /// 3.  Starts a live `JsonRpcServer` (HTTP and WebSocket) in a background task.
     /// 4.  Connects an `RpcClient` and `PubsubClient` to the running server.
     pub async fn new() -> Self {
+        std::io::stdout().flush().unwrap();
         const BLOCK_TIME_MS: u64 = 50;
 
         let execution = ExecutionTestEnv::new();
@@ -96,14 +98,13 @@ impl RpcTestEnv {
                 execution.accountsdb.clone(),
                 execution.ledger.clone(),
                 chainlink(&execution.accountsdb),
+                CancellationToken::new(),
                 BLOCK_TIME_MS,
             );
-            let cancel = CancellationToken::new();
             let addr = "0.0.0.0".parse().unwrap();
             let config = RpcConfig { addr, port };
             let server =
-                JsonRpcServer::new(&config, state, &execution.dispatch, cancel)
-                    .await;
+                JsonRpcServer::new(&config, state, &execution.dispatch).await;
             if let Ok(server) = server {
                 break (server, config);
             }
@@ -112,15 +113,13 @@ impl RpcTestEnv {
         tokio::spawn(server.run());
 
         let rpc_url = format!("http://{}:{}", config.addr, config.port);
-        let pubsub_url = format!("ws://{}:{}", config.addr, config.port + 1);
+        let pubsub_url = format!("ws://{}:{}", config.addr, config.port);
 
         let rpc = RpcClient::new(rpc_url);
         let pubsub = PubsubClient::new(&pubsub_url)
             .await
             .expect("failed to create a pubsub client to RPC server");
-
         // Allow server threads to initialize.
-        thread::yield_now();
 
         Self {
             block: execution.ledger.latest_block().clone(),

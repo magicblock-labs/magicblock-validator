@@ -79,7 +79,7 @@ impl HttpDispatcher {
     /// This function is designed to never panic or return an `Err`; all errors are
     /// caught and formatted into a valid JSON-RPC error object in the HTTP response.
     pub(super) async fn dispatch(
-        self: Arc<Self>,
+        &self,
         request: Request<Incoming>,
     ) -> Result<Response<JsonBody>, Infallible> {
         if request.method() == Method::OPTIONS {

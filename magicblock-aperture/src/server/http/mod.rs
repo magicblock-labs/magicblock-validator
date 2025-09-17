@@ -6,9 +6,10 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn,
 };
+use service::RequestHandler;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::oneshot::Receiver,
+    sync::{mpsc::Sender, oneshot::Receiver},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -16,56 +17,51 @@ use magicblock_core::link::DispatchEndpoints;
 
 use crate::{state::SharedState, RpcResult};
 
-use super::Shutdown;
+use super::{websocket::connection::WebsocketStream, Shutdown};
 
-/// A graceful, Tokio-based HTTP server built with Hyper.
+/// A graceful, Tokio-based server for handling RPC requests.
 ///
-/// This server is responsible for accepting raw TCP connections and managing their
-/// lifecycle. It uses a shared `HttpDispatcher` to process incoming requests and
-/// supports graceful shutdown to ensure in-flight requests are completed before termination.
+/// This server accepts TCP connections and uses a `RequestHandler` to serve them.
+/// It discriminates between standard HTTP requests, which are handled directly,
+/// and WebSocket upgrade requests, which are forwarded to a dedicated handler.
+/// It also supports graceful shutdown to ensure in-flight requests are completed.
 pub(crate) struct HttpServer {
     /// The TCP listener that accepts incoming connections.
     socket: TcpListener,
-    /// The shared request handler that contains the application's RPC logic.
+    /// A dispatcher for standard, non-upgrade HTTP requests.
     dispatcher: Arc<HttpDispatcher>,
+    /// A channel sender to pass upgraded WebSocket connections to the `WebsocketServer`.
+    websocket: Sender<WebsocketStream>,
     /// The main cancellation token. When triggered, the server stops accepting new connections.
     cancel: CancellationToken,
-    /// A shared RAII guard for tracking in-flight connections. When all clones of this
-    /// `Arc` are dropped, the `shutdown_rx` receiver is notified.
+    /// A shared RAII guard for tracking in-flight connections. When all clones
+    /// of this `Arc` are dropped, the `shutdown_rx` receiver is notified.
     shutdown: Arc<Shutdown>,
     /// The receiving end of the shutdown signal, used to wait for all connections to terminate.
     shutdown_rx: Receiver<()>,
 }
 
 impl HttpServer {
-    /// Initializes the HTTP server by binding to an address and setting up shutdown signaling.
+    /// Initializes the HTTP server and sets up shutdown signaling.
     pub(crate) async fn new(
         socket: TcpListener,
         state: SharedState,
-        cancel: CancellationToken,
         dispatch: &DispatchEndpoints,
+        websocket: Sender<WebsocketStream>,
     ) -> RpcResult<Self> {
         let (shutdown, shutdown_rx) = Shutdown::new();
 
         Ok(Self {
             socket,
+            cancel: state.cancel.clone(),
             dispatcher: HttpDispatcher::new(state, dispatch),
-            cancel,
+            websocket,
             shutdown,
             shutdown_rx,
         })
     }
 
     /// Starts the main server loop, accepting connections until a shutdown signal is received.
-    ///
-    /// ## Graceful Shutdown
-    ///
-    /// The shutdown process occurs in two phases:
-    /// 1.  When the `cancel` token is triggered, the server immediately stops accepting
-    ///     new connections.
-    /// 2.  The server then waits for all active connections (which hold a clone of the
-    ///     `shutdown` handle) to complete their work and drop their handles. Only then
-    ///     does the `run` method return.
     pub(crate) async fn run(mut self) {
         loop {
             tokio::select! {
@@ -86,34 +82,32 @@ impl HttpServer {
     }
 
     /// Spawns a new task to handle a single incoming TCP connection.
-    ///
-    /// Each connection is managed by a Hyper connection handler and is integrated with
-    /// the server's cancellation mechanism for graceful shutdown.
     fn handle(&mut self, stream: TcpStream) {
         // Create a child token so this specific connection can be cancelled.
         let cancel = self.cancel.child_token();
 
         let io = TokioIo::new(stream);
-        let dispatcher = self.dispatcher.clone();
-        let handler =
-            service_fn(move |request| dispatcher.clone().dispatch(request));
+        let handler = RequestHandler::new(self);
+        let service =
+            service_fn(move |request| handler.clone().handle(request));
         let shutdown = self.shutdown.clone();
 
         tokio::spawn(async move {
             let builder = conn::auto::Builder::new(TokioExecutor::new());
-            let connection = builder.serve_connection(io, handler);
+            let connection =
+                builder.serve_connection_with_upgrades(io, service);
             tokio::pin!(connection);
 
             // This loop manages the connection's lifecycle.
             loop {
                 tokio::select! {
-                    // Poll the connection itself. This branch
-                    // completes when the client disconnects.
+                    // Poll the connection itself. This branch completes
+                    // when the client disconnects or an error occurs.
                     _ = &mut connection => {
                         break;
                     }
-                    // If the cancellation token is triggered, initiate a graceful shutdown
-                    // of the Hyper connection.
+                    // If the cancellation token is triggered, initiate
+                    // a graceful shutdown of the Hyper connection.
                     _ = cancel.cancelled() => {
                         connection.as_mut().graceful_shutdown();
                     }
@@ -126,4 +120,7 @@ impl HttpServer {
     }
 }
 
+/// Handles dispatching of standard HTTP requests.
 pub(crate) mod dispatch;
+/// Provides the main Hyper service and request-handling logic.
+pub(crate) mod service;

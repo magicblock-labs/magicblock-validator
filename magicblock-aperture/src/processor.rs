@@ -75,11 +75,10 @@ impl EventProcessor {
         state: &SharedState,
         channels: &DispatchEndpoints,
         instances: usize,
-        cancel: CancellationToken,
     ) {
         for id in 0..instances {
             let processor = EventProcessor::new(channels, state);
-            tokio::spawn(processor.run(id, cancel.clone()));
+            tokio::spawn(processor.run(id, state.cancel.clone()));
         }
     }
 

@@ -64,10 +64,10 @@ mod event_processor {
             env.accountsdb.clone(),
             env.ledger.clone(),
             chainlink(&env.accountsdb),
+            CancellationToken::new(),
             50,
         );
-        let cancel = CancellationToken::new();
-        EventProcessor::start(&state, &env.dispatch, 1, cancel);
+        EventProcessor::start(&state, &env.dispatch, 1);
         env.advance_slot();
         (state, env)
     }

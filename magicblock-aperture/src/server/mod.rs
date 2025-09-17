@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tokio::sync::oneshot::{self, Receiver, Sender};
+use tokio::sync::oneshot;
 
 pub(crate) mod http;
 pub(crate) mod websocket;
@@ -17,7 +17,7 @@ pub(crate) mod websocket;
 /// task awaits the `Receiver`. When each task completes, its `Arc` is dropped.
 /// When the final `Arc` (including the one held by the main server loop) is dropped,
 /// the signal is sent, the `Receiver` resolves, and the server can exit cleanly.
-struct Shutdown(Option<Sender<()>>);
+struct Shutdown(Option<oneshot::Sender<()>>);
 
 impl Shutdown {
     /// Creates a new shutdown signal.
@@ -27,7 +27,7 @@ impl Shutdown {
     /// A tuple containing:
     /// 1.  An `Arc<Shutdown>` which acts as the distributable RAII guard.
     /// 2.  A `Receiver<()>` which can be awaited to detect when all guards have been dropped.
-    fn new() -> (Arc<Self>, Receiver<()>) {
+    fn new() -> (Arc<Self>, oneshot::Receiver<()>) {
         let (tx, rx) = oneshot::channel();
         (Self(Some(tx)).into(), rx)
     }

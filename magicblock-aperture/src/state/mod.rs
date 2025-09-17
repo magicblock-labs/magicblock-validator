@@ -17,6 +17,7 @@ use solana_feature_set::FeatureSet;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use subscriptions::SubscriptionsDb;
+use tokio_util::sync::CancellationToken;
 use transactions::TransactionsCache;
 
 pub type ChainlinkImpl = Chainlink<
@@ -48,6 +49,8 @@ pub struct SharedState {
     pub(crate) blocks: Arc<BlocksCache>,
     /// The central manager for all active pub-sub (e.g., WebSocket) subscriptions.
     pub(crate) subscriptions: SubscriptionsDb,
+    /// The global cancellation token for shutting down the server.
+    pub(crate) cancel: CancellationToken,
 }
 
 /// Holds the core configuration and runtime parameters that define the node's operational context.
@@ -78,6 +81,7 @@ impl SharedState {
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
         chainlink: ChainlinkImpl,
+        cancel: CancellationToken,
         blocktime: u64,
     ) -> Self {
         const TRANSACTIONS_CACHE_TTL: Duration = Duration::from_secs(75);
@@ -90,6 +94,7 @@ impl SharedState {
             ledger,
             chainlink,
             subscriptions: Default::default(),
+            cancel,
         }
     }
 }

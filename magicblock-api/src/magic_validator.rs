@@ -357,15 +357,11 @@ impl MagicValidator {
             accountsdb.clone(),
             ledger.clone(),
             chainlink,
+            token.clone(),
             config.validator.millis_per_slot,
         );
-        let rpc = JsonRpcServer::new(
-            &config.rpc,
-            shared_state,
-            &dispatch,
-            token.clone(),
-        )
-        .await?;
+        let rpc =
+            JsonRpcServer::new(&config.rpc, shared_state, &dispatch).await?;
         let rpc_handle = tokio::spawn(rpc.run());
 
         Ok(Self {

@@ -1,159 +1,113 @@
+//! Defines the WebSocket server task that manages connection lifecycles.
+
 use std::sync::Arc;
 
-use connection::ConnectionHandler;
-use fastwebsockets::upgrade::upgrade;
-use http_body_util::Empty;
+use connection::{ConnectionHandler, WebsocketStream};
 use hyper::{
-    body::{Bytes, Incoming},
-    server::conn::http1,
-    service::service_fn,
-    Request, Response,
+    header::{CONNECTION, UPGRADE},
+    Request,
 };
-use hyper_util::rt::TokioIo;
-use log::warn;
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::oneshot::Receiver,
-};
+use tokio::sync::{mpsc::Receiver, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    error::RpcError,
-    state::{
-        subscriptions::SubscriptionsDb, transactions::TransactionsCache,
-        SharedState,
-    },
-    RpcResult,
+use crate::state::{
+    subscriptions::SubscriptionsDb, transactions::TransactionsCache,
+    SharedState,
 };
 
 use super::Shutdown;
 
-/// The main WebSocket server.
+/// The main WebSocket server task.
 ///
-/// This server listens for TCP connections and manages the HTTP Upgrade handshake
-/// to establish persistent WebSocket connections for real-time event subscriptions.
-/// It supports graceful shutdown to ensure all client connections are terminated cleanly.
+/// Receives established streams from a channel (sent by HttpServer)
+/// and spawns a `ConnectionHandler` for each, managing the graceful
+/// shutdown of all active connections.
 pub struct WebsocketServer {
-    /// The TCP listener that accepts new client connections.
-    socket: TcpListener,
-    /// The shared state required by each individual connection handler.
+    /// Receives established WebSocket streams from the HTTP server.
+    streams: Receiver<WebsocketStream>,
+    /// State template cloned into each new connection handler.
     state: ConnectionState,
-    /// The receiving end of the shutdown signal, used to wait for all
-    /// active connections to terminate before the server fully exits.
-    shutdown: Receiver<()>,
+    /// Awaited during shutdown to ensure all connection handlers have terminated.
+    shutdown: oneshot::Receiver<()>,
 }
 
-/// A container for shared state that is cloned for each new WebSocket connection.
-///
-/// This serves as a dependency container, providing each connection handler with
-/// the necessary context to process requests and manage subscriptions.
+/// A container of shared state cloned into each new `ConnectionHandler`.
 #[derive(Clone)]
 struct ConnectionState {
-    /// A handle to the central subscription database.
+    /// Handle to the central subscription database.
     subscriptions: SubscriptionsDb,
-    /// A handle to the cache of recent transactions.
+    /// Handle to the recent transactions cache.
     transactions: TransactionsCache,
-    /// The global cancellation token for shutting down the server.
+    /// Global cancellation token for graceful shutdown.
     cancel: CancellationToken,
-    /// An RAII guard for tracking outstanding connections to enable graceful shutdown.
+    /// RAII guard that participates in graceful shutdown.
     shutdown: Arc<Shutdown>,
 }
 
 impl WebsocketServer {
-    /// Initializes the WebSocket server by binding a TCP
-    /// listener and preparing the shared connection state.
+    /// Prepares the WebSocket server by creating the shared connection state.
     pub(crate) async fn new(
-        socket: TcpListener,
+        streams: Receiver<WebsocketStream>,
         state: &SharedState,
-        cancel: CancellationToken,
-    ) -> RpcResult<Self> {
+    ) -> Self {
         let (shutdown, rx) = Shutdown::new();
         let state = ConnectionState {
             subscriptions: state.subscriptions.clone(),
             transactions: state.transactions.clone(),
-            cancel,
+            cancel: state.cancel.clone(),
             shutdown,
         };
-        Ok(Self {
-            socket,
+        Self {
+            streams,
             state,
             shutdown: rx,
-        })
+        }
     }
 
-    /// Starts the main server loop to accept and handle incoming connections.
+    /// Runs the main server loop, accepting new streams and spawning handlers.
     ///
-    /// ## Graceful Shutdown
-    /// When the server's `cancel` token is triggered, the loop stops accepting new
-    /// connections. It then waits for all active connections to complete their work
-    /// and drop their `Shutdown` handles before the method returns and the server exits.
+    /// This future completes once the cancellation token is triggered and all
+    /// active connection handlers have shut down gracefully.
     pub(crate) async fn run(mut self) {
         loop {
             tokio::select! {
-                // A new client is attempting to connect.
-                Ok((stream, _)) = self.socket.accept() => {
-                    self.handle(stream);
+                Some(stream) = self.streams.recv() => {
+                    let state = self.state.clone();
+                    tokio::spawn(ConnectionHandler::new(stream, state).run());
                 },
-                // The server shutdown signal has been received.
                 _ = self.state.cancel.cancelled() => break,
             }
         }
-        // Drop the main `ConnectionState` which holds the original `Shutdown` handle.
         drop(self.state);
-        // Wait for all spawned connection tasks to finish.
         let _ = self.shutdown.await;
     }
+}
 
-    /// Spawns a task to handle a new TCP stream as a potential WebSocket connection.
-    ///
-    /// This function sets up a Hyper service to perform the initial HTTP Upgrade handshake.
-    fn handle(&mut self, stream: TcpStream) {
-        // Clone the state for the new connection. This includes cloning the Arc<Shutdown>
-        // handle, incrementing the in-flight connection count.
-        let state = self.state.clone();
+/// Checks if an HTTP request is a valid WebSocket upgrade request.
+///
+/// It inspects the `Connection` and `Upgrade` headers for the required values.
+pub(crate) fn is_websocket_upgrade(
+    req: &Request<impl hyper::body::Body>,
+) -> bool {
+    let compare = |h: &str, v| h.trim().eq_ignore_ascii_case(v);
 
-        let io = TokioIo::new(stream);
-        let handler =
-            service_fn(move |request| handle_upgrade(request, state.clone()));
+    let is_upgrade_header_correct = req
+        .headers()
+        .get(UPGRADE)
+        .and_then(|val| val.to_str().ok())
+        .map_or(false, |s| compare(s, "websocket"));
 
-        tokio::spawn(async move {
-            let builder = http1::Builder::new();
-            // The `with_upgrades` method enables Hyper to handle the WebSocket upgrade protocol.
-            let connection =
-                builder.serve_connection(io, handler).with_upgrades();
-            if let Err(error) = connection.await {
-                warn!("websocket connection terminated with error: {error}");
-            }
-        });
+    if !is_upgrade_header_correct {
+        return false;
     }
+
+    req.headers()
+        .get(CONNECTION)
+        .and_then(|val| val.to_str().ok())
+        .map_or(false, |s| s.split(',').any(|s| compare(s, "Upgrade")))
 }
 
-/// A Hyper service function that handles an incoming HTTP request
-/// and attempts to upgrade it to a WebSocket connection.
-async fn handle_upgrade(
-    request: Request<Incoming>,
-    state: ConnectionState,
-) -> RpcResult<Response<Empty<Bytes>>> {
-    // `fastwebsockets::upgrade` checks the request headers (e.g., `Connection: upgrade`).
-    // If valid, it returns the "101 Switching Protocols" response and a future that
-    // will resolve to the established WebSocket stream.
-    let (response, ws) = upgrade(request).map_err(RpcError::internal)?;
-
-    // Spawn a new task to manage the WebSocket communication, freeing up the
-    // Hyper service to handle other potential incoming connections.
-    tokio::spawn(async move {
-        let Ok(ws) = ws.await else {
-            warn!("failed http upgrade to ws connection");
-            return;
-        };
-        // The `ConnectionHandler` will now take over the WebSocket stream.
-        let handler = ConnectionHandler::new(ws, state);
-        handler.run().await
-    });
-
-    // Return the "101 Switching Protocols" response to the client.
-    Ok(response)
-}
-
+/// Manages the lifecycle and I/O of a single WebSocket connection.
 pub(crate) mod connection;
+/// Handles RPC method dispatch and subscriptions for a connection.
 pub(crate) mod dispatch;
