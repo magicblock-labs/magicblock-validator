@@ -10427,6 +10427,7 @@ name = "test-chainlink"
 version = "0.0.0"
 dependencies = [
  "bincode",
+ "futures 0.3.31",
  "integration-test-tools",
  "log",
  "magicblock-chainlink",

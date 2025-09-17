@@ -654,47 +654,59 @@ pub mod deploy {
         debug!("Initialized length: {signature}");
 
         // 2. Write program data
-        let mut joinset = tokio::task::JoinSet::new();
-        for (idx, chunk) in program_data.chunks(CHUNK_SIZE).enumerate() {
-            let chunk = chunk.to_vec();
-            let offset = (idx * CHUNK_SIZE) as u32;
-            let program_pubkey = program_kp.pubkey();
-            let auth_kp = auth_kp.insecure_clone();
-            let auth_pubkey = auth_kp.pubkey();
-            let rpc_client = rpc_client.clone();
+        use futures::stream::{self, StreamExt};
 
-            joinset.spawn(async move {
-                let chunk_size = chunk.len();
-                // Create Write instruction to write program data in chunks
-                let loader_instruction = LoaderInstructionV4::Write {
-                    offset,
-                    bytes: chunk,
-                };
+        const MAX_CONCURRENCY: usize = 100;
 
-                let instruction = Instruction {
-                    program_id: loader_program_id,
-                    accounts: vec![
-                        // [writable] The program account to write to
-                        AccountMeta::new(program_pubkey, false),
-                        // [signer] The authority of the program
-                        AccountMeta::new_readonly(auth_pubkey, true),
-                    ],
-                    data: bincode::serialize(&loader_instruction)
-                        .expect("Failed to serialize Write instruction"),
-                };
+        let tasks =
+            program_data
+                .chunks(CHUNK_SIZE)
+                .enumerate()
+                .map(|(idx, chunk)| {
+                    let chunk = chunk.to_vec();
+                    let offset = (idx * CHUNK_SIZE) as u32;
+                    let program_pubkey = program_kp.pubkey();
+                    let auth_kp = auth_kp.insecure_clone();
+                    let auth_pubkey = auth_kp.pubkey();
+                    let rpc_client = rpc_client.clone();
 
-                let signature = send_instructions(
-                    &rpc_client,
-                    &[instruction],
-                    &[&auth_kp],
-                    "deploy_loader_v4::write_instruction",
-                )
-                .await;
-                trace!("Wrote chunk {idx} of size {chunk_size}: {signature}");
-                signature
-            });
-        }
-        let _signatures = joinset.join_all().await;
+                    async move {
+                        let chunk_size = chunk.len();
+                        let loader_instruction = LoaderInstructionV4::Write {
+                            offset,
+                            bytes: chunk,
+                        };
+
+                        let instruction = Instruction {
+                            program_id: loader_program_id,
+                            accounts: vec![
+                                AccountMeta::new(program_pubkey, false),
+                                AccountMeta::new_readonly(auth_pubkey, true),
+                            ],
+                            data: bincode::serialize(&loader_instruction)
+                                .expect(
+                                    "Failed to serialize Write instruction",
+                                ),
+                        };
+
+                        let signature = send_instructions(
+                            &rpc_client,
+                            &[instruction],
+                            &[&auth_kp],
+                            "deploy_loader_v4::write_instruction",
+                        )
+                        .await;
+                        trace!(
+                        "Wrote chunk {idx} of size {chunk_size}: {signature}"
+                    );
+                        signature
+                    }
+                });
+
+        let results: Vec<_> = stream::iter(tasks)
+            .buffer_unordered(MAX_CONCURRENCY)
+            .collect()
+            .await;
 
         // 3. Deploy the program to make it executable
         let deploy_instruction = {
