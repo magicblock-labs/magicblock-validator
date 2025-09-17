@@ -479,9 +479,22 @@ fn run_cloning_tests(
         return Ok(success_output());
     }
 
-    let loaded_chain_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
+    let loaded_chain_accounts = {
+        let mut loaded_chain_accounts =
+            LoadedAccounts::with_delegation_program_test_authority();
 
+        loaded_chain_accounts.add(&[
+            (
+                "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo",
+                "memo_v1.json",
+            ),
+            (
+                "MiniV21111111111111111111111111111111111111",
+                "target/deploy/miniv2/program_mini.json",
+            ),
+        ]);
+        loaded_chain_accounts
+    };
     let start_devnet_validator = || match start_validator(
         "cloning-conf.devnet.toml",
         ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
