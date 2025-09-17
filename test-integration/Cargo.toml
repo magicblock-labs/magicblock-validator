@@ -83,6 +83,7 @@ solana-sdk = "2.2"
 solana-sdk-ids = { version = "2.2" }
 solana-system-interface = "1.0"
 solana-transaction-status = "2.2"
+spl-memo-interface = "1.0"
 teepee = "0.0.1"
 tempfile = "3.10.1"
 test-chainlink = { path = "./test-chainlink" }

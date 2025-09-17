@@ -3510,6 +3510,7 @@ name = "magicblock-account-cloner"
 version = "0.1.7"
 dependencies = [
  "async-trait",
+ "bincode",
  "conjunto-transwise",
  "flume",
  "futures-util",
@@ -9917,6 +9918,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "spl-memo-interface"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24af0730130fea732616be9425fe8eb77782e2aab2f0e76837b6a66aaba96c6b"
+dependencies = [
+ "solana-instruction",
+ "solana-pubkey",
+]
+
+[[package]]
 name = "spl-pod"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10456,6 +10467,7 @@ dependencies = [
  "program-flexi-counter",
  "program-mini",
  "solana-sdk",
+ "spl-memo-interface",
  "test-chainlink",
  "test-kit",
  "tokio",

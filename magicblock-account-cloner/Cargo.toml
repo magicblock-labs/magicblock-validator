@@ -9,6 +9,7 @@ edition.workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
+bincode = { workspace = true }
 conjunto-transwise = { workspace = true }
 flume = { workspace = true }
 futures-util = { workspace = true }

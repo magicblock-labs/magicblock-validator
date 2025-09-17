@@ -24,6 +24,10 @@ use solana_sdk::{
 use solana_sdk::{hash::Hash, rent::Rent};
 use solana_sdk::{loader_v4, signature::Signer};
 
+use crate::chainext::bpf_loader_v1::BpfUpgradableProgramModifications;
+
+mod bpf_loader_v1;
+
 pub struct ChainlinkCloner {
     tx_scheduler: TransactionSchedulerHandle,
     accounts_db: Arc<AccountsDb>,
@@ -81,19 +85,28 @@ impl ChainlinkCloner {
         use RemoteProgramLoader::*;
         match program.loader {
             V1 => {
+                // NOTE: we don't support modifying this kind of program once it was
+                // deployed into our validator once.
+                // By nature of being immutable on chain this should never happen.
+                // Thus we avoid having to run the upgrade instruction and get
+                // away with just directly modifying the program and program data accounts.
+                debug!("Loading V1 program {}", program.program_id);
+                let validator_kp = validator_authority();
+
                 // BPF Loader (non-upgradeable) cannot be loaded via newer loaders,
                 // thus we just copy the account as is. It won't be upgradeable.
-                let program_modification = AccountModification {
-                    pubkey: program.program_id,
-                    lamports: Some(program.lamports()),
-                    owner: Some(program.loader_id()),
-                    rent_epoch: Some(0),
-                    data: Some(program.program_data),
-                    executable: Some(true),
-                    delegated: Some(false),
-                };
-                Ok(InstructionUtils::modify_accounts(
-                    vec![program_modification],
+                let modifications =
+                    BpfUpgradableProgramModifications::try_from(&program)?;
+                let mod_ix =
+                    InstructionUtils::modify_accounts_instruction(vec![
+                        modifications.program_id_modification,
+                        modifications.program_data_modification,
+                    ]);
+
+                Ok(Transaction::new_signed_with_payer(
+                    &[mod_ix],
+                    Some(&validator_kp.pubkey()),
+                    &[&validator_kp],
                     recent_blockhash,
                 ))
             }

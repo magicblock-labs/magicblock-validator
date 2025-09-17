@@ -3548,6 +3548,7 @@ name = "magicblock-account-cloner"
 version = "0.1.7"
 dependencies = [
  "async-trait",
+ "bincode",
  "conjunto-transwise",
  "flume",
  "futures-util",

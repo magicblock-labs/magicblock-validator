@@ -4,6 +4,7 @@ use integration_test_tools::IntegrationTestContext;
 use log::*;
 use program_mini::sdk::MiniSdk;
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair};
+use spl_memo_interface::{instruction as memo_ix, v1 as memo_v1};
 use test_chainlink::programs::{
     deploy::{compile_mini, deploy_loader_v4},
     MINIV2, MINIV3,
@@ -19,6 +20,24 @@ macro_rules! assert_tx_logs {
             panic!("No logs found for tx {}", $sig);
         }
     };
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_clone_memo_v1_loader_program() {
+    init_logger!();
+    let ctx = IntegrationTestContext::try_new().unwrap();
+
+    let payer = Keypair::new();
+    ctx.airdrop_chain_escrowed(&payer, LAMPORTS_PER_SOL)
+        .await
+        .unwrap();
+    let msg = "Hello World";
+    let ix =
+        memo_ix::build_memo(&memo_v1::id(), msg.as_bytes(), &[&payer.pubkey()]);
+    let (_sig, found) = ctx
+        .send_and_confirm_instructions_with_payer_ephem(&[ix], &payer)
+        .unwrap();
+    assert!(found);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

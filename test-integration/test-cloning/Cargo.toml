@@ -10,5 +10,6 @@ integration-test-tools = { workspace = true }
 log = { workspace = true }
 test-chainlink = { workspace = true }
 solana-sdk = { workspace = true }
+spl-memo-interface = { workspace = true }
 test-kit = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
