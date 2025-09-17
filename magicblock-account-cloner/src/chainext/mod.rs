@@ -1,12 +1,17 @@
+use std::{sync::Arc, time::Duration};
+
 use async_trait::async_trait;
 use log::*;
+use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     cloner::{errors::ClonerResult, Cloner},
     remote_account_provider::program_account::{
         LoadedProgram, RemoteProgramLoader,
     },
 };
-use magicblock_core::link::transactions::TransactionSchedulerHandle;
+use magicblock_core::{
+    link::transactions::TransactionSchedulerHandle, traits::AccountsBank,
+};
 use magicblock_ledger::LatestBlock;
 use magicblock_mutator::AccountModification;
 use magicblock_program::{
@@ -23,16 +28,19 @@ use solana_sdk::{loader_v4, signature::Signer};
 
 pub struct ChainlinkCloner {
     tx_scheduler: TransactionSchedulerHandle,
+    accounts_db: Arc<AccountsDb>,
     block: LatestBlock,
 }
 
 impl ChainlinkCloner {
     pub fn new(
         tx_scheduler: TransactionSchedulerHandle,
+        accounts_db: Arc<AccountsDb>,
         block: LatestBlock,
     ) -> Self {
         Self {
             tx_scheduler,
+            accounts_db,
             block,
         }
     }
@@ -154,6 +162,13 @@ impl Cloner for ChainlinkCloner {
         let recent_blockhash = self.block.load().blockhash;
         let tx =
             self.try_transaction_to_clone_program(program, recent_blockhash)?;
-        self.send_transaction(tx).await
+        let res = self.send_transaction(tx).await?;
+        // After cloning a program we need to wait at least one slot for it to become
+        // usable, so we do that here
+        let current_slot = self.accounts_db.slot();
+        while self.accounts_db.slot() == current_slot {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        Ok(res)
     }
 }
