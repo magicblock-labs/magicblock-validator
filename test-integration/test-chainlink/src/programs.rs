@@ -550,13 +550,14 @@ pub mod deploy {
     use solana_sdk::native_token::LAMPORTS_PER_SOL;
     use solana_sdk::signature::Keypair;
     use solana_sdk::signer::Signer;
+    use solana_sdk::{loader_v4, loader_v4_instruction};
     use solana_system_interface::instruction as system_instruction;
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
     use std::sync::Arc;
 
-    pub fn compile_mini(keypair: &Keypair) -> Vec<u8> {
+    pub fn compile_mini(keypair: &Keypair, suffix: Option<&str>) -> Vec<u8> {
         let workspace_root_path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
         let program_root_path =
@@ -565,7 +566,11 @@ pub mod deploy {
 
         // Build the program and read the binary, ensuring cleanup happens
         // Run cargo build-sbf to compile the program
-        let output = Command::new("cargo")
+        let mut cmd = Command::new("cargo");
+        if let Some(suffix) = suffix {
+            cmd.env("LOG_MSG_SUFFIX", suffix);
+        }
+        let output = cmd
             .env("MINI_PROGRAM_ID", &program_id)
             .args([
                 "build-sbf",
@@ -608,22 +613,35 @@ pub mod deploy {
             solana_sdk::pubkey!("LoaderV411111111111111111111111111111111111");
 
         // 1. Set program length to initialize and allocate space
-        let create_program_account_instruction =
-            system_instruction::create_account(
-                &auth_kp.pubkey(),
-                &program_kp.pubkey(),
-                10 * LAMPORTS_PER_SOL,
-                0,
-                &loader_program_id,
-            );
-        let signature = send_instructions(
-            &rpc_client,
-            &[create_program_account_instruction],
-            &[auth_kp, program_kp],
-            "deploy_loader_v4::create_program_account_instruction",
-        )
-        .await;
-        debug!("Created program account: {signature}");
+        if rpc_client.get_account(&program_kp.pubkey()).await.is_err() {
+            let create_program_account_instruction =
+                system_instruction::create_account(
+                    &auth_kp.pubkey(),
+                    &program_kp.pubkey(),
+                    10 * LAMPORTS_PER_SOL,
+                    0,
+                    &loader_program_id,
+                );
+            let signature = send_instructions(
+                &rpc_client,
+                &[create_program_account_instruction],
+                &[auth_kp, program_kp],
+                "deploy_loader_v4::create_program_account_instruction",
+            )
+            .await;
+            debug!("Created program account: {signature}");
+        } else {
+            let retract_instruction =
+                loader_v4::retract(&program_kp.pubkey(), &auth_kp.pubkey());
+            let signature = send_instructions(
+                &rpc_client,
+                &[retract_instruction],
+                &[auth_kp],
+                "deploy_loader_v4::create_program_account_instruction",
+            )
+            .await;
+            debug!("Retracted program account: {signature}");
+        }
 
         let set_length_instruction = {
             let loader_instruction = LoaderInstructionV4::SetProgramLength {

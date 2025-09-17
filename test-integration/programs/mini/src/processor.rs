@@ -208,7 +208,8 @@ impl Processor {
     }
 
     fn process_log_msg(msg_str: &str) -> ProgramResult {
-        msg!("LogMsg: {}", msg_str);
+        let suffix = option_env!("LOG_MSG_SUFFIX").unwrap_or("");
+        msg!("LogMsg: {}{}", msg_str, suffix);
         Ok(())
     }
 }

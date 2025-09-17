@@ -5,9 +5,12 @@ use log::*;
 use program_mini::sdk::MiniSdk;
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair};
 use spl_memo_interface::{instruction as memo_ix, v1 as memo_v1};
-use test_chainlink::programs::{
-    deploy::{compile_mini, deploy_loader_v4},
-    MINIV2, MINIV3,
+use test_chainlink::{
+    programs::{
+        deploy::{compile_mini, deploy_loader_v4},
+        MINIV2, MINIV3,
+    },
+    sleep_ms,
 };
 use test_kit::{init_logger, Signer};
 
@@ -82,37 +85,68 @@ async fn test_clone_mini_v3_loader_program() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_clone_mini_v4_loader_program() {
+async fn test_clone_mini_v4_loader_program_and_upgrade() {
     init_logger!();
     let prog_kp = Keypair::new();
     let auth_kp = Keypair::new();
 
     let ctx = IntegrationTestContext::try_new().unwrap();
 
-    let program_data = compile_mini(&prog_kp);
-    debug!("Binary size: {}", program_data.len(),);
-
-    let rpc_client = Arc::new(ctx.try_chain_client_async().unwrap());
-    deploy_loader_v4(
-        rpc_client.clone(),
-        &prog_kp,
-        &auth_kp,
-        &program_data,
-        false,
-    )
-    .await;
-
-    let sdk = MiniSdk::new(prog_kp.pubkey());
+    // Setting up escrowed payer
     let payer = Keypair::new();
     ctx.airdrop_chain_escrowed(&payer, LAMPORTS_PER_SOL)
         .await
         .unwrap();
-    let msg = "Hello World";
-    let ix = sdk.log_msg_instruction(&payer.pubkey(), msg);
-    let (sig, found) = ctx
-        .send_and_confirm_instructions_with_payer_ephem(&[ix], &payer)
-        .unwrap();
 
-    assert!(found);
-    assert_tx_logs!(ctx, sig, msg);
+    let sdk = MiniSdk::new(prog_kp.pubkey());
+
+    // Initial deploy and check
+    {
+        let program_data = compile_mini(&prog_kp, None);
+        debug!("Binary size: {}", program_data.len(),);
+
+        let rpc_client = Arc::new(ctx.try_chain_client_async().unwrap());
+        deploy_loader_v4(
+            rpc_client.clone(),
+            &prog_kp,
+            &auth_kp,
+            &program_data,
+            false,
+        )
+        .await;
+
+        let msg = "Hello World";
+        let ix = sdk.log_msg_instruction(&payer.pubkey(), msg);
+        let (sig, found) = ctx
+            .send_and_confirm_instructions_with_payer_ephem(&[ix], &payer)
+            .unwrap();
+
+        assert!(found);
+        assert_tx_logs!(ctx, sig, msg);
+    }
+
+    // Upgrade and check again
+    {
+        let program_data = compile_mini(&prog_kp, Some(" upgraded"));
+        debug!("Binary size: {}", program_data.len(),);
+
+        let rpc_client = Arc::new(ctx.try_chain_client_async().unwrap());
+        deploy_loader_v4(
+            rpc_client.clone(),
+            &prog_kp,
+            &auth_kp,
+            &program_data,
+            false,
+        )
+        .await;
+
+        let msg = "Hola Mundo";
+        let ix = sdk.log_msg_instruction(&payer.pubkey(), msg);
+        let (sig, found) = ctx
+            .send_and_confirm_instructions_with_payer_ephem(&[ix], &payer)
+            .unwrap();
+
+        assert!(found);
+        assert_tx_logs!(ctx, sig, format!("{} upgraded", msg));
+    }
 }

@@ -352,7 +352,7 @@ async fn ixtest_fetch_mini_v4_loader_program() {
     let prog_kp = Keypair::new();
     let auth_kp = Keypair::new();
 
-    let program_data = compile_mini(&prog_kp);
+    let program_data = compile_mini(&prog_kp, None);
     debug!(
         "Binary size: {} ({})",
         pretty_bytes(program_data.len()),
@@ -530,7 +530,7 @@ async fn ixtest_clone_mini_v4_loader_program() {
     let prog_kp = Keypair::new();
     let auth_kp = Keypair::new();
 
-    let program_data = compile_mini(&prog_kp);
+    let program_data = compile_mini(&prog_kp, None);
     debug!(
         "Binary size: {} ({})",
         pretty_bytes(program_data.len()),
