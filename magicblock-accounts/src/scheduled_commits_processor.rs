@@ -301,7 +301,9 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
             intent_sent_transaction,
             bank,
             Some(transaction_status_sender),
-        ) {
+        )
+        .await
+        {
             Ok(signature) => debug!(
                 "Signaled sent commit with internal signature: {:?}",
                 signature
@@ -327,7 +329,9 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
             intent_sent_transaction,
             bank,
             Some(transaction_status_sender),
-        ) {
+        )
+        .await
+        {
             Ok(signature) => debug!(
                 "Signaled sent commit with internal signature: {:?}",
                 signature

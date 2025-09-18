@@ -3873,6 +3873,7 @@ dependencies = [
 name = "magicblock-account-dumper"
 version = "0.2.1"
 dependencies = [
+ "async-trait",
  "bincode",
  "magicblock-bank",
  "magicblock-mutator",
@@ -4330,6 +4331,7 @@ dependencies = [
  "solana-timings",
  "spl-token",
  "spl-token-2022 6.0.0",
+ "tokio",
 ]
 
 [[package]]

@@ -81,6 +81,7 @@ async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
     let tx = InstructionUtils::accept_scheduled_commits(bank.last_blockhash());
     if let Err(err) =
         execute_legacy_transaction(tx, bank, Some(transaction_status_sender))
+            .await
     {
         error!("Failed to accept scheduled commits: {:?}", err);
         return;

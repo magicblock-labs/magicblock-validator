@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 magicblock-bank = { workspace = true }
 magicblock-mutator = { workspace = true }
 magicblock-processor = { workspace = true }
