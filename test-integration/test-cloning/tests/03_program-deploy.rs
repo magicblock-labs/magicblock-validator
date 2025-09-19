@@ -3,14 +3,12 @@ use std::sync::Arc;
 use integration_test_tools::IntegrationTestContext;
 use log::*;
 use program_mini::sdk::MiniSdk;
+use solana_loader_v4_interface::state::{LoaderV4State, LoaderV4Status};
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair};
 use spl_memo_interface::{instruction as memo_ix, v1 as memo_v1};
-use test_chainlink::{
-    programs::{
-        deploy::{compile_mini, deploy_loader_v4},
-        MINIV2, MINIV3,
-    },
-    sleep_ms,
+use test_chainlink::programs::{
+    deploy::{compile_mini, deploy_loader_v4},
+    MINIV2, MINIV3, MINIV3_AUTH,
 };
 use test_kit::{init_logger, Signer};
 
@@ -22,6 +20,29 @@ macro_rules! assert_tx_logs {
         } else {
             panic!("No logs found for tx {}", $sig);
         }
+    };
+}
+
+macro_rules! check_v4_program_status {
+    ($ctx:expr, $program:expr, $expected_auth:expr) => {
+        let data = $program
+            .data
+            .get(0..LoaderV4State::program_data_offset())
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let loader_state = unsafe {
+            std::mem::transmute::<
+                &[u8; LoaderV4State::program_data_offset()],
+                &LoaderV4State,
+            >(data)
+        };
+        debug!("LoaderV4State: {:#?}", loader_state);
+        assert_eq!(loader_state.status, LoaderV4Status::Deployed);
+        assert_eq!(
+            loader_state.authority_address_or_next_version,
+            $expected_auth
+        );
     };
 }
 
@@ -53,6 +74,10 @@ async fn test_clone_mini_v2_loader_program() {
     ctx.airdrop_chain_escrowed(&payer, LAMPORTS_PER_SOL)
         .await
         .unwrap();
+
+    let program = ctx.fetch_ephem_account(MINIV2).unwrap();
+    check_v4_program_status!(ctx, program, MINIV2);
+
     let msg = "Hello World";
     let ix = sdk.log_msg_instruction(&payer.pubkey(), msg);
     let (sig, found) = ctx
@@ -82,6 +107,9 @@ async fn test_clone_mini_v3_loader_program() {
 
     assert!(found);
     assert_tx_logs!(ctx, sig, msg);
+
+    let program = ctx.fetch_ephem_account(MINIV3).unwrap();
+    check_v4_program_status!(ctx, program, MINIV3_AUTH);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -123,6 +151,9 @@ async fn test_clone_mini_v4_loader_program_and_upgrade() {
 
         assert!(found);
         assert_tx_logs!(ctx, sig, msg);
+
+        let program = ctx.fetch_ephem_account(prog_kp.pubkey()).unwrap();
+        check_v4_program_status!(ctx, program, auth_kp.pubkey());
     }
 
     // Upgrade and check again
@@ -148,5 +179,8 @@ async fn test_clone_mini_v4_loader_program_and_upgrade() {
 
         assert!(found);
         assert_tx_logs!(ctx, sig, format!("{} upgraded", msg));
+
+        let program = ctx.fetch_ephem_account(prog_kp.pubkey()).unwrap();
+        check_v4_program_status!(ctx, program, auth_kp.pubkey());
     }
 }

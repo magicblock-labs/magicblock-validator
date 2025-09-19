@@ -10,4 +10,8 @@ pub enum ClonerError {
     TryFromIntError(#[from] std::num::TryFromIntError),
     #[error(transparent)]
     TransactionError(#[from] solana_transaction_error::TransactionError),
+    #[error(transparent)]
+    RemoteAccountProviderError(
+        #[from] crate::remote_account_provider::RemoteAccountProviderError,
+    ),
 }

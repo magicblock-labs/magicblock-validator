@@ -6,7 +6,7 @@ use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     cloner::{errors::ClonerResult, Cloner},
     remote_account_provider::program_account::{
-        LoadedProgram, RemoteProgramLoader,
+        DeployableV4Program, LoadedProgram, RemoteProgramLoader,
     },
 };
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
@@ -141,25 +141,48 @@ impl ChainlinkCloner {
                 );
 
                 // Create and initialize the program account in retracted state
-                // and then deploy it
-                let (loader_state, deploy_ix) = program
+                // and then deploy it and finally set the authority to match the
+                // one on chain
+                let DeployableV4Program {
+                    pre_deploy_loader_state,
+                    deploy_instruction,
+                    post_deploy_loader_state,
+                } = program
                     .try_into_deploy_data_and_ixs_v4(validator_kp.pubkey())?;
 
-                let lamports =
-                    Rent::default().minimum_balance(loader_state.len());
+                let lamports = Rent::default()
+                    .minimum_balance(pre_deploy_loader_state.len());
 
-                let mods = vec![AccountModification {
-                    pubkey: program_id,
-                    lamports: Some(lamports),
-                    owner: Some(loader_v4::id()),
-                    executable: Some(true),
-                    data: Some(loader_state),
-                    ..Default::default()
-                }];
-                let init_program_account_ix =
-                    InstructionUtils::modify_accounts_instruction(mods);
+                let pre_deploy_mod_instruction = {
+                    let pre_deploy_mods = vec![AccountModification {
+                        pubkey: program_id,
+                        lamports: Some(lamports),
+                        owner: Some(loader_v4::id()),
+                        executable: Some(true),
+                        data: Some(pre_deploy_loader_state),
+                        ..Default::default()
+                    }];
+                    InstructionUtils::modify_accounts_instruction(
+                        pre_deploy_mods,
+                    )
+                };
 
-                let ixs = vec![init_program_account_ix, deploy_ix];
+                let post_deploy_mod_instruction = {
+                    let post_deploy_mods = vec![AccountModification {
+                        pubkey: program_id,
+                        data: Some(post_deploy_loader_state),
+                        ..Default::default()
+                    }];
+                    InstructionUtils::modify_accounts_instruction(
+                        post_deploy_mods,
+                    )
+                };
+
+                let ixs = vec![
+                    pre_deploy_mod_instruction,
+                    deploy_instruction,
+                    post_deploy_mod_instruction,
+                ];
                 let tx = Transaction::new_signed_with_payer(
                     &ixs,
                     Some(&validator_kp.pubkey()),

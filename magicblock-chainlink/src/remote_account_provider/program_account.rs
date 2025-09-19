@@ -106,6 +106,15 @@ pub struct LoadedProgram {
     pub remote_slot: u64,
 }
 
+pub struct DeployableV4Program {
+    /// Loader state with [LoaderV4Status::Retracted] and the validator authority
+    pub pre_deploy_loader_state: Vec<u8>,
+    /// The instruction to deploy the program
+    pub deploy_instruction: Instruction,
+    /// Loader state with [LoaderV4Status::Deployed] and the chain authority
+    pub post_deploy_loader_state: Vec<u8>,
+}
+
 impl LoadedProgram {
     pub fn lamports(&self) -> u64 {
         let size = self.program_data.len();
@@ -126,32 +135,36 @@ impl LoadedProgram {
     /// NOTE: assumes that the program account was created already with enough
     /// lamports since we cannot do a system transfer without the keypair of the
     /// program account.
-    /// NOTE: uses the same authority as the remote program.
-    /// TODO: @@@ this may not work, in that case use auth of the validator
-    /// initially and then add mutation instruction to change auth to the
-    /// remote auth.
+    /// NOTE: uses the validator authority in order to sign the deploy instruction
+    ///       the caller itself will modify the authority to match the one on chain
+    ///       after the deploy.
     pub fn try_into_deploy_data_and_ixs_v4(
         self,
-        auth: Pubkey,
-    ) -> ClonerResult<(Vec<u8>, Instruction)> {
+        validator_auth: Pubkey,
+    ) -> ClonerResult<DeployableV4Program> {
         let Self {
             program_id,
-            authority: _,
+            authority,
             program_data,
             loader,
             ..
         } = self;
-        // TODO: @@@ mutate back/forth to real chain auth
-        let authority = auth;
-        let loader4_state = LoaderV4State {
+        let pre_deploy_loader_state = LoaderV4State {
             slot: 1,
-            authority_address_or_next_version: authority,
+            authority_address_or_next_version: validator_auth,
             status: LoaderV4Status::Retracted,
         };
-        // TODO: @@@ (fix unwrap)
-        let state_data = state_data_v4(&loader4_state, &program_data).unwrap();
-        let size = state_data.len();
+        let post_deploy_loader_state = LoaderV4State {
+            slot: 1,
+            authority_address_or_next_version: authority,
+            status: LoaderV4Status::Deployed,
+        };
+        let pre_deploy_state_data =
+            state_data_v4(&pre_deploy_loader_state, &program_data)?;
+        let post_deploy_state_data =
+            state_data_v4(&post_deploy_loader_state, &program_data)?;
 
+        let size = pre_deploy_state_data.len();
         let deploy_instruction = {
             let loader_instruction = LoaderInstructionV4::Deploy;
 
@@ -161,13 +174,17 @@ impl LoadedProgram {
                     // [writable] The program account to deploy
                     AccountMeta::new(program_id, false),
                     // [signer] The authority of the program
-                    AccountMeta::new_readonly(authority, true),
+                    AccountMeta::new_readonly(validator_auth, true),
                 ],
                 data: bincode::serialize(&loader_instruction)?,
             }
         };
 
-        Ok((state_data, deploy_instruction))
+        Ok(DeployableV4Program {
+            pre_deploy_loader_state: pre_deploy_state_data,
+            deploy_instruction,
+            post_deploy_loader_state: post_deploy_state_data,
+        })
     }
 }
 
