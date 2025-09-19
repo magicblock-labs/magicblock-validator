@@ -16,7 +16,7 @@ use tokio::{
 
 use crate::{
     chainlink::blacklisted_accounts::blacklisted_accounts,
-    cloner::Cloner,
+    cloner::{errors::ClonerResult, Cloner},
     remote_account_provider::{
         program_account::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
@@ -804,6 +804,7 @@ where
         )
         .await;
 
+        let mut join_set = JoinSet::new();
         for acc in accounts_to_clone {
             let (pubkey, account) = acc;
             if log::log_enabled!(log::Level::Trace) {
@@ -812,15 +813,24 @@ where
                     account.remote_slot(),
                     account.owner()
                 );
-            }
-            // TODO: @@ maybe parallelize
-            self.cloner.clone_account(pubkey, account).await?;
+            };
+
+            let cloner = self.cloner.clone();
+            join_set.spawn(async move {
+                cloner.clone_account(pubkey, account).await
+            });
         }
 
         for acc in loaded_programs {
-            // TODO: @@ maybe parallelize
-            self.cloner.clone_program(acc).await?;
+            let cloner = self.cloner.clone();
+            join_set.spawn(async move { cloner.clone_program(acc).await });
         }
+
+        join_set
+            .join_all()
+            .await
+            .into_iter()
+            .collect::<ClonerResult<Vec<_>>>()?;
 
         Ok(FetchAndCloneResult {
             not_found_on_chain: not_found,
