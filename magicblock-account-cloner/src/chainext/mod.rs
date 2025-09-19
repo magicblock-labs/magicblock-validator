@@ -77,6 +77,12 @@ impl ChainlinkCloner {
         )
     }
 
+    /// Creates a transaction to clone the given program into the validator.
+    /// Handles the initial (and only) clone of a BPF Loader V1 program which is just
+    /// cloned as is without running an upgrade instruction.
+    /// Also see [magicblock_chainlink::chainlink::fetch_cloner::FetchCloner::handle_executable_sub_update]
+    /// For all other loaders we use the LoaderV4 and run a deploy instruction.
+    /// Returns None if the program is currently retracted on chain.
     fn try_transaction_to_clone_program(
         &self,
         program: LoadedProgram,
@@ -114,8 +120,6 @@ impl ChainlinkCloner {
                 let validator_kp = validator_authority();
                 // All other versions are loaded via the LoaderV4, no matter what
                 // the original loader was. We do this via a proper upgrade instruction.
-
-                debug!("Cloning program {}", program.program_id);
                 let program_id = program.program_id;
 
                 // We don't allow  users to retract the program in the ER, since in that case any
@@ -126,11 +130,16 @@ impl ChainlinkCloner {
                     loader_v4::LoaderV4Status::Retracted
                 ) {
                     debug!(
-                        "Program {} is currently retracted on chain, won't clone until it is deployed again",
+                        "Program {} is retracted on chain, won't deploy until it is deployed on chain",
                         program.program_id
                     );
                     return Ok(None);
                 }
+                debug!(
+                    "Deploying program with V4 loader {}",
+                    program.program_id
+                );
+
                 // Create and initialize the program account in retracted state
                 // and then deploy it
                 let (loader_state, deploy_ix) = program
@@ -171,7 +180,6 @@ impl Cloner for ChainlinkCloner {
         pubkey: Pubkey,
         account: AccountSharedData,
     ) -> ClonerResult<Signature> {
-        debug!("Cloning account {pubkey}: {account:#?}");
         let recent_blockhash = self.block.load().blockhash;
         let tx = self.transaction_to_clone_regular_account(
             &pubkey,

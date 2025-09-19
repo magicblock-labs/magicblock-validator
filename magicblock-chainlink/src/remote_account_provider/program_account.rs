@@ -70,7 +70,7 @@ pub enum RemoteProgramLoader {
     V4,
 }
 
-const LOADER_V1: Pubkey =
+pub const LOADER_V1: Pubkey =
     pubkey!("BPFLoader1111111111111111111111111111111111");
 const LOADER_V2: Pubkey =
     pubkey!("BPFLoader2111111111111111111111111111111111");

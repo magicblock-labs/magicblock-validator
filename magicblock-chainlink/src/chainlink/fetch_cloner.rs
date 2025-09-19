@@ -19,8 +19,8 @@ use crate::{
     cloner::Cloner,
     remote_account_provider::{
         program_account::{
-            get_loaderv3_get_program_data_address, LoadedProgram,
-            ProgramAccountResolver, LOADER_V3,
+            get_loaderv3_get_program_data_address, ProgramAccountResolver,
+            LOADER_V1, LOADER_V3,
         },
         ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
         MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
@@ -190,25 +190,11 @@ where
                     )
                     .await;
                 if let Some(account) = resolved_account {
-                    // TODO: @@@ do everything we do in magicblock-chainlink/src/chainlink/fetch_cloner.rs
-                    // including handling LoaderV3 program accounts especially
                     if account.executable() {
-                        let loaded_program = ProgramAccountResolver::try_new(
-                            pubkey,
-                            *account.owner(),
-                            Some(account),
-                            None,
+                        Self::handle_executable_sub_update(
+                            &cloner, pubkey, account,
                         )
-                        // TODO: @@@ handle error properly
-                        .unwrap()
-                        .into_loaded_program();
-                        if let Err(err) =
-                            cloner.clone_program(loaded_program).await
-                        {
-                            error!(
-                            "Failed to clone account {pubkey} into bank: {err}"
-                        );
-                        }
+                        .await;
                     } else if let Err(err) =
                         cloner.clone_account(pubkey, account).await
                     {
@@ -219,6 +205,35 @@ where
                 }
             }
         });
+    }
+
+    async fn handle_executable_sub_update(
+        cloner: &Arc<C>,
+        pubkey: Pubkey,
+        account: AccountSharedData,
+    ) {
+        if account.owner().eq(&LOADER_V1) {
+            // This is a program deployed on chain with BPFLoader1111111111111111111111111111111111.
+            // By definition it cannot be upgraded, hence we should never get a subscription
+            // update for it.
+            error!("Unexpected subscription update for program to load with LoaderV3: {pubkey}.");
+            return;
+        }
+        let loaded_program = match ProgramAccountResolver::try_new(
+            pubkey,
+            *account.owner(),
+            Some(account),
+            None,
+        ) {
+            Ok(x) => x.into_loaded_program(),
+            Err(err) => {
+                error!("Failed to resolve program account {pubkey} into bank: {err}");
+                return;
+            }
+        };
+        if let Err(err) = cloner.clone_program(loaded_program).await {
+            error!("Failed to clone account {pubkey} into bank: {err}");
+        }
     }
 
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
