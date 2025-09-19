@@ -28,10 +28,6 @@ millis-per-slot = 50
 sigverify = true
 
 [[program]]
-id = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
-path = "<remote>"
-
-[[program]]
 id = "3JnJ727jWEmPVU8qfXwtH63sCNDX7nMgsLbg8qy8aaPX"
 path = "../programs/redline/redline.so"
 
