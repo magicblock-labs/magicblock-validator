@@ -383,11 +383,6 @@ impl MagicValidator {
                 .unwrap_or(CommitmentLevel::Confirmed);
             CommitmentConfig { commitment: level }
         };
-        // TODO @@@: remove this diagnostics hack later
-        if std::env::var("CHAINLINK_OFFLINE").is_ok() {
-            warn!("CHAINLINK_OFFLINE is set, Chainlink will not connect to any remote endpoints");
-            return Ok(ChainlinkImpl::try_new(&accounts_bank, None)?);
-        }
         Ok(ChainlinkImpl::try_new_from_endpoints(
             &endpoints,
             commitment_config,
