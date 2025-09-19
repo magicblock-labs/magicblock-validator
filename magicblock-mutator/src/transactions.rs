@@ -7,8 +7,6 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-// TODO: @@@ since this operates on an account we cannot provide the delegation
-// status, thus we cannot use this in the new implementation
 pub fn transaction_to_clone_regular_account(
     pubkey: &Pubkey,
     account: &Account,
