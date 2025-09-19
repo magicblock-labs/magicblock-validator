@@ -1,12 +1,10 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::{Arc, Mutex},
 };
 
 use async_trait::async_trait;
-use conjunto_transwise::AccountChainSnapshot;
 use log::{debug, error, info, warn};
-use magicblock_account_cloner::{AccountClonerOutput, CloneOutputMap};
 use magicblock_accounts_db::AccountsDb;
 use magicblock_committor_service::{
     intent_execution_manager::{
@@ -14,14 +12,13 @@ use magicblock_committor_service::{
     },
     intent_executor::ExecutionOutput,
     types::{ScheduledBaseIntentWrapper, TriggerType},
-    BaseIntentCommittor,
+    BaseIntentCommittor, CommittorService,
 };
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_core::traits::AccountsBank;
 use magicblock_program::{
-    magic_scheduled_base_intent::{CommittedAccount, ScheduledBaseIntent},
-    register_scheduled_commit_sent, FeePayerAccount, SentCommit,
-    TransactionScheduler,
+    magic_scheduled_base_intent::ScheduledBaseIntent,
+    register_scheduled_commit_sent, SentCommit, TransactionScheduler,
 };
 use solana_sdk::{
     hash::Hash, pubkey::Pubkey, signature::Signature, transaction::Transaction,
@@ -33,25 +30,21 @@ use crate::{
     errors::ScheduledCommitsProcessorResult, ScheduledCommitsProcessor,
 };
 
-const POISONED_RWLOCK_MSG: &str =
-    "RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned";
 const POISONED_MUTEX_MSG: &str =
     "Mutex of RemoteScheduledCommitsProcessor.intents_meta_map is poisoned";
 
-pub struct ScheduledCommitsProcessorImpl<C: BaseIntentCommittor> {
-    bank: Arc<AccountsDb>,
-    committor: Arc<C>,
+pub struct ScheduledCommitsProcessorImpl {
+    accounts_bank: Arc<AccountsDb>,
+    committor: Arc<CommittorService>,
     cancellation_token: CancellationToken,
     intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-    cloned_accounts: CloneOutputMap,
     transaction_scheduler: TransactionScheduler,
 }
 
-impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
+impl ScheduledCommitsProcessorImpl {
     pub fn new(
-        bank: Arc<AccountsDb>,
-        cloned_accounts: CloneOutputMap,
-        committor: Arc<C>,
+        accounts_bank: Arc<AccountsDb>,
+        committor: Arc<CommittorService>,
         internal_transaction_scheduler: TransactionSchedulerHandle,
     ) -> Self {
         let result_subscriber = committor.subscribe_for_results();
@@ -65,11 +58,10 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
         ));
 
         Self {
-            bank,
+            accounts_bank,
             committor,
             cancellation_token,
             intents_meta_map,
-            cloned_accounts,
             transaction_scheduler: TransactionScheduler::default(),
         }
     }
@@ -77,105 +69,46 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
     fn preprocess_intent(
         &self,
         mut base_intent: ScheduledBaseIntent,
-    ) -> (
-        ScheduledBaseIntentWrapper,
-        Vec<Pubkey>,
-        HashSet<FeePayerAccount>,
-    ) {
+    ) -> (ScheduledBaseIntentWrapper, Vec<Pubkey>) {
         let Some(committed_accounts) = base_intent.get_committed_accounts_mut()
         else {
             let intent = ScheduledBaseIntentWrapper {
                 inner: base_intent,
                 trigger_type: TriggerType::OnChain,
             };
-            return (intent, vec![], HashSet::new());
+            return (intent, vec![]);
         };
 
-        struct Processor<'a> {
-            excluded_pubkeys: HashSet<Pubkey>,
-            feepayers: HashSet<FeePayerAccount>,
-            bank: &'a AccountsDb,
-        }
-
-        impl Processor<'_> {
-            /// Handles case when committed account is feepayer
-            /// Returns `true` if account should be retained, `false` otherwise
-            fn process_feepayer(
-                &mut self,
-                account: &mut CommittedAccount,
-            ) -> bool {
-                let pubkey = account.pubkey;
-                let ephemeral_pubkey =
-                    AccountChainSnapshot::ephemeral_balance_pda(&pubkey);
-                self.feepayers.insert(FeePayerAccount {
-                    pubkey,
-                    delegated_pda: ephemeral_pubkey,
-                });
-
-                // We commit escrow, its data kept under FeePayer's address
-                if let Some(account_data) = self.bank.get_account(&pubkey) {
-                    account.pubkey = ephemeral_pubkey;
-                    account.account = account_data.into();
-                    true
-                } else {
-                    // TODO(edwin): shouldn't be possible.. Should be a panic
-                    error!(
-                        "Scheduled commit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
+        let mut excluded_pubkeys = vec![];
+        // Retains only account that are valid to be committed (all delegated ones)
+        committed_accounts.retain_mut(|account| {
+            let pubkey = account.pubkey;
+            let acc = self.accounts_bank.get_account(&pubkey);
+            match acc {
+                Some(acc) => {
+                    if acc.delegated() {
+                        true
+                    } else {
+                        excluded_pubkeys.push(pubkey);
+                        false
+                    }
+                }
+                None => {
+                    warn!(
+                        "Account {} not found in bank, skipping from commit",
                         pubkey
                     );
-                    self.excluded_pubkeys.insert(pubkey);
                     false
                 }
             }
-        }
-
-        let mut processor = Processor {
-            excluded_pubkeys: HashSet::new(),
-            feepayers: HashSet::new(),
-            bank: &self.bank,
-        };
-
-        // Retains onlu account that are valid to be commited
-        committed_accounts.retain_mut(|account| {
-            let pubkey = account.pubkey;
-            let cloned_accounts =
-                self.cloned_accounts.read().expect(POISONED_RWLOCK_MSG);
-            let account_chain_snapshot = match cloned_accounts.get(&pubkey) {
-                Some(AccountClonerOutput::Cloned {
-                    account_chain_snapshot,
-                    ..
-                }) => account_chain_snapshot,
-                Some(AccountClonerOutput::Unclonable { .. }) => {
-                    error!("Unclonable account as part of commit");
-                    return false;
-                }
-                None => {
-                    error!("Account snapshot is absent during commit!");
-                    return false;
-                }
-            };
-
-            if account_chain_snapshot.chain_state.is_feepayer() {
-                // Feepayer case, should actually always return true
-                processor.process_feepayer(account)
-            } else if account_chain_snapshot.chain_state.is_undelegated() {
-                // Can be safely excluded
-                processor.excluded_pubkeys.insert(account.pubkey);
-                false
-            } else {
-                // Means delegated so we keep it
-                true
-            }
         });
 
-        let feepayers = processor.feepayers;
-        let excluded_pubkeys = processor.excluded_pubkeys.into_iter().collect();
         let intent = ScheduledBaseIntentWrapper {
             inner: base_intent,
             trigger_type: TriggerType::OnChain,
         };
 
-        (intent, excluded_pubkeys, feepayers)
+        (intent, excluded_pubkeys)
     }
 
     async fn result_processor(
@@ -343,16 +276,13 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
             chain_signatures,
             included_pubkeys: intent_meta.included_pubkeys,
             excluded_pubkeys: intent_meta.excluded_pubkeys,
-            feepayers: intent_meta.feepayers,
             requested_undelegation: intent_meta.requested_undelegation,
         }
     }
 }
 
 #[async_trait]
-impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
-    for ScheduledCommitsProcessorImpl<C>
-{
+impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
     async fn process(&self) -> ScheduledCommitsProcessorResult<()> {
         let scheduled_base_intent =
             self.transaction_scheduler.take_scheduled_actions();
@@ -371,14 +301,10 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
                 self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
 
             intents
-                .map(|(intent, excluded_pubkeys, feepayers)| {
+                .map(|(intent, excluded_pubkeys)| {
                     intent_metas.insert(
                         intent.id,
-                        ScheduledBaseIntentMeta::new(
-                            &intent,
-                            excluded_pubkeys,
-                            feepayers,
-                        ),
+                        ScheduledBaseIntentMeta::new(&intent, excluded_pubkeys),
                     );
 
                     intent
@@ -409,7 +335,6 @@ struct ScheduledBaseIntentMeta {
     payer: Pubkey,
     included_pubkeys: Vec<Pubkey>,
     excluded_pubkeys: Vec<Pubkey>,
-    feepayers: HashSet<FeePayerAccount>,
     intent_sent_transaction: Transaction,
     requested_undelegation: bool,
 }
@@ -418,7 +343,6 @@ impl ScheduledBaseIntentMeta {
     fn new(
         intent: &ScheduledBaseIntent,
         excluded_pubkeys: Vec<Pubkey>,
-        feepayers: HashSet<FeePayerAccount>,
     ) -> Self {
         Self {
             slot: intent.slot,
@@ -428,7 +352,6 @@ impl ScheduledBaseIntentMeta {
                 .get_committed_pubkeys()
                 .unwrap_or_default(),
             excluded_pubkeys,
-            feepayers,
             intent_sent_transaction: intent.action_sent_transaction.clone(),
             requested_undelegation: intent.is_undelegate(),
         }

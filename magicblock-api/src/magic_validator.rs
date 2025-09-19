@@ -126,8 +126,7 @@ pub struct MagicValidator {
     ledger_truncator: LedgerTruncator,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     committor_service: Option<Arc<CommittorService>>,
-    scheduled_commits_processor:
-        Option<Arc<ScheduledCommitsProcessorImpl<CommittorService>>>,
+    scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
     rpc_handle: JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
@@ -265,6 +264,15 @@ impl MagicValidator {
         )
         .await?;
 
+        let scheduled_commits_processor =
+            committor_service.as_ref().and_then(|committor_service| {
+                Some(Arc::new(ScheduledCommitsProcessorImpl::new(
+                    accountsdb.clone(),
+                    committor_service.clone(),
+                    dispatch.transaction_scheduler.clone(),
+                )))
+            });
+
         validator::init_validator_authority(identity_keypair);
 
         let txn_scheduler_state = TransactionSchedulerState {
@@ -317,11 +325,10 @@ impl MagicValidator {
             config,
             exit,
             _metrics: metrics,
-            // TODO: set during [Self::start]
+            // NOTE: set during [Self::start]
             slot_ticker: None,
             committor_service,
-            // TODO: @@@
-            scheduled_commits_processor: None,
+            scheduled_commits_processor,
             token,
             ledger,
             ledger_truncator,
@@ -333,6 +340,7 @@ impl MagicValidator {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn init_chainlink(
         committor_service: Option<Arc<CommittorService>>,
         rpc_config: &RpcProviderConfig,
@@ -593,71 +601,6 @@ impl MagicValidator {
         validator::finished_starting_up();
         Ok(())
     }
-
-    /* TODO: @@@ properly remove
-    fn start_remote_account_fetcher_worker(&mut self) {
-        if let Some(mut remote_account_fetcher_worker) =
-            self.remote_account_fetcher_worker.take()
-        {
-            let cancellation_token = self.token.clone();
-            self.remote_account_fetcher_handle =
-                Some(tokio::spawn(async move {
-                    remote_account_fetcher_worker
-                        .start_fetch_request_processing(cancellation_token)
-                        .await;
-                }));
-        }
-    }
-
-    fn start_remote_account_updates_worker(&mut self) {
-        if let Some(remote_account_updates_worker) =
-            self.remote_account_updates_worker.take()
-        {
-            let cancellation_token = self.token.clone();
-            self.remote_account_updates_handle =
-                Some(tokio::spawn(async move {
-                    remote_account_updates_worker
-                        .start_monitoring_request_processing(cancellation_token)
-                        .await
-                }));
-        }
-    }
-
-    async fn start_remote_account_cloner_worker(&mut self) -> ApiResult<()> {
-        if let Some(remote_account_cloner_worker) =
-            self.remote_account_cloner_worker.take()
-        {
-            if let Some(committor_service) = &self.committor_service {
-                if self.config.accounts.clone.prepare_lookup_tables
-                    == PrepareLookupTables::Always
-                {
-                    debug!("Reserving common pubkeys for committor service");
-                    map_committor_request_result(
-                        committor_service.reserve_common_pubkeys(),
-                        committor_service.clone(),
-                    )
-                    .await?;
-                }
-            }
-
-            let _ = remote_account_cloner_worker.hydrate().await.inspect_err(
-                |err| {
-                    error!("Failed to hydrate validator accounts: {:?}", err);
-                },
-            );
-            info!("Validator hydration complete (bank hydrate, replay, account clone)");
-
-            let cancellation_token = self.token.clone();
-            self.remote_account_cloner_handle =
-                Some(tokio::spawn(async move {
-                    remote_account_cloner_worker
-                        .start_clone_request_processing(cancellation_token)
-                        .await
-                }));
-        }
-        Ok(())
-    }
-    */
 
     pub async fn stop(mut self) {
         self.exit.store(true, Ordering::Relaxed);

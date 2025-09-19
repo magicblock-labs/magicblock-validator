@@ -457,7 +457,9 @@ mod tests {
         // Ensuring that the instructions are created correctly and we can
         // create a signed transaction from them
         let validator_kp = Keypair::new();
-        let (_, deploy_ix) = LoadedProgram {
+        let DeployableV4Program {
+            deploy_instruction, ..
+        } = LoadedProgram {
             program_id: Pubkey::new_unique(),
             authority: Pubkey::new_unique(),
             program_data: vec![1, 2, 3, 4, 5],
@@ -471,7 +473,7 @@ mod tests {
 
         // This would fail if we had invalid/missing signers
         Transaction::new_signed_with_payer(
-            &[deploy_ix],
+            &[deploy_instruction],
             Some(&validator_kp.pubkey()),
             &[&validator_kp],
             recent_blockhash,
