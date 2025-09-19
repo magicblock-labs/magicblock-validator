@@ -14,4 +14,6 @@ pub enum ClonerError {
     RemoteAccountProviderError(
         #[from] crate::remote_account_provider::RemoteAccountProviderError,
     ),
+    #[error("CommittorServiceError {0}")]
+    CommittorServiceError(String),
 }

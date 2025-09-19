@@ -1,20 +1,33 @@
-use std::{sync::Arc, time::Duration};
+use magicblock_config::PrepareLookupTables;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use log::*;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
-    cloner::{errors::ClonerResult, Cloner},
+    cloner::{
+        errors::{ClonerError, ClonerResult},
+        Cloner,
+    },
     remote_account_provider::program_account::{
         DeployableV4Program, LoadedProgram, RemoteProgramLoader,
     },
 };
+use magicblock_committor_service::{
+    error::{CommittorServiceError, CommittorServiceResult},
+    BaseIntentCommittor, CommittorService,
+};
+use magicblock_config::AccountsCloneConfig;
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_ledger::LatestBlock;
 use magicblock_mutator::AccountModification;
 use magicblock_program::{
     instruction_utils::InstructionUtils, validator::validator_authority,
 };
+use magicblock_rpc_client::MagicblockRpcClient;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     pubkey::Pubkey,
@@ -23,12 +36,15 @@ use solana_sdk::{
 };
 use solana_sdk::{hash::Hash, rent::Rent};
 use solana_sdk::{loader_v4, signature::Signer};
+use tokio::sync::oneshot;
 
 use crate::chainext::bpf_loader_v1::BpfUpgradableProgramModifications;
 
 mod bpf_loader_v1;
 
 pub struct ChainlinkCloner {
+    changeset_committor: Option<Arc<CommittorService>>,
+    clone_config: AccountsCloneConfig,
     tx_scheduler: TransactionSchedulerHandle,
     accounts_db: Arc<AccountsDb>,
     block: LatestBlock,
@@ -36,11 +52,15 @@ pub struct ChainlinkCloner {
 
 impl ChainlinkCloner {
     pub fn new(
+        changeset_committor: Option<Arc<CommittorService>>,
+        clone_config: AccountsCloneConfig,
         tx_scheduler: TransactionSchedulerHandle,
         accounts_db: Arc<AccountsDb>,
         block: LatestBlock,
     ) -> Self {
         Self {
+            changeset_committor,
+            clone_config,
             tx_scheduler,
             accounts_db,
             block,
@@ -119,10 +139,10 @@ impl ChainlinkCloner {
             _ => {
                 let validator_kp = validator_authority();
                 // All other versions are loaded via the LoaderV4, no matter what
-                // the original loader was. We do this via a proper upgrade instruction.
+                // the original loader was. We do this via a proper deploy instruction.
                 let program_id = program.program_id;
 
-                // We don't allow  users to retract the program in the ER, since in that case any
+                // We don't allow users to retract the program in the ER, since in that case any
                 // accounts of that program still in the ER could never be committed nor
                 // undelegated
                 if matches!(
@@ -130,7 +150,7 @@ impl ChainlinkCloner {
                     loader_v4::LoaderV4Status::Retracted
                 ) {
                     debug!(
-                        "Program {} is retracted on chain, won't deploy until it is deployed on chain",
+                        "Program {} is retracted on chain, won't retract it. When it is deployed on chain we deploy the new version.",
                         program.program_id
                     );
                     return Ok(None);
@@ -194,6 +214,91 @@ impl ChainlinkCloner {
             }
         }
     }
+
+    fn maybe_prepare_lookup_tables(&self, pubkey: Pubkey, owner: Pubkey) {
+        // Allow the committer service to reserve pubkeys in lookup tables
+        // that could be needed when we commit this account
+        if let Some(committor) = self.changeset_committor.clone() {
+            if self.clone_config.prepare_lookup_tables
+                == PrepareLookupTables::Always
+            {
+                tokio::spawn(async move {
+                    match Self::map_committor_request_result(
+                        committor.reserve_pubkeys_for_committee(pubkey, owner),
+                        &committor,
+                    )
+                    .await
+                    {
+                        Ok(initiated) => {
+                            trace!(
+                                "Reserving lookup keys for {pubkey} took {:?}",
+                                initiated.elapsed()
+                            );
+                        }
+                        Err(err) => {
+                            error!("Failed to reserve lookup keys for {pubkey}: {err:?}");
+                        }
+                    };
+                });
+            }
+        }
+    }
+
+    async fn map_committor_request_result(
+        res: oneshot::Receiver<CommittorServiceResult<Instant>>,
+        committor: &Arc<CommittorService>,
+    ) -> ClonerResult<Instant> {
+        match res.await.map_err(|err| {
+            // Send request error
+            ClonerError::CommittorServiceError(format!(
+                "error sending request {err:?}"
+            ))
+        })? {
+            Ok(val) => Ok(val),
+            Err(err) => {
+                // Commit error
+                match err {
+                    CommittorServiceError::TableManiaError(table_mania_err) => {
+                        let Some(sig) = table_mania_err.signature() else {
+                            return Err(ClonerError::CommittorServiceError(
+                                format!("{:?}", table_mania_err),
+                            ));
+                        };
+                        let (logs, cus) = if let Ok(Ok(transaction)) =
+                            committor.get_transaction(&sig).await
+                        {
+                            let cus =
+                                MagicblockRpcClient::get_cus_from_transaction(
+                                    &transaction,
+                                );
+                            let logs =
+                                MagicblockRpcClient::get_logs_from_transaction(
+                                    &transaction,
+                                );
+                            (logs, cus)
+                        } else {
+                            (None, None)
+                        };
+
+                        let cus_str = cus
+                            .map(|cus| format!("{:?}", cus))
+                            .unwrap_or("N/A".to_string());
+                        let logs_str = logs
+                            .map(|logs| format!("{:#?}", logs))
+                            .unwrap_or("N/A".to_string());
+                        Err(ClonerError::CommittorServiceError(format!(
+                            "{:?}\nCUs: {cus_str}\nLogs: {logs_str}",
+                            table_mania_err
+                        )))
+                    }
+                    _ => Err(ClonerError::CommittorServiceError(format!(
+                        "{:?}",
+                        err
+                    ))),
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -209,6 +314,9 @@ impl Cloner for ChainlinkCloner {
             &account,
             recent_blockhash,
         );
+        if account.delegated() {
+            self.maybe_prepare_lookup_tables(pubkey, *account.owner());
+        }
         self.send_transaction(tx).await
     }
 
@@ -229,7 +337,8 @@ impl Cloner for ChainlinkCloner {
             }
             Ok(res)
         } else {
-            Ok(Signature::default()) // No-op, program was retracted
+            // No-op, program was retracted
+            Ok(Signature::default())
         }
     }
 }

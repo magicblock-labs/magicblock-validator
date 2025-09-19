@@ -21,6 +21,13 @@ pub enum LifecycleMode {
 }
 
 impl LifecycleMode {
+    // TODO(thlorenz): @@ adapt this to current pipeline and include this once
+    // we support all lifecycle modes again.
+    // Mainly we still should need:
+    // - allow_cloning_refresh
+    // - allow_cloning_undelegated_accounts
+    // - allow_cloning_delegated_accounts
+    // - allow_cloning_program_accounts
     pub fn to_account_cloner_permissions(&self) -> AccountClonerPermissions {
         match self {
             LifecycleMode::Replica => AccountClonerPermissions {

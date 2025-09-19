@@ -28,7 +28,10 @@ use magicblock_chainlink::{
     submux::SubMuxClient,
     Chainlink,
 };
-use magicblock_committor_service::{BaseIntentCommittor, CommittorService};
+use magicblock_committor_service::{
+    config::ChainConfig, BaseIntentCommittor, CommittorService,
+    ComputeBudgetConfig,
+};
 use magicblock_config::{
     EphemeralConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
     ProgramConfig,
@@ -122,9 +125,9 @@ pub struct MagicValidator {
     ledger: Arc<Ledger>,
     ledger_truncator: LedgerTruncator,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
+    committor_service: Option<Arc<CommittorService>>,
     scheduled_commits_processor:
         Option<Arc<ScheduledCommitsProcessorImpl<CommittorService>>>,
-    committor_service: Option<Arc<CommittorService>>,
     rpc_handle: JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
@@ -224,7 +227,7 @@ impl MagicValidator {
             None
         };
 
-        let (_accounts_config, remote_rpc_config) =
+        let (accounts_config, remote_rpc_config) =
             try_get_remote_accounts_and_rpc_config(&config.accounts)?;
 
         let (dispatch, validator_channels) = link();
@@ -236,83 +239,22 @@ impl MagicValidator {
             committor_persist_path.display()
         );
 
-        /* TODO: @@@ properly remove
-        let clone_permissions =
-            accounts_config.lifecycle.to_account_cloner_permissions();
-        let remote_account_fetcher_worker =
-            RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
-
-        let remote_account_updates_worker = RemoteAccountUpdatesWorker::new(
-            accounts_config.remote_cluster.ws_urls(),
-            remote_rpc_config.commitment(),
-            // We'll kill/refresh one connection every 50 minutes
-            Duration::from_secs(60 * 50),
-        );
-        let remote_account_fetcher_client =
-            RemoteAccountFetcherClient::new(&remote_account_fetcher_worker);
-        let remote_account_updates_client =
-            RemoteAccountUpdatesClient::new(&remote_account_updates_worker);
-        let account_dumper_bank = AccountDumperBank::new(
-            accountsdb.clone(),
-            dispatch.transaction_scheduler.clone(),
-        );
-        let blacklisted_accounts = standard_blacklisted_accounts(
-            &validator_pubkey,
-            &faucet_keypair.pubkey(),
-        );
-
-
-        let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
-            accountsdb_account_provider,
-            remote_account_fetcher_client,
-            remote_account_updates_client,
-            account_dumper_bank,
-            committor_service.clone(),
-            accounts_config.allowed_program_ids,
-            blacklisted_accounts,
-            if config.validator.base_fees.is_none() {
-                ValidatorCollectionMode::NoFees
-            } else {
-                ValidatorCollectionMode::Fees
+        // TODO(thlorenz): when we support lifecycle modes again, only start it when needed
+        let committor_service = Some(Arc::new(CommittorService::try_start(
+            identity_keypair.insecure_clone(),
+            committor_persist_path,
+            ChainConfig {
+                rpc_uri: remote_rpc_config.url().to_string(),
+                commitment: remote_rpc_config
+                    .commitment()
+                    .unwrap_or(CommitmentLevel::Confirmed),
+                compute_budget_config: ComputeBudgetConfig::new(
+                    accounts_config.commit_compute_unit_price,
+                ),
             },
-            clone_permissions,
-            validator_pubkey,
-            config.accounts.max_monitored_accounts,
-            config.accounts.clone.clone(),
-            config.ledger.resume_strategy_config.clone(),
-        );
-        */
-
-        validator::init_validator_authority(identity_keypair);
-        let scheduled_commits_processor = None;
-        /* TODO: @@@ Renable this
-        let scheduled_commits_processor = if can_clone {
-            Some(Arc::new(ScheduledCommitsProcessorImpl::new(
-                accountsdb.clone(),
-                remote_account_cloner_worker.get_last_clone_output(),
-                committor_service
-                    .clone()
-                    .expect("When clone enabled committor has to exist!"),
-                dispatch.transaction_scheduler.clone(),
-            )))
-        } else {
-            None
-        };
-        */
-
-        // TODO: @@@ remove this
-        /*
-        let accounts_manager = Self::init_accounts_manager(
-            &accountsdb,
-            &committor_service,
-            RemoteAccountClonerClient::new(&remote_account_cloner_worker),
-            &config,
-            dispatch.transaction_scheduler.clone(),
-            ledger.latest_block().clone(),
-        );
-        */
-
+        )?));
         let chainlink = Self::init_chainlink(
+            committor_service.clone(),
             &remote_rpc_config,
             &config,
             &dispatch.transaction_scheduler,
@@ -322,6 +264,8 @@ impl MagicValidator {
             faucet_keypair.pubkey(),
         )
         .await?;
+
+        validator::init_validator_authority(identity_keypair);
 
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
@@ -373,10 +317,11 @@ impl MagicValidator {
             config,
             exit,
             _metrics: metrics,
+            // TODO: set during [Self::start]
             slot_ticker: None,
-            scheduled_commits_processor,
-            // TODO: @@@ fix
-            committor_service: None,
+            committor_service,
+            // TODO: @@@
+            scheduled_commits_processor: None,
             token,
             ledger,
             ledger_truncator,
@@ -388,37 +333,8 @@ impl MagicValidator {
         })
     }
 
-    /* TODO: @@@ properly remove
-    fn init_accounts_manager(
-        bank: &Arc<AccountsDb>,
-        commitor_service: &Option<Arc<CommittorService>>,
-        remote_account_cloner_client: RemoteAccountClonerClient,
-        config: &EphemeralConfig,
-        transaction_scheduler: TransactionSchedulerHandle,
-        latest_block: LatestBlock,
-    ) -> Arc<AccountsManager> {
-        let accounts_config = try_convert_accounts_config(&config.accounts)
-            .expect(
-            "Failed to derive accounts config from provided magicblock config",
-        );
-        let committor_ext = commitor_service
-            .clone()
-            .map(|inner| Arc::new(CommittorServiceExt::new(inner)));
-        let accounts_manager = AccountsManager::try_new(
-            bank,
-            committor_ext,
-            remote_account_cloner_client,
-            accounts_config,
-            transaction_scheduler,
-            latest_block,
-        )
-        .expect("Failed to create accounts manager");
-
-        Arc::new(accounts_manager)
-    }
-    */
-
     async fn init_chainlink(
+        committor_service: Option<Arc<CommittorService>>,
         rpc_config: &RpcProviderConfig,
         config: &EphemeralConfig,
         transaction_scheduler: &TransactionSchedulerHandle,
@@ -442,6 +358,8 @@ impl MagicValidator {
             .collect::<Vec<_>>();
 
         let cloner = ChainlinkCloner::new(
+            committor_service,
+            config.accounts.clone.clone(),
             transaction_scheduler.clone(),
             accountsdb.clone(),
             latest_block.clone(),
@@ -669,27 +587,6 @@ impl MagicValidator {
             self.block_udpate_tx.clone(),
             self.exit.clone(),
         ));
-
-        // TODO: @@@ remove this properly (now covered by tasks)
-        /*
-        self.commit_accounts_ticker = {
-            let token = self.token.clone();
-            let account_manager = self.accounts_manager.clone();
-            let tick = Duration::from_millis(
-                self.config.accounts.commit.frequency_millis,
-            );
-            let task =
-                init_commit_accounts_ticker(account_manager, tick, token);
-            Some(tokio::spawn(task))
-        };
-
-        // NOTE: these need to startup in the right order, otherwise some worker
-        //       that may be needed, i.e. during hydration after ledger replay
-        //       are not started in time
-        self.start_remote_account_fetcher_worker();
-        self.start_remote_account_updates_worker();
-        self.start_remote_account_cloner_worker().await?;
-        */
 
         self.ledger_truncator.start();
 
