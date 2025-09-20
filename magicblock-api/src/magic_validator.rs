@@ -89,6 +89,7 @@ use solana_sdk::{
     signature::Keypair,
     signer::Signer,
 };
+use tokio::time::{interval, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -827,6 +828,23 @@ impl MagicValidator {
         }
     }
 
+    async fn run_hydration_once(
+        worker: &Arc<
+            RemoteAccountClonerWorker<
+                BankAccountProvider,
+                RemoteAccountFetcherClient,
+                RemoteAccountUpdatesClient,
+                AccountDumperBank,
+                CommittorService,
+            >,
+        >,
+    ) {
+        let _ = worker.hydrate().await.inspect_err(|err| {
+            error!("Failed to hydrate validator accounts: {:?}", err);
+        });
+        info!("Validator hydration complete (bank hydrate, replay, account clone)");
+    }
+
     async fn start_remote_account_cloner_worker(&mut self) -> ApiResult<()> {
         if let Some(remote_account_cloner_worker) =
             self.remote_account_cloner_worker.take()
@@ -844,12 +862,30 @@ impl MagicValidator {
                 }
             }
 
-            let _ = remote_account_cloner_worker.hydrate().await.inspect_err(
-                |err| {
-                    error!("Failed to hydrate validator accounts: {:?}", err);
-                },
-            );
-            info!("Validator hydration complete (bank hydrate, replay, account clone)");
+            // Run one hydration and await it.
+            Self::run_hydration_once(&remote_account_cloner_worker).await;
+
+            // Spawn periodic hydration every 15 minutes in the background.
+            {
+                let hydration_worker = remote_account_cloner_worker.clone();
+                let hydration_token = self.token.clone();
+                tokio::spawn(async move {
+                    let mut tick = interval(Duration::from_secs(15 * 60));
+                    tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+                    loop {
+                        tokio::select! {
+                            _ = hydration_token.cancelled() => {
+                                debug!("Hydration task cancelled");
+                                break;
+                            }
+                            _ = tick.tick() => {
+                                Self::run_hydration_once(&hydration_worker).await;
+                            }
+                        }
+                    }
+                });
+            }
 
             let cancellation_token = self.token.clone();
             self.remote_account_cloner_handle =
