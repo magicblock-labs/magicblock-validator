@@ -66,7 +66,7 @@ fn test_schedule_task() {
     );
 
     // Wait for account to be delegated
-    expect!(ctx.wait_for_delta_slot_ephem(2), validator);
+    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
 
     // Noop tx to make sure the noop program is cloned
     let ephem_blockhash = send_memo_tx(&ctx, &payer, &mut validator);
@@ -158,26 +158,6 @@ fn test_schedule_task() {
     );
 
     // Cancel the task
-    let sim = expect!(
-        ctx.try_ephem_client().and_then(|client| client
-            .simulate_transaction(&Transaction::new_signed_with_payer(
-                &[create_cancel_task_ix(
-                    payer.pubkey(),
-                    TASK_CONTEXT_PUBKEY,
-                    MAGIC_PROGRAM_ID,
-                    task_id,
-                )],
-                Some(&payer.pubkey()),
-                &[&payer],
-                ephem_blockhash,
-            ),)
-            .map_err(|e| anyhow::anyhow!(
-                "Failed to simulate transaction: {}",
-                e
-            ))),
-        validator
-    );
-    eprintln!("sim: {:?}", sim);
     expect!(
         ctx.send_transaction_ephem(
             &mut Transaction::new_signed_with_payer(

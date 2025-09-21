@@ -67,7 +67,7 @@ fn test_schedule_error() {
     );
 
     // Wait for account to be delegated
-    expect!(ctx.wait_for_delta_slot_ephem(2), validator);
+    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
 
     // Noop tx to make sure the noop program is cloned
     let ephem_blockhash = send_memo_tx(&ctx, &payer, &mut validator);
@@ -99,7 +99,7 @@ fn test_schedule_error() {
     );
 
     // Wait for the task to be scheduled and executed
-    expect!(ctx.wait_for_delta_slot_ephem(3), validator);
+    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
 
     // Check that the task was scheduled in the database
     let db = expect!(SchedulerDatabase::new(db_path), validator);

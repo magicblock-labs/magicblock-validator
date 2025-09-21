@@ -4185,7 +4185,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "bincode",
  "chrono",
@@ -4194,7 +4194,7 @@ dependencies = [
  "magicblock-accounts",
  "magicblock-bank",
  "magicblock-config",
- "magicblock-core 0.1.7",
+ "magicblock-core 0.2.1",
  "magicblock-geyser-plugin",
  "magicblock-processor",
  "magicblock-program",
