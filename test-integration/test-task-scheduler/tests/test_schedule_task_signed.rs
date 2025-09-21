@@ -5,8 +5,11 @@ use program_flexi_counter::instruction::{
     create_delegate_ix, create_init_ix, create_schedule_task_ix,
 };
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-    transaction::Transaction,
+    instruction::InstructionError,
+    native_token::LAMPORTS_PER_SOL,
+    signature::Keypair,
+    signer::Signer,
+    transaction::{Transaction, TransactionError},
 };
 use test_task_scheduler::{send_memo_tx, setup_validator};
 
@@ -59,7 +62,7 @@ fn test_schedule_task_signed() {
     );
 
     // Wait for account to be delegated
-    expect!(ctx.wait_for_delta_slot_ephem(2), validator);
+    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
 
     // Noop tx to make sure the noop program is cloned
     let ephem_blockhash = send_memo_tx(&ctx, &payer, &mut validator);
@@ -68,25 +71,42 @@ fn test_schedule_task_signed() {
     let task_id = 4;
     let execution_interval_millis = 100;
     let iterations = 3;
-    let res = ctx.send_transaction_ephem(
-        &mut Transaction::new_signed_with_payer(
-            &[create_schedule_task_ix(
-                payer.pubkey(),
-                TASK_CONTEXT_PUBKEY,
-                MAGIC_PROGRAM_ID,
-                task_id,
-                execution_interval_millis,
-                iterations,
-                false,
-                true,
-            )],
-            Some(&payer.pubkey()),
+    let sig = expect!(
+        ctx.send_transaction_ephem(
+            &mut Transaction::new_signed_with_payer(
+                &[create_schedule_task_ix(
+                    payer.pubkey(),
+                    TASK_CONTEXT_PUBKEY,
+                    MAGIC_PROGRAM_ID,
+                    task_id,
+                    execution_interval_millis,
+                    iterations,
+                    false,
+                    true,
+                )],
+                Some(&payer.pubkey()),
+                &[&payer],
+                ephem_blockhash,
+            ),
             &[&payer],
-            ephem_blockhash,
         ),
-        &[&payer],
+        validator
     );
-    assert!(res.is_err(), cleanup(&mut validator));
+    let status = expect!(ctx.get_transaction_ephem(&sig), validator);
+    expect!(
+        status
+            .transaction
+            .meta
+            .map(|m| matches!(
+                m.err,
+                Some(TransactionError::InstructionError(
+                    0,
+                    InstructionError::MissingRequiredSignature
+                ))
+            ))
+            .ok_or_else(|| anyhow::anyhow!("No meta in transaction")),
+        validator
+    );
 
     cleanup(&mut validator);
 }

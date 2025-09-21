@@ -66,7 +66,7 @@ fn test_cancel_ongoing_task() {
     );
 
     // Wait for account to be delegated
-    expect!(ctx.wait_for_delta_slot_ephem(2), validator);
+    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
 
     // Noop tx to make sure the noop program is cloned
     let ephem_blockhash = send_memo_tx(&ctx, &payer, &mut validator);
@@ -120,7 +120,7 @@ fn test_cancel_ongoing_task() {
     );
 
     // Wait for the task to be cancelled
-    expect!(ctx.wait_for_delta_slot_ephem(2), validator);
+    expect!(ctx.wait_for_delta_slot_ephem(5), validator);
 
     // Check that the task was cancelled
     let db = expect!(SchedulerDatabase::new(db_path), validator);

@@ -21,7 +21,7 @@ path = "../schedulecommit/elfs/mdp.so"
 
 [[program]]
 id = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
-path = "<remote>"
+path = "../programs/memo/memo.so"
 
 [rpc]
 port = 7799
