@@ -872,7 +872,7 @@ impl MagicValidator {
                 tokio::spawn(async move {
                     let mut tick = interval(Duration::from_secs(15 * 60));
                     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
+                    tick.tick().await;
                     loop {
                         tokio::select! {
                             _ = hydration_token.cancelled() => {
