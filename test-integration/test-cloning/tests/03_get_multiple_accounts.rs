@@ -29,7 +29,7 @@ async fn test_get_multiple_accounts_both_existing_and_not() {
     let missing = random_pubkey();
     let escrowed_kp = Keypair::new();
 
-    // 1. Create iniital account with 2 SOL
+    // 1. Create initial account with 2 SOL
     ctx.airdrop_chain(&normal, 2 * LAMPORTS_PER_SOL)
         .expect("failed to airdrop to normal on-chain account");
     let (
