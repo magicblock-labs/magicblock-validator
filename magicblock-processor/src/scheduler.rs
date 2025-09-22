@@ -108,11 +108,19 @@ impl TransactionScheduler {
     /// 3.  Receiving a notification of a new block, triggering a slot transition.
     async fn run(mut self) {
         let mut block_produced = self.latest_block.subscribe();
+        let mut ready = true;
         loop {
             tokio::select! {
-                // Prioritize receiving new transactions.
                 biased;
-                Some(txn) = self.transactions_rx.recv() => {
+                // A worker has finished its task and is ready for more.
+                Some(_) = self.ready_rx.recv() => {
+                    // TODO(bmuddha):
+                    // This branch will be used by a multi-threaded scheduler
+                    // with account-level locking to manage the pool of ready workers.
+                    ready = true;
+                }
+                // Receive new transactions for scheduling.
+                Some(txn) = self.transactions_rx.recv(), if ready => {
                     // TODO(bmuddha):
                     // The current implementation sends to the first worker only.
                     // A future implementation with account-level locking will enable
@@ -121,12 +129,7 @@ impl TransactionScheduler {
                         continue;
                     };
                     let _ = tx.send(txn).await;
-                }
-                // A worker has finished its task and is ready for more.
-                Some(_) = self.ready_rx.recv() => {
-                    // TODO(bmuddha):
-                    // This branch will be used by a multi-threaded scheduler
-                    // with account-level locking to manage the pool of ready workers.
+                    ready = false;
                 }
                 // A new block has been produced.
                 _ = block_produced.recv() => {

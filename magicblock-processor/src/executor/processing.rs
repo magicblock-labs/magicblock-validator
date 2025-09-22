@@ -56,9 +56,7 @@ impl super::TransactionExecutor {
                 return result;
             }
 
-            // Otherwise, check that the transaction didn't violate any permissions
-            // Self::validate_account_access(txn.message(), &processed)?;
-            // And commit the account state changes if all is good
+            // Otherwise commit the account state changes
             self.commit_accounts(&mut processed, is_replay);
 
             // For new transactions, also commit the transaction to the ledger.
