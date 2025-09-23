@@ -2,6 +2,7 @@ pub mod error;
 pub(crate) mod intent_executor_factory;
 mod single_stage_executor;
 pub mod task_info_fetcher;
+mod two_stage_executor;
 
 use std::{sync::Arc, time::Duration};
 
@@ -33,6 +34,7 @@ use crate::{
         },
         single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{ResetType, TaskInfoFetcher},
+        two_stage_executor::TwoStageExecutor,
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     tasks::{
@@ -203,7 +205,6 @@ where
             trace!("Executing intent in two stages");
             let output = self
                 .two_stage_execution_flow(
-                    base_intent,
                     commit_strategy,
                     finalize_strategy,
                     persister,
@@ -222,168 +223,29 @@ where
         transaction_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let mut to_cleanup = Vec::new();
-        // TODO: unwrap
+        let mut junk = Vec::new();
         SingleStageExecutor::new(self)
-            .execute(
-                base_intent,
-                transaction_strategy,
-                &mut to_cleanup,
-                persister,
-            )
+            .execute(base_intent, transaction_strategy, &mut junk, persister)
             .await
     }
 
     pub async fn two_stage_execution_flow<P: IntentPersister>(
         &self,
-        base_intent: ScheduledBaseIntent,
-        mut commit_strategy: TransactionStrategy,
-        mut finalize_strategy: TransactionStrategy,
+        committed_pubkeys: &[Pubkey],
+        commit_strategy: TransactionStrategy,
+        finalize_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        // const FINALIZE_MAX_RETRIES: usize = 10;
-        //
-        // // Prepare everything for Commit stage execution
-        // let commit_message = self
-        //     .transaction_preparator
-        //     .prepare_for_strategy(
-        //         &self.authority,
-        //         &mut commit_strategy,
-        //         persister,
-        //     )
-        //     .await
-        //     .map_err(IntentExecutorError::FailedCommitPreparationError)?;
-        //
-        // let result = self
-        //     .execute_message_with_retries(
-        //         commit_message,
-        //         &commit_strategy.optimized_tasks,
-        //     )
-        //     .await;
-        //
-        // let authority_copy = self.authority.insecure_clone();
-        // let transaction_preparator_copy = self.transaction_preparator.clone();
-        // let commit_signature = match result {
-        //     Ok(value) => Ok(value),
-        //     Err(TransactionStrategyExecutionError::CommitIDError) => {
-        //         //TODO: unwrap
-        //         let committed_pubkeys =
-        //             base_intent.get_committed_pubkeys().unwrap();
-        //         let to_cleanup = self
-        //             .handle_commit_id_error(
-        //                 &committed_pubkeys,
-        //                 &mut commit_strategy,
-        //             )
-        //             .await?;
-        //
-        //         // Retry
-        //         let res = self
-        //             .two_stage_execution_flow(
-        //                 base_intent,
-        //                 commit_strategy,
-        //                 finalize_strategy,
-        //                 persister,
-        //             )
-        //             .await;
-        //
-        //         // TODO: improve
-        //         tokio::spawn(async move {
-        //             transaction_preparator_copy
-        //                 .cleanup_for_strategy(
-        //                     &authority_copy,
-        //                     &to_cleanup.optimized_tasks,
-        //                     &to_cleanup.lookup_tables_keys,
-        //                 )
-        //                 .await
-        //         });
-        //
-        //         return res;
-        //     }
-        //     // TODO: logs?
-        //     // Unexpected here?
-        //     Err(TransactionStrategyExecutionError::ActionsError) => {
-        //         Err(IntentExecutorError::ActionsError)
-        //     }
-        //     // Can't handle - propagate
-        //     Err(TransactionStrategyExecutionError::CpiLimitError) => {
-        //         Err(IntentExecutorError::CpiLimitError)
-        //     }
-        //     // Can't handle - propagate
-        //     Err(TransactionStrategyExecutionError::InternalError(err)) => {
-        //         let signature = err.signature();
-        //         Err(IntentExecutorError::FailedToCommitError { err, signature })
-        //     }
-        // }?;
-        //
-        // let finalize_message = self
-        //     .transaction_preparator
-        //     .prepare_for_strategy(
-        //         &self.authority,
-        //         &mut finalize_strategy,
-        //         persister,
-        //     )
-        //     .await
-        //     .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
-        //
-        // let mut i = 0;
-        // let mut to_cleanup = Vec::new();
-        // let finalize_signature = loop {
-        //     i += 1;
-        //     let result = self
-        //         .execute_message_with_retries(
-        //             finalize_message.clone(),
-        //             &finalize_strategy.optimized_tasks,
-        //         )
-        //         .await;
-        //
-        //     if i == FINALIZE_MAX_RETRIES {
-        //         // TODO: improve
-        //         break match result {
-        //             Ok(value) => Ok(value),
-        //             Err(TransactionStrategyExecutionError::CommitIDError) => {
-        //                 Err(IntentExecutorError::CommitIDError)
-        //             }
-        //             Err(TransactionStrategyExecutionError::CpiLimitError) => {
-        //                 Err(IntentExecutorError::CpiLimitError)
-        //             }
-        //             Err(TransactionStrategyExecutionError::ActionsError) => {
-        //                 Err(IntentExecutorError::ActionsError)
-        //             }
-        //             Err(TransactionStrategyExecutionError::InternalError(
-        //                 err,
-        //             )) => {
-        //                 let finalize_signature = err.signature();
-        //                 Err(IntentExecutorError::FailedToFinalizeError {
-        //                     err,
-        //                     commit_signature: Some(commit_signature),
-        //                     finalize_signature,
-        //                 })
-        //             }
-        //         };
-        //     }
-        //
-        //     match result {
-        //         Ok(value) => break Ok(value),
-        //         Err(TransactionStrategyExecutionError::ActionsError) => {
-        //             let cleanup =
-        //                 self.handle_actions_error(&mut finalize_strategy);
-        //             to_cleanup.push(cleanup);
-        //         }
-        //         Err(TransactionStrategyExecutionError::CommitIDError) => {
-        //             // Unexpected - break the loop
-        //             warn!("Unexpected CommitIdError in finalize stage!");
-        //             break Err(IntentExecutorError::CommitIDError);
-        //         }
-        //         Err(TransactionStrategyExecutionError::CpiLimitError) => {}
-        //         Err(TransactionStrategyExecutionError::InternalError(err)) => {}
-        //     };
-        // }?;
-        //
-        // Ok(ExecutionOutput::TwoStage {
-        //     commit_signature,
-        //     finalize_signature,
-        // })
-        todo!()
+        let mut junk = Vec::new();
+        TwoStageExecutor::new(self)
+            .execute(
+                committed_pubkeys,
+                commit_strategy,
+                finalize_strategy,
+                &mut junk,
+                persister,
+            )
+            .await
     }
 
     /// Handles out of sync commit id error, fixes current strategy

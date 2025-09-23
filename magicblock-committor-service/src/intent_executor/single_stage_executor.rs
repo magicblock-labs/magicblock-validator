@@ -2,8 +2,6 @@ use std::ops::{ControlFlow, Deref};
 
 use log::error;
 use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
-use solana_pubkey::Pubkey;
-use solana_sdk::{signature::Signature, signer::Signer};
 
 use crate::{
     intent_executor::{
@@ -15,7 +13,7 @@ use crate::{
         ExecutionOutput, IntentExecutorImpl,
     },
     persist::IntentPersister,
-    tasks::{task_strategist::TransactionStrategy, TaskType},
+    tasks::task_strategist::TransactionStrategy,
     transaction_preparator::TransactionPreparator,
 };
 
@@ -37,7 +35,7 @@ where
         &self,
         base_intent: ScheduledBaseIntent,
         mut transaction_strategy: TransactionStrategy,
-        to_cleanup: &mut Vec<TransactionStrategy>,
+        junk: &mut Vec<TransactionStrategy>,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         const RECURSION_CEILING: u8 = 10;
@@ -69,7 +67,7 @@ where
             let execution_err = match execution_result {
                 // break with result, strategy that was executed at this point has to be returned for cleanup
                 Ok(value) => {
-                    to_cleanup.push(transaction_strategy);
+                    junk.push(transaction_strategy);
                     return Ok(ExecutionOutput::SingleStage(value));
                 }
                 Err(err) => err,
@@ -96,34 +94,38 @@ where
                 );
                 break (execution_err, cleanup);
             } else {
-                to_cleanup.push(cleanup);
+                junk.push(cleanup);
             }
         };
 
         // Special case
+        let committed_pubkeys = base_intent.get_committed_pubkeys();
         if i < RECURSION_CEILING
             && matches!(
                 execution_err,
                 TransactionStrategyExecutionError::CpiLimitError
             )
-            && base_intent.get_committed_pubkeys().is_some()
+            && committed_pubkeys.is_some()
         {
             // With actions, we can't predict num of CPIs
             // If we get here we will try to switch from Single stage to Two Stage commit
             // Note that this not necessarily will pass at the end due to the same reason
+
+            // SAFETY: is_some() checked prior
+            let committed_pubkeys = committed_pubkeys.unwrap();
             let (commit_strategy, finalize_strategy, cleanup) =
                 self.handle_cpi_limit_error(last_transaction_strategy);
-
-            to_cleanup.push(cleanup);
+            junk.push(cleanup);
             self.two_stage_execution_flow(
                 base_intent,
+                &committed_pubkeys,
                 commit_strategy,
                 finalize_strategy,
                 persister,
             )
             .await
         } else {
-            to_cleanup.push(last_transaction_strategy);
+            junk.push(last_transaction_strategy);
             let err = IntentExecutorError::from_strategy_execution_error(
                 execution_err,
                 |internal_err| {
@@ -156,23 +158,8 @@ where
             TransactionStrategyExecutionError::ActionsError => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
-                let old_tasks = std::mem::take(&mut transaction_strategy.optimized_tasks);
-                let (new_tasks, action_tasks) = old_tasks
-                    .into_iter()
-                    .partition(|el| {
-                        // Strip away actions
-                        el.task_type() != TaskType::Action
-                    });
-                transaction_strategy.optimized_tasks = new_tasks;
-
-                let old_alts = transaction_strategy
-                    .dummy_revaluate_alts(&self.authority.pubkey());
-
-                let to_cleanup = TransactionStrategy {
-                    optimized_tasks: action_tasks,
-                    lookup_tables_keys: old_alts,
-                };
-
+                let to_cleanup =
+                    self.handle_actions_error(transaction_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CommitIDError => {
@@ -191,7 +178,7 @@ where
                 // We signal flow break
                 Ok(ControlFlow::Break(()))
             }
-            TransactionStrategyExecutionError::InternalError(err) => {
+            TransactionStrategyExecutionError::InternalError(_) => {
                 // Error that we can't handle - break with cleanup data
                 Ok(ControlFlow::Break(()))
             }

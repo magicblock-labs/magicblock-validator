@@ -3,8 +3,7 @@ use log::error;
 use crate::{
     persist::{CommitStrategy, IntentPersister},
     tasks::{
-        visitor::Visitor, ArgsTask, ArgsTaskType, BaseTask, BufferTask,
-        BufferTaskType,
+        visitor::Visitor, ArgsTask, ArgsTaskType, BufferTask, BufferTaskType,
     },
 };
 
