@@ -1,5 +1,6 @@
 pub mod error;
 pub(crate) mod intent_executor_factory;
+mod single_stage_executor;
 pub mod task_info_fetcher;
 
 use std::{sync::Arc, time::Duration};
@@ -30,6 +31,7 @@ use crate::{
             IntentExecutorError, IntentExecutorResult, InternalError,
             TransactionStrategyExecutionError,
         },
+        single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{ResetType, TaskInfoFetcher},
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
@@ -217,139 +219,19 @@ where
     pub async fn single_stage_execution_flow<P: IntentPersister>(
         &self,
         base_intent: ScheduledBaseIntent,
-        mut transaction_strategy: TransactionStrategy,
+        transaction_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        const RECURSION_CEILING: u8 = 10;
-
-        // Prepare everythig for execution
-        let prepared_message = self
-            .transaction_preparator
-            .prepare_for_strategy(
-                &self.authority,
-                &mut transaction_strategy,
+        let mut to_cleanup = Vec::new();
+        // TODO: unwrap
+        SingleStageExecutor::new(self)
+            .execute(
+                base_intent,
+                transaction_strategy,
+                &mut to_cleanup,
                 persister,
             )
             .await
-            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
-
-        let mut to_cleanup = Vec::new();
-        let mut i = 0;
-        let (outcome, cleanup) = loop {
-            i += 1;
-
-            let result = self
-                .execute_message_with_retries(
-                    prepared_message.clone(),
-                    &transaction_strategy.optimized_tasks,
-                )
-                .await;
-            let (res, cleanup) = match result {
-                // break with result, strategy that was executed at this point has to be returned for cleanup
-                Ok(value) => {
-                    break (
-                        Ok(ExecutionOutput::SingleStage(value)),
-                        transaction_strategy,
-                    );
-                }
-                res @ Err(TransactionStrategyExecutionError::ActionsError) => {
-                    // Here we patch strategy for it to be retried in next iteration
-                    // & we also record data that has to be cleaned up after patch
-                    let (optimized_tasks, action_tasks) = transaction_strategy
-                        .optimized_tasks
-                        .into_iter()
-                        .partition(|el| {
-                            // Strip away actions
-                            el.task_type() != TaskType::Action
-                        });
-                    transaction_strategy.optimized_tasks = optimized_tasks;
-
-                    let old_alts = transaction_strategy
-                        .dummy_revaluate_alts(&self.authority.pubkey());
-
-                    let to_cleanup = TransactionStrategy {
-                        optimized_tasks: action_tasks,
-                        lookup_tables_keys: old_alts,
-                    };
-
-                    (res, to_cleanup)
-                }
-                res @ Err(TransactionStrategyExecutionError::CommitIDError) => {
-                    // Here we patch strategy for it to be retried in next iteration
-                    // & we also record data that has to be cleaned up after patch
-                    // TODO(edwin): unwrap
-                    let committed_pubkeys =
-                        base_intent.get_committed_pubkeys().unwrap();
-                    let to_cleanup = self
-                        .handle_commit_id_error(
-                            &committed_pubkeys,
-                            &mut transaction_strategy,
-                        )
-                        .await?;
-
-                    (res, to_cleanup)
-                }
-                Err(TransactionStrategyExecutionError::CpiLimitError) => {
-                    // With actions, we can't predict num of CPIs
-                    // If we get here we will try to switch from Single stage to Two Stage commit
-                    // Note that this not necessarily will pass at the end due to the same reason
-                    let (commit_strategy, finalize_strategy, to_cleanup) =
-                        self.handle_cpi_limit_error(transaction_strategy);
-
-                    let res = self
-                        .two_stage_execution_flow(
-                            base_intent,
-                            commit_strategy,
-                            finalize_strategy,
-                            persister,
-                        )
-                        .await;
-
-                    // Break right away with result from Two stage commit
-                    // & return strategy that has to be cleaned up
-                    break (res, to_cleanup);
-                }
-                Err(TransactionStrategyExecutionError::InternalError(err)) => {
-                    // Error that we can't handle - break with cleanup data
-                    let signature = err.signature();
-                    let res = Err(IntentExecutorError::FailedToFinalizeError {
-                        err,
-                        commit_signature: signature,
-                        finalize_signature: signature,
-                    });
-
-                    break (res, transaction_strategy);
-                }
-            };
-
-            if i == RECURSION_CEILING {
-                error!(
-                    "CRITICAL! Recursion ceiling reached in intent execution."
-                );
-                let res = res
-                    .map(|signature| ExecutionOutput::SingleStage(signature))
-                    .map_err(|err| {
-                        IntentExecutorError::from_strategy_execution_error(
-                            err,
-                            |internal_err| {
-                                let signature = internal_err.signature();
-                                IntentExecutorError::FailedToFinalizeError {
-                                    err: internal_err,
-                                    commit_signature: signature,
-                                    finalize_signature: signature,
-                                }
-                            },
-                        )
-                    });
-
-                break (res, cleanup);
-            } else {
-                to_cleanup.push(cleanup);
-            }
-        };
-
-        to_cleanup.push(cleanup);
-        outcome
     }
 
     pub async fn two_stage_execution_flow<P: IntentPersister>(
@@ -829,6 +711,7 @@ where
                             return internal_err;
                         };
 
+                        // If index exists and corresponds to Action - return ActionsError
                         if let Some(TaskType::Action) = tasks
                             .get(action_index as usize)
                             .map(|task: &Box<dyn BaseTask>| task.task_type())
