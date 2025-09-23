@@ -12,6 +12,7 @@ conjunto-transwise = { workspace = true }
 flume = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
+magicblock-delegation-program = { workspace = true }
 magicblock-account-fetcher = { workspace = true }
 magicblock-account-updates = { workspace = true }
 magicblock-account-dumper = { workspace = true }

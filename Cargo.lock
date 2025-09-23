@@ -3859,6 +3859,7 @@ dependencies = [
  "magicblock-accounts-api",
  "magicblock-committor-service",
  "magicblock-config",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-program",
