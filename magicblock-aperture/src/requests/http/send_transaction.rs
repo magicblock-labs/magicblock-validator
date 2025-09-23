@@ -34,13 +34,14 @@ impl HttpDispatcher {
         }
         debug!("Received transaction: {signature}, ensuring accounts");
         self.ensure_transaction_accounts(&transaction).await?;
-        debug!("Scheduling transaction: {signature}");
 
         // Based on the preflight flag, either execute and await the result,
         // or schedule (fire-and-forget) for background processing.
         if config.skip_preflight {
+            debug!("Scheduling transaction: {signature}");
             self.transactions_scheduler.schedule(transaction).await?;
         } else {
+            debug!("Executing transaction: {signature}");
             self.transactions_scheduler.execute(transaction).await?;
         }
 
