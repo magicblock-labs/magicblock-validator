@@ -233,6 +233,10 @@ async fn test_multiple_transfers_from_multiple_escrows_in_parallel() {
     handles.into_iter().for_each(|h| h.join().unwrap());
 }
 
+// NOTE: the below tests is not necessarily related to cloning, but was used to ensure
+//       that we can run multiple transactions in paralle.
+//       We should move this test once we implement the proper parallel transaction
+//       executor
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_multiple_transfers_from_same_escrow_different_amounts_in_parallel(
 ) {
@@ -248,7 +252,7 @@ async fn test_multiple_transfers_from_same_escrow_different_amounts_in_parallel(
     debug!("Creating escrowed account...");
 
     let kp_escrowed = Keypair::new();
-    ctx.airdrop_chain_escrowed(&kp_escrowed, 20 * LAMPORTS_PER_SOL)
+    ctx.airdrop_chain_escrowed(&kp_escrowed, 30 * LAMPORTS_PER_SOL)
         .await
         .unwrap();
 
