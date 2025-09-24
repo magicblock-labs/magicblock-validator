@@ -1,8 +1,8 @@
 use std::{ops::Deref, sync::Arc};
 
 use light_client::indexer::{
-    photon_indexer::PhotonIndexer, Context, Indexer, IndexerError,
-    IndexerRpcConfig, Response,
+    photon_indexer::PhotonIndexer, CompressedAccount, Context, Indexer,
+    IndexerError, IndexerRpcConfig, Response,
 };
 use magicblock_core::compression::derive_cda_from_pda;
 use solana_account::Account;
@@ -51,14 +51,54 @@ impl PhotonClientImpl {
                 return Err(err.into());
             }
         };
-        let data = compressed_acc.data.unwrap_or_default().data;
-        let account = Account {
-            lamports: compressed_acc.lamports,
-            data,
-            owner: compressed_acc.owner,
-            executable: false,
-            rent_epoch: 0,
-        };
+        let account = account_from_compressed_account(compressed_acc);
         Ok(Some((account, slot)))
+    }
+
+    async fn get_multiple_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: Option<Slot>,
+    ) -> RemoteAccountProviderResult<(Vec<Option<Account>>, Slot)> {
+        let config = min_context_slot.map(|slot| IndexerRpcConfig {
+            slot,
+            ..Default::default()
+        });
+        let cdas: Vec<_> = pubkeys
+            .iter()
+            .map(|pk| derive_cda_from_pda(pk).to_bytes())
+            .collect();
+        let Response {
+            value: compressed_accs,
+            context: Context { slot, .. },
+        } = self
+            .get_multiple_compressed_accounts(Some(cdas), None, config)
+            .await?;
+
+        let accounts = compressed_accs
+            .items
+            .into_iter()
+            .map(account_from_compressed_account)
+            // NOTE: the light-client API is incorrect currently.
+            // The server will return `None` for missing accounts,
+            .map(Some)
+            .collect();
+        Ok((accounts, slot))
+    }
+}
+
+// -----------------
+// Helpers
+// -----------------
+fn account_from_compressed_account(
+    compressed_acc: CompressedAccount,
+) -> Account {
+    let data = compressed_acc.data.unwrap_or_default().data;
+    Account {
+        lamports: compressed_acc.lamports,
+        data,
+        owner: compressed_acc.owner,
+        executable: false,
+        rent_epoch: 0,
     }
 }
