@@ -1,6 +1,4 @@
-use dlp::args::{
-    CallHandlerArgs, CommitStateArgs, CommitStateFromBufferArgs, Context,
-};
+use dlp::args::Context;
 use dyn_clone::DynClone;
 use magicblock_committor_program::{
     instruction_builder::{
@@ -17,22 +15,18 @@ use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::instruction::{AccountMeta, Instruction};
+use solana_sdk::instruction::Instruction;
 use thiserror::Error;
 
-use crate::{consts::MAX_WRITE_CHUNK_SIZE, tasks::visitor::Visitor};
+use crate::tasks::visitor::Visitor;
 
+mod args_task;
+mod buffer_task;
 pub mod task_builder;
 pub mod task_strategist;
 pub(crate) mod task_visitors;
 pub mod utils;
 pub mod visitor;
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum TaskStrategy {
-    Args,
-    Buffer,
-}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
@@ -47,6 +41,13 @@ pub enum PreparationState {
     NotNeeded,
     Required(PreparationTask),
     Cleanup(CleanupTask),
+}
+
+#[cfg(test)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum TaskStrategy {
+    Args,
+    Buffer,
 }
 
 /// A trait representing a task that can be executed on Base layer
@@ -82,6 +83,7 @@ pub trait BaseTask: Send + Sync + DynClone {
     fn compute_units(&self) -> u32;
 
     /// Returns current [`TaskStrategy`]
+    #[cfg(test)]
     fn strategy(&self) -> TaskStrategy;
 
     /// Returns [`TaskType`]
@@ -119,289 +121,6 @@ pub struct FinalizeTask {
 pub struct BaseActionTask {
     pub context: Context,
     pub action: BaseAction,
-}
-
-/// Task that will be executed on Base layer via arguments
-#[derive(Clone)]
-pub enum ArgsTaskType {
-    Commit(CommitTask),
-    Finalize(FinalizeTask),
-    Undelegate(UndelegateTask), // Special action really
-    BaseAction(BaseActionTask),
-}
-
-#[derive(Clone)]
-pub struct ArgsTask {
-    preparation_state: PreparationState,
-    pub task_type: ArgsTaskType,
-}
-
-impl From<ArgsTaskType> for ArgsTask {
-    fn from(value: ArgsTaskType) -> Self {
-        Self::new(value)
-    }
-}
-
-impl ArgsTask {
-    pub fn new(task_type: ArgsTaskType) -> Self {
-        Self {
-            preparation_state: PreparationState::NotNeeded,
-            task_type,
-        }
-    }
-}
-
-impl BaseTask for ArgsTask {
-    fn instruction(&self, validator: &Pubkey) -> Instruction {
-        match &self.task_type {
-            ArgsTaskType::Commit(value) => {
-                let args = CommitStateArgs {
-                    nonce: value.commit_id,
-                    lamports: value.committed_account.account.lamports,
-                    data: value.committed_account.account.data.clone(),
-                    allow_undelegation: value.allow_undelegation,
-                };
-                dlp::instruction_builder::commit_state(
-                    *validator,
-                    value.committed_account.pubkey,
-                    value.committed_account.account.owner,
-                    args,
-                )
-            }
-            ArgsTaskType::Finalize(value) => {
-                dlp::instruction_builder::finalize(
-                    *validator,
-                    value.delegated_account,
-                )
-            }
-            ArgsTaskType::Undelegate(value) => {
-                dlp::instruction_builder::undelegate(
-                    *validator,
-                    value.delegated_account,
-                    value.owner_program,
-                    value.rent_reimbursement,
-                )
-            }
-            ArgsTaskType::BaseAction(value) => {
-                let action = &value.action;
-                let account_metas = action
-                    .account_metas_per_program
-                    .iter()
-                    .map(|short_meta| AccountMeta {
-                        pubkey: short_meta.pubkey,
-                        is_writable: short_meta.is_writable,
-                        is_signer: false,
-                    })
-                    .collect();
-                dlp::instruction_builder::call_handler(
-                    *validator,
-                    action.destination_program,
-                    action.escrow_authority,
-                    account_metas,
-                    CallHandlerArgs {
-                        context: value.context,
-                        data: action.data_per_program.data.clone(),
-                        escrow_index: action.data_per_program.escrow_index,
-                    },
-                )
-            }
-        }
-    }
-
-    fn optimize(
-        self: Box<Self>,
-    ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
-        match self.task_type {
-            ArgsTaskType::Commit(value) => {
-                Ok(Box::new(BufferTask::new_preparation_required(
-                    BufferTaskType::Commit(value),
-                )))
-            }
-            ArgsTaskType::BaseAction(_)
-            | ArgsTaskType::Finalize(_)
-            | ArgsTaskType::Undelegate(_) => Err(self),
-        }
-    }
-
-    /// Nothing to prepare for [`ArgsTaskType`] type
-    fn preparation_state(&self) -> &PreparationState {
-        &self.preparation_state
-    }
-
-    fn switch_preparation_state(
-        &mut self,
-        new_state: PreparationState,
-    ) -> BaseTaskResult<()> {
-        if !matches!(new_state, PreparationState::NotNeeded) {
-            Err(BaseTaskError::PreparationStateTransitionError)
-        } else {
-            // Do nothing
-            Ok(())
-        }
-    }
-
-    fn compute_units(&self) -> u32 {
-        match &self.task_type {
-            ArgsTaskType::Commit(_) => 65_000,
-            ArgsTaskType::BaseAction(task) => task.action.compute_units,
-            ArgsTaskType::Undelegate(_) => 50_000,
-            ArgsTaskType::Finalize(_) => 40_000,
-        }
-    }
-
-    fn strategy(&self) -> TaskStrategy {
-        TaskStrategy::Args
-    }
-
-    fn task_type(&self) -> TaskType {
-        match &self.task_type {
-            ArgsTaskType::Commit(_) => TaskType::Commit,
-            ArgsTaskType::BaseAction(_) => TaskType::Action,
-            ArgsTaskType::Undelegate(_) => TaskType::Undelegate,
-            ArgsTaskType::Finalize(_) => TaskType::Finalize,
-        }
-    }
-
-    /// For tasks using Args strategy call corresponding `Visitor` method
-    fn visit(&self, visitor: &mut dyn Visitor) {
-        visitor.visit_args_task(self);
-    }
-
-    fn reset_commit_id(&mut self, commit_id: u64) {
-        let ArgsTaskType::Commit(commit_task) = &mut self.task_type else {
-            return;
-        };
-
-        commit_task.commit_id = commit_id;
-    }
-}
-
-/// Tasks that could be executed using buffers
-#[derive(Clone)]
-pub enum BufferTaskType {
-    Commit(CommitTask),
-    // Action in the future
-}
-
-#[derive(Clone)]
-pub struct BufferTask {
-    preparation_state: PreparationState,
-    pub task_type: BufferTaskType,
-}
-
-impl BufferTask {
-    pub fn new_preparation_required(task_type: BufferTaskType) -> Self {
-        Self {
-            preparation_state: Self::preparation_required(&task_type),
-            task_type,
-        }
-    }
-
-    pub fn new(
-        preparation_state: PreparationState,
-        task_type: BufferTaskType,
-    ) -> Self {
-        Self {
-            preparation_state,
-            task_type,
-        }
-    }
-
-    fn preparation_required(task_type: &BufferTaskType) -> PreparationState {
-        let BufferTaskType::Commit(ref commit_task) = task_type;
-        let committed_data = commit_task.committed_account.account.data.clone();
-        let chunks = Chunks::from_data_length(
-            committed_data.len(),
-            MAX_WRITE_CHUNK_SIZE,
-        );
-        let preparation_state = PreparationState::Required(PreparationTask {
-            commit_id: commit_task.commit_id,
-            pubkey: commit_task.committed_account.pubkey,
-            committed_data,
-            chunks,
-        });
-
-        preparation_state
-    }
-}
-
-impl BaseTask for BufferTask {
-    fn instruction(&self, validator: &Pubkey) -> Instruction {
-        let BufferTaskType::Commit(ref value) = self.task_type;
-        let commit_id_slice = value.commit_id.to_le_bytes();
-        let (commit_buffer_pubkey, _) =
-            magicblock_committor_program::pdas::buffer_pda(
-                validator,
-                &value.committed_account.pubkey,
-                &commit_id_slice,
-            );
-
-        dlp::instruction_builder::commit_state_from_buffer(
-            *validator,
-            value.committed_account.pubkey,
-            value.committed_account.account.owner,
-            commit_buffer_pubkey,
-            CommitStateFromBufferArgs {
-                nonce: value.commit_id,
-                lamports: value.committed_account.account.lamports,
-                allow_undelegation: value.allow_undelegation,
-            },
-        )
-    }
-
-    /// No further optimizations
-    fn optimize(
-        self: Box<Self>,
-    ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
-        Err(self)
-    }
-
-    fn preparation_state(&self) -> &PreparationState {
-        &self.preparation_state
-    }
-
-    fn switch_preparation_state(
-        &mut self,
-        new_state: PreparationState,
-    ) -> BaseTaskResult<()> {
-        if matches!(new_state, PreparationState::NotNeeded) {
-            Err(BaseTaskError::PreparationStateTransitionError)
-        } else {
-            self.preparation_state = new_state;
-            Ok(())
-        }
-    }
-
-    fn compute_units(&self) -> u32 {
-        match self.task_type {
-            BufferTaskType::Commit(_) => 65_000,
-        }
-    }
-
-    fn strategy(&self) -> TaskStrategy {
-        TaskStrategy::Buffer
-    }
-
-    fn task_type(&self) -> TaskType {
-        match self.task_type {
-            BufferTaskType::Commit(_) => TaskType::Commit,
-        }
-    }
-
-    /// For tasks using Args strategy call corresponding `Visitor` method
-    fn visit(&self, visitor: &mut dyn Visitor) {
-        visitor.visit_buffer_task(self);
-    }
-
-    fn reset_commit_id(&mut self, commit_id: u64) {
-        let BufferTaskType::Commit(commit_task) = &mut self.task_type;
-        if commit_id == commit_task.commit_id {
-            return;
-        }
-
-        commit_task.commit_id = commit_id;
-        self.preparation_state = Self::preparation_required(&self.task_type)
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -559,7 +278,11 @@ mod serialization_safety_test {
     };
     use solana_account::Account;
 
-    use crate::tasks::*;
+    use crate::tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
+        buffer_task::{BufferTask, BufferTaskType},
+        *,
+    };
 
     // Test all ArgsTask variants
     #[test]
@@ -694,11 +417,8 @@ mod serialization_safety_test {
 #[test]
 fn test_close_buffer_limit() {
     use solana_sdk::{
-        compute_budget::ComputeBudgetInstruction,
-        instruction::{AccountMeta, Instruction},
-        signature::Keypair,
-        signer::Signer,
-        transaction::Transaction,
+        compute_budget::ComputeBudgetInstruction, signature::Keypair,
+        signer::Signer, transaction::Transaction,
     };
 
     use crate::transactions::{

@@ -1,7 +1,9 @@
 use solana_pubkey::Pubkey;
 
 use crate::tasks::{
-    visitor::Visitor, ArgsTask, ArgsTaskType, BufferTask, BufferTaskType,
+    args_task::{ArgsTask, ArgsTaskType},
+    buffer_task::{BufferTask, BufferTaskType},
+    visitor::Visitor,
 };
 
 pub struct CommitMeta {

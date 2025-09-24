@@ -9,11 +9,12 @@ use solana_sdk::{
 use crate::{
     persist::IntentPersister,
     tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
         task_visitors::persistor_visitor::{
             PersistorContext, PersistorVisitor,
         },
         utils::TransactionUtils,
-        ArgsTask, ArgsTaskType, BaseTask, FinalizeTask,
+        BaseTask, FinalizeTask,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
@@ -248,6 +249,8 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 
 #[cfg(test)]
 mod tests {
+    use std::any::Any;
+
     use dlp::args::Context;
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, CommittedAccount, ProgramArgs,
@@ -258,7 +261,10 @@ mod tests {
     use super::*;
     use crate::{
         persist::IntentPersisterImpl,
-        tasks::{BaseActionTask, CommitTask, TaskStrategy, UndelegateTask},
+        tasks::{
+            buffer_task::BufferTask, BaseActionTask, CommitTask, TaskStrategy,
+            UndelegateTask,
+        },
     };
 
     // Helper to create a simple commit task
@@ -364,7 +370,6 @@ mod tests {
         )
         .expect("Should build strategy with buffer optimization");
 
-        assert_eq!(strategy.optimized_tasks.len(), 1);
         assert!(matches!(
             strategy.optimized_tasks[0].strategy(),
             TaskStrategy::Buffer

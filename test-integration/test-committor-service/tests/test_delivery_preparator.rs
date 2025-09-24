@@ -4,11 +4,12 @@ use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
         task_strategist::{TaskStrategist, TransactionStrategy},
-        ArgsTaskType, BaseTask, BufferTask,
+        BaseTask,
     },
 };
 use solana_sdk::signer::Signer;
-
+use magicblock_committor_service::tasks::args_task::ArgsTaskType;
+use magicblock_committor_service::tasks::buffer_task::BufferTask;
 use crate::common::{create_commit_task, generate_random_bytes, TestFixture};
 
 mod common;

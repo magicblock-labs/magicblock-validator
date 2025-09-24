@@ -6,7 +6,7 @@ use magicblock_committor_service::{
     tasks::{
         task_strategist::{TaskStrategist, TransactionStrategy},
         utils::TransactionUtils,
-        ArgsTaskType, BaseActionTask, BaseTask, BufferTask, CommitTask,
+        BaseActionTask, BaseTask, CommitTask,
         FinalizeTask, UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
@@ -16,7 +16,8 @@ use magicblock_program::magic_scheduled_base_intent::{
 };
 use solana_pubkey::Pubkey;
 use solana_sdk::{signer::Signer, system_program};
-
+use magicblock_committor_service::tasks::args_task::ArgsTaskType;
+use magicblock_committor_service::tasks::buffer_task::BufferTask;
 use crate::common::{
     create_committed_account, generate_random_bytes, TestFixture,
 };

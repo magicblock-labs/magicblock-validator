@@ -15,8 +15,8 @@ use crate::{
     },
     persist::IntentPersister,
     tasks::{
-        ArgsTask, ArgsTaskType, BaseActionTask, BaseTask, CommitTask,
-        FinalizeTask, UndelegateTask,
+        args_task::{ArgsTask, ArgsTaskType},
+        BaseActionTask, BaseTask, CommitTask, FinalizeTask, UndelegateTask,
     },
 };
 
