@@ -104,7 +104,7 @@ fn test_schedule_task_signed() {
                     InstructionError::MissingRequiredSignature
                 ))
             ))
-            .ok_or_else(|| anyhow::anyhow!("No meta in transaction")),
+            .ok_or_else(|| anyhow::anyhow!("Expected error not found")),
         validator
     );
 

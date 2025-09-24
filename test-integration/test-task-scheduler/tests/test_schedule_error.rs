@@ -76,7 +76,7 @@ fn test_schedule_error() {
     let task_id = 2;
     let execution_interval_millis = 100;
     let iterations = 3;
-    expect!(
+    let sig = expect!(
         ctx.send_transaction_ephem(
             &mut Transaction::new_signed_with_payer(
                 &[create_schedule_task_ix(
@@ -95,6 +95,15 @@ fn test_schedule_error() {
             ),
             &[&payer]
         ),
+        validator
+    );
+    let status = expect!(ctx.get_transaction_ephem(&sig), validator);
+    expect!(
+        status
+            .transaction
+            .meta
+            .map(|m| Some(m.err.is_none()))
+            .ok_or_else(|| anyhow::anyhow!("Unexpected error in transaction")),
         validator
     );
 
