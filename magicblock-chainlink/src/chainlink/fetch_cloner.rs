@@ -18,6 +18,7 @@ use crate::{
     chainlink::blacklisted_accounts::blacklisted_accounts,
     cloner::{errors::ClonerResult, Cloner},
     remote_account_provider::{
+        photon_client::PhotonClient,
         program_account::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
             LOADER_V1, LOADER_V3,
@@ -37,15 +38,16 @@ use tokio::task;
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
 
 #[derive(Clone)]
-pub struct FetchCloner<T, U, V, C>
+pub struct FetchCloner<T, U, V, C, P>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     /// The RemoteAccountProvider to fetch accounts from
-    remote_account_provider: Arc<RemoteAccountProvider<T, U>>,
+    remote_account_provider: Arc<RemoteAccountProvider<T, U, P>>,
     /// Tracks pending account fetch requests to avoid duplicate fetches in parallel
     /// Once an account is fetched and cloned into the bank, it's removed from here
     pending_requests: Arc<Mutex<HashMap<Pubkey, RemoteAccountRequests>>>,
@@ -122,16 +124,17 @@ impl fmt::Display for FetchAndCloneResult {
     }
 }
 
-impl<T, U, V, C> FetchCloner<T, U, V, C>
+impl<T, U, V, C, P> FetchCloner<T, U, V, C, P>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     /// Create FetchCloner with subscription updates properly connected
     pub fn new(
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
         validator_pubkey: Pubkey,
@@ -239,7 +242,7 @@ where
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
         update: ForwardedSubscriptionUpdate,
         bank: &Arc<V>,
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
         fetch_count: &Arc<AtomicU64>,
         validator_pubkey: Pubkey,
     ) -> Option<AccountSharedData> {
@@ -955,7 +958,7 @@ where
 
     fn task_to_fetch_with_delegation_record(
         &self,
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
         fetch_count: Arc<AtomicU64>,
         pubkey: Pubkey,
         slot: u64,
@@ -975,7 +978,7 @@ where
 
     fn task_to_fetch_with_program_data(
         &self,
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
         fetch_count: Arc<AtomicU64>,
         pubkey: Pubkey,
         slot: u64,
@@ -995,7 +998,7 @@ where
 
     fn task_to_fetch_with_companion(
         bank: Arc<V>,
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
         fetch_count: Arc<AtomicU64>,
         pubkey: Pubkey,
         delegation_record_pubkey: Pubkey,
@@ -1216,8 +1219,12 @@ impl fmt::Display for CancelStrategy {
     }
 }
 
-async fn cancel_subs<T: ChainRpcClient, U: ChainPubsubClient>(
-    provider: &Arc<RemoteAccountProvider<T, U>>,
+async fn cancel_subs<
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    P: PhotonClient,
+>(
+    provider: &Arc<RemoteAccountProvider<T, U, P>>,
     strategy: CancelStrategy,
 ) {
     if strategy.is_empty() {
@@ -1300,6 +1307,7 @@ mod tests {
                 add_delegation_record_for, add_invalid_delegation_record_for,
             },
             init_logger,
+            photon_client_mock::PhotonClientMock,
             rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
             utils::random_pubkey,
         },
@@ -1359,7 +1367,11 @@ mod tests {
 
     struct FetcherTestCtx {
         remote_account_provider: Arc<
-            RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+            RemoteAccountProvider<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                PhotonClientMock,
+            >,
         >,
         accounts_bank: Arc<AccountsBankStub>,
         rpc_client: crate::testing::rpc_client_mock::ChainRpcClientMock,
@@ -1370,6 +1382,7 @@ mod tests {
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
+            PhotonClientMock,
         >,
         #[allow(unused)]
         subscription_tx: mpsc::Sender<ForwardedSubscriptionUpdate>,
@@ -1408,6 +1421,7 @@ mod tests {
             RemoteAccountProvider::new(
                 rpc_client,
                 pubsub_client,
+                None::<PhotonClientMock>,
                 forward_tx,
                 &RemoteAccountProviderConfig::default_with_lifecycle_mode(
                     LifecycleMode::Ephemeral,
@@ -1437,7 +1451,11 @@ mod tests {
     /// Returns (FetchCloner, subscription_sender) for simulating subscription updates in tests
     fn init_fetch_cloner(
         remote_account_provider: Arc<
-            RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+            RemoteAccountProvider<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                PhotonClientMock,
+            >,
         >,
         bank: &Arc<AccountsBankStub>,
         validator_pubkey: Pubkey,
@@ -1448,6 +1466,7 @@ mod tests {
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
+            PhotonClientMock,
         >,
         mpsc::Sender<ForwardedSubscriptionUpdate>,
     ) {
@@ -2131,17 +2150,18 @@ mod tests {
 
         // Use a shared FetchCloner to test deduplication
         // Helper function to spawn a fetch_and_clone task with shared FetchCloner
-        let spawn_fetch_task = |fetch_cloner: &Arc<FetchCloner<_, _, _, _>>| {
-            let fetch_cloner = fetch_cloner.clone();
-            tokio::spawn(async move {
-                fetch_cloner
-                    .fetch_and_clone_accounts_with_dedup(
-                        &[account_pubkey],
-                        None,
-                    )
-                    .await
-            })
-        };
+        let spawn_fetch_task =
+            |fetch_cloner: &Arc<FetchCloner<_, _, _, _, _>>| {
+                let fetch_cloner = fetch_cloner.clone();
+                tokio::spawn(async move {
+                    fetch_cloner
+                        .fetch_and_clone_accounts_with_dedup(
+                            &[account_pubkey],
+                            None,
+                        )
+                        .await
+                })
+            };
 
         let fetch_cloner = Arc::new(fetch_cloner);
 

@@ -8,6 +8,7 @@ use solana_sdk::clock::Slot;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteAccountUpdateSource {
     Fetch,
+    Compressed,
     Subscription,
 }
 

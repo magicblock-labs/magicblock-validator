@@ -23,7 +23,7 @@ use magicblock_chainlink::{
     config::ChainlinkConfig,
     remote_account_provider::{
         chain_pubsub_client::ChainPubsubClientImpl,
-        chain_rpc_client::ChainRpcClientImpl,
+        chain_rpc_client::ChainRpcClientImpl, photon_client::PhotonClientImpl,
     },
     submux::SubMuxClient,
     Chainlink,
@@ -96,6 +96,7 @@ type ChainlinkImpl = Chainlink<
     SubMuxClient<ChainPubsubClientImpl>,
     AccountsDb,
     ChainlinkCloner,
+    PhotonClientImpl,
 >;
 
 // -----------------
@@ -265,12 +266,12 @@ impl MagicValidator {
         .await?;
 
         let scheduled_commits_processor =
-            committor_service.as_ref().and_then(|committor_service| {
-                Some(Arc::new(ScheduledCommitsProcessorImpl::new(
+            committor_service.as_ref().map(|committor_service| {
+                Arc::new(ScheduledCommitsProcessorImpl::new(
                     accountsdb.clone(),
                     committor_service.clone(),
                     dispatch.transaction_scheduler.clone(),
-                )))
+                ))
             });
 
         validator::init_validator_authority(identity_keypair);
@@ -359,11 +360,12 @@ impl MagicValidator {
             .remote_cluster
             .ws_urls()
             .into_iter()
-            .map(|pubsub_url| Endpoint {
+            .map(|pubsub_url| Endpoint::Rpc {
                 rpc_url: rpc_config.url().to_string(),
                 pubsub_url,
             })
             .collect::<Vec<_>>();
+        // TODO: @@@ add photon client url
 
         let cloner = ChainlinkCloner::new(
             committor_service,

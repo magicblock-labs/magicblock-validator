@@ -23,16 +23,16 @@ impl Deref for PhotonClientImpl {
 }
 
 impl PhotonClientImpl {
-    fn new(photon_indexer: Arc<PhotonIndexer>) -> Self {
+    pub(crate) fn new(photon_indexer: Arc<PhotonIndexer>) -> Self {
         Self(photon_indexer)
     }
-    fn new_from_url(url: &str) -> Self {
+    pub(crate) fn new_from_url(url: &str) -> Self {
         Self::new(Arc::new(PhotonIndexer::new(url.to_string(), None)))
     }
 }
 
 #[async_trait]
-pub trait PhotonClient {
+pub trait PhotonClient: Send + Sync + Clone + 'static {
     async fn get_account(
         &self,
         pubkey: &Pubkey,
@@ -63,7 +63,7 @@ impl PhotonClient for PhotonClientImpl {
             context: Context { slot, .. },
         } = match self.get_compressed_account(cda.to_bytes(), config).await {
             Ok(res) => res,
-            Err(err) if matches!(err, IndexerError::AccountNotFound) => {
+            Err(IndexerError::AccountNotFound) => {
                 return Ok(None);
             }
             Err(err) => {

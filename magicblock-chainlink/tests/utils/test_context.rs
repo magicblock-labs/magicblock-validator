@@ -8,6 +8,7 @@ use magicblock_chainlink::remote_account_provider::config::RemoteAccountProvider
 use magicblock_chainlink::remote_account_provider::RemoteAccountProvider;
 use magicblock_chainlink::testing::accounts::account_shared_with_owner;
 use magicblock_chainlink::testing::deleg::add_delegation_record_for;
+use magicblock_chainlink::testing::photon_client_mock::PhotonClientMock;
 use magicblock_chainlink::Chainlink;
 use solana_sdk::clock::Slot;
 use std::sync::Arc;
@@ -31,6 +32,7 @@ pub type TestChainlink = Chainlink<
     ChainPubsubClientMock,
     AccountsBankStub,
     ClonerStub,
+    PhotonClientMock,
 >;
 
 #[derive(Clone)]
@@ -40,7 +42,13 @@ pub struct TestContext {
     pub chainlink: Arc<TestChainlink>,
     pub bank: Arc<AccountsBankStub>,
     pub remote_account_provider: Option<
-        Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
+        Arc<
+            RemoteAccountProvider<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                PhotonClientMock,
+            >,
+        >,
     >,
     pub cloner: Arc<ClonerStub>,
     pub validator_pubkey: Pubkey,
@@ -68,6 +76,7 @@ impl TestContext {
                 RemoteAccountProvider::try_from_clients_and_mode(
                     rpc_client.clone(),
                     pubsub_client.clone(),
+                    None::<PhotonClientMock>,
                     tx,
                     &RemoteAccountProviderConfig::default_with_lifecycle_mode(
                         lifecycle_mode,
