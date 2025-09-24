@@ -14,6 +14,9 @@ pub enum RemoteAccountProviderError {
     #[error(transparent)]
     JoinError(#[from] tokio::task::JoinError),
 
+    #[error(transparent)]
+    IndexerError(#[from] light_client::indexer::IndexerError),
+
     #[error("Receiver error: {0}")]
     RecvrError(#[from] tokio::sync::oneshot::error::RecvError),
 

@@ -42,6 +42,7 @@ pub mod chain_rpc_client;
 pub mod config;
 pub mod errors;
 mod lru_cache;
+mod photon_client;
 pub mod program_account;
 mod remote_account;
 
