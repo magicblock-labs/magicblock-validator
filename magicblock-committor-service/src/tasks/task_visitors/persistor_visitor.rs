@@ -74,7 +74,4 @@ where
             }
         }
     }
-
-    fn visit_args_task_mut(&mut self, _: &mut ArgsTask) {}
-    fn visit_buffer_task_mut(&mut self, _: &mut BufferTask) {}
 }

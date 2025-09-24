@@ -42,7 +42,7 @@ use crate::{
         task_strategist::{
             TaskStrategist, TaskStrategistError, TransactionStrategy,
         },
-        task_visitors::modifying_visitor::TaskVisitorUtils,
+        task_visitors::utility_visitor::TaskVisitorUtils,
         BaseTask, TaskType,
     },
     transaction_preparator::{
@@ -156,13 +156,33 @@ where
             );
         }
 
-        // Build tasks for Commit & Finalize stages
+        // Build tasks for commit stage
         let commit_tasks = TaskBuilderV1::commit_tasks(
             &self.task_info_fetcher,
             &base_intent,
             persister,
         )
         .await?;
+
+        let committed_pubkeys = match base_intent.get_committed_pubkeys() {
+            Some(value) => value,
+            None => {
+                // Standalone actions executed in single stage
+                let strategy = TaskStrategist::build_strategy(
+                    commit_tasks,
+                    &self.authority.pubkey(),
+                    persister,
+                )?;
+                return self
+                    .single_stage_execution_flow(
+                        base_intent,
+                        strategy,
+                        persister,
+                    )
+                    .await;
+            }
+        };
+
         let finalize_tasks = TaskBuilderV1::finalize_tasks(
             &self.task_info_fetcher,
             &base_intent,
@@ -205,6 +225,7 @@ where
             trace!("Executing intent in two stages");
             let output = self
                 .two_stage_execution_flow(
+                    &committed_pubkeys,
                     commit_strategy,
                     finalize_strategy,
                     persister,
