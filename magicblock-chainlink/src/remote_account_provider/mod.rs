@@ -52,7 +52,10 @@ pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{
     errors::ChainlinkResult,
-    remote_account_provider::photon_client::{PhotonClient, PhotonClientImpl},
+    remote_account_provider::{
+        photon_client::{PhotonClient, PhotonClientImpl},
+        remote_account::FetchedRemoteAccounts,
+    },
     submux::SubMuxClient,
 };
 
@@ -789,57 +792,79 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         Ok(())
     }
 
-    async fn fetch(&self, pubkeys: Vec<Pubkey>, min_context_slot: u64) {
-        // TODO: @@@ fetch needs to create task
+    fn fetch(&self, pubkeys: Vec<Pubkey>, min_context_slot: u64) {
+        let rpc_client = self.rpc_client.clone();
+        let photon_client = self.photon_client.clone();
+        let fetching_accounts = self.fetching_accounts.clone();
         let pubkeys = Arc::new(pubkeys);
         let pubkeys = pubkeys.clone();
-        let remote_accounts =
-            self.fetch_from_rpc(pubkeys.clone(), min_context_slot).await;
+        tokio::spawn(async move {
+            let mut join_set = JoinSet::new();
+            join_set.spawn(Self::fetch_from_rpc(
+                rpc_client,
+                pubkeys.clone(),
+                min_context_slot,
+            ));
+            if let Some(photon_client) = photon_client {
+                let photon_client = photon_client.clone();
+                join_set.spawn(Self::fetch_from_photon(
+                    photon_client,
+                    pubkeys.clone(),
+                    min_context_slot,
+                ));
+            }
 
-        if log_enabled!(log::Level::Trace) {
-            let pubkeys = &pubkeys
-                .iter()
-                .map(|pk| pk.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            trace!(
-                "Fetched({pubkeys}) {remote_accounts:?}, notifying pending requests"
+            let remote_accounts_results = join_set.join_all().await;
+            let remote_accounts = Self::consolidate_fetched_remote_accounts(
+                &pubkeys,
+                remote_accounts_results,
             );
-        }
 
-        // Notify all pending requests with fetch results (unless subscription override occurred)
-        for (pubkey, remote_account) in
-            pubkeys.iter().zip(remote_accounts.iter())
-        {
-            let requests = {
-                let mut fetching = self.fetching_accounts.lock().unwrap();
-                // Remove from fetching and get pending requests
-                // Note: the account might have been resolved by subscription update already
-                if let Some((_, requests)) = fetching.remove(pubkey) {
-                    requests
-                } else {
-                    // Account was resolved by subscription update, skip
-                    if log::log_enabled!(log::Level::Trace) {
-                        trace!(
+            if log_enabled!(log::Level::Trace) {
+                let pubkeys = &pubkeys
+                    .iter()
+                    .map(|pk| pk.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                trace!(
+                    "Fetched({pubkeys}) {remote_accounts:?}, notifying pending requests"
+                );
+            }
+
+            // Notify all pending requests with fetch results (unless subscription override occurred)
+            for (pubkey, remote_account) in
+                pubkeys.iter().zip(remote_accounts.iter())
+            {
+                let requests = {
+                    let mut fetching = fetching_accounts.lock().unwrap();
+                    // Remove from fetching and get pending requests
+                    // Note: the account might have been resolved by subscription update already
+                    if let Some((_, requests)) = fetching.remove(pubkey) {
+                        requests
+                    } else {
+                        // Account was resolved by subscription update, skip
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!(
                                 "Account {pubkey} was already resolved by subscription update"
                             );
+                        }
+                        continue;
                     }
-                    continue;
-                }
-            };
+                };
 
-            // Send the fetch result to all waiting requests
-            for request in requests {
-                let _ = request.send(remote_account.clone());
+                // Send the fetch result to all waiting requests
+                for request in requests {
+                    let _ = request.send(remote_account.clone());
+                }
             }
-        }
+        });
     }
 
     async fn fetch_from_rpc(
-        &self,
+        rpc_client: T,
         pubkeys: Arc<Vec<Pubkey>>,
         min_context_slot: u64,
-    ) -> Vec<RemoteAccount> {
+    ) -> FetchedRemoteAccounts {
         const MAX_RETRIES: u64 = 10;
         let mut remaining_retries: u64 = 10;
         macro_rules! retry {
@@ -855,10 +880,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             }
         }
 
-        let rpc_client = self.rpc_client.clone();
-        let commitment = self.rpc_client.commitment();
+        let rpc_client = rpc_client.clone();
+        let commitment = rpc_client.commitment();
         let pubkeys = pubkeys.clone();
-        tokio::spawn(async move {
+        let remote_accounts = tokio::spawn(async move {
                 use RemoteAccount::*;
 
                 if log_enabled!(log::Level::Debug) {
@@ -965,37 +990,118 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                         None => NotFound(response.context.slot),
                     })
                     .collect::<Vec<_>>())
-            }).await.unwrap().unwrap()
+            }).await.unwrap().unwrap();
+        // TODO: @@@ unwrap
+
+        FetchedRemoteAccounts::Rpc(remote_accounts)
     }
 
-    /*
-    async fetch_from_photon(
-        &self,
+    async fn fetch_from_photon(
+        photon_client: P,
         pubkeys: Arc<Vec<Pubkey>>,
         min_context_slot: u64,
-    ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
-        let rpc_client = self.rpc_client.clone();
-        let pubkeys = pubkeys.clone();
-        let response = rpc_client
-            .get_multiple_accounts(pubkeys.as_slice(), Some(min_context_slot))
-            .await?;
-
-        let remote_accounts = response
-            .0
+    ) -> FetchedRemoteAccounts {
+        // TODO: @@@ unwrap and/or retry
+        let (compressed_accounts, slot) = photon_client
+            .get_multiple_accounts(&pubkeys, Some(min_context_slot))
+            .await
+            .unwrap();
+        let remote_accounts = compressed_accounts
             .into_iter()
             .map(|acc_opt| match acc_opt {
                 Some(acc) => RemoteAccount::from_fresh_account(
                     acc,
-                    response.1,
-                    RemoteAccountUpdateSource::Fetch,
+                    slot,
+                    RemoteAccountUpdateSource::Compressed,
                 ),
-                None => RemoteAccount::NotFound(response.1),
+                None => RemoteAccount::NotFound(slot),
             })
             .collect::<Vec<_>>();
-
-        Ok(remote_accounts)
+        FetchedRemoteAccounts::Compressed(remote_accounts)
     }
-    */
+
+    fn consolidate_fetched_remote_accounts(
+        pubkeys: &[Pubkey],
+        remote_accounts_results: Vec<FetchedRemoteAccounts>,
+    ) -> Vec<RemoteAccount> {
+        let (rpc_accounts, compressed_accounts) = {
+            use FetchedRemoteAccounts::*;
+            if remote_accounts_results.is_empty() {
+                return vec![];
+            }
+            if remote_accounts_results.len() == 1 {
+                match &remote_accounts_results[0] {
+                    Rpc(rpc_accounts) => {
+                        return rpc_accounts.clone();
+                    }
+                    Compressed(compressed_accounts) => {
+                        return compressed_accounts.clone();
+                    }
+                }
+            }
+            if remote_accounts_results.len() == 2 {
+                let mut rpc_accounts = None;
+                let mut compressed_accounts = None;
+                for res in remote_accounts_results {
+                    match res {
+                        Rpc(rpc_accs) => {
+                            rpc_accounts.replace(rpc_accs);
+                        }
+                        Compressed(comp_accs) => {
+                            compressed_accounts.replace(comp_accs);
+                        }
+                    }
+                }
+                (rpc_accounts.unwrap_or_default(), compressed_accounts)
+            } else {
+                error!("BUG: More than 2 fetch results found");
+                return vec![];
+            }
+        };
+
+        debug_assert_eq!(rpc_accounts.len(), pubkeys.len());
+        debug_assert!(compressed_accounts
+            .as_ref()
+            .map_or(true, |comp_accs| comp_accs.len() == pubkeys.len()));
+
+        let all_lens_match = pubkeys.len() == rpc_accounts.len()
+            && pubkeys.len()
+                == compressed_accounts
+                    .as_ref()
+                    .map_or(rpc_accounts.len(), |comp_accs| comp_accs.len());
+        if !all_lens_match {
+            error!("BUG: Fetched accounts length mismatch: pubkeys {}, rpc {}, compressed {:?}",
+                pubkeys.len(), rpc_accounts.len(),
+                compressed_accounts.as_ref().map(|c| c.len()));
+            return vec![];
+        }
+
+        use RemoteAccount::*;
+        match compressed_accounts {
+            Some(compressed_accounts) =>
+            pubkeys.iter().zip(
+                rpc_accounts
+                    .into_iter()
+                    .zip(compressed_accounts))
+                .map(|(pubkey, (rpc_acc, comp_acc))| match (rpc_acc, comp_acc) {
+                    (Found(_), Found(comp_state)) => {
+                        warn!("Both RPC and Compressed account found for pubkey {}. Using Compressed account.", pubkey);
+                        Found(comp_state)
+                    }
+                    (Found(rpc_state), NotFound(_)) => Found(rpc_state),
+                    (NotFound(_), Found(comp_state)) => Found(comp_state),
+                    (NotFound(rpc_slot), NotFound(comp_slot)) => {
+                        if rpc_slot >= comp_slot {
+                            NotFound(rpc_slot)
+                        } else {
+                            NotFound(comp_slot)
+                        }
+                    }
+                })
+                .collect(),
+            None => rpc_accounts,
+        }
+    }
 }
 
 impl

@@ -249,3 +249,8 @@ impl RemoteAccount {
         self.owner().is_some_and(|owner| owner.eq(&dlp::id()))
     }
 }
+
+pub enum FetchedRemoteAccounts {
+    Rpc(Vec<RemoteAccount>),
+    Compressed(Vec<RemoteAccount>),
+}
