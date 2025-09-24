@@ -7,6 +7,7 @@ mod two_stage_executor;
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use futures_util::future::try_join_all;
 use log::{error, trace, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
@@ -245,9 +246,26 @@ where
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let mut junk = Vec::new();
-        SingleStageExecutor::new(self)
+        let res = SingleStageExecutor::new(self)
             .execute(base_intent, transaction_strategy, &mut junk, persister)
-            .await
+            .await;
+
+        // Cleanup after intent
+        // Note: in some cases it maybe critical to execute cleanup synchronously
+        // Example: if commit nonces were invalid during execution
+        // next intent could use wrongly initiated buffers by current intent
+        let cleanup_futs = junk.iter().map(|to_cleanup| {
+            self.transaction_preparator.cleanup_for_strategy(
+                &self.authority,
+                &to_cleanup.optimized_tasks,
+                &to_cleanup.lookup_tables_keys,
+            )
+        });
+        if let Err(err) = try_join_all(cleanup_futs).await {
+            error!("Failed to cleanup after intent: {}", err);
+        }
+
+        res
     }
 
     pub async fn two_stage_execution_flow<P: IntentPersister>(
@@ -258,7 +276,7 @@ where
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let mut junk = Vec::new();
-        TwoStageExecutor::new(self)
+        let res = TwoStageExecutor::new(self)
             .execute(
                 committed_pubkeys,
                 commit_strategy,
@@ -266,7 +284,24 @@ where
                 &mut junk,
                 persister,
             )
-            .await
+            .await;
+
+        // Cleanup after intent
+        // Note: in some cases it maybe critical to execute cleanup synchronously
+        // Example: if commit nonces were invalid during execution
+        // next intent could use wrongly initiated buffers by current intent
+        let cleanup_futs = junk.iter().map(|to_cleanup| {
+            self.transaction_preparator.cleanup_for_strategy(
+                &self.authority,
+                &to_cleanup.optimized_tasks,
+                &to_cleanup.lookup_tables_keys,
+            )
+        });
+        if let Err(err) = try_join_all(cleanup_futs).await {
+            error!("Failed to cleanup after intent: {}", err);
+        }
+
+        res
     }
 
     /// Handles out of sync commit id error, fixes current strategy
@@ -805,7 +840,7 @@ mod tests {
         },
         persist::IntentPersisterImpl,
         tasks::task_builder::{TaskBuilderV1, TasksBuilder},
-        transaction_preparator::TransactionPreparatorV1,
+        transaction_preparator::TransactionPreparatorImpl,
     };
 
     struct MockInfoFetcher;
@@ -851,7 +886,7 @@ mod tests {
                 .unwrap();
 
         let result = IntentExecutorImpl::<
-            TransactionPreparatorV1,
+            TransactionPreparatorImpl,
             MockInfoFetcher,
         >::try_unite_tasks(
             &commit_task,

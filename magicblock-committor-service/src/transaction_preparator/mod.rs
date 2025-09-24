@@ -10,7 +10,10 @@ use crate::{
         task_strategist::TransactionStrategy, utils::TransactionUtils, BaseTask,
     },
     transaction_preparator::{
-        delivery_preparator::DeliveryPreparator, error::PreparatorResult,
+        delivery_preparator::{
+            DeliveryPreparator, DeliveryPreparatorResult, InternalError,
+        },
+        error::PreparatorResult,
     },
     ComputeBudgetConfig,
 };
@@ -35,19 +38,19 @@ pub trait TransactionPreparator: Send + Sync + Clone + 'static {
         authority: &Keypair,
         tasks: &[Box<dyn BaseTask>],
         lookup_table_keys: &[Pubkey],
-    );
+    ) -> DeliveryPreparatorResult<(), InternalError>;
 }
 
-/// [`TransactionPreparatorV1`] first version of preparator
+/// [`TransactionPreparatorImpl`] first version of preparator
 /// It omits future commit_bundle/finalize_bundle logic
 /// It creates TXs using current per account commit/finalize
 #[derive(Clone)]
-pub struct TransactionPreparatorV1 {
+pub struct TransactionPreparatorImpl {
     delivery_preparator: DeliveryPreparator,
     compute_budget_config: ComputeBudgetConfig,
 }
 
-impl TransactionPreparatorV1 {
+impl TransactionPreparatorImpl {
     pub fn new(
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
@@ -67,7 +70,7 @@ impl TransactionPreparatorV1 {
 }
 
 #[async_trait]
-impl TransactionPreparator for TransactionPreparatorV1 {
+impl TransactionPreparator for TransactionPreparatorImpl {
     async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,
@@ -111,10 +114,9 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         authority: &Keypair,
         tasks: &[Box<dyn BaseTask>],
         lookup_table_keys: &[Pubkey],
-    ) {
+    ) -> DeliveryPreparatorResult<(), InternalError> {
         self.delivery_preparator
             .cleanup(authority, tasks, lookup_table_keys)
-            .await;
-        todo!()
+            .await
     }
 }

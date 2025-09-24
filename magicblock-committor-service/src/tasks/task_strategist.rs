@@ -262,11 +262,8 @@ mod tests {
     };
 
     // Helper to create a simple commit task
-    fn create_test_commit_task(
-        commit_id: u64,
-        data_size: usize,
-    ) -> ArgsTaskType {
-        ArgsTaskType::Commit(CommitTask {
+    fn create_test_commit_task(commit_id: u64, data_size: usize) -> ArgsTask {
+        ArgsTask::new(ArgsTaskType::Commit(CommitTask {
             commit_id,
             allow_undelegation: false,
             committed_account: CommittedAccount {
@@ -279,12 +276,12 @@ mod tests {
                     rent_epoch: 0,
                 },
             },
-        })
+        }))
     }
 
     // Helper to create a Base action task
-    fn create_test_base_action_task(len: usize) -> ArgsTaskType {
-        ArgsTaskType::BaseAction(BaseActionTask {
+    fn create_test_base_action_task(len: usize) -> ArgsTask {
+        ArgsTask::new(ArgsTaskType::BaseAction(BaseActionTask {
             context: Context::Commit,
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
@@ -296,23 +293,23 @@ mod tests {
                 },
                 compute_units: 30_000,
             },
-        })
+        }))
     }
 
     // Helper to create a finalize task
-    fn create_test_finalize_task() -> ArgsTaskType {
-        ArgsTaskType::Finalize(FinalizeTask {
+    fn create_test_finalize_task() -> ArgsTask {
+        ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: Pubkey::new_unique(),
-        })
+        }))
     }
 
     // Helper to create an undelegate task
-    fn create_test_undelegate_task() -> ArgsTaskType {
-        ArgsTaskType::Undelegate(UndelegateTask {
+    fn create_test_undelegate_task() -> ArgsTask {
+        ArgsTask::new(ArgsTaskType::Undelegate(UndelegateTask {
             delegated_account: Pubkey::new_unique(),
             owner_program: system_program::id(),
             rent_reimbursement: Pubkey::new_unique(),
-        })
+        }))
     }
 
     #[test]

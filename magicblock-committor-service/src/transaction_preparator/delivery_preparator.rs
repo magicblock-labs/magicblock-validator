@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use borsh::BorshDeserialize;
-use futures_util::future::{join, join_all};
+use futures_util::future::{join, join_all, try_join_all};
 use log::error;
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
@@ -28,7 +28,7 @@ use crate::{
     persist::{CommitStatus, IntentPersister},
     tasks::{
         task_strategist::TransactionStrategy, BaseTask, BaseTaskError,
-        PreparationState, PreparationTask,
+        CleanupTask, PreparationState, PreparationTask,
     },
     utils::persist_status_update,
     ComputeBudgetConfig,
@@ -126,7 +126,8 @@ impl DeliveryPreparator {
             update_status,
         );
 
-        task.switch_preparation_state(PreparationState::Cleanup)?;
+        let cleanup_task = preparation_task.cleanup_task();
+        task.switch_preparation_state(PreparationState::Cleanup(cleanup_task))?;
         Ok(())
     }
 
@@ -248,11 +249,7 @@ impl DeliveryPreparator {
         let fut_iter = chunks_write_instructions.iter().map(|instructions| {
             self.send_ixs_with_retry(instructions.as_slice(), authority, 5)
         });
-
-        join_all(fut_iter)
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
+        try_join_all(fut_iter).await?;
 
         Ok(())
     }
@@ -329,18 +326,44 @@ impl DeliveryPreparator {
         Ok(alts)
     }
 
+    /// Releases pubkeys from TableMania and
+    /// cleans up after buffer tasks
     pub async fn cleanup(
         &self,
         authority: &Keypair,
         tasks: &[Box<dyn BaseTask>],
         lookup_table_keys: &[Pubkey],
-    ) {
+    ) -> DeliveryPreparatorResult<(), InternalError> {
         self.table_mania
             .release_pubkeys(&HashSet::from_iter(
                 lookup_table_keys.iter().cloned(),
             ))
             .await;
-        todo!()
+
+        let instructions: Vec<_> = tasks
+            .iter()
+            .filter_map(|task| {
+                if let PreparationState::Cleanup(cleanup_task) =
+                    task.preparation_state()
+                {
+                    Some(cleanup_task.instruction(&authority.pubkey()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let close_futs = instructions
+            .chunks(CleanupTask::max_tx_fit_count_with_budget())
+            .into_iter()
+            .map(|instructions| {
+                self.send_ixs_with_retry(&instructions, authority, 3)
+            });
+
+        join_all(close_futs)
+            .await
+            .into_iter()
+            .collect::<Result<(), _>>()
     }
 }
 
