@@ -47,6 +47,9 @@ pub enum RemoteAccountProviderError {
     #[error("Accounts matched same slot ({0}), but it's less than min required context slot {2} ")]
     MatchingSlotsNotSatisfyingMinContextSlot(String, Vec<u64>, u64),
 
+    #[error("Failed to fetch accounts ({0})")]
+    FailedFetchingAccounts(String),
+
     #[error("LRU capacity must be greater than 0, got {0}")]
     InvalidLruCapacity(usize),
 
