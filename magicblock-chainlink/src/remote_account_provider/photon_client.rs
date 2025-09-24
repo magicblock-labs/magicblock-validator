@@ -1,5 +1,6 @@
 use std::{ops::Deref, sync::Arc};
 
+use async_trait::async_trait;
 use light_client::indexer::{
     photon_indexer::PhotonIndexer, CompressedAccount, Context, Indexer,
     IndexerError, IndexerRpcConfig, Response,
@@ -22,13 +23,31 @@ impl Deref for PhotonClientImpl {
 }
 
 impl PhotonClientImpl {
-    pub fn new(photon_indexer: Arc<PhotonIndexer>) -> Self {
+    fn new(photon_indexer: Arc<PhotonIndexer>) -> Self {
         Self(photon_indexer)
     }
-    pub fn new_from_url(url: &str) -> Self {
+    fn new_from_url(url: &str) -> Self {
         Self::new(Arc::new(PhotonIndexer::new(url.to_string(), None)))
     }
+}
 
+#[async_trait]
+pub trait PhotonClient {
+    async fn get_account(
+        &self,
+        pubkey: &Pubkey,
+        min_context_slot: Option<Slot>,
+    ) -> RemoteAccountProviderResult<Option<(Account, Slot)>>;
+
+    async fn get_multiple_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: Option<Slot>,
+    ) -> RemoteAccountProviderResult<(Vec<Option<Account>>, Slot)>;
+}
+
+#[async_trait]
+impl PhotonClient for PhotonClientImpl {
     async fn get_account(
         &self,
         pubkey: &Pubkey,
