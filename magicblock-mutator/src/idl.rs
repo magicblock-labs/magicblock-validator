@@ -59,6 +59,7 @@ async fn try_fetch_program_idl_modification_from_cluster(
                 data: Some(account.data.clone()),
                 rent_epoch: Some(account.rent_epoch),
                 delegated: Some(false),
+                compressed: Some(false),
             });
         }
     }

@@ -210,6 +210,14 @@ pub(crate) fn process_mutate_accounts(
             );
             account.borrow_mut().set_delegated(delegated);
         }
+        if let Some(compressed) = modification.compressed {
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: setting compressed to {}",
+                compressed
+            );
+            account.borrow_mut().set_compressed(compressed);
+        }
     }
 
     if lamports_to_debit != 0 {
@@ -315,6 +323,7 @@ mod tests {
             data: Some(vec![1, 2, 3, 4, 5]),
             rent_epoch: Some(88),
             delegated: Some(true),
+            compressed: Some(true),
         };
         let ix = InstructionUtils::modify_accounts_instruction(vec![
             modification.clone(),
@@ -358,6 +367,7 @@ mod tests {
         let modified_account: AccountSharedData =
             accounts.drain(0..1).next().unwrap();
         assert!(modified_account.delegated());
+        assert!(modified_account.compressed());
         assert_matches!(
             modified_account.into(),
             Account {

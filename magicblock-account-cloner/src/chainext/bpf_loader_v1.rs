@@ -45,6 +45,7 @@ impl TryFrom<&LoadedProgram> for BpfUpgradableProgramModifications {
                 executable: Some(false),
                 rent_epoch: Some(u64::MAX),
                 delegated: Some(false),
+                compressed: Some(false),
             }
         };
 
@@ -64,6 +65,7 @@ impl TryFrom<&LoadedProgram> for BpfUpgradableProgramModifications {
                 executable: Some(true),
                 rent_epoch: Some(u64::MAX),
                 delegated: Some(false),
+                compressed: Some(false),
             }
         };
 

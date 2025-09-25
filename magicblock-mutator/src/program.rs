@@ -54,6 +54,7 @@ pub fn create_program_modifications(
         data: Some(program_id_account.data.to_owned()),
         executable: Some(program_id_account.executable),
         delegated: Some(false),
+        compressed: Some(false),
     };
     // Build the proper program_data that we will want to upgrade later
     let program_data_modification = create_program_data_modification(
@@ -96,6 +97,7 @@ pub fn create_program_data_modification(
         executable: Some(false),
         rent_epoch: Some(u64::MAX),
         delegated: Some(false),
+        compressed: Some(false),
     }
 }
 
@@ -120,5 +122,6 @@ pub fn create_program_buffer_modification(
         executable: Some(false),
         rent_epoch: Some(u64::MAX),
         delegated: Some(false),
+        compressed: Some(false),
     }
 }

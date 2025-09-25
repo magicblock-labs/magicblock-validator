@@ -22,6 +22,7 @@ pub fn transaction_to_clone_regular_account(
         data: Some(account.data.to_owned()),
         executable: Some(account.executable),
         delegated: Some(false),
+        compressed: Some(false),
     };
     if let Some(overrides) = overrides {
         if let Some(lamports) = overrides.lamports {

@@ -129,9 +129,7 @@ impl PhotonClient for PhotonClientImpl {
 fn account_from_compressed_account(
     compressed_acc: Option<CompressedAccount>,
 ) -> Option<Account> {
-    let Some(compressed_acc) = compressed_acc else {
-        return None;
-    };
+    let compressed_acc = compressed_acc?;
     let data = compressed_acc.data.unwrap_or_default().data;
 
     Some(Account {

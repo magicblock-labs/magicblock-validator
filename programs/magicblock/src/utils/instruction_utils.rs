@@ -173,6 +173,7 @@ impl InstructionUtils {
                         .map(set_account_mod_data),
                     rent_epoch: account_modification.rent_epoch,
                     delegated: account_modification.delegated,
+                    compressed: account_modification.compressed,
                 };
             account_mods.insert(
                 account_modification.pubkey,

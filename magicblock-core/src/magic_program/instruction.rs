@@ -85,6 +85,7 @@ pub struct AccountModification {
     pub data: Option<Vec<u8>>,
     pub rent_epoch: Option<u64>,
     pub delegated: Option<bool>,
+    pub compressed: Option<bool>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -95,4 +96,5 @@ pub struct AccountModificationForInstruction {
     pub data_key: Option<u64>,
     pub rent_epoch: Option<u64>,
     pub delegated: Option<bool>,
+    pub compressed: Option<bool>,
 }
