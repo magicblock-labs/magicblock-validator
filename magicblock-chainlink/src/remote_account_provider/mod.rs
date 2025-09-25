@@ -1652,4 +1652,203 @@ mod test {
             assert_eq!(removed_accounts, vec![expected_evicted]);
         }
     }
+
+    // -----------------
+    // Compressed Accounts
+    // -----------------
+    async fn setup_with_mixed_accounts(
+        pubkeys: &[Pubkey],
+        compressed_pubkeys: &[Pubkey],
+    ) -> (
+        RemoteAccountProvider<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            PhotonClientMock,
+        >,
+        mpsc::Receiver<ForwardedSubscriptionUpdate>,
+        mpsc::Receiver<Pubkey>,
+    ) {
+        let rpc_client = {
+            let mut rpc_client_builder =
+                ChainRpcClientMockBuilder::new().slot(1);
+            for (idx, pubkey) in pubkeys.iter().enumerate() {
+                rpc_client_builder = rpc_client_builder.account(
+                    *pubkey,
+                    Account {
+                        lamports: 555,
+                        data: vec![5; idx + 1],
+                        owner: system_program::id(),
+                        executable: false,
+                        rent_epoch: 0,
+                    },
+                );
+            }
+            rpc_client_builder.build()
+        };
+
+        let photon_client = PhotonClientMock::default();
+        for (idx, pubkey) in compressed_pubkeys.iter().enumerate() {
+            photon_client.add_account(
+                *pubkey,
+                Account {
+                    lamports: 777,
+                    data: vec![7; idx + 1],
+                    owner: system_program::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+                1,
+            );
+        }
+
+        let (tx, rx) = mpsc::channel(1);
+        let pubsub_client = ChainPubsubClientMock::new(tx, rx);
+
+        let (forward_tx, forward_rx) = mpsc::channel(100);
+        let provider = RemoteAccountProvider::new(
+            rpc_client,
+            pubsub_client,
+            Some(photon_client),
+            forward_tx,
+            &RemoteAccountProviderConfig::default_with_lifecycle_mode(
+                LifecycleMode::Ephemeral,
+            ),
+        )
+        .await
+        .unwrap();
+
+        let removed_account_tx = provider.try_get_removed_account_rx().unwrap();
+        (provider, forward_rx, removed_account_tx)
+    }
+
+    macro_rules! assert_compressed_account {
+        ($acc:expr, $expected_lamports:expr, $expected_data_len:expr) => {
+            assert!($acc.is_found());
+            assert_eq!(
+                $acc.source(),
+                Some(RemoteAccountUpdateSource::Compressed)
+            );
+            assert_eq!($acc.fresh_lamports(), Some($expected_lamports));
+            assert_eq!($acc.fresh_data_len(), Some($expected_data_len));
+        };
+    }
+
+    macro_rules! assert_regular_account {
+        ($acc:expr, $expected_lamports:expr, $expected_data_len:expr) => {
+            assert!($acc.is_found());
+            assert_eq!($acc.source(), Some(RemoteAccountUpdateSource::Fetch));
+            assert_eq!($acc.fresh_lamports(), Some($expected_lamports));
+            assert_eq!($acc.fresh_data_len(), Some($expected_data_len));
+        };
+    }
+
+    #[tokio::test]
+    async fn test_multiple_photon_accounts() {
+        init_logger();
+
+        let [cpk1, cpk2, cpk3] = [
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        ];
+        let compressed_pubkeys = &[cpk1, cpk2, cpk3];
+
+        let (provider, _, _) =
+            setup_with_mixed_accounts(&[], compressed_pubkeys).await;
+        let accs = provider
+            .try_get_multi(compressed_pubkeys, false)
+            .await
+            .unwrap();
+        let [acc1, acc2, acc3] = accs.as_slice() else {
+            panic!("Expected 3 accounts");
+        };
+        assert_compressed_account!(acc1, 777, 1);
+        assert_compressed_account!(acc2, 777, 2);
+        assert_compressed_account!(acc3, 777, 3);
+
+        let acc2 = provider.try_get(cpk2, false).await.unwrap();
+        assert_compressed_account!(acc2, 777, 2);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_mixed_accounts() {
+        init_logger();
+        let [pk1, pk2, pk3] = [
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        ];
+        let pubkeys = &[pk1, pk2, pk3];
+        let [cpk1, cpk2, cpk3] = [
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        ];
+        let compressed_pubkeys = &[cpk1, cpk2, cpk3];
+
+        let (provider, _, _) =
+            setup_with_mixed_accounts(pubkeys, compressed_pubkeys).await;
+
+        let mixed_keys = &[pk1, cpk1, pk2, cpk2, cpk3, pk3];
+        let accs = provider.try_get_multi(mixed_keys, false).await.unwrap();
+        let [acc1, cacc1, acc2, cacc2, cacc3, acc3] = accs.as_slice() else {
+            panic!("Expected 6 accounts");
+        };
+        assert_compressed_account!(cacc1, 777, 1);
+        assert_compressed_account!(cacc2, 777, 2);
+        assert_compressed_account!(cacc3, 777, 3);
+
+        assert_regular_account!(acc1, 555, 1);
+        assert_regular_account!(acc2, 555, 2);
+        assert_regular_account!(acc3, 555, 3);
+
+        let cacc2 = provider.try_get(cpk2, false).await.unwrap();
+        assert_compressed_account!(cacc2, 777, 2);
+
+        let acc2 = provider.try_get(pk2, false).await.unwrap();
+        assert_regular_account!(acc2, 555, 2);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_mixed_accounts_some_missing() {
+        init_logger();
+        let [pk1, pk2, pk3] = [
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        ];
+        let pubkeys = &[pk1, pk2];
+        let [cpk1, cpk2, cpk3] = [
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        ];
+        let compressed_pubkeys = &[cpk1, cpk2];
+
+        let (provider, _, _) =
+            setup_with_mixed_accounts(pubkeys, compressed_pubkeys).await;
+
+        let mixed_keys = &[pk1, cpk1, pk2, cpk2, cpk3, pk3];
+        let accs = provider.try_get_multi(mixed_keys, false).await.unwrap();
+        let [acc1, cacc1, acc2, cacc2, cacc3, acc3] = accs.as_slice() else {
+            panic!("Expected 6 accounts");
+        };
+        assert_compressed_account!(cacc1, 777, 1);
+        assert_compressed_account!(cacc2, 777, 2);
+        assert!(!cacc3.is_found());
+
+        assert_regular_account!(acc1, 555, 1);
+        assert_regular_account!(acc2, 555, 2);
+        assert!(!acc3.is_found());
+
+        let cacc2 = provider.try_get(cpk2, false).await.unwrap();
+        assert_compressed_account!(cacc2, 777, 2);
+        let cacc3 = provider.try_get(cpk3, false).await.unwrap();
+        assert!(!cacc3.is_found());
+
+        let acc2 = provider.try_get(pk2, false).await.unwrap();
+        assert_regular_account!(acc2, 555, 2);
+        let acc3 = provider.try_get(pk3, false).await.unwrap();
+        assert!(!acc3.is_found());
+    }
 }

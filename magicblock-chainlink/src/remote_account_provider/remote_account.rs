@@ -241,6 +241,10 @@ impl RemoteAccount {
         self.fresh_account().map(|acc| acc.lamports())
     }
 
+    pub fn fresh_data_len(&self) -> Option<usize> {
+        self.fresh_account().map(|acc| acc.data().len())
+    }
+
     pub fn owner(&self) -> Option<Pubkey> {
         self.fresh_account().map(|acc| *acc.owner())
     }
