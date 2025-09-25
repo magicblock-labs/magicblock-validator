@@ -14,8 +14,10 @@ pub(crate) fn set_account_owner(
     acc.borrow_mut().set_owner(pubkey);
 }
 
+/// Sets proper values on account during undelegation
 pub(crate) fn set_account_owner_to_delegation_program(
     acc: &RefCell<AccountSharedData>,
 ) {
+    acc.borrow_mut().set_delegated(false);
     set_account_owner(acc, DELEGATION_PROGRAM_ID);
 }
