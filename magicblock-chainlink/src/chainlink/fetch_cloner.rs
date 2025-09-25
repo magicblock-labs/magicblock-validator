@@ -419,6 +419,36 @@ where
 
         trace!("Fetched {accs:?}");
 
+        fn process_fresh_account(
+            pubkey: Pubkey,
+            account_shared_data: AccountSharedData,
+            plain: &mut Vec<(Pubkey, AccountSharedData)>,
+            owned_by_deleg: &mut Vec<(Pubkey, AccountSharedData, u64)>,
+            programs: &mut Vec<(Pubkey, AccountSharedData, u64)>,
+        ) {
+            let slot = account_shared_data.remote_slot();
+            if account_shared_data.owner().eq(&dlp::id()) {
+                owned_by_deleg.push((pubkey, account_shared_data, slot));
+            } else if account_shared_data.executable() {
+                // We don't clone native loader programs.
+                // They should not pass the blacklist in the first place,
+                // but in case a new native program is introduced we don't want
+                // to fail
+                if !account_shared_data
+                    .owner()
+                    .eq(&solana_sdk::native_loader::id())
+                {
+                    programs.push((pubkey, account_shared_data, slot));
+                } else {
+                    warn!(
+                        "Not cloning native loader program account: {pubkey} (should have been blacklisted)",
+                    );
+                }
+            } else {
+                plain.push((pubkey, account_shared_data));
+            }
+        }
+
         let (not_found, in_bank, plain, owned_by_deleg, programs) =
             accs.into_iter().zip(pubkeys).fold(
                 (vec![], vec![], vec![], vec![], vec![]),
@@ -435,45 +465,16 @@ where
                         NotFound(slot) => not_found.push((pubkey, slot)),
                         Found(remote_account_state) => {
                             match remote_account_state.account {
-                                ResolvedAccount::Fresh(account_shared_data) => {
-                                    let slot =
-                                        account_shared_data.remote_slot();
-                                    if account_shared_data
-                                        .owner()
-                                        .eq(&dlp::id())
-                                    {
-                                        owned_by_deleg.push((
-                                            pubkey,
-                                            account_shared_data,
-                                            slot,
-                                        ));
-                                    } else if account_shared_data.executable() {
-                                        // We don't clone native loader programs.
-                                        // They should not pass the blacklist in the first place,
-                                        // but in case a new native program is introduced we don't want
-                                        // to fail
-                                        if !account_shared_data
-                                            .owner()
-                                            .eq(&solana_sdk::native_loader::id(
-                                            ))
-                                        {
-                                            programs.push((
-                                                pubkey,
-                                                account_shared_data,
-                                                slot,
-                                            ));
-                                        } else {
-                                            warn!(
-                                                "Not cloning native loader program account: {pubkey} (should have been blacklisted)",
-                                            );
-                                        }
-                                    } else {
-                                        plain.push((
-                                            pubkey,
-                                            account_shared_data,
-                                        ));
-                                    }
-                                }
+                                ResolvedAccount::Fresh(account_shared_data)
+                                | ResolvedAccount::Compressed(
+                                    account_shared_data,
+                                ) => process_fresh_account(
+                                    pubkey,
+                                    account_shared_data,
+                                    &mut plain,
+                                    &mut owned_by_deleg,
+                                    &mut programs,
+                                ),
                                 ResolvedAccount::Bank(pubkey) => {
                                     in_bank.push(pubkey);
                                 }
@@ -538,7 +539,11 @@ where
 
         // For potentially delegated accounts we update the owner and delegation state first
         let mut fetch_with_delegation_record_join_set = JoinSet::new();
-        for (pubkey, _, account_slot) in &owned_by_deleg {
+        for (pubkey, acc, account_slot) in &owned_by_deleg {
+            if acc.compressed() {
+                warn!("Extract delegation record from account itself instead of fetching it separately: {pubkey}");
+                continue;
+            }
             let effective_slot = if let Some(min_slot) = min_context_slot {
                 min_slot.max(*account_slot)
             } else {

@@ -23,12 +23,16 @@ pub enum ResolvedAccount {
     /// The committor service will let us know once they are being undelegated at which point
     /// we subscribe to them and fetch the latest state.
     Fresh(AccountSharedData),
+    /// A fresh account that is compressed on chain
+    Compressed(AccountSharedData),
     /// Most _fresh_ accounts are stored in the bank before the transaction needing
     /// them proceeds. Delegation records are not stored.
     Bank((Pubkey, Slot)),
 }
 
 impl ResolvedAccount {
+    /// Resolves the account and sets the compressed flag if it is
+    /// a [ResolvedAccount::Compressed].
     pub fn resolved_account_shared_data(
         &self,
         bank: &impl AccountsBank,
@@ -36,6 +40,11 @@ impl ResolvedAccount {
         match self {
             ResolvedAccount::Fresh(account) => {
                 Some(ResolvedAccountSharedData::Fresh(account.clone()))
+            }
+            ResolvedAccount::Compressed(account) => {
+                let mut account = account.clone();
+                account.set_compressed(true);
+                Some(ResolvedAccountSharedData::Fresh(account))
             }
             ResolvedAccount::Bank((pubkey, _)) => bank
                 .get_account(pubkey)
@@ -150,6 +159,10 @@ impl ResolvedAccountSharedData {
             Bank(account) => account.remote_slot(),
         }
     }
+
+    pub fn compressed(&self) -> bool {
+        self.account_shared_data().compressed()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +203,12 @@ impl RemoteAccount {
             }) => {
                 Some(ResolvedAccountSharedData::Fresh(remote_account.clone()))
             }
+            RemoteAccount::Found(RemoteAccountState {
+                account: ResolvedAccount::Compressed(remote_account),
+                ..
+            }) => {
+                Some(ResolvedAccountSharedData::Fresh(remote_account.clone()))
+            }
             // Most up to date version of account from the bank
             RemoteAccount::Found(RemoteAccountState {
                 account: ResolvedAccount::Bank((pubkey, _)),
@@ -206,6 +225,9 @@ impl RemoteAccount {
             RemoteAccount::Found(RemoteAccountState { account, .. }) => {
                 match account {
                     ResolvedAccount::Fresh(account_shared_data) => {
+                        account_shared_data.remote_slot()
+                    }
+                    ResolvedAccount::Compressed(account_shared_data) => {
                         account_shared_data.remote_slot()
                     }
                     ResolvedAccount::Bank((_, slot)) => *slot,
