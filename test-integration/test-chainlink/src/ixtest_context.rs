@@ -17,6 +17,7 @@ use magicblock_chainlink::{
             RemoteAccountProviderConfig,
             DEFAULT_SUBSCRIBED_ACCOUNTS_LRU_CAPACITY,
         },
+        photon_client::PhotonClientImpl,
         Endpoint, RemoteAccountProvider,
     },
     submux::SubMuxClient,
@@ -42,12 +43,12 @@ pub type IxtestChainlink = Chainlink<
     SubMuxClient<ChainPubsubClientImpl>,
     AccountsBankStub,
     ClonerStub,
+    PhotonClientImpl,
 >;
 
 #[derive(Clone)]
 pub struct IxtestContext {
     pub rpc_client: Arc<RpcClient>,
-    // pub pubsub_client: ChainPubsubClientImpl
     pub chainlink: Arc<IxtestChainlink>,
     pub bank: Arc<AccountsBankStub>,
     pub remote_account_provider: Option<
@@ -55,6 +56,7 @@ pub struct IxtestContext {
             RemoteAccountProvider<
                 ChainRpcClientImpl,
                 SubMuxClient<ChainPubsubClientImpl>,
+                PhotonClientImpl,
             >,
         >,
     >,
@@ -87,7 +89,7 @@ impl IxtestContext {
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let (fetch_cloner, remote_account_provider) = {
-            let endpoints = [Endpoint {
+            let endpoints = [Endpoint::Rpc {
                 rpc_url: RPC_URL.to_string(),
                 pubsub_url: "ws://localhost:7800".to_string(),
             }];

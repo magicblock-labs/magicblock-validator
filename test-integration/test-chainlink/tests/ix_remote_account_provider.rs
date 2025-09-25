@@ -1,6 +1,7 @@
 use log::{debug, info};
 use magicblock_chainlink::config::LifecycleMode;
 use magicblock_chainlink::remote_account_provider::config::RemoteAccountProviderConfig;
+use magicblock_chainlink::remote_account_provider::photon_client::PhotonClientImpl;
 use magicblock_chainlink::submux::SubMuxClient;
 use magicblock_chainlink::{
     remote_account_provider::{
@@ -24,15 +25,17 @@ use tokio::sync::mpsc;
 async fn init_remote_account_provider() -> RemoteAccountProvider<
     ChainRpcClientImpl,
     SubMuxClient<ChainPubsubClientImpl>,
+    PhotonClientImpl,
 > {
     let (fwd_tx, _fwd_rx) = mpsc::channel(100);
-    let endpoints = [Endpoint {
+    let endpoints = [Endpoint::Rpc {
         rpc_url: RPC_URL.to_string(),
         pubsub_url: PUBSUB_URL.to_string(),
     }];
     RemoteAccountProvider::<
         ChainRpcClientImpl,
         SubMuxClient<ChainPubsubClientImpl>,
+        PhotonClientImpl,
     >::try_new_from_urls(
         &endpoints,
         CommitmentConfig::confirmed(),

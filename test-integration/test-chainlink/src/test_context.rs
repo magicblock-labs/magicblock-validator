@@ -5,6 +5,7 @@ use magicblock_chainlink::config::LifecycleMode;
 use magicblock_chainlink::errors::ChainlinkResult;
 use magicblock_chainlink::fetch_cloner::{FetchAndCloneResult, FetchCloner};
 use magicblock_chainlink::remote_account_provider::config::RemoteAccountProviderConfig;
+use magicblock_chainlink::remote_account_provider::photon_client::PhotonClientImpl;
 use magicblock_chainlink::remote_account_provider::RemoteAccountProvider;
 use magicblock_chainlink::testing::accounts::account_shared_with_owner;
 use magicblock_chainlink::testing::deleg::add_delegation_record_for;
@@ -31,6 +32,7 @@ pub type TestChainlink = Chainlink<
     ChainPubsubClientMock,
     AccountsBankStub,
     ClonerStub,
+    PhotonClientImpl,
 >;
 
 #[derive(Clone)]
@@ -40,7 +42,13 @@ pub struct TestContext {
     pub chainlink: Arc<TestChainlink>,
     pub bank: Arc<AccountsBankStub>,
     pub remote_account_provider: Option<
-        Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
+        Arc<
+            RemoteAccountProvider<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                PhotonClientImpl,
+            >,
+        >,
     >,
     pub cloner: Arc<ClonerStub>,
     pub validator_pubkey: Pubkey,
@@ -68,6 +76,7 @@ impl TestContext {
                 RemoteAccountProvider::try_from_clients_and_mode(
                     rpc_client.clone(),
                     pubsub_client.clone(),
+                    None::<PhotonClientImpl>,
                     tx,
                     &RemoteAccountProviderConfig::default_with_lifecycle_mode(
                         lifecycle_mode,
