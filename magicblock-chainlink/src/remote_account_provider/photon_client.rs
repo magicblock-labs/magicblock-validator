@@ -65,6 +65,10 @@ impl PhotonClient for PhotonClientImpl {
             context: Context { slot, .. },
         } = match self.get_compressed_account(cda.to_bytes(), config).await {
             Ok(res) => res,
+            // NOTE: @@@ this is broken, we actually are getting a `None` value
+            // when the account is not found
+            // We need to wait for the light-client to provide an `Option` for that
+            // value
             Err(IndexerError::AccountNotFound) => {
                 return Ok(None);
             }
@@ -72,8 +76,8 @@ impl PhotonClient for PhotonClientImpl {
                 return Err(err.into());
             }
         };
-        let account = account_from_compressed_account(compressed_acc);
-        Ok(Some((account, slot)))
+        let account = account_from_compressed_account(Some(compressed_acc));
+        Ok(account.map(|acc| (acc, slot)))
     }
 
     async fn get_multiple_accounts(
@@ -102,7 +106,6 @@ impl PhotonClient for PhotonClientImpl {
             .map(account_from_compressed_account)
             // NOTE: the light-client API is incorrect currently.
             // The server will return `None` for missing accounts,
-            .map(Some)
             .collect();
         Ok((accounts, slot))
     }
@@ -112,14 +115,18 @@ impl PhotonClient for PhotonClientImpl {
 // Helpers
 // -----------------
 fn account_from_compressed_account(
-    compressed_acc: CompressedAccount,
-) -> Account {
+    compressed_acc: Option<CompressedAccount>,
+) -> Option<Account> {
+    let Some(compressed_acc) = compressed_acc else {
+        return None;
+    };
     let data = compressed_acc.data.unwrap_or_default().data;
-    Account {
+
+    Some(Account {
         lamports: compressed_acc.lamports,
         data,
         owner: compressed_acc.owner,
         executable: false,
         rent_epoch: 0,
-    }
+    })
 }
