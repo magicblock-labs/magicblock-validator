@@ -465,16 +465,15 @@ where
                         NotFound(slot) => not_found.push((pubkey, slot)),
                         Found(remote_account_state) => {
                             match remote_account_state.account {
-                                ResolvedAccount::Fresh(account_shared_data)
-                                | ResolvedAccount::Compressed(
-                                    account_shared_data,
-                                ) => process_fresh_account(
-                                    pubkey,
-                                    account_shared_data,
-                                    &mut plain,
-                                    &mut owned_by_deleg,
-                                    &mut programs,
-                                ),
+                                ResolvedAccount::Fresh(account_shared_data) => {
+                                    process_fresh_account(
+                                        pubkey,
+                                        account_shared_data,
+                                        &mut plain,
+                                        &mut owned_by_deleg,
+                                        &mut programs,
+                                    )
+                                }
                                 ResolvedAccount::Bank(pubkey) => {
                                     in_bank.push(pubkey);
                                 }

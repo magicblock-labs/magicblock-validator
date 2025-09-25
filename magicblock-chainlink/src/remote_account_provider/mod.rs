@@ -85,7 +85,6 @@ pub struct RemoteAccountProvider<
     pubsub_client: U,
     /// The client to fetch compressed accounts from photon the first time we receive
     /// a request for them
-    #[allow(dead_code)]
     photon_client: Option<P>,
     /// Minimal tracking of accounts currently being fetched to handle race conditions
     /// between fetch and subscription updates. Only used during active fetch operations.
@@ -1079,26 +1078,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         use RemoteAccount::*;
         match compressed_accounts {
             Some(compressed_accounts) =>
-            pubkeys.iter().zip(
-                rpc_accounts
-                    .into_iter()
-                    .zip(compressed_accounts))
-                .map(|(pubkey, (rpc_acc, comp_acc))| match (rpc_acc, comp_acc) {
-                    (Found(_), Found(comp_state)) => {
-                        warn!("Both RPC and Compressed account found for pubkey {}. Using Compressed account.", pubkey);
-                        Found(comp_state)
-                    }
-                    (Found(rpc_state), NotFound(_)) => Found(rpc_state),
-                    (NotFound(_), Found(comp_state)) => Found(comp_state),
-                    (NotFound(rpc_slot), NotFound(comp_slot)) => {
-                        if rpc_slot >= comp_slot {
-                            NotFound(rpc_slot)
-                        } else {
-                            NotFound(comp_slot)
-                        }
-                    }
-                })
-                .collect(),
+                pubkeys.iter().zip(
+                    rpc_accounts
+                        .into_iter()
+                        .zip(compressed_accounts))
+                        .map(|(pubkey, (rpc_acc, comp_acc))| match (rpc_acc, comp_acc) {
+                            (Found(_), Found(comp_state)) => {
+                                warn!("Both RPC and Compressed account found for pubkey {}. Using Compressed account.", pubkey);
+                                Found(comp_state)
+                            }
+                            (Found(rpc_state), NotFound(_)) => Found(rpc_state),
+                            (NotFound(_), Found(comp_state)) => Found(comp_state),
+                            (NotFound(rpc_slot), NotFound(comp_slot)) => {
+                                if rpc_slot >= comp_slot {
+                                    NotFound(rpc_slot)
+                                } else {
+                                    NotFound(comp_slot)
+                                }
+                            }
+                        })
+                        .collect(),
             None => rpc_accounts,
         }
     }
