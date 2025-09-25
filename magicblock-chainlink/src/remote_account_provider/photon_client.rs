@@ -1,3 +1,4 @@
+use log::*;
 use std::{ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
@@ -27,6 +28,7 @@ impl PhotonClientImpl {
         Self(photon_indexer)
     }
     pub(crate) fn new_from_url(url: &str) -> Self {
+        debug!("Creating PhotonClient with URL: {}", url);
         Self::new(Arc::new(PhotonIndexer::new(url.to_string(), None)))
     }
 }
