@@ -1,4 +1,3 @@
-pub mod magic_program;
 pub mod traits;
 
 /// A macro that panics when running a debug build and logs the panic message

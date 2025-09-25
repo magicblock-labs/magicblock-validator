@@ -370,6 +370,7 @@ mod tests {
         )
         .expect("Should build strategy with buffer optimization");
 
+        assert_eq!(strategy.optimized_tasks.len(), 1);
         assert!(matches!(
             strategy.optimized_tasks[0].strategy(),
             TaskStrategy::Buffer

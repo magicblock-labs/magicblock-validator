@@ -15,7 +15,7 @@ solana-test-validator \
   --limit-ledger-size \
   1000000 \
   --bpf-program \
-  CoMtrr6j336NSB5PAoAWpLe5hPgkcShWKbPgHhZxaxh \
+  ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq \
   $DIR/../../target/deploy/magicblock_committor_program.so \
   --bpf-program \
   f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4 \

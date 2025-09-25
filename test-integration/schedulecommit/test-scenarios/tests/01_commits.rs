@@ -1,6 +1,5 @@
 use integration_test_tools::run_test;
 use log::*;
-use magicblock_core::magic_program;
 use program_schedulecommit::api::schedule_commit_cpi_instruction;
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
@@ -23,7 +22,7 @@ mod utils;
 //  protocol fees vault:      7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg
 //  validator fees vault:     DUH8h7rYjdTPYyBUEGAUwZv9ffz5wiM45GdYWYzogXjp
 //  delegation program:       DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh
-//  committor program:        CoMtrr6j336NSB5PAoAWpLe5hPgkcShWKbPgHhZxaxh
+//  committor program:        ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq
 
 #[test]
 fn test_committing_one_account() {
@@ -41,8 +40,8 @@ fn test_committing_one_account() {
 
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
-            magic_program::id(),
-            magic_program::MAGIC_CONTEXT_PUBKEY,
+            magicblock_magic_program_api::id(),
+            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -91,8 +90,8 @@ fn test_committing_two_accounts() {
 
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
-            magic_program::id(),
-            magic_program::MAGIC_CONTEXT_PUBKEY,
+            magicblock_magic_program_api::id(),
+            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())

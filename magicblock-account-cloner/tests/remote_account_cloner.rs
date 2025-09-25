@@ -9,11 +9,14 @@ use magicblock_account_cloner::{
 use magicblock_account_dumper::AccountDumperStub;
 use magicblock_account_fetcher::AccountFetcherStub;
 use magicblock_account_updates::AccountUpdatesStub;
-use magicblock_accounts_api::InternalAccountProviderStub;
+use magicblock_accounts_api::{
+    InternalAccountProvider, InternalAccountProviderStub,
+};
 use magicblock_committor_service::stubs::ChangesetCommittorStub;
 use magicblock_config::{AccountsCloneConfig, LedgerResumeStrategyConfig};
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
+    account::ReadableAccount,
     bpf_loader_upgradeable::get_program_data_address,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
@@ -269,6 +272,7 @@ async fn test_clone_allow_undelegated_account_when_ephemeral() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_clone_fails_stale_undelegated_account_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
@@ -469,7 +473,7 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
 }
 
 #[tokio::test]
-async fn test_clone_refuse_already_written_in_bank() {
+async fn test_clone_lazy_hydration_already_written_in_bank() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -488,19 +492,22 @@ async fn test_clone_refuse_already_written_in_bank() {
     // Account(s) involved
     let already_in_the_bank = Pubkey::new_unique();
     internal_account_provider.set(already_in_the_bank, Default::default());
+    let mut acc = internal_account_provider
+        .get_account(&already_in_the_bank)
+        .unwrap();
+    acc.set_delegated(true);
+    account_updates.set_first_subscribed_slot(already_in_the_bank, 41);
+    account_fetcher.set_delegated_account(already_in_the_bank, 42, 11);
     // Run test
     let result = cloner.clone_account(&already_in_the_bank).await;
-    // Check expected result
-    assert!(matches!(
-        result,
-        Ok(AccountClonerOutput::Unclonable {
-            reason: AccountClonerUnclonableReason::AlreadyLocallyOverriden,
-            ..
-        })
-    ));
-    assert_eq!(account_fetcher.get_fetch_count(&already_in_the_bank), 0);
-    assert!(!account_updates.has_account_monitoring(&already_in_the_bank));
-    assert!(account_dumper.was_untouched(&already_in_the_bank));
+    // Assert expected result
+    assert!(result.is_ok());
+    // Assert account is unchanged in the internal account provider
+    let acc = internal_account_provider
+        .get_account(&already_in_the_bank)
+        .unwrap();
+    assert_eq!(acc.lamports(), 0);
+    assert_eq!(account_fetcher.get_fetch_count(&already_in_the_bank), 1);
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());

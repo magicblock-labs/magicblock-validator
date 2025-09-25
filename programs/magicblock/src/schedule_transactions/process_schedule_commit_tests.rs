@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use magicblock_core::magic_program::{
+use magicblock_magic_program_api::{
     instruction::MagicBlockInstruction, MAGIC_CONTEXT_PUBKEY,
 };
 use solana_sdk::{

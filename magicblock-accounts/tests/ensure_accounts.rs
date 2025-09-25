@@ -13,9 +13,7 @@ use magicblock_account_cloner::{
 use magicblock_account_dumper::AccountDumperStub;
 use magicblock_account_fetcher::AccountFetcherStub;
 use magicblock_account_updates::AccountUpdatesStub;
-use magicblock_accounts::{
-    errors::AccountsError, ExternalAccountsManager, LifecycleMode,
-};
+use magicblock_accounts::{ExternalAccountsManager, LifecycleMode};
 use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_committor_service::stubs::ChangesetCommittorStub;
 use magicblock_config::{AccountsCloneConfig, LedgerResumeStrategyConfig};
@@ -170,6 +168,8 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
     // Account should be already in the bank
     let already_loaded_account = Pubkey::new_unique();
     internal_account_provider.set(already_loaded_account, Default::default());
+    account_updates.set_first_subscribed_slot(already_loaded_account, 41);
+    account_fetcher.set_undelegated_account(already_loaded_account, 42);
 
     // Ensure accounts
     let result = manager
@@ -185,7 +185,6 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
     assert!(result.is_ok());
 
     // Check proper behaviour
-    assert!(account_dumper.was_untouched(&already_loaded_account));
     assert_eq!(manager.last_commit(&already_loaded_account), None);
 
     // Cleanup
@@ -388,6 +387,8 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
     internal_account_provider.set(already_loaded_account, Default::default());
     account_updates.set_first_subscribed_slot(delegated_account, 41);
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
+    account_updates.set_first_subscribed_slot(already_loaded_account, 41);
+    account_fetcher.set_delegated_account(already_loaded_account, 42, 11);
 
     // Ensure accounts
     let result = manager
@@ -403,8 +404,7 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
     assert!(result.is_ok());
 
     // Check proper behaviour
-    assert!(account_dumper.was_untouched(&already_loaded_account));
-    assert!(manager.last_commit(&already_loaded_account).is_none());
+    assert!(manager.last_commit(&already_loaded_account).is_some());
 
     assert!(account_dumper.was_dumped_as_delegated_account(&delegated_account));
     assert!(manager.last_commit(&delegated_account).is_some());
@@ -736,7 +736,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
     account_updates.set_first_subscribed_slot(delegated_account, 41);
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
 
-    // First Transaction should not clone the account and use it as readonly
+    // First Transaction should hydrate the account and dump it as a delegated
     {
         // Ensure accounts
         let result = manager
@@ -752,13 +752,15 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
         assert!(result.is_ok());
 
         // Check proper behaviour
-        assert!(account_dumper.was_untouched(&delegated_account));
-        assert!(manager.last_commit(&delegated_account).is_none());
+        assert!(
+            account_dumper.was_dumped_as_delegated_account(&delegated_account)
+        );
+        assert!(manager.last_commit(&delegated_account).is_some());
     }
 
     account_dumper.clear_history();
 
-    // Second Transaction trying to use it as a writable should fail because of a local override
+    // Second Transaction trying to use it as a writable should work fine
     {
         // Ensure accounts
         let result = manager
@@ -773,12 +775,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
             .await;
 
         // Check proper behaviour
-        assert!(matches!(
-            result,
-            Err(
-                AccountsError::UnclonableAccountUsedAsWritableInEphemeral { .. }
-            )
-        ));
+        assert!(result.is_ok());
     }
 
     // Cleanup

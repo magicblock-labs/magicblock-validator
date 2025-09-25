@@ -9,8 +9,8 @@ use std::{
 use log::*;
 use magicblock_accounts::{AccountsManager, ScheduledCommitsProcessor};
 use magicblock_bank::bank::Bank;
-use magicblock_core::magic_program;
 use magicblock_ledger::Ledger;
+use magicblock_magic_program_api::{self, MAGIC_CONTEXT_PUBKEY};
 use magicblock_metrics::metrics;
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{instruction_utils::InstructionUtils, MagicContext};
@@ -54,8 +54,11 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
 
             // If accounts were scheduled to be committed, we accept them here
             // and processs the commits
-            let magic_context_acc = bank.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
-                .expect("Validator found to be running without MagicContext account!");
+            let magic_context_acc = bank
+                .get_account(&MAGIC_CONTEXT_PUBKEY)
+                .expect(
+                "Validator found to be running without MagicContext account!",
+            );
             if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
                 handle_scheduled_commits(
                     &bank,
@@ -78,6 +81,7 @@ async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
     let tx = InstructionUtils::accept_scheduled_commits(bank.last_blockhash());
     if let Err(err) =
         execute_legacy_transaction(tx, bank, Some(transaction_status_sender))
+            .await
     {
         error!("Failed to accept scheduled commits: {:?}", err);
         return;

@@ -22,7 +22,7 @@ pub mod delivery_preparator;
 pub mod error;
 
 #[async_trait]
-pub trait TransactionPreparator: Send + Sync + Clone + 'static {
+pub trait TransactionPreparator: Send + Sync + 'static {
     /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
     /// Handles all necessary preparation needed for successful [`BaseTask`] execution
     async fn prepare_for_strategy<P: IntentPersister>(

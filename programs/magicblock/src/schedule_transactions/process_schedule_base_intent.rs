@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_core::magic_program::args::MagicBaseIntentArgs;
+use magicblock_magic_program_api::args::MagicBaseIntentArgs;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{

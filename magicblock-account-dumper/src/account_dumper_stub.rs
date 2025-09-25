@@ -3,6 +3,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use async_trait::async_trait;
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable::get_program_data_address,
     pubkey::Pubkey, signature::Signature,
@@ -20,8 +21,9 @@ pub struct AccountDumperStub {
     program_idls: Arc<RwLock<HashSet<Pubkey>>>,
 }
 
+#[async_trait]
 impl AccountDumper for AccountDumperStub {
-    fn dump_feepayer_account(
+    async fn dump_feepayer_account(
         &self,
         pubkey: &Pubkey,
         _lamports: u64,
@@ -34,7 +36,7 @@ impl AccountDumper for AccountDumperStub {
         Ok(Signature::new_unique())
     }
 
-    fn dump_undelegated_account(
+    async fn dump_undelegated_account(
         &self,
         pubkey: &Pubkey,
         _account: &Account,
@@ -46,7 +48,7 @@ impl AccountDumper for AccountDumperStub {
         Ok(Signature::new_unique())
     }
 
-    fn dump_delegated_account(
+    async fn dump_delegated_account(
         &self,
         pubkey: &Pubkey,
         _account: &Account,
@@ -59,7 +61,7 @@ impl AccountDumper for AccountDumperStub {
         Ok(Signature::new_unique())
     }
 
-    fn dump_program_accounts(
+    async fn dump_program_accounts(
         &self,
         program_id_pubkey: &Pubkey,
         _program_id_account: &Account,
@@ -84,7 +86,7 @@ impl AccountDumper for AccountDumperStub {
         Ok(Signature::new_unique())
     }
 
-    fn dump_program_account_with_old_bpf(
+    async fn dump_program_account_with_old_bpf(
         &self,
         program_pubkey: &Pubkey,
         _program_account: &Account,

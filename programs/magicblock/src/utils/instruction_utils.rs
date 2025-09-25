@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use magicblock_core::magic_program::{
+use magicblock_magic_program_api::{
     instruction::{
         AccountModification, AccountModificationForInstruction,
         MagicBlockInstruction,

@@ -1,0 +1,102 @@
+name: Deploy to Testnet
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        default: 'master'
+        required: true
+      requested_by:
+        description: '(optional) original user who requested a programmatic dispatch'
+        required: false
+
+concurrency:
+  group: deploy-testnet
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  # This job runs only for manual triggers and sets an output "authorized"
+  check-authorization:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    outputs:
+      authorized: ${{ steps.auth.outputs.authorized }}
+    steps:
+      - name: Check user authorization
+        id: auth
+        run: |
+          TEST_NODE_MANUAL_DEPLOY_AUTHORIZED_USERS="${{ secrets.TEST_NODE_MANUAL_DEPLOY_AUTHORIZED_USERS }}"
+          USER="${{ github.actor }}"
+
+          # If dispatch was performed programmatically by the actions bot, allow requested_by override
+          if [ "${USER}" = "github-actions[bot]" ] && [ -n "${{ github.event.inputs.requested_by }}" ]; then
+            USER="${{ github.event.inputs.requested_by }}"
+          fi
+
+          IFS=' ' read -ra AUTH_ARRAY <<< "$TEST_NODE_MANUAL_DEPLOY_AUTHORIZED_USERS"
+          for u in "${AUTH_ARRAY[@]}"; do
+            if [ "$u" = "$USER" ]; then
+              echo "User $USER is authorized"
+              echo "authorized=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          done
+
+          echo "User $USER is not authorized"
+          echo "authorized=false" >> $GITHUB_OUTPUT
+
+  trigger-deploy:
+    runs-on: ubuntu-latest
+    needs: [check-authorization]
+    if: |
+      always() && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+        (github.event_name == 'workflow_dispatch' && needs.check-authorization.outputs.authorized == 'true')
+      )
+    steps:
+      - name: Determine branch to deploy
+        id: determine_branch
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            BRANCH="master"
+            EVENT_TYPE="auto-deploy"
+            echo "Deploy triggered by push to master"
+          else
+            BRANCH="${{ github.event.inputs.branch }}"
+            EVENT_TYPE="manual-deploy"
+            echo "Manual deploy for branch: $BRANCH"
+          fi
+
+          echo "Will deploy branch: $BRANCH"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "event_type=$EVENT_TYPE" >> $GITHUB_OUTPUT
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: magicblock-validator
+          ref: ${{ steps.determine_branch.outputs.branch }}
+
+      - name: Trigger deploy workflow
+        uses: ./magicblock-validator/.github/actions/repository-dispatch
+        with:
+          token: ${{ secrets.DEPLOY_TRIGGER_TOKEN }}
+          repository: magicblock-labs/validator-deployment
+          event-type: ${{ steps.determine_branch.outputs.event_type }}
+          client-payload: |
+            {
+              "project": "magicblock-validator",
+              "deploy_target": "testnet",
+              "branch": "${{ steps.determine_branch.outputs.branch }}",
+              "triggered_by": "${{ github.actor }}",
+              "source_repo": "${{ github.repository }}",
+              "source_sha": "${{ github.sha }}",
+              "timestamp": "${{ github.run_id }}"
+            }

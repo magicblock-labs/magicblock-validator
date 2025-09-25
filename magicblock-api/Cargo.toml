@@ -15,6 +15,7 @@ fd-lock = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 paste = { workspace = true }
+num_cpus = { workspace = true }
 magicblock-account-cloner = { workspace = true }
 magicblock-account-dumper = { workspace = true }
 magicblock-account-fetcher = { workspace = true }
@@ -26,6 +27,7 @@ magicblock-bank = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
 magicblock-geyser-plugin = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-metrics = { workspace = true }

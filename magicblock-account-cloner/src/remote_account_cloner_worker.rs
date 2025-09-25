@@ -336,76 +336,101 @@ where
             return Ok(AccountClonerOutput::Unclonable {
                 pubkey: *pubkey,
                 reason: AccountClonerUnclonableReason::NoCloningAllowed,
-                at_slot: u64::MAX, // we should never try cloning, ever
+                at_slot: u64::MAX,
             });
         }
-        // Check for the latest updates onchain for that account
-        let last_known_update_slot = self
-            .account_updates
-            .get_last_known_update_slot(pubkey)
-            .unwrap_or(u64::MIN);
-        self.monitored_accounts.borrow_mut().promote(pubkey);
-        // Check for the happy/fast path, we may already have cloned this account before
-        match self.get_last_clone_output_from_pubkey(pubkey) {
-            // If we already cloned this account, check what the output of the clone was
-            Some(last_clone_output) => match &last_clone_output {
-                // If the previous clone succeeded, we may be able to re-use it, need to check further
-                AccountClonerOutput::Cloned {
-                    account_chain_snapshot: snapshot,
-                    ..
-                } => {
-                    // If the clone output is recent enough,
-                    // or the account is a feepayer, we don't clone again
-                    if snapshot.at_slot >= last_known_update_slot
-                        || snapshot.chain_state.is_feepayer()
-                    {
-                        Ok(last_clone_output)
-                    }
-                    // If the cloned account has been updated since clone, update the cache
-                    else {
-                        self.do_clone_and_update_cache(
-                            pubkey,
-                            ValidatorStage::Running,
-                        )
-                        .await
+
+        // Use a loop to avoid recursion
+        loop {
+            // Check for the latest updates onchain for that account
+            let last_known_update_slot = self
+                .account_updates
+                .get_last_known_update_slot(pubkey)
+                .unwrap_or(u64::MIN);
+            self.monitored_accounts.borrow_mut().promote(pubkey);
+
+            // Check for the happy/fast path, we may already have cloned this account before
+            match self.get_last_clone_output_from_pubkey(pubkey) {
+                Some(last_clone_output) => {
+                    match &last_clone_output {
+                        AccountClonerOutput::Cloned {
+                            account_chain_snapshot: snapshot,
+                            ..
+                        } => {
+                            return if (snapshot.at_slot
+                                >= last_known_update_slot
+                                || snapshot.chain_state.is_feepayer())
+                                && !self
+                                    .internal_account_provider
+                                    .get_account(pubkey)
+                                    .is_some_and(|x| x.owner().eq(&dlp::ID))
+                            {
+                                Ok(last_clone_output)
+                            } else {
+                                // If the cloned account has been updated since clone, update the cache
+                                self.do_clone_and_update_cache(
+                                    pubkey,
+                                    ValidatorStage::Running,
+                                )
+                                .await
+                            };
+                        }
+                        AccountClonerOutput::Unclonable {
+                            at_slot: until_slot,
+                            ..
+                        } => {
+                            if *until_slot >= last_known_update_slot {
+                                return Ok(last_clone_output);
+                            } else {
+                                // If the cloned account has been updated since clone, try to update the cache
+                                return self
+                                    .do_clone_and_update_cache(
+                                        pubkey,
+                                        ValidatorStage::Running,
+                                    )
+                                    .await;
+                            }
+                        }
                     }
                 }
-                // If the previous clone marked the account as unclonable, we may be able to re-use that output
-                AccountClonerOutput::Unclonable {
-                    at_slot: until_slot,
-                    ..
-                } => {
-                    // If the clone output is recent enough, use that
-                    if *until_slot >= last_known_update_slot {
-                        Ok(last_clone_output)
+                None => {
+                    // If we never cloned the account before, we can't use the cache
+                    match self.internal_account_provider.get_account(pubkey) {
+                        Some(acc) if acc.is_delegated() => {
+                            let res = self
+                                .do_clone_and_update_cache(
+                                    pubkey,
+                                    ValidatorStage::Hydrating {
+                                        validator_identity: self
+                                            .validator_identity,
+                                        account_owner: *acc.owner(),
+                                    },
+                                )
+                                .await;
+                            match res {
+                                Ok(_) => {
+                                    // If successful, loop back to the top to check the cache again
+                                    continue;
+                                }
+                                Err(_) => {
+                                    return Ok(AccountClonerOutput::Unclonable {
+                                        pubkey: *pubkey,
+                                        reason: AccountClonerUnclonableReason::AlreadyLocallyOverriden,
+                                        at_slot: u64::MAX,
+                                    });
+                                }
+                            }
+                        }
+                        _ => {
+                            // First time clone and update cache
+                            return self
+                                .do_clone_and_update_cache(
+                                    pubkey,
+                                    ValidatorStage::Running,
+                                )
+                                .await;
+                        }
                     }
-                    // If the cloned account has been updated since clone, try to update the cache
-                    else {
-                        self.do_clone_and_update_cache(
-                            pubkey,
-                            ValidatorStage::Running,
-                        )
-                        .await
-                    }
-                }
-            },
-            // If we never cloned the account before, we can't use the cache
-            None => {
-                // If somehow we already have this account in the bank, keep it as is
-                if self.internal_account_provider.has_account(pubkey) {
-                    Ok(AccountClonerOutput::Unclonable {
-                        pubkey: *pubkey,
-                        reason: AccountClonerUnclonableReason::AlreadyLocallyOverriden,
-                        at_slot: u64::MAX, // we will never try cloning again
-                    })
-                }
-                // If we need to clone it for the first time and update the cache
-                else {
-                    self.do_clone_and_update_cache(
-                        pubkey,
-                        ValidatorStage::Running,
-                    )
-                    .await
                 }
             }
         }
@@ -487,10 +512,10 @@ where
 
             // Fetch the account, repeat and retry until we have a satisfactory response
             let mut fetch_count = 0;
+            let min_context_slot =
+                self.account_updates.get_last_known_update_slot(&clock::ID);
             loop {
                 fetch_count += 1;
-                let min_context_slot =
-                    self.account_updates.get_last_known_update_slot(&clock::ID);
                 match self
                     .fetch_account_chain_snapshot(pubkey, min_context_slot)
                     .await
@@ -502,17 +527,27 @@ where
                             >= self
                                 .account_updates
                                 .get_first_subscribed_slot(pubkey)
-                                .unwrap_or(u64::MAX)
+                                .unwrap_or(u64::MIN)
                         {
                             break account_chain_snapshot;
                         }
                         // If we failed to fetch too many time, stop here
                         if fetch_count >= self.fetch_retries {
                             return if min_context_slot.is_none() {
+                                error!("Failed to get satisfactory slot for {} after {fetch_count} tries, current update slot {}, first subscribed slot {:?}",
+                                    pubkey,
+                                    account_chain_snapshot.at_slot,
+                                    self.account_updates.get_first_subscribed_slot(pubkey),
+                                );
                                 Err(
                                     AccountClonerError::FailedToGetSubscriptionSlot,
                                 )
                             } else {
+                                error!("Failed to fetch satisfactory slot for {} after {fetch_count} tries, current update slot {}, first subscribed slot {:?}",
+                                    pubkey,
+                                    account_chain_snapshot.at_slot,
+                                    self.account_updates.get_first_subscribed_slot(pubkey),
+                                );
                                 Err(
                                     AccountClonerError::FailedToFetchSatisfactorySlot,
                                 )
@@ -550,8 +585,8 @@ where
                     max(self.clone_config.auto_airdrop_lamports, *lamports);
                 self.track_not_delegated_account(*pubkey).await?;
                 match self.validator_charges_fees {
-                    ValidatorCollectionMode::NoFees => self
-                        .do_clone_undelegated_account(
+                    ValidatorCollectionMode::NoFees => {
+                        self.do_clone_undelegated_account(
                             pubkey,
                             // TODO(GabrielePicco): change account fetching to return the account
                             &Account {
@@ -559,7 +594,9 @@ where
                                 owner: *owner,
                                 ..Default::default()
                             },
-                        )?,
+                        )
+                        .await?
+                    }
                     ValidatorCollectionMode::Fees => {
                         // Fetch the associated escrowed account
                         let escrowed_snapshot = match self
@@ -624,7 +661,8 @@ where
                             escrowed_account.lamports,
                             owner,
                             Some(&escrowed_snapshot.pubkey),
-                        )?
+                        )
+                        .await?
                     }
                 }
             }
@@ -669,7 +707,7 @@ where
                     // Keep track of non-delegated accounts, removing any stale ones,
                     // which were evicted from monitored accounts cache
                     self.track_not_delegated_account(*pubkey).await?;
-                    self.do_clone_undelegated_account(pubkey, account)?
+                    self.do_clone_undelegated_account(pubkey, account).await?
                 }
             }
             // If the account delegated on-chain, we need to apply some overrides
@@ -753,7 +791,8 @@ where
                         ..account.clone()
                     },
                     delegation_record,
-                )?
+                )
+                .await?
             }
         };
         // Return the result
@@ -763,7 +802,7 @@ where
         })
     }
 
-    fn do_clone_feepayer_account(
+    async fn do_clone_feepayer_account(
         &self,
         pubkey: &Pubkey,
         lamports: u64,
@@ -772,6 +811,7 @@ where
     ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_feepayer_account(pubkey, lamports, owner)
+            .await
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::FeePayer {
@@ -781,13 +821,14 @@ where
             })
     }
 
-    fn do_clone_undelegated_account(
+    async fn do_clone_undelegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
     ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_undelegated_account(pubkey, account)
+            .await
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(
@@ -799,7 +840,7 @@ where
             })
     }
 
-    fn do_clone_delegated_account(
+    async fn do_clone_delegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
@@ -824,6 +865,7 @@ where
         // If its the first time we're seeing this delegated account, dump it to the bank
         self.account_dumper
             .dump_delegated_account(pubkey, account, &record.owner)
+            .await
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::Delegated {
@@ -852,11 +894,13 @@ where
             // clone such programs like normal accounts
             return Err(AccountClonerError::ProgramDataDoesNotExist);
         } else if account.owner == solana_sdk::bpf_loader::ID {
-            let signature =
-                self.account_dumper.dump_program_account_with_old_bpf(
+            let signature = self
+                .account_dumper
+                .dump_program_account_with_old_bpf(
                     program_id_pubkey,
                     program_id_account,
-                )?;
+                )
+                .await?;
             return Ok(signature);
         }
 
@@ -886,6 +930,7 @@ where
                 program_data_account,
                 idl_account,
             )
+            .await
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::Program {

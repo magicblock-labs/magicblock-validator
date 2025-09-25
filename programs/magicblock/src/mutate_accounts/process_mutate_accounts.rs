@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use magicblock_core::magic_program::instruction::AccountModificationForInstruction;
+use magicblock_magic_program_api::instruction::AccountModificationForInstruction;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
@@ -268,7 +268,7 @@ mod tests {
     use std::collections::HashMap;
 
     use assert_matches::assert_matches;
-    use magicblock_core::magic_program::instruction::AccountModification;
+    use magicblock_magic_program_api::instruction::AccountModification;
     use solana_sdk::{
         account::{Account, AccountSharedData},
         pubkey::Pubkey,

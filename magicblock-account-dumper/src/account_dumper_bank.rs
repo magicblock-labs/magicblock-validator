@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use magicblock_bank::bank::Bank;
 use magicblock_mutator::{
     program::{
@@ -41,7 +42,7 @@ impl AccountDumperBank {
         }
     }
 
-    fn execute_transaction(
+    async fn execute_transaction(
         &self,
         transaction: Transaction,
     ) -> AccountDumperResult<Signature> {
@@ -55,12 +56,14 @@ impl AccountDumperBank {
             &self.bank,
             self.transaction_status_sender.as_ref(),
         )
+        .await
         .map_err(AccountDumperError::TransactionError)
     }
 }
 
+#[async_trait]
 impl AccountDumper for AccountDumperBank {
-    fn dump_feepayer_account(
+    async fn dump_feepayer_account(
         &self,
         pubkey: &Pubkey,
         lamports: u64,
@@ -77,10 +80,10 @@ impl AccountDumper for AccountDumperBank {
             None,
             self.bank.last_blockhash(),
         );
-        self.execute_transaction(transaction)
+        self.execute_transaction(transaction).await
     }
 
-    fn dump_undelegated_account(
+    async fn dump_undelegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
@@ -91,7 +94,7 @@ impl AccountDumper for AccountDumperBank {
             None,
             self.bank.last_blockhash(),
         );
-        let result = self.execute_transaction(transaction)?;
+        let result = self.execute_transaction(transaction).await?;
         if let Some(mut acc) = self.bank.get_account(pubkey) {
             acc.set_delegated(false);
             self.bank.store_account(*pubkey, acc);
@@ -99,7 +102,7 @@ impl AccountDumper for AccountDumperBank {
         Ok(result)
     }
 
-    fn dump_delegated_account(
+    async fn dump_delegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
@@ -116,7 +119,7 @@ impl AccountDumper for AccountDumperBank {
             overrides,
             self.bank.last_blockhash(),
         );
-        let result = self.execute_transaction(transaction)?;
+        let result = self.execute_transaction(transaction).await?;
         if let Some(mut acc) = self.bank.get_account(pubkey) {
             acc.set_delegated(true);
             self.bank.store_account(*pubkey, acc);
@@ -124,7 +127,7 @@ impl AccountDumper for AccountDumperBank {
         Ok(result)
     }
 
-    fn dump_program_accounts(
+    async fn dump_program_accounts(
         &self,
         program_id_pubkey: &Pubkey,
         program_id_account: &Account,
@@ -146,10 +149,7 @@ impl AccountDumper for AccountDumperBank {
         .map_err(AccountDumperError::MutatorModificationError)?;
         let program_idl_modification =
             program_idl.map(|(program_idl_pubkey, program_idl_account)| {
-                AccountModification::from((
-                    &program_idl_pubkey,
-                    &program_idl_account,
-                ))
+                from_account(program_idl_pubkey, &program_idl_account)
             });
         let needs_upgrade = self.bank.has_account(program_id_pubkey);
         let transaction = transaction_to_clone_program(
@@ -160,10 +160,10 @@ impl AccountDumper for AccountDumperBank {
             program_idl_modification,
             self.bank.last_blockhash(),
         );
-        self.execute_transaction(transaction)
+        self.execute_transaction(transaction).await
     }
 
-    fn dump_program_account_with_old_bpf(
+    async fn dump_program_account_with_old_bpf(
         &self,
         program_pubkey: &Pubkey,
         program_account: &Account,
@@ -180,7 +180,7 @@ impl AccountDumper for AccountDumperBank {
         );
 
         let mut program_id_modification =
-            AccountModification::from((program_pubkey, program_account));
+            from_account(*program_pubkey, program_account);
         // point program account to the derived program data account address
         let program_id_state =
             bincode::serialize(&UpgradeableLoaderState::Program {
@@ -208,6 +208,17 @@ impl AccountDumper for AccountDumperBank {
             None,
             self.bank.last_blockhash(),
         );
-        self.execute_transaction(transaction)
+        self.execute_transaction(transaction).await
+    }
+}
+
+fn from_account(pubkey: Pubkey, account: &Account) -> AccountModification {
+    AccountModification {
+        pubkey,
+        lamports: Some(account.lamports),
+        owner: Some(account.owner),
+        executable: Some(account.executable),
+        data: Some(account.data.clone()),
+        rent_epoch: Some(account.rent_epoch),
     }
 }
