@@ -93,6 +93,18 @@ impl PhotonClient for PhotonClientImpl {
             .iter()
             .map(|pk| derive_cda_from_pda(pk).to_bytes())
             .collect();
+
+        if log::log_enabled!(log::Level::Debug) {
+            let pks_cdas: Vec<_> = pubkeys
+                .iter()
+                .zip(cdas.iter())
+                .map(|(pk, cda)| {
+                    (pk.to_string(), Pubkey::new_from_array(*cda).to_string())
+                })
+                .collect();
+            debug!("Fetching multiple accounts: {pks_cdas:?}");
+        }
+
         let Response {
             value: compressed_accs,
             context: Context { slot, .. },
