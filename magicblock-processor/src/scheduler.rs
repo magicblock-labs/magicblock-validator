@@ -1,5 +1,6 @@
 use std::sync::{atomic::AtomicUsize, Arc, RwLock};
 
+use locks::{WorkerId, MAX_SVM_WORKERS};
 use log::info;
 use magicblock_core::link::transactions::{
     ProcessableTransaction, TransactionToProcessRx,
@@ -12,10 +13,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 
-use crate::{
-    executor::{SimpleForkGraph, TransactionExecutor},
-    WorkerId,
-};
+use crate::executor::{SimpleForkGraph, TransactionExecutor};
 
 /// The central transaction scheduler responsible for distributing work to a
 /// pool of `TransactionExecutor` workers.
@@ -46,7 +44,8 @@ impl TransactionScheduler {
     /// 1.  Prepares the shared program cache and ensures necessary sysvars are in the `AccountsDb`.
     /// 2.  Creates a pool of `TransactionExecutor` workers, each with its own dedicated channel.
     /// 3.  Spawns each worker in its own OS thread for maximum isolation and performance.
-    pub fn new(workers: u8, state: TransactionSchedulerState) -> Self {
+    pub fn new(workers: u32, state: TransactionSchedulerState) -> Self {
+        let workers = workers.min(MAX_SVM_WORKERS);
         let index = Arc::new(AtomicUsize::new(0));
         let mut executors = Vec::with_capacity(workers as usize);
 
@@ -154,4 +153,6 @@ impl TransactionScheduler {
     }
 }
 
+pub mod locks;
+pub mod queue;
 pub mod state;

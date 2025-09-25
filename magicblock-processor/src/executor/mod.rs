@@ -20,7 +20,8 @@ use solana_svm::transaction_processor::{
 use tokio::{runtime::Builder, sync::mpsc::Sender};
 
 use crate::{
-    builtins::BUILTINS, scheduler::state::TransactionSchedulerState, WorkerId,
+    builtins::BUILTINS,
+    scheduler::{locks::WorkerId, state::TransactionSchedulerState},
 };
 
 /// A dedicated, single-threaded worker responsible for processing transactions using

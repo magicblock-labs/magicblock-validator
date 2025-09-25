@@ -149,6 +149,7 @@ rand = "0.8.5"
 rayon = "1.10.0"
 rusqlite = { version = "0.34.0", features = ["bundled"] }                                           # bundled sqlite 3.44
 rustc_version = "0.4"
+rustc-hash = "2.1"
 scc = "2.4"
 semver = "1.0.22"
 serde = "1.0.217"

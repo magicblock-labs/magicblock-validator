@@ -4031,6 +4031,7 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-program",
  "parking_lot 0.12.4",
+ "rustc-hash 2.1.1",
  "solana-account",
  "solana-address-lookup-table-program",
  "solana-bpf-loader-program",

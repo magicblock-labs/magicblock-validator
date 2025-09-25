@@ -38,6 +38,8 @@ solana-transaction = { workspace = true }
 solana-transaction-status = { workspace = true }
 solana-transaction-error = { workspace = true }
 
+rustc-hash = { workspace = true }
+
 [dev-dependencies]
 guinea = { workspace = true }
 solana-signature = { workspace = true }
