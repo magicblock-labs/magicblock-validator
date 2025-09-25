@@ -356,7 +356,7 @@ impl MagicValidator {
         let accounts = try_convert_accounts_config(&config.accounts).expect(
             "Failed to derive accounts config from provided magicblock config",
         );
-        let endpoints = accounts
+        let mut endpoints = accounts
             .remote_cluster
             .ws_urls()
             .into_iter()
@@ -365,7 +365,11 @@ impl MagicValidator {
                 pubsub_url,
             })
             .collect::<Vec<_>>();
-        // TODO: @@@ add photon client url
+
+        // TODO: @@@ HACK, make this configurable
+        endpoints.push(Endpoint::Compression {
+            url: "http://127.0.0.1:8784".to_string(),
+        });
 
         let cloner = ChainlinkCloner::new(
             committor_service,
