@@ -46,6 +46,11 @@ setup-schedulecommit-devnet:
 	RUN_TESTS=schedulecommit \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-schedulecommit-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=schedulecommit \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-schedulecommit-both:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedulecommit \
