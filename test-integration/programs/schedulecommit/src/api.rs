@@ -14,11 +14,13 @@ use crate::{
 
 pub fn init_account_instruction(
     payer: Pubkey,
+    player: Pubkey,
     committee: Pubkey,
 ) -> Instruction {
     let program_id = crate::id();
     let account_metas = vec![
         AccountMeta::new(payer, true),
+        AccountMeta::new(player, true),
         AccountMeta::new(committee, false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];

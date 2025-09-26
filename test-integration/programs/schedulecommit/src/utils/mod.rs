@@ -108,7 +108,12 @@ pub fn transfer_lamports<'a>(
     to_account_info: &AccountInfo<'a>,
     lamports: u64,
 ) -> Result<(), ProgramError> {
-    msg!("  transfer_lamports()");
+    msg!(
+        "  transfer_lamports() transferring {} lamports {} | {}",
+        lamports,
+        payer_info.key,
+        payer_info.owner
+    );
     if payer_info.lamports() < lamports {
         msg!("Err: payer has only {} lamports", payer_info.lamports());
         return Err(ProgramError::InsufficientFunds);
