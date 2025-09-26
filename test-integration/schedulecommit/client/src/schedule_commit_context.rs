@@ -1,3 +1,4 @@
+use log::*;
 use std::{fmt, ops::Deref};
 
 use anyhow::{Context, Result};
@@ -21,8 +22,11 @@ use solana_sdk::{
 };
 
 pub struct ScheduleCommitTestContext {
-    // The first payer from the committees array which is used to fund transactions
-    pub payer: Keypair,
+    // The first payer from the committees array which is used to fund transactions inside the
+    // ephemeral
+    pub payer_ephem: Keypair,
+    // The first payer from the committees array which is used to fund transactions on chain
+    pub payer_chain: Keypair,
     // The Payer keypairs along with its PDA pubkey which we'll commit
     pub committees: Vec<(Keypair, Pubkey)>,
 
@@ -40,7 +44,8 @@ impl fmt::Display for ScheduleCommitTestContext {
 }
 
 pub struct ScheduleCommitTestContextFields<'a> {
-    pub payer: &'a Keypair,
+    pub payer_ephem: &'a Keypair,
+    pub payer_chain: &'a Keypair,
     pub committees: &'a Vec<(Keypair, Pubkey)>,
     pub commitment: &'a CommitmentConfig,
     pub chain_client: Option<&'a RpcClient>,
@@ -64,27 +69,47 @@ impl ScheduleCommitTestContext {
     fn try_new_internal(ncommittees: usize, random_keys: bool) -> Result<Self> {
         let ictx = IntegrationTestContext::try_new()?;
 
+        let payer_chain = if random_keys {
+            Keypair::new()
+        } else {
+            Keypair::from_seed(&[0u8; 32]).unwrap()
+        };
+        let lamports = LAMPORTS_PER_SOL * 10;
+        let payer_chain_airdrop_sig =
+            ictx.airdrop_chain(&payer_chain.pubkey(), lamports)?;
+        debug!(
+            "Airdropped {} lamports to chain payer {} ({})",
+            lamports,
+            payer_chain.pubkey(),
+            payer_chain_airdrop_sig
+        );
+
         // Each committee is the payer and the matching PDA
         // The payer has money airdropped in order to init its PDA.
         // However in order to commit we can use any payer as the only
         // requirement is that the PDA is owned by its program.
         let committees = (0..ncommittees)
             .map(|_idx| {
-                let payer = if random_keys {
+                let payer_ephem = if random_keys {
                     Keypair::new()
                 } else {
-                    Keypair::from_seed(&[_idx as u8; 32]).unwrap()
+                    Keypair::from_seed(&[_idx as u8 + 100; 32]).unwrap()
                 };
-                ictx.airdrop_chain_and_delegate(&payer, LAMPORTS_PER_SOL)
-                    .unwrap();
-                let (pda, _) = pda_and_bump(&payer.pubkey());
-                (payer, pda)
+                ictx.airdrop_chain_and_delegate(
+                    &payer_chain,
+                    &payer_ephem,
+                    lamports,
+                )
+                .unwrap();
+                let (pda, _) = pda_and_bump(&payer_ephem.pubkey());
+                (payer_ephem, pda)
             })
             .collect::<Vec<(Keypair, Pubkey)>>();
 
-        let payer = committees[0].0.insecure_clone();
+        let payer_ephem = committees[0].0.insecure_clone();
         Ok(Self {
-            payer,
+            payer_chain,
+            payer_ephem,
             committees,
             common_ctx: ictx,
         })
@@ -97,25 +122,29 @@ impl ScheduleCommitTestContext {
         let ixs = self
             .committees
             .iter()
-            .map(|(payer, committee)| {
-                init_account_instruction(payer.pubkey(), *committee)
+            .map(|(player, committee)| {
+                init_account_instruction(
+                    self.payer_chain.pubkey(),
+                    player.pubkey(),
+                    *committee,
+                )
             })
             .collect::<Vec<_>>();
 
-        let payers = self
+        let mut signers = self
             .committees
             .iter()
             .map(|(payer, _)| payer)
             .collect::<Vec<_>>();
+        signers.push(&self.payer_chain);
 
-        // The init tx for all payers is funded by the first payer for simplicity
         let tx = Transaction::new_signed_with_payer(
             &ixs,
-            Some(&payers[0].pubkey()),
-            &payers,
+            Some(&self.payer_chain.pubkey()),
+            &signers,
             *self.try_chain_blockhash()?,
         );
-        self.try_chain_client()?
+        let sig = self.try_chain_client()?
             .send_and_confirm_transaction_with_spinner_and_config(
                 &tx,
                 self.commitment,
@@ -129,17 +158,20 @@ impl ScheduleCommitTestContext {
                     "Failed to initialize committees. Transaction signature: {}",
                     tx.get_signature()
                 )
-            })
+            })?;
+
+        debug!("Initialed committees: {sig}");
+        Ok(sig)
     }
 
     pub fn escrow_lamports_for_payer(&self) -> Result<Signature> {
-        let ixs = init_payer_escrow(self.payer.pubkey());
+        let ixs = init_payer_escrow(self.payer_ephem.pubkey());
 
         // The init tx for all payers is funded by the first payer for simplicity
         let tx = Transaction::new_signed_with_payer(
             &ixs,
-            Some(&self.payer.pubkey()),
-            &[&self.payer],
+            Some(&self.payer_ephem.pubkey()),
+            &[&self.payer_ephem],
             *self.try_chain_blockhash()?,
         );
         self.try_chain_client()?
@@ -220,7 +252,8 @@ impl ScheduleCommitTestContext {
 
     pub fn fields(&self) -> ScheduleCommitTestContextFields {
         ScheduleCommitTestContextFields {
-            payer: &self.payer,
+            payer_chain: &self.payer_chain,
+            payer_ephem: &self.payer_ephem,
             committees: &self.committees,
             commitment: &self.commitment,
             chain_client: self.common_ctx.chain_client.as_ref(),

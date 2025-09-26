@@ -73,7 +73,7 @@ fn test_schedule_commit_directly_with_single_ix() {
     // This fails since a CPI program id cannot be found.
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContextFields {
-        payer,
+        payer_ephem: payer,
         commitment,
         committees,
         ephem_blockhash,
@@ -113,7 +113,7 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
     // This fails since a CPI program id cannot be found.
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContextFields {
-        payer,
+        payer_ephem: payer,
         commitment,
         ephem_blockhash,
         ephem_client,
@@ -163,7 +163,7 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     // Fails since a CPI program id cannot be found.
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContextFields {
-        payer,
+        payer_ephem: payer,
         commitment,
         committees,
         ephem_blockhash,
@@ -224,7 +224,7 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
     // not matching the PDA's owner.
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContextFields {
-        payer,
+        payer_ephem: payer,
         commitment,
         committees,
         ephem_blockhash,
@@ -278,7 +278,7 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
     // The last one fails due to it not owning the PDAs.
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContextFields {
-        payer,
+        payer_ephem: payer,
         commitment,
         committees,
         ephem_blockhash,

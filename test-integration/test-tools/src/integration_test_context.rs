@@ -20,7 +20,6 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
     instruction::Instruction,
-    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     rent::Rent,
     signature::{Keypair, Signature},
@@ -545,55 +544,51 @@ impl IntegrationTestContext {
     /// then delegates it as on-curve
     pub fn airdrop_chain_and_delegate(
         &self,
-        payer: &Keypair,
+        payer_chain: &Keypair,
+        payer_ephem: &Keypair,
         lamports: u64,
-    ) -> anyhow::Result<(Signature, Signature, Signature)> {
-        // 1. Airdrop funds to the funder and payer itself
-        let payer_airdrop_sig =
-            self.airdrop_chain(&payer.pubkey(), lamports)?;
+    ) -> anyhow::Result<(Signature, Signature)> {
+        // 1. Airdrop funds to the payer we will clone into the ephem
+        let payer_ephem_airdrop_sig =
+            self.airdrop_chain(&payer_ephem.pubkey(), lamports)?;
         debug!(
-            "Airdropped {} lamports to payer {} ({})",
+            "Airdropped {} lamports to ephem payer {} ({})",
             lamports,
-            payer.pubkey(),
-            payer_airdrop_sig
-        );
-        let funder = Keypair::new();
-        let funder_airdrop_sig =
-            self.airdrop_chain(&funder.pubkey(), LAMPORTS_PER_SOL)?;
-        debug!(
-            "Airdropped {} lamports to funder {} ({})",
-            lamports,
-            funder.pubkey(),
-            funder_airdrop_sig
+            payer_ephem.pubkey(),
+            payer_ephem_airdrop_sig
         );
 
-        // 2.Delegate the payer
+        // 2.Delegate the ephem payer
         let delegated_already = self
-            .fetch_chain_account_owner(payer.pubkey())
+            .fetch_chain_account_owner(payer_ephem.pubkey())
             .map(|owner| owner.eq(&dlp::id()))
             .unwrap_or(false);
         let deleg_sig = if !delegated_already {
             let ixs = dlp_interface::create_delegate_ixs(
-                funder.pubkey(),
-                payer.pubkey(),
+                // We change the owner of the ephem account, thus cannot use it as payer
+                payer_chain.pubkey(),
+                payer_ephem.pubkey(),
                 self.ephem_validator_identity,
             );
             let mut tx =
-                Transaction::new_with_payer(&ixs, Some(&funder.pubkey()));
+                Transaction::new_with_payer(&ixs, Some(&payer_chain.pubkey()));
             let (deleg_sig, confirmed) = self
                 .send_and_confirm_transaction_chain(
                     &mut tx,
-                    &[&funder, payer],
+                    &[payer_chain, payer_ephem],
                 )?;
             assert!(confirmed, "Failed to confirm airdrop delegation");
-            debug!("Delegated payer {}", payer.pubkey());
+            debug!("Delegated payer {}", payer_ephem.pubkey());
             deleg_sig
         } else {
-            debug!("Payer {} already delegated, skipping", payer.pubkey());
+            debug!(
+                "Ephem payer {} already delegated, skipping",
+                payer_ephem.pubkey()
+            );
             Signature::default()
         };
 
-        Ok((payer_airdrop_sig, funder_airdrop_sig, deleg_sig))
+        Ok((payer_ephem_airdrop_sig, deleg_sig))
     }
 
     pub fn airdrop(

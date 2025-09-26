@@ -44,14 +44,14 @@ pub fn create_topup_ixs(
 }
 
 pub fn create_delegate_ixs(
-    funder: Pubkey,
-    recvr: Pubkey,
+    payer: Pubkey,
+    delegatee: Pubkey,
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
-    let change_owner_ix = system_instruction::assign(&recvr, &dlp::id());
+    let change_owner_ix = system_instruction::assign(&delegatee, &dlp::id());
     let delegate_ix = dlp::instruction_builder::delegate(
-        funder,
-        recvr,
+        payer,
+        delegatee,
         None,
         DelegateArgs {
             commit_frequency_ms: u32::MAX,

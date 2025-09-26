@@ -31,13 +31,15 @@ fn test_committing_one_account() {
         let ctx = get_context_with_delegated_committees(1);
 
         let ScheduleCommitTestContextFields {
-            payer,
+            payer_ephem: payer,
             committees,
             commitment,
             ephem_client,
             ephem_blockhash,
             ..
         } = ctx.fields();
+
+        debug!("Context initialized: {ctx}");
 
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
@@ -58,6 +60,7 @@ fn test_committing_one_account() {
         );
 
         let sig = tx.get_signature();
+        debug!("Submitting tx to commit committee {sig}",);
         let res = ephem_client
             .send_and_confirm_transaction_with_spinner_and_config(
                 &tx,
@@ -81,7 +84,7 @@ fn test_committing_two_accounts() {
         let ctx = get_context_with_delegated_committees(2);
 
         let ScheduleCommitTestContextFields {
-            payer,
+            payer_ephem: payer,
             committees,
             commitment,
             ephem_client,

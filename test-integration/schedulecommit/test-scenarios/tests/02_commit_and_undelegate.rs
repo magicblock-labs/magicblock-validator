@@ -49,7 +49,7 @@ fn commit_and_undelegate_one_account(
 ) {
     let ctx = get_context_with_delegated_committees(1);
     let ScheduleCommitTestContextFields {
-        payer,
+        payer_ephem: payer,
         committees,
         commitment,
         ephem_client,
@@ -110,7 +110,7 @@ fn commit_and_undelegate_two_accounts(
 ) {
     let ctx = get_context_with_delegated_committees(2);
     let ScheduleCommitTestContextFields {
-        payer,
+        payer_ephem: payer,
         committees,
         commitment,
         ephem_client,
@@ -281,7 +281,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         let (ctx, sig, tx_res) = commit_and_undelegate_one_account(false);
         info!("{} '{:?}'", sig, tx_res);
         let ScheduleCommitTestContextFields {
-            payer,
+            payer_ephem: payer,
             committees,
             commitment,
             ephem_client,
@@ -351,7 +351,7 @@ fn test_committed_and_undelegated_accounts_redelegation() {
         let (ctx, sig, tx_res) = commit_and_undelegate_two_accounts(false);
         info!("{} '{:?}'", sig, tx_res);
         let ScheduleCommitTestContextFields {
-            payer,
+            payer_ephem: payer,
             committees,
             commitment,
             ephem_client,

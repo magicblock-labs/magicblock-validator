@@ -87,7 +87,7 @@ pub fn assert_feepayer_was_committed(
     res: &ScheduledCommitResult<MainAccount>,
     is_single_stage: bool,
 ) {
-    let payer = ctx.payer.pubkey();
+    let payer = ctx.payer_ephem.pubkey();
 
     assert_eq!(res.feepayers.len(), 1, "includes 1 payer");
 
