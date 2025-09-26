@@ -5,6 +5,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::instruction::Instruction;
+use solana_sdk::system_instruction;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signature},
@@ -40,6 +41,25 @@ pub fn create_topup_ixs(
         ixs.push(delegate_ix);
     }
     ixs
+}
+
+pub fn create_delegate_ixs(
+    funder: Pubkey,
+    recvr: Pubkey,
+    validator: Option<Pubkey>,
+) -> Vec<Instruction> {
+    let change_owner_ix = system_instruction::assign(&recvr, &dlp::id());
+    let delegate_ix = dlp::instruction_builder::delegate(
+        funder,
+        recvr,
+        None,
+        DelegateArgs {
+            commit_frequency_ms: u32::MAX,
+            seeds: vec![],
+            validator,
+        },
+    );
+    vec![change_owner_ix, delegate_ix]
 }
 
 pub async fn top_up_ephemeral_fee_balance(

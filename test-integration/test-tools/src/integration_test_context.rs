@@ -20,6 +20,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
     instruction::Instruction,
+    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     rent::Rent,
     signature::{Keypair, Signature},
@@ -538,6 +539,61 @@ impl IntegrationTestContext {
             deleg_record,
             escrow_lamports,
         ))
+    }
+
+    /// Airdrop lamports to the payer on-chain account and
+    /// then delegates it as on-curve
+    pub fn airdrop_chain_and_delegate(
+        &self,
+        payer: &Keypair,
+        lamports: u64,
+    ) -> anyhow::Result<(Signature, Signature, Signature)> {
+        // 1. Airdrop funds to the funder and payer itself
+        let payer_airdrop_sig =
+            self.airdrop_chain(&payer.pubkey(), lamports)?;
+        debug!(
+            "Airdropped {} lamports to payer {} ({})",
+            lamports,
+            payer.pubkey(),
+            payer_airdrop_sig
+        );
+        let funder = Keypair::new();
+        let funder_airdrop_sig =
+            self.airdrop_chain(&funder.pubkey(), LAMPORTS_PER_SOL)?;
+        debug!(
+            "Airdropped {} lamports to funder {} ({})",
+            lamports,
+            funder.pubkey(),
+            funder_airdrop_sig
+        );
+
+        // 2.Delegate the payer
+        let delegated_already = self
+            .fetch_chain_account_owner(payer.pubkey())
+            .map(|owner| owner.eq(&dlp::id()))
+            .unwrap_or(false);
+        let deleg_sig = if !delegated_already {
+            let ixs = dlp_interface::create_delegate_ixs(
+                funder.pubkey(),
+                payer.pubkey(),
+                self.ephem_validator_identity,
+            );
+            let mut tx =
+                Transaction::new_with_payer(&ixs, Some(&funder.pubkey()));
+            let (deleg_sig, confirmed) = self
+                .send_and_confirm_transaction_chain(
+                    &mut tx,
+                    &[&funder, payer],
+                )?;
+            assert!(confirmed, "Failed to confirm airdrop delegation");
+            debug!("Delegated payer {}", payer.pubkey());
+            deleg_sig
+        } else {
+            debug!("Payer {} already delegated, skipping", payer.pubkey());
+            Signature::default()
+        };
+
+        Ok((payer_airdrop_sig, funder_airdrop_sig, deleg_sig))
     }
 
     pub fn airdrop(
