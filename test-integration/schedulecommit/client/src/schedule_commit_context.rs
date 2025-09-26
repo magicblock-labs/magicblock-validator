@@ -18,15 +18,16 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
+    system_program,
     transaction::Transaction,
 };
 
 pub struct ScheduleCommitTestContext {
+    // The first payer from the committees array which is used to fund transactions on chain
+    pub payer_chain: Keypair,
     // The first payer from the committees array which is used to fund transactions inside the
     // ephemeral
     pub payer_ephem: Keypair,
-    // The first payer from the committees array which is used to fund transactions on chain
-    pub payer_chain: Keypair,
     // The Payer keypairs along with its PDA pubkey which we'll commit
     pub committees: Vec<(Keypair, Pubkey)>,
 
@@ -35,9 +36,12 @@ pub struct ScheduleCommitTestContext {
 
 impl fmt::Display for ScheduleCommitTestContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "ScheduleCommitTestContext {{ committees: [")?;
+        writeln!(f, "ScheduleCommitTestContext {{ ")?;
+        writeln!(f, "payer_chain: {}, ", self.payer_chain.pubkey())?;
+        writeln!(f, "payer_ephem: {}, ", self.payer_ephem.pubkey())?;
+        writeln!(f, "committees: [")?;
         for (player, pda) in &self.committees {
-            writeln!(f, "Player: {} PDA: {}, ", player.pubkey(), pda)?;
+            writeln!(f, "  Player: {} PDA: {}, ", player.pubkey(), pda)?;
         }
         writeln!(f, "] }}")
     }
@@ -107,6 +111,35 @@ impl ScheduleCommitTestContext {
             .collect::<Vec<(Keypair, Pubkey)>>();
 
         let payer_ephem = committees[0].0.insecure_clone();
+
+        let payer_chain_on_chain = ictx
+            .fetch_chain_account(payer_chain.pubkey())
+            .with_context(|| "Failed to fetch chain payer account")?;
+        trace!("Payer Chain Account: {:#?}", payer_chain_on_chain);
+        assert!(payer_chain_on_chain.lamports >= lamports / 2,);
+        assert_eq!(payer_chain_on_chain.owner, system_program::id());
+
+        let payer_ephem_on_chain = ictx
+            .fetch_chain_account(payer_ephem.pubkey())
+            .with_context(|| "Failed to fetch ephemeral payer account")?;
+        trace!("Payer Ephem Account: {:#?}", payer_ephem_on_chain);
+        assert!(payer_ephem_on_chain.lamports >= lamports / 2,);
+        assert_eq!(payer_ephem_on_chain.owner, dlp::id());
+
+        let payer_chain_on_ephem =
+            ictx.fetch_ephem_account(payer_chain.pubkey())?;
+        trace!("Payer Chain Account on Ephem: {:#?}", payer_chain_on_ephem);
+        assert_eq!(payer_chain_on_ephem, payer_chain_on_chain);
+
+        let payer_ephem_on_ephem =
+            ictx.fetch_ephem_account(payer_ephem.pubkey())?;
+        trace!("Payer Ephem Account on Ephem: {:#?}", payer_ephem_on_ephem);
+        assert_eq!(
+            payer_ephem_on_ephem.lamports,
+            payer_ephem_on_chain.lamports
+        );
+        assert_eq!(payer_ephem_on_ephem.owner, system_program::id());
+
         Ok(Self {
             payer_chain,
             payer_ephem,

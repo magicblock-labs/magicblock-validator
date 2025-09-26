@@ -5824,6 +5824,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "magicblock-core 0.1.7",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "program-schedulecommit",
  "solana-program",
  "solana-rpc-client",
