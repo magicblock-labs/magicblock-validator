@@ -15,20 +15,6 @@ use solana_sdk::{
 pub fn get_context_with_delegated_committees(
     ncommittees: usize,
 ) -> ScheduleCommitTestContext {
-    get_context_with_delegated_committees_impl(ncommittees, true)
-}
-
-#[allow(dead_code)] // used in 03_commits_fee_payer.rs
-pub fn get_context_with_delegated_committees_without_payer_escrow(
-    ncommittees: usize,
-) -> ScheduleCommitTestContext {
-    get_context_with_delegated_committees_impl(ncommittees, false)
-}
-
-fn get_context_with_delegated_committees_impl(
-    ncommittees: usize,
-    escrow_lamports_for_payer: bool,
-) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
         ScheduleCommitTestContext::try_new(ncommittees)
     } else {
@@ -38,9 +24,6 @@ fn get_context_with_delegated_committees_impl(
 
     ctx.init_committees().unwrap();
     ctx.delegate_committees(None).unwrap();
-    if escrow_lamports_for_payer {
-        ctx.escrow_lamports_for_payer().unwrap();
-    }
     ctx
 }
 
