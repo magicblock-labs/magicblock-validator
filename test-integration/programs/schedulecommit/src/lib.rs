@@ -52,22 +52,25 @@ pub struct ScheduleCommitCpiArgs {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub enum ScheduleCommitInstruction {
+    /// - **0.**   `[WRITE, SIGNER]` Payer funding the initialization
+    /// - **1.**   `[SIGNER]`        Player requesting initialization
+    /// - **2.**   `[WRITE]`         Account for which initialization is requested
+    /// - **3.**   `[]`              System program
     Init,
 
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer funding the delegation
-    /// - **1.**   `[SIGNER]`        Player requesting delegation
-    /// - **2.**   `[WRITE]`         Account for which delegation is requested
-    /// - **3.**   `[]`              Delegate account owner program
-    /// - **4.**   `[WRITE]`         Buffer account
-    /// - **5.**   `[WRITE]`         Delegation record account
-    /// - **6.**   `[WRITE]`         Delegation metadata account
-    /// - **7.**   `[]`              Delegation program
-    /// - **8.**   `[]`              System program
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting and funcding the delegation
+    /// - **1.**   `[WRITE]`         Account for which delegation is requested
+    /// - **2.**   `[]`              Delegate account owner program
+    /// - **3.**   `[WRITE]`         Buffer account
+    /// - **4.**   `[WRITE]`         Delegation record account
+    /// - **5.**   `[WRITE]`         Delegation metadata account
+    /// - **6.**   `[]`              Delegation program
+    /// - **7.**   `[]`              System program
     DelegateCpi(DelegateCpiArgs),
 
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+    /// - **0.**   `[WRITE, SIGNER]` Payer funding the commit
     /// - **1**    `[]`              MagicContext (used to record scheduled commit)
     /// - **2**    `[]`              MagicBlock Program (used to schedule commit)
     /// - **3..n** `[]`              PDA accounts to be committed

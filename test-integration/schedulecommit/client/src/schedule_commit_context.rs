@@ -36,8 +36,8 @@ pub struct ScheduleCommitTestContext {
 impl fmt::Display for ScheduleCommitTestContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "ScheduleCommitTestContext {{ committees: [")?;
-        for (payer, pda) in &self.committees {
-            writeln!(f, "Payer: {} PDA: {}, ", payer.pubkey(), pda)?;
+        for (player, pda) in &self.committees {
+            writeln!(f, "Player: {} PDA: {}, ", player.pubkey(), pda)?;
         }
         writeln!(f, "] }}")
     }
@@ -160,7 +160,7 @@ impl ScheduleCommitTestContext {
                 )
             })?;
 
-        debug!("Initialed committees: {sig}");
+        debug!("Initialized committees: {sig}");
         Ok(sig)
     }
 
@@ -191,11 +191,12 @@ impl ScheduleCommitTestContext {
         blockhash: Option<Hash>,
     ) -> Result<Signature> {
         let mut ixs = vec![];
-        let mut payers = vec![];
-        for (payer, _) in &self.committees {
-            let ix = delegate_account_cpi_instruction(payer.pubkey());
+        for (player, _) in &self.committees {
+            let ix = delegate_account_cpi_instruction(
+                self.payer_chain.pubkey(),
+                player.pubkey(),
+            );
             ixs.push(ix);
-            payers.push(payer);
         }
 
         let blockhash = match blockhash {
@@ -205,11 +206,12 @@ impl ScheduleCommitTestContext {
 
         let tx = Transaction::new_signed_with_payer(
             &ixs,
-            Some(&payers[0].pubkey()),
-            &payers,
+            Some(&self.payer_chain.pubkey()),
+            &[&self.payer_chain],
             blockhash,
         );
-        self.try_chain_client()?
+        let sig = self
+            .try_chain_client()?
             .send_and_confirm_transaction_with_spinner_and_config(
                 &tx,
                 self.commitment,
@@ -223,7 +225,9 @@ impl ScheduleCommitTestContext {
                     "Failed to delegate committees '{:?}'",
                     tx.signatures[0]
                 )
-            })
+            })?;
+        debug!("Delegated committees: {sig}");
+        Ok(sig)
     }
 
     // -----------------
