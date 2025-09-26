@@ -29,6 +29,9 @@ use solana_sdk::{
     signature::Keypair,
     transaction::{SanitizedTransaction, Transaction},
 };
+use solana_svm_transaction::svm_message::SVMMessage;
+use magicblock_bank::bank_dev_utils::transactions::create_undelegate_transaction;
+use magicblock_program::validator::generate_validator_authority_if_needed;
 use test_tools_core::init_logger;
 
 #[test]
@@ -291,4 +294,38 @@ fn test_bank_sysvars_from_account() {
     let tx = create_sysvars_from_account_transaction(&bank);
     bank.advance_slot();
     execute_and_check_results(&bank, tx);
+}
+
+#[test]
+fn test_undelegate_persists_delegated_flag() {
+    use solana_sdk::system_program;
+    use magicblock_program::pubkey;
+
+    pub const DELEGATION_PROGRAM_ID: Pubkey =
+        pubkey!("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
+
+    init_logger!();
+    generate_validator_authority_if_needed();
+
+    let (genesis_config, _) = create_genesis_config(u64::MAX);
+    let bank = Bank::new_for_tests(&genesis_config, None, None).unwrap();
+
+    let tx = create_undelegate_transaction(&bank);
+    let undelegated_pubkey = *tx.fee_payer();
+
+    let undelegated_account = bank.get_account(&undelegated_pubkey);
+    assert!(undelegated_account.is_some());
+    let undelegated_account = undelegated_account.unwrap();
+    assert_eq!(undelegated_account.is_delegated(), true);
+    assert_eq!(undelegated_account.owner(), &system_program::id());
+
+    bank.advance_slot();
+    execute_and_check_results(&bank, tx);
+    bank.advance_slot();
+
+    let undelegated_account1 = bank.get_account(&undelegated_pubkey);
+    assert!(undelegated_account1.is_some());
+    let undelegated_account1 = undelegated_account1.unwrap();
+    assert_eq!(undelegated_account1.owner(), &DELEGATION_PROGRAM_ID);
+    assert_eq!(undelegated_account1.is_delegated(), false);
 }

@@ -407,6 +407,7 @@ mod tests {
         }
         let committed_account = processed_scheduled.last().unwrap();
         assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
+        assert_eq!(*committed_account.is_delegated(), false);
     }
 
     #[test]
@@ -622,6 +623,7 @@ mod tests {
             for _ in &[committee_uno, committee_dos, committee_tres] {
                 let committed_account = processed_scheduled.pop().unwrap();
                 assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
+                assert_eq!(*committed_account.is_delegated(), false);
             }
         }
     }

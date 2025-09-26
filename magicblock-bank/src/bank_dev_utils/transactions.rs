@@ -1,4 +1,5 @@
 use itertools::izip;
+use magicblock_program::{instruction::MagicBlockInstruction, MAGIC_CONTEXT_PUBKEY, MAGIC_CONTEXT_SIZE};
 use rayon::{
     iter::IndexedParallelIterator,
     prelude::{
@@ -6,7 +7,7 @@ use rayon::{
     },
 };
 use solana_sdk::{
-    account::Account,
+    account::{Account, AccountSharedData},
     hash::Hash,
     instruction::{AccountMeta, Instruction},
     message::{v0::LoadedAddresses, Message},
@@ -65,6 +66,27 @@ pub fn create_funded_account(bank: &Bank, lamports: Option<u64>) -> Keypair {
         }
         .into(),
     );
+
+    account
+}
+
+fn create_delegated_account(bank: &Bank, lamports: Option<u64>) -> Keypair {
+    let account = Keypair::new();
+    let lamports = lamports.unwrap_or_else(|| {
+        let rent_exempt_reserve = Rent::default().minimum_balance(0);
+        rent_exempt_reserve + DEFAULT_LAMPORTS_PER_SIGNATURE
+    });
+
+    let mut shared: AccountSharedData = Account {
+        lamports,
+        data: vec![],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: Epoch::MAX,
+    }
+    .into();
+    shared.set_delegated(true);
+    bank.store_account(account.pubkey(), shared);
 
     account
 }
@@ -348,6 +370,49 @@ fn create_sysvars_from_account_instruction(
             AccountMeta::new_readonly(sysvar::slot_history::id(), false),
         ],
     )
+}
+
+fn create_undelegate_instruction(
+    payer: &Pubkey,
+    accounts: &[Pubkey],
+) -> Instruction {
+    let ix = MagicBlockInstruction::ScheduleCommitAndUndelegate;
+    let mut account_metas = vec![
+        AccountMeta::new(*payer, true),
+        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+    ];
+    account_metas.extend(
+        accounts
+            .iter()
+            .map(|account| AccountMeta::new(*account, true)),
+    );
+    Instruction::new_with_bincode(magicblock_program::id(), &ix, account_metas)
+}
+
+pub fn create_undelegate_transaction(bank: &Bank) -> SanitizedTransaction {
+    let payer = create_delegated_account(bank, Some(LAMPORTS_PER_SOL));
+    bank.store_account(
+        MAGIC_CONTEXT_PUBKEY,
+        Account {
+            lamports: u64::MAX,
+            data: vec![0; MAGIC_CONTEXT_SIZE],
+            owner: system_program::id(),
+            executable: false,
+            rent_epoch: Epoch::MAX,
+        }.into()
+    );
+
+    let undelegate_ix =
+        create_undelegate_instruction(&payer.pubkey(), &[payer.pubkey()]);
+    // 4. Run all Instructions as part of one Transaction
+    let message = Message::new(&[undelegate_ix], Some(&payer.pubkey()));
+    let transaction =
+        Transaction::new(&[&payer], message, bank.last_blockhash());
+    SanitizedTransaction::try_from_legacy_transaction(
+        transaction,
+        &Default::default(),
+    )
+    .unwrap()
 }
 
 // -----------------
