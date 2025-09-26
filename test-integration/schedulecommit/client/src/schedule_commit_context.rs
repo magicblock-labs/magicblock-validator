@@ -75,7 +75,7 @@ impl ScheduleCommitTestContext {
                 } else {
                     Keypair::from_seed(&[_idx as u8; 32]).unwrap()
                 };
-                ictx.airdrop_chain_escrowed(&payer.pubkey(), LAMPORTS_PER_SOL)
+                ictx.airdrop_chain_escrowed(&payer, LAMPORTS_PER_SOL)
                     .unwrap();
                 let (pda, _) = pda_and_bump(&payer.pubkey());
                 (payer, pda)
