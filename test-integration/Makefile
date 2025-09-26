@@ -27,6 +27,8 @@ list:
 list-programs:
 	@echo $(PROGRAMS_SO)
 
+programs: $(PROGRAMS_SO)
+
 test: $(PROGRAMS_SO)
 	$(MAKE) chainlink-prep-programs -C ./test-chainlink && \
 	RUST_BACKTRACE=1 \
@@ -200,4 +202,4 @@ ci-fmt:
 ci-lint:
 	cargo clippy --all-targets -- -D warnings
 
-.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-chainlink setup-chainlink-devnet test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list ci-fmt ci-lint
+.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-chainlink setup-chainlink-devnet test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list ci-fmt ci-lint programs
