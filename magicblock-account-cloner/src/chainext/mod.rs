@@ -82,15 +82,9 @@ impl ChainlinkCloner {
         account: &AccountSharedData,
         recent_blockhash: Hash,
     ) -> Transaction {
-        let lamports = if account.compressed() {
-            let rent = Rent::default().minimum_balance(account.data().len());
-            account.lamports() + rent
-        } else {
-            account.lamports()
-        };
         let account_modification = AccountModification {
             pubkey: *pubkey,
-            lamports: Some(lamports),
+            lamports: Some(account.lamports()),
             owner: Some(*account.owner()),
             rent_epoch: Some(account.rent_epoch()),
             data: Some(account.data().to_owned()),
