@@ -394,7 +394,6 @@ where
                         None
                     })
             })
-            .filter(|(_, _, _, acc)| acc.is_delegated())
             .filter(|(_, _, prev_hash, acc)| {
                 prev_hash.map_or(true, |hash| hash_account(acc) != hash)
             })

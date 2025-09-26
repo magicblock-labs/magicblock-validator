@@ -86,15 +86,13 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
     generate_validator_authority_if_needed();
     let commit_needed_pubkey = Pubkey::new_unique();
     let commit_needed_account = generate_account(&commit_needed_pubkey);
-    let mut commit_needed_account_shared =
+    let commit_needed_account_shared =
         AccountSharedData::from(commit_needed_account.clone());
-    commit_needed_account_shared.set_delegated(true);
 
     let commit_not_needed_pubkey = Pubkey::new_unique();
     let commit_not_needed_account = generate_account(&commit_not_needed_pubkey);
-    let mut commit_not_needed_account_shared =
+    let commit_not_needed_account_shared =
         AccountSharedData::from(commit_not_needed_account.clone());
-    commit_not_needed_account_shared.set_delegated(true);
 
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_cloner = AccountClonerStub::default();
