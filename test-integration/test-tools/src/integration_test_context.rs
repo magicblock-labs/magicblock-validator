@@ -20,7 +20,6 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
     instruction::Instruction,
-    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     rent::Rent,
     signature::{Keypair, Signature},
@@ -500,7 +499,7 @@ impl IntegrationTestContext {
     }
     /// Airdrop lamports to the payer on-chain account and
     /// then top up the ephemeral fee balance with half of that
-    pub async fn airdrop_chain_escrowed(
+    pub fn airdrop_chain_escrowed(
         &self,
         payer: &Keypair,
         lamports: u64,
@@ -515,26 +514,23 @@ impl IntegrationTestContext {
         );
 
         // 2. Top up the ephemeral fee balance account from the payer
-        let rpc_client = async_rpc_client(self.try_chain_client()?);
-        let topup_sol = (lamports / 2) / LAMPORTS_PER_SOL;
+        let topup_lamports = lamports / 2;
 
-        let (escrow_sig, ephemeral_balance_pda, deleg_record) =
-            dlp_interface::top_up_ephemeral_fee_balance(
-                &rpc_client,
-                payer,
-                payer.pubkey(),
-                topup_sol,
-                self.ephem_validator_identity,
-            )
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to airdrop escrowed chain account from '{}'",
-                    payer.pubkey()
-                )
-            })?;
+        let ixs = dlp_interface::create_topup_ixs(
+            payer.pubkey(),
+            payer.pubkey(),
+            topup_lamports,
+            self.ephem_validator_identity,
+        );
+        let (escrow_sig, confirmed) =
+            self.send_and_confirm_instructions_with_payer_chain(&ixs, payer)?;
+        assert!(confirmed, "Failed to confirm escrow airdrop");
+
+        let (ephemeral_balance_pda, deleg_record) =
+            dlp_interface::escrow_pdas(&payer.pubkey());
+
         let escrow_lamports =
-            topup_sol * LAMPORTS_PER_SOL + Rent::default().minimum_balance(0);
+            topup_lamports + Rent::default().minimum_balance(0);
         Ok((
             airdrop_sig,
             escrow_sig,

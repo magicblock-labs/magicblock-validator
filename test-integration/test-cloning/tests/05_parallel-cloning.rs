@@ -161,7 +161,6 @@ async fn test_multiple_transfers_from_multiple_escrows_in_parallel() {
             let ctx = ctx.clone();
             join_set.spawn(async move {
                 ctx.airdrop_chain_escrowed(&kp_escrowed, 2 * LAMPORTS_PER_SOL)
-                    .await
                     .unwrap();
                 kp_escrowed
             });
@@ -237,9 +236,8 @@ async fn test_multiple_transfers_from_multiple_escrows_in_parallel() {
 //       that we can run multiple transactions in paralle.
 //       We should move this test once we implement the proper parallel transaction
 //       executor
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_multiple_transfers_from_same_escrow_different_amounts_in_parallel(
-) {
+#[test]
+fn test_multiple_transfers_from_same_escrow_different_amounts_in_parallel() {
     init_logger!();
     let ctx = Arc::new(IntegrationTestContext::try_new().unwrap());
 
@@ -253,7 +251,6 @@ async fn test_multiple_transfers_from_same_escrow_different_amounts_in_parallel(
 
     let kp_escrowed = Keypair::new();
     ctx.airdrop_chain_escrowed(&kp_escrowed, 30 * LAMPORTS_PER_SOL)
-        .await
         .unwrap();
 
     // 3. Fetch escrowed account to ensure that the fetch + clone already happened before
