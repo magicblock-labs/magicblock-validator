@@ -14,7 +14,7 @@ use schedulecommit_client::{
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::{
     client_error::{Error as ClientError, ErrorKind},
-    config::RpcSendTransactionConfig,
+    config::{RpcSendTransactionConfig, RpcSimulateTransactionConfig},
     request::RpcError,
 };
 use solana_sdk::{
@@ -252,18 +252,34 @@ fn assert_cannot_increase_committee_count(
 fn assert_can_increase_committee_count(
     pda: Pubkey,
     payer: &Keypair,
-    blockhash: Hash,
-    chain_client: &RpcClient,
+    rpc_client: &RpcClient,
     commitment: &CommitmentConfig,
 ) {
     let ix = increase_count_instruction(pda);
+    let blockhash = rpc_client.get_latest_blockhash().unwrap();
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&payer.pubkey()),
         &[&payer],
         blockhash,
     );
-    let tx_res = chain_client
+    let simulation_res = rpc_client
+        .simulate_transaction_with_config(
+            &tx,
+            RpcSimulateTransactionConfig {
+                sig_verify: false,
+                replace_recent_blockhash: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    debug!("Simulation result: {:#?}", simulation_res);
+    debug!(
+        "Simulation logs for increasing count: {:?}",
+        simulation_res.value.logs
+    );
+
+    let tx_res = rpc_client
         .send_and_confirm_transaction_with_spinner_and_config(
             &tx,
             *commitment,
@@ -272,6 +288,9 @@ fn assert_can_increase_committee_count(
                 ..Default::default()
             },
         );
+    if let Err(err) = &tx_res {
+        error!("Failed to increase count: {:?} ({})", err, rpc_client.url());
+    }
     assert!(tx_res.is_ok());
 }
 
@@ -279,9 +298,10 @@ fn assert_can_increase_committee_count(
 fn test_committed_and_undelegated_single_account_redelegation() {
     run_test!({
         let (ctx, sig, tx_res) = commit_and_undelegate_one_account(false);
-        info!("{} '{:?}'", sig, tx_res);
+        debug!("Committed and undelegated account {} '{:?}'", sig, tx_res);
         let ScheduleCommitTestContextFields {
             payer_ephem,
+            payer_chain,
             committees,
             commitment,
             ephem_client,
@@ -298,34 +318,35 @@ fn test_committed_and_undelegated_single_account_redelegation() {
             ephem_client,
             commitment,
         );
+        debug!("✅ Cannot increase count in ephemeral after undelegation triggered");
 
         // 2. Wait for commit + undelegation to finish and try chain again
         {
             verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
+            debug!("Undelegation verified from logs");
 
-            let blockhash = chain_client.get_latest_blockhash().unwrap();
             assert_can_increase_committee_count(
                 committees[0].1,
-                payer_ephem,
-                blockhash,
+                payer_chain,
                 chain_client,
                 commitment,
+            );
+            debug!(
+                "✅ Can increase count on chain after undelegation completed"
             );
         }
 
         // 3. Re-delegate the same account
         {
             std::thread::sleep(std::time::Duration::from_secs(2));
-            ctx.delegate_committees(None).unwrap();
+            ctx.delegate_committees().unwrap();
         }
 
         // 4. Now we can modify it in the ephemeral again and no longer on chain
         {
-            let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
             assert_can_increase_committee_count(
                 committees[0].1,
                 payer_ephem,
-                ephem_blockhash,
                 ephem_client,
                 commitment,
             );
@@ -382,18 +403,15 @@ fn test_committed_and_undelegated_accounts_redelegation() {
             verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
 
             // we need a new blockhash otherwise the tx is identical to the above
-            let blockhash = chain_client.get_latest_blockhash().unwrap();
             assert_can_increase_committee_count(
                 committees[0].1,
                 payer,
-                blockhash,
                 chain_client,
                 commitment,
             );
             assert_can_increase_committee_count(
                 committees[1].1,
                 payer,
-                blockhash,
                 chain_client,
                 commitment,
             );
@@ -402,23 +420,20 @@ fn test_committed_and_undelegated_accounts_redelegation() {
         // 3. Re-delegate the same accounts
         {
             std::thread::sleep(std::time::Duration::from_secs(2));
-            ctx.delegate_committees(None).unwrap();
+            ctx.delegate_committees().unwrap();
         }
 
         // 4. Now we can modify them in the ephemeral again and no longer on chain
         {
-            let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
             assert_can_increase_committee_count(
                 committees[0].1,
                 payer,
-                ephem_blockhash,
                 ephem_client,
                 commitment,
             );
             assert_can_increase_committee_count(
                 committees[1].1,
                 payer,
-                ephem_blockhash,
                 ephem_client,
                 commitment,
             );

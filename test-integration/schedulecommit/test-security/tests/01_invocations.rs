@@ -35,7 +35,7 @@ fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
     .unwrap();
     ctx.escrow_lamports_for_payer().unwrap();
     ctx.init_committees().unwrap();
-    ctx.delegate_committees(None).unwrap();
+    ctx.delegate_committees().unwrap();
 
     ctx
 }

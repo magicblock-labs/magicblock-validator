@@ -227,13 +227,13 @@ impl ScheduleCommitTestContext {
             ixs.push(ix);
         }
 
-        let blockhash = self.try_chain_blockhash()?;
+        let chain_blockhash = self.try_chain_blockhash()?;
 
         let tx = Transaction::new_signed_with_payer(
             &ixs,
             Some(&self.payer_chain.pubkey()),
             &[&self.payer_chain],
-            blockhash,
+            chain_blockhash,
         );
         let sig = self
             .try_chain_client()?
@@ -241,13 +241,13 @@ impl ScheduleCommitTestContext {
                 &tx,
                 self.commitment,
                 RpcSendTransactionConfig {
-                    skip_preflight: false,
+                    skip_preflight: true,
                     ..Default::default()
                 },
             )
             .with_context(|| {
                 format!(
-                    "Failed to delegate committees '{:?}'",
+                    "Failed to delegate committees on chain '{:?}'",
                     tx.signatures[0]
                 )
             })?;
