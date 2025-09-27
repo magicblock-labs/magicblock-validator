@@ -357,13 +357,20 @@ fn process_increase_count(accounts: &[AccountInfo]) -> ProgramResult {
     // NOTE: we don't check if the player owning the PDA is signer here for simplicity
     let accounts_iter = &mut accounts.iter();
     let account = next_account_info(accounts_iter)?;
+    msg!("Counter account key {}", account.key);
     let mut main_account = {
         let main_account_data = account.try_borrow_data()?;
         MainAccount::try_from_slice(&main_account_data)?
     };
+    msg!("Owner: {}", account.owner);
+    msg!("Counter account {:#?}", main_account);
     main_account.count += 1;
-    main_account
-        .serialize(&mut &mut account.try_borrow_mut_data()?.as_mut())?;
+    msg!("Increased count {:#?}", main_account);
+    let mut mut_data = account.try_borrow_mut_data()?;
+    let mut as_mut: &mut [u8] = mut_data.as_mut();
+    msg!("Mutating buffer of len: {}", as_mut.len());
+    main_account.serialize(&mut as_mut)?;
+    msg!("Serialized counter");
     Ok(())
 }
 
