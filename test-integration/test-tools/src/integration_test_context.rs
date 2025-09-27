@@ -780,6 +780,7 @@ impl IntegrationTestContext {
                 ixs,
                 payer,
                 self.commitment,
+                "ephemeral",
             )
             .with_context(|| {
                 format!(
@@ -801,6 +802,7 @@ impl IntegrationTestContext {
                 ixs,
                 payer,
                 self.commitment,
+                "chain",
             )
             .with_context(|| {
                 format!(

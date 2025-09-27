@@ -21,11 +21,13 @@ pub fn send_and_confirm_instructions_with_payer(
     ixs: &[Instruction],
     payer: &Keypair,
     commitment: CommitmentConfig,
+    label: &str,
 ) -> Result<(Signature, bool), client_error::Error> {
     debug!(
-        "Sending transaction {} instructions, payer: {}",
+        "Sending {} with {} instructions, payer: {}",
+        label,
+        ixs.len(),
         payer.pubkey(),
-        ixs.len()
     );
     let (sig, tx) = send_instructions_with_payer(rpc_client, ixs, payer)?;
     debug!("Confirming transaction with signature: {}", sig);

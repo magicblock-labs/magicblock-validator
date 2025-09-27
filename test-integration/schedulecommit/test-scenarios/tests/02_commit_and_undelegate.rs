@@ -1,5 +1,5 @@
 use integration_test_tools::{
-    run_test,
+    conversions::stringify_simulation_result, run_test,
     scheduled_commits::extract_scheduled_commit_sent_signature_from_logs,
     transactions::send_and_confirm_instructions_with_payer,
 };
@@ -20,7 +20,6 @@ use solana_rpc_client_api::{
 };
 use solana_sdk::{
     commitment_config::CommitmentConfig,
-    hash::Hash,
     instruction::InstructionError,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
@@ -201,25 +200,33 @@ fn test_committing_and_undelegating_two_accounts_success() {
 fn assert_cannot_increase_committee_count(
     pda: Pubkey,
     payer: &Keypair,
-    blockhash: Hash,
-    client: &RpcClient,
-    commitment: &CommitmentConfig,
+    rpc_client: &RpcClient,
 ) {
     let ix = increase_count_instruction(pda);
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&payer.pubkey()),
-        &[&payer],
-        blockhash,
+        &[payer],
+        rpc_client.get_latest_blockhash().unwrap(),
     );
-    let tx_res = client.send_and_confirm_transaction_with_spinner_and_config(
-        &tx,
-        *commitment,
-        RpcSendTransactionConfig {
-            skip_preflight: true,
-            ..Default::default()
-        },
+    let simulation_result = rpc_client.simulate_transaction(&tx).unwrap();
+    let simulation =
+        stringify_simulation_result(simulation_result.value, &tx.signatures[0]);
+    debug!(
+        "{}\nExpecting ExternalAccountDataModified ({})",
+        simulation,
+        rpc_client.url()
     );
+
+    let tx_res = rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            rpc_client.commitment(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
     let (tx_result_err, tx_err) = extract_transaction_error(tx_res);
     if let Some(tx_err) = tx_err {
         assert_is_instruction_error(
@@ -234,9 +241,11 @@ fn assert_cannot_increase_committee_count(
         // we run the transaction that tried to increase the count
         macro_rules! invalid_error {
             ($tx_result_err:expr) => {
+                // TODO: @@@ this is obsolete
                 panic!("Expected transaction or transwise NotAllWritablesDelegated error, got: {:?}", $tx_result_err)
             };
         }
+
         match &tx_result_err.kind {
             ErrorKind::RpcError(RpcError::RpcResponseError {
                 message, ..
@@ -262,6 +271,7 @@ fn assert_can_increase_committee_count(
         &[ix],
         payer,
         *commitment,
+        "assert_can_increase_committee_count",
     );
 
     if let Err(err) = &tx_res {
@@ -286,13 +296,10 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         let chain_client = ctx.try_chain_client().unwrap();
 
         // 1. Show we cannot use it in the ephemeral anymore
-        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
         assert_cannot_increase_committee_count(
             committees[0].1,
             payer_ephem,
-            ephem_blockhash,
             ephem_client,
-            commitment,
         );
         debug!("✅ Cannot increase count in ephemeral after undelegation triggered");
 
@@ -316,25 +323,25 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         {
             std::thread::sleep(std::time::Duration::from_secs(2));
             ctx.delegate_committees().unwrap();
+            debug!("✅ Redelegated committees");
         }
 
         // 4. Now we can modify it in the ephemeral again and no longer on chain
         {
+            assert_cannot_increase_committee_count(
+                committees[0].1,
+                payer_chain,
+                chain_client,
+            );
+            debug!("✅ Cannot increase count on chain after redelegation");
+
             assert_can_increase_committee_count(
                 committees[0].1,
                 payer_ephem,
                 ephem_client,
                 commitment,
             );
-
-            let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
-            assert_cannot_increase_committee_count(
-                committees[0].1,
-                payer_ephem,
-                chain_blockhash,
-                chain_client,
-                commitment,
-            );
+            debug!("✅ Can increase count in ephemeral after redelegation");
         }
     });
 }
@@ -357,20 +364,15 @@ fn test_committed_and_undelegated_accounts_redelegation() {
 
         // 1. Show we cannot use them in the ephemeral anymore
         {
-            let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
             assert_cannot_increase_committee_count(
                 committees[0].1,
                 payer,
-                ephem_blockhash,
                 ephem_client,
-                commitment,
             );
             assert_cannot_increase_committee_count(
                 committees[1].1,
                 payer,
-                ephem_blockhash,
                 ephem_client,
-                commitment,
             );
         }
 
@@ -414,20 +416,15 @@ fn test_committed_and_undelegated_accounts_redelegation() {
                 commitment,
             );
 
-            let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
             assert_cannot_increase_committee_count(
                 committees[0].1,
                 payer,
-                chain_blockhash,
                 chain_client,
-                commitment,
             );
             assert_cannot_increase_committee_count(
                 committees[1].1,
                 payer,
-                chain_blockhash,
                 chain_client,
-                commitment,
             );
         }
     });

@@ -2,6 +2,7 @@ use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
 use integration_test_tools::scheduled_commits::ScheduledCommitResult;
 use program_schedulecommit::MainAccount;
 use schedulecommit_client::ScheduleCommitTestContext;
+use solana_rpc_client_api::client_error;
 use solana_sdk::{
     instruction::InstructionError,
     pubkey::Pubkey,
@@ -242,11 +243,8 @@ pub fn assert_is_instruction_error(
 }
 
 pub fn extract_transaction_error(
-    tx_result: Result<Signature, solana_rpc_client_api::client_error::Error>,
-) -> (
-    solana_rpc_client_api::client_error::Error,
-    Option<TransactionError>,
-) {
+    tx_result: Result<Signature, client_error::Error>,
+) -> (client_error::Error, Option<TransactionError>) {
     let tx_result_err = match tx_result {
         Ok(sig) => panic!("Expected error, got signature: {:?}", sig),
         Err(err) => err,
