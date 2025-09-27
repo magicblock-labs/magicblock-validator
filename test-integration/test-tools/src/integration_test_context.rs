@@ -18,7 +18,6 @@ use solana_sdk::{
     account::Account,
     clock::Slot,
     commitment_config::CommitmentConfig,
-    hash::Hash,
     instruction::Instruction,
     pubkey::Pubkey,
     rent::Rent,
@@ -67,8 +66,6 @@ pub struct IntegrationTestContext {
     pub chain_client: Option<RpcClient>,
     pub ephem_client: Option<RpcClient>,
     pub ephem_validator_identity: Option<Pubkey>,
-    pub chain_blockhash: Option<Hash>,
-    pub ephem_blockhash: Option<Hash>,
 }
 
 impl IntegrationTestContext {
@@ -79,14 +76,11 @@ impl IntegrationTestContext {
             commitment,
         );
         let validator_identity = ephem_client.get_identity()?;
-        let ephem_blockhash = ephem_client.get_latest_blockhash()?;
         Ok(Self {
             commitment,
             chain_client: None,
             ephem_client: Some(ephem_client),
             ephem_validator_identity: Some(validator_identity),
-            chain_blockhash: None,
-            ephem_blockhash: Some(ephem_blockhash),
         })
     }
 
@@ -96,14 +90,11 @@ impl IntegrationTestContext {
             Self::url_chain().to_string(),
             commitment,
         );
-        let chain_blockhash = chain_client.get_latest_blockhash()?;
         Ok(Self {
             commitment,
             chain_client: Some(chain_client),
             ephem_client: None,
             ephem_validator_identity: None,
-            chain_blockhash: Some(chain_blockhash),
-            ephem_blockhash: None,
         })
     }
 
@@ -119,16 +110,12 @@ impl IntegrationTestContext {
             commitment,
         );
         let validator_identity = ephem_client.get_identity()?;
-        let chain_blockhash = chain_client.get_latest_blockhash()?;
-        let ephem_blockhash = ephem_client.get_latest_blockhash()?;
 
         Ok(Self {
             commitment,
             chain_client: Some(chain_client),
             ephem_client: Some(ephem_client),
             ephem_validator_identity: Some(validator_identity),
-            chain_blockhash: Some(chain_blockhash),
-            ephem_blockhash: Some(ephem_blockhash),
         })
     }
 

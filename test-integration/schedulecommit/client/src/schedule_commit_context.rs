@@ -55,8 +55,6 @@ pub struct ScheduleCommitTestContextFields<'a> {
     pub chain_client: Option<&'a RpcClient>,
     pub ephem_client: &'a RpcClient,
     pub validator_identity: &'a Pubkey,
-    pub chain_blockhash: Option<&'a Hash>,
-    pub ephem_blockhash: &'a Hash,
 }
 
 impl ScheduleCommitTestContext {
@@ -175,7 +173,7 @@ impl ScheduleCommitTestContext {
             &ixs,
             Some(&self.payer_chain.pubkey()),
             &signers,
-            *self.try_chain_blockhash()?,
+            self.try_chain_blockhash()?,
         );
         let sig = self.try_chain_client()?
             .send_and_confirm_transaction_with_spinner_and_config(
@@ -205,7 +203,7 @@ impl ScheduleCommitTestContext {
             &ixs,
             Some(&self.payer_ephem.pubkey()),
             &[&self.payer_ephem],
-            *self.try_chain_blockhash()?,
+            self.try_chain_blockhash()?,
         );
         self.try_chain_client()?
             .send_and_confirm_transaction_with_spinner_and_config(
@@ -219,10 +217,7 @@ impl ScheduleCommitTestContext {
             .with_context(|| "Failed to escrow fund for payer")
     }
 
-    pub fn delegate_committees(
-        &self,
-        blockhash: Option<Hash>,
-    ) -> Result<Signature> {
+    pub fn delegate_committees(&self) -> Result<Signature> {
         let mut ixs = vec![];
         for (player, _) in &self.committees {
             let ix = delegate_account_cpi_instruction(
@@ -232,10 +227,7 @@ impl ScheduleCommitTestContext {
             ixs.push(ix);
         }
 
-        let blockhash = match blockhash {
-            Some(blockhash) => blockhash,
-            None => *self.try_chain_blockhash()?,
-        };
+        let blockhash = self.try_chain_blockhash()?;
 
         let tx = Transaction::new_signed_with_payer(
             &ixs,
@@ -249,7 +241,7 @@ impl ScheduleCommitTestContext {
                 &tx,
                 self.commitment,
                 RpcSendTransactionConfig {
-                    skip_preflight: true,
+                    skip_preflight: false,
                     ..Default::default()
                 },
             )
@@ -273,18 +265,21 @@ impl ScheduleCommitTestContext {
         Ok(chain_client)
     }
 
-    pub fn try_chain_blockhash(&self) -> anyhow::Result<&Hash> {
-        let Some(chain_blockhash) = self.chain_blockhash.as_ref() else {
-            return Err(anyhow::anyhow!("Chain blockhash  not available"));
+    pub fn try_chain_blockhash(&self) -> anyhow::Result<Hash> {
+        let Some(chain_client) = self.chain_client.as_ref() else {
+            return Err(anyhow::anyhow!("Chain client not available"));
         };
-        Ok(chain_blockhash)
+        chain_client
+            .get_latest_blockhash()
+            .with_context(|| "Failed to get latest blockhash from chain client")
     }
 
     pub fn ephem_client(&self) -> &RpcClient {
         self.common_ctx.try_ephem_client().unwrap()
     }
-    pub fn ephem_blockhash(&self) -> &Hash {
-        self.common_ctx.ephem_blockhash.as_ref().unwrap()
+
+    pub fn ephem_blockhash(&self) -> Hash {
+        self.ephem_client().get_latest_blockhash().unwrap()
     }
 
     pub fn fields(&self) -> ScheduleCommitTestContextFields {
@@ -300,8 +295,6 @@ impl ScheduleCommitTestContext {
                 .ephem_validator_identity
                 .as_ref()
                 .unwrap(),
-            chain_blockhash: self.common_ctx.chain_blockhash.as_ref(),
-            ephem_blockhash: self.common_ctx.ephem_blockhash.as_ref().unwrap(),
         }
     }
 }
