@@ -46,7 +46,6 @@ fn test_get_multiple_existing_accounts_in_parallel() {
                     .expect("failed to airdrop to on-chain account");
             })
         })
-        .into_iter()
         .for_each(|h| h.join().unwrap());
     debug!("Airdrops complete.");
 

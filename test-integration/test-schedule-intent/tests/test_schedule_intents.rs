@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use dlp::pda::ephemeral_balance_pda_from_payer;
-use integration_test_tools::IntegrationTestContext;
+use integration_test_tools::{
+    transactions::confirm_transaction, IntegrationTestContext,
+};
 use program_flexi_counter::{
     delegation_program_id,
     instruction::{
@@ -274,7 +276,7 @@ fn schedule_intent(
     if let Some(confirmation_wait) = confirmation_wait {
         std::thread::sleep(confirmation_wait);
     }
-    let confirmed = IntegrationTestContext::confirm_transaction(
+    let confirmed = confirm_transaction(
         &sig,
         rpc_client,
         CommitmentConfig::confirmed(),

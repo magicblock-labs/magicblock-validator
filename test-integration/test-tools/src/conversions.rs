@@ -28,7 +28,7 @@ pub fn stringify_simulation_result(
         if logs.is_empty() {
             "".to_string()
         } else {
-            format!("{}", logs.join("\n  "))
+            logs.join("\n  ").to_string()
         }
     });
     let accounts = res.accounts.map_or("".to_string(), |accounts| {

@@ -1,6 +1,7 @@
 use integration_test_tools::{
     run_test,
     scheduled_commits::extract_scheduled_commit_sent_signature_from_logs,
+    transactions::send_and_confirm_instructions_with_payer,
 };
 use log::*;
 use magicblock_core::magic_program;
@@ -14,7 +15,7 @@ use schedulecommit_client::{
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::{
     client_error::{Error as ClientError, ErrorKind},
-    config::{RpcSendTransactionConfig, RpcSimulateTransactionConfig},
+    config::RpcSendTransactionConfig,
     request::RpcError,
 };
 use solana_sdk::{
@@ -256,38 +257,13 @@ fn assert_can_increase_committee_count(
     commitment: &CommitmentConfig,
 ) {
     let ix = increase_count_instruction(pda);
-    let blockhash = rpc_client.get_latest_blockhash().unwrap();
-    let tx = Transaction::new_signed_with_payer(
+    let tx_res = send_and_confirm_instructions_with_payer(
+        rpc_client,
         &[ix],
-        Some(&payer.pubkey()),
-        &[&payer],
-        blockhash,
-    );
-    let simulation_res = rpc_client
-        .simulate_transaction_with_config(
-            &tx,
-            RpcSimulateTransactionConfig {
-                sig_verify: false,
-                replace_recent_blockhash: false,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-    debug!("Simulation result: {:#?}", simulation_res);
-    debug!(
-        "Simulation logs for increasing count: {:?}",
-        simulation_res.value.logs
+        payer,
+        *commitment,
     );
 
-    let tx_res = rpc_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
     if let Err(err) = &tx_res {
         error!("Failed to increase count: {:?} ({})", err, rpc_client.url());
     }
