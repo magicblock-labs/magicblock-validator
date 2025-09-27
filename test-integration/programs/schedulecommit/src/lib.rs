@@ -92,7 +92,7 @@ pub enum ScheduleCommitInstruction {
     /// This instruction can only run on the ephemeral after the account was
     /// delegated or on chain while it is undelegated.
     /// # Account references:
-    /// - **0.** `[WRITE]` Account to increase count
+    /// - **0.** `[WRITE]` PDA Account to increase count of
     IncreaseCount,
     // This is invoked by the delegation program when we request to undelegate
     // accounts.
