@@ -35,7 +35,6 @@ fn test_committing_one_account() {
             committees,
             commitment,
             ephem_client,
-            ephem_blockhash,
             ..
         } = ctx.fields();
 
@@ -52,11 +51,12 @@ fn test_committing_one_account() {
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         );
 
+        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
             Some(&payer.pubkey()),
             &[&payer],
-            *ephem_blockhash,
+            ephem_blockhash,
         );
 
         let sig = tx.get_signature();
@@ -88,7 +88,6 @@ fn test_committing_two_accounts() {
             committees,
             commitment,
             ephem_client,
-            ephem_blockhash,
             ..
         } = ctx.fields();
 
@@ -103,11 +102,12 @@ fn test_committing_two_accounts() {
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         );
 
+        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
             Some(&payer.pubkey()),
             &[&payer],
-            *ephem_blockhash,
+            ephem_blockhash,
         );
 
         let sig = tx.get_signature();

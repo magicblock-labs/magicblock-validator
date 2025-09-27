@@ -53,7 +53,6 @@ fn commit_and_undelegate_one_account(
         committees,
         commitment,
         ephem_client,
-        ephem_blockhash,
         ..
     } = ctx.fields();
 
@@ -80,11 +79,12 @@ fn commit_and_undelegate_one_account(
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         )
     };
+    let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&payer.pubkey()),
         &[&payer],
-        *ephem_blockhash,
+        ephem_blockhash,
     );
 
     let sig = tx.get_signature();
@@ -114,7 +114,6 @@ fn commit_and_undelegate_two_accounts(
         committees,
         commitment,
         ephem_client,
-        ephem_blockhash,
         ..
     } = ctx.fields();
 
@@ -142,11 +141,12 @@ fn commit_and_undelegate_two_accounts(
         )
     };
 
+    let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&payer.pubkey()),
         &[&payer],
-        *ephem_blockhash,
+        ephem_blockhash,
     );
 
     let sig = tx.get_signature();
@@ -281,20 +281,20 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         let (ctx, sig, tx_res) = commit_and_undelegate_one_account(false);
         info!("{} '{:?}'", sig, tx_res);
         let ScheduleCommitTestContextFields {
-            payer_ephem: payer,
+            payer_ephem,
             committees,
             commitment,
             ephem_client,
-            ephem_blockhash,
             ..
         } = ctx.fields();
         let chain_client = ctx.try_chain_client().unwrap();
 
         // 1. Show we cannot use it in the ephemeral anymore
+        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
         assert_cannot_increase_committee_count(
             committees[0].1,
-            payer,
-            *ephem_blockhash,
+            payer_ephem,
+            ephem_blockhash,
             ephem_client,
             commitment,
         );
@@ -306,7 +306,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
             let blockhash = chain_client.get_latest_blockhash().unwrap();
             assert_can_increase_committee_count(
                 committees[0].1,
-                payer,
+                payer_ephem,
                 blockhash,
                 chain_client,
                 commitment,
@@ -316,8 +316,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         // 3. Re-delegate the same account
         {
             std::thread::sleep(std::time::Duration::from_secs(2));
-            let blockhash = chain_client.get_latest_blockhash().unwrap();
-            ctx.delegate_committees(Some(blockhash)).unwrap();
+            ctx.delegate_committees(None).unwrap();
         }
 
         // 4. Now we can modify it in the ephemeral again and no longer on chain
@@ -325,7 +324,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
             let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
             assert_can_increase_committee_count(
                 committees[0].1,
-                payer,
+                payer_ephem,
                 ephem_blockhash,
                 ephem_client,
                 commitment,
@@ -334,7 +333,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
             let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
             assert_cannot_increase_committee_count(
                 committees[0].1,
-                payer,
+                payer_ephem,
                 chain_blockhash,
                 chain_client,
                 commitment,
@@ -355,24 +354,24 @@ fn test_committed_and_undelegated_accounts_redelegation() {
             committees,
             commitment,
             ephem_client,
-            ephem_blockhash,
             ..
         } = ctx.fields();
         let chain_client = ctx.try_chain_client().unwrap();
 
         // 1. Show we cannot use them in the ephemeral anymore
         {
+            let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
             assert_cannot_increase_committee_count(
                 committees[0].1,
                 payer,
-                *ephem_blockhash,
+                ephem_blockhash,
                 ephem_client,
                 commitment,
             );
             assert_cannot_increase_committee_count(
                 committees[1].1,
                 payer,
-                *ephem_blockhash,
+                ephem_blockhash,
                 ephem_client,
                 commitment,
             );
@@ -403,8 +402,7 @@ fn test_committed_and_undelegated_accounts_redelegation() {
         // 3. Re-delegate the same accounts
         {
             std::thread::sleep(std::time::Duration::from_secs(2));
-            let blockhash = chain_client.get_latest_blockhash().unwrap();
-            ctx.delegate_committees(Some(blockhash)).unwrap();
+            ctx.delegate_committees(None).unwrap();
         }
 
         // 4. Now we can modify them in the ephemeral again and no longer on chain
