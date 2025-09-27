@@ -70,6 +70,8 @@ pub struct IntegrationTestContext {
 
 impl IntegrationTestContext {
     pub fn try_new_ephem_only() -> Result<Self> {
+        color_backtrace::install();
+
         let commitment = CommitmentConfig::confirmed();
         let ephem_client = RpcClient::new_with_commitment(
             Self::url_ephem().to_string(),
@@ -85,6 +87,8 @@ impl IntegrationTestContext {
     }
 
     pub fn try_new_chain_only() -> Result<Self> {
+        color_backtrace::install();
+
         let commitment = CommitmentConfig::confirmed();
         let chain_client = RpcClient::new_with_commitment(
             Self::url_chain().to_string(),
@@ -99,6 +103,8 @@ impl IntegrationTestContext {
     }
 
     pub fn try_new() -> Result<Self> {
+        color_backtrace::install();
+
         let commitment = CommitmentConfig::confirmed();
 
         let chain_client = RpcClient::new_with_commitment(
