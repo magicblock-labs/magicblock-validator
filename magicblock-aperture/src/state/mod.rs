@@ -39,7 +39,7 @@ pub struct SharedState {
     /// A thread-safe handle to the blockchain ledger for accessing historical data.
     pub(crate) ledger: Arc<Ledger>,
     /// Chainlink provides synchronization of on-chain accounts
-    pub(crate) chainlink: ChainlinkImpl,
+    pub(crate) chainlink: Arc<ChainlinkImpl>,
     /// A cache for recently processed transaction signatures to prevent replay attacks
     /// and to serve `getSignatureStatuses` requests efficiently.
     pub(crate) transactions: TransactionsCache,
@@ -77,7 +77,7 @@ impl SharedState {
         context: NodeContext,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        chainlink: ChainlinkImpl,
+        chainlink: Arc<ChainlinkImpl>,
         blocktime: u64,
     ) -> Self {
         const TRANSACTIONS_CACHE_TTL: Duration = Duration::from_secs(75);

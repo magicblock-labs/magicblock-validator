@@ -252,23 +252,26 @@ impl MagicValidator {
                 ),
             },
         )?));
-        let chainlink = Self::init_chainlink(
-            committor_service.clone(),
-            &remote_rpc_config,
-            &config,
-            &dispatch.transaction_scheduler,
-            &ledger.latest_block().clone(),
-            &accountsdb,
-            validator_pubkey,
-            faucet_keypair.pubkey(),
-        )
-        .await?;
+        let chainlink = Arc::new(
+            Self::init_chainlink(
+                committor_service.clone(),
+                &remote_rpc_config,
+                &config,
+                &dispatch.transaction_scheduler,
+                &ledger.latest_block().clone(),
+                &accountsdb,
+                validator_pubkey,
+                faucet_keypair.pubkey(),
+            )
+            .await?,
+        );
 
         let scheduled_commits_processor =
             committor_service.as_ref().map(|committor_service| {
                 Arc::new(ScheduledCommitsProcessorImpl::new(
                     accountsdb.clone(),
                     committor_service.clone(),
+                    chainlink.clone(),
                     dispatch.transaction_scheduler.clone(),
                 ))
             });
