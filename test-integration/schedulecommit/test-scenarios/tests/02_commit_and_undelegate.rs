@@ -14,9 +14,7 @@ use schedulecommit_client::{
 };
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::{
-    client_error::{Error as ClientError, ErrorKind},
-    config::RpcSendTransactionConfig,
-    request::RpcError,
+    client_error::Error as ClientError, config::RpcSendTransactionConfig,
 };
 use solana_sdk::{
     commitment_config::CommitmentConfig,
@@ -28,7 +26,6 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use utils::{
-    assert_is_instruction_error,
     assert_one_committee_account_was_undelegated_on_chain,
     assert_one_committee_synchronized_count,
     assert_one_committee_was_committed,
@@ -215,7 +212,7 @@ fn assert_cannot_increase_committee_count(
     let simulation =
         stringify_simulation_result(simulation_result.value, &tx.signatures[0]);
     debug!(
-        "{}\nExpecting ExternalAccountDataModified ({})",
+        "{}\nExpecting ExternalAccountDataModified | ProgramFailedToComplete ({})",
         simulation,
         rpc_client.url()
     );
@@ -242,27 +239,11 @@ fn assert_cannot_increase_committee_count(
             InstructionError::ProgramFailedToComplete,
         );
     } else {
-        // If we did not get a transaction error then that means that the transaction
-        // was blocked because the account was found to not be delegated
-        // For undelegation tests this is the case if undelegation completes before
-        // we run the transaction that tried to increase the count
-        macro_rules! invalid_error {
-            ($tx_result_err:expr) => {
-                // TODO: @@@ this is obsolete
-                panic!("Expected transaction or transwise NotAllWritablesDelegated error, got: {:?}", $tx_result_err)
-            };
-        }
-
-        match &tx_result_err.kind {
-            ErrorKind::RpcError(RpcError::RpcResponseError {
-                message, ..
-            }) => {
-                if !message.contains("NotAllWritablesDelegated") {
-                    invalid_error!(tx_result_err);
-                }
-            }
-            _ => invalid_error!(tx_result_err),
-        }
+        panic!(
+            "Transaction {} should have failed ({})",
+            tx.signatures[0],
+            rpc_client.url()
+        );
     }
 }
 
