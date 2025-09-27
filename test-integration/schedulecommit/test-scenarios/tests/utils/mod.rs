@@ -213,21 +213,10 @@ pub fn assert_account_was_undelegated_on_chain(
     assert_eq!(owner, new_owner, "{} has new owner", pda);
 }
 
-#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_tx_failed_with_instruction_error(
-    tx_result: Result<Signature, solana_rpc_client_api::client_error::Error>,
-    ix_error: InstructionError,
-) {
-    let (tx_result_err, tx_err) = extract_transaction_error(tx_result);
-    let tx_err = tx_err.unwrap_or_else(|| {
-        panic!("Expected TransactionError, got: {:?}", tx_result_err)
-    });
-    assert_is_instruction_error(tx_err, &tx_result_err, ix_error);
-}
-
+#[allow(dead_code)] // used in tests
 pub fn assert_is_instruction_error(
     tx_err: TransactionError,
-    tx_result_err: &solana_rpc_client_api::client_error::Error,
+    tx_result_err: &client_error::Error,
     ix_error: InstructionError,
 ) {
     assert!(
@@ -238,10 +227,31 @@ pub fn assert_is_instruction_error(
         ),
         "Expected InstructionError({:?}), got: {:?}",
         ix_error,
-        tx_result_err
+        tx_result_err.get_transaction_error()
     );
 }
 
+#[allow(dead_code)] // used in tests
+pub fn assert_is_one_of_instruction_errors(
+    tx_err: TransactionError,
+    tx_result_err: &client_error::Error,
+    ix_error1: InstructionError,
+    ix_error2: InstructionError,
+) {
+    assert!(
+        matches!(
+            tx_err,
+            TransactionError::InstructionError(_, err)
+            if err == ix_error1 || err == ix_error2
+        ),
+        "Expected InstructionError({:?} | {:?}), got: {:?}",
+        ix_error1,
+        ix_error2,
+        tx_result_err.get_transaction_error()
+    );
+}
+
+#[allow(dead_code)] // used in tests
 pub fn extract_transaction_error(
     tx_result: Result<Signature, client_error::Error>,
 ) -> (client_error::Error, Option<TransactionError>) {

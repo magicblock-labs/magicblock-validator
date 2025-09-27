@@ -38,6 +38,8 @@ use utils::{
     get_context_with_delegated_committees,
 };
 
+use crate::utils::assert_is_one_of_instruction_errors;
+
 mod utils;
 
 fn commit_and_undelegate_one_account(
@@ -229,10 +231,15 @@ fn assert_cannot_increase_committee_count(
         );
     let (tx_result_err, tx_err) = extract_transaction_error(tx_res);
     if let Some(tx_err) = tx_err {
-        assert_is_instruction_error(
+        assert_is_one_of_instruction_errors(
             tx_err,
             &tx_result_err,
             InstructionError::ExternalAccountDataModified,
+            // Recently we saw the following when the account is owned by the delegation program
+            // and serialized:
+            //   Program failed: Access violation in input section at address 0x400000060 of size 32
+            //   Error: InstructionError(0, ProgramFailedToComplete)
+            InstructionError::ProgramFailedToComplete,
         );
     } else {
         // If we did not get a transaction error then that means that the transaction
