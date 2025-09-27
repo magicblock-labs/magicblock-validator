@@ -76,7 +76,6 @@ fn test_schedule_commit_directly_with_single_ix() {
         payer_ephem: payer,
         commitment,
         committees,
-        ephem_blockhash,
         ephem_client,
         ..
     } = ctx.fields();
@@ -91,7 +90,7 @@ fn test_schedule_commit_directly_with_single_ix() {
         &[ix],
         Some(&payer.pubkey()),
         &[&payer],
-        *ephem_blockhash,
+        ephem_client.get_latest_blockhash().unwrap(),
     );
 
     let sig = tx.signatures[0];
@@ -115,7 +114,6 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
     let ScheduleCommitTestContextFields {
         payer_ephem: payer,
         commitment,
-        ephem_blockhash,
         ephem_client,
         ..
     } = ctx.fields();
@@ -131,7 +129,7 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
         &[ix],
         Some(&payer.pubkey()),
         &[&payer],
-        *ephem_blockhash,
+        ephem_client.get_latest_blockhash().unwrap(),
     );
 
     let sig = tx.signatures[0];
@@ -152,7 +150,7 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
 
     // 3. Confirm the transaction
     assert!(ctx
-        .confirm_transaction_chain(&commit_result.sigs[0])
+        .confirm_transaction_chain(&commit_result.sigs[0], Some(&tx))
         .unwrap_or_default());
 }
 
@@ -166,7 +164,6 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
         payer_ephem: payer,
         commitment,
         committees,
-        ephem_blockhash,
         ephem_client,
         ..
     } = ctx.fields();
@@ -200,7 +197,7 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
         &[transfer_ix_1, ix, transfer_ix_2],
         Some(&payer.pubkey()),
         &[&payer],
-        *ephem_blockhash,
+        ephem_client.get_latest_blockhash().unwrap(),
     );
 
     let sig = tx.signatures[0];
@@ -227,7 +224,6 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
         payer_ephem: payer,
         commitment,
         committees,
-        ephem_blockhash,
         ephem_client,
         ..
     } = ctx.fields();
@@ -245,7 +241,7 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
         &[ix],
         Some(&payer.pubkey()),
         &[&payer],
-        *ephem_blockhash,
+        ephem_client.get_latest_blockhash().unwrap(),
     );
 
     let sig = tx.signatures[0];
@@ -281,7 +277,6 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
         payer_ephem: payer,
         commitment,
         committees,
-        ephem_blockhash,
         ephem_client,
         ..
     } = ctx.fields();
@@ -309,7 +304,7 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
         &[non_cpi_ix, cpi_ix, nested_cpi_ix],
         Some(&payer.pubkey()),
         &[&payer],
-        *ephem_blockhash,
+        ephem_client.get_latest_blockhash().unwrap(),
     );
 
     let sig = tx.signatures[0];

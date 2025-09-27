@@ -8,9 +8,11 @@ use solana_rpc_client::{
     rpc_client::{GetConfirmedSignaturesForAddress2Config, RpcClient},
 };
 use solana_rpc_client_api::{
-    client_error,
-    client_error::{Error as ClientError, ErrorKind as ClientErrorKind},
-    config::{RpcSendTransactionConfig, RpcTransactionConfig},
+    client_error::{self, Error as ClientError, ErrorKind as ClientErrorKind},
+    config::{
+        RpcSendTransactionConfig, RpcSimulateTransactionConfig,
+        RpcTransactionConfig,
+    },
 };
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
@@ -29,7 +31,7 @@ use solana_transaction_status::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
 
-use crate::dlp_interface;
+use crate::{conversions::stringify_simulation_result, dlp_interface};
 
 const URL_CHAIN: &str = "http://localhost:7799";
 const WS_URL_CHAIN: &str = "ws://localhost:7800";
@@ -594,14 +596,15 @@ impl IntegrationTestContext {
             || format!("Failed to airdrop chain account '{:?}'", pubkey),
         )?;
 
-        let succeeded =
-            Self::confirm_transaction(&sig, rpc_client, commitment_config)
-                .with_context(|| {
-                    format!(
-                        "Failed to confirm airdrop chain account '{:?}'",
-                        pubkey
-                    )
-                })?;
+        let succeeded = Self::confirm_transaction(
+            &sig,
+            rpc_client,
+            commitment_config,
+            None,
+        )
+        .with_context(|| {
+            format!("Failed to confirm airdrop chain account '{:?}'", pubkey)
+        })?;
         if !succeeded {
             return Err(anyhow::anyhow!(
                 "Failed to airdrop chain account '{:?}'",
@@ -647,6 +650,7 @@ impl IntegrationTestContext {
     pub fn confirm_transaction_chain(
         &self,
         sig: &Signature,
+        tx: Option<&Transaction>,
     ) -> Result<bool, client_error::Error> {
         Self::confirm_transaction(
             sig,
@@ -655,12 +659,14 @@ impl IntegrationTestContext {
                 kind: client_error::ErrorKind::Custom(err.to_string()),
             })?,
             self.commitment,
+            tx,
         )
     }
 
     pub fn confirm_transaction_ephem(
         &self,
         sig: &Signature,
+        tx: Option<&Transaction>,
     ) -> Result<bool, client_error::Error> {
         Self::confirm_transaction(
             sig,
@@ -669,6 +675,7 @@ impl IntegrationTestContext {
                 kind: client_error::ErrorKind::Custom(err.to_string()),
             })?,
             self.commitment,
+            tx,
         )
     }
 
@@ -676,6 +683,7 @@ impl IntegrationTestContext {
         sig: &Signature,
         rpc_client: &RpcClient,
         commitment_config: CommitmentConfig,
+        tx: Option<&Transaction>,
     ) -> Result<bool, client_error::Error> {
         // Allow RPC failures to persist for up to 1 sec
         const MAX_FAILURES: u64 = 5;
@@ -685,6 +693,7 @@ impl IntegrationTestContext {
         // Allow transactions to take up to 40 seconds to confirm
         const MAX_UNCONFIRMED_COUNT: u64 = 40;
         const MILLIS_UNTIL_RECONFIRM: u64 = 500;
+        const SIMULATE_THRESHOLD: u64 = 5;
         let mut unconfirmed_count = 0;
 
         loop {
@@ -698,9 +707,37 @@ impl IntegrationTestContext {
                     unconfirmed_count += 1;
                     if unconfirmed_count >= MAX_UNCONFIRMED_COUNT {
                         return Ok(false);
-                    } else {
-                        sleep(Duration::from_millis(MILLIS_UNTIL_RECONFIRM));
                     }
+                    if let Some(tx) = tx {
+                        if unconfirmed_count == SIMULATE_THRESHOLD {
+                            // After a few tries, simulate the transaction to log helpful
+                            // information about while it isn't landing
+                            match rpc_client.simulate_transaction_with_config(
+                                tx,
+                                RpcSimulateTransactionConfig {
+                                    sig_verify: false,
+                                    replace_recent_blockhash: true,
+                                    ..Default::default()
+                                },
+                            ) {
+                                Ok(res) => {
+                                    warn!(
+                                        "{}",
+                                        stringify_simulation_result(
+                                            res.value, sig
+                                        )
+                                    );
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        "Failed to simulate transaction: {:?}",
+                                        err
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    sleep(Duration::from_millis(MILLIS_UNTIL_RECONFIRM));
                 }
                 Err(err) => {
                     failure_count += 1;
@@ -748,7 +785,7 @@ impl IntegrationTestContext {
         &self,
         ixs: &[Instruction],
         payer: &Keypair,
-    ) -> Result<Signature, client_error::Error> {
+    ) -> Result<(Signature, Transaction), client_error::Error> {
         Self::send_instructions_with_payer(
             self.try_ephem_client().map_err(|err| client_error::Error {
                 request: None,
@@ -763,7 +800,7 @@ impl IntegrationTestContext {
         &self,
         ixs: &[Instruction],
         payer: &Keypair,
-    ) -> Result<Signature, client_error::Error> {
+    ) -> Result<(Signature, Transaction), client_error::Error> {
         Self::send_instructions_with_payer(
             self.try_chain_client().map_err(|err| client_error::Error {
                 request: None,
@@ -879,11 +916,12 @@ impl IntegrationTestContext {
         rpc_client: &RpcClient,
         ixs: &[Instruction],
         payer: &Keypair,
-    ) -> Result<Signature, client_error::Error> {
+    ) -> Result<(Signature, Transaction), client_error::Error> {
         let blockhash = rpc_client.get_latest_blockhash()?;
         let mut tx = Transaction::new_with_payer(ixs, Some(&payer.pubkey()));
         tx.sign(&[payer], blockhash);
-        Self::send_transaction(rpc_client, &mut tx, &[payer])
+        let sig = Self::send_transaction(rpc_client, &mut tx, &[payer])?;
+        Ok((sig, tx))
     }
 
     pub fn send_and_confirm_transaction(
@@ -893,7 +931,7 @@ impl IntegrationTestContext {
         commitment: CommitmentConfig,
     ) -> Result<(Signature, bool), client_error::Error> {
         let sig = Self::send_transaction(rpc_client, tx, signers)?;
-        Self::confirm_transaction(&sig, rpc_client, commitment)
+        Self::confirm_transaction(&sig, rpc_client, commitment, Some(tx))
             .map(|confirmed| (sig, confirmed))
     }
 
@@ -909,9 +947,10 @@ impl IntegrationTestContext {
             payer.pubkey(),
             ixs.len()
         );
-        let sig = Self::send_instructions_with_payer(rpc_client, ixs, payer)?;
+        let (sig, tx) =
+            Self::send_instructions_with_payer(rpc_client, ixs, payer)?;
         debug!("Confirming transaction with signature: {}", sig);
-        Self::confirm_transaction(&sig, rpc_client, commitment)
+        Self::confirm_transaction(&sig, rpc_client, commitment, Some(&tx))
             .map(|confirmed| (sig, confirmed))
             .inspect_err(|_| {
                 self.dump_ephemeral_logs(sig);

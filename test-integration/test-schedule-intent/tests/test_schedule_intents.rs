@@ -278,6 +278,7 @@ fn schedule_intent(
         &sig,
         rpc_client,
         CommitmentConfig::confirmed(),
+        Some(&tx),
     )
     .unwrap();
     assert!(confirmed);
