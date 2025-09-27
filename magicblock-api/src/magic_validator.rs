@@ -265,12 +265,12 @@ impl MagicValidator {
         .await?;
 
         let scheduled_commits_processor =
-            committor_service.as_ref().and_then(|committor_service| {
-                Some(Arc::new(ScheduledCommitsProcessorImpl::new(
+            committor_service.as_ref().map(|committor_service| {
+                Arc::new(ScheduledCommitsProcessorImpl::new(
                     accountsdb.clone(),
                     committor_service.clone(),
                     dispatch.transaction_scheduler.clone(),
-                )))
+                ))
             });
 
         validator::init_validator_authority(identity_keypair);
