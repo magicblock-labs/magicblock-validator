@@ -210,7 +210,7 @@ impl TestContext {
         owner: &Pubkey,
     ) -> ChainlinkResult<AccountSharedData> {
         // Committor service calls this to trigger subscription
-        self.chainlink.undelegation_requested(pubkey).await?;
+        self.chainlink.undelegation_requested(*pubkey).await?;
 
         // Committor service then requests undelegation on chain
         let acc = self.rpc_client.get_account_at_slot(pubkey).unwrap();

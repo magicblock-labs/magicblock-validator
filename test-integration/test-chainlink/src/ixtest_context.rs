@@ -283,7 +283,7 @@ impl IxtestContext {
         let counter_pda = self.counter_pda(&counter_auth.pubkey());
         // The committor service will call this in order to have
         // chainlink subscribe to account updates of the counter account
-        self.chainlink.undelegation_requested(&counter_pda).await;
+        self.chainlink.undelegation_requested(counter_pda).await;
 
         // In order to make the account undelegatable we first need to
         // commmit and finalize

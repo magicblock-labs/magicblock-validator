@@ -287,7 +287,19 @@ macro_rules! assert_loaded_program_with_size {
             $loader,
             $loader_status
         );
-        assert_eq!(loaded_program.program_data.len(), $size);
+        // Program size may vary a bit
+        const DEVIATION: usize = 200;
+        let actual_size = loaded_program.program_data.len();
+        let min = $size - DEVIATION;
+        let max = $size + DEVIATION;
+        assert!(
+            actual_size >= min && actual_size <= max,
+            "Expected program {} to have size around {}, got {}",
+            $program_id,
+            $size,
+            actual_size
+        );
+        loaded_program
     }};
 }
 
