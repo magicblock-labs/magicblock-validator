@@ -201,6 +201,15 @@ fn assert_cannot_increase_committee_count(
     payer: &Keypair,
     rpc_client: &RpcClient,
 ) {
+    // NOTE: in the case of checking this on the ephemeral there are two reasons why an account
+    //       cannot be modified in case it was _just_ undelegted:
+    //
+    // - it's owner is set to the delegation program and thus the transaction fails when it runs
+    //   - this is the case when the undelegation is still in progress and/or the validator has not
+    //     yet seen the resulting on chain account update
+    // - the undelegation already went through and the validator saw this update
+    //   - in this case the account was marked as undelegated
+
     let ix = increase_count_instruction(pda);
     let tx = Transaction::new_signed_with_payer(
         &[ix],
@@ -216,6 +225,15 @@ fn assert_cannot_increase_committee_count(
         simulation,
         rpc_client.url()
     );
+
+    // In case the account is undelegated in the ephem we see this when simulating.
+    // Since in this case the transaction never lands it cannot be confirmed and
+    // times out eventually. Until that is fixed we shortcut here and accept simulation
+    // failing that way as a good enough indicator that an account is undelegated and
+    // cannot be modified.
+    if simulation.contains("InvalidWritableAccount") {
+        return;
+    }
 
     let tx_res = rpc_client
         .send_and_confirm_transaction_with_spinner_and_config(
@@ -272,7 +290,10 @@ fn assert_can_increase_committee_count(
 fn test_committed_and_undelegated_single_account_redelegation() {
     run_test!({
         let (ctx, sig, tx_res) = commit_and_undelegate_one_account(false);
-        debug!("Committed and undelegated account {} '{:?}'", sig, tx_res);
+        debug!(
+            "✅ Committed and undelegated account {} '{:?}'",
+            sig, tx_res
+        );
         let ScheduleCommitTestContextFields {
             payer_ephem,
             payer_chain,
