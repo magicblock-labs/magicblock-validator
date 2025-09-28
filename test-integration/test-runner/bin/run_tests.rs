@@ -538,8 +538,18 @@ fn run_magicblock_pubsub_tests(
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
 
-    let start_ephem_validator = || match start_validator(
+    let start_devnet_validator = || match start_validator(
         "validator-offline.devnet.toml",
+        ValidatorCluster::Chain(None),
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start ephemeral validator properly");
+        }
+    };
+    let start_ephem_validator = || match start_validator(
+        "cloning-config.ephem.toml",
         ValidatorCluster::Ephem,
         &loaded_chain_accounts,
     ) {
@@ -552,6 +562,7 @@ fn run_magicblock_pubsub_tests(
     if config.run_test(TEST_NAME) {
         eprintln!("======== RUNNING MAGICBLOCK PUBSUB TESTS ========");
 
+        let mut devnet_validator = start_devnet_validator();
         let mut ephem_validator = start_ephem_validator();
 
         let test_dir = format!("{}/../{}", manifest_dir, "test-pubsub");
@@ -563,12 +574,14 @@ fn run_magicblock_pubsub_tests(
             err
         })?;
 
-        cleanup_validator(&mut ephem_validator, "ephemeral");
+        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
         Ok(output)
     } else {
+        let devnet_validator =
+            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
-        wait_for_ctrlc(None, ephem_validator, success_output())
+        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
     }
 }
 
