@@ -1,3 +1,62 @@
+## Integration Test Status
+
+- [x] `schedulecommit/test-scenarios`
+- [x] `schedulecommit/test-security`
+- [x] `test-chainlink`
+- [x] `test-cloning`
+- [x] `test-committor-service`
+- [ ] `test-config` all failing
+- [x] `test-issues` removed since we won't support frequent commits
+- [ ] `test-ledger-restore` all failing/stalling
+- [ ] `test-magicblock-api` 2/4 failing (incorrect airdrop)
+
+### Test Config
+
+When running individually I get:
+
+```sh
+cargo test test_clone_config_never -- --nocapture
+```
+
+```
+called `Result::unwrap()` on an `Err` value: LedgerError(UnableToSetOpenFileDescriptorLimit)
+```
+when the validator starts up.
+
+### Test Ledger Restore
+
+```sh
+make setup-restore-ledger-devnet
+````
+
+Then run test: ` cargo nextest run restore_ledger_empty_validator --nocapture`
+
+Error:
+```
+Failed to start validator: NextSlotAfterLedgerProcessingNotMatchingBankSlot(19, 20)
+```
+
+### Test Magicblock API
+
+```sh
+make setup-magicblock-api-devnet
+```
+
+```sh
+make setup-magicblock-api-ephem
+```
+
+Then run test: ` cargo nextest run -p test-magicblock-api  --no-fail-fast -j 16`
+
+Errors:
+
+```
+FAIL [   0.126s] test-magicblock-api::test_clocks_match test_clocks_match
+FAIL [   0.127s] test-magicblock-api::test_get_block_timestamp_stability test_get_block_timestamp_stability
+```
+- failing due to airdrop disabled
+- should use integration test context and call `pub fn airdrop_chain_escrowed`
+
 ## UX
 
 - need to have transaction in ledger if writable vs. delegated doesn't check out
