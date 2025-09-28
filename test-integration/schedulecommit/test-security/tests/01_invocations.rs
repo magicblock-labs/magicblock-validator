@@ -33,7 +33,6 @@ fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
         ScheduleCommitTestContext::try_new_random_keys(2)
     }
     .unwrap();
-    ctx.escrow_lamports_for_payer().unwrap();
     ctx.init_committees().unwrap();
     ctx.delegate_committees().unwrap();
 
@@ -73,14 +72,14 @@ fn test_schedule_commit_directly_with_single_ix() {
     // This fails since a CPI program id cannot be found.
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContextFields {
-        payer_ephem: payer,
+        payer_ephem,
         commitment,
         committees,
         ephem_client,
         ..
     } = ctx.fields();
     let ix = create_schedule_commit_ix(
-        payer.pubkey(),
+        payer_ephem.pubkey(),
         magic_program::id(),
         magic_program::MAGIC_CONTEXT_PUBKEY,
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
@@ -88,8 +87,8 @@ fn test_schedule_commit_directly_with_single_ix() {
 
     let tx = Transaction::new_signed_with_payer(
         &[ix],
-        Some(&payer.pubkey()),
-        &[&payer],
+        Some(&payer_ephem.pubkey()),
+        &[&payer_ephem],
         ephem_client.get_latest_blockhash().unwrap(),
     );
 
