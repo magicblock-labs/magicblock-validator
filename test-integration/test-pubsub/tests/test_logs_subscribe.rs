@@ -7,6 +7,25 @@ use solana_rpc_client_api::config::{
 use solana_sdk::signer::Signer;
 use test_pubsub::PubSubEnv;
 
+// We may get other updates before the one we're waiting for
+// i.e. when an account is cloned
+macro_rules! wait_for_update_with_sig {
+    ($rx:expr, $sig:expr) => {{
+        loop {
+            let update =
+                tokio::time::timeout(Duration::from_millis(100), $rx.next())
+                    .await
+                    .expect("timeout waiting for txn log update")
+                    .expect(
+                        "failed to receive signature update after tranfer txn",
+                    );
+            if update.value.signature == $sig {
+                break update;
+            }
+        }
+    }};
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_logs_subscribe_all() {
     const TRANSFER_AMOUNT: u64 = 10_000;
@@ -23,11 +42,8 @@ async fn test_logs_subscribe_all() {
     for _ in 0..5 {
         let signature = env.transfer(TRANSFER_AMOUNT);
 
-        // NOTE: @@@ failing cause it gets the cloning account txn instead
-        let update = rx
-            .next()
-            .await
-            .expect("failed to receive signature update after tranfer txn");
+        let update = wait_for_update_with_sig!(rx, signature.to_string());
+
         assert_eq!(
             update.value.signature,
             signature.to_string(),
@@ -75,10 +91,7 @@ async fn test_logs_subscribe_mentions() {
         .expect("failed to subscribe to txn logs for account 2");
     let signature = env.transfer(TRANSFER_AMOUNT);
     for rx in [&mut rx1, &mut rx2] {
-        let update = rx
-            .next()
-            .await
-            .expect("failed to receive signature update after tranfer txn");
+        let update = wait_for_update_with_sig!(rx, signature.to_string());
         assert_eq!(
             update.value.signature,
             signature.to_string(),
