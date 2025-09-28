@@ -135,10 +135,20 @@ setup-committor-devnet:
 test-pubsub:
 	RUN_TESTS=pubsub \
 	$(MAKE) test
+setup-pubsub-devnet:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=pubsub \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
 setup-pubsub-ephem:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=pubsub \
 	SETUP_ONLY=ephem \
+	$(MAKE) test
+setup-pubsub-both:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=pubsub \
+	SETUP_ONLY=both \
 	$(MAKE) test
 
 test-config:

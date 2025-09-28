@@ -4,7 +4,7 @@ use solana_sdk::{
 };
 use test_pubsub::PubSubEnv;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_program_subscribe() {
     let env = PubSubEnv::new().await;
     let (mut rx, cancel) = env
@@ -14,7 +14,7 @@ async fn test_program_subscribe() {
         .expect("failed to subscribe to program");
 
     const TRANSFER_AMOUNT: u64 = 10_000;
-    env.transfer(TRANSFER_AMOUNT).await;
+    env.transfer(TRANSFER_AMOUNT);
     for _ in 0..2 {
         let update = rx
             .next()

@@ -17,6 +17,7 @@ use solana_sdk::{
     account::Account,
     clock::Slot,
     commitment_config::CommitmentConfig,
+    hash::Hash,
     instruction::Instruction,
     pubkey::Pubkey,
     rent::Rent,
@@ -974,6 +975,20 @@ impl IntegrationTestContext {
             blockhashes.push(blockhash);
         }
         Ok(blockhashes)
+    }
+
+    pub fn try_get_latest_blockhash_ephem(&self) -> Result<Hash> {
+        self.try_ephem_client().and_then(Self::get_latest_blockhash)
+    }
+
+    pub fn try_get_latest_blockhash_chain(&self) -> Result<Hash> {
+        self.try_chain_client().and_then(Self::get_latest_blockhash)
+    }
+
+    fn get_latest_blockhash(rpc_client: &RpcClient) -> Result<Hash> {
+        rpc_client
+            .get_latest_blockhash()
+            .map_err(|e| anyhow::anyhow!("Failed to get blockhash{}", e))
     }
 
     // -----------------

@@ -10569,6 +10569,8 @@ name = "test-pubsub"
 version = "0.0.0"
 dependencies = [
  "futures 0.3.31",
+ "integration-test-tools",
+ "log",
  "solana-pubsub-client",
  "solana-rpc-client",
  "solana-rpc-client-api",
