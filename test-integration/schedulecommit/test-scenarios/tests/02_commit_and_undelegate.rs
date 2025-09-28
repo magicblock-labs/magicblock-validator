@@ -486,7 +486,6 @@ fn test_committing_and_undelegating_one_account_modifying_it_after() {
     });
 }
 
-// TODO: @@@ This test fails sporadically when running in parallel (see .../../../notes-babur.md)
 #[test]
 fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
     run_test!({
@@ -518,63 +517,5 @@ fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
             .confirm_transaction(&scheduled_commmit_sent_sig)
             .unwrap());
         debug!("✅ Verified that not commit was scheduled since tx failed");
-    });
-}
-
-// TODO: @@@ Remove later
-// Attempt of reproducing the race condition which did not work, i.e. it does not repro the issue
-//#[test]
-fn _test_committing_and_undelegating_two_accounts_modifying_them_after_in_parallel_with_valid_commits(
-) {
-    const ITERATIONS: usize = 80;
-    run_test!({
-        let mut handles = vec![];
-        for idx in 0..ITERATIONS {
-            let invalid_task = || {
-                let (ctx, sig, _tx_res) =
-                    commit_and_undelegate_two_accounts(true);
-
-                let logs = ctx.fetch_ephemeral_logs(sig).unwrap();
-                let scheduled_commmit_sent_sig =
-                    extract_scheduled_commit_sent_signature_from_logs(&logs)
-                        .unwrap();
-                debug!("Verifying that commit was not scheduled: {scheduled_commmit_sent_sig}");
-
-                assert!(!ctx
-                    .ephem_client
-                    .as_ref()
-                    .unwrap()
-                    .confirm_transaction(&scheduled_commmit_sent_sig)
-                    .unwrap());
-                debug!(
-                    "✅ Verified that not commit was scheduled since tx failed"
-                );
-            };
-            let valid_task = || {
-                let (ctx, sig, tx_res) =
-                    commit_and_undelegate_two_accounts(false);
-                debug!(
-                    "Committed and undelegated accounts {} '{:?}'",
-                    sig, tx_res
-                );
-
-                let res =
-                    verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
-
-                assert_two_committees_were_committed(&ctx, &res, true);
-                assert_two_committees_synchronized_count(&ctx, &res, 1);
-
-                assert_two_committee_accounts_were_undelegated_on_chain(&ctx);
-            };
-
-            if idx % 2 == 0 {
-                handles.push(std::thread::spawn(invalid_task));
-                handles.push(std::thread::spawn(valid_task));
-            } else {
-                handles.push(std::thread::spawn(valid_task));
-                handles.push(std::thread::spawn(invalid_task));
-            }
-        }
-        handles.into_iter().for_each(|h| h.join().unwrap());
     });
 }
