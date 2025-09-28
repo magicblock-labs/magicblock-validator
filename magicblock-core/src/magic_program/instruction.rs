@@ -66,7 +66,8 @@ pub enum MagicBlockInstruction {
     ///
     /// We implement it this way so we can log the signature of this transaction
     /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
-    ScheduledCommitSent(u64),
+    /// Args: (intent_id, bump) - bump is needed in order to guarantee unique transactions
+    ScheduledCommitSent((u64, u64)),
     ScheduleBaseIntent(MagicBaseIntentArgs),
 }
 

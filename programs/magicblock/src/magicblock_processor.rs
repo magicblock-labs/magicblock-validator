@@ -64,7 +64,7 @@ declare_process_instruction!(
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
-            ScheduledCommitSent(id) => process_scheduled_commit_sent(
+            ScheduledCommitSent((id, _bump)) => process_scheduled_commit_sent(
                 signers,
                 invoke_context,
                 transaction_context,
