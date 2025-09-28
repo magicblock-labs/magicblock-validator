@@ -59,25 +59,6 @@ setup-schedulecommit-both:
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-issues-frequent-commits:
-	RUN_TESTS=issues_frequent_commits \
-	$(MAKE) test
-setup-issues-frequent-commits-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=issues_frequent_commits \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
-setup-issues-frequent-commits-ephem:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=issues_frequent_commits \
-	SETUP_ONLY=ephem \
-	$(MAKE) test
-setup-issues-frequent-commits-both:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=issues_frequent_commits \
-	SETUP_ONLY=both \
-	$(MAKE) test
-
 test-chainlink:
 	RUN_TESTS=chainlink \
 	$(MAKE) test

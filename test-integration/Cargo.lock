@@ -10510,6 +10510,8 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "log",
+ "solana-rpc-client",
+ "solana-sdk",
  "test-kit",
 ]
 
