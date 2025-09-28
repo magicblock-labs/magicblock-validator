@@ -103,6 +103,11 @@ setup-magicblock-api-devnet:
 	RUN_TESTS=magicblock_api \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-magicblock-api-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=magicblock_api \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-magicblock-api-both:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=magicblock_api \
