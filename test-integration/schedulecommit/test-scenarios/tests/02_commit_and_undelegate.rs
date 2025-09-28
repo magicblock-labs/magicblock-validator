@@ -361,9 +361,13 @@ fn test_committed_and_undelegated_single_account_redelegation() {
 fn test_committed_and_undelegated_accounts_redelegation() {
     run_test!({
         let (ctx, sig, tx_res) = commit_and_undelegate_two_accounts(false);
-        info!("{} '{:?}'", sig, tx_res);
+        debug!(
+            "✅ Committed and undelegated accounts {} '{:?}'",
+            sig, tx_res
+        );
         let ScheduleCommitTestContextFields {
-            payer_ephem: payer,
+            payer_ephem,
+            payer_chain,
             committees,
             commitment,
             ephem_client,
@@ -375,14 +379,15 @@ fn test_committed_and_undelegated_accounts_redelegation() {
         {
             assert_cannot_increase_committee_count(
                 committees[0].1,
-                payer,
+                payer_ephem,
                 ephem_client,
             );
             assert_cannot_increase_committee_count(
                 committees[1].1,
-                payer,
+                payer_ephem,
                 ephem_client,
             );
+            debug!("✅ Cannot increase counts in ephemeral after undelegation triggered");
         }
 
         // 2. Wait for commit + undelegation to finish and try chain again
@@ -392,15 +397,18 @@ fn test_committed_and_undelegated_accounts_redelegation() {
             // we need a new blockhash otherwise the tx is identical to the above
             assert_can_increase_committee_count(
                 committees[0].1,
-                payer,
+                payer_chain,
                 chain_client,
                 commitment,
             );
             assert_can_increase_committee_count(
                 committees[1].1,
-                payer,
+                payer_chain,
                 chain_client,
                 commitment,
+            );
+            debug!(
+                "✅ Can increase counts on chain after undelegation completed"
             );
         }
 
@@ -408,33 +416,36 @@ fn test_committed_and_undelegated_accounts_redelegation() {
         {
             std::thread::sleep(std::time::Duration::from_secs(2));
             ctx.delegate_committees().unwrap();
+            debug!("✅ Redelegated committees");
         }
 
         // 4. Now we can modify them in the ephemeral again and no longer on chain
         {
-            assert_can_increase_committee_count(
+            assert_cannot_increase_committee_count(
                 committees[0].1,
-                payer,
-                ephem_client,
-                commitment,
+                payer_chain,
+                chain_client,
             );
-            assert_can_increase_committee_count(
+            assert_cannot_increase_committee_count(
                 committees[1].1,
-                payer,
-                ephem_client,
-                commitment,
+                payer_chain,
+                chain_client,
             );
+            debug!("✅ Cannot increase counts on chain after redelegation");
 
-            assert_cannot_increase_committee_count(
+            assert_can_increase_committee_count(
                 committees[0].1,
-                payer,
-                chain_client,
+                payer_ephem,
+                ephem_client,
+                commitment,
             );
-            assert_cannot_increase_committee_count(
+            assert_can_increase_committee_count(
                 committees[1].1,
-                payer,
-                chain_client,
+                payer_ephem,
+                ephem_client,
+                commitment,
             );
+            debug!("✅ Can increase counts in ephemeral after redelegation");
         }
     });
 }
@@ -445,15 +456,19 @@ fn test_committed_and_undelegated_accounts_redelegation() {
 #[test]
 fn test_committing_and_undelegating_one_account_modifying_it_after() {
     run_test!({
-        let (ctx, sig, res) = commit_and_undelegate_one_account(true);
-        info!("{} '{:?}'", sig, res);
+        let (ctx, sig, tx_res) = commit_and_undelegate_one_account(true);
+        debug!(
+            "✅ Committed and undelegated account and tried to mod after {} '{:?}'",
+            sig, tx_res
+        );
 
         // 1. Show we cannot use them in the ephemeral anymore
         ctx.assert_ephemeral_transaction_error(
             sig,
-            &res,
+            &tx_res,
             "instruction modified data of an account it does not own",
         );
+        debug!("✅ Verified we could not increase count in same tx that triggered undelegation in ephem");
 
         // 2. Retrieve the signature of the scheduled commit sent
         let logs = ctx.fetch_ephemeral_logs(sig).unwrap();
@@ -467,20 +482,26 @@ fn test_committing_and_undelegating_one_account_modifying_it_after() {
             .unwrap()
             .confirm_transaction(&sig)
             .unwrap());
+        debug!("✅ Verified that not commit was scheduled since tx failed");
     });
 }
+
 #[test]
 fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
     run_test!({
-        let (ctx, sig, res) = commit_and_undelegate_two_accounts(true);
-        info!("{} '{:?}'", sig, res);
+        let (ctx, sig, tx_res) = commit_and_undelegate_two_accounts(true);
+        debug!(
+            "✅ Committed and undelegated accounts and tried to mod after {} '{:?}'",
+            sig, tx_res
+        );
 
         // 1. Show we cannot use them in the ephemeral anymore
         ctx.assert_ephemeral_transaction_error(
             sig,
-            &res,
+            &tx_res,
             "instruction modified data of an account it does not own",
         );
+        debug!("✅ Verified we could not increase counts in same tx that triggered undelegation in ephem");
 
         // 2. Retrieve the signature of the scheduled commit sent
         let logs = ctx.fetch_ephemeral_logs(sig).unwrap();
@@ -494,5 +515,6 @@ fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
             .unwrap()
             .confirm_transaction(&scheduled_commmit_sent_sig)
             .unwrap());
+        debug!("✅ Verified that not commit was scheduled since tx failed");
     });
 }
