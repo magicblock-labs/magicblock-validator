@@ -9,7 +9,9 @@
 - we should peek into the account instead and only run the tx if it changed (has scheduled
 commits)
 
-## Regression
+## ~~Regression~~ _Fixed_
+
+- [fix here](https://github.com/magicblock-labs/magicblock-validator/commit/9ad32f3be6a13984f1a7ff897f1b6b462cbc7395)
 
 ### Schedule Commit
 
