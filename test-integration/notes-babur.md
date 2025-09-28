@@ -5,10 +5,13 @@
 - [x] `test-chainlink`
 - [x] `test-cloning`
 - [x] `test-committor-service`
-- [ ] `test-config` all failing
 - [x] `test-issues` removed since we won't support frequent commits
+- [x] `test-table-mania` all passing
+- [ ] `test-config` all failing
 - [ ] `test-ledger-restore` all failing/stalling
 - [ ] `test-magicblock-api` 2/4 failing (incorrect airdrop)
+- [ ] `test-pubsub` failing due to airdrop similar to above
+- [ ] `test-schedule-intent` all failing (not sure why)
 
 ### Test Config
 
