@@ -549,7 +549,7 @@ fn run_magicblock_pubsub_tests(
         }
     };
     let start_ephem_validator = || match start_validator(
-        "cloning-config.ephem.toml",
+        "cloning-conf.ephem.toml",
         ValidatorCluster::Ephem,
         &loaded_chain_accounts,
     ) {
