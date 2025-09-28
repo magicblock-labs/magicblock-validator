@@ -158,6 +158,11 @@ setup-schedule-intents-devnet:
 	RUN_TESTS=schedule_intents \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-schedule-intents-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=schedule_intents \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-schedule-intents-both:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedule_intents \

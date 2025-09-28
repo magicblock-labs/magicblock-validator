@@ -138,6 +138,9 @@ fn test_redelegation_intent() {
 }
 
 fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
+    // TODO: @@@ this could just use  ctx.airdrop_chain_escrowed(&payer, 2 * LAMPORTS_PER_SOL)
+    // instead of repeating the logic here
+
     let payer = Keypair::new();
     ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
         .unwrap();
