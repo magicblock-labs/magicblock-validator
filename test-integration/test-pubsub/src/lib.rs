@@ -110,3 +110,15 @@ impl PubSubEnv {
         self.send_signed_transaction(tx)
     }
 }
+
+#[macro_export]
+macro_rules! drain_stream {
+    ($rx:expr) => {{
+        while let Ok(Some(_)) = ::tokio::time::timeout(
+            ::std::time::Duration::from_millis(100),
+            $rx.next(),
+        )
+        .await
+        {}
+    }};
+}

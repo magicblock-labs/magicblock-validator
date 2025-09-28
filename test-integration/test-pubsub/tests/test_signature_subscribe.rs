@@ -4,7 +4,7 @@ use futures::StreamExt;
 use solana_rpc_client_api::response::{
     ProcessedSignatureResult, RpcSignatureResult,
 };
-use test_pubsub::PubSubEnv;
+use test_pubsub::{drain_stream, PubSubEnv};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_signature_subscribe() {
@@ -31,6 +31,7 @@ async fn test_signature_subscribe() {
         })
     );
 
+    drain_stream!(&mut rx);
     cancel().await;
     assert_eq!(
         rx.next().await,
@@ -62,6 +63,7 @@ async fn test_signature_subscribe_with_delay() {
         })
     );
 
+    drain_stream!(&mut rx);
     cancel().await;
     assert_eq!(
         rx.next().await,

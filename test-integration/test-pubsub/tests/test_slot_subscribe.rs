@@ -1,5 +1,5 @@
 use futures::StreamExt;
-use test_pubsub::PubSubEnv;
+use test_pubsub::{drain_stream, PubSubEnv};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slot_subscribe() {
@@ -22,6 +22,7 @@ async fn test_slot_subscribe() {
             break;
         }
     }
+    drain_stream!(&mut rx);
     cancel().await;
     assert_eq!(
         rx.next().await,

@@ -4,7 +4,7 @@ use futures::StreamExt;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signer::Signer,
 };
-use test_pubsub::PubSubEnv;
+use test_pubsub::{drain_stream, PubSubEnv};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_program_subscribe() {
@@ -51,6 +51,7 @@ async fn test_program_subscribe() {
             );
         }
     }
+    drain_stream!(&mut rx);
     cancel().await;
     assert_eq!(
         rx.next().await,
