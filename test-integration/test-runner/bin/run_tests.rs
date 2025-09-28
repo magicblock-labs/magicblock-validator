@@ -407,7 +407,7 @@ fn run_issues_frequent_commmits_tests(
     manifest_dir: &str,
     config: &TestConfigViaEnvVars,
 ) -> Result<Output, Box<dyn Error>> {
-    const TEST_NAME: &str = "issues_frequent_commmits";
+    const TEST_NAME: &str = "issues_frequent_commits";
     if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
