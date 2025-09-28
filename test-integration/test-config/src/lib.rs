@@ -1,3 +1,4 @@
+use log::*;
 use std::process::Child;
 
 use integration_test_tools::{
@@ -92,33 +93,58 @@ pub fn delegate_and_clone(
     ctx: &IntegrationTestContext,
     validator: &mut Child,
 ) -> Keypair {
-    let payer = Keypair::new();
+    let payer_chain = Keypair::new();
+    let payer_escrowed = Keypair::new();
 
     // 1. Airdrop to payer on chain
     expect!(
-        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL),
+        ctx.airdrop_chain(&payer_chain.pubkey(), LAMPORTS_PER_SOL),
         validator
     );
+    debug!(
+        "Airdropped 1 SOL to payer account on chain: {}",
+        payer_chain.pubkey()
+    );
 
-    // 2. Create and send init counter instruction on chain and delegate it
-    let init_ix = create_init_ix(payer.pubkey(), "TEST_COUNTER".to_string());
-    let delegate_ix = create_delegate_ix(payer.pubkey());
+    // 2. Airdrop to payer used to pay transactions in the ephemeral validator
+    ctx.airdrop_chain_escrowed(&payer_escrowed, LAMPORTS_PER_SOL)
+        .unwrap();
+    debug!(
+        "Airdropped 1 SOL to escrowed payer account on chain: {}",
+        payer_escrowed.pubkey()
+    );
+
+    // 3. Create and send init counter instruction on chain and delegate it
+    let init_ix =
+        create_init_ix(payer_chain.pubkey(), "TEST_COUNTER".to_string());
+    let delegate_ix = create_delegate_ix(payer_chain.pubkey());
     expect!(
         ctx.send_and_confirm_instructions_with_payer_chain(
             &[init_ix, delegate_ix],
-            &payer
+            &payer_chain
         ),
         validator
     );
-
-    // 3. Send a transaction to ephemeral validator to trigger cloning
-    let add_ix = create_add_ix(payer.pubkey(), 1);
-    expect!(
-        ctx.send_and_confirm_instructions_with_payer_ephem(&[add_ix], &payer),
-        validator
+    debug!(
+        "Initialized and delegated counter account to payer account on chain: {}",
+        payer_chain.pubkey()
     );
 
-    payer
+    // 3. Send a transaction to ephemeral validator to trigger cloning
+    let add_ix = create_add_ix(payer_chain.pubkey(), 1);
+    expect!(
+        ctx.send_and_confirm_instructions_with_payer_ephem(
+            &[add_ix],
+            &payer_escrowed
+        ),
+        validator
+    );
+    debug!(
+        "Sent add instruction to ephemeral validator to trigger cloning for payer account on chain: {}",
+        payer_chain.pubkey()
+    );
+
+    payer_chain
 }
 
 pub fn count_lookup_table_transactions_on_chain(

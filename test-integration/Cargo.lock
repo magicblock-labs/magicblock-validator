@@ -10505,17 +10505,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "test-issues"
-version = "0.0.0"
-dependencies = [
- "integration-test-tools",
- "log",
- "solana-rpc-client",
- "solana-sdk",
- "test-kit",
-]
-
-[[package]]
 name = "test-kit"
 version = "0.1.7"
 dependencies = [

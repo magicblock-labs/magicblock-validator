@@ -11,7 +11,6 @@ members = [
   "schedulecommit/test-security",
   "test-chainlink",
   "test-cloning",
-  "test-issues",
   "test-ledger-restore",
   "test-magicblock-api",
   "test-runner",
