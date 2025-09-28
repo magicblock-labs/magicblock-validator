@@ -114,7 +114,7 @@ impl PubSubEnv {
 #[macro_export]
 macro_rules! drain_stream {
     ($rx:expr) => {{
-        while let Ok(Some(_)) = ::tokio::time::timeout(
+        while let Ok(_) = ::tokio::time::timeout(
             ::std::time::Duration::from_millis(100),
             $rx.next(),
         )

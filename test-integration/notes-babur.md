@@ -10,7 +10,7 @@
 - [ ] `test-config` all failing
 - [ ] `test-ledger-restore` all failing/stalling
 - [ ] `test-magicblock-api` 2/4 failing (incorrect airdrop)
-- [ ] `test-pubsub` failing due to airdrop similar to above
+- [x] `test-pubsub` were failing due to airdrop similar to above and were fixed via escrowed airdrop
 - [ ] `test-schedule-intent` all failing (not sure why)
 
 ### Test Config

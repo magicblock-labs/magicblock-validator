@@ -5,7 +5,7 @@ use solana_rpc_client_api::config::{
     RpcTransactionLogsConfig, RpcTransactionLogsFilter,
 };
 use solana_sdk::signer::Signer;
-use test_pubsub::PubSubEnv;
+use test_pubsub::{drain_stream, PubSubEnv};
 
 // We may get other updates before the one we're waiting for
 // i.e. when an account is cloned
@@ -54,6 +54,7 @@ async fn test_logs_subscribe_all() {
         tokio::time::sleep(Duration::from_millis(100)).await
     }
 
+    drain_stream!(&mut rx);
     cancel().await;
     assert_eq!(
         rx.next().await,
@@ -101,7 +102,9 @@ async fn test_logs_subscribe_mentions() {
         assert!(!update.value.logs.is_empty());
     }
 
+    drain_stream!(&mut rx1);
     cancel1().await;
+    drain_stream!(&mut rx2);
     cancel2().await;
     assert_eq!(
         rx1.next().await,
