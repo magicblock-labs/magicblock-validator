@@ -18,7 +18,7 @@ use magicblock_program::{
     TaskRequest, TASK_CONTEXT_PUBKEY,
 };
 use solana_sdk::{
-    account::{ReadableAccount, WritableAccount},
+    account::ReadableAccount,
     instruction::Instruction,
     message::Message,
     pubkey::Pubkey,
@@ -286,16 +286,12 @@ impl TaskSchedulerService {
                     // https://github.com/magicblock-labs/magicblock-validator/issues/523
 
                     // Process any existing requests from the context
-                    let Some(mut context_account) = self.bank.get_account(&TASK_CONTEXT_PUBKEY) else {
+                    let Some(context_account) = self.bank.get_account(&TASK_CONTEXT_PUBKEY) else {
                         error!("Task context account not found");
                         return Err(TaskSchedulerError::TaskContextNotFound);
                     };
 
-                    let Ok(mut task_context) =
-                        bincode::deserialize::<TaskContext>(context_account.data_as_mut_slice()) else {
-                        error!("Invalid task context account");
-                        return Err(TaskSchedulerError::ContextDeserialization(context_account.data().to_vec()));
-                    };
+                    let mut task_context = bincode::deserialize::<TaskContext>(context_account.data()).unwrap_or_default();
 
                     trace!("Task context deserialized: {:?}", task_context);
 

@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
+use solana_sdk::{
+    account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
+};
 
 use crate::{
     schedule_task::utils::check_task_context_id,
@@ -50,8 +52,28 @@ pub(crate) fn process_cancel_task(
         transaction_context,
         TASK_CONTEXT_IDX,
     )?;
+    ic_msg!(
+        invoke_context,
+        "Owner before: {}",
+        context_acc.borrow().owner()
+    );
+    ic_msg!(
+        invoke_context,
+        "Program before: {}",
+        transaction_context.get_key_of_account_at_index(TASK_CONTEXT_IDX)?
+    );
     TaskContext::add_request(context_acc, TaskRequest::Cancel(cancel_request))?;
 
+    ic_msg!(
+        invoke_context,
+        "Owner after: {}",
+        context_acc.borrow().owner()
+    );
+    ic_msg!(
+        invoke_context,
+        "Program after: {}",
+        transaction_context.get_key_of_account_at_index(TASK_CONTEXT_IDX)?
+    );
     ic_msg!(
         invoke_context,
         "Successfully added cancel request for task {}",

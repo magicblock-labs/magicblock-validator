@@ -1,4 +1,3 @@
-use cleanass::assert;
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_program::{ID as MAGIC_PROGRAM_ID, TASK_CONTEXT_PUBKEY};
 use program_flexi_counter::instruction::{
