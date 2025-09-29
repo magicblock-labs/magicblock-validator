@@ -16,7 +16,6 @@
 - clone not found escrow accounts with 0 lamports (Thorsten)
 - replay - remove all non-delegated accounts from bank (Thorsten)
 
-
 ### Test Config
 
 When running individually I get:
