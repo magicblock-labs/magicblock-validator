@@ -1,6 +1,7 @@
 use std::sync::{atomic::AtomicUsize, Arc, RwLock};
 
-use locks::{WorkerId, MAX_SVM_WORKERS};
+use coordinator::ExecutionCoordinator;
+use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use log::info;
 use magicblock_core::link::transactions::{
     ProcessableTransaction, TransactionToProcessRx,
@@ -22,11 +23,13 @@ use crate::executor::{SimpleForkGraph, TransactionExecutor};
 /// pipeline. It receives transactions from a global queue and dispatches them to available
 /// worker threads for execution or simulation.
 pub struct TransactionScheduler {
+    /// Scheduling/Execution orchestrator
+    coordinator: ExecutionCoordinator,
     /// The receiving end of the global queue for all new transactions.
     transactions_rx: TransactionToProcessRx,
     /// A channel that receives readiness notifications from workers,
     /// indicating they are free to accept new work.
-    ready_rx: Receiver<WorkerId>,
+    ready_rx: Receiver<ExecutorId>,
     /// A list of sender channels, one for each `TransactionExecutor` worker.
     executors: Vec<Sender<ProcessableTransaction>>,
     /// A handle to the globally shared cache for loaded BPF programs.
@@ -44,23 +47,23 @@ impl TransactionScheduler {
     /// 1.  Prepares the shared program cache and ensures necessary sysvars are in the `AccountsDb`.
     /// 2.  Creates a pool of `TransactionExecutor` workers, each with its own dedicated channel.
     /// 3.  Spawns each worker in its own OS thread for maximum isolation and performance.
-    pub fn new(workers: u32, state: TransactionSchedulerState) -> Self {
-        let workers = workers.min(MAX_SVM_WORKERS);
+    pub fn new(executors: u32, state: TransactionSchedulerState) -> Self {
+        let count = executors.min(MAX_SVM_EXECUTORS) as usize;
         let index = Arc::new(AtomicUsize::new(0));
-        let mut executors = Vec::with_capacity(workers as usize);
+        let mut executors = Vec::with_capacity(count);
 
         // Create the back-channel for workers to signal their readiness.
-        let (ready_tx, ready_rx) = channel(workers as usize);
+        let (ready_tx, ready_rx) = channel(count);
         // Perform one-time setup of the shared program cache and sysvars.
         let program_cache = state.prepare_programs_cache();
         state.prepare_sysvars();
 
-        for id in 0..workers {
+        for id in 0..count {
             // Each executor has a channel capacity of 1, as it
             // can only process one transaction at a time.
             let (transactions_tx, transactions_rx) = channel(1);
             let executor = TransactionExecutor::new(
-                id,
+                id as u32,
                 &state,
                 transactions_rx,
                 ready_tx.clone(),
@@ -71,7 +74,9 @@ impl TransactionScheduler {
             executor.spawn();
             executors.push(transactions_tx);
         }
+        let coordinator = ExecutionCoordinator::new(count);
         Self {
+            coordinator,
             transactions_rx: state.txn_to_process_rx,
             ready_rx,
             executors,
@@ -107,28 +112,23 @@ impl TransactionScheduler {
     /// 3.  Receiving a notification of a new block, triggering a slot transition.
     async fn run(mut self) {
         let mut block_produced = self.latest_block.subscribe();
-        let mut ready = true;
         loop {
             tokio::select! {
                 biased;
                 // A worker has finished its task and is ready for more.
-                Some(_) = self.ready_rx.recv() => {
-                    // TODO(bmuddha):
-                    // This branch will be used by a multi-threaded scheduler
-                    // with account-level locking to manage the pool of ready workers.
-                    ready = true;
+                Some(executor) = self.ready_rx.recv() => {
+                    self.coordinator.unlock_accounts(executor);
+                    self.reschedule_blocked_transactions(executor).await;
                 }
                 // Receive new transactions for scheduling.
-                Some(txn) = self.transactions_rx.recv(), if ready => {
-                    // TODO(bmuddha):
-                    // The current implementation sends to the first worker only.
-                    // A future implementation with account-level locking will enable
-                    // dispatching to any available worker.
-                    let Some(tx) = self.executors.first() else {
-                        continue;
-                    };
-                    let _ = tx.send(txn).await;
-                    ready = false;
+                Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {
+                    // NOTE: unwrap_or will never happen as ready() guard gaurantees that
+                    // Some(_) will be returned, it's more eye pleasing than panicking
+                    let executor = self
+                        .coordinator
+                        .get_ready_executor()
+                        .unwrap_or(ExecutorId::MIN);
+                    self.schedule_transaction(executor, txn).await;
                 }
                 // A new block has been produced.
                 _ = block_produced.recv() => {
@@ -151,8 +151,55 @@ impl TransactionScheduler {
         self.program_cache.write().unwrap().latest_root_slot =
             self.latest_block.load().slot;
     }
+
+    async fn reschedule_blocked_transactions(&mut self, blocking: ExecutorId) {
+        let mut executor = Some(blocking);
+        loop {
+            let Some(exec) = executor else {
+                break;
+            };
+            let Some(txn) = self.coordinator.get_blocked_transaction(blocking)
+            else {
+                self.coordinator.release_executor(exec);
+                break;
+            };
+
+            self.schedule_transaction(exec, txn).await;
+            executor = self.coordinator.get_ready_executor();
+        }
+    }
+
+    async fn schedule_transaction(
+        &mut self,
+        executor: ExecutorId,
+        txn: ProcessableTransaction,
+    ) {
+        let result = self.coordinator.try_acquire_locks(executor, &txn);
+        if let Err(blocking) = result {
+            self.coordinator.unlock_accounts(executor);
+            self.coordinator.release_executor(executor);
+            self.coordinator.queue_transaction(blocking, txn);
+            return;
+        }
+        let _ = self.get_executor(executor).send(txn).await;
+    }
+
+    #[inline]
+    fn get_executor(
+        &self,
+        executor: ExecutorId,
+    ) -> &Sender<ProcessableTransaction> {
+        let idx = executor as usize;
+        // SAFETY:
+        // executor id is always within the bounds of the vec
+        unsafe { self.executors.get_unchecked(idx) }
+    }
 }
 
+pub mod coordinator;
 pub mod locks;
-pub mod queue;
 pub mod state;
+
+// SAFETY:
+// Rc<RefCell> used within the scheduler never escapes to other threads
+unsafe impl Send for TransactionScheduler {}

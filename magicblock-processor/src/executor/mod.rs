@@ -21,7 +21,7 @@ use tokio::{runtime::Builder, sync::mpsc::Sender};
 
 use crate::{
     builtins::BUILTINS,
-    scheduler::{locks::WorkerId, state::TransactionSchedulerState},
+    scheduler::{locks::ExecutorId, state::TransactionSchedulerState},
 };
 
 /// A dedicated, single-threaded worker responsible for processing transactions using
@@ -31,7 +31,7 @@ use crate::{
 /// executors can be spawned to process transactions in parallel.
 pub(super) struct TransactionExecutor {
     /// A unique identifier for this worker instance.
-    id: WorkerId,
+    id: ExecutorId,
     /// A handle to the global accounts database for reading and writing account state.
     accountsdb: Arc<AccountsDb>,
     /// A handle to the global ledger for writing committed transaction history.
@@ -51,7 +51,7 @@ pub(super) struct TransactionExecutor {
     /// A channel to send out account state updates after processing.
     accounts_tx: AccountUpdateTx,
     /// A back-channel to notify the `TransactionScheduler` that this worker is ready for more work.
-    ready_tx: Sender<WorkerId>,
+    ready_tx: Sender<ExecutorId>,
     /// A read lock held during a slot's processing to synchronize with critical global
     /// operations like `AccountsDb` snapshots.
     sync: StWLock,
@@ -66,10 +66,10 @@ impl TransactionExecutor {
     /// with a globally shared one. This allows updates made by one executor to be immediately
     /// visible to all others, preventing redundant program loads.
     pub(super) fn new(
-        id: WorkerId,
+        id: ExecutorId,
         state: &TransactionSchedulerState,
         rx: TransactionToProcessRx,
-        ready_tx: Sender<WorkerId>,
+        ready_tx: Sender<ExecutorId>,
         index: Arc<AtomicUsize>,
         programs_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     ) -> Self {
