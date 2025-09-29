@@ -141,7 +141,7 @@ async fn replay_blocks(
         }
         slot += 1;
     }
-    Ok(slot.max(1))
+    Ok(slot + 1)
 }
 
 /// Processes the provided ledger updating the bank and returns the slot

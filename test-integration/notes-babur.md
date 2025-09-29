@@ -7,11 +7,11 @@
 - [x] `test-committor-service`
 - [x] `test-issues` removed since we won't support frequent commits
 - [x] `test-table-mania` all passing
-- [ ] `test-config` all failing
-- [ ] `test-ledger-restore` all failing/stalling
+- [ ] `test-config` 2/2 failing (Transaction::sign failed with error NotEnoughSigners)
+- [ ] `test-ledger-restore` 16/17 failing (mostly airdrop and Failed to setup an account subscriptions)
 - [ ] `test-magicblock-api` 2/4 failing (incorrect airdrop)
 - [x] `test-pubsub` were failing due to airdrop similar to above and were fixed via escrowed airdrop
-- [ ] `test-schedule-intent` all failing (not sure why)
+- [ ] `test-schedule-intent` 5/5 failing (failed to airdrop)
 
 ### Test Config
 
