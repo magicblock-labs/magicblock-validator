@@ -8,13 +8,14 @@ use solana_sdk::{
     signature::Signature,
     transaction::{Result, SanitizedTransaction, Transaction},
 };
+use tokio::sync::Semaphore;
 
 use crate::batch_processor::{execute_batch, TransactionBatchWithIndexes};
 
 // NOTE: these don't exactly belong in the accounts crate
 //       they should go into a dedicated crate that also has access to
 //       magicblock_bank, magicblock_processor and magicblock_transaction_status
-pub fn execute_legacy_transaction(
+pub async fn execute_legacy_transaction(
     tx: Transaction,
     bank: &Arc<Bank>,
     transaction_status_sender: Option<&TransactionStatusSender>,
@@ -24,13 +25,17 @@ pub fn execute_legacy_transaction(
         &Default::default(),
     )?;
     execute_sanitized_transaction(sanitized_tx, bank, transaction_status_sender)
+        .await
 }
 
 lazy_static! {
     pub static ref TRANSACTION_INDEX_LOCK: StWLock = StWLock::default();
 }
+lazy_static! {
+    pub static ref TXN_SERIALIZER: Arc<Semaphore> = Arc::new(Semaphore::new(1));
+}
 
-pub fn execute_sanitized_transaction(
+pub async fn execute_sanitized_transaction(
     sanitized_tx: SanitizedTransaction,
     bank: &Arc<Bank>,
     transaction_status_sender: Option<&TransactionStatusSender>,
@@ -45,7 +50,10 @@ pub fn execute_sanitized_transaction(
     // If we choose this as a long term solution we need to lock simulations/preflight with the
     // same mutex once we enable them again
     // Work tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/181
-    let _execution_guard = TRANSACTION_INDEX_LOCK.write();
+    let _execution_guard = TXN_SERIALIZER
+        .acquire()
+        .await
+        .expect("semaphore has been closed");
 
     let batch = bank.prepare_sanitized_batch(txs);
 

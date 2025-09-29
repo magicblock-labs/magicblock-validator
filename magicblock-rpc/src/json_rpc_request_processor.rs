@@ -100,6 +100,7 @@ pub struct JsonRpcRequestProcessor {
 
     pub accounts_manager: Arc<AccountsManager>,
 }
+
 impl Metadata for JsonRpcRequestProcessor {}
 
 impl JsonRpcRequestProcessor {

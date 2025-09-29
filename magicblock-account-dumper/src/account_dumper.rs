@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use magicblock_mutator::errors::MutatorModificationError;
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
@@ -17,10 +18,11 @@ pub type AccountDumperResult<T> = Result<T, AccountDumperError>;
 //  - a TransactionExecutor trait with a service implementation passed as parameter to the AccountCloner
 //  - using the mutator's functionality directly inside of the AccountCloner
 //  - work tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/159
+#[async_trait]
 pub trait AccountDumper {
     // Overrides the account in the bank to make sure it's usable as a feepayer account (it has no-data)
     // in future transactions that account can be used for signing transactions and transferring lamports
-    fn dump_feepayer_account(
+    async fn dump_feepayer_account(
         &self,
         pubkey: &Pubkey,
         lamports: u64,
@@ -29,7 +31,7 @@ pub trait AccountDumper {
 
     // Overrides the account in the bank to make sure it's a PDA that can be used as readonly
     // Future transactions should be able to read from it (but not write) on the account as-is
-    fn dump_undelegated_account(
+    async fn dump_undelegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
@@ -37,7 +39,7 @@ pub trait AccountDumper {
 
     // Overrides the account in the bank to make sure it's a ready to use delegated account
     // Transactions should be able to write to it, we need to make sure the owner is set correctly
-    fn dump_delegated_account(
+    async fn dump_delegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
@@ -46,7 +48,7 @@ pub trait AccountDumper {
 
     // Overrides the accounts in the bank to make sure the program is usable normally (and upgraded)
     // We make sure all accounts involved in the program are present in the bank with latest state
-    fn dump_program_accounts(
+    async fn dump_program_accounts(
         &self,
         program_id: &Pubkey,
         program_id_account: &Account,
@@ -58,7 +60,7 @@ pub trait AccountDumper {
     /// Edge case handler, when we artificially manufacture 2 accounts for program, which is owned
     /// by older version of BPF loader, and thus only had 1 program account on main chain. This is
     /// necessary for uniformity of program loading pipeline by utilizing single loader (BPF upgradable).
-    fn dump_program_account_with_old_bpf(
+    async fn dump_program_account_with_old_bpf(
         &self,
         program_pubkey: &Pubkey,
         program_account: &Account,
