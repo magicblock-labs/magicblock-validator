@@ -101,8 +101,8 @@ fn test_cancel_ongoing_task() {
         status
             .transaction
             .meta
-            .map(|m| Some(m.err.is_none()))
-            .ok_or_else(|| anyhow::anyhow!("Unexpected error in transaction")),
+            .and_then(|m| m.status.ok())
+            .ok_or_else(|| anyhow::anyhow!("Transaction failed")),
         validator
     );
 
@@ -132,8 +132,8 @@ fn test_cancel_ongoing_task() {
         status
             .transaction
             .meta
-            .map(|m| Some(m.err.is_none()))
-            .ok_or_else(|| anyhow::anyhow!("Unexpected error in transaction")),
+            .and_then(|m| m.status.ok())
+            .ok_or_else(|| anyhow::anyhow!("Transaction failed")),
         validator
     );
 

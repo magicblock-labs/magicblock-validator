@@ -4,7 +4,6 @@ use magicblock_magic_program_api::TASK_CONTEXT_SIZE;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
-    account_utils::StateMut,
     instruction::{Instruction, InstructionError},
     pubkey::Pubkey,
 };
@@ -68,11 +67,15 @@ impl TaskContext {
         context_acc: &RefCell<AccountSharedData>,
         update_fn: impl FnOnce(&mut TaskContext),
     ) -> Result<(), InstructionError> {
-        let context_data = &mut context_acc.borrow_mut();
-        let mut context = TaskContext::deserialize(context_data)
+        let mut context = Self::deserialize(&context_acc.borrow())
             .map_err(|_| InstructionError::GenericError)?;
         update_fn(&mut context);
-        context_data.set_state(&context)?;
+
+        let serialized_data = bincode::serialize(&context)
+            .map_err(|_| InstructionError::InvalidAccountData)?;
+        let mut context_data = context_acc.borrow_mut();
+        context_data.resize(serialized_data.len(), 0);
+        context_data.set_data_from_slice(&serialized_data);
         Ok(())
     }
 

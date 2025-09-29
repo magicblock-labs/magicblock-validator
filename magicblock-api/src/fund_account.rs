@@ -4,7 +4,7 @@ use magicblock_bank::bank::Bank;
 use magicblock_magic_program_api::{
     self, MAGIC_CONTEXT_PUBKEY, TASK_CONTEXT_PUBKEY,
 };
-use magicblock_program::{MagicContext, TaskContext};
+use magicblock_program::MagicContext;
 use solana_sdk::{
     account::{Account, WritableAccount},
     clock::Epoch,
@@ -107,6 +107,6 @@ pub(crate) fn fund_task_context(bank: &Bank) {
         &TASK_CONTEXT_PUBKEY,
         magicblock_program::ID,
         u64::MAX,
-        TaskContext::ZERO.to_vec(),
+        vec![],
     );
 }

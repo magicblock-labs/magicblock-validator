@@ -99,13 +99,18 @@ fn test_schedule_error() {
     );
     let status = expect!(ctx.get_transaction_ephem(&sig), validator);
     expect!(
-        status
-            .transaction
-            .meta
-            .map(|m| Some(m.err.is_none()))
-            .ok_or_else(|| anyhow::anyhow!("Unexpected error in transaction")),
-        validator
-    );
+            status
+                .transaction
+                .meta
+    <<<<<<< HEAD
+                .map(|m| Some(m.err.is_none()))
+                .ok_or_else(|| anyhow::anyhow!("Unexpected error in transaction")),
+    =======
+                .and_then(|m| m.status.ok())
+                .ok_or_else(|| anyhow::anyhow!("Transaction failed")),
+    >>>>>>> dode/schedule-tasks
+            validator
+        );
 
     // Wait for the task to be scheduled and executed
     expect!(ctx.wait_for_delta_slot_ephem(10), validator);
@@ -162,7 +167,7 @@ fn test_schedule_error() {
     );
 
     // Cancel the task
-    expect!(
+    let sig = expect!(
         ctx.send_transaction_ephem(
             &mut Transaction::new_signed_with_payer(
                 &[create_cancel_task_ix(
@@ -177,6 +182,15 @@ fn test_schedule_error() {
             ),
             &[&payer]
         ),
+        validator
+    );
+    let status = expect!(ctx.get_transaction_ephem(&sig), validator);
+    expect!(
+        status
+            .transaction
+            .meta
+            .and_then(|m| m.status.ok())
+            .ok_or_else(|| anyhow::anyhow!("Transaction failed")),
         validator
     );
 
