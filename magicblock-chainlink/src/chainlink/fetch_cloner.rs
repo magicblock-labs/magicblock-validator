@@ -397,7 +397,7 @@ where
     async fn fetch_and_clone_accounts(
         &self,
         pubkeys: &[Pubkey],
-        _mark_empty: Option<&[Pubkey]>,
+        mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
@@ -873,6 +873,7 @@ where
     pub async fn fetch_and_clone_accounts_with_dedup(
         &self,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         // We cannot clone blacklisted accounts, thus either they are already
@@ -930,7 +931,12 @@ where
         // If we have accounts to fetch, delegate to the existing implementation
         // but notify all pending requests when done
         let result = if !fetch_new.is_empty() {
-            self.fetch_and_clone_accounts(&fetch_new, None, slot).await
+            self.fetch_and_clone_accounts(
+                &fetch_new,
+                mark_empty_if_not_found,
+                slot,
+            )
+            .await
         } else {
             Ok(FetchAndCloneResult {
                 not_found_on_chain: vec![],
@@ -2162,6 +2168,7 @@ mod tests {
                     .fetch_and_clone_accounts_with_dedup(
                         &[account_pubkey],
                         None,
+                        None,
                     )
                     .await
             })
@@ -2228,6 +2235,7 @@ mod tests {
                 fetch_cloner
                     .fetch_and_clone_accounts_with_dedup(
                         &[account_pubkey],
+                        None,
                         None,
                     )
                     .await
@@ -2387,7 +2395,7 @@ mod tests {
             let fetch_cloner = fetch_cloner.clone();
             tokio::spawn(async move {
                 fetch_cloner
-                    .fetch_and_clone_accounts_with_dedup(&accounts, None)
+                    .fetch_and_clone_accounts_with_dedup(&accounts, None, None)
                     .await
             })
         };

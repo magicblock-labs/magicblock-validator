@@ -178,7 +178,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             trace!("Adding balance PDA {balance_pda} for feepayer {feepayer}");
             pubkeys.push(balance_pda);
         }
-        self.ensure_accounts(&pubkeys).await
+        self.ensure_accounts(&pubkeys, None).await
     }
 
     /// Same as fetch accounts, but does not return the accounts, just
@@ -187,11 +187,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub async fn ensure_accounts(
         &self,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(FetchAndCloneResult::default());
         };
-        self.fetch_accounts_common(fetch_cloner, pubkeys).await
+        self.fetch_accounts_common(
+            fetch_cloner,
+            pubkeys,
+            mark_empty_if_not_found,
+        )
+        .await
     }
 
     /// Fetches the accounts from the bank if we're offline and not syncing accounts.
@@ -217,7 +223,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 .map(|pubkey| self.accounts_bank.get_account(pubkey))
                 .collect());
         };
-        let _ = self.fetch_accounts_common(fetch_cloner, pubkeys).await?;
+        let _ = self
+            .fetch_accounts_common(fetch_cloner, pubkeys, None)
+            .await?;
 
         let accounts = pubkeys
             .iter()
@@ -230,6 +238,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         &self,
         fetch_cloner: &FetchCloner<T, U, V, C>,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys_str = pubkeys
@@ -247,7 +256,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         // If any of the accounts was invalid and couldn't be fetched/cloned then
         // we return an error.
         let result = fetch_cloner
-            .fetch_and_clone_accounts_with_dedup(pubkeys, None)
+            .fetch_and_clone_accounts_with_dedup(
+                pubkeys,
+                mark_empty_if_not_found,
+                None,
+            )
             .await?;
         trace!("Fetched and cloned accounts: {result:?}");
         Ok(result)

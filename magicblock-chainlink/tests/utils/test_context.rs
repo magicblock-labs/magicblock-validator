@@ -188,7 +188,7 @@ impl TestContext {
         &self,
         pubkey: &Pubkey,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        self.chainlink.ensure_accounts(&[*pubkey]).await
+        self.chainlink.ensure_accounts(&[*pubkey], None).await
     }
 
     /// Force undelegation of an account in the bank to mark it as such until
