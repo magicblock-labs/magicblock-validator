@@ -1,3 +1,9 @@
+//! The central transaction scheduler and its event loop.
+//!
+//! This module is the entry point for all transactions into the processing pipeline.
+//! It is responsible for creating and managing a pool of `TransactionExecutor`
+//! workers and dispatching transactions to them for execution.
+
 use std::sync::{atomic::AtomicUsize, Arc, RwLock};
 
 use coordinator::{ExecutionCoordinator, TransactionWithId};
@@ -23,7 +29,7 @@ use crate::executor::{SimpleForkGraph, TransactionExecutor};
 /// pipeline. It receives transactions from a global queue and dispatches them to available
 /// worker threads for execution or simulation.
 pub struct TransactionScheduler {
-    /// Scheduling/Execution orchestrator
+    /// Manages the state of all executors, including locks and blocked transactions.
     coordinator: ExecutionCoordinator,
     /// The receiving end of the global queue for all new transactions.
     transactions_rx: TransactionToProcessRx,
@@ -88,17 +94,15 @@ impl TransactionScheduler {
 
     /// Spawns the scheduler's main event loop into a new, dedicated OS thread.
     ///
-    /// Similar to the executors, the scheduler runs in its own thread with a dedicated
-    /// single-threaded Tokio runtime for performance and to prevent it from interfering
-    /// with other application tasks.
+    /// The scheduler runs in its own thread with a dedicated single-threaded Tokio
+    /// runtime. This design ensures that the scheduling logic, which is a critical
+    /// path, does not compete for resources with other tasks.
     pub fn spawn(self) {
         let task = move || {
             let runtime = Builder::new_current_thread()
-                .thread_name("transaction scheduler")
+                .thread_name("transaction-scheduler")
                 .build()
-                .expect(
-                    "building single threaded tokio runtime should succeed",
-                );
+                .expect("Failed to build single-threaded Tokio runtime");
             runtime.block_on(tokio::task::unconstrained(self.run()));
         };
         std::thread::spawn(task);
@@ -106,10 +110,13 @@ impl TransactionScheduler {
 
     /// The main event loop of the transaction scheduler.
     ///
-    /// This loop multiplexes between three primary events:
-    /// 1.  Receiving a new transaction and dispatching it to an available worker.
-    /// 2.  Receiving a readiness notification from a worker.
-    /// 3.  Receiving a notification of a new block, triggering a slot transition.
+    /// This loop multiplexes between three primary events using `tokio::select!`:
+    /// 1.  **Worker Readiness**: A worker signals it is ready for a new task.
+    /// 2.  **New Transaction**: A new transaction arrives for processing.
+    /// 3.  **New Block**: A new block is produced, triggering a slot transition.
+    ///
+    /// The `biased` selection ensures that ready workers are processed first,
+    /// which helps to keep the pipeline full and maximize throughput.
     async fn run(mut self) {
         let mut block_produced = self.latest_block.subscribe();
         loop {
@@ -117,19 +124,12 @@ impl TransactionScheduler {
                 biased;
                 // A worker has finished its task and is ready for more.
                 Some(executor) = self.ready_rx.recv() => {
-                    self.coordinator.unlock_accounts(executor);
-                    self.reschedule_blocked_transactions(executor).await;
+                    self.handle_ready_executor(executor).await;
                 }
-                // Receive new transactions for scheduling.
+                // Receive new transactions for scheduling, but
+                // only if there is at least one ready worker.
                 Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {
-                    // NOTE: unwrap_or will never happen as ready() guard gaurantees that
-                    // Some(_) will be returned, it's more eye pleasing than panicking
-                    let executor = self
-                        .coordinator
-                        .get_ready_executor()
-                        .unwrap_or(ExecutorId::MIN);
-                    let txn = TransactionWithId::new(txn);
-                    self.schedule_transaction(executor, txn).await;
+                    self.handle_new_transaction(txn).await;
                 }
                 // A new block has been produced.
                 _ = block_produced.recv() => {
@@ -141,7 +141,25 @@ impl TransactionScheduler {
                 }
             }
         }
-        info!("transaction scheduler has terminated");
+        info!("Transaction scheduler has terminated");
+    }
+
+    /// Handles a notification that a worker has become ready.
+    async fn handle_ready_executor(&mut self, executor: ExecutorId) {
+        self.coordinator.unlock_accounts(executor);
+        self.reschedule_blocked_transactions(executor).await;
+    }
+
+    /// Handles a new transaction from the global queue.
+    async fn handle_new_transaction(&mut self, txn: ProcessableTransaction) {
+        // This unwrap is safe due to the `if self.coordinator.is_ready()`
+        // guard in the `select!` macro.
+        let executor = self
+            .coordinator
+            .get_ready_executor()
+            .unwrap_or(ExecutorId::MIN);
+        let txn = TransactionWithId::new(txn);
+        self.schedule_transaction(executor, txn).await;
     }
 
     /// Updates the scheduler's state when a new slot begins.
@@ -153,47 +171,40 @@ impl TransactionScheduler {
             self.latest_block.load().slot;
     }
 
-    async fn reschedule_blocked_transactions(&mut self, blocking: ExecutorId) {
-        let mut executor = Some(blocking);
-        loop {
-            let Some(exec) = executor else {
-                break;
-            };
-            let Some(txn) = self.coordinator.get_blocked_transaction(blocking)
-            else {
+    /// Attempts to reschedule transactions that were blocked by the newly freed executor.
+    async fn reschedule_blocked_transactions(&mut self, blocker: ExecutorId) {
+        let mut executor = Some(blocker);
+        while let Some(exec) = executor {
+            let txn = self.coordinator.get_blocked_transaction(blocker);
+            if let Some(txn) = txn {
+                self.schedule_transaction(exec, txn).await;
+                executor = self.coordinator.get_ready_executor();
+            } else {
                 self.coordinator.release_executor(exec);
                 break;
-            };
-
-            self.schedule_transaction(exec, txn).await;
-            executor = self.coordinator.get_ready_executor();
+            }
         }
     }
 
+    /// Attempts to schedule a single transaction for execution.
+    ///
+    /// If the transaction's required account locks are acquired, it is sent to the
+    /// specified executor. Otherwise, it is queued and will be retried later.
     async fn schedule_transaction(
         &mut self,
         executor: ExecutorId,
         txn: TransactionWithId,
     ) {
-        let result = self.coordinator.try_acquire_locks(executor, &txn);
-        if let Err(blocker) = result {
+        if let Err(blocker) = self.coordinator.try_acquire_locks(executor, &txn)
+        {
             self.coordinator.unlock_accounts(executor);
             self.coordinator.release_executor(executor);
             self.coordinator.queue_transaction(blocker, txn);
             return;
         }
-        let _ = self.get_executor(executor).send(txn.txn).await;
-    }
-
-    #[inline]
-    fn get_executor(
-        &self,
-        executor: ExecutorId,
-    ) -> &Sender<ProcessableTransaction> {
-        let idx = executor as usize;
-        // SAFETY:
-        // executor id is always within the bounds of the vec
-        unsafe { self.executors.get_unchecked(idx) }
+        // It's safe to ignore the result of the send operation. If the send fails,
+        // it means the executor's channel is closed, which only happens on shutdown.
+        let _ = self.executors[executor as usize].send(txn.txn).await;
     }
 }
 
