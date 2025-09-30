@@ -96,7 +96,8 @@ impl TestFixture {
     #[allow(dead_code)]
     pub fn create_intent_executor(
         &self,
-    ) -> IntentExecutorImpl<TransactionPreparatorImpl, MockTaskInfoFetcher> {
+    ) -> IntentExecutorImpl<TransactionPreparatorImpl, MockTaskInfoFetcher>
+    {
         let transaction_preparator = self.create_transaction_preparator();
         let task_info_fetcher = Arc::new(MockTaskInfoFetcher);
 

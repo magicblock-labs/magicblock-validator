@@ -20,8 +20,8 @@ use thiserror::Error;
 
 use crate::tasks::visitor::Visitor;
 
-mod args_task;
-mod buffer_task;
+pub mod args_task;
+pub mod buffer_task;
 pub mod task_builder;
 pub mod task_strategist;
 pub(crate) mod task_visitors;
@@ -260,6 +260,24 @@ impl CleanupTask {
     /// Returns a number of [`CleanupTask`]s that is possible to fit in single
     pub const fn max_tx_fit_count_with_budget() -> usize {
         19
+    }
+
+    pub fn chunks_pda(&self, authority: &Pubkey) -> Pubkey {
+        pdas::chunks_pda(
+            authority,
+            &self.pubkey,
+            self.commit_id.to_le_bytes().as_slice(),
+        )
+        .0
+    }
+
+    pub fn buffer_pda(&self, authority: &Pubkey) -> Pubkey {
+        pdas::buffer_pda(
+            authority,
+            &self.pubkey,
+            self.commit_id.to_le_bytes().as_slice(),
+        )
+        .0
     }
 }
 
