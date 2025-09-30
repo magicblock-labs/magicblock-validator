@@ -132,6 +132,7 @@ impl ExecutionCoordinator {
 
             self.acquired_locks[executor as usize].push(lock);
         }
+        self.transaction_queues.remove(&transaction.id);
         Ok(())
     }
 }
