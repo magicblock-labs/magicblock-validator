@@ -36,7 +36,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {
     {
         info!("1. Account delegated to us");
 
-        ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+        ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
 
         // Account should be cloned as delegated
         let account = ctx.cloner.get_account(&counter_pda).unwrap();

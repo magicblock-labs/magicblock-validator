@@ -217,7 +217,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         let updates = me.pubsub_client.take_updates();
         me.listen_for_account_updates(updates)?;
-        let clock_remote_account = me.try_get(clock::ID, false).await?;
+        let clock_remote_account = me.try_get(clock::ID).await?;
         match clock_remote_account {
             RemoteAccount::NotFound(_) => {
                 Err(RemoteAccountProviderError::ClockAccountCouldNotBeResolved(
@@ -405,7 +405,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey])
+        self.try_get_multi(&[pubkey], None)
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
@@ -421,7 +421,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
-        let remote_accounts = self.try_get_multi(pubkeys).await?;
+        let remote_accounts = self.try_get_multi(pubkeys, None).await?;
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
             config.as_ref().and_then(|c| c.min_context_slot),
@@ -449,7 +449,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     self.chain_slot()
                 );
             }
-            self.fetch(pubkeys.to_vec(), self.chain_slot());
+            self.fetch(pubkeys.to_vec(), None, self.chain_slot());
         }
 
         // 3. Wait for the slots to match
@@ -469,7 +469,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     pubkey_slots
                 );
             }
-            let remote_accounts = self.try_get_multi(pubkeys).await?;
+            let remote_accounts = self.try_get_multi(pubkeys, None).await?;
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
                 config.min_context_slot,
@@ -522,6 +522,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub async fn try_get_multi(
         &self,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
             return Ok(vec![]);
@@ -554,7 +555,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // Start the fetch
         let min_context_slot = fetch_start_slot;
-        self.fetch(pubkeys.to_vec(), min_context_slot);
+        self.fetch(pubkeys.to_vec(), mark_empty_if_not_found, min_context_slot);
 
         // Wait for all accounts to resolve (either from fetch or subscription override)
         let mut resolved_accounts = vec![];
@@ -733,7 +734,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(())
     }
 
-    fn fetch(&self, pubkeys: Vec<Pubkey>, min_context_slot: u64) {
+    fn fetch(
+        &self,
+        pubkeys: Vec<Pubkey>,
+        mark_empty_if_not_found: Option<&[Pubkey]>,
+        min_context_slot: u64,
+    ) {
         const MAX_RETRIES: u64 = 10;
         let mut remaining_retries: u64 = 10;
         macro_rules! retry {
@@ -752,6 +758,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let rpc_client = self.rpc_client.clone();
         let fetching_accounts = self.fetching_accounts.clone();
         let commitment = self.rpc_client.commitment();
+        let mark_empty_if_not_found =
+            mark_empty_if_not_found.unwrap_or(&[]).to_vec();
         tokio::spawn(async move {
             use RemoteAccount::*;
 
@@ -999,10 +1007,8 @@ mod test {
         };
 
         let pubkey = random_pubkey();
-        let remote_account = remote_account_provider
-            .try_get(pubkey, false)
-            .await
-            .unwrap();
+        let remote_account =
+            remote_account_provider.try_get(pubkey).await.unwrap();
         assert!(!remote_account.is_found());
     }
 
@@ -1047,10 +1053,8 @@ mod test {
             )
         };
 
-        let remote_account = remote_account_provider
-            .try_get(pubkey, false)
-            .await
-            .unwrap();
+        let remote_account =
+            remote_account_provider.try_get(pubkey).await.unwrap();
         let AccountAtSlot { account, slot } =
             rpc_client.get_account_at_slot(&pubkey).unwrap();
         assert_eq!(
@@ -1349,7 +1353,7 @@ mod test {
 
         // Add three accounts (up to limit)
         for pk in pubkeys {
-            provider.try_get(*pk, false).await.unwrap();
+            provider.try_get(*pk).await.unwrap();
         }
 
         // No evictions should occur
@@ -1376,16 +1380,16 @@ mod test {
             setup_with_accounts(pubkeys, 3).await;
 
         // Fill cache: [1, 2, 3] (1 is least recently used)
-        provider.try_get(pubkey1, false).await.unwrap();
-        provider.try_get(pubkey2, false).await.unwrap();
-        provider.try_get(pubkey3, false).await.unwrap();
+        provider.try_get(pubkey1).await.unwrap();
+        provider.try_get(pubkey2).await.unwrap();
+        provider.try_get(pubkey3).await.unwrap();
 
         // Access pubkey1 to make it more recently used: [2, 3, 1]
         // This should just promote, making order [2, 3, 1]
-        provider.try_get(pubkey1, false).await.unwrap();
+        provider.try_get(pubkey1).await.unwrap();
 
         // Add pubkey4, should evict pubkey2 (now least recently used)
-        provider.try_get(pubkey4, false).await.unwrap();
+        provider.try_get(pubkey4).await.unwrap();
 
         // Check channel received the evicted account
 
@@ -1393,7 +1397,7 @@ mod test {
         assert_eq!(removed_accounts, [pubkey2]);
 
         // Add pubkey5, should evict pubkey3 (now least recently used)
-        provider.try_get(pubkey5, false).await.unwrap();
+        provider.try_get(pubkey5).await.unwrap();
 
         // Check channel received the second evicted account
         let removed_accounts = drain_removed_account_rx(&mut removed_rx);
@@ -1416,12 +1420,12 @@ mod test {
 
         // Fill cache to capacity (no evictions)
         for pk in pubkeys.iter().take(4) {
-            provider.try_get(*pk, false).await.unwrap();
+            provider.try_get(*pk).await.unwrap();
         }
 
         // Add more accounts and verify evictions happen in LRU order
         for i in 4..7 {
-            provider.try_get(pubkeys[i], false).await.unwrap();
+            provider.try_get(pubkeys[i]).await.unwrap();
             let expected_evicted = pubkeys[i - 4]; // Should evict the account added 4 steps ago
 
             // Verify the evicted account was sent over the channel
