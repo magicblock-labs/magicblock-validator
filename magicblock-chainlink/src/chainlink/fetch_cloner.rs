@@ -431,7 +431,10 @@ where
         self.fetch_count
             .fetch_add(pubkeys.len() as u64, Ordering::Relaxed);
 
-        let accs = self.remote_account_provider.try_get_multi(pubkeys).await?;
+        let accs = self
+            .remote_account_provider
+            .try_get_multi(pubkeys, mark_empty_if_not_found)
+            .await?;
 
         trace!("Fetched {accs:?}");
 
@@ -524,6 +527,15 @@ where
             );
         }
 
+        let (clone_as_empty, not_found) =
+            if let Some(mark_empty) = mark_empty_if_not_found {
+                not_found
+                    .into_iter()
+                    .partition::<Vec<_>, _>(|(p, _)| mark_empty.contains(p))
+            } else {
+                (vec![], not_found)
+            };
+
         // For accounts we couldn't find we cannot do anything. We will let code depending
         // on them to be in the bank fail on its own
         if !not_found.is_empty() {
@@ -541,6 +553,17 @@ where
             trace!(
                 "Accounts already in bank: {:?}",
                 in_bank
+                    .iter()
+                    .map(|(p, _)| p.to_string())
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        // We mark some accounts as empty if we know that they will never exist on chain
+        if log::log_enabled!(log::Level::Trace) && !clone_as_empty.is_empty() {
+            trace!(
+                "Cloning accounts as empty: {:?}",
+                clone_as_empty
                     .iter()
                     .map(|(p, _)| p.to_string())
                     .collect::<Vec<_>>()
@@ -1308,7 +1331,7 @@ mod tests {
     use super::*;
     use crate::{
         accounts_bank::mock::AccountsBankStub,
-        assert_not_subscribed, assert_subscribed,
+        assert_not_cloned, assert_not_subscribed, assert_subscribed,
         assert_subscribed_without_delegation_record,
         config::LifecycleMode,
         remote_account_provider::{
@@ -1331,6 +1354,7 @@ mod tests {
     };
     use solana_account::Account;
     use solana_account::{AccountSharedData, WritableAccount};
+    use solana_sdk::system_program;
     use std::{collections::HashMap, sync::Arc};
     use tokio::sync::mpsc;
 
@@ -2433,6 +2457,86 @@ mod tests {
             account3,
             CURRENT_SLOT,
             account_owner
+        );
+    }
+
+    // -----------------
+    // Marked Non Existing Accounts
+    // -----------------
+    #[tokio::test]
+    async fn test_fetch_with_some_acounts_marked_as_empty_if_not_found() {
+        init_logger();
+        let validator_pubkey = random_pubkey();
+        let account_owner = random_pubkey();
+        const CURRENT_SLOT: u64 = 100;
+
+        // Create one existing account and one non-existing account
+        let existing_account_pubkey = random_pubkey();
+        let marked_non_existing_account_pubkey = random_pubkey();
+        let unmarked_non_existing_account_pubkey = random_pubkey();
+
+        let existing_account = Account {
+            lamports: 1_000_000,
+            data: vec![1, 2, 3, 4],
+            owner: account_owner,
+            executable: false,
+            rent_epoch: 0,
+        };
+        let accounts = [(existing_account_pubkey, existing_account.clone())];
+
+        let FetcherTestCtx {
+            accounts_bank,
+            fetch_cloner,
+            remote_account_provider,
+            ..
+        } = setup(accounts, CURRENT_SLOT, validator_pubkey).await;
+
+        // Configure fetch_cloner to mark some accounts as empty if not found
+        fetch_cloner
+            .fetch_and_clone_accounts(
+                &[
+                    existing_account_pubkey,
+                    marked_non_existing_account_pubkey,
+                    unmarked_non_existing_account_pubkey,
+                ],
+                Some(&[marked_non_existing_account_pubkey]),
+                None,
+            )
+            .await
+            .expect("Fetch and clone failed");
+
+        // Existing account should be cloned normally
+        assert_cloned_undelegated_account!(
+            accounts_bank,
+            existing_account_pubkey,
+            existing_account,
+            CURRENT_SLOT,
+            account_owner
+        );
+
+        // Non marked account should not be cloned
+        assert_not_cloned!(
+            accounts_bank,
+            &[unmarked_non_existing_account_pubkey]
+        );
+
+        // Marked non-existing account should be cloned as empty
+        assert_cloned_undelegated_account!(
+            accounts_bank,
+            marked_non_existing_account_pubkey,
+            Account {
+                lamports: 0,
+                data: vec![],
+                owner: Pubkey::default(),
+                executable: false,
+                rent_epoch: 0,
+            },
+            CURRENT_SLOT,
+            system_program::id()
+        );
+        assert_subscribed_without_delegation_record!(
+            remote_account_provider,
+            &[&marked_non_existing_account_pubkey]
         );
     }
 }

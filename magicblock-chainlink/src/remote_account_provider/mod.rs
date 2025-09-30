@@ -855,15 +855,28 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             // TODO: should we retry if not or respond with an error?
             assert!(response.context.slot >= min_context_slot);
 
-            let remote_accounts: Vec<RemoteAccount> = response
-                .value
-                .into_iter()
-                .map(|acc| match acc {
+            let remote_accounts: Vec<RemoteAccount> = pubkeys
+                .iter()
+                .zip(response.value.into_iter())
+                .map(|(pubkey, acc)| match acc {
                     Some(value) => RemoteAccount::from_fresh_account(
                         value,
                         response.context.slot,
                         RemoteAccountUpdateSource::Fetch,
                     ),
+                    None if mark_empty_if_not_found.contains(pubkey) => {
+                        RemoteAccount::from_fresh_account(
+                            Account {
+                                lamports: 0,
+                                data: vec![],
+                                owner: Pubkey::default(),
+                                executable: false,
+                                rent_epoch: 0,
+                            },
+                            response.context.slot,
+                            RemoteAccountUpdateSource::Fetch,
+                        )
+                    }
                     None => NotFound(response.context.slot),
                 })
                 .collect();
