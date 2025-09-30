@@ -26,11 +26,17 @@ pub struct DbTask {
 #[derive(Debug, Clone)]
 pub struct FailedScheduling {
     pub id: u64,
+    pub timestamp: u64,
+    pub task_id: u64,
+    pub error: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct FailedTask {
     pub id: u64,
+    pub timestamp: u64,
+    pub task_id: u64,
+    pub error: String,
 }
 
 pub struct SchedulerDatabase {
@@ -62,14 +68,20 @@ impl SchedulerDatabase {
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS failed_scheduling (
-                id INTEGER PRIMARY KEY
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                task_id INTEGER,
+                error TEXT NOT NULL
             )",
             [],
         )?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS failed_tasks (
-                id INTEGER PRIMARY KEY
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                task_id INTEGER,
+                error TEXT NOT NULL
             )",
             [],
         )?;
@@ -124,50 +136,27 @@ impl SchedulerDatabase {
 
     pub fn insert_failed_scheduling(
         &self,
-        failed_scheduling: &FailedScheduling,
+        task_id: u64,
+        error: String,
     ) -> Result<(), TaskSchedulerError> {
         self.conn.execute(
-            "INSERT INTO failed_scheduling (id) VALUES (?)",
-            [failed_scheduling.id],
+            "INSERT INTO failed_scheduling (timestamp, task_id, error) VALUES (?, ?, ?)",
+            params![Utc::now().timestamp_millis(), task_id, error],
         )?;
-        trace!(
-            "Inserted failed scheduling {} into database",
-            failed_scheduling.id
-        );
-        Ok(())
-    }
-
-    pub fn remove_failed_scheduling(
-        &self,
-        task_id: u64,
-    ) -> Result<(), TaskSchedulerError> {
-        self.conn
-            .execute("DELETE FROM failed_scheduling WHERE id = ?", [task_id])?;
-        trace!("Removed failed scheduling {} from database", task_id);
+        trace!("Inserted failed scheduling: {:?}", task_id);
         Ok(())
     }
 
     pub fn insert_failed_task(
         &self,
-        failed_task: &FailedTask,
-    ) -> Result<(), TaskSchedulerError> {
-        let changed_rows = self.conn.execute(
-            "INSERT INTO failed_tasks (id) VALUES (?)",
-            [failed_task.id],
-        )?;
-        trace!("Changed rows: {}", changed_rows);
-        trace!("Failed task ids: {:?}", self.get_failed_task_ids()?);
-        trace!("Inserted failed task {} into database", failed_task.id);
-        Ok(())
-    }
-
-    pub fn remove_failed_task(
-        &self,
         task_id: u64,
+        error: String,
     ) -> Result<(), TaskSchedulerError> {
-        self.conn
-            .execute("DELETE FROM failed_tasks WHERE id = ?", [task_id])?;
-        trace!("Removed failed task {} from database", task_id);
+        self.conn.execute(
+            "INSERT INTO failed_tasks (timestamp, task_id, error) VALUES (?, ?, ?)",
+            params![Utc::now().timestamp_millis(), task_id, error],
+        )?;
+        trace!("Inserted failed task {} into database", task_id);
         Ok(())
     }
 
@@ -281,27 +270,43 @@ impl SchedulerDatabase {
         Ok(rows.collect::<Result<Vec<u64>, rusqlite::Error>>()?)
     }
 
-    pub fn get_failed_scheduling_ids(
+    pub fn get_failed_schedulings(
         &self,
-    ) -> Result<Vec<u64>, TaskSchedulerError> {
+    ) -> Result<Vec<FailedScheduling>, TaskSchedulerError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id 
+            "SELECT * 
              FROM failed_scheduling",
         )?;
 
-        let rows = stmt.query_map([], |row| row.get(0))?;
+        let rows = stmt.query_map([], |row| {
+            Ok(FailedScheduling {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                task_id: row.get(2)?,
+                error: row.get(3)?,
+            })
+        })?;
 
-        Ok(rows.collect::<Result<Vec<u64>, rusqlite::Error>>()?)
+        Ok(rows.collect::<Result<Vec<FailedScheduling>, rusqlite::Error>>()?)
     }
 
-    pub fn get_failed_task_ids(&self) -> Result<Vec<u64>, TaskSchedulerError> {
+    pub fn get_failed_tasks(
+        &self,
+    ) -> Result<Vec<FailedTask>, TaskSchedulerError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id 
+            "SELECT * 
              FROM failed_tasks",
         )?;
 
-        let rows = stmt.query_map([], |row| row.get(0))?;
+        let rows = stmt.query_map([], |row| {
+            Ok(FailedTask {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                task_id: row.get(2)?,
+                error: row.get(3)?,
+            })
+        })?;
 
-        Ok(rows.collect::<Result<Vec<u64>, rusqlite::Error>>()?)
+        Ok(rows.collect::<Result<Vec<FailedTask>, rusqlite::Error>>()?)
     }
 }

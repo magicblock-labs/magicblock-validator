@@ -113,7 +113,7 @@ fn test_schedule_error() {
     // Check that the task was scheduled in the database
     let db = expect!(SchedulerDatabase::new(db_path), validator);
 
-    let failed_scheduling = expect!(db.get_failed_scheduling_ids(), validator);
+    let failed_scheduling = expect!(db.get_failed_schedulings(), validator);
     assert_eq!(
         failed_scheduling.len(),
         0,
@@ -122,7 +122,7 @@ fn test_schedule_error() {
         failed_scheduling,
     );
 
-    let failed_tasks = expect!(db.get_failed_task_ids(), validator);
+    let failed_tasks = expect!(db.get_failed_tasks(), validator);
     assert_eq!(
         failed_tasks.len(),
         1,
