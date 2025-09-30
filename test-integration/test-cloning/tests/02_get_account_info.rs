@@ -52,8 +52,8 @@ fn test_get_account_info_existing_not_delegated() {
     assert_eq!(acc.unwrap().lamports, 3 * LAMPORTS_PER_SOL);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_get_account_info_escrowed() {
+#[test]
+fn test_get_account_info_escrowed() {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
@@ -67,7 +67,6 @@ async fn test_get_account_info_escrowed() {
         escrow_lamports,
     ) = ctx
         .airdrop_chain_escrowed(&kp, 4 * LAMPORTS_PER_SOL)
-        .await
         .unwrap();
     debug!("Airdrop + escrow tx: {airdrop_sig}, {escrow_sig}");
 

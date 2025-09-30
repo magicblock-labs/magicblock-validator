@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use magicblock_core::magic_program::{
     instruction::{
@@ -109,13 +112,17 @@ impl InstructionUtils {
         validator_authority: &Pubkey,
         scheduled_commit_id: u64,
     ) -> Instruction {
+        static COMMIT_SENT_BUMP: AtomicU64 = AtomicU64::new(0);
         let account_metas = vec![
             AccountMeta::new_readonly(*magic_block_program, false),
             AccountMeta::new_readonly(*validator_authority, true),
         ];
         Instruction::new_with_bincode(
             *magic_block_program,
-            &MagicBlockInstruction::ScheduledCommitSent(scheduled_commit_id),
+            &MagicBlockInstruction::ScheduledCommitSent((
+                scheduled_commit_id,
+                COMMIT_SENT_BUMP.fetch_add(1, Ordering::SeqCst),
+            )),
             account_metas,
         )
     }

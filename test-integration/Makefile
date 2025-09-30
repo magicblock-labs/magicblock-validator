@@ -27,6 +27,8 @@ list:
 list-programs:
 	@echo $(PROGRAMS_SO)
 
+programs: $(PROGRAMS_SO)
+
 test: $(PROGRAMS_SO)
 	$(MAKE) chainlink-prep-programs -C ./test-chainlink && \
 	RUST_BACKTRACE=1 \
@@ -46,23 +48,14 @@ setup-schedulecommit-devnet:
 	RUN_TESTS=schedulecommit \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-schedulecommit-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=schedulecommit \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-schedulecommit-both:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedulecommit \
-	SETUP_ONLY=both \
-	$(MAKE) test
-
-test-issues-frequent-commits:
-	RUN_TESTS=issues_frequent_commits \
-	$(MAKE) test
-setup-issues-frequent-commits-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=issues_frequent_commits \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
-setup-issues-frequent-commits-both:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=issues_frequent_commits \
 	SETUP_ONLY=both \
 	$(MAKE) test
 
@@ -110,6 +103,11 @@ setup-magicblock-api-devnet:
 	RUN_TESTS=magicblock_api \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-magicblock-api-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=magicblock_api \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-magicblock-api-both:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=magicblock_api \
@@ -137,10 +135,20 @@ setup-committor-devnet:
 test-pubsub:
 	RUN_TESTS=pubsub \
 	$(MAKE) test
+setup-pubsub-devnet:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=pubsub \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
 setup-pubsub-ephem:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=pubsub \
 	SETUP_ONLY=ephem \
+	$(MAKE) test
+setup-pubsub-both:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=pubsub \
+	SETUP_ONLY=both \
 	$(MAKE) test
 
 test-config:
@@ -159,6 +167,11 @@ setup-schedule-intents-devnet:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedule_intents \
 	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-schedule-intents-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=schedule_intents \
+	SETUP_ONLY=ephem \
 	$(MAKE) test
 setup-schedule-intents-both:
 	RUST_LOG_STYLE=none \
@@ -195,4 +208,4 @@ ci-fmt:
 ci-lint:
 	cargo clippy --all-targets -- -D warnings
 
-.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-chainlink setup-chainlink-devnet test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list ci-fmt ci-lint
+.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-chainlink setup-chainlink-devnet test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list ci-fmt ci-lint programs

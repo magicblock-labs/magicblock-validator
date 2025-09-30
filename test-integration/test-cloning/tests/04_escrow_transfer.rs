@@ -9,8 +9,8 @@ use test_kit::init_logger;
 use crate::utils::init_and_delegate_flexi_counter;
 mod utils;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_transfer_from_escrow_to_delegated_account() {
+#[test]
+fn test_transfer_from_escrow_to_delegated_account() {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
@@ -27,7 +27,6 @@ async fn test_transfer_from_escrow_to_delegated_account() {
         escrow_lamports,
     ) = ctx
         .airdrop_chain_escrowed(&kp_escrowed, 2 * LAMPORTS_PER_SOL)
-        .await
         .unwrap();
 
     assert_eq!(

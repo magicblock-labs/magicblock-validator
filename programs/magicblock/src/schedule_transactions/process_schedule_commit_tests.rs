@@ -225,7 +225,7 @@ fn assert_first_commit(
             assert_eq!(slot, &test_clock.slot);
             assert_eq!(actual_payer, payer);
             assert_eq!(base_intent.get_committed_pubkeys().unwrap().as_slice(), committees);
-            let instruction = MagicBlockInstruction::ScheduledCommitSent(*id);
+            let instruction = MagicBlockInstruction::ScheduledCommitSent((*id, 0));
             assert_eq!(action_sent_transaction.data(0), instruction.try_to_vec().unwrap());
             assert_eq!(base_intent.is_undelegate(), expected_request_undelegation);
         }

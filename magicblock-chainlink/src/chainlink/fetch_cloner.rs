@@ -190,6 +190,19 @@ where
                     )
                     .await;
                 if let Some(account) = resolved_account {
+                    // Once we clone an account that is delegated to us we no longer need
+                    // to receive updates for it from chain
+                    // The subscription will be turned back on once the committor service schedules
+                    // a commit for it that includes undelegation
+                    if account.delegated() {
+                        if let Err(err) =
+                            remote_account_provider.unsubscribe(&pubkey).await
+                        {
+                            error!(
+                                "Failed to unsubscribe from delegated account {pubkey}: {err}"
+                            );
+                        }
+                    }
                     if account.executable() {
                         Self::handle_executable_sub_update(
                             &cloner, pubkey, account,

@@ -57,6 +57,7 @@ macro_rules! run_test {
             ::std::sync::atomic::AtomicUsize::new(0);
 
         init_logger!();
+        ::integration_test_tools::color_backtrace::install();
 
         let test_name = $crate::function_name!();
         let test = || $test_body;

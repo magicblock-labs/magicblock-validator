@@ -4,7 +4,8 @@ use magicblock_core::traits::AccountsBank;
 use solana_account::AccountSharedData;
 use solana_feature_set::{
     curve25519_restrict_msm_length, curve25519_syscall_enabled,
-    disable_rent_fees_collection, FeatureSet,
+    disable_rent_fees_collection, enable_transaction_loading_failure_fees,
+    FeatureSet,
 };
 use solana_program::feature;
 use solana_rent_collector::RentCollector;
@@ -19,9 +20,14 @@ pub fn build_svm_env(
     let mut featureset = FeatureSet::default();
 
     // Activate list of features which are relevant to ER operations
+    //
+    // We don't collect rent, every regular account is rent exempt
     featureset.activate(&disable_rent_fees_collection::ID, 0);
     featureset.activate(&curve25519_syscall_enabled::ID, 0);
     featureset.activate(&curve25519_restrict_msm_length::ID, 0);
+    // We collect fees even from transactions failing to load, this is a
+    // DOS attack mitigation, by discouraging invalid transaction spams
+    featureset.activate(&enable_transaction_loading_failure_fees::ID, 0);
 
     let active = featureset.active.iter().map(|(k, &v)| (k, Some(v)));
     for (feature_id, activated_at) in active {

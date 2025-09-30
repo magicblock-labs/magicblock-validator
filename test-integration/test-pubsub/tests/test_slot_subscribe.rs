@@ -1,7 +1,7 @@
 use futures::StreamExt;
 use test_pubsub::PubSubEnv;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slot_subscribe() {
     let env = PubSubEnv::new().await;
     let (mut rx, cancel) = env

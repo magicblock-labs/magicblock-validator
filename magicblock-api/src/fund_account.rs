@@ -78,4 +78,11 @@ pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
         u64::MAX,
         MAGIC_CONTEXT_SIZE,
     );
+    let mut magic_context = accountsdb
+        .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+        .unwrap();
+    // TODO: @@@ ensure that we never commit this account
+    magic_context.set_delegated(true);
+    accountsdb
+        .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
 }

@@ -1060,6 +1060,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009067b02b9284528f9f01e3b35ebcd6b545666d15fb74fd9fa30222de89da8e"
 
 [[package]]
+name = "color-backtrace"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e49b1973af2a47b5b44f7dd0a344598da95c872e1556b045607888784e973b91"
+dependencies = [
+ "backtrace",
+ "termcolor",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2968,6 +2978,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "borsh 1.5.7",
+ "color-backtrace",
  "log",
  "magicblock-config",
  "magicblock-core 0.1.7",
@@ -3598,6 +3609,7 @@ dependencies = [
  "magicblock-account-updates",
  "magicblock-accounts-api",
  "magicblock-accounts-db",
+ "magicblock-chainlink",
  "magicblock-committor-service",
  "magicblock-core 0.1.7",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
@@ -5822,7 +5834,9 @@ dependencies = [
  "anyhow",
  "borsh 1.5.7",
  "integration-test-tools",
+ "log",
  "magicblock-core 0.1.7",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "program-schedulecommit",
  "solana-program",
  "solana-rpc-client",
@@ -10491,15 +10505,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "test-issues"
-version = "0.0.0"
-dependencies = [
- "integration-test-tools",
- "log",
- "test-kit",
-]
-
-[[package]]
 name = "test-kit"
 version = "0.1.7"
 dependencies = [
@@ -10564,6 +10569,8 @@ name = "test-pubsub"
 version = "0.0.0"
 dependencies = [
  "futures 0.3.31",
+ "integration-test-tools",
+ "log",
  "solana-pubsub-client",
  "solana-rpc-client",
  "solana-rpc-client-api",

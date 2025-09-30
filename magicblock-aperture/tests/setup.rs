@@ -55,9 +55,11 @@ pub struct RpcTestEnv {
     pub block: LatestBlock,
 }
 
-fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
-    ChainlinkImpl::try_new(accounts_db, None)
-        .expect("Failed to create Chainlink")
+fn chainlink(accounts_db: &Arc<AccountsDb>) -> Arc<ChainlinkImpl> {
+    Arc::new(
+        ChainlinkImpl::try_new(accounts_db, None)
+            .expect("Failed to create Chainlink"),
+    )
 }
 
 impl RpcTestEnv {

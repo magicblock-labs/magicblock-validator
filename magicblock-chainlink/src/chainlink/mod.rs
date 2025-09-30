@@ -259,7 +259,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// 2. When a subscription update is received we clone the new state as usual
     pub async fn undelegation_requested(
         &self,
-        pubkey: &Pubkey,
+        pubkey: Pubkey,
     ) -> ChainlinkResult<()> {
         trace!("Undelegation requested for account: {pubkey}");
 
@@ -269,7 +269,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
         // Subscribe to updates for this account so we can track changes
         // once it's undelegated
-        fetch_cloner.subscribe_to_account(pubkey).await?;
+        fetch_cloner.subscribe_to_account(&pubkey).await?;
 
         trace!("Successfully subscribed to account {pubkey} for undelegation tracking");
         Ok(())

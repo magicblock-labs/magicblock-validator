@@ -3637,6 +3637,7 @@ dependencies = [
  "magicblock-account-updates",
  "magicblock-accounts-api",
  "magicblock-accounts-db",
+ "magicblock-chainlink",
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",

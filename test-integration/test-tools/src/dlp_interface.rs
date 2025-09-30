@@ -5,6 +5,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::instruction::Instruction;
+use solana_sdk::system_instruction;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signature},
@@ -12,23 +13,22 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-pub async fn top_up_ephemeral_fee_balance(
-    rpc_client: &RpcClient,
-    payer: &Keypair,
+pub fn create_topup_ixs(
+    payer: Pubkey,
     recvr: Pubkey,
-    sol: u64,
+    lamports: u64,
     validator: Option<Pubkey>,
-) -> anyhow::Result<(Signature, Pubkey, Pubkey)> {
+) -> Vec<Instruction> {
     let topup_ix = dlp::instruction_builder::top_up_ephemeral_balance(
-        payer.pubkey(),
+        payer,
         recvr,
-        Some(sol * LAMPORTS_PER_SOL),
+        Some(lamports),
         None,
     );
     let mut ixs = vec![topup_ix];
     if let Some(validator) = validator {
         let delegate_ix = dlp::instruction_builder::delegate_ephemeral_balance(
-            payer.pubkey(),
+            payer,
             recvr,
             DelegateEphemeralBalanceArgs {
                 delegate_args: DelegateArgs {
@@ -40,6 +40,41 @@ pub async fn top_up_ephemeral_fee_balance(
         );
         ixs.push(delegate_ix);
     }
+    ixs
+}
+
+pub fn create_delegate_ixs(
+    payer: Pubkey,
+    delegatee: Pubkey,
+    validator: Option<Pubkey>,
+) -> Vec<Instruction> {
+    let change_owner_ix = system_instruction::assign(&delegatee, &dlp::id());
+    let delegate_ix = dlp::instruction_builder::delegate(
+        payer,
+        delegatee,
+        None,
+        DelegateArgs {
+            commit_frequency_ms: u32::MAX,
+            seeds: vec![],
+            validator,
+        },
+    );
+    vec![change_owner_ix, delegate_ix]
+}
+
+pub async fn top_up_ephemeral_fee_balance(
+    rpc_client: &RpcClient,
+    payer: &Keypair,
+    recvr: Pubkey,
+    sol: u64,
+    validator: Option<Pubkey>,
+) -> anyhow::Result<(Signature, Pubkey, Pubkey)> {
+    let ixs = create_topup_ixs(
+        payer.pubkey(),
+        recvr,
+        sol * LAMPORTS_PER_SOL,
+        validator,
+    );
     let sig = send_instructions(rpc_client, &ixs, &[payer], "topup ephemeral")
         .await?;
     let (ephemeral_balance_pda, deleg_record) = escrow_pdas(&recvr);

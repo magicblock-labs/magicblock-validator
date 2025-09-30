@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use dlp::pda::ephemeral_balance_pda_from_payer;
-use integration_test_tools::IntegrationTestContext;
+use integration_test_tools::{
+    transactions::confirm_transaction, IntegrationTestContext,
+};
 use program_flexi_counter::{
     delegation_program_id,
     instruction::{
@@ -136,6 +138,9 @@ fn test_redelegation_intent() {
 }
 
 fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
+    // TODO: @@@ this could just use  ctx.airdrop_chain_escrowed(&payer, 2 * LAMPORTS_PER_SOL)
+    // instead of repeating the logic here
+
     let payer = Keypair::new();
     ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
         .unwrap();
@@ -274,10 +279,11 @@ fn schedule_intent(
     if let Some(confirmation_wait) = confirmation_wait {
         std::thread::sleep(confirmation_wait);
     }
-    let confirmed = IntegrationTestContext::confirm_transaction(
+    let confirmed = confirm_transaction(
         &sig,
         rpc_client,
         CommitmentConfig::confirmed(),
+        Some(&tx),
     )
     .unwrap();
     assert!(confirmed);

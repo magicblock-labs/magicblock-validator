@@ -84,7 +84,7 @@ async fn test_undelegate_redelegate_to_us_in_same_slot() {
         info!("2.3. Account is undelegated and redelegated to us in same slot");
 
         // First trigger undelegation subscription
-        ctx.chainlink.undelegation_requested(&pubkey).await.unwrap();
+        ctx.chainlink.undelegation_requested(pubkey).await.unwrap();
 
         // Then immediately delegate back to us (simulating same slot operation)
         ctx.delegate_existing_account_to(
