@@ -246,7 +246,6 @@ impl super::TransactionExecutor {
             self.index.fetch_add(1, Ordering::Relaxed),
         ) {
             error!("failed to commit transaction to the ledger: {error}");
-            return;
         }
     }
 
