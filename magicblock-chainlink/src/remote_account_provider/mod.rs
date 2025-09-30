@@ -404,9 +404,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub async fn try_get(
         &self,
         pubkey: Pubkey,
-        force_refetch: bool,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey], force_refetch)
+        self.try_get_multi(&[pubkey])
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
@@ -422,7 +421,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
-        let remote_accounts = self.try_get_multi(pubkeys, false).await?;
+        let remote_accounts = self.try_get_multi(pubkeys).await?;
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
             config.as_ref().and_then(|c| c.min_context_slot),
@@ -470,7 +469,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     pubkey_slots
                 );
             }
-            let remote_accounts = self.try_get_multi(pubkeys, true).await?;
+            let remote_accounts = self.try_get_multi(pubkeys).await?;
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
                 config.min_context_slot,
@@ -523,7 +522,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub async fn try_get_multi(
         &self,
         pubkeys: &[Pubkey],
-        _force_refetch: bool, // No longer needed since we don't cache
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
             return Ok(vec![]);

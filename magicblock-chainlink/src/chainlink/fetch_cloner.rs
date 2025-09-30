@@ -431,10 +431,7 @@ where
         self.fetch_count
             .fetch_add(pubkeys.len() as u64, Ordering::Relaxed);
 
-        let accs = self
-            .remote_account_provider
-            .try_get_multi(pubkeys, false)
-            .await?;
+        let accs = self.remote_account_provider.try_get_multi(pubkeys).await?;
 
         trace!("Fetched {accs:?}");
 
