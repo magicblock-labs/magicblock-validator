@@ -173,12 +173,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 .get_account(feepayer)
                 .is_none_or(|a| !a.delegated())
         };
-        if clone_escrow {
+
+        let mark_empty_if_not_found = if clone_escrow {
             let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
             trace!("Adding balance PDA {balance_pda} for feepayer {feepayer}");
             pubkeys.push(balance_pda);
-        }
-        self.ensure_accounts(&pubkeys, None).await
+            vec![balance_pda]
+        } else {
+            vec![]
+        };
+        let mark_empty_if_not_found = (!mark_empty_if_not_found.is_empty())
+            .then(|| &mark_empty_if_not_found[..]);
+        self.ensure_accounts(&pubkeys, mark_empty_if_not_found)
+            .await
     }
 
     /// Same as fetch accounts, but does not return the accounts, just
