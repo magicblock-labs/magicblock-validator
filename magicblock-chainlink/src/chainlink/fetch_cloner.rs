@@ -386,9 +386,18 @@ where
         }
     }
 
+    /// Tries to fetch all accounts in `pubkeys` and clone them into the bank.
+    /// If `mark_empty` is provided, accounts in that list that are
+    /// not found on chain will be added with zero lamports to the bank.
+    ///
+    /// - **pubkeys**: list of accounts to fetch and clone
+    /// - **mark_empty**: optional list of accounts that should be added as empty if not found on
+    ///   chain
+    /// - **slot**: optional slot to use as minimum context slot for the accounts being cloned
     async fn fetch_and_clone_accounts(
         &self,
         pubkeys: &[Pubkey],
+        _mark_empty: Option<&[Pubkey]>,
         slot: Option<u64>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
@@ -921,7 +930,7 @@ where
         // If we have accounts to fetch, delegate to the existing implementation
         // but notify all pending requests when done
         let result = if !fetch_new.is_empty() {
-            self.fetch_and_clone_accounts(&fetch_new, slot).await
+            self.fetch_and_clone_accounts(&fetch_new, None, slot).await
         } else {
             Ok(FetchAndCloneResult {
                 not_found_on_chain: vec![],
@@ -1503,7 +1512,7 @@ mod tests {
             .await;
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1536,7 +1545,7 @@ mod tests {
         .await;
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[non_existing_pubkey], None)
+            .fetch_and_clone_accounts(&[non_existing_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1590,7 +1599,7 @@ mod tests {
 
         // Test fetch and clone
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1662,7 +1671,7 @@ mod tests {
         );
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1739,7 +1748,7 @@ mod tests {
             account_owner,
         );
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[deleg_record_pubkey], None)
+            .fetch_and_clone_accounts(&[deleg_record_pubkey], None, None)
             .await;
         assert!(result.is_ok());
 
@@ -1748,7 +1757,7 @@ mod tests {
 
         // Fetch and clone the delegated account
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         assert!(result.is_ok());
@@ -1843,6 +1852,7 @@ mod tests {
                     delegated_account_pubkey,
                     delegation_record_pubkey,
                 ],
+                None,
                 None,
             )
             .await;
@@ -1945,6 +1955,7 @@ mod tests {
             .fetch_and_clone_accounts(
                 &[delegated_pubkey, invalid_delegated_pubkey],
                 None,
+                None,
             )
             .await;
 
@@ -2012,7 +2023,7 @@ mod tests {
         // Initially we should not be able to clone the account since we cannot
         // find a valid delegation record (up to date the same way the account is)
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -2028,7 +2039,7 @@ mod tests {
         // at the required slot then all is ok
         rpc_client.account_override_slot(&deleg_record_pubkey, CURRENT_SLOT);
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
         debug!("Test result after updating delegation record: {result:?}");
         assert!(result.is_ok());
@@ -2077,7 +2088,7 @@ mod tests {
         // Initially we should not be able to clone the account since the account
         // is stale (delegation record is up to date but account is behind)
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -2092,7 +2103,7 @@ mod tests {
         // After the RPC provider updates the account to the current slot
         rpc_client.account_override_slot(&account_pubkey, CURRENT_SLOT);
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
         debug!("Test result after updating account: {result:?}");
         assert!(result.is_ok());
@@ -2289,7 +2300,7 @@ mod tests {
         // Initially fetch and clone the delegated account
         // This should result in no active subscription since it's delegated to us
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
         assert!(result.is_ok());
 
