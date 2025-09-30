@@ -1,6 +1,6 @@
 use std::sync::{atomic::AtomicUsize, Arc, RwLock};
 
-use coordinator::ExecutionCoordinator;
+use coordinator::{ExecutionCoordinator, TransactionWithId};
 use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use log::info;
 use magicblock_core::link::transactions::{
@@ -128,6 +128,7 @@ impl TransactionScheduler {
                         .coordinator
                         .get_ready_executor()
                         .unwrap_or(ExecutorId::MIN);
+                    let txn = TransactionWithId::new(txn);
                     self.schedule_transaction(executor, txn).await;
                 }
                 // A new block has been produced.
@@ -172,16 +173,16 @@ impl TransactionScheduler {
     async fn schedule_transaction(
         &mut self,
         executor: ExecutorId,
-        txn: ProcessableTransaction,
+        txn: TransactionWithId,
     ) {
         let result = self.coordinator.try_acquire_locks(executor, &txn);
-        if let Err(blocking) = result {
+        if let Err(blocker) = result {
             self.coordinator.unlock_accounts(executor);
             self.coordinator.release_executor(executor);
-            self.coordinator.queue_transaction(blocking, txn);
+            self.coordinator.queue_transaction(blocker, txn);
             return;
         }
-        let _ = self.get_executor(executor).send(txn).await;
+        let _ = self.get_executor(executor).send(txn.txn).await;
     }
 
     #[inline]
