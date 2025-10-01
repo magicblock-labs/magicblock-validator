@@ -1,5 +1,5 @@
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -9,7 +9,9 @@ use std::{
 
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
-use magicblock_account_cloner::chainext::ChainlinkCloner;
+use magicblock_account_cloner::{
+    chainext::ChainlinkCloner, map_committor_request_result,
+};
 use magicblock_accounts::{
     scheduled_commits_processor::ScheduledCommitsProcessorImpl,
     utils::try_rpc_cluster_from_cluster, ScheduledCommitsProcessor,
@@ -34,7 +36,7 @@ use magicblock_committor_service::{
 };
 use magicblock_config::{
     EphemeralConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
-    ProgramConfig,
+    PrepareLookupTables, ProgramConfig,
 };
 use magicblock_core::{
     link::{
@@ -238,20 +240,14 @@ impl MagicValidator {
             committor_persist_path.display()
         );
 
-        // TODO(thlorenz): when we support lifecycle modes again, only start it when needed
-        let committor_service = Some(Arc::new(CommittorService::try_start(
-            identity_keypair.insecure_clone(),
+        let committor_service = Self::init_committor_service(
+            &identity_keypair,
             committor_persist_path,
-            ChainConfig {
-                rpc_uri: remote_rpc_config.url().to_string(),
-                commitment: remote_rpc_config
-                    .commitment()
-                    .unwrap_or(CommitmentLevel::Confirmed),
-                compute_budget_config: ComputeBudgetConfig::new(
-                    accounts_config.commit_compute_unit_price,
-                ),
-            },
-        )?));
+            &remote_rpc_config,
+            &accounts_config,
+            &config.accounts.clone.prepare_lookup_tables,
+        )
+        .await?;
         let chainlink = Arc::new(
             Self::init_chainlink(
                 committor_service.clone(),
@@ -341,6 +337,41 @@ impl MagicValidator {
             transaction_scheduler: dispatch.transaction_scheduler,
             block_udpate_tx: validator_channels.block_update,
         })
+    }
+
+    async fn init_committor_service(
+        identity_keypair: &Keypair,
+        committor_persist_path: PathBuf,
+        remote_rpc_config: &RpcProviderConfig,
+        accounts_config: &magicblock_accounts::AccountsConfig,
+        prepare_lookup_tables: &PrepareLookupTables,
+    ) -> ApiResult<Option<Arc<CommittorService>>> {
+        // TODO(thlorenz): when we support lifecycle modes again, only start it when needed
+        let committor_service = Some(Arc::new(CommittorService::try_start(
+            identity_keypair.insecure_clone(),
+            committor_persist_path,
+            ChainConfig {
+                rpc_uri: remote_rpc_config.url().to_string(),
+                commitment: remote_rpc_config
+                    .commitment()
+                    .unwrap_or(CommitmentLevel::Confirmed),
+                compute_budget_config: ComputeBudgetConfig::new(
+                    accounts_config.commit_compute_unit_price,
+                ),
+            },
+        )?));
+
+        if let Some(committor_service) = &committor_service {
+            if prepare_lookup_tables == &PrepareLookupTables::Always {
+                debug!("Reserving common pubkeys for committor service");
+                map_committor_request_result(
+                    committor_service.reserve_common_pubkeys(),
+                    committor_service.clone(),
+                )
+                .await?;
+            }
+        }
+        Ok(committor_service)
     }
 
     #[allow(clippy::too_many_arguments)]
