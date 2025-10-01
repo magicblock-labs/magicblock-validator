@@ -303,8 +303,14 @@ impl MagicValidator {
             base_fee: config.validator.base_fees.unwrap_or_default(),
             featureset: txn_scheduler_state.environment.feature_set.clone(),
         };
-        let transaction_scheduler =
-            TransactionScheduler::new(1, txn_scheduler_state);
+        // We dedicate half of the available resources to the execution
+        // runtime, -1 is taken up by the transaction scheduler itself
+        let transaction_executors =
+            (num_cpus::get() / 2).saturating_sub(1).max(1) as u32;
+        let transaction_scheduler = TransactionScheduler::new(
+            transaction_executors,
+            txn_scheduler_state,
+        );
         transaction_scheduler.spawn();
 
         let shared_state = SharedState::new(

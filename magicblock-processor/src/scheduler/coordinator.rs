@@ -151,6 +151,8 @@ impl ExecutionCoordinator {
             };
             acquired_locks.push(lock);
 
+            // We couldn't lock all of the accounts, so we are bailing, but
+            // first we need to set contention, and unlock successful locks
             if result.is_err() {
                 for lock in acquired_locks.drain(..) {
                     let mut lock = lock.borrow_mut();

@@ -7,6 +7,7 @@ use magicblock_api::{
 };
 use magicblock_config::MagicBlockConfig;
 use solana_sdk::signature::Signer;
+use tokio::runtime::Builder;
 
 use crate::shutdown::Shutdown;
 
@@ -49,8 +50,21 @@ fn init_logger() {
     });
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // We dedicate half of the threads to async runtime (where RPC and other
+    // io/timer bound services are running), and the other half is allocated
+    // for the execution runtime (transaction scheduler/executor threads)
+    let workers = (num_cpus::get() / 2).max(1);
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(workers)
+        .enable_all()
+        .thread_name("async-runtime")
+        .build()
+        .expect("failed to build async runtime");
+    runtime.block_on(run());
+}
+
+async fn run() {
     init_logger();
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();

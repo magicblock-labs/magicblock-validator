@@ -3769,6 +3769,7 @@ dependencies = [
  "magicblock-processor",
  "magicblock-program",
  "magicblock-validator-admin",
+ "num_cpus",
  "paste",
  "solana-feature-set",
  "solana-inline-spl",
@@ -4121,6 +4122,7 @@ dependencies = [
  "magicblock-api",
  "magicblock-config",
  "magicblock-version",
+ "num_cpus",
  "solana-sdk",
  "tokio",
 ]
