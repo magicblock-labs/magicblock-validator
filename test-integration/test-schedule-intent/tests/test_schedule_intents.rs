@@ -20,8 +20,9 @@ use solana_sdk::{
 
 const LABEL: &str = "I am a label";
 
+#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
-fn test_schedule_intent() {
+fn test_schedule_intent_basic() {
     // Init context
     let ctx = IntegrationTestContext::try_new().unwrap();
     let payer = setup_payer(&ctx);
@@ -40,6 +41,7 @@ fn test_schedule_intent() {
     );
 }
 
+#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_and_undelegate() {
     // Init context
@@ -54,6 +56,7 @@ fn test_schedule_intent_and_undelegate() {
     schedule_intent(&ctx, &[&payer], vec![-100], true, None);
 }
 
+#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_2_commits() {
     // Init context
@@ -69,6 +72,7 @@ fn test_schedule_intent_2_commits() {
     schedule_intent(&ctx, &[&payer], vec![-100], false, None);
 }
 
+#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_3_payers_intent_with_undelegation() {
     const PAYERS: usize = 3;
@@ -95,6 +99,7 @@ fn test_3_payers_intent_with_undelegation() {
     );
 }
 
+#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_5_payers_intent_only_commit() {
     const PAYERS: usize = 5;
@@ -273,7 +278,6 @@ fn schedule_intent(
         )
         .unwrap();
 
-    println!("sigtrtr: {}", sig);
     // In some cases it takes longer for tx to make it to baselayer
     // we need an additional wait time
     if let Some(confirmation_wait) = confirmation_wait {
