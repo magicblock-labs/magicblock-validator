@@ -35,7 +35,7 @@ test: $(PROGRAMS_SO)
 	RUST_LOG=$(RUST_LOG) \
 	cargo run --package test-runner --bin run-tests
 
-test-force-mb: $(PROGRAMS_SO) test-ledger-restore
+test-force-mb: $(PROGRAMS_SO)
 	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
 	cargo run --package test-runner --bin run-tests

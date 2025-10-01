@@ -10534,6 +10534,7 @@ dependencies = [
  "anyhow",
  "cleanass",
  "integration-test-tools",
+ "log",
  "magicblock-accounts-db",
  "magicblock-config",
  "program-flexi-counter",
@@ -10541,6 +10542,7 @@ dependencies = [
  "solana-sdk",
  "solana-transaction-status",
  "tempfile",
+ "test-kit",
 ]
 
 [[package]]

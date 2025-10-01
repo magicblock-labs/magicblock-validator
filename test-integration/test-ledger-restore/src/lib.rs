@@ -19,7 +19,7 @@ use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     clock::Slot,
     instruction::Instruction,
-    pubkey,
+    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
@@ -33,7 +33,7 @@ pub const SNAPSHOT_FREQUENCY: u64 = 2;
 pub const FLEXI_COUNTER_ID: &str =
     "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4";
 pub const FLEXI_COUNTER_PUBKEY: Pubkey =
-    pubkey!("f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4");
+    solana_sdk::pubkey!("f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4");
 
 pub fn setup_offline_validator(
     ledger_path: &Path,
@@ -128,6 +128,17 @@ pub fn setup_validator_with_local_remote(
         programs,
         ..Default::default()
     };
+    // Fund validator on chain
+    {
+        let chain_only_ctx =
+            IntegrationTestContext::try_new_chain_only().unwrap();
+        chain_only_ctx
+            .airdrop_chain(
+                &loaded_accounts.validator_authority(),
+                20 * LAMPORTS_PER_SOL,
+            )
+            .unwrap();
+    }
 
     let (default_tmpdir_config, Some(mut validator)) =
         start_magicblock_validator_with_config_struct(config, loaded_accounts)
