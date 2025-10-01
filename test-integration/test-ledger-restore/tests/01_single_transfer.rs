@@ -21,7 +21,7 @@ use test_ledger_restore::{
 };
 
 #[test]
-fn test_restore_ledger_with_airdropped_account() {
+fn test_restore_ledger_with_transferred_account() {
     init_logger!();
 
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
