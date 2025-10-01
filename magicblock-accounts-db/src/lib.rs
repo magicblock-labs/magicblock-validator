@@ -336,6 +336,26 @@ impl AccountsBank for AccountsDb {
             .remove_account(pubkey)
             .inspect_err(log_err!("removing an account {}", pubkey));
     }
+
+    /// Remove all accounts matching the provided predicate
+    /// NOTE: accounts are not locked while this operation is in progress,
+    /// thus this should only be performed before the validator starts processing
+    /// transactions
+    fn remove_where(
+        &self,
+        predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+    ) -> usize {
+        let to_remove = self
+            .iter_all()
+            .filter(|(pk, acc)| predicate(pk, acc))
+            .map(|(pk, _)| pk)
+            .collect::<Vec<_>>();
+        let removed = to_remove.len();
+        for pk in to_remove {
+            self.remove_account(&pk);
+        }
+        removed
+    }
 }
 
 // SAFETY:

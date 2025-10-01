@@ -408,7 +408,7 @@ impl MagicValidator {
         );
         let cloner = Arc::new(cloner);
         let accounts_bank = accountsdb.clone();
-        let config = ChainlinkConfig::default_with_lifecycle_mode(
+        let chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral.into(),
         );
         let commitment_config = {
@@ -417,16 +417,22 @@ impl MagicValidator {
                 .unwrap_or(CommitmentLevel::Confirmed);
             CommitmentConfig { commitment: level }
         };
-        Ok(ChainlinkImpl::try_new_from_endpoints(
+        let chainlink = ChainlinkImpl::try_new_from_endpoints(
             &endpoints,
             commitment_config,
             &accounts_bank,
             &cloner,
             validator_pubkey,
             faucet_pubkey,
-            config,
+            chainlink_config,
         )
-        .await?)
+        .await?;
+
+        if !config.ledger.resume_strategy().is_removing_accountsdb() {
+            chainlink.reset_accounts_bank();
+        }
+
+        Ok(chainlink)
     }
 
     fn init_ledger(

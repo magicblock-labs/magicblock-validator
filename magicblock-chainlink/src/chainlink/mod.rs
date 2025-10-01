@@ -117,6 +117,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Chainlink::try_new(accounts_bank, fetch_cloner)
     }
 
+    /// Removes all accounts that aren't delegated to us from the bank
+    /// This should only be called _before_ the validator starts up, i.e.
+    /// when resuming an existing ledger to guarantee that we don't hold
+    /// accounts that might be stale.
+    pub fn reset_accounts_bank(&self) {
+        let removed = self
+            .accounts_bank
+            .remove_where(|_pubkey, account| !account.delegated());
+
+        debug!("Removed {removed} non-delegated accounts");
+    }
+
     fn subscribe_account_removals(
         accounts_bank: &Arc<V>,
         mut removed_accounts_rx: mpsc::Receiver<Pubkey>,
