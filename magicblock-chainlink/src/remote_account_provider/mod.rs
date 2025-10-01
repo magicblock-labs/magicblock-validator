@@ -857,7 +857,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             let remote_accounts: Vec<RemoteAccount> = pubkeys
                 .iter()
-                .zip(response.value.into_iter())
+                .zip(response.value)
                 .map(|(pubkey, acc)| match acc {
                     Some(value) => RemoteAccount::from_fresh_account(
                         value,
