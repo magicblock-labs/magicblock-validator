@@ -1,10 +1,12 @@
+use cleanass::{assert, assert_eq};
 use std::{path::Path, process::Child, thread::sleep, time::Duration};
 
 use integration_test_tools::{
     expect,
     loaded_accounts::LoadedAccounts,
     validator::{
-        resolve_programs, start_magicblock_validator_with_config_struct,
+        cleanup, resolve_programs,
+        start_magicblock_validator_with_config_struct,
     },
     IntegrationTestContext,
 };
@@ -195,7 +197,7 @@ pub fn transfer_lamports(
 ) -> Signature {
     let transfer_ix =
         solana_sdk::system_instruction::transfer(&from.pubkey(), to, lamports);
-    let (sig, _) = expect!(
+    let (sig, confirmed) = expect!(
         ctx.send_and_confirm_instructions_with_payer_ephem(
             &[transfer_ix],
             from
@@ -203,6 +205,8 @@ pub fn transfer_lamports(
         "Failed to send transfer",
         validator
     );
+
+    assert!(confirmed, cleanup(validator));
     sig
 }
 
@@ -247,7 +251,7 @@ pub fn confirm_tx_with_payer_ephem(
         ctx.send_and_confirm_transaction_ephem(&mut tx, signers),
         validator
     );
-    assert!(confirmed, "Should confirm transaction");
+    assert!(confirmed, cleanup(validator), "Should confirm transaction",);
     sig
 }
 
@@ -265,7 +269,7 @@ pub fn confirm_tx_with_payer_chain(
         ctx.send_and_confirm_transaction_chain(&mut tx, signers),
         validator
     );
-    assert!(confirmed, "Should confirm transaction");
+    assert!(confirmed, cleanup(validator), "Should confirm transaction");
     sig
 }
 
@@ -363,7 +367,7 @@ pub fn assert_counter_commits_on_chain(
     let (pda, _) = FlexiCounter::pda(payer);
     let stats =
         expect!(ctx.get_signaturestats_for_address_chain(&pda), validator);
-    assert_eq!(stats.len(), expected_count);
+    assert_eq!(stats.len(), expected_count, cleanup(validator));
 }
 
 // -----------------
