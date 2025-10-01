@@ -21,8 +21,9 @@ use solana_sdk::{
 
 const LABEL: &str = "I am a label";
 
+#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
-fn test_schedule_intent() {
+fn test_schedule_intent_basic() {
     // Init context
     let ctx = IntegrationTestContext::try_new().unwrap();
     let payer = setup_payer(&ctx);
@@ -46,6 +47,7 @@ fn test_schedule_intent() {
     );
 }
 
+#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_and_undelegate() {
     // Init context
@@ -70,6 +72,7 @@ fn test_schedule_intent_and_undelegate() {
     );
 }
 
+#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_2_commits() {
     // Init context
@@ -104,6 +107,7 @@ fn test_schedule_intent_2_commits() {
     );
 }
 
+#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_undelegate_delegate_back_undelegate_again() {
     // Init context

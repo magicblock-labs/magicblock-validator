@@ -195,7 +195,7 @@ impl HttpDispatcher {
                 // setup a subscription, etc.
                 // In that case we don't even want to run the transaction.
                 warn!("Failed to ensure transaction accounts: {:?}", err);
-                Err(RpcError::transaction_verification(err.to_string()))
+                Err(RpcError::transaction_verification(err))
             }
         }
     }
