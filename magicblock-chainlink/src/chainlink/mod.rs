@@ -117,6 +117,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Chainlink::try_new(accounts_bank, fetch_cloner)
     }
 
+    /// Removes all accounts that aren't delegated to us from the bank
+    /// This should only be called _before_ the validator starts up, i.e.
+    /// when resuming an existing ledger to guarantee that we don't hold
+    /// accounts that might be stale.
+    pub fn reset_accounts_bank(&self) {
+        let removed = self
+            .accounts_bank
+            .remove_where(|_pubkey, account| !account.delegated());
+
+        debug!("Removed {removed} non-delegated accounts");
+    }
+
     fn subscribe_account_removals(
         accounts_bank: &Arc<V>,
         mut removed_accounts_rx: mpsc::Receiver<Pubkey>,
@@ -173,12 +185,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 .get_account(feepayer)
                 .is_none_or(|a| !a.delegated())
         };
-        if clone_escrow {
+
+        let mark_empty_if_not_found = if clone_escrow {
             let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
             trace!("Adding balance PDA {balance_pda} for feepayer {feepayer}");
             pubkeys.push(balance_pda);
-        }
-        self.ensure_accounts(&pubkeys).await
+            vec![balance_pda]
+        } else {
+            vec![]
+        };
+        let mark_empty_if_not_found = (!mark_empty_if_not_found.is_empty())
+            .then(|| &mark_empty_if_not_found[..]);
+        self.ensure_accounts(&pubkeys, mark_empty_if_not_found)
+            .await
     }
 
     /// Same as fetch accounts, but does not return the accounts, just
@@ -187,11 +206,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub async fn ensure_accounts(
         &self,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(FetchAndCloneResult::default());
         };
-        self.fetch_accounts_common(fetch_cloner, pubkeys).await
+        self.fetch_accounts_common(
+            fetch_cloner,
+            pubkeys,
+            mark_empty_if_not_found,
+        )
+        .await
     }
 
     /// Fetches the accounts from the bank if we're offline and not syncing accounts.
@@ -217,7 +242,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 .map(|pubkey| self.accounts_bank.get_account(pubkey))
                 .collect());
         };
-        let _ = self.fetch_accounts_common(fetch_cloner, pubkeys).await?;
+        let _ = self
+            .fetch_accounts_common(fetch_cloner, pubkeys, None)
+            .await?;
 
         let accounts = pubkeys
             .iter()
@@ -230,6 +257,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         &self,
         fetch_cloner: &FetchCloner<T, U, V, C>,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys_str = pubkeys
@@ -247,7 +275,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         // If any of the accounts was invalid and couldn't be fetched/cloned then
         // we return an error.
         let result = fetch_cloner
-            .fetch_and_clone_accounts_with_dedup(pubkeys, None)
+            .fetch_and_clone_accounts_with_dedup(
+                pubkeys,
+                mark_empty_if_not_found,
+                None,
+            )
             .await?;
         trace!("Fetched and cloned accounts: {result:?}");
         Ok(result)

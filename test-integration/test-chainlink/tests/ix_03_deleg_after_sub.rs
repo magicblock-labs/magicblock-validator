@@ -2,8 +2,7 @@ use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
-    assert_subscribed_without_delegation_record,
-    testing::init_logger,
+    assert_subscribed_without_delegation_record, testing::init_logger,
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::ixtest_context::IxtestContext;
@@ -21,7 +20,7 @@ async fn ixtest_deleg_after_subscribe_case2() {
     // 1. Initially the account does not exist
     {
         info!("1. Initially the account does not exist");
-        let res = ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+        let res = ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
 
         assert_not_found!(res, &pubkeys);
         assert_not_cloned!(ctx.cloner, &pubkeys);
@@ -33,7 +32,7 @@ async fn ixtest_deleg_after_subscribe_case2() {
         info!("2. Create account owned by program_flexi_counter");
         ctx.init_counter(&counter_auth).await;
 
-        ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+        ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
 
         // Assert cloned account state matches the remote account and slot
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
@@ -54,7 +53,7 @@ async fn ixtest_deleg_after_subscribe_case2() {
 
         let deleg_record_pubkey = ctx.delegation_record_pubkey(&counter_pda);
 
-        ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+        ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
 
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
         assert_cloned_as_delegated!(

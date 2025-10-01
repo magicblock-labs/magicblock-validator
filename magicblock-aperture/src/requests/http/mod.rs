@@ -88,7 +88,7 @@ impl HttpDispatcher {
         debug!("Ensuring account {pubkey}");
         let _ = self
             .chainlink
-            .ensure_accounts(&[*pubkey])
+            .ensure_accounts(&[*pubkey], None)
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the account fails
@@ -112,15 +112,15 @@ impl HttpDispatcher {
                 .join(", ");
             debug!("Ensuring accounts {pubkeys}");
         }
-        let _ =
-            self.chainlink
-                .ensure_accounts(pubkeys)
-                .await
-                .inspect_err(|e| {
-                    // There is nothing we can do if fetching the accounts fails
-                    // Log the error and return whatever is in the accounts db
-                    error!("Failed to ensure accounts: {e}");
-                });
+        let _ = self
+            .chainlink
+            .ensure_accounts(pubkeys, None)
+            .await
+            .inspect_err(|e| {
+                // There is nothing we can do if fetching the accounts fails
+                // Log the error and return whatever is in the accounts db
+                error!("Failed to ensure accounts: {e}");
+            });
         pubkeys
             .iter()
             .map(|pubkey| self.accountsdb.get_account(pubkey))

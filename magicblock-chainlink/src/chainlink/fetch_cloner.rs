@@ -386,9 +386,18 @@ where
         }
     }
 
+    /// Tries to fetch all accounts in `pubkeys` and clone them into the bank.
+    /// If `mark_empty` is provided, accounts in that list that are
+    /// not found on chain will be added with zero lamports to the bank.
+    ///
+    /// - **pubkeys**: list of accounts to fetch and clone
+    /// - **mark_empty**: optional list of accounts that should be added as empty if not found on
+    ///   chain
+    /// - **slot**: optional slot to use as minimum context slot for the accounts being cloned
     async fn fetch_and_clone_accounts(
         &self,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
@@ -424,7 +433,7 @@ where
 
         let accs = self
             .remote_account_provider
-            .try_get_multi(pubkeys, false)
+            .try_get_multi(pubkeys, mark_empty_if_not_found)
             .await?;
 
         trace!("Fetched {accs:?}");
@@ -518,6 +527,15 @@ where
             );
         }
 
+        let (clone_as_empty, not_found) =
+            if let Some(mark_empty) = mark_empty_if_not_found {
+                not_found
+                    .into_iter()
+                    .partition::<Vec<_>, _>(|(p, _)| mark_empty.contains(p))
+            } else {
+                (vec![], not_found)
+            };
+
         // For accounts we couldn't find we cannot do anything. We will let code depending
         // on them to be in the bank fail on its own
         if !not_found.is_empty() {
@@ -535,6 +553,17 @@ where
             trace!(
                 "Accounts already in bank: {:?}",
                 in_bank
+                    .iter()
+                    .map(|(p, _)| p.to_string())
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        // We mark some accounts as empty if we know that they will never exist on chain
+        if log::log_enabled!(log::Level::Trace) && !clone_as_empty.is_empty() {
+            trace!(
+                "Cloning accounts as empty: {:?}",
+                clone_as_empty
                     .iter()
                     .map(|(p, _)| p.to_string())
                     .collect::<Vec<_>>()
@@ -864,6 +893,7 @@ where
     pub async fn fetch_and_clone_accounts_with_dedup(
         &self,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         // We cannot clone blacklisted accounts, thus either they are already
@@ -921,7 +951,12 @@ where
         // If we have accounts to fetch, delegate to the existing implementation
         // but notify all pending requests when done
         let result = if !fetch_new.is_empty() {
-            self.fetch_and_clone_accounts(&fetch_new, slot).await
+            self.fetch_and_clone_accounts(
+                &fetch_new,
+                mark_empty_if_not_found,
+                slot,
+            )
+            .await
         } else {
             Ok(FetchAndCloneResult {
                 not_found_on_chain: vec![],
@@ -1296,7 +1331,7 @@ mod tests {
     use super::*;
     use crate::{
         accounts_bank::mock::AccountsBankStub,
-        assert_not_subscribed, assert_subscribed,
+        assert_not_cloned, assert_not_subscribed, assert_subscribed,
         assert_subscribed_without_delegation_record,
         config::LifecycleMode,
         remote_account_provider::{
@@ -1319,6 +1354,7 @@ mod tests {
     };
     use solana_account::Account;
     use solana_account::{AccountSharedData, WritableAccount};
+    use solana_sdk::system_program;
     use std::{collections::HashMap, sync::Arc};
     use tokio::sync::mpsc;
 
@@ -1503,7 +1539,7 @@ mod tests {
             .await;
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1536,7 +1572,7 @@ mod tests {
         .await;
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[non_existing_pubkey], None)
+            .fetch_and_clone_accounts(&[non_existing_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1590,7 +1626,7 @@ mod tests {
 
         // Test fetch and clone
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1662,7 +1698,7 @@ mod tests {
         );
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1739,7 +1775,7 @@ mod tests {
             account_owner,
         );
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[deleg_record_pubkey], None)
+            .fetch_and_clone_accounts(&[deleg_record_pubkey], None, None)
             .await;
         assert!(result.is_ok());
 
@@ -1748,7 +1784,7 @@ mod tests {
 
         // Fetch and clone the delegated account
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         assert!(result.is_ok());
@@ -1843,6 +1879,7 @@ mod tests {
                     delegated_account_pubkey,
                     delegation_record_pubkey,
                 ],
+                None,
                 None,
             )
             .await;
@@ -1945,6 +1982,7 @@ mod tests {
             .fetch_and_clone_accounts(
                 &[delegated_pubkey, invalid_delegated_pubkey],
                 None,
+                None,
             )
             .await;
 
@@ -2012,7 +2050,7 @@ mod tests {
         // Initially we should not be able to clone the account since we cannot
         // find a valid delegation record (up to date the same way the account is)
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -2028,7 +2066,7 @@ mod tests {
         // at the required slot then all is ok
         rpc_client.account_override_slot(&deleg_record_pubkey, CURRENT_SLOT);
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
         debug!("Test result after updating delegation record: {result:?}");
         assert!(result.is_ok());
@@ -2077,7 +2115,7 @@ mod tests {
         // Initially we should not be able to clone the account since the account
         // is stale (delegation record is up to date but account is behind)
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -2092,7 +2130,7 @@ mod tests {
         // After the RPC provider updates the account to the current slot
         rpc_client.account_override_slot(&account_pubkey, CURRENT_SLOT);
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
         debug!("Test result after updating account: {result:?}");
         assert!(result.is_ok());
@@ -2150,6 +2188,7 @@ mod tests {
                 fetch_cloner
                     .fetch_and_clone_accounts_with_dedup(
                         &[account_pubkey],
+                        None,
                         None,
                     )
                     .await
@@ -2217,6 +2256,7 @@ mod tests {
                 fetch_cloner
                     .fetch_and_clone_accounts_with_dedup(
                         &[account_pubkey],
+                        None,
                         None,
                     )
                     .await
@@ -2289,7 +2329,7 @@ mod tests {
         // Initially fetch and clone the delegated account
         // This should result in no active subscription since it's delegated to us
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
         assert!(result.is_ok());
 
@@ -2376,7 +2416,7 @@ mod tests {
             let fetch_cloner = fetch_cloner.clone();
             tokio::spawn(async move {
                 fetch_cloner
-                    .fetch_and_clone_accounts_with_dedup(&accounts, None)
+                    .fetch_and_clone_accounts_with_dedup(&accounts, None, None)
                     .await
             })
         };
@@ -2417,6 +2457,86 @@ mod tests {
             account3,
             CURRENT_SLOT,
             account_owner
+        );
+    }
+
+    // -----------------
+    // Marked Non Existing Accounts
+    // -----------------
+    #[tokio::test]
+    async fn test_fetch_with_some_acounts_marked_as_empty_if_not_found() {
+        init_logger();
+        let validator_pubkey = random_pubkey();
+        let account_owner = random_pubkey();
+        const CURRENT_SLOT: u64 = 100;
+
+        // Create one existing account and one non-existing account
+        let existing_account_pubkey = random_pubkey();
+        let marked_non_existing_account_pubkey = random_pubkey();
+        let unmarked_non_existing_account_pubkey = random_pubkey();
+
+        let existing_account = Account {
+            lamports: 1_000_000,
+            data: vec![1, 2, 3, 4],
+            owner: account_owner,
+            executable: false,
+            rent_epoch: 0,
+        };
+        let accounts = [(existing_account_pubkey, existing_account.clone())];
+
+        let FetcherTestCtx {
+            accounts_bank,
+            fetch_cloner,
+            remote_account_provider,
+            ..
+        } = setup(accounts, CURRENT_SLOT, validator_pubkey).await;
+
+        // Configure fetch_cloner to mark some accounts as empty if not found
+        fetch_cloner
+            .fetch_and_clone_accounts(
+                &[
+                    existing_account_pubkey,
+                    marked_non_existing_account_pubkey,
+                    unmarked_non_existing_account_pubkey,
+                ],
+                Some(&[marked_non_existing_account_pubkey]),
+                None,
+            )
+            .await
+            .expect("Fetch and clone failed");
+
+        // Existing account should be cloned normally
+        assert_cloned_undelegated_account!(
+            accounts_bank,
+            existing_account_pubkey,
+            existing_account,
+            CURRENT_SLOT,
+            account_owner
+        );
+
+        // Non marked account should not be cloned
+        assert_not_cloned!(
+            accounts_bank,
+            &[unmarked_non_existing_account_pubkey]
+        );
+
+        // Marked non-existing account should be cloned as empty
+        assert_cloned_undelegated_account!(
+            accounts_bank,
+            marked_non_existing_account_pubkey,
+            Account {
+                lamports: 0,
+                data: vec![],
+                owner: Pubkey::default(),
+                executable: false,
+                rent_epoch: 0,
+            },
+            CURRENT_SLOT,
+            system_program::id()
+        );
+        assert_subscribed_without_delegation_record!(
+            remote_account_provider,
+            &[&marked_non_existing_account_pubkey]
         );
     }
 }

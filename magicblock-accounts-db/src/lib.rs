@@ -84,14 +84,12 @@ impl AccountsDb {
     /// Insert account with given pubkey into the database
     /// Note: this method removes zero lamport account from database
     pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
-        // don't store empty accounts
-        if account.lamports() == 0 {
-            let _ = self.index.remove_account(pubkey).inspect_err(log_err!(
-                "removing zero lamport account {}",
-                pubkey
-            ));
-            return;
-        }
+        // NOTE: we don't check fro non-zero lamports since we allow to store zero-lamport accounts
+        // for the following two cases:
+        // - when we clone a compressed account we reflect the exact lamports it has which maybe
+        //   zero since compressed accounts don't need to be rent-exempt
+        // - when we clone an account to signal that we fetched it from chain already but did not
+        //   find it, i.e. in the case of an escrow account to avoid doing that over and over
         match account {
             AccountSharedData::Borrowed(acc) => {
                 // For borrowed variants everything is already written and we just increment the
@@ -337,6 +335,26 @@ impl AccountsBank for AccountsDb {
             .index
             .remove_account(pubkey)
             .inspect_err(log_err!("removing an account {}", pubkey));
+    }
+
+    /// Remove all accounts matching the provided predicate
+    /// NOTE: accounts are not locked while this operation is in progress,
+    /// thus this should only be performed before the validator starts processing
+    /// transactions
+    fn remove_where(
+        &self,
+        predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+    ) -> usize {
+        let to_remove = self
+            .iter_all()
+            .filter(|(pk, acc)| predicate(pk, acc))
+            .map(|(pk, _)| pk)
+            .collect::<Vec<_>>();
+        let removed = to_remove.len();
+        for pk in to_remove {
+            self.remove_account(&pk);
+        }
+        removed
     }
 }
 
