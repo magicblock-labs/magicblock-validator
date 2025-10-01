@@ -197,7 +197,6 @@ impl TransactionScheduler {
     ) {
         if let Err(blocker) = self.coordinator.try_acquire_locks(executor, &txn)
         {
-            self.coordinator.unlock_accounts(executor);
             self.coordinator.release_executor(executor);
             self.coordinator.queue_transaction(blocker, txn);
             return;
@@ -211,6 +210,8 @@ impl TransactionScheduler {
 pub mod coordinator;
 pub mod locks;
 pub mod state;
+#[cfg(test)]
+mod tests;
 
 // SAFETY:
 // Rc<RefCell> used within the scheduler never escapes to other threads

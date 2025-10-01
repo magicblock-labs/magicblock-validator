@@ -144,16 +144,23 @@ impl ExecutionCoordinator {
             let lock = self.locks.entry(acc).or_default().clone();
 
             // Attempt to acquire a write or read lock.
-            if message.is_writable(i) {
-                lock.borrow_mut().write(executor, transaction.id)?;
+            let result = if message.is_writable(i) {
+                lock.borrow_mut().write(executor, transaction.id)
             } else {
-                lock.borrow_mut().read(executor, transaction.id)?;
+                lock.borrow_mut().read(executor, transaction.id)
             };
-
             acquired_locks.push(lock);
+
+            if result.is_err() {
+                for lock in acquired_locks.drain(..) {
+                    let mut lock = lock.borrow_mut();
+                    lock.unlock_with_contention(executor, transaction.id);
+                }
+            }
+            result?;
         }
 
-        // On success, the transaction is no longer blocked.
+        // On success, the transaction is no longer blocking anything.
         self.transaction_contention.remove(&transaction.id);
         Ok(())
     }

@@ -42,6 +42,7 @@ rustc-hash = { workspace = true }
 
 [dev-dependencies]
 guinea = { workspace = true }
+solana-keypair = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
 test-kit = { workspace = true }

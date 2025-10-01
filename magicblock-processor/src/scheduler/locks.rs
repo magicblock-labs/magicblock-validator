@@ -49,8 +49,8 @@ impl AccountLock {
         txn: TransactionId,
     ) -> Result<(), u32> {
         self.contended(txn)?;
+        println!("rw: {:b} -> {}", self.rw, self.contender);
         if self.rw != 0 {
-            self.contender = txn;
             // If the lock is held, `trailing_zeros()` will return the index of the
             // least significant bit that is set. This corresponds to the ID of the
             // executor that holds the lock.
@@ -71,7 +71,6 @@ impl AccountLock {
         self.contended(txn)?;
         // Check if the write lock bit is set.
         if self.rw & WRITE_BIT_MASK != 0 {
-            self.contender = txn;
             // If a write lock is held, the conflicting executor is the one whose
             // bit is set. We can find it using `trailing_zeros()`.
             return Err(self.rw.trailing_zeros());
@@ -87,6 +86,18 @@ impl AccountLock {
         // To release the lock, we clear both the write bit and the executor's
         // read bit. This is done using a bitwise AND with the inverted mask.
         self.rw &= !(WRITE_BIT_MASK | (1 << executor));
+    }
+
+    /// Releases a lock held by an executor.
+    pub(super) fn unlock_with_contention(
+        &mut self,
+        executor: ExecutorId,
+        txn: TransactionId,
+    ) {
+        if self.contender == 0 {
+            self.contender = txn;
+        }
+        self.unlock(executor);
     }
 
     /// Checks if the lock is marked as contended by another transaction.
