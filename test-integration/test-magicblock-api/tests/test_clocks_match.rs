@@ -1,36 +1,46 @@
 use std::time::Duration;
 
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use integration_test_tools::IntegrationTestContext;
+use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, system_instruction, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    system_instruction, transaction::Transaction,
 };
 use solana_transaction_status::UiTransactionEncoding;
 
 const EPHEM_URL: &str = "http://localhost:8899";
 
 /// Test that verifies transaction timestamps, block timestamps, and ledger block timestamps all match
-#[tokio::test]
-async fn test_clocks_match() {
+#[test]
+fn test_clocks_match() {
     let iterations = 10;
     let millis_per_slot = 50;
+    let ctx = IntegrationTestContext::try_new().unwrap();
 
+    let payer_chain = Keypair::new();
     let from_keypair = Keypair::new();
-    let to_pubkey = Pubkey::new_unique();
+    let to_keypair = Keypair::new();
+    // Fund payer on chain which will fund accounts we delegate
+    ctx.airdrop_chain(&payer_chain.pubkey(), 5 * LAMPORTS_PER_SOL)
+        .unwrap();
+    ctx.airdrop_chain_and_delegate(
+        &payer_chain,
+        &from_keypair,
+        LAMPORTS_PER_SOL,
+    )
+    .unwrap();
+    ctx.airdrop_chain_and_delegate(&payer_chain, &to_keypair, LAMPORTS_PER_SOL)
+        .unwrap();
 
     let rpc_client = RpcClient::new(EPHEM_URL.to_string());
-    rpc_client
-        .request_airdrop(&from_keypair.pubkey(), LAMPORTS_PER_SOL)
-        .await
-        .unwrap();
 
     // Test multiple slots to ensure consistency
     for _ in 0..iterations {
-        let blockhash = rpc_client.get_latest_blockhash().await.unwrap();
+        let blockhash = rpc_client.get_latest_blockhash().unwrap();
         let transfer_tx = Transaction::new_signed_with_payer(
             &[system_instruction::transfer(
                 &from_keypair.pubkey(),
-                &to_pubkey,
+                &to_keypair.pubkey(),
                 1000000,
             )],
             Some(&from_keypair.pubkey()),
@@ -40,25 +50,21 @@ async fn test_clocks_match() {
 
         let tx_result = rpc_client
             .send_and_confirm_transaction(&transfer_tx)
-            .await
             .unwrap();
 
         let mut tx = rpc_client
             .get_transaction(&tx_result, UiTransactionEncoding::Base64)
-            .await
             .unwrap();
         // Wait until we're sure the slot is written to the ledger
-        while rpc_client.get_slot().await.unwrap() < tx.slot + 10 {
+        while rpc_client.get_slot().unwrap() < tx.slot + 10 {
             tx = rpc_client
                 .get_transaction(&tx_result, UiTransactionEncoding::Base64)
-                .await
                 .unwrap();
-            tokio::time::sleep(Duration::from_millis(millis_per_slot)).await;
+            std::thread::sleep(Duration::from_millis(millis_per_slot));
         }
 
-        let ledger_timestamp =
-            rpc_client.get_block_time(tx.slot).await.unwrap();
-        let block_timestamp = rpc_client.get_block(tx.slot).await.unwrap();
+        let ledger_timestamp = rpc_client.get_block_time(tx.slot).unwrap();
+        let block_timestamp = rpc_client.get_block(tx.slot).unwrap();
         let block_timestamp = block_timestamp.block_time;
 
         // Verify timestamps match

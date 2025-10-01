@@ -1,6 +1,7 @@
 [accounts]
-remote.cluster = "devnet"
-lifecycle = "offline"
+remote.cluster = "custom"
+remote.url = "http://127.0.0.1:7799"
+lifecycle = "ephemeral"
 commit = { frequency-millis = 9_000_000_000_000, compute-unit-price = 1_000_000 }
 
 [accounts.db]
