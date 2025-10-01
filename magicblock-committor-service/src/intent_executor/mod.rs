@@ -590,11 +590,13 @@ where
 
         let decide_flow_rpc_error =
             |err: solana_rpc_client_api::client_error::Error,
-             last_err: &mut TransactionStrategyExecutionError,
              map: fn(
                 solana_rpc_client_api::client_error::Error,
             ) -> MagicBlockRpcClientError|
-             -> ControlFlow<TransactionStrategyExecutionError> {
+             -> ControlFlow<
+                TransactionStrategyExecutionError,
+                TransactionStrategyExecutionError,
+            > {
                 let map_helper =
                     |request, kind| -> TransactionStrategyExecutionError {
                         TransactionStrategyExecutionError::InternalError(
@@ -609,7 +611,7 @@ where
 
                 match err.kind {
                     ErrorKind::TransactionError(transaction_err) => {
-                        // Try to map to known errors first to attempt recovery
+                        // Map transaction error to a known set, otherwise maps to internal error
                         // We're returning immediately to recover
                         let error = TransactionStrategyExecutionError::from_transaction_error(transaction_err, tasks, |transaction_err| -> MagicBlockRpcClientError {
                             map(
@@ -622,9 +624,8 @@ where
                         ControlFlow::Break(error)
                     }
                     err_kind @ ErrorKind::Io(_) => {
-                        // Record error and attempt retry
-                        *last_err = map_helper(err.request, err_kind);
-                        ControlFlow::Continue(())
+                        // Attempting retry
+                        ControlFlow::Continue(map_helper(err.request, err_kind))
                     }
                     err_kind @ (ErrorKind::Reqwest(_)
                     | ErrorKind::Middleware(_)
@@ -662,7 +663,7 @@ where
 
             let result =
                 self.send_prepared_message(prepared_message.clone()).await;
-            match result {
+            let flow = match result {
                 Ok(result) => {
                     return match result.into_result() {
                         Ok(value) =>  Ok(value),
@@ -679,39 +680,37 @@ where
                 }
                 Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::SentTransactionError(err, signature)))
                 => {
-                    return Err(TransactionStrategyExecutionError::from_transaction_error(err, tasks, |err| {
+                    // TransactionError can be mapped to known set of error
+                    // We return right away to retry recovery, because this can't be fixed with retries
+                    ControlFlow::Break(TransactionStrategyExecutionError::from_transaction_error(err, tasks, |err| {
                         MagicBlockRpcClientError::SentTransactionError(err, signature)
                     }))
                 }
                 Err(err @ InternalError::SignerError(_)) => {
                     // Can't handle SignerError in any way
                     // propagate lower
-                    return Err(TransactionStrategyExecutionError::InternalError(err))
+                    ControlFlow::Break(TransactionStrategyExecutionError::InternalError(err))
                 }
                 Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(err))) => {
-                    if let ControlFlow::Break(err) = decide_flow_rpc_error(err, &mut last_err, MagicBlockRpcClientError::RpcClientError) {
-                        return Err(err)
-                    }
+                    decide_flow_rpc_error(err, MagicBlockRpcClientError::RpcClientError)
                 }
                 Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::SendTransaction(err)))
                 => {
-                    if let ControlFlow::Break(err) = decide_flow_rpc_error(err, &mut last_err, MagicBlockRpcClientError::SendTransaction) {
-                        return Err(err)
-                    }
+                    decide_flow_rpc_error(err, MagicBlockRpcClientError::SendTransaction)
                 }
                 Err(InternalError::MagicBlockRpcClientError(err @ MagicBlockRpcClientError::GetLatestBlockhash(_))) => {
                     // we're retrying in that case
-                    last_err = TransactionStrategyExecutionError::InternalError(err.into());
+                    ControlFlow::Continue(TransactionStrategyExecutionError::InternalError(err.into()))
                 }
                 Err(InternalError::MagicBlockRpcClientError(err @ MagicBlockRpcClientError::GetSlot(_))) => {
                     // Unexpected error, returning right away
                     warn!("MagicBlockRpcClientError::GetSlot during send transaction");
-                    return Err(TransactionStrategyExecutionError::InternalError(err.into()))
+                    ControlFlow::Break(TransactionStrategyExecutionError::InternalError(err.into()))
                 }
                 Err(InternalError::MagicBlockRpcClientError(err @ MagicBlockRpcClientError::LookupTableDeserialize(_))) => {
                     // Unexpected error, returning right away
                     warn!(" MagicBlockRpcClientError::LookupTableDeserialize during send transaction");
-                    return Err(TransactionStrategyExecutionError::InternalError(err.into()))
+                    ControlFlow::Break(TransactionStrategyExecutionError::InternalError(err.into()))
                 }
                 Err(err @ InternalError::MagicBlockRpcClientError(
                     MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(..)
@@ -723,6 +722,11 @@ where
                     continue;
                 }
             };
+
+            match flow {
+                ControlFlow::Continue(new_err) => last_err = new_err,
+                ControlFlow::Break(err) => return Err(err),
+            }
 
             sleep(SLEEP).await
         }
