@@ -7,14 +7,28 @@
 - [x] `test-committor-service`
 - [x] `test-issues` removed since we won't support frequent commits
 - [x] `test-table-mania` all passing
-- [ ] `test-config` 2/2 failing (Transaction::sign failed with error NotEnoughSigners) (Thorsten)
-- [ ] `test-ledger-restore` 16/17 failing (mostly airdrop and Failed to setup an account subscriptions)
+- [ ] `test-config` 2/2 failing (Transaction::sign failed with error NotEnoughSigners -fixed) (Thorsten)
+- [ ] `test-ledger-restore` 12/16 failing (mostly airdrop and Failed to setup an account subscriptions)
 - [ ] `test-magicblock-api` 2/4 failing (incorrect airdrop)
 - [x] `test-pubsub` were failing due to airdrop similar to above and were fixed via escrowed airdrop
-- [ ] `test-schedule-intent` 5/5 failing (failed to airdrop) (Babur)
+- [x] `test-schedule-intent` 5/5 failing (failed to airdrop) (Babur - disabled)
 
-- clone not found escrow accounts with 0 lamports (Thorsten)
-- replay - remove all non-delegated accounts from bank (Thorsten)
+- clone not found escrow accounts with 0 lamports (Thorsten - fixed)
+- replay - remove all non-delegated accounts from bank (Thorsten - fixed)
+
+## Current Issues
+
+- `Failed to start validator: NextSlotAfterLedgerProcessingNotMatchingBankSlot(87, 85)`
+- this happens sporadically when restoring ledger via this test (I saw it once and could not
+reproduce, but it is possible):
+
+```sh
+make setup-restore-ledger-devnet
+```
+```sh
+cargo nextest run test_restore_ledger_with_two_airdropped_accounts_separate_slot --nocapture
+```
+
 
 ### Test Config
 
