@@ -9,14 +9,13 @@ use integration_test_tools::{
 use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
-    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    system_instruction,
 };
 use test_ledger_restore::{
-    setup_offline_validator, setup_validator_with_local_remote,
+    airdrop_and_delegate_accounts, setup_offline_validator,
+    setup_validator_with_local_remote, transfer_lamports,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
@@ -26,11 +25,8 @@ fn test_restore_ledger_with_transferred_account() {
 
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
-    let keypair1 = Keypair::new();
-    let keypair2 = Keypair::new();
-
-    let (mut validator, transfer_sig, _) =
-        write_ledger(&ledger_path, &keypair1, &keypair2);
+    let (mut validator, transfer_sig, _slot, _keypair1, keypair2) =
+        write_ledger(&ledger_path);
     validator.kill().unwrap();
     debug!("Transfer sig: {transfer_sig}");
 
@@ -41,9 +37,7 @@ fn test_restore_ledger_with_transferred_account() {
 
 fn write_ledger(
     ledger_path: &Path,
-    keypair1: &Keypair,
-    keypair2: &Keypair,
-) -> (Child, Signature, u64) {
+) -> (Child, Signature, u64, Keypair, Keypair) {
     // Launch a validator and airdrop to an account
     let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
@@ -56,35 +50,20 @@ fn write_ledger(
     // Wait to make sure we don't process transactions on slot 0
     expect!(ctx.wait_for_next_slot_ephem(), validator);
 
-    let payer_chain = Keypair::new();
-    expect!(
-        ctx.airdrop_chain(&payer_chain.pubkey(), LAMPORTS_PER_SOL),
-        "Failed to airdrop to payer_chain",
-        validator
+    let mut keypairs = airdrop_and_delegate_accounts(
+        &ctx,
+        &mut validator,
+        &[1_111_111, 2_222_222],
     );
-    expect!(
-        ctx.airdrop_chain_and_delegate(&payer_chain, keypair1, 1_111_111),
-        "Failed to airdrop and delegate  keypair1",
-        validator
-    );
-    expect!(
-        ctx.airdrop_chain_and_delegate(&payer_chain, keypair2, 2_222_222),
-        "Failed to airdrop and delegate  keypair2",
-        validator
-    );
+    let keypair1 = keypairs.drain(0..1).next().unwrap();
+    let keypair2 = keypairs.drain(0..1).next().unwrap();
 
-    let transfer_ix = system_instruction::transfer(
-        &keypair1.pubkey(),
+    let sig = transfer_lamports(
+        &ctx,
+        &mut validator,
+        &keypair1,
         &keypair2.pubkey(),
         111,
-    );
-    let (sig, _) = expect!(
-        ctx.send_and_confirm_instructions_with_payer_ephem(
-            &[transfer_ix],
-            keypair1,
-        ),
-        "Failed to send transfer from keypair1 to keypair2",
-        validator
     );
 
     let lamports = expect!(
@@ -96,7 +75,7 @@ fn write_ledger(
     let slot = wait_for_ledger_persist(&mut validator);
 
     validator.kill().unwrap();
-    (validator, sig, slot)
+    (validator, sig, slot, keypair1, keypair2)
 }
 
 fn read_ledger(

@@ -153,6 +153,59 @@ pub fn setup_validator_with_local_remote(
 // -----------------
 // Transactions and Account Updates
 // -----------------
+pub fn airdrop_and_delegate_accounts(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+    lamports: &[u64],
+) -> Vec<Keypair> {
+    let payer_chain = Keypair::new();
+
+    let total_lamports: u64 = lamports.iter().sum();
+    let payer_lamports = LAMPORTS_PER_SOL + total_lamports;
+    // 1. Airdrop to payer on chain
+    expect!(
+        ctx.airdrop_chain(&payer_chain.pubkey(), payer_lamports),
+        validator
+    );
+    // 2. Airdrop to ephem payers and delegate them
+    let keypairs_lamports = lamports
+        .into_iter()
+        .map(|&l| (Keypair::new(), l))
+        .collect::<Vec<_>>();
+
+    for (keypair, l) in keypairs_lamports.iter() {
+        expect!(
+            ctx.airdrop_chain_and_delegate(&payer_chain, keypair, *l),
+            format!("Failed to airdrop {l} and delegate keypair"),
+            validator
+        );
+    }
+    keypairs_lamports
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect::<Vec<_>>()
+}
+
+pub fn transfer_lamports(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+    from: &Keypair,
+    to: &Pubkey,
+    lamports: u64,
+) -> Signature {
+    let transfer_ix =
+        solana_sdk::system_instruction::transfer(&from.pubkey(), to, lamports);
+    let (sig, _) = expect!(
+        ctx.send_and_confirm_instructions_with_payer_ephem(
+            &[transfer_ix],
+            from
+        ),
+        "Failed to send transfer",
+        validator
+    );
+    sig
+}
+
 pub fn send_tx_with_payer_ephem(
     ix: Instruction,
     payer: &Keypair,
