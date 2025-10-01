@@ -1,6 +1,7 @@
 use std::ops::{ControlFlow, Deref};
 
-use log::{error, warn};
+use log::{error, info, warn};
+use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 use solana_pubkey::Pubkey;
 
 use crate::{
@@ -74,7 +75,10 @@ where
                 )
                 .await?;
             let cleanup = match flow {
-                ControlFlow::Continue(value) => value,
+                ControlFlow::Continue(value) => {
+                    info!("Patched intent, error was: {:?}", execution_err);
+                    value
+                }
                 ControlFlow::Break(()) => {
                     break (Err(execution_err), commit_strategy)
                 }
@@ -188,7 +192,7 @@ where
             TransactionStrategyExecutionError::ActionsError => {
                 // Unexpected in Two Stage commit
                 // That would mean that Two Stage executes Standalone commit
-                error!("Unexpected error in Two stage commit flow: {}", err);
+                warn!("Unexpected error in Two stage commit flow: {}", err);
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::CpiLimitError => {

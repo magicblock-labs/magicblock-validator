@@ -68,6 +68,10 @@ pub enum IntentExecutorError {
 }
 
 impl IntentExecutorError {
+    pub fn is_cpi_limit_error(&self) -> bool {
+        matches!(self, IntentExecutorError::CpiLimitError)
+    }
+
     pub fn from_strategy_execution_error<F>(
         error: TransactionStrategyExecutionError,
         converter: F,

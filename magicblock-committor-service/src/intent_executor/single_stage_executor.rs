@@ -1,6 +1,6 @@
 use std::ops::{ControlFlow, Deref};
 
-use log::error;
+use log::{error, info, warn};
 use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 
 use crate::{
@@ -82,9 +82,16 @@ where
                 )
                 .await?;
             let cleanup = match flow {
-                ControlFlow::Continue(cleanup) => cleanup,
+                ControlFlow::Continue(cleanup) => {
+                    info!(
+                        "Patched intent: {}. patched error: {:?}",
+                        base_intent.id, execution_err
+                    );
+                    cleanup
+                }
                 ControlFlow::Break(()) => {
-                    break (execution_err, transaction_strategy)
+                    error!("Could not patch failed intent: {}", base_intent.id);
+                    break (execution_err, transaction_strategy);
                 }
             };
 

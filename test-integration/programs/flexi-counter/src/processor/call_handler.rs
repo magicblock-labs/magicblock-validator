@@ -114,17 +114,19 @@ where
             let undelegation_action_data =
                 UndelegateActionData::try_from_slice(&call_handler.data)?;
 
-            let mut counter =
-                FlexiCounter::try_from_slice(&delegated_account.data.borrow())?;
+            let mut counter = {
+                let data = delegated_account.data.borrow();
+                FlexiCounter::deserialize(&mut data.as_ref())?
+            };
 
-            counter.count = (counter.count as i64
-                + undelegation_action_data.counter_diff)
-                as u64;
+            counter.count = u64::try_from(
+                counter.count as i64 + undelegation_action_data.counter_diff,
+            )
+            .unwrap();
             counter.updates += 1;
 
-            let size = delegated_account.data_len();
             let counter_data = to_vec(&counter)?;
-            delegated_account.data.borrow_mut()[..size]
+            delegated_account.data.borrow_mut()[..counter_data.len()]
                 .copy_from_slice(&counter_data);
 
             invoke(

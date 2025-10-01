@@ -8,7 +8,7 @@ use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures_util::future::try_join_all;
-use log::{error, trace, warn};
+use log::{error, info, trace, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
@@ -389,7 +389,6 @@ where
         // We encountered error "Max instruction trace length exceeded"
         // All the tasks a prepared to be executed at this point
         // We attempt Two stages commit flow, need to split tasks up
-        // TODO(edwin): doesn't take in account Standalone Action. problem?
         let (commit_stage_tasks, finalize_stage_tasks): (Vec<_>, Vec<_>) =
             strategy
                 .optimized_tasks

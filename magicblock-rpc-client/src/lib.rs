@@ -168,6 +168,7 @@ impl MagicBlockSendTransactionConfig {
     }
 }
 
+#[derive(Debug)]
 pub struct MagicBlockSendTransactionOutcome {
     signature: Signature,
     processed_err: Option<TransactionError>,
