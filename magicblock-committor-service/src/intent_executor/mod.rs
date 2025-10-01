@@ -4,7 +4,7 @@ mod single_stage_executor;
 pub mod task_info_fetcher;
 mod two_stage_executor;
 
-use std::{sync::Arc, time::Duration};
+use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures_util::future::try_join_all;
@@ -20,7 +20,6 @@ use magicblock_rpc_client::{
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::client_error::ErrorKind;
 use solana_sdk::{
-    instruction::InstructionError,
     message::VersionedMessage,
     signature::{Keypair, Signature, Signer, SignerError},
     transaction::{TransactionError, VersionedTransaction},
@@ -589,13 +588,13 @@ where
 
         const SLEEP: Duration = Duration::from_millis(500);
 
-        let convert_rpc_error =
+        let decide_flow_rpc_error =
             |err: solana_rpc_client_api::client_error::Error,
              last_err: &mut TransactionStrategyExecutionError,
              map: fn(
                 solana_rpc_client_api::client_error::Error,
             ) -> MagicBlockRpcClientError|
-             -> Option<TransactionStrategyExecutionError> {
+             -> ControlFlow<TransactionStrategyExecutionError> {
                 let map_helper =
                     |request, kind| -> TransactionStrategyExecutionError {
                         TransactionStrategyExecutionError::InternalError(
@@ -611,7 +610,7 @@ where
                 match err.kind {
                     ErrorKind::TransactionError(transaction_err) => {
                         // Try to map to known errors first to attempt recovery
-                        // We're returning immoderately to recover
+                        // We're returning immediately to recover
                         let error = TransactionStrategyExecutionError::from_transaction_error(transaction_err, tasks, |transaction_err| -> MagicBlockRpcClientError {
                             map(
                                 solana_rpc_client_api::client_error::Error {
@@ -620,36 +619,21 @@ where
                                 })
                         });
 
-                        Some(error)
+                        ControlFlow::Break(error)
                     }
                     err_kind @ ErrorKind::Io(_) => {
                         // Record error and attempt retry
                         *last_err = map_helper(err.request, err_kind);
-                        None
+                        ControlFlow::Continue(())
                     }
-                    err_kind @ ErrorKind::Reqwest(_) => {
+                    err_kind @ (ErrorKind::Reqwest(_)
+                    | ErrorKind::Middleware(_)
+                    | ErrorKind::RpcError(_)
+                    | ErrorKind::SerdeJson(_)
+                    | ErrorKind::SigningError(_)
+                    | ErrorKind::Custom(_)) => {
                         // Can't handle - propagate
-                        Some(map_helper(err.request, err_kind))
-                    }
-                    err_kind @ ErrorKind::Middleware(_) => {
-                        // Can't handle - propagate
-                        Some(map_helper(err.request, err_kind))
-                    }
-                    err_kind @ ErrorKind::RpcError(_) => {
-                        // Can't handle - propagate
-                        Some(map_helper(err.request, err_kind))
-                    }
-                    err_kind @ ErrorKind::SerdeJson(_) => {
-                        // Can't handle - propagate
-                        Some(map_helper(err.request, err_kind))
-                    }
-                    err_kind @ ErrorKind::SigningError(_) => {
-                        // Can't handle - propagate
-                        Some(map_helper(err.request, err_kind))
-                    }
-                    err_kind @ ErrorKind::Custom(_) => {
-                        // Can't handle - propagate
-                        Some(map_helper(err.request, err_kind))
+                        ControlFlow::Break(map_helper(err.request, err_kind))
                     }
                 }
             };
@@ -686,10 +670,10 @@ where
                             // Since err is TransactionError we return from here right away
                             // It's wether some known reason like: ActionError/CommitIdError or something else
                             // We can't recover here so we propagate
-                            Err(TransactionStrategyExecutionError::from_transaction_error(err, tasks, |err: TransactionError| {
+                            let err = TransactionStrategyExecutionError::from_transaction_error(err, tasks, |err: TransactionError| {
                                 MagicBlockRpcClientError::SendTransaction(err.into())
-                                }
-                            ))
+                            });
+                            Err(err)
                         }
                     }
                 }
@@ -705,13 +689,13 @@ where
                     return Err(TransactionStrategyExecutionError::InternalError(err))
                 }
                 Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(err))) => {
-                    if let Some(err) = convert_rpc_error(err, &mut last_err, MagicBlockRpcClientError::RpcClientError) {
+                    if let ControlFlow::Break(err) = decide_flow_rpc_error(err, &mut last_err, MagicBlockRpcClientError::RpcClientError) {
                         return Err(err)
                     }
                 }
                 Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::SendTransaction(err)))
                 => {
-                    if let Some(err) = convert_rpc_error(err, &mut last_err, MagicBlockRpcClientError::SendTransaction) {
+                    if let ControlFlow::Break(err) = decide_flow_rpc_error(err, &mut last_err, MagicBlockRpcClientError::SendTransaction) {
                         return Err(err)
                     }
                 }
