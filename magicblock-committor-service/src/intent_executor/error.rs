@@ -1,9 +1,15 @@
+use log::error;
 use magicblock_rpc_client::MagicBlockRpcClientError;
-use solana_sdk::signature::{Signature, SignerError};
+use solana_sdk::{
+    instruction::InstructionError,
+    signature::{Signature, SignerError},
+    transaction::TransactionError,
+};
 
 use crate::{
     tasks::{
         task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
+        BaseTask, TaskType,
     },
     transaction_preparator::error::TransactionPreparatorError,
 };
@@ -97,6 +103,68 @@ pub enum TransactionStrategyExecutionError {
     CpiLimitError,
     #[error("InternalError: {0}")]
     InternalError(#[from] InternalError),
+}
+
+impl TransactionStrategyExecutionError {
+    /// Convert [`TransactionError`] into known errors that can be handled
+    /// [`TransactionStrategyExecutionError`]
+    pub fn from_transaction_error(
+        err: TransactionError,
+        tasks: &[Box<dyn BaseTask>],
+        map: impl FnOnce(TransactionError) -> MagicBlockRpcClientError,
+    ) -> Self {
+        // There's always 2 budget instructions in front
+        const OFFSET: u8 = 2;
+        const OUTDATED_SLOT: u32 = dlp::error::DlpError::OutdatedSlot as u32;
+
+        match err {
+            // Filter CommitIdError by custom error code
+            TransactionError::InstructionError(
+                _,
+                InstructionError::Custom(OUTDATED_SLOT),
+            ) => TransactionStrategyExecutionError::CommitIDError,
+            // Some tx may use too much CPIs and we can handle it in certain cases
+            TransactionError::InstructionError(
+                _,
+                InstructionError::MaxInstructionTraceLengthExceeded,
+            ) => TransactionStrategyExecutionError::CpiLimitError,
+            // Filter ActionError, we can attempt recovery by stripping away actions
+            TransactionError::InstructionError(index, ix_err) => {
+                let transaction_error =
+                    TransactionError::InstructionError(index, ix_err);
+                let internal_err =
+                    TransactionStrategyExecutionError::InternalError(
+                        InternalError::MagicBlockRpcClientError(map(
+                            transaction_error,
+                        )),
+                    );
+
+                let Some(action_index) = index.checked_sub(OFFSET) else {
+                    return internal_err;
+                };
+
+                // If index exists and corresponds to Action - return ActionsError
+                if let Some(TaskType::Action) = tasks
+                    .get(action_index as usize)
+                    .map(|task: &Box<dyn BaseTask>| task.task_type())
+                {
+                    TransactionStrategyExecutionError::ActionsError
+                } else {
+                    internal_err
+                }
+            }
+            // This means transaction failed to other reasons that we don't handle - propagate
+            err => {
+                error!(
+                    "Message execution failed and we can not handle it: {}",
+                    err
+                );
+                TransactionStrategyExecutionError::InternalError(
+                    InternalError::MagicBlockRpcClientError(map(err)),
+                )
+            }
+        }
+    }
 }
 
 impl From<TaskStrategistError> for IntentExecutorError {

@@ -50,6 +50,10 @@ pub struct TestFixture {
 impl TestFixture {
     pub async fn new() -> Self {
         let authority = Keypair::new();
+        TestFixture::new_with_keypair(authority).await
+    }
+
+    pub async fn new_with_keypair(authority: Keypair) -> Self {
         let rpc_client = create_test_client().await;
 
         // TableMania
