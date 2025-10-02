@@ -14,7 +14,7 @@ pub struct BaseActionArgs {
     pub args: ActionArgs,
     pub compute_units: u32, // compute units your action will use
     pub escrow_authority: u8, // index of account authorizing action on actor pda
-    pub destination_program: Pubkey, // adress of destination program
+    pub destination_program: Pubkey, // address of destination program
     pub accounts: Vec<ShortAccountMeta>, // short account metas
 }
 
