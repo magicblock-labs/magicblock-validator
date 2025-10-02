@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use solana_program::account_info::AccountInfo;
 use solana_program::instruction::AccountMeta;
 
 use crate::Pubkey;
@@ -73,6 +74,21 @@ impl From<AccountMeta> for ShortAccountMeta {
     fn from(value: AccountMeta) -> Self {
         Self {
             pubkey: value.pubkey,
+            is_writable: value.is_writable,
+        }
+    }
+}
+
+impl<'a> From<AccountInfo<'a>> for ShortAccountMeta {
+    fn from(value: AccountInfo<'a>) -> Self {
+        Self::from(&value)
+    }
+}
+
+impl<'a> From<&AccountInfo<'a>> for ShortAccountMeta {
+    fn from(value: &AccountInfo<'a>) -> Self {
+        Self {
+            pubkey: *value.key,
             is_writable: value.is_writable,
         }
     }
