@@ -629,7 +629,7 @@ impl MagicValidator {
             self.chainlink.reset_accounts_bank();
         }
 
-        // Now we start all services and are ready to accept transactions
+        // Now we are ready to start all services and are ready to accept transactions
         self.claim_fees_task.start(self.config.clone());
 
         self.slot_ticker = Some(init_slot_ticker(

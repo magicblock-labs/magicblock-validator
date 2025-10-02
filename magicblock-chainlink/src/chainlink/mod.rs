@@ -47,6 +47,9 @@ pub struct Chainlink<
     /// synchronized.
     #[allow(unused)] // needed to cleanup chainlink
     removed_accounts_sub: Option<task::JoinHandle<()>>,
+
+    validator_id: Pubkey,
+    faucet_id: Pubkey,
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
@@ -55,6 +58,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub fn try_new(
         accounts_bank: &Arc<V>,
         fetch_cloner: Option<FetchCloner<T, U, V, C>>,
+        validator_pubkey: Pubkey,
+        faucet_pubkey: Pubkey,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
@@ -70,6 +75,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             accounts_bank: accounts_bank.clone(),
             fetch_cloner,
             removed_accounts_sub,
+            validator_id: validator_pubkey,
+            faucet_id: faucet_pubkey,
         })
     }
 
@@ -114,17 +121,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             None
         };
 
-        Chainlink::try_new(accounts_bank, fetch_cloner)
+        Chainlink::try_new(
+            accounts_bank,
+            fetch_cloner,
+            validator_pubkey,
+            faucet_pubkey,
+        )
     }
 
-    /// Removes all accounts that aren't delegated to us from the bank
+    /// Removes all accounts that aren't delegated to us and not blacklisted from the bank
     /// This should only be called _before_ the validator starts up, i.e.
     /// when resuming an existing ledger to guarantee that we don't hold
     /// accounts that might be stale.
     pub fn reset_accounts_bank(&self) {
-        let removed = self
-            .accounts_bank
-            .remove_where(|_pubkey, account| !account.delegated());
+        let blacklisted_accounts =
+            blacklisted_accounts(&self.validator_id, &self.faucet_id);
+        let removed = self.accounts_bank.remove_where(|pubkey, account| {
+            !account.delegated() && !blacklisted_accounts.contains(pubkey)
+        });
 
         debug!("Removed {removed} non-delegated accounts");
     }

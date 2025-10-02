@@ -40,8 +40,13 @@ fn ws_channel() -> (WsConnectionChannel, Receiver<Bytes>) {
 }
 
 fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
-    ChainlinkImpl::try_new(accounts_db, None)
-        .expect("Failed to create Chainlink")
+    ChainlinkImpl::try_new(
+        accounts_db,
+        None,
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+    )
+    .expect("Failed to create Chainlink")
 }
 
 mod event_processor {
