@@ -33,6 +33,7 @@ magicblock-chainlink = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
+magicblock-metrics = { workspace = true }
 magicblock-version = { workspace = true }
 
 # solana

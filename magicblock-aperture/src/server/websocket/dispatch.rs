@@ -15,6 +15,7 @@ use crate::{
 use super::connection::ConnectionID;
 use hyper::body::Bytes;
 use json::{Serialize, Value};
+use magicblock_metrics::metrics::RPC_REQUESTS_COUNT;
 use tokio::sync::mpsc;
 
 /// The sender half of an MPSC channel used to push subscription notifications
@@ -65,6 +66,9 @@ impl WsDispatcher {
         request: &mut JsonWsRequest,
     ) -> RpcResult<WsDispatchResult> {
         use JsonRpcWsMethod::*;
+        RPC_REQUESTS_COUNT
+            .with_label_values(&[request.method.as_str()])
+            .inc();
         let result = match request.method {
             AccountSubscribe => self.account_subscribe(request).await,
             ProgramSubscribe => self.program_subscribe(request).await,

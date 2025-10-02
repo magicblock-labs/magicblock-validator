@@ -789,17 +789,11 @@ where
         pubkey: &Pubkey,
         lamports: u64,
         owner: &Pubkey,
-        balance_pda: Option<&Pubkey>,
+        _balance_pda: Option<&Pubkey>,
     ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_feepayer_account(pubkey, lamports, owner)
             .map_err(AccountClonerError::AccountDumperError)
-            .inspect(|_| {
-                metrics::inc_account_clone(metrics::AccountClone::FeePayer {
-                    pubkey: &pubkey.to_string(),
-                    balance_pda: balance_pda.map(|p| p.to_string()).as_deref(),
-                });
-            })
     }
 
     fn do_clone_undelegated_account(
@@ -810,14 +804,6 @@ where
         self.account_dumper
             .dump_undelegated_account(pubkey, account)
             .map_err(AccountClonerError::AccountDumperError)
-            .inspect(|_| {
-                metrics::inc_account_clone(
-                    metrics::AccountClone::Undelegated {
-                        pubkey: &pubkey.to_string(),
-                        owner: &account.owner().to_string(),
-                    },
-                );
-            })
     }
 
     fn do_clone_delegated_account(
@@ -846,13 +832,6 @@ where
         self.account_dumper
             .dump_delegated_account(pubkey, account, &record.owner)
             .map_err(AccountClonerError::AccountDumperError)
-            .inspect(|_| {
-                metrics::inc_account_clone(metrics::AccountClone::Delegated {
-                    // TODO(bmuddha): optimize metrics, remove .to_string()
-                    pubkey: &pubkey.to_string(),
-                    owner: &record.owner.to_string(),
-                });
-            })
     }
 
     async fn do_clone_program_accounts(
@@ -908,11 +887,6 @@ where
                 idl_account,
             )
             .map_err(AccountClonerError::AccountDumperError)
-            .inspect(|_| {
-                metrics::inc_account_clone(metrics::AccountClone::Program {
-                    pubkey: &pubkey.to_string(),
-                });
-            })
     }
 
     async fn fetch_program_idl(
