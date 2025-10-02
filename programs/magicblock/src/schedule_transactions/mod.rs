@@ -4,7 +4,6 @@ mod process_schedule_commit;
 #[cfg(test)]
 mod process_schedule_commit_tests;
 mod process_scheduled_commit_sent;
-mod schedule_base_intent_processor;
 pub(crate) mod transaction_scheduler;
 
 use magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY;

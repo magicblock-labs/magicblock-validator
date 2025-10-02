@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use solana_program::instruction::AccountMeta;
+
+use crate::Pubkey;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionArgs {
@@ -11,8 +14,8 @@ pub struct BaseActionArgs {
     pub args: ActionArgs,
     pub compute_units: u32, // compute units your action will use
     pub escrow_authority: u8, // index of account authorizing action on actor pda
-    pub destination_program: u8, // index of the account
-    pub accounts: Vec<u8>,    // indices of account
+    pub destination_program: Pubkey, // adress of destination program
+    pub accounts: Vec<ShortAccountMeta>, // short account metas
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -58,4 +61,19 @@ pub enum MagicBaseIntentArgs {
     BaseActions(Vec<BaseActionArgs>),
     Commit(CommitTypeArgs),
     CommitAndUndelegate(CommitAndUndelegateArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShortAccountMeta {
+    pub pubkey: Pubkey,
+    pub is_writable: bool,
+}
+
+impl From<AccountMeta> for ShortAccountMeta {
+    fn from(value: AccountMeta) -> Self {
+        Self {
+            pubkey: value.pubkey,
+            is_writable: value.is_writable,
+        }
+    }
 }

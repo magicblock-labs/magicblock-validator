@@ -3621,6 +3621,7 @@ dependencies = [
  "magicblock-accounts-api",
  "magicblock-committor-service",
  "magicblock-config",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-program",
@@ -3635,6 +3636,7 @@ dependencies = [
 name = "magicblock-account-dumper"
 version = "0.2.1"
 dependencies = [
+ "async-trait",
  "bincode",
  "magicblock-bank",
  "magicblock-mutator",
@@ -4075,6 +4077,7 @@ dependencies = [
  "solana-timings",
  "spl-token",
  "spl-token-2022 6.0.0",
+ "tokio",
 ]
 
 [[package]]
