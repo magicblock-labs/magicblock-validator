@@ -10537,6 +10537,7 @@ dependencies = [
  "log",
  "magicblock-accounts-db",
  "magicblock-config",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "program-flexi-counter",
  "solana-rpc-client",
  "solana-sdk",

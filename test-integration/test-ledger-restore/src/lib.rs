@@ -12,8 +12,7 @@ use integration_test_tools::{
 };
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
-    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
-    ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
+    LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
     DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::state::FlexiCounter;
@@ -95,6 +94,35 @@ pub fn setup_validator_with_local_remote(
     skip_keypair_match_check: bool,
     loaded_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
+    let resume_strategy = if reset {
+        LedgerResumeStrategy::Reset {
+            slot: 0,
+            keep_accounts: false,
+        }
+    } else {
+        LedgerResumeStrategy::Resume { replay: true }
+    };
+    setup_validator_with_local_remote_and_resume_strategy(
+        ledger_path,
+        programs,
+        resume_strategy,
+        skip_keypair_match_check,
+        loaded_accounts,
+    )
+}
+
+/// This function sets up a validator that connects to a local remote and allows to
+/// specify the resume strategy specifically.
+/// That local remote is expected to listen on port 7799.
+/// The [IntegrationTestContext] is setup to connect to both the ephemeral validator
+/// and the local remote.
+pub fn setup_validator_with_local_remote_and_resume_strategy(
+    ledger_path: &Path,
+    programs: Option<Vec<ProgramConfig>>,
+    resume_strategy: LedgerResumeStrategy,
+    skip_keypair_match_check: bool,
+    loaded_accounts: &LoadedAccounts,
+) -> (TempDir, Child, IntegrationTestContext) {
     let mut accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Ephemeral,
         remote: RemoteConfig {
@@ -108,20 +136,9 @@ pub fn setup_validator_with_local_remote(
 
     let programs = resolve_programs(programs);
 
-    let resume_strategy_config = if reset {
-        LedgerResumeStrategyConfig {
-            kind: LedgerResumeStrategyType::Reset,
-            ..Default::default()
-        }
-    } else {
-        LedgerResumeStrategyConfig {
-            kind: LedgerResumeStrategyType::Replay,
-            ..Default::default()
-        }
-    };
     let config = EphemeralConfig {
         ledger: LedgerConfig {
-            resume_strategy_config,
+            resume_strategy_config: resume_strategy.into(),
             skip_keypair_match_check,
             path: ledger_path.display().to_string(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
@@ -155,6 +172,39 @@ pub fn setup_validator_with_local_remote(
 // -----------------
 // Transactions and Account Updates
 // -----------------
+pub fn airdrop_accounts_on_chain(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+    lamports: &[u64],
+) -> Vec<Keypair> {
+    let mut payers = vec![];
+    for l in lamports.iter() {
+        let payer_chain = Keypair::new();
+        expect!(ctx.airdrop_chain(&payer_chain.pubkey(), *l), validator);
+        payers.push(payer_chain);
+    }
+    payers
+}
+
+pub fn delegate_accounts(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+    keypairs: &[&Keypair],
+) {
+    let payer_chain = Keypair::new();
+    expect!(
+        ctx.airdrop_chain(&payer_chain.pubkey(), LAMPORTS_PER_SOL),
+        validator
+    );
+    for keypair in keypairs.iter() {
+        expect!(
+            ctx.delegate_account(&payer_chain, keypair),
+            format!("Failed to delegate keypair {}", keypair.pubkey()),
+            validator
+        );
+    }
+}
+
 pub fn airdrop_and_delegate_accounts(
     ctx: &IntegrationTestContext,
     validator: &mut Child,

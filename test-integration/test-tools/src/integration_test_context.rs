@@ -564,19 +564,9 @@ impl IntegrationTestContext {
             .map(|owner| owner.eq(&dlp::id()))
             .unwrap_or(false);
         let deleg_sig = if !delegated_already {
-            let ixs = dlp_interface::create_delegate_ixs(
-                // We change the owner of the ephem account, thus cannot use it as payer
-                payer_chain.pubkey(),
-                payer_ephem.pubkey(),
-                self.ephem_validator_identity,
-            );
-            let mut tx =
-                Transaction::new_with_payer(&ixs, Some(&payer_chain.pubkey()));
-            let (deleg_sig, confirmed) = self
-                .send_and_confirm_transaction_chain(
-                    &mut tx,
-                    &[payer_chain, payer_ephem],
-                )?;
+            let (deleg_sig, confirmed) =
+                self.delegate_account(payer_chain, payer_ephem)?;
+
             assert!(confirmed, "Failed to confirm airdrop delegation");
             debug!("Delegated payer {}", payer_ephem.pubkey());
             deleg_sig
@@ -589,6 +579,26 @@ impl IntegrationTestContext {
         };
 
         Ok((payer_ephem_airdrop_sig, deleg_sig))
+    }
+
+    pub fn delegate_account(
+        &self,
+        payer_chain: &Keypair,
+        payer_ephem: &Keypair,
+    ) -> anyhow::Result<(Signature, bool)> {
+        let ixs = dlp_interface::create_delegate_ixs(
+            // We change the owner of the ephem account, thus cannot use it as payer
+            payer_chain.pubkey(),
+            payer_ephem.pubkey(),
+            self.ephem_validator_identity,
+        );
+        let mut tx =
+            Transaction::new_with_payer(&ixs, Some(&payer_chain.pubkey()));
+        let (deleg_sig, confirmed) = self.send_and_confirm_transaction_chain(
+            &mut tx,
+            &[payer_chain, payer_ephem],
+        )?;
+        Ok((deleg_sig, confirmed))
     }
 
     pub fn airdrop(
