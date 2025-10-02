@@ -378,7 +378,7 @@ where
         // Therefore we use the current slot which could result in two commits with the same
         // slot. However since we most likely will phase out frequent commits we accept this
         // inconsistency for now.
-        static MESSAGE_ID: AtomicU64 = AtomicU64::new((i64::MAX - 1) as u64);
+        static MESSAGE_ID: AtomicU64 = AtomicU64::new(u64::MAX - 1);
 
         let slot = self.internal_account_provider.get_slot();
         let blockhash = self.internal_account_provider.get_blockhash();
