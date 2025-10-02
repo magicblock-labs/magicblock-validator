@@ -38,9 +38,9 @@ fn payer_keypair() -> Keypair {
 
 const COUNTER: &str = "Counter of Payer";
 
-#[ignore = "the ebpf deploy is failing in CI, but passing locally"]
+#[ignore = "the ebpf deploy was failing in CI and is not supported until we support non-ephemeral mode again"]
 #[test]
-fn restore_ledger_with_flexi_counter_deploy() {
+fn test_restore_ledger_with_flexi_counter_deploy() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer = payer_keypair();
     let flexi_counter_paths = TestProgramPaths::new(
