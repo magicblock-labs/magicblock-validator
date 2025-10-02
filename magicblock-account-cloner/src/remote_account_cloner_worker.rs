@@ -29,8 +29,8 @@ use solana_sdk::{
     clock::Slot,
     pubkey::Pubkey,
     signature::Signature,
-    sysvar::clock,
     system_program,
+    sysvar::clock,
 };
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -676,8 +676,7 @@ where
             // We need to differenciate between programs and other accounts
             AccountChainState::Undelegated { account, .. } => {
                 // Skip cloning if the account does not exist on-chain (empty system account)
-                if account.lamports == 0
-                    && account.owner == system_program::ID
+                if account.lamports == 0 && account.owner == system_program::ID
                 {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
