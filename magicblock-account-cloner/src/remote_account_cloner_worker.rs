@@ -358,19 +358,23 @@ where
                             account_chain_snapshot: snapshot,
                             ..
                         } => {
-                            if snapshot.at_slot >= last_known_update_slot
-                                || snapshot.chain_state.is_feepayer()
+                            return if (snapshot.at_slot
+                                >= last_known_update_slot
+                                || snapshot.chain_state.is_feepayer())
+                                && !self
+                                    .internal_account_provider
+                                    .get_account(pubkey)
+                                    .is_some_and(|x| x.owner().eq(&dlp::ID))
                             {
-                                return Ok(last_clone_output);
+                                Ok(last_clone_output)
                             } else {
                                 // If the cloned account has been updated since clone, update the cache
-                                return self
-                                    .do_clone_and_update_cache(
-                                        pubkey,
-                                        ValidatorStage::Running,
-                                    )
-                                    .await;
-                            }
+                                self.do_clone_and_update_cache(
+                                    pubkey,
+                                    ValidatorStage::Running,
+                                )
+                                .await
+                            };
                         }
                         AccountClonerOutput::Unclonable {
                             at_slot: until_slot,
