@@ -30,6 +30,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Signature,
     sysvar::clock,
+    system_program,
 };
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -438,12 +439,21 @@ where
         stage: ValidatorStage,
     ) -> AccountClonerResult<AccountClonerOutput> {
         let updated_clone_output = self.do_clone(pubkey, stage).await?;
-        self.last_clone_output
-            .write()
-            .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned")
-            .insert(*pubkey, updated_clone_output.clone());
-        if let Ok(map) = self.last_clone_output.read() {
-            metrics::set_cached_clone_outputs_count(map.len());
+        // Do not cache non-existent accounts
+        let should_cache = match &updated_clone_output {
+            AccountClonerOutput::Unclonable { reason, .. } => {
+                !matches!(reason, AccountClonerUnclonableReason::DoesNotExist)
+            }
+            AccountClonerOutput::Cloned { .. } => true,
+        };
+        if should_cache {
+            self.last_clone_output
+                .write()
+                .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned")
+                .insert(*pubkey, updated_clone_output.clone());
+            if let Ok(map) = self.last_clone_output.read() {
+                metrics::set_cached_clone_outputs_count(map.len());
+            }
         }
         Ok(updated_clone_output)
     }
@@ -665,6 +675,16 @@ where
             // If the account is present on-chain, but not delegated, it's just readonly data
             // We need to differenciate between programs and other accounts
             AccountChainState::Undelegated { account, .. } => {
+                // Skip cloning if the account does not exist on-chain (empty system account)
+                if account.lamports == 0
+                    && account.owner == system_program::ID
+                {
+                    return Ok(AccountClonerOutput::Unclonable {
+                        pubkey: *pubkey,
+                        reason: AccountClonerUnclonableReason::DoesNotExist,
+                        at_slot: u64::MAX,
+                    });
+                }
                 // If it's an executable, we may have some special fetching to do
                 if account.executable {
                     if let Some(allowed_program_ids) = &self.allowed_program_ids
