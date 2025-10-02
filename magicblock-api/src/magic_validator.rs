@@ -129,6 +129,7 @@ pub struct MagicValidator {
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     committor_service: Option<Arc<CommittorService>>,
     scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
+    chainlink: Arc<ChainlinkImpl>,
     rpc_handle: JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
@@ -307,7 +308,7 @@ impl MagicValidator {
             node_context,
             accountsdb.clone(),
             ledger.clone(),
-            chainlink,
+            chainlink.clone(),
             config.validator.millis_per_slot,
         );
         let rpc = JsonRpcServer::new(
@@ -328,6 +329,7 @@ impl MagicValidator {
             slot_ticker: None,
             committor_service,
             scheduled_commits_processor,
+            chainlink,
             token,
             ledger,
             ledger_truncator,
@@ -427,10 +429,6 @@ impl MagicValidator {
             chainlink_config,
         )
         .await?;
-
-        if !config.ledger.resume_strategy().is_removing_accountsdb() {
-            chainlink.reset_accounts_bank();
-        }
 
         Ok(chainlink)
     }
@@ -617,8 +615,21 @@ impl MagicValidator {
             }
         }
 
+        // Ledger processing needs to happen before anything of the below
         self.maybe_process_ledger().await?;
 
+        // Ledger replay has completed, we can now clean non-delegated accounts
+        // including programs from the bank
+        if !self
+            .config
+            .ledger
+            .resume_strategy()
+            .is_removing_accountsdb()
+        {
+            self.chainlink.reset_accounts_bank();
+        }
+
+        // Now we start all services and are ready to accept transactions
         self.claim_fees_task.start(self.config.clone());
 
         self.slot_ticker = Some(init_slot_ticker(
