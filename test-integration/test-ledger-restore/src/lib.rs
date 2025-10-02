@@ -1,4 +1,5 @@
 use cleanass::{assert, assert_eq};
+use log::*;
 use std::{path::Path, process::Child, thread::sleep, time::Duration};
 
 use integration_test_tools::{
@@ -15,7 +16,10 @@ use magicblock_config::{
     LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
     DEFAULT_LEDGER_SIZE_BYTES,
 };
-use program_flexi_counter::state::FlexiCounter;
+use program_flexi_counter::{
+    instruction::{create_delegate_ix, create_init_ix},
+    state::FlexiCounter,
+};
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     clock::Slot,
@@ -172,6 +176,53 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
 // -----------------
 // Transactions and Account Updates
 // -----------------
+pub fn init_and_delegate_counter_and_payer(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+    label: &str,
+) -> (Keypair, Pubkey) {
+    // 1. Airdrop to payer on chain
+    let mut keypairs =
+        airdrop_accounts_on_chain(ctx, validator, &[2 * LAMPORTS_PER_SOL]);
+    let payer = keypairs.drain(0..1).next().unwrap();
+
+    // 2. Init counter instruction on chain
+    let ix = create_init_ix(payer.pubkey(), label.to_string());
+    confirm_tx_with_payer_chain(ix, &payer, validator);
+
+    // 3 Delegate counter PDA
+    let ix = create_delegate_ix(payer.pubkey());
+    confirm_tx_with_payer_chain(ix, &payer, validator);
+
+    // 4. Now we can delegate the payer to use for counter instructions
+    //    in the ephemeral
+    delegate_accounts(ctx, validator, &[&payer]);
+
+    // 4. Verify all accounts are initialized correctly
+    let (counter_pda, _) = FlexiCounter::pda(&payer.pubkey());
+    let counter = fetch_counter_chain(&payer.pubkey(), validator);
+    assert_eq!(
+        counter,
+        FlexiCounter {
+            count: 0,
+            updates: 0,
+            label: label.to_string()
+        },
+        cleanup(validator)
+    );
+
+    let payer_chain =
+        expect!(ctx.fetch_chain_account(payer.pubkey()), validator);
+    assert_eq!(payer_chain.owner, dlp::id(), cleanup(validator));
+    assert!(payer_chain.lamports > LAMPORTS_PER_SOL, cleanup(validator));
+    debug!(
+        "✅ Initialized counter {counter_pda} and delegated payer {}",
+        payer.pubkey()
+    );
+
+    (payer, counter_pda)
+}
+
 pub fn airdrop_accounts_on_chain(
     ctx: &IntegrationTestContext,
     validator: &mut Child,

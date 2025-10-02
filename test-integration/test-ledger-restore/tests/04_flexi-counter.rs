@@ -2,25 +2,19 @@ use log::*;
 use std::{path::Path, process::Child};
 use test_kit::init_logger;
 
-use cleanass::{assert, assert_eq};
+use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, validator::cleanup, IntegrationTestContext,
+    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
 use magicblock_config::LedgerResumeStrategy;
 use program_flexi_counter::{
-    instruction::{
-        create_add_ix, create_delegate_ix, create_init_ix, create_mul_ix,
-    },
+    instruction::{create_add_ix, create_mul_ix},
     state::FlexiCounter,
 };
-use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer,
-};
+use solana_sdk::{pubkey::Pubkey, signer::Signer};
 use test_ledger_restore::{
-    airdrop_accounts_on_chain, confirm_tx_with_payer_chain,
-    confirm_tx_with_payer_ephem, delegate_accounts, fetch_counter_chain,
-    fetch_counter_ephem, setup_offline_validator,
+    confirm_tx_with_payer_ephem, fetch_counter_ephem,
+    init_and_delegate_counter_and_payer, setup_offline_validator,
     setup_validator_with_local_remote_and_resume_strategy,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
@@ -58,53 +52,6 @@ fn test_restore_ledger_with_flexi_counter_separate_slot() {
 
     let mut validator = read(&ledger_path, &payer1, &payer2);
     validator.kill().unwrap();
-}
-
-fn init_and_delegate_counter_and_payer(
-    ctx: &IntegrationTestContext,
-    validator: &mut Child,
-    label: &str,
-) -> (Keypair, Pubkey) {
-    // 1. Airdrop to payer on chain
-    let mut keypairs =
-        airdrop_accounts_on_chain(ctx, validator, &[2 * LAMPORTS_PER_SOL]);
-    let payer = keypairs.drain(0..1).next().unwrap();
-
-    // 2. Init counter instruction on chain
-    let ix = create_init_ix(payer.pubkey(), label.to_string());
-    confirm_tx_with_payer_chain(ix, &payer, validator);
-
-    // 3 Delegate counter PDA
-    let ix = create_delegate_ix(payer.pubkey());
-    confirm_tx_with_payer_chain(ix, &payer, validator);
-
-    // 4. Now we can delegate the payer to use for counter instructions
-    //    in the ephemeral
-    delegate_accounts(ctx, validator, &[&payer]);
-
-    // 4. Verify all accounts are initialized correctly
-    let (counter_pda, _) = FlexiCounter::pda(&payer.pubkey());
-    let counter = fetch_counter_chain(&payer.pubkey(), validator);
-    assert_eq!(
-        counter,
-        FlexiCounter {
-            count: 0,
-            updates: 0,
-            label: label.to_string()
-        },
-        cleanup(validator)
-    );
-
-    let payer_chain =
-        expect!(ctx.fetch_chain_account(payer.pubkey()), validator);
-    assert_eq!(payer_chain.owner, dlp::id(), cleanup(validator));
-    assert!(payer_chain.lamports > LAMPORTS_PER_SOL, cleanup(validator));
-    debug!(
-        "✅ Initialized counter {counter_pda} and delegated payer {}",
-        payer.pubkey()
-    );
-
-    (payer, counter_pda)
 }
 
 fn write(
