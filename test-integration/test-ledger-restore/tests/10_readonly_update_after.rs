@@ -1,4 +1,6 @@
+use log::*;
 use std::{path::Path, process::Child};
+use test_kit::init_logger;
 
 use cleanass::assert_eq;
 use integration_test_tools::{
@@ -17,10 +19,10 @@ use solana_sdk::{
 };
 use test_ledger_restore::{
     assert_counter_state, confirm_tx_with_payer_chain,
-    confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
-    get_programs_with_flexi_counter, setup_validator_with_local_remote,
-    wait_for_cloned_accounts_hydration, wait_for_ledger_persist, Counter,
-    State, TMP_DIR_LEDGER,
+    confirm_tx_with_payer_ephem, delegate_accounts, fetch_counter_chain,
+    fetch_counter_ephem, get_programs_with_flexi_counter,
+    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
+    wait_for_ledger_persist, Counter, State, TMP_DIR_LEDGER,
 };
 
 const COUNTER_MAIN: &str = "Main Counter";
@@ -116,6 +118,7 @@ macro_rules! assert_counter_states {
 // -----------------
 #[test]
 fn test_restore_ledger_using_readonly() {
+    init_logger!();
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer_main = payer_keypair();
     let payer_readonly = payer_keypair();
@@ -170,10 +173,21 @@ fn write(
         payer_main,
         &mut validator,
     );
+    let (counter_main_pda, _) = FlexiCounter::pda(&payer_main.pubkey());
+    debug!(
+        "✅ Initialized main counter {counter_main_pda} for payer {} on chain",
+        payer_main.pubkey()
+    );
+
     confirm_tx_with_payer_chain(
         create_init_ix(payer_readonly.pubkey(), COUNTER_READONLY.to_string()),
         payer_readonly,
         &mut validator,
+    );
+    let (counter_readonly_pda, _) = FlexiCounter::pda(&payer_readonly.pubkey());
+    debug!(
+        "✅ Initialized readonly counter {counter_readonly_pda} for payer {} on chain",
+        payer_readonly.pubkey()
     );
 
     // Delegate main counter to ephemeral and add 2
@@ -183,9 +197,18 @@ fn write(
             payer_main,
             &mut validator,
         );
+        debug!("✅ Delegated main counter {counter_main_pda} on chain");
+
+        // Delegate main payer so we can use it in ephem
+        delegate_accounts(&ctx, &mut validator, &[payer_main]);
+        debug!(
+            "✅ Delegated main payer {} for ephem use",
+            payer_main.pubkey()
+        );
 
         let ix = create_add_ix(payer_main.pubkey(), 2);
         confirm_tx_with_payer_ephem(ix, payer_main, &mut validator);
+        debug!("✅ Added 2 to main counter {counter_main_pda} in ephem");
 
         assert_counter_state!(
             &mut validator,
@@ -215,6 +238,7 @@ fn write(
             label: COUNTER_READONLY.to_string(),
         }
     );
+    debug!("✅ Added 3 to readonly counter {counter_readonly_pda} on chain");
 
     // Add Readonly Counter to Main Counter
     // At this point readonly counter is cloned into ephemeral
@@ -227,6 +251,9 @@ fn write(
             updates: 2,
             label: COUNTER_MAIN.to_string(),
         }
+    );
+    debug!(
+        "✅ Added readonly counter {counter_readonly_pda} to main counter {counter_main_pda} in ephem (cloned readonly)"
     );
 
     assert_counter_states!(
@@ -257,6 +284,8 @@ fn write(
         }
     );
 
+    debug!("✅ Verified counter states before shutdown");
+
     let slot = wait_for_ledger_persist(&mut validator);
     (validator, slot)
 }
@@ -279,6 +308,9 @@ fn read(
     );
 
     wait_for_cloned_accounts_hydration();
+
+    let (counter_main_pda, _) = FlexiCounter::pda(payer_main);
+    let (counter_readonly_pda, _) = FlexiCounter::pda(payer_readonly);
 
     assert_counter_states!(
         &mut validator,
@@ -309,6 +341,7 @@ fn read(
             },
         }
     );
+    debug!("✅ Verified counter states after restore");
 
     // We use it to add to the main counter to ensure that its latest state is used
     add_readonly_to_main!(
@@ -320,6 +353,9 @@ fn read(
             updates: 3,
             label: COUNTER_MAIN.to_string(),
         }
+    );
+    debug!(
+        "✅ Added readonly counter {counter_readonly_pda} to main counter {counter_main_pda} in ephem"
     );
 
     assert_counter_states!(
@@ -350,6 +386,8 @@ fn read(
         }
     );
 
+    debug!("✅ Verified counter states after adding readonly to main");
+
     // Now we update the readonly counter on chain and ensure it is cloned
     // again when we use it in another transaction
     add_to_readonly!(
@@ -361,6 +399,9 @@ fn read(
             updates: 3,
             label: COUNTER_READONLY.to_string(),
         }
+    );
+    debug!(
+        "✅ Updated readonly counter {counter_readonly_pda} on chain (count: 5, updates: 3)"
     );
 
     // NOTE: for now the ephem validator keeps the old state of the readonly account
@@ -381,6 +422,9 @@ fn read(
             updates: 4,
             label: COUNTER_MAIN.to_string(),
         }
+    );
+    debug!(
+        "✅ Added updated readonly counter {counter_readonly_pda} to main counter {counter_main_pda} in ephem (re-cloned readonly)"
     );
 
     assert_counter_states!(
@@ -412,6 +456,8 @@ fn read(
             },
         }
     );
+
+    debug!("✅ Verified counter states after adding readonly to main again");
 
     validator
 }
