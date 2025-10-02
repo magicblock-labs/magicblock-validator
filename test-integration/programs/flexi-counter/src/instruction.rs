@@ -136,7 +136,7 @@ pub enum FlexiCounterInstruction {
     /// 7. `[]` The system program
     /// 8. `[write]` The Magic Context
     /// 9. `[]` The Magic Program
-    CreateRedelegationIntont,
+    CreateRedelegationIntent,
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -359,7 +359,7 @@ pub fn create_redelegation_intent_ix(payer: Pubkey) -> Instruction {
 
     Instruction::new_with_borsh(
         *program_id,
-        &FlexiCounterInstruction::CreateRedelegationIntont,
+        &FlexiCounterInstruction::CreateRedelegationIntent,
         account_metas,
     )
 }

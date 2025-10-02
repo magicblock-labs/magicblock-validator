@@ -4,7 +4,7 @@ use ephemeral_rollups_sdk::{
         CallHandler, CommitAndUndelegate, CommitType, MagicAction,
         MagicInstructionBuilder, UndelegateType,
     },
-    ActionArgs,
+    ActionArgs, ShortAccountMeta,
 };
 use solana_program::{
     account_info::{next_account_info, next_account_infos, AccountInfo},
@@ -65,9 +65,12 @@ pub fn process_create_intent(
         .map(|(committee, escrow_authority)| {
             let other_accounts = vec![
                 // counter account
-                committee.clone(),
-                transfer_destination.clone(),
-                system_program.clone(),
+                committee.into(),
+                ShortAccountMeta {
+                    pubkey: *transfer_destination.key,
+                    is_writable: true, // writable on base chain
+                },
+                system_program.into(),
             ];
 
             CallHandler {
@@ -81,7 +84,7 @@ pub fn process_create_intent(
                 },
                 compute_units,
                 escrow_authority,
-                destination_program: destination_program.clone(),
+                destination_program: *destination_program.key,
                 accounts: other_accounts,
             }
         })
@@ -104,9 +107,12 @@ pub fn process_create_intent(
 
                 let other_accounts = vec![
                     // counter account
-                    committee.clone(),
-                    transfer_destination.clone(),
-                    system_program.clone(),
+                    committee.into(),
+                    ShortAccountMeta {
+                        pubkey: *destination_program.key,
+                        is_writable: true, // writable on base chain
+                    },
+                    system_program.into(),
                 ];
 
                 Ok(CallHandler {
@@ -120,7 +126,7 @@ pub fn process_create_intent(
                     },
                     compute_units,
                     escrow_authority,
-                    destination_program: destination_program.clone(),
+                    destination_program: *destination_program.key,
                     accounts: other_accounts,
                 })
             })

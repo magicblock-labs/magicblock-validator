@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
-use solana_program::account_info::AccountInfo;
-use solana_program::instruction::AccountMeta;
+use solana_program::{account_info::AccountInfo, instruction::AccountMeta};
 
 use crate::Pubkey;
 
