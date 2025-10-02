@@ -364,7 +364,6 @@ fn test_reschedule_multiple_blocked_on_same_executor() {
     let ready_exec = coordinator.get_ready_executor().unwrap();
     let blocked_txn1 = coordinator.get_blocked_transaction(exec1).unwrap();
     let result = coordinator.try_acquire_locks(ready_exec, &blocked_txn1);
-    println!("R: {result:?}");
     assert!(
         result.is_ok(),
         "First blocked transaction should be reschedulable"

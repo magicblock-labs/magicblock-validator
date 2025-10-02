@@ -152,12 +152,13 @@ impl TransactionScheduler {
 
     /// Handles a new transaction from the global queue.
     async fn handle_new_transaction(&mut self, txn: ProcessableTransaction) {
+        // SAFETY:
         // This unwrap is safe due to the `if self.coordinator.is_ready()`
-        // guard in the `select!` macro.
+        // guard in the `select!` macro, which calls this method
         let executor = self
             .coordinator
             .get_ready_executor()
-            .unwrap_or(ExecutorId::MIN);
+            .expect("unreacheable code if there're not ready executors");
         let txn = TransactionWithId::new(txn);
         self.schedule_transaction(executor, txn).await;
     }

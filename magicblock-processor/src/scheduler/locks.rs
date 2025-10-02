@@ -43,13 +43,13 @@ pub(super) struct AccountLock {
 
 impl AccountLock {
     /// Attempts to acquire a write lock. Fails if any other lock is held.
+    #[inline]
     pub(super) fn write(
         &mut self,
         executor: ExecutorId,
         txn: TransactionId,
     ) -> Result<(), u32> {
         self.contended(txn)?;
-        println!("rw: {:b} -> {}", self.rw, self.contender);
         if self.rw != 0 {
             // If the lock is held, `trailing_zeros()` will return the index of the
             // least significant bit that is set. This corresponds to the ID of the
@@ -63,6 +63,7 @@ impl AccountLock {
     }
 
     /// Attempts to acquire a read lock. Fails if a write lock is held.
+    #[inline]
     pub(super) fn read(
         &mut self,
         executor: ExecutorId,
@@ -82,30 +83,27 @@ impl AccountLock {
     }
 
     /// Releases a lock held by an executor.
+    #[inline]
     pub(super) fn unlock(&mut self, executor: ExecutorId) {
         // To release the lock, we clear both the write bit and the executor's
         // read bit. This is done using a bitwise AND with the inverted mask.
         self.rw &= !(WRITE_BIT_MASK | (1 << executor));
     }
 
-    /// Releases a lock held by an executor.
-    pub(super) fn unlock_with_contention(
-        &mut self,
-        executor: ExecutorId,
-        txn: TransactionId,
-    ) {
-        if self.contender == 0 {
-            self.contender = txn;
-        }
-        self.unlock(executor);
-    }
-
     /// Checks if the lock is marked as contended by another transaction.
+    #[inline]
     fn contended(&self, txn: TransactionId) -> Result<(), TransactionId> {
         if self.contender != 0 && self.contender != txn {
             return Err(self.contender);
         }
         Ok(())
+    }
+
+    #[inline]
+    pub(super) fn contend(&mut self, txn: TransactionId) {
+        if self.contender == 0 {
+            self.contender = txn;
+        }
     }
 }
 
@@ -114,7 +112,9 @@ pub(super) fn next_transaction_id() -> TransactionId {
     static mut COUNTER: u32 = MAX_SVM_EXECUTORS;
     // SAFETY: This is safe because the scheduler, which calls this function,
     // operates in a single, dedicated thread. Therefore, there are no concurrent
-    // access concerns for this static mutable variable.
+    // access concerns for this static mutable variable. The u32::MAX is large
+    // enough range to statistically guarantee that no two pending transactions
+    // have the same ID.
     unsafe {
         COUNTER = COUNTER.wrapping_add(1).max(MAX_SVM_EXECUTORS);
         COUNTER

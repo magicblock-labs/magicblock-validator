@@ -13,8 +13,6 @@ use super::locks::{
     TransactionId, MAX_SVM_EXECUTORS,
 };
 
-// --- Type Aliases ---
-
 /// A queue of transactions waiting for a specific executor to release a lock.
 type TransactionQueue = VecDeque<TransactionWithId>;
 /// A list of transaction queues, indexed by `ExecutorId`. Each executor has its own queue.
@@ -78,12 +76,14 @@ impl ExecutionCoordinator {
         // A `blocker_id` greater than `MAX_SVM_EXECUTORS` is a `TransactionId`
         // of another waiting transaction. We must resolve it to the actual executor.
         if blocker_id >= MAX_SVM_EXECUTORS {
-            // SAFETY: This unwrap is safe. A `TransactionId` is only returned as a
-            // blocker if that transaction is already tracked in the contention map.
+            // A `TransactionId` is only returned as a blocker if that
+            // transaction is already tracked in the contention map.
             blocker_id = self
                 .transaction_contention
                 .get(&blocker_id)
                 .copied()
+                // should never happen, but from a logical
+                // standpoint, it's not really an error
                 .unwrap_or(ExecutorId::MIN);
         }
 
@@ -149,17 +149,21 @@ impl ExecutionCoordinator {
             } else {
                 lock.borrow_mut().read(executor, transaction.id)
             };
-            acquired_locks.push(lock);
 
             // We couldn't lock all of the accounts, so we are bailing, but
             // first we need to set contention, and unlock successful locks
             if result.is_err() {
                 for lock in acquired_locks.drain(..) {
                     let mut lock = lock.borrow_mut();
-                    lock.unlock_with_contention(executor, transaction.id);
+                    lock.contend(transaction.id);
+                    lock.unlock(executor);
                 }
+                // for the lock that we failed to acquire, we just set the contention
+                lock.borrow_mut().contend(transaction.id);
             }
             result?;
+
+            acquired_locks.push(lock);
         }
 
         // On success, the transaction is no longer blocking anything.
