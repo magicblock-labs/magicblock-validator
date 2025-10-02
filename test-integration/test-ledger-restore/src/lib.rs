@@ -380,7 +380,7 @@ pub fn fetch_counter_ephem(
 ) -> FlexiCounter {
     let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
     let ephem_client = expect!(ctx.try_ephem_client(), validator);
-    fetch_counter(payer, ephem_client, validator)
+    fetch_counter(payer, ephem_client, validator, "ephem")
 }
 
 pub fn fetch_counter_chain(
@@ -389,15 +389,17 @@ pub fn fetch_counter_chain(
 ) -> FlexiCounter {
     let ctx = expect!(IntegrationTestContext::try_new_chain_only(), validator);
     let chain_client = expect!(ctx.try_chain_client(), validator);
-    fetch_counter(payer, chain_client, validator)
+    fetch_counter(payer, chain_client, validator, "chain")
 }
 
 fn fetch_counter(
     payer: &Pubkey,
     rpc_client: &RpcClient,
     validator: &mut Child,
+    source: &str,
 ) -> FlexiCounter {
     let (counter, _) = FlexiCounter::pda(payer);
+    debug!("Fetching counter {counter} for payer {payer} from {source}");
     let counter_acc = expect!(rpc_client.get_account(&counter), validator);
     expect!(FlexiCounter::try_decode(&counter_acc.data), validator)
 }
