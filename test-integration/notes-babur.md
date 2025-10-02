@@ -8,13 +8,16 @@
 - [x] `test-issues` removed since we won't support frequent commits
 - [x] `test-table-mania` all passing
 - [ ] `test-config` 2/2 failing (Transaction::sign failed with error NotEnoughSigners -fixed) (Thorsten)
-- [ ] `test-ledger-restore` 12/16 failing (mostly airdrop and Failed to setup an account subscriptions)
+- [ ] `test-ledger-restore` 11/16 failing (mostly airdrop and Failed to setup an account subscriptions)
 - [ ] `test-magicblock-api` 2/4 failing (incorrect airdrop)
 - [x] `test-pubsub` were failing due to airdrop similar to above and were fixed via escrowed airdrop
 - [x] `test-schedule-intent` 5/5 failing (failed to airdrop) (Babur - disabled)
 
-- clone not found escrow accounts with 0 lamports (Thorsten - fixed)
-- replay - remove all non-delegated accounts from bank (Thorsten - fixed)
+- [x] clone not found escrow accounts with 0 lamports (Thorsten - fixed)
+- [x] replay - remove all non-delegated accounts from bank (Thorsten - fixed)
+- [ ] correctly handle empty readonly accounts (Thorsten)
+- [x] we are removing programs on resume, ensured ledger replay completed before that (Thorsten)
+
 
 ## Current Issues
 
