@@ -6,7 +6,7 @@ use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup, IntegrationTestContext,
 };
-use magicblock_config::{LedgerResumeStrategy, ProgramConfig};
+use magicblock_config::LedgerResumeStrategy;
 use program_flexi_counter::{
     instruction::{
         create_add_ix, create_delegate_ix, create_init_ix, create_mul_ix,
@@ -22,7 +22,7 @@ use test_ledger_restore::{
     confirm_tx_with_payer_ephem, delegate_accounts, fetch_counter_chain,
     fetch_counter_ephem, setup_offline_validator,
     setup_validator_with_local_remote_and_resume_strategy,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;
@@ -58,13 +58,6 @@ fn test_restore_ledger_with_flexi_counter_separate_slot() {
 
     let mut validator = read(&ledger_path, &payer1, &payer2);
     validator.kill().unwrap();
-}
-
-fn get_programs() -> Vec<ProgramConfig> {
-    vec![ProgramConfig {
-        id: FLEXI_COUNTER_ID.try_into().unwrap(),
-        path: "program_flexi_counter.so".to_string(),
-    }]
 }
 
 fn init_and_delegate_counter_and_payer(
@@ -250,10 +243,9 @@ fn write(
 }
 
 fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
-    let programs = get_programs();
     let (_, mut validator, _) = setup_offline_validator(
         ledger_path,
-        Some(programs),
+        None,
         Some(SLOT_MS),
         LedgerResumeStrategy::Resume { replay: true },
         false,
