@@ -748,12 +748,13 @@ where
         persister: Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let message_id = base_intent.id;
+        let is_undelegate = base_intent.is_undelegate();
         let pubkeys = base_intent.get_committed_pubkeys();
 
         let result = self.execute_inner(base_intent, &persister).await;
         if let Some(pubkeys) = pubkeys {
             // Reset TaskInfoFetcher, as cache could become invalid
-            if result.is_err() {
+            if result.is_err() || is_undelegate {
                 self.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
             }
 

@@ -291,8 +291,8 @@ pub type BaseTaskResult<T> = Result<T, BaseTaskError>;
 
 #[cfg(test)]
 mod serialization_safety_test {
-    use magicblock_program::magic_scheduled_base_intent::{
-        ProgramArgs, ShortAccountMeta,
+    use magicblock_program::{
+        args::ShortAccountMeta, magic_scheduled_base_intent::ProgramArgs,
     };
     use solana_account::Account;
 
