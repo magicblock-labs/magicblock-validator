@@ -235,6 +235,8 @@ impl super::TransactionExecutor {
     ) {
         let meta = TransactionStatusMeta {
             status,
+            pre_balances: vec![0; txn.message().account_keys().len()],
+            post_balances: vec![0; txn.message().account_keys().len()],
             ..Default::default()
         };
         let signature = *txn.signature();
