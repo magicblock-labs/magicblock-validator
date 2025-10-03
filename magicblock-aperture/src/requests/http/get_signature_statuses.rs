@@ -32,7 +32,7 @@ impl HttpDispatcher {
                     slot: cached_status.slot,
                     status: cached_status.result.clone(),
                     confirmations: None, // This validator does not track confirmations.
-                    err: None, // `status` field contains the error; `err` is deprecated.
+                    err: cached_status.result.err(),
                     confirmation_status: DEFAULT_CONFIRMATION_STATUS,
                 }));
                 continue;
@@ -44,9 +44,9 @@ impl HttpDispatcher {
             if let Some((slot, meta)) = ledger_status {
                 statuses.push(Some(TransactionStatus {
                     slot,
-                    status: meta.status,
                     confirmations: None,
-                    err: None,
+                    status: meta.status.clone(),
+                    err: meta.status.err(),
                     confirmation_status: DEFAULT_CONFIRMATION_STATUS,
                 }));
             } else {
