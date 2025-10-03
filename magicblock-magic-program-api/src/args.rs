@@ -63,12 +63,18 @@ pub enum MagicBaseIntentArgs {
     CommitAndUndelegate(CommitAndUndelegateArgs),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A compact account meta used for base-layer actions.
+///
+/// Unlike `solana_sdk::instruction::AccountMeta`, this type **does not** carry an
+/// `is_signer` flag. Users cannot request signatures: the only signer available
+/// is the validator.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShortAccountMeta {
     pub pubkey: Pubkey,
+    /// Whether this account should be marked **writable**
+    /// in the Base layer instruction built from this action.
     pub is_writable: bool,
 }
-
 impl From<AccountMeta> for ShortAccountMeta {
     fn from(value: AccountMeta) -> Self {
         Self {

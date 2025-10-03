@@ -68,7 +68,7 @@ pub fn process_create_intent(
                 committee.into(),
                 ShortAccountMeta {
                     pubkey: *transfer_destination.key,
-                    is_writable: true, // writable on base chain
+                    is_writable: true,
                 },
                 system_program.into(),
             ];
@@ -110,7 +110,7 @@ pub fn process_create_intent(
                     committee.into(),
                     ShortAccountMeta {
                         pubkey: *destination_program.key,
-                        is_writable: true, // writable on base chain
+                        is_writable: true,
                     },
                     system_program.into(),
                 ];
