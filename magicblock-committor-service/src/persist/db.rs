@@ -250,7 +250,7 @@ impl CommittsDb {
                     .and_then(|s| s.finalize_stage_signature)
                     .map(|s| s.to_string()),
                 pubkey.to_string(),
-                message_id
+                u64_into_i64(message_id)
             ],
         )?;
 
@@ -283,7 +283,7 @@ impl CommittsDb {
                     .and_then(|s| s.finalize_stage_signature)
                     .map(|s| s.to_string()),
                 pubkey.to_string(),
-                commit_id
+                u64_into_i64(commit_id)
             ],
         )?;
 
@@ -304,7 +304,11 @@ impl CommittsDb {
 
         self.conn.execute(
             query,
-            params![value.as_str(), pubkey.to_string(), commit_id],
+            params![
+                value.as_str(),
+                pubkey.to_string(),
+                u64_into_i64(commit_id)
+            ],
         )?;
 
         Ok(())
@@ -324,7 +328,11 @@ impl CommittsDb {
 
         self.conn.execute(
             query,
-            params![commit_id, pubkey.to_string(), message_id],
+            params![
+                u64_into_i64(commit_id),
+                pubkey.to_string(),
+                u64_into_i64(message_id)
+            ],
         )?;
 
         Ok(())
@@ -494,9 +502,9 @@ impl CommittsDb {
             (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             ),
             params![
-            commit.message_id,
+            u64_into_i64(commit.message_id),
             commit.pubkey.to_string(),
-            commit.commit_id,
+            u64_into_i64(commit.commit_id),
             commit.delegated_account_owner.to_string(),
             u64_into_i64(commit.slot),
             commit.ephemeral_blockhash.to_string(),
@@ -541,7 +549,7 @@ impl CommittsDb {
         let query =
             format!("{SELECT_ALL_COMMIT_STATUS_COLUMNS} WHERE message_id = ?1");
         let stmt = &mut self.conn.prepare(&query)?;
-        let mut rows = stmt.query(params![message_id])?;
+        let mut rows = stmt.query(params![u64_into_i64(message_id)])?;
 
         extract_committor_rows(&mut rows)
     }
@@ -555,7 +563,8 @@ impl CommittsDb {
             "{SELECT_ALL_COMMIT_STATUS_COLUMNS} WHERE message_id = ?1 AND pubkey = ?2"
         );
         let stmt = &mut self.conn.prepare(&query)?;
-        let mut rows = stmt.query(params![message_id, pubkey.to_string()])?;
+        let mut rows =
+            stmt.query(params![u64_into_i64(message_id), pubkey.to_string()])?;
 
         extract_committor_rows(&mut rows).map(|mut rows| rows.pop())
     }
@@ -566,7 +575,7 @@ impl CommittsDb {
     ) -> CommitPersistResult<()> {
         let query = "DELETE FROM commit_status WHERE message_id = ?1";
         let stmt = &mut self.conn.prepare(query)?;
-        stmt.execute(params![message_id])?;
+        stmt.execute(params![u64_into_i64(message_id)])?;
         Ok(())
     }
 
@@ -583,7 +592,8 @@ impl CommittsDb {
         LIMIT 1";
 
         let mut stmt = self.conn.prepare(query)?;
-        let mut rows = stmt.query(params![commit_id, pubkey.to_string()])?;
+        let mut rows =
+            stmt.query(params![u64_into_i64(commit_id), pubkey.to_string()])?;
 
         let result = rows
             .next()?
@@ -959,5 +969,147 @@ mod tests {
 
         let retrieved = db.get_commit_status(1, &row.pubkey).unwrap().unwrap();
         assert!(retrieved.undelegate);
+    }
+
+    #[test]
+    fn test_flow_message_and_commit_id_roundtrip_boundaries() {
+        let (mut db, _file) = setup_test_db();
+
+        // Boundary IDs we care about for storage and retrieval.
+        // Skip u64::MAX due to the known overflow behavior in u64_into_i64.
+        let ids: [u64; 4] =
+            [0, i64::MAX as u64, (i64::MAX as u64) + 1, u64::MAX - 1];
+
+        // Prepare rows with message_id == commit_id == each boundary value.
+        let mut rows = Vec::new();
+        for &id in &ids {
+            let mut row = create_test_row(id, id);
+            // give each row a distinct status/signatures pattern to make sure
+            // we don't accidentally mix them up in queries/updates
+            if id % 2 == 0 {
+                row.commit_status = CommitStatus::Pending;
+            } else {
+                row.commit_status =
+                    CommitStatus::Succeeded(CommitStatusSignatures {
+                        commit_stage_signature: Signature::new_unique(),
+                        finalize_stage_signature: None,
+                    });
+            }
+            rows.push(row);
+        }
+
+        // Insert all rows
+        db.insert_commit_status_rows(&rows).unwrap();
+
+        // 1) Retrieval by message_id should give back exactly the rows with that ID,
+        // and the internal IDs should be round-tripped correctly.
+        for row in &rows {
+            let fetched = db.get_commit_statuses_by_id(row.message_id).unwrap();
+            // We inserted a single row for each (message_id, pubkey, commit_id) triple,
+            // so count should be 1 for this message_id.
+            assert_eq!(
+                fetched.len(),
+                1,
+                "unexpected count for message_id={}",
+                row.message_id
+            );
+            let got = &fetched[0];
+            assert_eq!(got.message_id, row.message_id, "message_id mismatch");
+            assert_eq!(got.commit_id, row.commit_id, "commit_id mismatch");
+            assert_eq!(got.pubkey, row.pubkey, "pubkey mismatch");
+            assert_eq!(got.commit_status, row.commit_status, "status mismatch");
+        }
+
+        // 2) Retrieval by (message_id, pubkey) via get_commit_status should match exactly.
+        for row in &rows {
+            let got = db
+                .get_commit_status(row.message_id, &row.pubkey)
+                .unwrap()
+                .unwrap();
+            assert_eq!(got.message_id, row.message_id);
+            assert_eq!(got.commit_id, row.commit_id);
+            assert_eq!(got.pubkey, row.pubkey);
+        }
+
+        // 3) Verify update by message_id preserves IDs and writes the new status.
+        // Use the smallest and largest IDs to stress the conversion.
+        let smallest_id = ids[0];
+        let largest_id = ids[ids.len() - 1];
+
+        {
+            let target =
+                rows.iter().find(|r| r.message_id == smallest_id).unwrap();
+            let new_status = CommitStatus::Failed;
+            db.update_status_by_message(
+                target.message_id,
+                &target.pubkey,
+                &new_status,
+            )
+            .unwrap();
+
+            let got = db
+                .get_commit_status(target.message_id, &target.pubkey)
+                .unwrap()
+                .unwrap();
+            assert_eq!(got.message_id, target.message_id);
+            assert_eq!(got.commit_id, target.commit_id);
+            assert_eq!(got.commit_status, new_status);
+        }
+
+        // 4) Verify update by commit_id also works for large negative-mapped i64.
+        {
+            let target =
+                rows.iter().find(|r| r.commit_id == largest_id).unwrap();
+            let new_status = CommitStatus::Succeeded(CommitStatusSignatures {
+                commit_stage_signature: Signature::new_unique(),
+                finalize_stage_signature: Some(Signature::new_unique()),
+            });
+            db.update_status_by_commit(
+                target.commit_id,
+                &target.pubkey,
+                &new_status,
+            )
+            .unwrap();
+
+            let got = db
+                .get_commit_status(target.message_id, &target.pubkey)
+                .unwrap()
+                .unwrap();
+            assert_eq!(got.message_id, target.message_id);
+            assert_eq!(got.commit_id, target.commit_id);
+            assert_eq!(got.commit_status, new_status);
+
+            // also verify get_signatures_by_commit returns the same signatures
+            let sigs = db
+                .get_signatures_by_commit(target.commit_id, &target.pubkey)
+                .unwrap()
+                .unwrap();
+            if let CommitStatus::Succeeded(ss) = new_status {
+                assert_eq!(
+                    sigs.commit_stage_signature,
+                    ss.commit_stage_signature
+                );
+                assert_eq!(
+                    sigs.finalize_stage_signature,
+                    ss.finalize_stage_signature
+                );
+            } else {
+                panic!("unexpected status shape");
+            }
+        }
+
+        // 5) set_commit_id should update correctly across the boundary values
+        //    (use XOR to create a different but valid u64).
+        for row in &rows {
+            let new_commit_id = row.commit_id ^ 0xDEAD_BEEF_DEAD_BEEF;
+            db.set_commit_id(row.message_id, &row.pubkey, new_commit_id)
+                .unwrap();
+            let got = db
+                .get_commit_status(row.message_id, &row.pubkey)
+                .unwrap()
+                .unwrap();
+            assert_eq!(got.message_id, row.message_id);
+            assert_eq!(got.commit_id, new_commit_id);
+        }
     }
 }
