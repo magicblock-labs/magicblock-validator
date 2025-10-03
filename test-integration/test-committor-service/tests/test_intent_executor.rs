@@ -11,30 +11,29 @@ use borsh::to_vec;
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use magicblock_committor_service::{
     intent_executor::{
+        error::TransactionStrategyExecutionError,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         ExecutionOutput, IntentExecutor, IntentExecutorImpl,
     },
-    persist::{IntentPersister, IntentPersisterImpl},
-    tasks::CommitTask,
+    persist::IntentPersisterImpl,
+    tasks::{
+        task_builder::{TaskBuilderImpl, TasksBuilder},
+        task_strategist::{TaskStrategist, TransactionStrategy},
+    },
     transaction_preparator::TransactionPreparatorImpl,
-    types::{ScheduledBaseIntentWrapper, TriggerType},
 };
 use magicblock_program::{
+    args::ShortAccountMeta,
     magic_scheduled_base_intent::{
         BaseAction, CommitAndUndelegate, CommitType, CommittedAccount,
-        MagicBaseIntent, ProgramArgs, ScheduledBaseIntent, ShortAccountMeta,
-        UndelegateType,
-    },
-    validator::{
-        generate_validator_authority_if_needed, init_validator_authority,
+        MagicBaseIntent, ProgramArgs, ScheduledBaseIntent, UndelegateType,
     },
 };
-use magicblock_rpc_client::MagicblockRpcClient;
 use program_flexi_counter::{
     args::{CallHandlerDiscriminator, UndelegateActionData},
-    delegation_program_id,
     state::FlexiCounter,
 };
+use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
@@ -43,12 +42,11 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     rent::Rent,
     signature::{Keypair, Signer},
-    stake::instruction::StakeInstruction::Authorize,
     transaction::Transaction,
 };
 
 use crate::{
-    common::{create_commit_task, generate_random_bytes, TestFixture},
+    common::TestFixture,
     utils::{
         ensure_validator_authority,
         transactions::{
@@ -97,6 +95,108 @@ impl TestEnv {
     fn authority(&self) -> &Keypair {
         &self.fixture.authority
     }
+}
+
+#[tokio::test]
+async fn test_commit_id_error_parsing() {
+    const COUNTER_SIZE: u64 = 70;
+
+    let TestEnv {
+        fixture,
+        intent_executor,
+        task_info_fetcher,
+    } = TestEnv::setup().await;
+    let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
+    let intent = create_intent(
+        vec![CommittedAccount {
+            pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
+            account,
+        }],
+        true,
+    );
+
+    // Invalidate ids before execution
+    task_info_fetcher
+        .fetch_next_commit_ids(&intent.get_committed_pubkeys().unwrap())
+        .await
+        .unwrap();
+
+    let mut transaction_strategy = single_flow_transaction_strategy(
+        &fixture.authority.pubkey(),
+        &task_info_fetcher,
+        &intent,
+    )
+    .await;
+    let execution_result = intent_executor
+        .prepare_and_execute_strategy(
+            &mut transaction_strategy,
+            &None::<IntentPersisterImpl>,
+        )
+        .await;
+    assert!(execution_result.is_ok(), "Preparation is expected to pass!");
+
+    // Verify that we got CommitIdError
+    let execution_result = execution_result.unwrap();
+    assert!(execution_result.is_err());
+    assert!(matches!(
+        execution_result.unwrap_err(),
+        TransactionStrategyExecutionError::CommitIDError
+    ))
+}
+
+#[tokio::test]
+async fn test_action_error_parsing() {
+    const COUNTER_SIZE: u64 = 70;
+
+    let TestEnv {
+        fixture,
+        intent_executor,
+        task_info_fetcher,
+    } = TestEnv::setup().await;
+
+    let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
+    setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
+        .await;
+
+    let committed_account = CommittedAccount {
+        pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
+        account,
+    };
+
+    // Create Intent with invalid action
+    let commit_action = CommitType::Standalone(vec![committed_account.clone()]);
+    let undelegate_action = failing_undelegate_action(
+        counter_auth.pubkey(),
+        committed_account.pubkey,
+    );
+    let base_intent =
+        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+            commit_action,
+            undelegate_action,
+        });
+
+    let scheduled_intent = create_scheduled_intent(base_intent);
+    let mut transaction_strategy = single_flow_transaction_strategy(
+        &fixture.authority.pubkey(),
+        &task_info_fetcher,
+        &scheduled_intent,
+    )
+    .await;
+    let execution_result = intent_executor
+        .prepare_and_execute_strategy(
+            &mut transaction_strategy,
+            &None::<IntentPersisterImpl>,
+        )
+        .await;
+    assert!(execution_result.is_ok(), "Preparation is expected to pass!");
+
+    // Verify that we got CommitIdError
+    let execution_result = execution_result.unwrap();
+    assert!(execution_result.is_err());
+    assert!(matches!(
+        execution_result.unwrap_err(),
+        TransactionStrategyExecutionError::ActionsError
+    ))
 }
 
 #[tokio::test]
@@ -263,6 +363,15 @@ fn failing_undelegate_action(
 
 async fn setup_payer(rpc_client: &Arc<RpcClient>) -> Keypair {
     let payer = Keypair::new();
+    setup_payer_with_keypair(&payer, rpc_client).await;
+
+    payer
+}
+
+async fn setup_payer_with_keypair(
+    payer: &Keypair,
+    rpc_client: &Arc<RpcClient>,
+) {
     let sig = rpc_client
         .request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL)
         .await
@@ -299,8 +408,15 @@ async fn setup_payer(rpc_client: &Arc<RpcClient>) -> Keypair {
         rpc_client.get_account(&escrow_pda).await.unwrap().lamports,
         LAMPORTS_PER_SOL / 2 + rent
     );
+}
 
-    payer
+async fn setup_counter(counter_bytes: u64) -> (Keypair, Account) {
+    let counter_auth = Keypair::new();
+    let (_, mut account) =
+        init_and_delegate_account_on_chain(&counter_auth, counter_bytes).await;
+
+    account.owner = program_flexi_counter::id();
+    (counter_auth, account)
 }
 
 fn create_intent(
@@ -332,4 +448,31 @@ fn create_scheduled_intent(
         payer: Pubkey::new_unique(),
         base_intent,
     }
+}
+
+// TODO(edwin): for convinience need to be provided as api
+async fn single_flow_transaction_strategy(
+    authority: &Pubkey,
+    task_info_fetcher: &Arc<CacheTaskInfoFetcher>,
+    intent: &ScheduledBaseIntent,
+) -> TransactionStrategy {
+    let mut tasks = TaskBuilderImpl::commit_tasks(
+        task_info_fetcher,
+        &intent,
+        &None::<IntentPersisterImpl>,
+    )
+    .await
+    .unwrap();
+    let finalize_tasks =
+        TaskBuilderImpl::finalize_tasks(task_info_fetcher, &intent)
+            .await
+            .unwrap();
+    tasks.extend(finalize_tasks);
+
+    TaskStrategist::build_strategy(
+        tasks,
+        authority,
+        &None::<IntentPersisterImpl>,
+    )
+    .unwrap()
 }

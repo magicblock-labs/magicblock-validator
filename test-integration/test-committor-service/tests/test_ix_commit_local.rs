@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Once},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -13,32 +13,21 @@ use magicblock_committor_service::{
     types::{ScheduledBaseIntentWrapper, TriggerType},
     BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
 };
-use magicblock_program::{
-    magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
-        ScheduledBaseIntent, UndelegateType,
-    },
-    validator::{init_validator_authority, validator_authority},
+use magicblock_program::magic_scheduled_base_intent::{
+    CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
+    ScheduledBaseIntent, UndelegateType,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
-    commitment_config::CommitmentConfig, hash::Hash,
-    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-    transaction::Transaction,
+    commitment_config::CommitmentConfig, hash::Hash, signature::Keypair,
+    signer::Signer, transaction::Transaction,
 };
 use test_tools_core::init_logger;
 use tokio::task::JoinSet;
-use utils::{
-    instructions::{
-        init_account_and_delegate_ixs, init_validator_fees_vault_ix,
-        InitAccountAndDelegateIxs,
-    },
-    transactions::tx_logs_contain,
-};
+use utils::transactions::tx_logs_contain;
 
 use crate::utils::{
     ensure_validator_authority,

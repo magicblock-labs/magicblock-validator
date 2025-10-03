@@ -12,12 +12,9 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-use crate::utils::{
-    instructions::{
-        init_account_and_delegate_ixs, init_validator_fees_vault_ix,
-        InitAccountAndDelegateIxs,
-    },
-    sleep_millis,
+use crate::utils::instructions::{
+    init_account_and_delegate_ixs, init_validator_fees_vault_ix,
+    InitAccountAndDelegateIxs,
 };
 
 #[macro_export]

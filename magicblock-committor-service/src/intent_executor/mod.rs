@@ -8,7 +8,7 @@ use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures_util::future::try_join_all;
-use log::{error, info, trace, warn};
+use log::{error, trace, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
@@ -38,7 +38,7 @@ use crate::{
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     tasks::{
-        task_builder::{TaskBuilderError, TaskBuilderV1, TasksBuilder},
+        task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_strategist::{
             TaskStrategist, TaskStrategistError, TransactionStrategy,
         },
@@ -157,7 +157,7 @@ where
         }
 
         // Build tasks for commit stage
-        let commit_tasks = TaskBuilderV1::commit_tasks(
+        let commit_tasks = TaskBuilderImpl::commit_tasks(
             &self.task_info_fetcher,
             &base_intent,
             persister,
@@ -183,7 +183,7 @@ where
             }
         };
 
-        let finalize_tasks = TaskBuilderV1::finalize_tasks(
+        let finalize_tasks = TaskBuilderImpl::finalize_tasks(
             &self.task_info_fetcher,
             &base_intent,
         )
@@ -810,7 +810,7 @@ mod tests {
             IntentExecutorImpl,
         },
         persist::IntentPersisterImpl,
-        tasks::task_builder::{TaskBuilderV1, TasksBuilder},
+        tasks::task_builder::{TaskBuilderImpl, TasksBuilder},
         transaction_preparator::TransactionPreparatorImpl,
     };
 
@@ -844,7 +844,7 @@ mod tests {
         let intent = create_test_intent(0, &pubkey);
 
         let info_fetcher = Arc::new(MockInfoFetcher);
-        let commit_task = TaskBuilderV1::commit_tasks(
+        let commit_task = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
@@ -852,7 +852,7 @@ mod tests {
         .await
         .unwrap();
         let finalize_task =
-            TaskBuilderV1::finalize_tasks(&info_fetcher, &intent)
+            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
                 .await
                 .unwrap();
 

@@ -1,7 +1,6 @@
 use std::ops::{ControlFlow, Deref};
 
 use log::{error, info, warn};
-use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 use solana_pubkey::Pubkey;
 
 use crate::{

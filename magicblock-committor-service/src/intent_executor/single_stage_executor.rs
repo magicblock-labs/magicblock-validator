@@ -1,6 +1,6 @@
 use std::ops::{ControlFlow, Deref};
 
-use log::{error, info, warn};
+use log::{error, info};
 use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 
 use crate::{

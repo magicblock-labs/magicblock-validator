@@ -38,10 +38,10 @@ pub trait TasksBuilder {
 
 /// V1 Task builder
 /// V1: Actions are part of finalize tx
-pub struct TaskBuilderV1;
+pub struct TaskBuilderImpl;
 
 #[async_trait]
-impl TasksBuilder for TaskBuilderV1 {
+impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
         commit_id_fetcher: &Arc<C>,
