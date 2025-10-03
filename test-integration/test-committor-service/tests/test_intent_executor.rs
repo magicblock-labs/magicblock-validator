@@ -16,6 +16,7 @@ use magicblock_committor_service::{
     },
     persist::{IntentPersister, IntentPersisterImpl},
     tasks::CommitTask,
+    transaction_preparator::TransactionPreparatorImpl,
     types::{ScheduledBaseIntentWrapper, TriggerType},
 };
 use magicblock_program::{
@@ -62,24 +63,51 @@ mod utils;
 
 const ACTOR_ESCROW_INDEX: u8 = 1;
 
+struct TestEnv {
+    fixture: TestFixture,
+    task_info_fetcher: Arc<CacheTaskInfoFetcher>,
+    intent_executor:
+        IntentExecutorImpl<TransactionPreparatorImpl, CacheTaskInfoFetcher>,
+}
+
+impl TestEnv {
+    async fn setup() -> Self {
+        let validator_auth = ensure_validator_authority();
+        let fixture = TestFixture::new_with_keypair(validator_auth).await;
+        fund_validator_auth_and_ensure_validator_fees_vault(&fixture.authority)
+            .await;
+
+        let transaction_preparator = fixture.create_transaction_preparator();
+        let task_info_fetcher =
+            Arc::new(CacheTaskInfoFetcher::new(fixture.rpc_client.clone()));
+
+        let intent_executor = IntentExecutorImpl::new(
+            fixture.rpc_client.clone(),
+            transaction_preparator,
+            task_info_fetcher.clone(),
+        );
+
+        Self {
+            fixture,
+            task_info_fetcher,
+            intent_executor,
+        }
+    }
+
+    fn authority(&self) -> &Keypair {
+        &self.fixture.authority
+    }
+}
+
 #[tokio::test]
 async fn test_commit_id_error_recovery() {
     const COUNTER_SIZE: u64 = 100;
 
-    let validator_auth = ensure_validator_authority();
-    let fixture = TestFixture::new_with_keypair(validator_auth).await;
-    fund_validator_auth_and_ensure_validator_fees_vault(&fixture.authority)
-        .await;
-
-    let transaction_preparator = fixture.create_transaction_preparator();
-    let task_info_fetcher =
-        Arc::new(CacheTaskInfoFetcher::new(fixture.rpc_client.clone()));
-
-    let intent_executor = IntentExecutorImpl::new(
-        fixture.rpc_client.clone(),
-        transaction_preparator,
-        task_info_fetcher.clone(),
-    );
+    let TestEnv {
+        fixture: _,
+        intent_executor,
+        task_info_fetcher,
+    } = TestEnv::setup().await;
 
     let counter_auth = Keypair::new();
     let (pubkey, mut account) =
@@ -108,20 +136,11 @@ async fn test_commit_id_error_recovery() {
 async fn test_action_error_recovery() {
     const COUNTER_SIZE: u64 = 100;
 
-    let validator_auth = ensure_validator_authority();
-    let fixture = TestFixture::new_with_keypair(validator_auth).await;
-    fund_validator_auth_and_ensure_validator_fees_vault(&fixture.authority)
-        .await;
-
-    let transaction_preparator = fixture.create_transaction_preparator();
-    let task_info_fetcher =
-        Arc::new(CacheTaskInfoFetcher::new(fixture.rpc_client.clone()));
-
-    let intent_executor = IntentExecutorImpl::new(
-        fixture.rpc_client.clone(),
-        transaction_preparator,
-        task_info_fetcher.clone(),
-    );
+    let TestEnv {
+        fixture,
+        intent_executor,
+        task_info_fetcher: _,
+    } = TestEnv::setup().await;
 
     let payer = setup_payer(fixture.rpc_client.get_inner()).await;
     let (counter_pubkey, mut account) =
@@ -155,20 +174,11 @@ async fn test_action_error_recovery() {
 async fn test_commit_id_and_action_errors_recovery() {
     const COUNTER_SIZE: u64 = 100;
 
-    let validator_auth = ensure_validator_authority();
-    let fixture = TestFixture::new_with_keypair(validator_auth).await;
-    fund_validator_auth_and_ensure_validator_fees_vault(&fixture.authority)
-        .await;
-
-    let transaction_preparator = fixture.create_transaction_preparator();
-    let task_info_fetcher =
-        Arc::new(CacheTaskInfoFetcher::new(fixture.rpc_client.clone()));
-
-    let intent_executor = IntentExecutorImpl::new(
-        fixture.rpc_client.clone(),
-        transaction_preparator,
-        task_info_fetcher.clone(),
-    );
+    let TestEnv {
+        fixture,
+        intent_executor,
+        task_info_fetcher,
+    } = TestEnv::setup().await;
 
     let payer = setup_payer(fixture.rpc_client.get_inner()).await;
     let (counter_pubkey, mut account) =

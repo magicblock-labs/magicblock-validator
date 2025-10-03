@@ -44,25 +44,14 @@ where
         let (execution_err, last_transaction_strategy) = loop {
             i += 1;
 
-            // Prepare message
-            let prepared_message = self
-                .transaction_preparator
-                .prepare_for_strategy(
-                    &self.authority,
+            // Prepare & execute message
+            let execution_result = self
+                .prepare_and_execute_strategy(
                     &mut transaction_strategy,
                     persister,
                 )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
-
-            // Execute strategy
-            let execution_result = self
-                .execute_message_with_retries(
-                    prepared_message,
-                    &transaction_strategy.optimized_tasks,
-                )
-                .await;
-
             // Process error: Ok - return, Err - handle further
             let execution_err = match execution_result {
                 // break with result, strategy that was executed at this point has to be returned for cleanup

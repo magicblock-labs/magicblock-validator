@@ -575,6 +575,35 @@ where
         }
     }
 
+    pub async fn prepare_and_execute_strategy<P: IntentPersister>(
+        &self,
+        transaction_strategy: &mut TransactionStrategy,
+        persister: &Option<P>,
+    ) -> IntentExecutorResult<
+        IntentExecutorResult<Signature, TransactionStrategyExecutionError>,
+        TransactionPreparatorError,
+    > {
+        // Prepare message
+        let prepared_message = self
+            .transaction_preparator
+            .prepare_for_strategy(
+                &self.authority,
+                transaction_strategy,
+                persister,
+            )
+            .await?;
+
+        // Execute strategy
+        let execution_result = self
+            .execute_message_with_retries(
+                prepared_message,
+                &transaction_strategy.optimized_tasks,
+            )
+            .await;
+
+        Ok(execution_result)
+    }
+
     /// Attempts and retries to execute strategy and parses errors
     async fn execute_message_with_retries(
         &self,

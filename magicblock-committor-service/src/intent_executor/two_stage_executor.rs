@@ -43,25 +43,13 @@ where
 
         let mut i = 0;
         let (commit_result, last_commit_strategy) = loop {
-            // Prepare message
-            let prepared_message = self
-                .transaction_preparator
-                .prepare_for_strategy(
-                    &self.authority,
-                    &mut commit_strategy,
-                    persister,
-                )
-                .await
-                .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
+            i += 1;
 
-            // Execute strategy
+            // Prepare & execute message
             let execution_result = self
-                .execute_message_with_retries(
-                    prepared_message,
-                    &commit_strategy.optimized_tasks,
-                )
-                .await;
-
+                .prepare_and_execute_strategy(&mut commit_strategy, persister)
+                .await
+                .map_err(IntentExecutorError::FailedCommitPreparationError)?;
             let execution_err = match execution_result {
                 Ok(value) => break (Ok(value), commit_strategy),
                 Err(err) => err,
@@ -111,24 +99,13 @@ where
 
         i = 0;
         let (finalize_result, last_finalize_strategy) = loop {
-            // Prepare message
-            let prepared_message = self
-                .transaction_preparator
-                .prepare_for_strategy(
-                    &self.authority,
-                    &mut finalize_srategy,
-                    persister,
-                )
+            i += 1;
+
+            // Prepare & execute message
+            let execution_result = self
+                .prepare_and_execute_strategy(&mut finalize_srategy, persister)
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
-
-            // Execute strategy
-            let execution_result = self
-                .execute_message_with_retries(
-                    prepared_message,
-                    &finalize_srategy.optimized_tasks,
-                )
-                .await;
             let execution_err = match execution_result {
                 Ok(value) => break (Ok(value), finalize_srategy),
                 Err(err) => err,
