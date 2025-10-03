@@ -35,6 +35,8 @@ magicblock-program = { workspace = true }
 magicblock-validator-admin = { workspace = true }
 magic-domain-program = { workspace = true }
 
+num_cpus = { workspace = true }
+
 solana-feature-set = { workspace = true }
 solana-inline-spl = { workspace = true }
 solana-rpc = { workspace = true }
