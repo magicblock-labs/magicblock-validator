@@ -1,28 +1,32 @@
+use log::*;
 use std::{path::Path, process::Child};
+use test_kit::init_logger;
 
 use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
+    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    validator::cleanup,
 };
 use magicblock_config::LedgerResumeStrategy;
-use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use solana_sdk::{signature::Keypair, signature::Signature, signer::Signer};
 use solana_transaction_status::UiTransactionEncoding;
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,
-    TMP_DIR_LEDGER,
+    airdrop_and_delegate_accounts, setup_offline_validator,
+    setup_validator_with_local_remote, transfer_lamports,
+    wait_for_ledger_persist, SNAPSHOT_FREQUENCY, TMP_DIR_LEDGER,
 };
 
 // In this test we ensure that the timestamps of the blocks in the restored
 // ledger match the timestamps of the blocks in the original ledger.
 
 #[test]
-fn restore_preserves_timestamps() {
+fn test_restore_preserves_timestamps() {
+    init_logger!();
+
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
-    let pubkey = Pubkey::new_unique();
-
-    let (mut validator, slot, signature, block_time) =
-        write(&ledger_path, &pubkey);
+    let (mut validator, slot, signature, block_time, _payer) =
+        write(&ledger_path);
     validator.kill().unwrap();
 
     assert!(slot > SNAPSHOT_FREQUENCY);
@@ -31,26 +35,45 @@ fn restore_preserves_timestamps() {
     validator.kill().unwrap();
 }
 
-fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
-    let (_, mut validator, ctx) = setup_offline_validator(
+fn write(ledger_path: &Path) -> (Child, u64, Signature, i64, Keypair) {
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
-        None,
-        LedgerResumeStrategy::Reset {
-            slot: 0,
-            keep_accounts: false,
-        },
+        true,
         false,
+        &LoadedAccounts::default(),
     );
 
     // Wait to make sure we don't process transactions on slot 0
     expect!(ctx.wait_for_next_slot_ephem(), validator);
 
-    // First airdrop followed by wait until account is flushed
-    let signature = expect!(ctx.airdrop_ephem(pubkey, 1_111_111), validator);
+    // Airdrop and delegate two accounts
+    let mut payers = airdrop_and_delegate_accounts(
+        &ctx,
+        &mut validator,
+        &[2_000_000, 1_000_000],
+    );
+    let payer1 = payers.drain(0..1).next().unwrap();
+    let payer2 = payers.drain(0..1).next().unwrap();
+    debug!(
+        "✅ Airdropped and delegated payers {} and {}",
+        payer1.pubkey(),
+        payer2.pubkey()
+    );
+
+    // Transfer lamports in ephem to create a transaction
+    let signature = transfer_lamports(
+        &ctx,
+        &mut validator,
+        &payer1,
+        &payer2.pubkey(),
+        111_111,
+    );
+    debug!("✅ Created transfer transaction {signature}");
 
     // Wait for the tx to be written to disk and slot to be finalized
     let slot = wait_for_ledger_persist(&mut validator);
+    debug!("✅ Ledger persisted at slot {slot}");
 
     let block_time = expect!(
         ctx.try_ephem_client().and_then(|client| {
@@ -63,13 +86,14 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64, Signature, i64) {
         }),
         validator
     );
+    debug!("✅ Retrieved block time {block_time} for signature");
 
-    (validator, slot, signature, block_time)
+    (validator, slot, signature, block_time, payer1)
 }
 
 fn read(ledger_path: &Path, signature: Signature, block_time: i64) -> Child {
     // Measure time
-    let _ = std::time::Instant::now();
+    let start = std::time::Instant::now();
     let (_, mut validator, ctx) = setup_offline_validator(
         ledger_path,
         None,
@@ -77,10 +101,7 @@ fn read(ledger_path: &Path, signature: Signature, block_time: i64) -> Child {
         LedgerResumeStrategy::Resume { replay: true },
         false,
     );
-    eprintln!(
-        "Validator started in {:?}",
-        std::time::Instant::now().elapsed()
-    );
+    debug!("✅ Validator started in {:?}", start.elapsed());
 
     let restored_block_time = expect!(
         ctx.try_ephem_client().and_then(|client| {
@@ -93,6 +114,10 @@ fn read(ledger_path: &Path, signature: Signature, block_time: i64) -> Child {
         }),
         validator
     );
+    debug!("✅ Retrieved restored block time {restored_block_time}");
+
     assert_eq!(restored_block_time, block_time, cleanup(&mut validator));
+    debug!("✅ Verified timestamps match: original={block_time}, restored={restored_block_time}");
+
     validator
 }
