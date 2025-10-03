@@ -4,9 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+bincode = { workspace = true }
 borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
+serde = { workspace = true }
 solana-program = { workspace = true }
+magicblock_magic_program_api = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -15,3 +18,5 @@ crate-type = ["cdylib", "lib"]
 no-entrypoint = []
 cpi = ["no-entrypoint"]
 default = []
+custom-panic = []
+custom-heap = []

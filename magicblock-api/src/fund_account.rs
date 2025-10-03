@@ -2,8 +2,9 @@ use std::path::Path;
 
 use magicblock_bank::bank::Bank;
 use magicblock_magic_program_api::{
-    self, MAGIC_CONTEXT_PUBKEY, MAGIC_CONTEXT_SIZE,
+    self, MAGIC_CONTEXT_PUBKEY, TASK_CONTEXT_PUBKEY,
 };
+use magicblock_program::MagicContext;
 use solana_sdk::{
     account::{Account, WritableAccount},
     clock::Epoch,
@@ -22,15 +23,17 @@ pub(crate) fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
     fund_account_with_data(bank, pubkey, lamports, vec![]);
 }
 
-pub(crate) fn fund_account_with_data(
+pub(crate) fn fund_owned_account_with_data(
     bank: &Bank,
     pubkey: &Pubkey,
+    owner: Pubkey,
     lamports: u64,
     data: Vec<u8>,
 ) {
     if let Some(mut acc) = bank.get_account(pubkey) {
         acc.set_lamports(lamports);
         acc.set_data(data);
+        acc.set_owner(owner);
         bank.store_account(*pubkey, acc);
     } else {
         bank.store_account(
@@ -38,13 +41,28 @@ pub(crate) fn fund_account_with_data(
             Account {
                 lamports,
                 data,
-                owner: system_program::id(),
+                owner,
                 executable: false,
                 rent_epoch: Epoch::MAX,
             }
             .into(),
         );
     }
+}
+
+pub(crate) fn fund_account_with_data(
+    bank: &Bank,
+    pubkey: &Pubkey,
+    lamports: u64,
+    data: Vec<u8>,
+) {
+    fund_owned_account_with_data(
+        bank,
+        pubkey,
+        system_program::id(),
+        lamports,
+        data,
+    );
 }
 
 pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
@@ -77,6 +95,18 @@ pub(crate) fn fund_magic_context(bank: &Bank) {
         bank,
         &MAGIC_CONTEXT_PUBKEY,
         u64::MAX,
-        vec![0; MAGIC_CONTEXT_SIZE],
+        MagicContext::ZERO.to_vec(),
+    );
+}
+
+// Make rent-exempt to allow the PDA to receive rent
+pub(crate) fn fund_task_context(bank: &Bank) {
+    // Initialize as an empty task context
+    fund_owned_account_with_data(
+        bank,
+        &TASK_CONTEXT_PUBKEY,
+        magicblock_program::ID,
+        u64::MAX,
+        vec![],
     );
 }

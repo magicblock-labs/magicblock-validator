@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 use solana_program::declare_id;
 
 mod args;

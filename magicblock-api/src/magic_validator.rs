@@ -56,7 +56,8 @@ use magicblock_metrics::MetricsService;
 use magicblock_perf_service::SamplePerformanceService;
 use magicblock_processor::execute_transaction::TRANSACTION_INDEX_LOCK;
 use magicblock_program::{
-    init_persister, validator, validator::validator_authority,
+    init_persister,
+    validator::{self, validator_authority},
     TransactionScheduler,
 };
 use magicblock_pubsub::pubsub_service::{
@@ -65,6 +66,7 @@ use magicblock_pubsub::pubsub_service::{
 use magicblock_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
+use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
 use magicblock_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
 };
@@ -96,7 +98,8 @@ use crate::{
     errors::{ApiError, ApiResult},
     external_config::{cluster_from_remote, try_convert_accounts_config},
     fund_account::{
-        fund_magic_context, fund_validator_identity, funded_faucet,
+        fund_magic_context, fund_task_context, fund_validator_identity,
+        funded_faucet,
     },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
@@ -175,6 +178,7 @@ pub struct MagicValidator {
     pubsub_config: PubsubConfig,
     pub transaction_status_sender: TransactionStatusSender,
     claim_fees_task: ClaimFeesTask,
+    task_scheduler_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl MagicValidator {
@@ -247,6 +251,7 @@ impl MagicValidator {
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
+        fund_task_context(&bank);
         let faucet_keypair =
             funded_faucet(&bank, ledger.ledger_path().as_path())?;
 
@@ -444,6 +449,7 @@ impl MagicValidator {
             transaction_listener,
             transaction_status_sender,
             claim_fees_task: ClaimFeesTask::new(),
+            task_scheduler_handle: None,
         })
     }
 
@@ -787,6 +793,42 @@ impl MagicValidator {
             pubsub_service.spawn(self.pubsub_config.socket())?;
         self.pubsub_handle.write().unwrap().replace(pubsub_handle);
         self.pubsub_close_handle = pubsub_close_handle;
+
+        let task_scheduler_db_path =
+            SchedulerDatabase::path(self.ledger.ledger_path().parent().expect(
+                "ledger_path didn't have a parent, should never happen",
+            ));
+        debug!(
+            "Task scheduler persists to: {}",
+            task_scheduler_db_path.display()
+        );
+        let task_scheduler_handle = TaskSchedulerService::start(
+            &task_scheduler_db_path,
+            &self.config.task_scheduler,
+            self.bank.clone(),
+            self.token.clone(),
+        )?;
+        // TODO: we should shutdown gracefully.
+        // This is discussed in this comment:
+        // https://github.com/magicblock-labs/magicblock-validator/pull/493#discussion_r2324560798
+        // However there is no proper solution for this right now.
+        // An issue to create a shutdown system is open here:
+        // https://github.com/magicblock-labs/magicblock-validator/issues/524
+        self.task_scheduler_handle = Some(tokio::spawn(async move {
+            match task_scheduler_handle.await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    error!("An error occurred while running the task scheduler: {:?}", err);
+                    error!("Exiting process...");
+                    std::process::exit(1);
+                }
+                Err(err) => {
+                    error!("Failed to start task scheduler: {:?}", err);
+                    error!("Exiting process...");
+                    std::process::exit(1);
+                }
+            }
+        }));
 
         self.sample_performance_service
             .replace(SamplePerformanceService::new(
