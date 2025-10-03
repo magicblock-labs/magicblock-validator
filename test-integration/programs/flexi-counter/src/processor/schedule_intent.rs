@@ -109,7 +109,7 @@ pub fn process_create_intent(
                     // counter account
                     committee.into(),
                     ShortAccountMeta {
-                        pubkey: *destination_program.key,
+                        pubkey: *transfer_destination.key,
                         is_writable: true,
                     },
                     system_program.into(),

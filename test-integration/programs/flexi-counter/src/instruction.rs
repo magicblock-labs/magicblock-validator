@@ -303,12 +303,17 @@ pub fn create_intent_single_committee_ix(
 pub fn create_intent_ix(
     payers: Vec<Pubkey>,
     transfer_destination: Pubkey,
-    counter_diffs: Vec<i64>,
-    is_undelegate: bool,
+    counter_diffs: Option<Vec<i64>>,
     compute_units: u32,
 ) -> Instruction {
     let program_id = &crate::id();
 
+    let (is_undelegate, counter_diffs) =
+        if let Some(counter_diffs) = counter_diffs {
+            (true, counter_diffs)
+        } else {
+            (false, vec![])
+        };
     let payers_meta = payers.iter().map(|payer| AccountMeta::new(*payer, true));
     let counter_metas = payers
         .iter()
