@@ -11,8 +11,6 @@ use solana_sdk::{
     transaction_context::TransactionContext,
 };
 
-use crate::magic_scheduled_base_intent::ShortAccountMeta;
-
 pub(crate) fn find_tx_index_of_instruction_account(
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
@@ -100,21 +98,6 @@ pub(crate) fn get_instruction_pubkey_with_idx(
     let tx_idx = ix_ctx.get_index_of_instruction_account_in_transaction(idx)?;
     let pubkey = transaction_context.get_key_of_account_at_index(tx_idx)?;
     Ok(pubkey)
-}
-
-pub(crate) fn get_instruction_account_short_meta_with_idx(
-    transaction_context: &TransactionContext,
-    idx: u16,
-) -> Result<ShortAccountMeta, InstructionError> {
-    let ix_ctx = transaction_context.get_current_instruction_context()?;
-    let tx_idx = ix_ctx.get_index_of_instruction_account_in_transaction(idx)?;
-
-    let pubkey = *transaction_context.get_key_of_account_at_index(tx_idx)?;
-    let is_writable = ix_ctx.is_instruction_account_writable(idx)?;
-    Ok(ShortAccountMeta {
-        pubkey,
-        is_writable,
-    })
 }
 
 pub(crate) fn debit_instruction_account_at_index(

@@ -3,7 +3,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use magicblock_core::magic_program::{
+use magicblock_magic_program_api::{
     instruction::{
         AccountModification, AccountModificationForInstruction,
         MagicBlockInstruction,

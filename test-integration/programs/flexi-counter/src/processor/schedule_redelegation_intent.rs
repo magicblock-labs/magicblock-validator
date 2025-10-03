@@ -3,7 +3,7 @@ use ephemeral_rollups_sdk::{
         CallHandler, CommitAndUndelegate, CommitType, MagicAction,
         MagicInstructionBuilder, UndelegateType,
     },
-    ActionArgs,
+    ActionArgs, ShortAccountMeta,
 };
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
@@ -37,19 +37,34 @@ pub fn process_create_redelegation_intent(
     let magic_program = next_account_info(account_info_iter)?;
 
     // Set proper writable data
-    let other_accounts = vec![
+    let other_accounts: Vec<ShortAccountMeta> = vec![
         // Undelegated account at that point
-        delegated_account.clone(),
+        delegated_account.into(),
         // Payer is escrow an included by dlp::call_handler
-        // .. ,
+        // ..
         // Owner
-        destination_program.clone(),
+        ShortAccountMeta {
+            pubkey: *destination_program.key,
+            is_writable: false,
+        },
         // records and such
-        delegated_buffer.clone(),
-        delegation_record.clone(),
-        delegation_metadata.clone(),
-        delegation_program.clone(),
-        system_program.clone(),
+        ShortAccountMeta {
+            pubkey: *delegated_buffer.key,
+            is_writable: true,
+        },
+        ShortAccountMeta {
+            pubkey: *delegation_record.key,
+            is_writable: true,
+        },
+        ShortAccountMeta {
+            pubkey: *delegation_metadata.key,
+            is_writable: true,
+        },
+        ShortAccountMeta {
+            pubkey: *delegation_program.key,
+            is_writable: false,
+        },
+        system_program.into(),
     ];
 
     let call_handler = CallHandler {
@@ -59,7 +74,7 @@ pub fn process_create_redelegation_intent(
         },
         compute_units: 150_000,
         escrow_authority: escrow_authority.clone(),
-        destination_program: destination_program.clone(),
+        destination_program: *destination_program.key,
         accounts: other_accounts,
     };
 

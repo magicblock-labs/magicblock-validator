@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use solana_program::pubkey::Pubkey;
 
-use crate::magic_program::args::MagicBaseIntentArgs;
+use crate::args::MagicBaseIntentArgs;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MagicBlockInstruction {

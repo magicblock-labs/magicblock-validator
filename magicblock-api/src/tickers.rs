@@ -15,6 +15,7 @@ use magicblock_core::{
     magic_program,
 };
 use magicblock_ledger::{LatestBlock, Ledger};
+use magicblock_magic_program_api::{self, MAGIC_CONTEXT_PUBKEY};
 use magicblock_metrics::metrics;
 use magicblock_program::{instruction_utils::InstructionUtils, MagicContext};
 use solana_sdk::account::ReadableAccount;
@@ -61,7 +62,7 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
 
             // If accounts were scheduled to be committed, we accept them here
             // and processs the commits
-            let magic_context_acc = accountsdb.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+            let magic_context_acc = accountsdb.get_account(&MAGIC_CONTEXT_PUBKEY)
                 .expect("Validator found to be running without MagicContext account!");
             if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
                 handle_scheduled_commits(

@@ -1,7 +1,7 @@
-use solana_program::{declare_id, pubkey, pubkey::Pubkey};
-
 pub mod args;
 pub mod instruction;
+
+pub use solana_program::{declare_id, pubkey, pubkey::Pubkey};
 
 declare_id!("Magic11111111111111111111111111111111111111");
 

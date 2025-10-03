@@ -1847,6 +1847,30 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
+||||||| 49616cb7
+name = "expiring-hashmap"
+version = "0.1.7"
+
+[[package]]
+name = "fake-simd"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e88a8acf291dafb59c2d96e8f59828f3838bb1a70398823ade51a84de6a6deed"
+
+[[package]]
+=======
+name = "expiring-hashmap"
+version = "0.2.1"
+
+[[package]]
+name = "fake-simd"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e88a8acf291dafb59c2d96e8f59828f3838bb1a70398823ade51a84de6a6deed"
+
+[[package]]
+>>>>>>> master
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2229,6 +2253,40 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
+||||||| 49616cb7
+name = "geyser-grpc-proto"
+version = "0.1.7"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "prost 0.11.9",
+ "protobuf-src",
+ "solana-account-decoder",
+ "solana-sdk",
+ "solana-transaction-status",
+ "tonic 0.9.2",
+ "tonic-build",
+]
+
+[[package]]
+=======
+name = "geyser-grpc-proto"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "prost 0.11.9",
+ "protobuf-src",
+ "solana-account-decoder",
+ "solana-sdk",
+ "solana-transaction-status",
+ "tonic 0.9.2",
+ "tonic-build",
+]
+
+[[package]]
+>>>>>>> master
 name = "gimli"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3545,7 +3603,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "bincode",
@@ -3562,8 +3620,14 @@ dependencies = [
  "magicblock-chainlink",
  "magicblock-committor-service",
  "magicblock-config",
+<<<<<<< HEAD
  "magicblock-core",
  "magicblock-ledger",
+||||||| 49616cb7
+ "magicblock-core",
+=======
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+>>>>>>> master
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-program",
@@ -3576,8 +3640,9 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-dumper"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
+ "async-trait",
  "bincode",
  "magicblock-accounts-db",
  "magicblock-core",
@@ -3589,7 +3654,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-fetcher"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "conjunto-transwise",
@@ -3604,7 +3669,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-updates"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "bincode",
  "conjunto-transwise",
@@ -3624,7 +3689,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "conjunto-transwise",
@@ -3642,7 +3707,12 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+<<<<<<< HEAD
  "magicblock-ledger",
+||||||| 49616cb7
+=======
+ "magicblock-magic-program-api",
+>>>>>>> master
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-processor",
@@ -3659,7 +3729,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-api"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "magicblock-accounts-db",
  "magicblock-core",
@@ -3669,7 +3739,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "env_logger 0.11.8",
  "lmdb-rkv",
@@ -3739,7 +3809,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3765,10 +3835,12 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-ledger",
+ "magicblock-magic-program-api",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
  "magicblock-validator-admin",
+ "num_cpus",
  "paste",
  "solana-feature-set",
  "solana-inline-spl",
@@ -3784,8 +3856,16 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "magicblock-chainlink"
 version = "0.1.7"
+||||||| 49616cb7
+name = "magicblock-bank"
+version = "0.1.7"
+=======
+name = "magicblock-bank"
+version = "0.2.1"
+>>>>>>> master
 dependencies = [
  "assert_matches",
  "async-trait",
@@ -3819,7 +3899,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "borsh 1.5.7",
  "borsh-derive 1.5.7",
@@ -3836,7 +3916,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -3870,7 +3950,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "bs58",
  "clap 4.5.40",
@@ -3889,11 +3969,11 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config-helpers"
-version = "0.1.7"
+version = "0.2.1"
 
 [[package]]
 name = "magicblock-config-macro"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "clap 4.5.40",
  "convert_case 0.8.0",
@@ -3908,8 +3988,9 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
+<<<<<<< HEAD
  "bincode",
  "flume",
  "serde",
@@ -3924,6 +4005,14 @@ dependencies = [
  "solana-transaction-error",
  "solana-transaction-status-client-types",
  "tokio",
+||||||| 49616cb7
+ "bincode",
+ "serde",
+ "solana-account",
+ "solana-program",
+=======
+ "magicblock-magic-program-api",
+>>>>>>> master
 ]
 
 [[package]]
@@ -3959,8 +4048,70 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-ledger"
+<<<<<<< HEAD
+||||||| 49616cb7
+name = "magicblock-geyser-plugin"
 version = "0.1.7"
+dependencies = [
+ "agave-geyser-plugin-interface",
+ "anyhow",
+ "base64 0.21.7",
+ "bs58 0.4.0",
+ "cargo-lock",
+ "expiring-hashmap",
+ "flume",
+ "geyser-grpc-proto",
+ "git-version",
+ "hostname",
+ "log",
+ "magicblock-transaction-status",
+ "scc",
+ "serde",
+ "serde_json",
+ "solana-sdk",
+ "spl-token-2022 6.0.0",
+ "tokio",
+ "tokio-stream",
+ "tokio-util 0.7.15",
+ "tonic 0.9.2",
+ "tonic-health",
+ "vergen",
+]
+
+[[package]]
+=======
+name = "magicblock-geyser-plugin"
+version = "0.2.1"
+dependencies = [
+ "agave-geyser-plugin-interface",
+ "anyhow",
+ "base64 0.21.7",
+ "bs58 0.4.0",
+ "cargo-lock",
+ "expiring-hashmap",
+ "flume",
+ "geyser-grpc-proto",
+ "git-version",
+ "hostname",
+ "log",
+ "magicblock-transaction-status",
+ "scc",
+ "serde",
+ "serde_json",
+ "solana-sdk",
+ "spl-token-2022 6.0.0",
+ "tokio",
+ "tokio-stream",
+ "tokio-util 0.7.15",
+ "tonic 0.9.2",
+ "tonic-health",
+ "vergen",
+]
+
+[[package]]
+>>>>>>> master
+name = "magicblock-ledger"
+version = "0.2.1"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -3979,8 +4130,16 @@ dependencies = [
  "solana-measure",
  "solana-metrics",
  "solana-sdk",
+<<<<<<< HEAD
  "solana-storage-proto 0.1.7",
  "solana-svm",
+||||||| 49616cb7
+ "solana-storage-proto 0.1.7",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+=======
+ "solana-storage-proto 0.2.1",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+>>>>>>> master
  "solana-timings",
  "solana-transaction-status",
  "tempfile",
@@ -3990,8 +4149,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "magicblock-magic-program-api"
+version = "0.2.1"
+dependencies = [
+ "bincode",
+ "serde",
+ "solana-program",
+]
+
+[[package]]
 name = "magicblock-metrics"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "http-body-util",
  "hyper 1.6.0",
@@ -4005,7 +4173,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-mutator"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "assert_matches",
  "bincode",
@@ -4021,13 +4189,36 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-processor"
+<<<<<<< HEAD
+||||||| 49616cb7
+name = "magicblock-perf-service"
 version = "0.1.7"
+dependencies = [
+ "log",
+ "magicblock-bank",
+ "magicblock-ledger",
+]
+
+[[package]]
+=======
+name = "magicblock-perf-service"
+version = "0.2.1"
+dependencies = [
+ "log",
+ "magicblock-bank",
+ "magicblock-ledger",
+]
+
+[[package]]
+>>>>>>> master
+name = "magicblock-processor"
+version = "0.2.1"
 dependencies = [
  "bincode",
  "guinea",
  "log",
  "magicblock-accounts-db",
+<<<<<<< HEAD
  "magicblock-core",
  "magicblock-ledger",
  "magicblock-program",
@@ -4054,17 +4245,45 @@ dependencies = [
  "solana-transaction-error",
  "solana-transaction-status",
  "test-kit",
+||||||| 49616cb7
+ "magicblock-bank",
+ "magicblock-transaction-status",
+ "rayon",
+ "solana-account-decoder",
+ "solana-measure",
+ "solana-metrics",
+ "solana-rayon-threadlimit",
+ "solana-sdk",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-timings",
+ "spl-token",
+ "spl-token-2022 6.0.0",
+=======
+ "magicblock-bank",
+ "magicblock-transaction-status",
+ "rayon",
+ "solana-account-decoder",
+ "solana-measure",
+ "solana-metrics",
+ "solana-rayon-threadlimit",
+ "solana-sdk",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-timings",
+ "spl-token",
+ "spl-token-2022 6.0.0",
+>>>>>>> master
  "tokio",
 ]
 
 [[package]]
 name = "magicblock-program"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "assert_matches",
  "bincode",
  "lazy_static",
  "magicblock-core",
+ "magicblock-magic-program-api",
  "magicblock-metrics",
  "num-derive",
  "num-traits",
@@ -4078,8 +4297,126 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-rpc-client"
+<<<<<<< HEAD
+||||||| 49616cb7
+name = "magicblock-pubsub"
 version = "0.1.7"
+dependencies = [
+ "bincode",
+ "geyser-grpc-proto",
+ "jsonrpc-core",
+ "jsonrpc-pubsub",
+ "jsonrpc-ws-server",
+ "log",
+ "magicblock-bank",
+ "magicblock-geyser-plugin",
+ "serde",
+ "serde_json",
+ "solana-account-decoder",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util 0.7.15",
+]
+
+[[package]]
+name = "magicblock-rpc"
+version = "0.1.7"
+dependencies = [
+ "base64 0.21.7",
+ "bincode",
+ "bs58 0.4.0",
+ "jsonrpc-core",
+ "jsonrpc-core-client",
+ "jsonrpc-derive",
+ "jsonrpc-http-server",
+ "log",
+ "magicblock-accounts",
+ "magicblock-bank",
+ "magicblock-ledger",
+ "magicblock-metrics",
+ "magicblock-processor",
+ "magicblock-tokens",
+ "magicblock-transaction-status",
+ "magicblock-version",
+ "serde",
+ "serde_derive",
+ "solana-account-decoder",
+ "solana-accounts-db",
+ "solana-inline-spl",
+ "solana-metrics",
+ "solana-perf",
+ "solana-rpc",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "solana-transaction-status",
+ "spl-token-2022 6.0.0",
+ "tokio",
+]
+
+[[package]]
+=======
+name = "magicblock-pubsub"
+version = "0.2.1"
+dependencies = [
+ "bincode",
+ "geyser-grpc-proto",
+ "jsonrpc-core",
+ "jsonrpc-pubsub",
+ "jsonrpc-ws-server",
+ "log",
+ "magicblock-bank",
+ "magicblock-geyser-plugin",
+ "serde",
+ "serde_json",
+ "solana-account-decoder",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util 0.7.15",
+]
+
+[[package]]
+name = "magicblock-rpc"
+version = "0.2.1"
+dependencies = [
+ "base64 0.21.7",
+ "bincode",
+ "bs58 0.4.0",
+ "jsonrpc-core",
+ "jsonrpc-core-client",
+ "jsonrpc-derive",
+ "jsonrpc-http-server",
+ "log",
+ "magicblock-accounts",
+ "magicblock-bank",
+ "magicblock-ledger",
+ "magicblock-metrics",
+ "magicblock-processor",
+ "magicblock-tokens",
+ "magicblock-transaction-status",
+ "magicblock-version",
+ "serde",
+ "serde_derive",
+ "solana-account-decoder",
+ "solana-accounts-db",
+ "solana-inline-spl",
+ "solana-metrics",
+ "solana-perf",
+ "solana-rpc",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "solana-transaction-status",
+ "spl-token-2022 6.0.0",
+ "tokio",
+]
+
+[[package]]
+>>>>>>> master
+name = "magicblock-rpc-client"
+version = "0.2.1"
 dependencies = [
  "env_logger 0.11.8",
  "log",
@@ -4093,7 +4430,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "ed25519-dalek",
  "log",
@@ -4109,8 +4446,66 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-validator"
+<<<<<<< HEAD
+||||||| 49616cb7
+name = "magicblock-tokens"
 version = "0.1.7"
+dependencies = [
+ "log",
+ "magicblock-bank",
+ "magicblock-transaction-status",
+ "solana-account-decoder",
+ "solana-measure",
+ "solana-metrics",
+ "solana-sdk",
+ "spl-token",
+ "spl-token-2022 6.0.0",
+]
+
+[[package]]
+name = "magicblock-transaction-status"
+version = "0.1.7"
+dependencies = [
+ "crossbeam-channel",
+ "log",
+ "magicblock-bank",
+ "solana-sdk",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-transaction-status",
+]
+
+[[package]]
+=======
+name = "magicblock-tokens"
+version = "0.2.1"
+dependencies = [
+ "log",
+ "magicblock-bank",
+ "magicblock-transaction-status",
+ "solana-account-decoder",
+ "solana-measure",
+ "solana-metrics",
+ "solana-sdk",
+ "spl-token",
+ "spl-token-2022 6.0.0",
+]
+
+[[package]]
+name = "magicblock-transaction-status"
+version = "0.2.1"
+dependencies = [
+ "crossbeam-channel",
+ "log",
+ "magicblock-bank",
+ "solana-sdk",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-transaction-status",
+]
+
+[[package]]
+>>>>>>> master
+name = "magicblock-validator"
+version = "0.2.1"
 dependencies = [
  "clap 4.5.40",
  "console-subscriber",
@@ -4125,7 +4520,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "log",
@@ -4144,7 +4539,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "git-version",
  "rustc_version",
@@ -9018,7 +9413,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
  "bincode",
  "bs58",
@@ -10431,8 +10826,56 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
+<<<<<<< HEAD
 name = "test-kit"
 version = "0.1.7"
+||||||| 49616cb7
+name = "test-tools"
+version = "0.1.7"
+dependencies = [
+ "log",
+ "magicblock-accounts-db",
+ "magicblock-bank",
+ "magicblock-config",
+ "magicblock-core",
+ "magicblock-program",
+ "solana-geyser-plugin-manager",
+ "solana-rpc-client",
+ "solana-sdk",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-timings",
+ "tempfile",
+ "test-tools-core",
+ "tokio",
+]
+
+[[package]]
+name = "test-tools-core"
+version = "0.1.7"
+=======
+name = "test-tools"
+version = "0.2.1"
+dependencies = [
+ "log",
+ "magicblock-accounts-db",
+ "magicblock-bank",
+ "magicblock-config",
+ "magicblock-core",
+ "magicblock-program",
+ "solana-geyser-plugin-manager",
+ "solana-rpc-client",
+ "solana-sdk",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-timings",
+ "tempfile",
+ "test-tools-core",
+ "tokio",
+]
+
+[[package]]
+name = "test-tools-core"
+version = "0.2.1"
+>>>>>>> master
 dependencies = [
  "env_logger 0.11.8",
  "guinea",

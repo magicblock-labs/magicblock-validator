@@ -21,6 +21,7 @@ members = [
   "magicblock-config-macro",
   "magicblock-core",
   "magicblock-aperture",
+  "magicblock-magic-program-api",
   "magicblock-ledger",
   "magicblock-metrics",
   "magicblock-mutator",
@@ -43,7 +44,7 @@ resolver = "2"
 
 [workspace.package]
 # Solana Version (2.2.x)
-version = "0.1.7"
+version = "0.2.1"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
@@ -124,6 +125,7 @@ magicblock-metrics = { path = "./magicblock-metrics" }
 magicblock-mutator = { path = "./magicblock-mutator" }
 magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
+magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }

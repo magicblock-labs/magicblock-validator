@@ -84,7 +84,7 @@ pub fn process(
             is_undelegate,
             compute_units,
         ),
-        CreateRedelegationIntont => {
+        CreateRedelegationIntent => {
             process_create_redelegation_intent(accounts)
         }
     }?;

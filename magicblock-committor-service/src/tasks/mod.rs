@@ -186,10 +186,10 @@ impl BaseTask for ArgsTask {
 
     fn compute_units(&self) -> u32 {
         match self {
-            Self::Commit(_) => 65_000,
+            Self::Commit(_) => 75_000,
             Self::BaseAction(task) => task.action.compute_units,
-            Self::Undelegate(_) => 50_000,
-            Self::Finalize(_) => 40_000,
+            Self::Undelegate(_) => 60_000,
+            Self::Finalize(_) => 60_000,
         }
     }
 
@@ -307,7 +307,7 @@ impl BaseTask for BufferTask {
 
     fn compute_units(&self) -> u32 {
         match self {
-            Self::Commit(_) => 65_000,
+            Self::Commit(_) => 75_000,
         }
     }
 
@@ -323,8 +323,8 @@ impl BaseTask for BufferTask {
 
 #[cfg(test)]
 mod serialization_safety_test {
-    use magicblock_program::magic_scheduled_base_intent::{
-        ProgramArgs, ShortAccountMeta,
+    use magicblock_program::{
+        args::ShortAccountMeta, magic_scheduled_base_intent::ProgramArgs,
     };
     use solana_account::Account;
 

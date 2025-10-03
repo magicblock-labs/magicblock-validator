@@ -230,6 +230,12 @@ impl AccountsDb {
         self.storage.get_slot()
     }
 
+    /// Temporary hack for overriding accountsdb slot without snapshot checks
+    // TODO(bmuddha): remove with the ledger rewrite
+    pub fn override_slot(&self, slot: u64) {
+        self.storage.set_slot(slot);
+    }
+
     /// Set latest observed slot
     #[inline(always)]
     pub fn set_slot(self: &Arc<Self>, slot: u64) {

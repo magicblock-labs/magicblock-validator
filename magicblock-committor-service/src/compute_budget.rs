@@ -114,7 +114,7 @@ impl ComputeBudgetConfig {
             },
             undelegate: Budget {
                 compute_unit_price,
-                base_budget: 60_000,
+                base_budget: 70_000,
                 per_committee: 35_000,
             },
             buffer_init: BufferWithReallocBudget {

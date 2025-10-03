@@ -49,6 +49,18 @@ fn init_logger() {
     });
 }
 
+/// Print informational startup messages.
+/// If RUST_LOG is not set, prints to stdout using println! so users always see it.
+/// If RUST_LOG is set, emits an info! log so operators can control visibility
+/// (e.g., by setting RUST_LOG=warn to hide it).
+fn print_info<S: std::fmt::Display>(msg: S) {
+    if std::env::var_os("RUST_LOG").is_some() {
+        info!("{}", msg);
+    } else {
+        println!("{}", msg);
+    }
+}
+
 #[tokio::main]
 async fn main() {
     init_logger();
@@ -71,7 +83,7 @@ async fn main() {
     let rpc_host = mb_config.config.rpc.addr;
 
     let validator_keypair = mb_config.validator_keypair();
-    info!("Validator identity: {}", validator_keypair.pubkey());
+    let validator_identity = validator_keypair.pubkey();
 
     let config = MagicValidatorConfig {
         validator_config: mb_config.config,
@@ -92,18 +104,29 @@ async fn main() {
 
     api.start().await.expect("Failed to start validator");
     let version = magicblock_version::Version::default();
-    info!("");
-    info!("🧙 Magicblock Validator is running!");
-    info!(
+    print_info("");
+    print_info("🧙 Magicblock Validator is running! 🪄✦");
+    print_info(format!(
         "🏷️ Validator version: {} (Git: {})",
         version, version.git_version
-    );
-    info!("-----------------------------------");
-    info!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
-    info!("🔌 WebSocket endpoint: ws://{}:{}", rpc_host, ws_port);
-    info!("-----------------------------------");
-    info!("Ready for connections!");
-    info!("");
+    ));
+    print_info("-----------------------------------");
+    print_info(format!(
+        "📡 RPC endpoint:       http://{}:{}",
+        rpc_host, rpc_port
+    ));
+    print_info(format!(
+        "🔌 WebSocket endpoint: ws://{}:{}",
+        rpc_host, ws_port
+    ));
+    print_info(format!("🖥️ Validator identity: {}", validator_identity));
+    print_info(format!(
+        "🗄️ Ledger location:    {}",
+        api.ledger().ledger_path().to_str().unwrap_or("")
+    ));
+    print_info("-----------------------------------");
+    print_info("Ready for connections!");
+    print_info("");
 
     if let Err(err) = Shutdown::wait().await {
         error!("Failed to gracefully shutdown: {}", err);

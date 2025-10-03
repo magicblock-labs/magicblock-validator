@@ -12,7 +12,6 @@ use magicblock_committor_service::{
     error::{CommittorServiceError, CommittorServiceResult},
     BaseIntentCommittor,
 };
-use magicblock_core::magic_program;
 use magicblock_rpc_client::MagicblockRpcClient;
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
@@ -72,6 +71,8 @@ pub enum AccountClonerUnclonableReason {
     DoesNotHaveDelegatedEscrowAccount,
     DoesNotAllowEscrowedPda,
     DoesNotAllowFeepayerWithEscrowedPda,
+    /// The account does not exist on-chain (RPC returned empty/system default)
+    DoesNotExist,
     /// If an account is delegated to our validator then we should use the latest
     /// state in our own bank since that is more up to date than the on-chain state.
     DelegatedAccountsNotClonedWhileHydrating,
@@ -210,8 +211,8 @@ pub fn standard_blacklisted_accounts(
     blacklisted_accounts.insert(solana_sdk::sysvar::slot_history::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::stake_history::ID);
     blacklisted_accounts.insert(NATIVE_SOL_ID);
-    blacklisted_accounts.insert(magic_program::ID);
-    blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
+    blacklisted_accounts.insert(magicblock_program::ID);
+    blacklisted_accounts.insert(magicblock_program::MAGIC_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
     blacklisted_accounts.insert(*faucet_id);
     blacklisted_accounts
