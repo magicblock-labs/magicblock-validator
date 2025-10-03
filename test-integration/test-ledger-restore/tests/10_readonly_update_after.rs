@@ -116,6 +116,7 @@ macro_rules! assert_counter_states {
 // -----------------
 // Test
 // -----------------
+#[ignore = "We would have to hydrate all delegated accounts to support this. We may add this behind a config."]
 #[test]
 fn test_restore_ledger_using_readonly() {
     init_logger!();
