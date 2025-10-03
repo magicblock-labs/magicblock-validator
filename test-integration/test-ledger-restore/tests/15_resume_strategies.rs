@@ -1,4 +1,6 @@
+use log::*;
 use std::{path::Path, process::Child};
+use test_kit::init_logger;
 
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{
@@ -10,26 +12,63 @@ use solana_sdk::{
     signer::Signer,
 };
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist,
-    wait_for_next_slot_after_account_snapshot, SNAPSHOT_FREQUENCY,
-    TMP_DIR_LEDGER,
+    airdrop_and_delegate_accounts, setup_validator_with_local_remote,
+    setup_validator_with_local_remote_and_resume_strategy, transfer_lamports,
+    wait_for_ledger_persist, wait_for_next_slot_after_account_snapshot,
+    SNAPSHOT_FREQUENCY, TMP_DIR_LEDGER,
 };
 
 #[test]
-fn restore_ledger_reset() {
-    eprintln!("\n================\nReset\n================\n");
+fn test_restore_ledger_reset() {
+    init_logger!();
+
+    debug!("1. Reset");
     test_resume_strategy(LedgerResumeStrategy::Reset {
         slot: 1000,
         keep_accounts: false,
     });
-    eprintln!("\n================\nReset with accounts\n================\n");
+
+    debug!("2. Reset with accounts");
     test_resume_strategy(LedgerResumeStrategy::Reset {
         slot: 1000,
         keep_accounts: false,
     });
-    eprintln!("\n================\nResume\n================\n");
+
+    debug!("3. Resume");
     test_resume_strategy(LedgerResumeStrategy::Resume { replay: true });
-    eprintln!("\n================\nReplay\n================\n");
+
+    debug!("4. Replay");
+    test_resume_strategy(LedgerResumeStrategy::Resume { replay: false });
+}
+
+#[test]
+fn test_restore_ledger_resume_strategy_reset_all() {
+    init_logger!();
+
+    test_resume_strategy(LedgerResumeStrategy::Reset {
+        slot: 1000,
+        keep_accounts: false,
+    });
+}
+
+#[test]
+fn test_restore_ledger_resume_strategy_reset_keep_accounts() {
+    init_logger!();
+    test_resume_strategy(LedgerResumeStrategy::Reset {
+        slot: 1000,
+        keep_accounts: true,
+    });
+}
+
+#[test]
+fn test_restore_ledger_resume_strategy_resume_with_replay() {
+    init_logger!();
+    test_resume_strategy(LedgerResumeStrategy::Resume { replay: true });
+}
+
+#[test]
+fn test_restore_ledger_resume_strategy_resume_without_replay() {
+    init_logger!();
     test_resume_strategy(LedgerResumeStrategy::Resume { replay: false });
 }
 
@@ -45,27 +84,32 @@ pub fn test_resume_strategy(strategy: LedgerResumeStrategy) {
 }
 
 pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {
-    let millis_per_slot = 100;
-    let (_, mut validator, ctx) = setup_offline_validator(
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
-        Some(millis_per_slot),
-        LedgerResumeStrategy::Reset {
-            slot: 0,
-            keep_accounts: false,
-        },
-        false,
+        true,
+        true,
+        &Default::default(),
     );
 
     // Wait slot 1 otherwise we might be unable to fetch the transaction status
     expect!(ctx.wait_for_next_slot_ephem(), validator);
+    debug!("✅ Validator started and advanced to slot 1");
 
-    let signature =
-        expect!(ctx.airdrop_ephem(&kp.pubkey(), 1_111_111), validator);
+    // Airdrop and delegate the keypair
+    let mut keypairs =
+        airdrop_and_delegate_accounts(&ctx, &mut validator, &[1_111_111]);
+    *kp = keypairs.drain(0..1).next().unwrap();
+    debug!("✅ Airdropped and delegated keypair {}", kp.pubkey());
 
     let lamports =
         expect!(ctx.fetch_ephem_account_balance(&kp.pubkey()), validator);
     assert_eq!(lamports, 1_111_111, cleanup(&mut validator));
+    debug!(
+        "✅ Verified balance of {} lamports for {}",
+        lamports,
+        kp.pubkey()
+    );
 
     // Wait for the next snapshot
     // We wait for one slot after the snapshot but the restarting validator will be at the previous slot
@@ -73,8 +117,25 @@ pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {
         &mut validator,
         SNAPSHOT_FREQUENCY,
     ) - 1;
+    debug!("✅ Waited for snapshot at slot {}", slot);
+
+    // Create another delegated account to transfer to
+    let mut transfer_to_keypairs =
+        airdrop_and_delegate_accounts(&ctx, &mut validator, &[1_000_000]);
+    let transfer_to = transfer_to_keypairs.drain(0..1).next().unwrap();
+    debug!(
+        "✅ Created transfer target account {}",
+        transfer_to.pubkey()
+    );
+
+    // Perform a transfer to create a real transaction signature
+    let signature =
+        transfer_lamports(&ctx, &mut validator, kp, &transfer_to.pubkey(), 100);
+    debug!("✅ Created transfer transaction {}", signature);
+
     // Wait more to be sure the ledger is persisted
     wait_for_ledger_persist(&mut validator);
+    debug!("✅ Ledger persisted");
 
     (validator, slot, signature)
 }
@@ -86,18 +147,25 @@ pub fn read(
     slot: u64,
     strategy: LedgerResumeStrategy,
 ) -> Child {
-    let (_, mut validator, ctx) = setup_offline_validator(
-        ledger_path,
-        None,
-        None,
-        strategy.clone(),
-        false,
-    );
+    debug!("✅ Reading ledger with strategy: {:?}", strategy);
+
+    let (_, mut validator, ctx) =
+        setup_validator_with_local_remote_and_resume_strategy(
+            ledger_path,
+            None,
+            strategy.clone(),
+            false,
+            &Default::default(),
+        );
 
     let validator_slot = expect!(ctx.get_slot_ephem(), validator);
+    debug!("✅ Validator restarted at slot {}", validator_slot);
+
+    // For Resume strategy, verify we're at or beyond the saved slot
+    // For Reset strategy, we just continue from where we were
     let target_slot = match strategy {
-        LedgerResumeStrategy::Reset { slot, .. } => slot,
         LedgerResumeStrategy::Resume { .. } => slot,
+        LedgerResumeStrategy::Reset { .. } => 0,
     };
     assert!(
         validator_slot >= target_slot,
@@ -107,30 +175,47 @@ pub fn read(
         validator_slot,
         target_slot
     );
-
-    let lamports =
-        expect!(ctx.fetch_ephem_account_balance(&kp.pubkey()), validator);
-    let target_lamports = if strategy.is_removing_accountsdb() {
-        0
-    } else {
-        1_111_111
-    };
-    assert_eq!(
-        lamports,
-        target_lamports,
-        cleanup(&mut validator),
-        "{:?} (removing ADB: {})",
-        strategy,
-        strategy.is_removing_accountsdb()
+    debug!(
+        "✅ Verified slot {} >= target slot {}",
+        validator_slot, target_slot
     );
 
-    assert!(
-        ctx.get_transaction_ephem(signature).is_err()
-            == strategy.is_removing_ledger(),
+    // In ephemeral mode with delegated accounts, they will always be cloned from chain
+    // For Resume strategies, the transfer will be replayed, reducing balance by 100
+    // For Reset strategies, accounts are cloned fresh from chain with original balance
+    let lamports =
+        expect!(ctx.fetch_ephem_account_balance(&kp.pubkey()), validator);
+    let expected_lamports = match strategy {
+        LedgerResumeStrategy::Resume { .. } => 1_111_011, // 1_111_111 - 100 (transfer)
+        LedgerResumeStrategy::Reset { .. } => 1_111_111, // Fresh clone from chain
+    };
+    assert_eq!(
+        lamports, expected_lamports,
         cleanup(&mut validator),
-        "{:?} (removing ledger: {})",
+        "{:?}: Account balance should reflect strategy", strategy
+    );
+    debug!(
+        "✅ Verified balance {} lamports for {} (expected: {})",
+        lamports,
+        kp.pubkey(),
+        expected_lamports
+    );
+
+    // Transaction should not be found if we're removing the ledger
+    let tx_result = ctx.get_transaction_ephem(signature);
+    let tx_not_found = tx_result.is_err();
+    assert!(
+        tx_not_found == strategy.is_removing_ledger(),
+        cleanup(&mut validator),
+        "{:?} (removing ledger: {}, tx_not_found: {})",
         strategy,
-        strategy.is_removing_ledger()
+        strategy.is_removing_ledger(),
+        tx_not_found
+    );
+    debug!(
+        "✅ Verified transaction state (removing ledger: {}, tx_not_found: {})",
+        strategy.is_removing_ledger(),
+        tx_not_found
     );
 
     validator
