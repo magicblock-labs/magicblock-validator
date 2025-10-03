@@ -331,7 +331,7 @@ fn assert_counters(
                 ctx.fetch_chain_account_struct::<FlexiCounter>(counter.pda)
                     .unwrap()
             } else {
-                ctx.fetch_chain_account_struct::<FlexiCounter>(counter.pda)
+                ctx.fetch_ephem_account_struct::<FlexiCounter>(counter.pda)
                     .unwrap()
             }
         })
