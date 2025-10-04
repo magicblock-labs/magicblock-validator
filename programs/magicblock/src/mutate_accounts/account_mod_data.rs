@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    ops::Neg,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex, RwLock,
@@ -69,22 +68,11 @@ pub(crate) fn set_account_mod_data(data: Vec<u8>) -> u64 {
         .lock()
         .expect("DATA_MODS poisoned")
         .insert(id, data);
-    // update metrics related to total count of data mods
-    magicblock_metrics::metrics::adjust_active_data_mods(1);
     id
 }
 
 pub(super) fn get_data(id: u64) -> Option<Vec<u8>> {
-    DATA_MODS
-        .lock()
-        .expect("DATA_MODS poisoned")
-        .remove(&id)
-        .inspect(|v| {
-            // decrement metrics
-            let len = (v.len() as i64).neg();
-            magicblock_metrics::metrics::adjust_active_data_mods_size(len);
-            magicblock_metrics::metrics::adjust_active_data_mods(-1);
-        })
+    DATA_MODS.lock().expect("DATA_MODS poisoned").remove(&id)
 }
 
 pub fn init_persister<T: PersistsAccountModData>(persister: Arc<T>) {

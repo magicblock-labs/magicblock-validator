@@ -16,6 +16,7 @@ tokio = { workspace = true }
 magicblock-accounts-db = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
+magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 
 solana-account = { workspace = true }
