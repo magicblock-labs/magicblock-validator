@@ -15,6 +15,7 @@ use magicblock_config::{
     LedgerResumeStrategyType, LifecycleMode, RemoteCluster, RemoteConfig,
     TaskSchedulerConfig, ValidatorConfig,
 };
+use program_flexi_counter::instruction::{create_delegate_ix, create_init_ix};
 use solana_sdk::{
     hash::Hash, instruction::Instruction, pubkey::Pubkey, signature::Keypair,
     signer::Signer, transaction::Transaction,
@@ -73,6 +74,52 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
 
     let ctx = expect!(IntegrationTestContext::try_new(), validator);
     (default_tmpdir_config, validator, ctx)
+}
+
+pub fn create_delegated_counter(
+    ctx: &IntegrationTestContext,
+    payer: &Keypair,
+    validator: &mut Child,
+) {
+    // Initialize the counter
+    let blockhash = expect!(
+        ctx.try_chain_client().and_then(|client| client
+            .get_latest_blockhash()
+            .map_err(|e| anyhow::anyhow!(
+                "Failed to get latest blockhash: {}",
+                e
+            ))),
+        validator
+    );
+    expect!(
+        ctx.send_transaction_chain(
+            &mut Transaction::new_signed_with_payer(
+                &[create_init_ix(payer.pubkey(), "test".to_string())],
+                Some(&payer.pubkey()),
+                &[&payer],
+                blockhash,
+            ),
+            &[&payer]
+        ),
+        validator
+    );
+
+    // Delegate the counter to the ephem validator
+    expect!(
+        ctx.send_transaction_chain(
+            &mut Transaction::new_signed_with_payer(
+                &[create_delegate_ix(payer.pubkey())],
+                Some(&payer.pubkey()),
+                &[&payer],
+                blockhash,
+            ),
+            &[&payer]
+        ),
+        validator
+    );
+
+    // Wait for account to be delegated
+    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
 }
 
 pub fn send_memo_tx(

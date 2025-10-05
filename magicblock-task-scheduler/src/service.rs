@@ -234,6 +234,17 @@ impl TaskSchedulerService {
             last_execution_millis: 0,
         };
 
+        // Check if the task already exists in the database
+        if let Some(db_task) = self.db.get_task(task.id)? {
+            if db_task.authority != task.authority {
+                return Err(TaskSchedulerError::UnauthorizedReplacing(
+                    task.id,
+                    db_task.authority.to_string(),
+                    task.authority.to_string(),
+                ));
+            }
+        }
+
         self.db.insert_task(&db_task)?;
         self.task_queue
             .insert(db_task.clone(), Duration::from_millis(0));
@@ -278,17 +289,14 @@ impl TaskSchedulerService {
                     let mut task_context = bincode::deserialize::<TaskContext>(context_account.data()).unwrap_or_default();
 
                     match self.process_context_requests(&mut task_context) {
-                        Ok(result) if result.is_empty() => {
+                        Ok(result) => {
                             if task_context.requests.is_empty() {
                                 // Nothing to do because there are no requests in the context
                                 continue;
                             }
 
-                            // All requests were processed successfully, reset the context
-                            // We need to freeze the bank to avoid race conditions
-                            // This is done with an instruction to the magic program.
-                            // It avoids race conditions with write access to accountsDb
-                            trace!("Resetting task context after processing {} requests", task_context.requests.len());
+                            // All requests were processed, reset the context
+                            warn!("Failed to process {} requests out of {}", result.len(), task_context.requests.len());
                             let output = self.process_transaction(vec![
                                 InstructionUtils::process_tasks_instruction(
                                     &validator_authority_id(),
@@ -300,12 +308,6 @@ impl TaskSchedulerService {
                                     return Err(TaskSchedulerError::Transaction(e));
                                 }
                             }
-                        }
-                        Ok(result) => {
-                            for error in &result {
-                                error!("Failed to process some context requests: {:?}", error);
-                            }
-                            return Err(TaskSchedulerError::SchedulingRequests(result));
                         }
                         Err(e) => {
                             error!("Failed to process context requests: {}", e);

@@ -3,17 +3,16 @@ use integration_test_tools::{expect, validator::cleanup};
 use magicblock_program::{ID as MAGIC_PROGRAM_ID, TASK_CONTEXT_PUBKEY};
 use magicblock_task_scheduler::SchedulerDatabase;
 use program_flexi_counter::{
-    instruction::{
-        create_cancel_task_ix, create_delegate_ix, create_init_ix,
-        create_schedule_task_ix,
-    },
+    instruction::{create_cancel_task_ix, create_schedule_task_ix},
     state::FlexiCounter,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use test_task_scheduler::{send_memo_tx, setup_validator};
+use test_task_scheduler::{
+    create_delegated_counter, send_memo_tx, setup_validator,
+};
 
 #[test]
 fn test_cancel_ongoing_task() {
@@ -28,45 +27,7 @@ fn test_cancel_ongoing_task() {
         validator
     );
 
-    // Initialize the counter
-    let blockhash = expect!(
-        ctx.try_chain_client().and_then(|client| client
-            .get_latest_blockhash()
-            .map_err(|e| anyhow::anyhow!(
-                "Failed to get latest blockhash: {}",
-                e
-            ))),
-        validator
-    );
-    expect!(
-        ctx.send_transaction_chain(
-            &mut Transaction::new_signed_with_payer(
-                &[create_init_ix(payer.pubkey(), "test".to_string())],
-                Some(&payer.pubkey()),
-                &[&payer],
-                blockhash,
-            ),
-            &[&payer]
-        ),
-        validator
-    );
-
-    // Delegate the counter to the ephem validator
-    expect!(
-        ctx.send_transaction_chain(
-            &mut Transaction::new_signed_with_payer(
-                &[create_delegate_ix(payer.pubkey())],
-                Some(&payer.pubkey()),
-                &[&payer],
-                blockhash,
-            ),
-            &[&payer]
-        ),
-        validator
-    );
-
-    // Wait for account to be delegated
-    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
+    create_delegated_counter(&ctx, &payer, &mut validator);
 
     // Noop tx to make sure the noop program is cloned
     let ephem_blockhash = send_memo_tx(&ctx, &payer, &mut validator);
