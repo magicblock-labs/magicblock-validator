@@ -143,7 +143,7 @@ fn test_reschedule_task() {
     );
 
     // Wait for the task to be rescheduled
-    expect!(ctx.wait_for_delta_slot_ephem(5), validator);
+    expect!(ctx.wait_for_delta_slot_ephem(6), validator);
 
     // Check that the task was scheduled in the database
     let db = expect!(SchedulerDatabase::new(db_path), validator);

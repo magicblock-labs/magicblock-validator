@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use log::*;
 use rusqlite::{params, Connection};
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
 
@@ -110,7 +109,6 @@ impl SchedulerDatabase {
             ],
         )?;
 
-        trace!("Inserted task {} into database", task.id);
         Ok(())
     }
 
@@ -130,7 +128,6 @@ impl SchedulerDatabase {
             params![last_execution, now, task_id],
         )?;
 
-        trace!("Updated task {} after execution", task_id);
         Ok(())
     }
 
@@ -143,7 +140,7 @@ impl SchedulerDatabase {
             "INSERT INTO failed_scheduling (timestamp, task_id, error) VALUES (?, ?, ?)",
             params![Utc::now().timestamp_millis(), task_id, error],
         )?;
-        trace!("Inserted failed scheduling: {:?}", task_id);
+
         Ok(())
     }
 
@@ -156,7 +153,7 @@ impl SchedulerDatabase {
             "INSERT INTO failed_tasks (timestamp, task_id, error) VALUES (?, ?, ?)",
             params![Utc::now().timestamp_millis(), task_id, error],
         )?;
-        trace!("Inserted failed task {} into database", task_id);
+
         Ok(())
     }
 
@@ -168,14 +165,14 @@ impl SchedulerDatabase {
             "UPDATE tasks SET executions_left = 0 WHERE id = ?",
             [task_id],
         )?;
-        trace!("Unscheduled task {}", task_id);
+
         Ok(())
     }
 
     pub fn remove_task(&self, task_id: u64) -> Result<(), TaskSchedulerError> {
         self.conn
             .execute("DELETE FROM tasks WHERE id = ?", [task_id])?;
-        trace!("Removed task {} from database", task_id);
+
         Ok(())
     }
 

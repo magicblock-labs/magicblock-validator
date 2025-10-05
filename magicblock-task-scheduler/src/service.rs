@@ -115,7 +115,6 @@ impl TaskSchedulerService {
         let requests = &task_context.requests;
         let mut result = Vec::with_capacity(requests.len());
         for request in requests {
-            trace!("Processing task scheduling request: {request:?}");
             match request {
                 TaskRequest::Schedule(schedule_request) => {
                     if let Err(e) =
@@ -159,10 +158,7 @@ impl TaskSchedulerService {
         // Convert request to task and register in database
         let task = CrankTask::from(schedule_request);
         self.register_task(&task)?;
-        trace!(
-            "Processed schedule request for task {}",
-            schedule_request.id
-        );
+
         Ok(())
     }
 
@@ -189,16 +185,11 @@ impl TaskSchedulerService {
 
         // Remove task from database
         self.unregister_task(cancel_request.task_id)?;
-        trace!(
-            "Processed cancel request for task {}",
-            cancel_request.task_id
-        );
+
         Ok(())
     }
 
     fn execute_task(&mut self, task: &DbTask) -> TaskSchedulerResult<()> {
-        trace!("Executing task {}", task.id);
-
         let output = self.process_transaction(task.instructions.clone())?;
 
         // If any instruction fails, the task is cancelled
@@ -226,11 +217,6 @@ impl TaskSchedulerService {
 
         let current_time = chrono::Utc::now().timestamp_millis();
         self.db.update_task_after_execution(task.id, current_time)?;
-        trace!(
-            "Task {} has {} executions left",
-            task.id,
-            task.executions_left
-        );
 
         Ok(())
     }
@@ -291,8 +277,6 @@ impl TaskSchedulerService {
 
                     let mut task_context = bincode::deserialize::<TaskContext>(context_account.data()).unwrap_or_default();
 
-                    trace!("Task context deserialized: {:?}", task_context);
-
                     match self.process_context_requests(&mut task_context) {
                         Ok(result) if result.is_empty() => {
                             if task_context.requests.is_empty() {
@@ -304,7 +288,7 @@ impl TaskSchedulerService {
                             // We need to freeze the bank to avoid race conditions
                             // This is done with an instruction to the magic program.
                             // It avoids race conditions with write access to accountsDb
-                            trace!("Resetting task context");
+                            trace!("Resetting task context after processing {} requests", task_context.requests.len());
                             let output = self.process_transaction(vec![
                                 InstructionUtils::process_tasks_instruction(
                                     &validator_authority_id(),

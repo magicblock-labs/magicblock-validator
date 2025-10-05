@@ -40,4 +40,7 @@ pub enum TaskSchedulerError {
 
     #[error("Failed to deserialize task context: {0:?}")]
     ContextDeserialization(Vec<u8>),
+
+    #[error("Task {0} already exists and is owned by {1}, not {2}")]
+    UnauthorizedReplacing(u64, String, String),
 }

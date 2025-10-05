@@ -27,7 +27,6 @@ version = "0.0.0"
 edition = "2021"
 
 [workspace.dependencies]
-magicblock-config = { path = "../magicblock-config" }
 anyhow = "1.0.86"
 async-trait = "0.1.77"
 borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
@@ -49,6 +48,7 @@ magicblock-committor-program = { path = "../magicblock-committor-program", featu
   "no-entrypoint",
 ] }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
+magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = [

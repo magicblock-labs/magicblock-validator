@@ -141,9 +141,7 @@ impl AccountsStorage {
         // https://github.com/magicblock-labs/magicblock-validator/issues/334
         assert!(
             head.load(Relaxed) < self.meta.total_blocks as u64,
-            "database is full: head: {}, total_blocks: {}",
-            head.load(Relaxed),
-            self.meta.total_blocks
+            "database is full",
         );
 
         // SAFETY:
