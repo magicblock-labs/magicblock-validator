@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use magicblock_core::traits::AccountsBank;
 use std::sync::Arc;
 
@@ -81,7 +82,7 @@ impl AccountDumper for AccountDumperBank {
             // this is only to present make the compiler happy
             BlockHash::new_unique(),
         );
-        let result = self.execute_transaction(transaction)?;
+        let result = self.execute_transaction(transaction).await?;
         if let Some(mut acc) = self.accountsdb.get_account(pubkey) {
             acc.set_delegated(false);
             self.accountsdb.insert_account(pubkey, &acc);
@@ -108,7 +109,7 @@ impl AccountDumper for AccountDumperBank {
             // this is only to present make the compiler happy
             BlockHash::new_unique(),
         );
-        let result = self.execute_transaction(transaction)?;
+        let result = self.execute_transaction(transaction).await?;
         if let Some(mut acc) = self.accountsdb.get_account(pubkey) {
             acc.set_delegated(true);
             self.accountsdb.insert_account(pubkey, &acc);

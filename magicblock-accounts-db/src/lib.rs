@@ -252,12 +252,13 @@ impl AccountsDb {
         std::thread::spawn(move || {
             // acquire the lock, effectively stopping the world, nothing should be able
             // to modify underlying accounts database while this lock is active
-            let _locked = this.synchronizer.write();
+            let lock = this.synchronizer.write();
             // flush everything before taking the snapshot, in order to ensure consistent state
             this.flush();
 
             let used_storage = this.storage.utilized_mmap();
-            if let Err(err) = this.snapshot_engine.snapshot(slot, used_storage)
+            if let Err(err) =
+                this.snapshot_engine.snapshot(slot, used_storage, lock)
             {
                 warn!(
                     "failed to take snapshot at {}, slot {slot}: {err}",

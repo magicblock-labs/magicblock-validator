@@ -3,7 +3,7 @@ use std::{cmp::min, sync::Arc, time::Duration};
 use log::{error, info, warn};
 use solana_measure::measure::Measure;
 use tokio::{
-    task::{spawn_blocking, JoinError, JoinHandle},
+    task::{JoinError, JoinHandle},
     time::interval,
 };
 use tokio_util::sync::CancellationToken;

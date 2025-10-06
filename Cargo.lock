@@ -3562,6 +3562,7 @@ dependencies = [
  "magicblock-chainlink",
  "magicblock-committor-service",
  "magicblock-config",
+ "magicblock-core",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-ledger",
  "magicblock-metrics",
