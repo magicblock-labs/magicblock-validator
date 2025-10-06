@@ -79,7 +79,7 @@ fn test_schedule_commit_directly_with_single_ix() {
     } = ctx.fields();
     let ix = create_schedule_commit_ix(
         payer_ephem.pubkey(),
-        magic_program::id(),
+        magicblock_magic_program_api::id(),
         magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
