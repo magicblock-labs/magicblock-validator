@@ -1,6 +1,6 @@
 use std::{
     fs,
-    net::{TcpListener, TcpStream},
+    net::TcpStream,
     path::{Path, PathBuf},
     process::{self, Child},
     thread::sleep,
@@ -10,6 +10,7 @@ use std::{
 use magicblock_config::{
     EphemeralConfig, MetricsConfig, ProgramConfig, RpcConfig,
 };
+use random_port::{PortPicker, Protocol};
 use tempfile::TempDir;
 
 use crate::{
@@ -194,14 +195,14 @@ pub fn start_magicblock_validator_with_config_struct(
     config: EphemeralConfig,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Option<process::Child>, u16) {
-    let random_port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let port = PortPicker::new()
+        .random(true)
+        .protocol(Protocol::Tcp)
+        .pick()
+        .unwrap();
     let config = EphemeralConfig {
         rpc: RpcConfig {
-            port: random_port,
+            port,
             ..config.rpc.clone()
         },
         metrics: MetricsConfig {
@@ -235,7 +236,7 @@ pub fn start_magicblock_validator_with_config_struct(
             loaded_chain_accounts,
             release,
         ),
-        random_port,
+        port,
     )
 }
 

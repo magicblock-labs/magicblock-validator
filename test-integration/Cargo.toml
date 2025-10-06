@@ -67,6 +67,7 @@ program-mini = { path = "./programs/mini" }
 program-schedulecommit = { path = "programs/schedulecommit" }
 program-schedulecommit-security = { path = "programs/schedulecommit-security" }
 rand = "0.8.5"
+random-port = "0.1.1"
 rayon = "1.10.0"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
