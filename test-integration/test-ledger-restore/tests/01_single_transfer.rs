@@ -72,7 +72,7 @@ fn write_ledger(
     );
     assert_eq!(lamports, 2_222_333, cleanup(&mut validator));
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
     validator.kill().unwrap();
     (validator, sig, slot, keypair1, keypair2)

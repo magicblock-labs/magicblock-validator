@@ -19,29 +19,6 @@ use test_ledger_restore::{
 };
 
 #[test]
-fn test_restore_ledger_reset() {
-    init_logger!();
-
-    debug!("1. Reset");
-    test_resume_strategy(LedgerResumeStrategy::Reset {
-        slot: 1000,
-        keep_accounts: false,
-    });
-
-    debug!("2. Reset with accounts");
-    test_resume_strategy(LedgerResumeStrategy::Reset {
-        slot: 1000,
-        keep_accounts: false,
-    });
-
-    debug!("3. Resume");
-    test_resume_strategy(LedgerResumeStrategy::Resume { replay: true });
-
-    debug!("4. Replay");
-    test_resume_strategy(LedgerResumeStrategy::Resume { replay: false });
-}
-
-#[test]
 fn test_restore_ledger_resume_strategy_reset_all() {
     init_logger!();
 
@@ -114,6 +91,7 @@ pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {
     // Wait for the next snapshot
     // We wait for one slot after the snapshot but the restarting validator will be at the previous slot
     let slot = wait_for_next_slot_after_account_snapshot(
+        &ctx,
         &mut validator,
         SNAPSHOT_FREQUENCY,
     ) - 1;
@@ -134,7 +112,7 @@ pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {
     debug!("✅ Created transfer transaction {}", signature);
 
     // Wait more to be sure the ledger is persisted
-    wait_for_ledger_persist(&mut validator);
+    wait_for_ledger_persist(&ctx, &mut validator);
     debug!("✅ Ledger persisted");
 
     (validator, slot, signature)

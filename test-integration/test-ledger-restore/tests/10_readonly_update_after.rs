@@ -93,24 +93,29 @@ macro_rules! add_to_readonly {
 }
 
 macro_rules! add_readonly_to_main {
-    ($validator:expr, $payer_main:expr, $payer_readonly:expr, $expected:expr) => {
+    ($ctx:expr, $validator:expr, $payer_main:expr, $payer_readonly:expr, $expected:expr) => {
         let ix = create_add_counter_ix(
             $payer_main.pubkey(),
             $payer_readonly.pubkey(),
         );
-        confirm_tx_with_payer_ephem(ix, $payer_main, $validator);
+        confirm_tx_with_payer_ephem(ix, $payer_main, $ctx, $validator);
 
         let counter_main_ephem =
-            fetch_counter_ephem(&$payer_main.pubkey(), $validator);
+            fetch_counter_ephem($ctx, &$payer_main.pubkey(), $validator);
         assert_eq!(counter_main_ephem, $expected, cleanup($validator));
     };
 }
 
 macro_rules! assert_counter_states {
-    ($validator:expr, $expected:expr) => {
-        assert_counter_state!($validator, $expected.main, COUNTER_MAIN);
-        assert_counter_state!($validator, $expected.readonly, COUNTER_READONLY);
-    };
+    ($ctx:expr, $validator:expr, $expected:expr) => {{
+        assert_counter_state!($ctx, $validator, $expected.main, COUNTER_MAIN);
+        assert_counter_state!(
+            $ctx,
+            $validator,
+            $expected.readonly,
+            COUNTER_READONLY
+        );
+    }};
 }
 
 // -----------------
@@ -208,10 +213,11 @@ fn write(
         );
 
         let ix = create_add_ix(payer_main.pubkey(), 2);
-        confirm_tx_with_payer_ephem(ix, payer_main, &mut validator);
+        confirm_tx_with_payer_ephem(ix, payer_main, &ctx, &mut validator);
         debug!("✅ Added 2 to main counter {counter_main_pda} in ephem");
 
         assert_counter_state!(
+            &ctx,
             &mut validator,
             Counter {
                 payer: &payer_main.pubkey(),
@@ -244,6 +250,7 @@ fn write(
     // Add Readonly Counter to Main Counter
     // At this point readonly counter is cloned into ephemeral
     add_readonly_to_main!(
+        &ctx,
         &mut validator,
         payer_main,
         payer_readonly,
@@ -258,6 +265,7 @@ fn write(
     );
 
     assert_counter_states!(
+        &ctx,
         &mut validator,
         ExpectedCounterStates {
             main: Counter {
@@ -287,7 +295,7 @@ fn write(
 
     debug!("✅ Verified counter states before shutdown");
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
     (validator, slot)
 }
 
@@ -300,7 +308,7 @@ fn read(
     let payer_readonly = &payer_readonly_kp.pubkey();
     let programs = get_programs_with_flexi_counter();
 
-    let (_, mut validator, _) = setup_validator_with_local_remote(
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         Some(programs),
         false,
@@ -314,6 +322,7 @@ fn read(
     let (counter_readonly_pda, _) = FlexiCounter::pda(payer_readonly);
 
     assert_counter_states!(
+        &ctx,
         &mut validator,
         ExpectedCounterStates {
             main: Counter {
@@ -346,6 +355,7 @@ fn read(
 
     // We use it to add to the main counter to ensure that its latest state is used
     add_readonly_to_main!(
+        &ctx,
         &mut validator,
         payer_main_kp,
         payer_readonly_kp,
@@ -360,6 +370,7 @@ fn read(
     );
 
     assert_counter_states!(
+        &ctx,
         &mut validator,
         ExpectedCounterStates {
             main: Counter {
@@ -415,6 +426,7 @@ fn read(
     // Here we also ensure that we can use the delegated counter to add
     // the updated readonly count to it
     add_readonly_to_main!(
+        &ctx,
         &mut validator,
         payer_main_kp,
         payer_readonly_kp,
@@ -429,6 +441,7 @@ fn read(
     );
 
     assert_counter_states!(
+        &ctx,
         &mut validator,
         ExpectedCounterStates {
             main: Counter {

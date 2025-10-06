@@ -122,7 +122,7 @@ fn write(
     );
     assert_eq!(lamports2, 3_333_444, cleanup(&mut validator));
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
     (validator, sig1, sig2, slot, keypair1, keypair2, keypair3)
 }

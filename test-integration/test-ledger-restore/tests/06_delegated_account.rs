@@ -21,7 +21,6 @@ const COUNTER: &str = "Counter of Payer";
 fn test_restore_ledger_containing_delegated_account() {
     init_logger!();
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
-
     let (mut validator, _, payer) = write(&ledger_path);
     validator.kill().unwrap();
 
@@ -44,8 +43,9 @@ fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
     {
         // Increment counter in ephemeral
         let ix = create_add_ix(payer.pubkey(), 3);
-        confirm_tx_with_payer_ephem(ix, &payer, &mut validator);
-        let counter = fetch_counter_ephem(&payer.pubkey(), &mut validator);
+        confirm_tx_with_payer_ephem(ix, &payer, &ctx, &mut validator);
+        let counter =
+            fetch_counter_ephem(&ctx, &payer.pubkey(), &mut validator);
         assert_eq!(
             counter,
             FlexiCounter {
@@ -57,12 +57,12 @@ fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
         );
     }
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
     (validator, slot, payer)
 }
 
 fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
-    let (_, mut validator, _) = setup_validator_with_local_remote(
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
         false,
@@ -72,7 +72,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
 
     wait_for_cloned_accounts_hydration();
 
-    let counter_decoded = fetch_counter_ephem(payer, &mut validator);
+    let counter_decoded = fetch_counter_ephem(&ctx, payer, &mut validator);
     assert_eq!(
         counter_decoded,
         FlexiCounter {

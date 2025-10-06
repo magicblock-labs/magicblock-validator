@@ -72,7 +72,7 @@ fn write(ledger_path: &Path) -> (Child, u64, Signature, i64, Keypair) {
     debug!("✅ Created transfer transaction {signature}");
 
     // Wait for the tx to be written to disk and slot to be finalized
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
     debug!("✅ Ledger persisted at slot {slot}");
 
     let block_time = expect!(

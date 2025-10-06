@@ -112,7 +112,7 @@ fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
         );
     }
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
     debug!("✅ Ledger persisted at slot {}", slot);
 
     (validator, slot, transfer_receiver)

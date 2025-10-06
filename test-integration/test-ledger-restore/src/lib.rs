@@ -74,7 +74,7 @@ pub fn setup_offline_validator(
         validator: validator_config,
         ..Default::default()
     };
-    let (default_tmpdir_config, Some(mut validator)) =
+    let (default_tmpdir_config, Some(mut validator), port) =
         start_magicblock_validator_with_config_struct(
             config,
             &Default::default(),
@@ -83,7 +83,10 @@ pub fn setup_offline_validator(
         panic!("validator should set up correctly");
     };
 
-    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
+    let ctx = expect!(
+        IntegrationTestContext::try_new_with_ephem_port(port),
+        validator
+    );
     (default_tmpdir_config, validator, ctx)
 }
 
@@ -163,13 +166,16 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
             .unwrap();
     }
 
-    let (default_tmpdir_config, Some(mut validator)) =
+    let (default_tmpdir_config, Some(mut validator), port) =
         start_magicblock_validator_with_config_struct(config, loaded_accounts)
     else {
         panic!("validator should set up correctly");
     };
 
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let ctx = expect!(
+        IntegrationTestContext::try_new_with_ephem_port(port),
+        validator
+    );
     (default_tmpdir_config, validator, ctx)
 }
 
@@ -311,20 +317,6 @@ pub fn transfer_lamports(
     sig
 }
 
-pub fn send_tx_with_payer_ephem(
-    ix: Instruction,
-    payer: &Keypair,
-    validator: &mut Child,
-) -> Signature {
-    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
-
-    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
-    let signers = &[payer];
-
-    let sig = expect!(ctx.send_transaction_ephem(&mut tx, signers), validator);
-    sig
-}
-
 pub fn send_tx_with_payer_chain(
     ix: Instruction,
     payer: &Keypair,
@@ -341,10 +333,9 @@ pub fn send_tx_with_payer_chain(
 pub fn confirm_tx_with_payer_ephem(
     ix: Instruction,
     payer: &Keypair,
+    ctx: &IntegrationTestContext,
     validator: &mut Child,
 ) -> Signature {
-    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
-
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
 
@@ -375,10 +366,10 @@ pub fn confirm_tx_with_payer_chain(
 }
 
 pub fn fetch_counter_ephem(
+    ctx: &IntegrationTestContext,
     payer: &Pubkey,
     validator: &mut Child,
 ) -> FlexiCounter {
-    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
     let ephem_client = expect!(ctx.try_ephem_client(), validator);
     fetch_counter(payer, ephem_client, validator, "ephem")
 }
@@ -418,9 +409,10 @@ pub fn fetch_counter_owner_chain(
 // -----------------
 /// Waits for sufficient slot advances to guarantee that the ledger for
 /// the current slot was persisted
-pub fn wait_for_ledger_persist(validator: &mut Child) -> Slot {
-    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
-
+pub fn wait_for_ledger_persist(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+) -> Slot {
     // I noticed test flakiness if we just advance to next slot once
     // It seems then the ledger hasn't been fully written by the time
     // we kill the validator and the most recent transactions + account
@@ -498,7 +490,7 @@ pub struct Counter<'a> {
 
 #[macro_export]
 macro_rules! assert_counter_state {
-    ($validator:expr, $expected:expr, $label:ident) => {
+    ($ctx:expr, $validator:expr, $expected:expr, $label:ident) => {
         let counter_chain =
             $crate::fetch_counter_chain($expected.payer, $validator);
         ::cleanass::assert_eq!(
@@ -512,7 +504,7 @@ macro_rules! assert_counter_state {
         );
 
         let counter_ephem =
-            $crate::fetch_counter_ephem($expected.payer, $validator);
+            $crate::fetch_counter_ephem($ctx, $expected.payer, $validator);
         ::cleanass::assert_eq!(
             counter_ephem,
             ::program_flexi_counter::state::FlexiCounter {
@@ -533,11 +525,10 @@ pub fn wait_for_cloned_accounts_hydration() {
 
 /// Waits for the next slot after the snapshot frequency
 pub fn wait_for_next_slot_after_account_snapshot(
+    ctx: &IntegrationTestContext,
     validator: &mut Child,
     snapshot_frequency: u64,
 ) -> Slot {
-    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
-
     let initial_slot = expect!(ctx.get_slot_ephem(), validator);
     let slots_until_next_snapshot =
         snapshot_frequency - (initial_slot % snapshot_frequency);

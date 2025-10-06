@@ -6,7 +6,7 @@ use cleanass::assert;
 use integration_test_tools::{
     conversions::get_rpc_transwise_error_msg, expect, expect_err,
     loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir, unwrap,
-    validator::cleanup, IntegrationTestContext,
+    validator::cleanup,
 };
 use program_flexi_counter::{
     instruction::{
@@ -40,6 +40,7 @@ const COUNTER: &str = "Counter of Payer";
 // 1. Check that it was cloned with the updated state
 // 2. Verify that it is no longer useable as as delegated account in the validator
 
+#[ignore = "This is currently no longer supported since we don't hydrate delegated accounts on startup"]
 #[test]
 fn test_restore_ledger_with_account_undelegated_before_restart() {
     init_logger!();
@@ -104,10 +105,11 @@ fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
 
     // Add 2 to counter in ephemeral
     let ix = create_add_ix(payer.pubkey(), 2);
-    confirm_tx_with_payer_ephem(ix, &payer, &mut validator);
+    confirm_tx_with_payer_ephem(ix, &payer, &ctx, &mut validator);
     debug!("✅ Added 2 to counter {counter_pda} in ephemeral");
 
     assert_counter_state!(
+        &ctx,
         &mut validator,
         Counter {
             payer: &payer.pubkey(),
@@ -124,7 +126,7 @@ fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
     );
     debug!("✅ Verified counter state after adding 2");
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
     debug!("✅ Ledger persisted at slot {slot}");
     (validator, slot, payer)
 }
@@ -154,7 +156,7 @@ fn update_counter_between_restarts(payer: &Keypair) -> Child {
     //     );
 
     let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 3, true);
-    let sig = confirm_tx_with_payer_ephem(ix, payer, &mut validator);
+    let sig = confirm_tx_with_payer_ephem(ix, payer, &ctx, &mut validator);
     debug!("✅ Added 3 and scheduled commit to counter {counter_pda} with undelegation");
 
     let res = expect!(
@@ -168,6 +170,7 @@ fn update_counter_between_restarts(payer: &Keypair) -> Child {
     // validator instance shut down, thus we start from 0:0 again when
     // we add 3
     assert_counter_state!(
+        &ctx,
         &mut validator,
         Counter {
             payer: &payer.pubkey(),
@@ -190,7 +193,7 @@ fn update_counter_between_restarts(payer: &Keypair) -> Child {
 fn read(ledger_path: &Path, payer: &Keypair) -> Child {
     let programs = get_programs_with_flexi_counter();
 
-    let (_, mut validator, _) = setup_validator_with_local_remote(
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         Some(programs),
         false,
@@ -199,7 +202,6 @@ fn read(ledger_path: &Path, payer: &Keypair) -> Child {
     );
     debug!("✅ Started validator after restore");
 
-    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
     let ix = create_add_ix(payer.pubkey(), 1);
 
     let (counter_pda, _) = FlexiCounter::pda(&payer.pubkey());

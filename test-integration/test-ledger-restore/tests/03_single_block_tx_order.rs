@@ -119,7 +119,7 @@ fn write(
         LAMPORTS_PER_SOL,
     );
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
     (validator, slot, keypairs)
 }

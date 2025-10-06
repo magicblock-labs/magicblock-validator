@@ -105,10 +105,10 @@ fn write(
     // Add 2 to main counter in ephemeral
     {
         let ix = create_add_ix(payer_main.pubkey(), 2);
-        confirm_tx_with_payer_ephem(ix, &payer_main, &mut validator);
+        confirm_tx_with_payer_ephem(ix, &payer_main, &ctx, &mut validator);
 
         let counter_main_ephem =
-            fetch_counter_ephem(&payer_main.pubkey(), &mut validator);
+            fetch_counter_ephem(&ctx, &payer_main.pubkey(), &mut validator);
 
         assert_eq!(
             counter_main_ephem,
@@ -145,10 +145,10 @@ fn write(
     {
         let ix =
             create_add_counter_ix(payer_main.pubkey(), payer_readonly.pubkey());
-        confirm_tx_with_payer_ephem(ix, &payer_main, &mut validator);
+        confirm_tx_with_payer_ephem(ix, &payer_main, &ctx, &mut validator);
 
         let counter_main_ephem =
-            fetch_counter_ephem(&payer_main.pubkey(), &mut validator);
+            fetch_counter_ephem(&ctx, &payer_main.pubkey(), &mut validator);
         assert_eq!(
             counter_main_ephem,
             FlexiCounter {
@@ -167,7 +167,7 @@ fn write(
     );
     debug!("Payer main ephemeral lamports: {payer_main_ephem_lamports}");
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
     (validator, slot, payer_main_ephem_lamports, payer_main)
 }
 
@@ -199,7 +199,7 @@ fn read(
     debug!("✅ Verified main payer ephemeral lamports");
 
     let counter_readonly_ephem =
-        fetch_counter_ephem(payer_readonly, &mut validator);
+        fetch_counter_ephem(&ctx, payer_readonly, &mut validator);
     assert_eq!(
         counter_readonly_ephem,
         FlexiCounter {
@@ -211,7 +211,8 @@ fn read(
     );
     debug!("✅ Verified readonly counter state after restore");
 
-    let counter_main_ephem = fetch_counter_ephem(payer_main, &mut validator);
+    let counter_main_ephem =
+        fetch_counter_ephem(&ctx, payer_main, &mut validator);
     assert_eq!(
         counter_main_ephem,
         FlexiCounter {

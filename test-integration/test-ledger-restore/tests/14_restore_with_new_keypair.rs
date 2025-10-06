@@ -90,7 +90,7 @@ fn write(ledger_path: &Path) -> (Child, u64) {
     assert_eq!(owner, loader_v4::ID, cleanup(&mut validator));
     assert!(executable, cleanup(&mut validator));
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
     (validator, slot)
 }
