@@ -1845,22 +1845,22 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.2.7"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=54fe6f8#54fe6f84350d869294e6b5620f263880445b7127"
+version = "0.3.0"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=faad3eb3b44cba9f80ca059297b91053f64def27#faad3eb3b44cba9f80ca059297b91053f64def27"
 dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk-attribute-commit",
  "ephemeral-rollups-sdk-attribute-delegate",
  "ephemeral-rollups-sdk-attribute-ephemeral",
- "magicblock-core 0.1.7",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+ "magicblock-delegation-program 1.1.1",
+ "magicblock-magic-program-api 0.2.1 (git+https://github.com/magicblock-labs/magicblock-validator.git?rev=959b63c37eaf07cce31a434c4dcad28ed3d452ef)",
  "solana-program",
 ]
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.2.7"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=54fe6f8#54fe6f84350d869294e6b5620f263880445b7127"
+version = "0.3.0"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=faad3eb3b44cba9f80ca059297b91053f64def27#faad3eb3b44cba9f80ca059297b91053f64def27"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1868,8 +1868,8 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.2.7"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=54fe6f8#54fe6f84350d869294e6b5620f263880445b7127"
+version = "0.3.0"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=faad3eb3b44cba9f80ca059297b91053f64def27#faad3eb3b44cba9f80ca059297b91053f64def27"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1878,8 +1878,8 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
-version = "0.2.7"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=54fe6f8#54fe6f84350d869294e6b5620f263880445b7127"
+version = "0.3.0"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=faad3eb3b44cba9f80ca059297b91053f64def27#faad3eb3b44cba9f80ca059297b91053f64def27"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3036,7 +3036,7 @@ dependencies = [
  "borsh 1.5.7",
  "log",
  "magicblock-config",
- "magicblock-core 0.2.1",
+ "magicblock-core",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "rayon",
  "serde",
@@ -3696,9 +3696,9 @@ dependencies = [
  "magicblock-accounts-api",
  "magicblock-bank",
  "magicblock-committor-service",
- "magicblock-core 0.2.1",
+ "magicblock-core",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.2.1",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-processor",
@@ -3763,11 +3763,11 @@ dependencies = [
  "magicblock-bank",
  "magicblock-committor-service",
  "magicblock-config",
- "magicblock-core 0.2.1",
+ "magicblock-core",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-geyser-plugin",
  "magicblock-ledger",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.2.1",
  "magicblock-metrics",
  "magicblock-perf-service",
  "magicblock-processor",
@@ -3799,7 +3799,7 @@ dependencies = [
  "log",
  "magicblock-accounts-db",
  "magicblock-config",
- "magicblock-core 0.2.1",
+ "magicblock-core",
  "magicblock-program",
  "rand 0.8.5",
  "serde",
@@ -3907,20 +3907,9 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.1.7"
-source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=aa010d3#aa010d3ca3aaee780bbffb1a2281caafaa4b21f5"
-dependencies = [
- "bincode",
- "serde",
- "solana-account",
- "solana-program",
-]
-
-[[package]]
-name = "magicblock-core"
 version = "0.2.1"
 dependencies = [
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.2.1",
 ]
 
 [[package]]
@@ -3943,6 +3932,23 @@ dependencies = [
 name = "magicblock-delegation-program"
 version = "1.0.0"
 source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20#5fb8d20f3567113dc75c2c8047a80129f792c5bb"
+dependencies = [
+ "bincode",
+ "borsh 1.5.7",
+ "bytemuck",
+ "num_enum",
+ "paste",
+ "solana-curve25519",
+ "solana-program",
+ "solana-security-txt",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "magicblock-delegation-program"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8dd321b31bda8396e214ea675460f57e9e1770a69ea783ab63c0646666d9c410"
 dependencies = [
  "bincode",
  "borsh 1.5.7",
@@ -3995,7 +4001,7 @@ dependencies = [
  "log",
  "magicblock-accounts-db",
  "magicblock-bank",
- "magicblock-core 0.2.1",
+ "magicblock-core",
  "num-format",
  "num_cpus",
  "prost",
@@ -4017,6 +4023,16 @@ dependencies = [
 [[package]]
 name = "magicblock-magic-program-api"
 version = "0.2.1"
+dependencies = [
+ "bincode",
+ "serde",
+ "solana-program",
+]
+
+[[package]]
+name = "magicblock-magic-program-api"
+version = "0.2.1"
+source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=959b63c37eaf07cce31a434c4dcad28ed3d452ef#959b63c37eaf07cce31a434c4dcad28ed3d452ef"
 dependencies = [
  "bincode",
  "serde",
@@ -4087,8 +4103,8 @@ version = "0.2.1"
 dependencies = [
  "bincode",
  "lazy_static",
- "magicblock-core 0.2.1",
- "magicblock-magic-program-api",
+ "magicblock-core",
+ "magicblock-magic-program-api 0.2.1",
  "magicblock-metrics",
  "num-derive",
  "num-traits",
@@ -4197,7 +4213,7 @@ dependencies = [
  "magicblock-accounts",
  "magicblock-bank",
  "magicblock-config",
- "magicblock-core 0.2.1",
+ "magicblock-core",
  "magicblock-geyser-plugin",
  "magicblock-processor",
  "magicblock-program",
@@ -5172,7 +5188,7 @@ dependencies = [
  "bincode",
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.2.1",
  "serde",
  "solana-program",
 ]
@@ -6013,7 +6029,7 @@ dependencies = [
  "anyhow",
  "borsh 1.5.7",
  "integration-test-tools",
- "magicblock-core 0.2.1",
+ "magicblock-core",
  "program-schedulecommit",
  "solana-program",
  "solana-rpc-client",
@@ -6052,8 +6068,8 @@ dependencies = [
  "ephemeral-rollups-sdk",
  "integration-test-tools",
  "log",
- "magicblock-core 0.2.1",
- "magicblock-magic-program-api",
+ "magicblock-core",
+ "magicblock-magic-program-api 0.2.1",
  "program-schedulecommit",
  "schedulecommit-client",
  "solana-program",
@@ -6068,8 +6084,8 @@ name = "schedulecommit-test-security"
 version = "0.0.0"
 dependencies = [
  "integration-test-tools",
- "magicblock-core 0.2.1",
- "magicblock-magic-program-api",
+ "magicblock-core",
+ "magicblock-magic-program-api 0.2.1",
  "program-schedulecommit",
  "program-schedulecommit-security",
  "schedulecommit-client",

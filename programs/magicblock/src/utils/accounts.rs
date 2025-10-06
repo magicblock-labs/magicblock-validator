@@ -1,6 +1,7 @@
 #![allow(unused)] // most of these utilities will come in useful later
 use std::cell::RefCell;
 
+use magicblock_magic_program_api::args::ShortAccountMeta;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
@@ -10,8 +11,6 @@ use solana_sdk::{
     pubkey::Pubkey,
     transaction_context::TransactionContext,
 };
-
-use crate::magic_scheduled_base_intent::ShortAccountMeta;
 
 pub(crate) fn find_tx_index_of_instruction_account(
     invoke_context: &InvokeContext,

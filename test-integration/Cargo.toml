@@ -34,7 +34,7 @@ bincode = "1.3.3"
 chrono = "0.4"
 cleanass = "0.0.1"
 ctrlc = "3.4.7"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "54fe6f8" }
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "faad3eb3b44cba9f80ca059297b91053f64def27" }
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"

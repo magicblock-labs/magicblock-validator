@@ -162,7 +162,7 @@ pub enum FlexiCounterInstruction {
     /// 7. `[]` The system program
     /// 8. `[write]` The Magic Context
     /// 9. `[]` The Magic Program
-    CreateRedelegationIntont,
+    CreateRedelegationIntent,
 
     /// Schedules a task to increase the counter.
     ///
@@ -370,12 +370,17 @@ pub fn create_intent_single_committee_ix(
 pub fn create_intent_ix(
     payers: Vec<Pubkey>,
     transfer_destination: Pubkey,
-    counter_diffs: Vec<i64>,
-    is_undelegate: bool,
+    counter_diffs: Option<Vec<i64>>,
     compute_units: u32,
 ) -> Instruction {
     let program_id = &crate::id();
 
+    let (is_undelegate, counter_diffs) =
+        if let Some(counter_diffs) = counter_diffs {
+            (true, counter_diffs)
+        } else {
+            (false, vec![])
+        };
     let payers_meta = payers.iter().map(|payer| AccountMeta::new(*payer, true));
     let counter_metas = payers
         .iter()
@@ -426,7 +431,7 @@ pub fn create_redelegation_intent_ix(payer: Pubkey) -> Instruction {
 
     Instruction::new_with_borsh(
         *program_id,
-        &FlexiCounterInstruction::CreateRedelegationIntont,
+        &FlexiCounterInstruction::CreateRedelegationIntent,
         account_metas,
     )
 }
