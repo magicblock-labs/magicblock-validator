@@ -99,7 +99,7 @@ pub fn create_delegated_counter(
                 &[&payer],
                 blockhash,
             ),
-            &[&payer]
+            &[payer]
         ),
         validator
     );
@@ -113,7 +113,7 @@ pub fn create_delegated_counter(
                 &[&payer],
                 blockhash,
             ),
-            &[&payer]
+            &[payer]
         ),
         validator
     );
