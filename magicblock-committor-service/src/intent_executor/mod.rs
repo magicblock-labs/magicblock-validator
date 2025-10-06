@@ -1,8 +1,8 @@
 pub mod error;
 pub(crate) mod intent_executor_factory;
-mod single_stage_executor;
+pub mod single_stage_executor;
 pub mod task_info_fetcher;
-mod two_stage_executor;
+pub mod two_stage_executor;
 
 use std::{ops::ControlFlow, sync::Arc, time::Duration};
 

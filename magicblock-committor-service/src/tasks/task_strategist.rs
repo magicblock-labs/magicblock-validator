@@ -249,8 +249,6 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 
 #[cfg(test)]
 mod tests {
-    use std::any::Any;
-
     use dlp::args::Context;
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, CommittedAccount, ProgramArgs,
@@ -261,10 +259,7 @@ mod tests {
     use super::*;
     use crate::{
         persist::IntentPersisterImpl,
-        tasks::{
-            buffer_task::BufferTask, BaseActionTask, CommitTask, TaskStrategy,
-            UndelegateTask,
-        },
+        tasks::{BaseActionTask, CommitTask, TaskStrategy, UndelegateTask},
     };
 
     // Helper to create a simple commit task
