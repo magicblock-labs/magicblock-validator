@@ -8,7 +8,7 @@
 - [x] `test-issues` removed since we won't support frequent commits
 - [x] `test-table-mania` all passing
 - [ ] `test-config` 2/2 failing (Transaction::sign failed with error NotEnoughSigners -fixed) (Thorsten)
-- [ ] `test-ledger-restore` 4/16 failing, one test no longer supported
+- [ ] `test-ledger-restore` 2/16 failing, one test no longer supported
 `11_undelegate_before_restart`
 - [ ] `test-magicblock-api` 2/4 failing (incorrect airdrop)
 - [x] `test-pubsub` were failing due to airdrop similar to above and were fixed via escrowed airdrop
@@ -16,13 +16,19 @@
 
 - [x] clone not found escrow accounts with 0 lamports (Thorsten - fixed)
 - [x] replay - remove all non-delegated accounts from bank (Thorsten - fixed)
-- [ ] correctly handle empty readonly accounts (Thorsten)
+- [x] correctly handle empty readonly accounts (Thorsten)
 - [x] we are removing programs on resume, ensured ledger replay completed before that (Thorsten)
 
-## Still failing
+## Ledger Restore tests Still failing
 
+- test_restore_ledger_resume_strategy_reset_keep_accounts
+- test_restore_ledger_with_flexi_counter_same_slot
+- test_restore_ledger_with_flexi_counter_separate_slot
+
+Still seeing the below, even though it should've been fixed::
 ```
-SLOW: test_restore_ledger_resume_strategy_reset_keep_accounts
+NextSlotAfterLedgerProcessingNotMatchingBankSlot(85, 86)
+magicblock-api/src/magic_validator.rs:519
 ```
 
 ## Current Issues
