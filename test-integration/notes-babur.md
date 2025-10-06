@@ -19,6 +19,11 @@
 - [ ] correctly handle empty readonly accounts (Thorsten)
 - [x] we are removing programs on resume, ensured ledger replay completed before that (Thorsten)
 
+## Still failing
+
+```
+SLOW: test_restore_ledger_resume_strategy_reset_keep_accounts
+```
 
 ## Current Issues
 
