@@ -110,6 +110,10 @@ impl IntegrationTestContext {
     }
 
     pub fn try_new() -> Result<Self> {
+        Self::try_new_with_ephem_port(8899)
+    }
+
+    pub fn try_new_with_ephem_port(port: u16) -> Result<Self> {
         color_backtrace::install();
 
         let commitment = CommitmentConfig::confirmed();
@@ -119,7 +123,7 @@ impl IntegrationTestContext {
             commitment,
         );
         let ephem_client = RpcClient::new_with_commitment(
-            Self::url_ephem().to_string(),
+            Self::url_local_ephem_at_port(port).to_string(),
             commitment,
         );
         let validator_identity = ephem_client.get_identity()?;
@@ -1006,6 +1010,9 @@ impl IntegrationTestContext {
     // -----------------
     pub fn url_ephem() -> &'static str {
         URL_EPHEM
+    }
+    pub fn url_local_ephem_at_port(port: u16) -> String {
+        format!("http://localhost:{}", port)
     }
     pub fn url_chain() -> &'static str {
         URL_CHAIN

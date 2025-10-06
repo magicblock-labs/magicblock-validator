@@ -1,13 +1,15 @@
 use std::{
     fs,
-    net::TcpStream,
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{self, Child},
     thread::sleep,
     time::Duration,
 };
 
-use magicblock_config::{EphemeralConfig, ProgramConfig};
+use magicblock_config::{
+    EphemeralConfig, MetricsConfig, ProgramConfig, RpcConfig,
+};
 use tempfile::TempDir;
 
 use crate::{
@@ -185,11 +187,29 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
 pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 
 /// Stringifies the config and writes it to a temporary config file.
+/// Sets the RPC port to a random available port to allow multiple tests to
+/// run in parallel.
 /// Then uses that config to start the validator.
 pub fn start_magicblock_validator_with_config_struct(
     config: EphemeralConfig,
     loaded_chain_accounts: &LoadedAccounts,
-) -> (TempDir, Option<process::Child>) {
+) -> (TempDir, Option<process::Child>, u16) {
+    let random_port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let config = EphemeralConfig {
+        rpc: RpcConfig {
+            port: random_port,
+            ..config.rpc.clone()
+        },
+        metrics: MetricsConfig {
+            enabled: false,
+            ..config.metrics.clone()
+        },
+        ..config.clone()
+    };
     let workspace_dir = resolve_workspace_dir();
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
     let release = std::env::var("RELEASE").is_ok();
@@ -215,6 +235,7 @@ pub fn start_magicblock_validator_with_config_struct(
             loaded_chain_accounts,
             release,
         ),
+        random_port,
     )
 }
 

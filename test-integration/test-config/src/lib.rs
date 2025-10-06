@@ -68,7 +68,7 @@ pub fn start_validator_with_clone_config(
         ..Default::default()
     };
 
-    let (default_tmpdir, Some(mut validator)) =
+    let (default_tmpdir, Some(mut validator), port) =
         start_magicblock_validator_with_config_struct(
             config,
             loaded_chain_accounts,
@@ -77,7 +77,10 @@ pub fn start_validator_with_clone_config(
         panic!("validator should set up correctly");
     };
 
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let ctx = expect!(
+        IntegrationTestContext::try_new_with_ephem_port(port),
+        validator
+    );
     (default_tmpdir, validator, ctx)
 }
 
