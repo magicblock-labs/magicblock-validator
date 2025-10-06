@@ -9,6 +9,8 @@ use crate::utils;
 
 pub mod instructions;
 pub mod transactions;
+
+#[allow(dead_code)]
 pub const TEST_TABLE_CLOSE: bool = cfg!(feature = "test_table_close");
 
 pub async fn sleep_millis(millis: u64) {

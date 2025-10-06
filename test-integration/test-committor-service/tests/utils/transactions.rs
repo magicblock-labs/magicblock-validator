@@ -67,6 +67,7 @@ macro_rules! get_account {
     }};
 }
 
+#[allow(dead_code)]
 pub async fn tx_logs_contain(
     rpc_client: &RpcClient,
     signature: &Signature,

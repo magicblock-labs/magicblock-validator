@@ -48,6 +48,7 @@ pub struct TestFixture {
 }
 
 impl TestFixture {
+    #[allow(dead_code)]
     pub async fn new() -> Self {
         let authority = Keypair::new();
         TestFixture::new_with_keypair(authority).await

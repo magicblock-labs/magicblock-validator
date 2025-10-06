@@ -9,11 +9,10 @@ use std::{
 
 use borsh::to_vec;
 use dlp::pda::ephemeral_balance_pda_from_payer;
-use futures::future::{join_all, try_join_all};
+use futures::future::join_all;
 use magicblock_committor_service::{
     intent_executor::{
         error::TransactionStrategyExecutionError,
-        single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         ExecutionOutput, IntentExecutor, IntentExecutorImpl,
     },
@@ -36,7 +35,7 @@ use program_flexi_counter::{
     state::FlexiCounter,
 };
 use solana_account::Account;
-use solana_pubkey::{pubkey, Pubkey};
+use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
@@ -46,7 +45,6 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
-use tokio::{task::JoinHandle, try_join};
 
 use crate::{
     common::TestFixture,
@@ -209,7 +207,7 @@ async fn test_cpi_limite_error_parsing() {
         task_info_fetcher,
     } = TestEnv::setup().await;
 
-    let counters = (0..COUNTER_NUM).into_iter().map(|el| async {
+    let counters = (0..COUNTER_NUM).into_iter().map(|_| async {
         let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
         setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
             .await;
@@ -379,7 +377,7 @@ async fn test_cpi_limite_error_recovery() {
         task_info_fetcher,
     } = TestEnv::setup().await;
 
-    let counters = (0..COUNTER_NUM).into_iter().map(|el| async {
+    let counters = (0..COUNTER_NUM).into_iter().map(|_| async {
         let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
         setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
             .await;
@@ -432,6 +430,106 @@ async fn test_cpi_limite_error_recovery() {
         }
     ));
 
+    verify_committed_accounts(
+        fixture.rpc_client.get_inner(),
+        &committed_accounts,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_commit_id_actions_cpi_limit_recovery() {
+    const COUNTER_SIZE: u64 = 102;
+    // COUNTER_NUM = 10 or larger result in CpiLimitError even with 2 stage execution
+    const COUNTER_NUM: u64 = 9;
+
+    let TestEnv {
+        fixture,
+        intent_executor,
+        task_info_fetcher,
+    } = TestEnv::setup().await;
+
+    // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
+    // We also craft unique on-chain data so we can verify post-commit state exactly.
+    let counters = (0..COUNTER_NUM).into_iter().map(|_| async {
+        let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
+        setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
+            .await;
+        (counter_auth, account)
+    });
+    let counters = join_all(counters).await;
+
+    // Build committed accounts with distinct serialized data to verify later
+    let committed_accounts: Vec<_> = counters
+        .iter()
+        .enumerate()
+        .map(|(i, (counter, account))| {
+            let data = FlexiCounter {
+                label: format!("acct-{i}"),
+                count: i as u64,
+                updates: (i as u64) * 2,
+            };
+            let mut account = account.clone();
+            account.data = to_vec(&data).unwrap();
+            CommittedAccount {
+                pubkey: FlexiCounter::pda(&counter.pubkey()).0,
+                account,
+            }
+        })
+        .collect();
+
+    // We use CommitAndUndelegate so initial single-stage flow is guaranteed to be heavy.
+    let payer = setup_payer(fixture.rpc_client.get_inner()).await;
+
+    let commit_action = CommitType::Standalone(committed_accounts.clone());
+    let undelegate_action =
+        failing_undelegate_action(payer.pubkey(), committed_accounts[0].pubkey);
+    let base_intent =
+        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+            commit_action,
+            undelegate_action,
+        });
+    let scheduled_intent = create_scheduled_intent(base_intent);
+
+    // Force CommitIDError by invalidating the commit-nonce cache before running
+    let pubkeys: Vec<_> = committed_accounts.iter().map(|c| c.pubkey).collect();
+    let _ = task_info_fetcher
+        .fetch_next_commit_ids(&pubkeys)
+        .await
+        .unwrap();
+
+    // Build a single-flow strategy (commit + finalize in one go),
+    // then run the single-stage execution flow that can recover by splitting into two stages.
+    let strategy = single_flow_transaction_strategy(
+        &fixture.authority.pubkey(),
+        &task_info_fetcher,
+        &scheduled_intent,
+    )
+    .await;
+
+    let res = intent_executor
+        .single_stage_execution_flow(
+            scheduled_intent,
+            strategy,
+            &None::<IntentPersisterImpl>,
+        )
+        .await;
+
+    println!("{:?}", res);
+    // We expect recovery to succeed by splitting into two stages (commit, then finalize)
+    assert!(
+        res.is_ok(),
+        "Expected recovery from CommitID, Actions, and CpiLimit errors"
+    );
+    assert!(matches!(
+        res.unwrap(),
+        ExecutionOutput::TwoStage {
+            commit_signature: _,
+            finalize_signature: _,
+        }
+    ));
+
+    // Verify on-chain state matches our committed account data
     verify_committed_accounts(
         fixture.rpc_client.get_inner(),
         &committed_accounts,
@@ -605,8 +703,6 @@ async fn verify_committed_accounts(
     rpc_client: &Arc<RpcClient>,
     expected_counters: &[CommittedAccount],
 ) {
-    use borsh::BorshDeserialize;
-
     let assert_futs = expected_counters.iter().map(|committed_account| async {
         let account = rpc_client
             .get_account(&committed_account.pubkey)
