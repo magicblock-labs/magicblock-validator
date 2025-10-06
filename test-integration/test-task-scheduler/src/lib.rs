@@ -22,8 +22,8 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 
-pub const MEMO_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+pub const NOOP_PROGRAM_ID: Pubkey =
+    Pubkey::from_str_const("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
 pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;
 
@@ -122,7 +122,7 @@ pub fn create_delegated_counter(
     expect!(ctx.wait_for_delta_slot_ephem(10), validator);
 }
 
-pub fn send_memo_tx(
+pub fn send_noop_tx(
     ctx: &IntegrationTestContext,
     payer: &Keypair,
     validator: &mut Child,
@@ -138,7 +138,7 @@ pub fn send_memo_tx(
         validator
     );
     let noop_instruction =
-        Instruction::new_with_bytes(MEMO_PROGRAM_ID, &[0], vec![]);
+        Instruction::new_with_bytes(NOOP_PROGRAM_ID, &[0], vec![]);
     expect!(
         ctx.send_transaction_ephem(
             &mut Transaction::new_signed_with_payer(

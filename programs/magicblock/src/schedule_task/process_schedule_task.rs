@@ -147,14 +147,14 @@ mod test {
     use super::*;
     use crate::{
         test_utils::{
-            process_instruction, COUNTER_PROGRAM_ID, MEMO_PROGRAM_ID,
+            process_instruction, COUNTER_PROGRAM_ID, NOOP_PROGRAM_ID,
         },
         utils::instruction_utils::InstructionUtils,
         validator::generate_validator_authority_if_needed,
     };
 
     fn create_simple_ix() -> Instruction {
-        Instruction::new_with_borsh(MEMO_PROGRAM_ID, b"test memo", vec![])
+        Instruction::new_with_borsh(NOOP_PROGRAM_ID, b"test noop", vec![])
     }
 
     fn create_complex_ix(

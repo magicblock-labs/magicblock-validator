@@ -20,8 +20,8 @@ id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
 path = "../schedulecommit/elfs/mdp.so"
 
 [[program]]
-id = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
-path = "../programs/memo/memo.so"
+id = "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+path = "../programs/noop/noop.so"
 
 [rpc]
 port = 7799

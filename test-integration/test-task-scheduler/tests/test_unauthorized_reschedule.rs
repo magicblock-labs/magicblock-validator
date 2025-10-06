@@ -10,7 +10,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use test_task_scheduler::{
-    create_delegated_counter, send_memo_tx, setup_validator,
+    create_delegated_counter, send_noop_tx, setup_validator,
 };
 
 #[test]
@@ -35,7 +35,7 @@ fn test_unauthorized_reschedule() {
     create_delegated_counter(&ctx, &different_payer, &mut validator);
 
     // Noop tx to make sure the noop program is cloned
-    let ephem_blockhash = send_memo_tx(&ctx, &payer, &mut validator);
+    let ephem_blockhash = send_noop_tx(&ctx, &payer, &mut validator);
 
     // Schedule a task
     let task_id = 1;

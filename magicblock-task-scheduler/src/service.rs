@@ -40,8 +40,8 @@ use crate::{
     errors::{TaskSchedulerError, TaskSchedulerResult},
 };
 
-const MEMO_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+const NOOP_PROGRAM_ID: Pubkey =
+    Pubkey::from_str_const("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
 pub struct TaskSchedulerService {
     /// Database for persisting tasks
@@ -338,7 +338,7 @@ impl TaskSchedulerService {
         // We prepend a noop instruction to make each transaction unique.
         let blockhash = self.bank.last_blockhash();
         let noop_instruction = Instruction::new_with_bytes(
-            MEMO_PROGRAM_ID,
+            NOOP_PROGRAM_ID,
             &self
                 .tx_counter
                 .fetch_add(1, Ordering::Relaxed)
