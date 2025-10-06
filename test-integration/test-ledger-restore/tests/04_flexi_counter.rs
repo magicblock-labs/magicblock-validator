@@ -39,7 +39,6 @@ const SLOT_MS: u64 = 150;
 
 => Does not confirm transaction
 */
-#[ignore]
 #[test]
 fn test_restore_ledger_with_flexi_counter_same_slot() {
     init_logger!();
@@ -96,6 +95,11 @@ fn write(
         }
         init_and_delegate_counter_and_payer(&ctx, &mut validator, COUNTER1)
     };
+    debug!(
+        "✅ Delegated counter {counter1_pda} for {}",
+        payer1.pubkey()
+    );
+
     let (payer2, counter2_pda) = {
         // Create and send init counter2 instruction
         if separate_slot {
@@ -103,6 +107,10 @@ fn write(
         }
         init_and_delegate_counter_and_payer(&ctx, &mut validator, COUNTER2)
     };
+    debug!(
+        "✅ Delegated counter {counter2_pda} for {}",
+        payer2.pubkey()
+    );
 
     {
         // Execute ((0) + 5) * 2 on counter1
