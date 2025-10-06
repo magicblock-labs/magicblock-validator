@@ -28,7 +28,6 @@ magicblock-committor-service = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-mutator = { workspace = true }
-magicblock-program = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
