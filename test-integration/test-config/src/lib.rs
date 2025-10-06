@@ -134,7 +134,7 @@ pub fn delegate_and_clone(
     );
 
     // 3. Send a transaction to ephemeral validator to trigger cloning
-    let add_ix = create_add_ix(payer_chain.pubkey(), 1);
+    let add_ix = create_add_ix(payer_escrowed.pubkey(), 1);
     expect!(
         ctx.send_and_confirm_instructions_with_payer_ephem(
             &[add_ix],
