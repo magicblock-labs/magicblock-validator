@@ -195,11 +195,16 @@ pub fn start_magicblock_validator_with_config_struct(
     config: EphemeralConfig,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Option<process::Child>, u16) {
-    let port = PortPicker::new()
-        .random(true)
-        .protocol(Protocol::Tcp)
-        .pick()
-        .unwrap();
+    let port = std::env::var("EPHEM_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or_else(|| {
+            PortPicker::new()
+                .random(true)
+                .protocol(Protocol::Tcp)
+                .pick()
+                .unwrap()
+        });
     let config = EphemeralConfig {
         rpc: RpcConfig {
             port,
