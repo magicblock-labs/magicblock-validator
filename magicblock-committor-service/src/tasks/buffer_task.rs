@@ -51,14 +51,13 @@ impl BufferTask {
             committed_data.len(),
             MAX_WRITE_CHUNK_SIZE,
         );
-        let preparation_state = PreparationState::Required(PreparationTask {
+
+        PreparationState::Required(PreparationTask {
             commit_id: commit_task.commit_id,
             pubkey: commit_task.committed_account.pubkey,
             committed_data,
             chunks,
-        });
-
-        preparation_state
+        })
     }
 }
 

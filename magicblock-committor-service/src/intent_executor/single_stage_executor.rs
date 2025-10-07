@@ -185,7 +185,7 @@ where
 impl<'a, T, F> Deref for SingleStageExecutor<'a, T, F> {
     type Target = IntentExecutorImpl<T, F>;
 
-    fn deref(&self) -> &Self::Target {
+    fn deref(&self) -> &'a Self::Target {
         self.inner
     }
 }

@@ -103,7 +103,7 @@ impl DeliveryPreparator {
         );
 
         // Initialize buffer account. Init + reallocs
-        self.initialize_buffer_account(authority, &preparation_task)
+        self.initialize_buffer_account(authority, preparation_task)
             .await?;
 
         // Persist initialization success
@@ -116,7 +116,7 @@ impl DeliveryPreparator {
         );
 
         // Writing chunks with some retries
-        self.write_buffer_with_retries(authority, &preparation_task, 5)
+        self.write_buffer_with_retries(authority, preparation_task, 5)
             .await?;
         // Persist that buffer account initiated successfully
         let update_status = CommitStatus::BufferAndChunkFullyInitialized;
@@ -360,7 +360,6 @@ impl DeliveryPreparator {
 
         let close_futs = cleanup_tasks
             .chunks(CleanupTask::max_tx_fit_count_with_budget())
-            .into_iter()
             .map(|cleanup_tasks| {
                 let compute_units = cleanup_tasks[0].compute_units()
                     * cleanup_tasks.len() as u32;

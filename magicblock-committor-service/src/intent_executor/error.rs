@@ -150,7 +150,7 @@ impl TransactionStrategyExecutionError {
                 // If index exists and corresponds to Action - return ActionsError
                 if let Some(TaskType::Action) = tasks
                     .get(action_index as usize)
-                    .map(|task: &Box<dyn BaseTask>| task.task_type())
+                    .map(|task| task.task_type())
                 {
                     TransactionStrategyExecutionError::ActionsError
                 } else {

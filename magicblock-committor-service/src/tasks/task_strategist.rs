@@ -35,7 +35,7 @@ impl TransactionStrategy {
             std::mem::replace(
                 &mut self.lookup_tables_keys,
                 TaskStrategist::collect_lookup_table_keys(
-                    &authority,
+                    authority,
                     &self.optimized_tasks,
                 ),
             )

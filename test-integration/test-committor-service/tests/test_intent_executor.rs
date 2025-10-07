@@ -10,7 +10,7 @@ use std::{
 
 use borsh::to_vec;
 use dlp::pda::ephemeral_balance_pda_from_payer;
-use futures::{future::join_all, stream, StreamExt};
+use futures::future::join_all;
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
@@ -53,7 +53,7 @@ use solana_sdk::{
 use crate::{
     common::TestFixture,
     utils::{
-        ensure_validator_authority, get_validator_auth,
+        ensure_validator_authority,
         transactions::{
             fund_validator_auth_and_ensure_validator_fees_vault,
             init_and_delegate_account_on_chain,
@@ -212,7 +212,7 @@ async fn test_action_error_parsing() {
 }
 
 #[tokio::test]
-async fn test_cpi_limite_error_parsing() {
+async fn test_cpi_limits_error_parsing() {
     const COUNTER_SIZE: u64 = 102;
     const COUNTER_NUM: u64 = 10;
 
@@ -223,7 +223,7 @@ async fn test_cpi_limite_error_parsing() {
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
 
-    let counters = (0..COUNTER_NUM).into_iter().map(|_| async {
+    let counters = (0..COUNTER_NUM).map(|_| async {
         let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
         setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
             .await;
@@ -299,10 +299,19 @@ async fn test_commit_id_error_recovery() {
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
 
+    let commit_ids_by_pk: HashMap<_, _> = [&committed_account]
+        .iter()
+        .map(|el| {
+            (
+                el.pubkey,
+                task_info_fetcher.peek_commit_id(&el.pubkey).unwrap(),
+            )
+        })
+        .collect();
     verify(
         &fixture.table_mania,
-        &task_info_fetcher,
         fixture.rpc_client.get_inner(),
+        &commit_ids_by_pk,
         &pre_test_tablemania_state,
         &[committed_account],
     )
@@ -317,7 +326,7 @@ async fn test_action_error_recovery() {
         fixture,
         intent_executor,
         task_info_fetcher: _,
-        pre_test_tablemania_state: _,
+        pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
     let payer = setup_payer(fixture.rpc_client.get_inner()).await;
@@ -346,6 +355,17 @@ async fn test_action_error_recovery() {
         .await;
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+
+    verify_committed_accounts_state(
+        fixture.rpc_client.get_inner(),
+        &[committed_account],
+    )
+    .await;
+    verify_table_mania_released(
+        &fixture.table_mania,
+        &pre_test_tablemania_state,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -356,7 +376,7 @@ async fn test_commit_id_and_action_errors_recovery() {
         fixture,
         intent_executor,
         task_info_fetcher,
-        pre_test_tablemania_state: _,
+        pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
     let payer = setup_payer(fixture.rpc_client.get_inner()).await;
@@ -392,10 +412,21 @@ async fn test_commit_id_and_action_errors_recovery() {
         .await;
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+
+    verify_committed_accounts_state(
+        fixture.rpc_client.get_inner(),
+        &[committed_account],
+    )
+    .await;
+    verify_table_mania_released(
+        &fixture.table_mania,
+        &pre_test_tablemania_state,
+    )
+    .await;
 }
 
 #[tokio::test]
-async fn test_cpi_limite_error_recovery() {
+async fn test_cpi_limits_error_recovery() {
     const COUNTER_SIZE: u64 = 102;
     const COUNTER_NUM: u64 = 10;
 
@@ -406,7 +437,7 @@ async fn test_cpi_limite_error_recovery() {
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
-    let counters = (0..COUNTER_NUM).into_iter().map(|_| async {
+    let counters = (0..COUNTER_NUM).map(|_| async {
         let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
         setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
             .await;
@@ -459,10 +490,19 @@ async fn test_cpi_limite_error_recovery() {
         }
     ));
 
+    let commit_ids_by_pk: HashMap<_, _> = committed_accounts
+        .iter()
+        .map(|el| {
+            (
+                el.pubkey,
+                task_info_fetcher.peek_commit_id(&el.pubkey).unwrap(),
+            )
+        })
+        .collect();
     verify(
         &fixture.table_mania,
-        &task_info_fetcher,
         fixture.rpc_client.get_inner(),
+        &commit_ids_by_pk,
         &pre_test_tablemania_state,
         &committed_accounts,
     )
@@ -479,12 +519,12 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         fixture,
         intent_executor,
         task_info_fetcher,
-        pre_test_tablemania_state: _,
+        pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
     // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
     // We also craft unique on-chain data so we can verify post-commit state exactly.
-    let counters = (0..COUNTER_NUM).into_iter().map(|_| async {
+    let counters = (0..COUNTER_NUM).map(|_| async {
         let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
         setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
             .await;
@@ -526,7 +566,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
 
     // Force CommitIDError by invalidating the commit-nonce cache before running
     let pubkeys: Vec<_> = committed_accounts.iter().map(|c| c.pubkey).collect();
-    let _ = task_info_fetcher
+    let mut invalidated_keys = task_info_fetcher
         .fetch_next_commit_ids(&pubkeys)
         .await
         .unwrap();
@@ -562,10 +602,30 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         }
     ));
 
-    // Verify on-chain state matches our committed account data
-    verify_committed_accounts_state(
+    let commit_ids_by_pk: HashMap<_, _> = committed_accounts
+        .iter()
+        .map(|el| {
+            (
+                el.pubkey,
+                task_info_fetcher.peek_commit_id(&el.pubkey).unwrap(),
+            )
+        })
+        .collect();
+    verify(
+        &fixture.table_mania,
+        fixture.rpc_client.get_inner(),
+        &commit_ids_by_pk,
+        &pre_test_tablemania_state,
+        &committed_accounts,
+    )
+    .await;
+
+    // Verify that incorrectly created buffers are also cleaned up
+    invalidated_keys.values_mut().for_each(|el| *el += 1);
+    verify_buffers_cleaned_up(
         fixture.rpc_client.get_inner(),
         &committed_accounts,
+        &invalidated_keys,
     )
     .await;
 }
@@ -713,13 +773,13 @@ async fn single_flow_transaction_strategy(
 ) -> TransactionStrategy {
     let mut tasks = TaskBuilderImpl::commit_tasks(
         task_info_fetcher,
-        &intent,
+        intent,
         &None::<IntentPersisterImpl>,
     )
     .await
     .unwrap();
     let finalize_tasks =
-        TaskBuilderImpl::finalize_tasks(task_info_fetcher, &intent)
+        TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent)
             .await
             .unwrap();
     tasks.extend(finalize_tasks);
@@ -749,17 +809,15 @@ async fn verify_committed_accounts_state(
 
 async fn verify_buffers_cleaned_up(
     rpc_client: &Arc<RpcClient>,
-    task_info_fetcher: &Arc<CacheTaskInfoFetcher>,
     commited_accounts: &[CommittedAccount],
+    commit_ids_by_pk: &HashMap<Pubkey, u64>,
 ) {
     let validator_auth = validator_authority_id();
-    let commit_ids = commited_accounts
-        .iter()
-        .map(|el| task_info_fetcher.peek_commit_id(&el.pubkey).unwrap());
-
-    for (committed_account, commit_id) in
-        commited_accounts.iter().zip(commit_ids)
-    {
+    for committed_account in commited_accounts {
+        let Some(commit_id) = commit_ids_by_pk.get(&committed_account.pubkey)
+        else {
+            continue;
+        };
         let (buffer_pda, _) = pdas::buffer_pda(
             &validator_auth,
             &committed_account.pubkey,
@@ -799,17 +857,13 @@ async fn verify_table_mania_released(
 
 async fn verify(
     table_mania: &TableMania,
-    task_info_fetcher: &Arc<CacheTaskInfoFetcher>,
     rpc_client: &Arc<RpcClient>,
+    commit_ids_by_pk: &HashMap<Pubkey, u64>,
     pre_start_state: &HashMap<Pubkey, usize>,
     committed_accounts: &[CommittedAccount],
 ) {
     verify_committed_accounts_state(rpc_client, committed_accounts).await;
-    verify_buffers_cleaned_up(
-        rpc_client,
-        task_info_fetcher,
-        committed_accounts,
-    )
-    .await;
+    verify_buffers_cleaned_up(rpc_client, committed_accounts, commit_ids_by_pk)
+        .await;
     verify_table_mania_released(table_mania, pre_start_state).await;
 }

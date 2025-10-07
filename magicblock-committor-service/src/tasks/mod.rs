@@ -18,9 +18,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk::instruction::Instruction;
 use thiserror::Error;
 
-use crate::{
-    tasks::visitor::Visitor, transactions::MAX_ENCODED_TRANSACTION_SIZE,
-};
+use crate::tasks::visitor::Visitor;
 
 pub mod args_task;
 pub mod buffer_task;
@@ -38,7 +36,7 @@ pub enum TaskType {
     Action,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PreparationState {
     NotNeeded,
     Required(PreparationTask),
@@ -166,6 +164,7 @@ impl PreparationTask {
     }
 
     /// Returns realloc instruction required for Buffer preparation
+    #[allow(clippy::let_and_return)]
     pub fn realloc_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
         let buffer_account_size = self.committed_data.len() as u64;
         let realloc_instructions =
@@ -185,6 +184,7 @@ impl PreparationTask {
     }
 
     /// Returns realloc instruction required for Buffer preparation
+    #[allow(clippy::let_and_return)]
     pub fn write_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
         let chunks_iter =
             ChangesetChunks::new(&self.chunks, self.chunks.chunk_size())
@@ -239,7 +239,7 @@ impl PreparationTask {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CleanupTask {
     pub pubkey: Pubkey,
     pub commit_id: u64,

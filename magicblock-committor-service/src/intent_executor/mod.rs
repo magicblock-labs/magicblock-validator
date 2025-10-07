@@ -315,12 +315,12 @@ where
         // We reset TaskInfoFetcher for all committed accounts
         // We re-fetch them to fix out of sync tasks
         self.task_info_fetcher
-            .reset(ResetType::Specific(&committed_pubkeys));
+            .reset(ResetType::Specific(committed_pubkeys));
         let commit_ids = self
             .task_info_fetcher
-            .fetch_next_commit_ids(&committed_pubkeys)
+            .fetch_next_commit_ids(committed_pubkeys)
             .await
-            .map_err(|err| TaskBuilderError::CommitTasksBuildError(err))?;
+            .map_err(TaskBuilderError::CommitTasksBuildError)?;
 
         // Here we find the broken tasks and reset them
         // Broken tasks are prepared incorrectly so they have to be cleaned up
@@ -364,7 +364,6 @@ where
         let (optimized_tasks, action_tasks) = strategy
             .optimized_tasks
             .drain(..)
-            .into_iter()
             .partition(|el| el.task_type() != TaskType::Action);
         strategy.optimized_tasks = optimized_tasks;
 
