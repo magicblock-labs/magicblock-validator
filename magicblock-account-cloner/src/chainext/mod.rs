@@ -317,7 +317,9 @@ impl Cloner for ChainlinkCloner {
         if account.delegated() {
             self.maybe_prepare_lookup_tables(pubkey, *account.owner());
         }
-        self.send_transaction(tx).await
+        self.send_transaction(tx).await.map_err(|err| {
+            ClonerError::FailedToCloneRegularAccount(pubkey, Box::new(err))
+        })
     }
 
     async fn clone_program(
@@ -325,10 +327,19 @@ impl Cloner for ChainlinkCloner {
         program: LoadedProgram,
     ) -> ClonerResult<Signature> {
         let recent_blockhash = self.block.load().blockhash;
-        if let Some(tx) =
-            self.try_transaction_to_clone_program(program, recent_blockhash)?
+        let program_id = program.program_id;
+        if let Some(tx) = self
+            .try_transaction_to_clone_program(program, recent_blockhash)
+            .map_err(|err| {
+                ClonerError::FailedToCreateCloneProgramTransaction(
+                    program_id,
+                    Box::new(err),
+                )
+            })?
         {
-            let res = self.send_transaction(tx).await?;
+            let res = self.send_transaction(tx).await.map_err(|err| {
+                ClonerError::FailedToCloneProgram(program_id, Box::new(err))
+            })?;
             // After cloning a program we need to wait at least one slot for it to become
             // usable, so we do that here
             let current_slot = self.accounts_db.slot();
