@@ -95,7 +95,6 @@ where
         };
 
         // Special case
-        // TODO(edwin): maybe return and handle separately?
         let committed_pubkeys = base_intent.get_committed_pubkeys();
         if i < RECURSION_CEILING
             && matches!(

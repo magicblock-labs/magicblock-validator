@@ -81,7 +81,6 @@ where
             }
         };
 
-        // TODO: verify
         junk.push(last_commit_strategy);
         let commit_signature = commit_result.map_err(|err| {
             IntentExecutorError::from_strategy_execution_error(
