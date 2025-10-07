@@ -32,16 +32,16 @@ impl HttpDispatcher {
         {
             return Err(TransactionError::AlreadyProcessed.into());
         }
-        debug!("Received transaction: {signature}, ensuring accounts");
+        trace!("Received transaction: {signature}, ensuring accounts");
         self.ensure_transaction_accounts(&transaction).await?;
 
         // Based on the preflight flag, either execute and await the result,
         // or schedule (fire-and-forget) for background processing.
         if config.skip_preflight {
-            debug!("Scheduling transaction: {signature}");
+            trace!("Scheduling transaction: {signature}");
             self.transactions_scheduler.schedule(transaction).await?;
         } else {
-            debug!("Executing transaction: {signature}");
+            trace!("Executing transaction: {signature}");
             self.transactions_scheduler.execute(transaction).await?;
         }
 
