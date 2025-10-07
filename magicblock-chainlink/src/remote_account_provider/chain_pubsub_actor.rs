@@ -313,7 +313,7 @@ impl ChainPubsubActor {
             loop {
                 tokio::select! {
                     _ = cancellation_token.cancelled() => {
-                        trace!("Subscription for {pubkey} was cancelled");
+                        debug!("Subscription for {pubkey} was cancelled");
                         unsubscribe().await;
                         break;
                     }
@@ -330,7 +330,8 @@ impl ChainPubsubActor {
                                 error!("Failed to send {pubkey} subscription update: {err:?}");
                             });
                         } else {
-                            warn!("Subscription for {pubkey} ended by update stream");
+                            // This is normal to happen if we unsubscribe from a particular account
+                            debug!("Subscription for {pubkey} ended by update stream");
                             break;
                         }
                     }
