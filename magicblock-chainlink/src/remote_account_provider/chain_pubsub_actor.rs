@@ -313,7 +313,7 @@ impl ChainPubsubActor {
             loop {
                 tokio::select! {
                     _ = cancellation_token.cancelled() => {
-                        debug!("Subscription for {pubkey} was cancelled");
+                        trace!("Subscription for {pubkey} was cancelled");
                         unsubscribe().await;
                         break;
                     }
