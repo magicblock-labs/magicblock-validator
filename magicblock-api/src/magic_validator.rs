@@ -484,7 +484,7 @@ impl MagicValidator {
         // we have this number for our max blockhash age in slots, which correspond to 60 seconds
         let max_block_age =
             SOLANA_VALID_BLOCKHASH_AGE / self.config.validator.millis_per_slot;
-        let slot_to_continue_at = process_ledger(
+        let mut slot_to_continue_at = process_ledger(
             &self.ledger,
             &self.accountsdb,
             self.transaction_scheduler.clone(),
@@ -517,12 +517,23 @@ impl MagicValidator {
             return Err(err.into());
         }
         if self.accountsdb.slot() != slot_to_continue_at {
-            return Err(
+            // NOTE: we used to return this error here, but this occurs very frequently
+            // when running ledger restore integration tests, especially after
+            // 6f52e376 (fix: sync accountsdb slot after ledger replay) was added.
+            // It is a somewhat valid scenario in which the accounts db snapshot is more up to
+            // date than the last ledger entry.
+            // This means we lost some history, but our state is most up to date. In this case
+            // we also don't need to replay anything.
+            let err =
                 ApiError::NextSlotAfterLedgerProcessingNotMatchingBankSlot(
                     slot_to_continue_at,
                     self.accountsdb.slot(),
-                ),
+                );
+            warn!(
+                "{err}, correcting to accoutns db slot {}",
+                self.accountsdb.slot()
             );
+            slot_to_continue_at = self.accountsdb.slot();
         }
 
         info!(
