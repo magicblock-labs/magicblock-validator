@@ -42,7 +42,7 @@ pub async fn create_test_client() -> MagicblockRpcClient {
 // Test fixture structure
 pub struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
-    table_mania: TableMania,
+    pub table_mania: TableMania,
     pub authority: Keypair,
     pub compute_budget_config: ComputeBudgetConfig,
 }

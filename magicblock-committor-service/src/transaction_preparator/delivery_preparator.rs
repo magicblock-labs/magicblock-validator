@@ -14,6 +14,7 @@ use magicblock_table_mania::{error::TableManiaError, TableMania};
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
     message::{
         v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
@@ -340,29 +341,56 @@ impl DeliveryPreparator {
             ))
             .await;
 
-        let instructions: Vec<_> = tasks
+        let cleanup_tasks: Vec<_> = tasks
             .iter()
             .filter_map(|task| {
                 if let PreparationState::Cleanup(cleanup_task) =
                     task.preparation_state()
                 {
-                    Some(cleanup_task.instruction(&authority.pubkey()))
+                    Some(cleanup_task)
                 } else {
                     None
                 }
             })
             .collect();
 
-        let close_futs = instructions
+        if cleanup_tasks.is_empty() {
+            return Ok(());
+        }
+
+        let close_futs = cleanup_tasks
             .chunks(CleanupTask::max_tx_fit_count_with_budget())
             .into_iter()
-            .map(|instructions| {
-                self.send_ixs_with_retry(&instructions, authority, 3)
+            .map(|cleanup_tasks| {
+                let compute_units = cleanup_tasks[0].compute_units()
+                    * cleanup_tasks.len() as u32;
+                let mut instructions = vec![
+                    ComputeBudgetInstruction::set_compute_unit_limit(
+                        compute_units,
+                    ),
+                    ComputeBudgetInstruction::set_compute_unit_price(
+                        self.compute_budget_config.compute_unit_price,
+                    ),
+                ];
+                instructions.extend(
+                    cleanup_tasks
+                        .iter()
+                        .map(|task| task.instruction(&authority.pubkey())),
+                );
+
+                async move {
+                    self.send_ixs_with_retry(&instructions, authority, 1).await
+                }
             });
 
         join_all(close_futs)
             .await
             .into_iter()
+            .inspect(|res| {
+                if let Err(err) = res {
+                    error!("Failed to cleanup buffers: {}", err);
+                }
+            })
             .collect::<Result<(), _>>()
     }
 }

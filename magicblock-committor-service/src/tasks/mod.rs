@@ -18,7 +18,9 @@ use solana_pubkey::Pubkey;
 use solana_sdk::instruction::Instruction;
 use thiserror::Error;
 
-use crate::tasks::visitor::Visitor;
+use crate::{
+    tasks::visitor::Visitor, transactions::MAX_ENCODED_TRANSACTION_SIZE,
+};
 
 pub mod args_task;
 pub mod buffer_task;
@@ -259,7 +261,7 @@ impl CleanupTask {
 
     /// Returns a number of [`CleanupTask`]s that is possible to fit in single
     pub const fn max_tx_fit_count_with_budget() -> usize {
-        19
+        8
     }
 
     pub fn chunks_pda(&self, authority: &Pubkey) -> Pubkey {
@@ -443,32 +445,43 @@ fn test_close_buffer_limit() {
         serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE,
     };
 
-    let task = CleanupTask {
-        commit_id: 101,
-        pubkey: Pubkey::new_unique(),
-    };
+    let authority = Keypair::new();
 
+    // Budget ixs (fixed)
     let compute_budget_ix =
-        ComputeBudgetInstruction::set_compute_unit_limit(task.compute_units());
+        ComputeBudgetInstruction::set_compute_unit_limit(30_000);
     let compute_unit_price_ix =
         ComputeBudgetInstruction::set_compute_unit_price(101);
 
-    let authority = Keypair::new();
-    let ixs_iter = (0..CleanupTask::max_tx_fit_count_with_budget())
-        .into_iter()
-        .map(|_| task.instruction(&authority.pubkey()));
+    // Each task unique: commit_id increments; pubkey is new_unique each time
+    let base_commit_id = 101u64;
+    let ixs_iter = (0..CleanupTask::max_tx_fit_count_with_budget()).map(|i| {
+        let task = CleanupTask {
+            commit_id: base_commit_id + i as u64,
+            pubkey: Pubkey::new_unique(),
+        };
+        task.instruction(&authority.pubkey())
+    });
 
     let mut ixs: Vec<_> = [compute_budget_ix, compute_unit_price_ix]
         .into_iter()
         .chain(ixs_iter)
         .collect();
+
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
+    println!("{}", serialize_and_encode_base64(&tx).len());
     assert!(
         serialize_and_encode_base64(&tx).len() <= MAX_ENCODED_TRANSACTION_SIZE
     );
 
-    // Check that 1 more ix will overflow allowed tx size
-    ixs.push(task.instruction(&authority.pubkey()));
+    // One more unique task should overflow
+    let overflow_task = CleanupTask {
+        commit_id: base_commit_id
+            + CleanupTask::max_tx_fit_count_with_budget() as u64,
+        pubkey: Pubkey::new_unique(),
+    };
+    ixs.push(overflow_task.instruction(&authority.pubkey()));
+
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
     assert!(
         serialize_and_encode_base64(&tx).len() > MAX_ENCODED_TRANSACTION_SIZE
