@@ -204,7 +204,7 @@ pub fn init_and_delegate_counter_and_payer(
     //    in the ephemeral
     delegate_accounts(ctx, validator, &[&payer]);
 
-    // 4. Verify all accounts are initialized correctly
+    // 5. Verify all accounts are initialized correctly
     let (counter_pda, _) = FlexiCounter::pda(&payer.pubkey());
     let counter = fetch_counter_chain(&payer.pubkey(), validator);
     assert_eq!(
@@ -216,13 +216,16 @@ pub fn init_and_delegate_counter_and_payer(
         },
         cleanup(validator)
     );
+    let owner = fetch_counter_owner_chain(&payer.pubkey(), validator);
+    assert_eq!(owner, dlp::id(), cleanup(validator));
 
     let payer_chain =
         expect!(ctx.fetch_chain_account(payer.pubkey()), validator);
     assert_eq!(payer_chain.owner, dlp::id(), cleanup(validator));
     assert!(payer_chain.lamports > LAMPORTS_PER_SOL, cleanup(validator));
+
     debug!(
-        "✅ Initialized counter {counter_pda} and delegated payer {}",
+        "✅ Initialized and delegated counter {counter_pda} and payer {}",
         payer.pubkey()
     );
 

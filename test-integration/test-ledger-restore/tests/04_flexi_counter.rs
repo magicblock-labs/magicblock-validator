@@ -4,7 +4,8 @@ use test_kit::init_logger;
 
 use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
+    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    validator::cleanup,
 };
 use magicblock_config::LedgerResumeStrategy;
 use program_flexi_counter::{
@@ -29,16 +30,6 @@ const SLOT_MS: u64 = 150;
 * the same as when it was recorded
 */
 
-/* TODO: @@@ FAILING
-*
-[2025-10-06T13:48:09.888935Z WARN  integration_test_tools::transactions] Simulation Result: 4sG6rbQEBCkuZkMcJFuamkwpQBMdT6zEFueVLSXHC1Ao7GCoXHB1uKhUboqJtYK3fWZLZkXdJyaKX8SZQHTX1sZV
-
-    Replacement Blockhash: RpcBlockhash { blockhash: "4zpH8xdPfdvRKr9Gr6zzqDTknqqCrfDYK8eLM7Uukmea", last_valid_block_height: 1355 }
-
-    Error: InvalidWritableAccount
-
-=> Does not confirm transaction
-*/
 #[test]
 fn test_restore_ledger_with_flexi_counter_same_slot() {
     init_logger!();
@@ -51,7 +42,6 @@ fn test_restore_ledger_with_flexi_counter_same_slot() {
     validator.kill().unwrap();
 }
 
-#[ignore]
 #[test]
 fn test_restore_ledger_with_flexi_counter_separate_slot() {
     init_logger!();
@@ -83,7 +73,7 @@ fn write(
                 keep_accounts: false,
             },
             true,
-            &Default::default(),
+            &LoadedAccounts::with_delegation_program_test_authority(),
         );
 
     expect!(ctx.wait_for_slot_ephem(1), validator);
@@ -219,7 +209,7 @@ fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
         None,
         Some(SLOT_MS),
         LedgerResumeStrategy::Resume { replay: true },
-        false,
+        true,
     );
 
     let counter1_decoded = fetch_counter_ephem(&ctx, payer1, &mut validator);
