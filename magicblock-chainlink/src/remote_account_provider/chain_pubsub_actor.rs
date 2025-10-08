@@ -330,7 +330,6 @@ impl ChainPubsubActor {
                                 error!("Failed to send {pubkey} subscription update: {err:?}");
                             });
                         } else {
-                            // This is normal to happen if we unsubscribe from a particular account
                             debug!("Subscription for {pubkey} ended by update stream");
                             break;
                         }
