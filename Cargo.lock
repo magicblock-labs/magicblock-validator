@@ -3626,9 +3626,10 @@ dependencies = [
 [[package]]
 name = "light-account-checks"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3fd000a2b8e0cc9d0b7b7712964870df51f2114f1693b9d8f0414f6f3ec16bd"
 dependencies = [
  "solana-account-info",
- "solana-msg",
  "solana-program-error",
  "solana-pubkey",
  "solana-sysvar",
@@ -3638,10 +3639,10 @@ dependencies = [
 [[package]]
 name = "light-account-checks"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3fd000a2b8e0cc9d0b7b7712964870df51f2114f1693b9d8f0414f6f3ec16bd"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
  "solana-account-info",
+ "solana-msg",
  "solana-program-error",
  "solana-pubkey",
  "solana-sysvar",
@@ -3663,6 +3664,7 @@ dependencies = [
 [[package]]
 name = "light-client"
 version = "0.13.1"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
  "async-trait",
  "base64 0.13.1",
@@ -3670,13 +3672,13 @@ dependencies = [
  "bs58",
  "bytemuck",
  "lazy_static",
- "light-compressed-account 0.3.0",
+ "light-compressed-account 0.3.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
  "light-concurrent-merkle-tree",
- "light-hasher 3.1.0",
+ "light-hasher 3.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
  "light-indexed-merkle-tree",
  "light-merkle-tree-metadata",
  "light-prover-client",
- "light-sdk 0.13.0",
+ "light-sdk 0.13.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
  "num-bigint 0.4.6",
  "num-traits",
  "photon-api",
@@ -3707,23 +3709,6 @@ dependencies = [
 [[package]]
 name = "light-compressed-account"
 version = "0.3.0"
-dependencies = [
- "borsh 0.10.4",
- "bytemuck",
- "light-hasher 3.1.0",
- "light-macros 2.1.0",
- "light-program-profiler",
- "light-zero-copy 0.2.0",
- "solana-msg",
- "solana-program-error",
- "solana-pubkey",
- "thiserror 2.0.12",
- "zerocopy",
-]
-
-[[package]]
-name = "light-compressed-account"
-version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f15113babaca9efb592631ec1e7e78c1c83413818a6e1e4248b7df53d88fe65"
 dependencies = [
@@ -3736,32 +3721,33 @@ dependencies = [
 ]
 
 [[package]]
-name = "light-concurrent-merkle-tree"
-version = "2.1.0"
+name = "light-compressed-account"
+version = "0.3.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
  "borsh 0.10.4",
- "light-bounded-vec",
- "light-hasher 3.1.0",
- "memoffset",
+ "bytemuck",
+ "light-hasher 3.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-macros 2.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-program-profiler",
+ "light-zero-copy 0.2.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "solana-msg",
  "solana-program-error",
+ "solana-pubkey",
  "thiserror 2.0.12",
+ "zerocopy",
 ]
 
 [[package]]
-name = "light-hasher"
-version = "3.1.0"
+name = "light-concurrent-merkle-tree"
+version = "2.1.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
- "ark-bn254 0.5.0",
- "ark-ff 0.5.0",
- "arrayvec",
  "borsh 0.10.4",
- "light-poseidon 0.3.0",
- "num-bigint 0.4.6",
- "sha2 0.10.9",
- "sha3",
- "solana-nostd-keccak",
+ "light-bounded-vec",
+ "light-hasher 3.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "memoffset",
  "solana-program-error",
- "solana-pubkey",
  "thiserror 2.0.12",
 ]
 
@@ -3784,10 +3770,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "light-hasher"
+version = "3.1.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "ark-ff 0.5.0",
+ "arrayvec",
+ "borsh 0.10.4",
+ "light-poseidon 0.3.0",
+ "num-bigint 0.4.6",
+ "sha2 0.10.9",
+ "sha3",
+ "solana-nostd-keccak",
+ "solana-program-error",
+ "solana-pubkey",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "light-indexed-array"
 version = "0.1.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
- "light-hasher 3.1.0",
+ "light-hasher 3.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
  "num-bigint 0.4.6",
  "num-traits",
  "thiserror 2.0.12",
@@ -3796,25 +3802,16 @@ dependencies = [
 [[package]]
 name = "light-indexed-merkle-tree"
 version = "2.1.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
  "light-bounded-vec",
  "light-concurrent-merkle-tree",
- "light-hasher 3.1.0",
+ "light-hasher 3.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
  "light-merkle-tree-reference",
  "num-bigint 0.4.6",
  "num-traits",
  "solana-program-error",
  "thiserror 2.0.12",
-]
-
-[[package]]
-name = "light-macros"
-version = "2.1.0"
-dependencies = [
- "bs58",
- "proc-macro2",
- "quote",
- "syn 2.0.104",
 ]
 
 [[package]]
@@ -3830,12 +3827,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "light-macros"
+version = "2.1.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
+dependencies = [
+ "bs58",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "light-merkle-tree-metadata"
 version = "0.3.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
  "borsh 0.10.4",
  "bytemuck",
- "light-compressed-account 0.3.0",
+ "light-compressed-account 0.3.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
  "solana-msg",
  "solana-program-error",
  "solana-sysvar",
@@ -3846,8 +3855,9 @@ dependencies = [
 [[package]]
 name = "light-merkle-tree-reference"
 version = "2.0.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
- "light-hasher 3.1.0",
+ "light-hasher 3.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
  "light-indexed-array",
  "num-bigint 0.4.6",
  "num-traits",
@@ -3899,11 +3909,12 @@ dependencies = [
 [[package]]
 name = "light-prover-client"
 version = "2.0.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
  "ark-bn254 0.5.0",
  "ark-serialize 0.5.0",
  "ark-std 0.5.0",
- "light-hasher 3.1.0",
+ "light-hasher 3.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
  "light-indexed-array",
  "light-sparse-merkle-tree",
  "num-bigint 0.4.6",
@@ -3915,28 +3926,6 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "light-sdk"
-version = "0.13.0"
-dependencies = [
- "borsh 0.10.4",
- "light-account-checks 0.3.0",
- "light-compressed-account 0.3.0",
- "light-hasher 3.1.0",
- "light-macros 2.1.0",
- "light-sdk-macros 0.13.0",
- "light-sdk-types 0.13.0",
- "light-zero-copy 0.2.0",
- "num-bigint 0.4.6",
- "solana-account-info",
- "solana-cpi",
- "solana-instruction",
- "solana-msg",
- "solana-program-error",
- "solana-pubkey",
- "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -3964,15 +3953,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "light-sdk-macros"
+name = "light-sdk"
 version = "0.13.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
- "light-hasher 3.1.0",
- "light-poseidon 0.3.0",
- "proc-macro2",
- "quote",
+ "borsh 0.10.4",
+ "light-account-checks 0.3.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-compressed-account 0.3.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-hasher 3.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-macros 2.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-sdk-macros 0.13.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-sdk-types 0.13.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-zero-copy 0.2.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "num-bigint 0.4.6",
+ "solana-account-info",
+ "solana-cpi",
+ "solana-instruction",
+ "solana-msg",
+ "solana-program-error",
  "solana-pubkey",
- "syn 2.0.104",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -3990,17 +3990,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "light-sdk-types"
+name = "light-sdk-macros"
 version = "0.13.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
- "borsh 0.10.4",
- "light-account-checks 0.3.0",
- "light-compressed-account 0.3.0",
- "light-hasher 3.1.0",
- "light-macros 2.1.0",
- "light-zero-copy 0.2.0",
- "solana-msg",
- "thiserror 2.0.12",
+ "light-hasher 3.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-poseidon 0.3.0",
+ "proc-macro2",
+ "quote",
+ "solana-pubkey",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -4019,22 +4018,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "light-sparse-merkle-tree"
-version = "0.1.0"
+name = "light-sdk-types"
+version = "0.13.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
- "light-hasher 3.1.0",
- "light-indexed-array",
- "num-bigint 0.4.6",
- "num-traits",
+ "borsh 0.10.4",
+ "light-account-checks 0.3.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-compressed-account 0.3.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-hasher 3.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-macros 2.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-zero-copy 0.2.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "solana-msg",
  "thiserror 2.0.12",
 ]
 
 [[package]]
-name = "light-zero-copy"
-version = "0.2.0"
+name = "light-sparse-merkle-tree"
+version = "0.1.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
- "light-zero-copy-derive",
- "zerocopy",
+ "light-hasher 3.1.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
+ "light-indexed-array",
+ "num-bigint 0.4.6",
+ "num-traits",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -4048,8 +4055,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "light-zero-copy"
+version = "0.2.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
+dependencies = [
+ "light-zero-copy-derive",
+ "zerocopy",
+]
+
+[[package]]
 name = "light-zero-copy-derive"
 version = "0.1.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -4424,7 +4441,7 @@ dependencies = [
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
  "solana-transaction",
  "tempfile",
  "thiserror 1.0.69",
@@ -4632,7 +4649,7 @@ dependencies = [
  "solana-metrics",
  "solana-sdk",
  "solana-storage-proto 0.1.7",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
  "solana-timings",
  "solana-transaction-status",
  "tempfile",
@@ -4699,7 +4716,7 @@ dependencies = [
  "solana-sdk-ids",
  "solana-signature",
  "solana-signer",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
  "solana-svm-transaction",
  "solana-system-program",
  "solana-transaction",
@@ -5443,6 +5460,7 @@ dependencies = [
 [[package]]
 name = "photon-api"
 version = "0.51.0"
+source = "git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2#eaf4210775d516d26503267d11d363972b87fa5e"
 dependencies = [
  "reqwest 0.12.23",
  "serde",
@@ -7046,6 +7064,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=6bbfc69#6bbfc6926bb413963895956ae238a04bae66eecb"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -7273,7 +7292,7 @@ dependencies = [
  "solana-runtime-transaction",
  "solana-sdk",
  "solana-send-transaction-service",
- "solana-svm",
+ "solana-svm 2.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "tarpc",
  "tokio",
  "tokio-serde",
@@ -8301,7 +8320,7 @@ dependencies = [
  "solana-stake-program",
  "solana-storage-bigtable",
  "solana-storage-proto 2.2.1",
- "solana-svm",
+ "solana-svm 2.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-svm-transaction",
  "solana-timings",
  "solana-transaction-status",
@@ -8895,7 +8914,7 @@ dependencies = [
  "solana-sbpf",
  "solana-sdk",
  "solana-sdk-ids",
- "solana-svm",
+ "solana-svm 2.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-timings",
  "solana-vote-program",
  "thiserror 2.0.12",
@@ -9140,7 +9159,7 @@ dependencies = [
  "solana-stake-program",
  "solana-storage-bigtable",
  "solana-streamer",
- "solana-svm",
+ "solana-svm 2.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-tpu-client",
  "solana-transaction-status",
  "solana-version",
@@ -9307,7 +9326,7 @@ dependencies = [
  "solana-runtime-transaction",
  "solana-sdk",
  "solana-stake-program",
- "solana-svm",
+ "solana-svm 2.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-svm-rent-collector",
  "solana-svm-transaction",
  "solana-timings",
@@ -9856,6 +9875,52 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0850baf834aba4a94a7558fa6cf6ca93fad284abf0363dec5fb9cab173a11fc4"
+dependencies = [
+ "ahash 0.8.12",
+ "itertools 0.12.1",
+ "log",
+ "percentage",
+ "serde",
+ "serde_derive",
+ "solana-account",
+ "solana-bpf-loader-program",
+ "solana-clock",
+ "solana-compute-budget",
+ "solana-compute-budget-instruction",
+ "solana-feature-set",
+ "solana-fee-structure",
+ "solana-hash",
+ "solana-instruction",
+ "solana-instructions-sysvar",
+ "solana-loader-v4-program",
+ "solana-log-collector",
+ "solana-measure",
+ "solana-message",
+ "solana-nonce",
+ "solana-nonce-account",
+ "solana-precompiles",
+ "solana-program",
+ "solana-program-runtime",
+ "solana-pubkey",
+ "solana-rent",
+ "solana-rent-debits",
+ "solana-sdk",
+ "solana-sdk-ids",
+ "solana-svm-rent-collector",
+ "solana-svm-transaction",
+ "solana-timings",
+ "solana-transaction-context",
+ "solana-transaction-error",
+ "solana-type-overrides",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "solana-svm"
+version = "2.2.1"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2#11bbaf2249aeb16cec4111e86f2e18a0c45ff1f2"
 dependencies = [
  "ahash 0.8.12",
  "log",
