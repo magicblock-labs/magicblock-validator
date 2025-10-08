@@ -10,7 +10,6 @@ use crate::{
     task_context::{ScheduleTaskRequest, TaskContext, MIN_EXECUTION_INTERVAL},
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        get_writable_with_idx,
     },
     validator::validator_authority_id,
     TaskRequest,
@@ -85,16 +84,12 @@ pub(crate) fn process_schedule_task(
 
     // Assert that the task instructions do not have signers aside from the validator authority
     // Assert that instruction accounts are passed to this instruction
-    // Assert that writable task accounts are passed as writable to this instruction
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accounts = (ACCOUNTS_START
         ..ix_ctx.get_number_of_instruction_accounts() as usize)
         .map(|i| {
             get_instruction_pubkey_with_idx(transaction_context, i as u16)
-                .and_then(|pk| {
-                    get_writable_with_idx(transaction_context, i as u16)
-                        .map(|writable| (pk, writable))
-                })
+                .copied()
         })
         .collect::<Result<Vec<_>, _>>()?;
     for instruction in &args.instructions {
@@ -104,13 +99,7 @@ pub(crate) fn process_schedule_task(
                 return Err(InstructionError::MissingRequiredSignature);
             }
 
-            if let Some((_pk, writable)) =
-                ix_accounts.iter().find(|(pk, _)| *pk == &account.pubkey)
-            {
-                if *writable != account.is_writable {
-                    return Err(InstructionError::Immutable);
-                }
-            } else {
+            if !ix_accounts.contains(&account.pubkey) {
                 return Err(InstructionError::MissingAccount);
             }
         }
@@ -285,20 +274,7 @@ mod test {
         process_instruction(&ix.data, tx_accs, ix.accounts, Ok(()));
 
         let (tx_accs, ix) = setup_complex_ix_test(2, true, false);
-        process_instruction(
-            &ix.data,
-            tx_accs,
-            ix.accounts,
-            Err(InstructionError::Immutable),
-        );
-
-        let (tx_accs, ix) = setup_complex_ix_test(2, false, true);
-        process_instruction(
-            &ix.data,
-            tx_accs,
-            ix.accounts,
-            Err(InstructionError::MissingRequiredSignature),
-        );
+        process_instruction(&ix.data, tx_accs, ix.accounts, Ok(()));
     }
 
     #[test]
