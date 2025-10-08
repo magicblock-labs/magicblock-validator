@@ -28,11 +28,6 @@ fn test_restore_ledger_resume_strategy_reset_all() {
     });
 }
 
-/* TODO: @@@
-*thread 'main' panicked at magicblock-validator/src/main.rs:95:10:
-called `Result::unwrap()` on an `Err` value: AccountsDbError(SnapshotMissing(0))
-*/
-#[ignore]
 #[test]
 fn test_restore_ledger_resume_strategy_reset_keep_accounts() {
     init_logger!();
@@ -116,6 +111,26 @@ pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {
         transfer_lamports(&ctx, &mut validator, kp, &transfer_to.pubkey(), 100);
     debug!("✅ Created transfer transaction {}", signature);
 
+    let to_lamports = expect!(
+        ctx.fetch_ephem_account_balance(&transfer_to.pubkey()),
+        validator
+    );
+    assert_eq!(to_lamports, 1_000_100, cleanup(&mut validator));
+    debug!(
+        "✅ Verified balance of {} lamports for receiving account {}",
+        to_lamports,
+        transfer_to.pubkey()
+    );
+
+    let from_lamports =
+        expect!(ctx.fetch_ephem_account_balance(&kp.pubkey()), validator);
+    assert_eq!(from_lamports, 1_111_011, cleanup(&mut validator));
+    debug!(
+        "✅ Verified balance of {} lamports for sending account {}",
+        from_lamports,
+        kp.pubkey()
+    );
+
     // Wait more to be sure the ledger is persisted
     wait_for_ledger_persist(&ctx, &mut validator);
     debug!("✅ Ledger persisted");
@@ -168,9 +183,11 @@ pub fn read(
     // For Reset strategies, accounts are cloned fresh from chain with original balance
     let lamports =
         expect!(ctx.fetch_ephem_account_balance(&kp.pubkey()), validator);
+    use LedgerResumeStrategy::*;
     let expected_lamports = match strategy {
-        LedgerResumeStrategy::Resume { .. } => 1_111_011, // 1_111_111 - 100 (transfer)
-        LedgerResumeStrategy::Reset { .. } => 1_111_111, // Fresh clone from chain
+        Resume { .. } => 1_111_011, // 1_111_111 - 100 (transfer)
+        Reset { keep_accounts, .. } if keep_accounts => 1_111_011, // 1_111_111 - 100 (transfer)
+        Reset { .. } => 1_111_111, // Fresh clone from chain
     };
     assert_eq!(
         lamports, expected_lamports,
