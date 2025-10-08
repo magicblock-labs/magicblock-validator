@@ -8,174 +8,58 @@
 - [x] `test-issues` removed since we won't support frequent commits
 - [x] `test-table-mania` all passing
 - [ ] `test-config` 2/2 failing (Transaction::sign failed with error NotEnoughSigners -fixed) (Thorsten)
-- [ ] `test-ledger-restore` 2/16 failing, one test no longer supported
+- [x] `test-ledger-restore`  all passing except one test no longer supported
 `11_undelegate_before_restart`
 - [ ] `test-magicblock-api` 2/4 failing (incorrect airdrop)
 - [x] `test-pubsub` were failing due to airdrop similar to above and were fixed via escrowed airdrop
 - [x] `test-schedule-intent` 5/5 failing (failed to airdrop) (Babur - disabled)
-
 - [x] clone not found escrow accounts with 0 lamports (Thorsten - fixed)
 - [x] replay - remove all non-delegated accounts from bank (Thorsten - fixed)
 - [x] correctly handle empty readonly accounts (Thorsten)
 - [x] we are removing programs on resume, ensured ledger replay completed before that (Thorsten)
 
-## Ledger Restore tests Still failing
 
-- test_restore_ledger_resume_strategy_reset_keep_accounts
-- test_restore_ledger_with_flexi_counter_same_slot
-- test_restore_ledger_with_flexi_counter_separate_slot
+### Recheck Fails
 
-Still seeing the below, even though it should've been fixed::
+#### Chainlink
+
+- FAIL test-chainlink::ix_feepayer ixtest_feepayer_delegated_to_us
 ```
-NextSlotAfterLedgerProcessingNotMatchingBankSlot(85, 86)
-magicblock-api/src/magic_validator.rs:519
+thread 'ixtest_feepayer_without_ephemeral_balance' panicked at test-chainlink/tests/ix_feepayer.rs:109:5:
+Expected account ErGwWjtF4vifqVwVNwMhb74RJyQXNWWt9uMWXAcf85t7 to not be cloned
 ```
 
-## Current Issues
-
-- `Failed to start validator: NextSlotAfterLedgerProcessingNotMatchingBankSlot(87, 85)`
-- this happens sporadically when restoring ledger via this test (I saw it once and could not
-reproduce, but it is possible):
-
-```sh
-make setup-restore-ledger-devnet
+- FAIL test-chainlink::ix_feepayer ixtest_feepayer_without_ephemeral_balance
 ```
-```sh
-cargo nextest run test_restore_ledger_with_two_airdropped_accounts_separate_slot --nocapture
+thread 'ixtest_feepayer_delegated_to_us' panicked at test-chainlink/tests/ix_feepayer.rs:144:5:
+Expected account 7YhoJB6ae4rB1vy1VoEk8rTPvMFp7ogw7nTcYyjmv63H to not be cloned
 ```
 
 
-### Test Config
+#### Cloning
 
-When running individually I get:
-
-```sh
-cargo test test_clone_config_never -- --nocapture
+_Flaky_ failed once and then never again
+- FAIL test-cloning::01_program-deploy test_clone_mini_v4_loader_program_and_upgrade
+```
+Message:  assertion failed: logs.contains(&format!("Program log: LogMsg: {}",
+            format!("{} upgraded", msg)))
+Location: test-cloning/tests/01_program-deploy.rs:179
 ```
 
+#### API
+
+
+- FAIL test-magicblock-api::test_clocks_match test_clocks_match
+- FAIL test-magicblock-api::test_get_block_timestamp_stability test_get_block_timestamp_stability
 ```
-called `Result::unwrap()` on an `Err` value: LedgerError(UnableToSetOpenFileDescriptorLimit)
-```
-when the validator starts up.
-
-### Test Ledger Restore
-
-```sh
-make setup-restore-ledger-devnet
-````
-
-Then run test: ` cargo nextest run restore_ledger_empty_validator --nocapture`
-
-Error:
-```
-Failed to start validator: NextSlotAfterLedgerProcessingNotMatchingBankSlot(19, 20)
+thread 'test_clocks_match' panicked at test-magicblock-api/tests/test_clocks_match.rs:25:10:
+called `Result::unwrap()` on an `Err` value: Error { request: None, kind: RpcError(ForUser("airdrop request failed. This can happen when the rate limit is reached.")) }
 ```
 
-### Test Magicblock API
+#### Config
 
-```sh
-make setup-magicblock-api-devnet
-```
+- still all failing
 
-```sh
-make setup-magicblock-api-ephem
-```
+#### Intents
 
-Then run test: ` cargo nextest run -p test-magicblock-api  --no-fail-fast -j 16`
-
-Errors:
-
-```
-FAIL [   0.126s] test-magicblock-api::test_clocks_match test_clocks_match
-FAIL [   0.127s] test-magicblock-api::test_get_block_timestamp_stability test_get_block_timestamp_stability
-```
-- failing due to airdrop disabled
-- should use integration test context and call `pub fn airdrop_chain_escrowed`
-
-## UX
-
-- need to have transaction in ledger if writable vs. delegated doesn't check out
-- other option is to have _fake_ hashmap of signatures that provide this error
-
-## Perf
-
-- we run a tx to look into the magic context for scheduled commits very frequently
-- we should peek into the account instead and only run the tx if it changed (has scheduled
-commits)
-
-## ~~Regression~~ _Fixed_
-
-- [fix here](https://github.com/magicblock-labs/magicblock-validator/commit/9ad32f3be6a13984f1a7ff897f1b6b462cbc7395)
-
-### Schedule Commit
-
-- `test_committing_and_undelegating_two_accounts_modifying_them_after` fails because the
-scheduled commit appears to be still is processed even though the transaction scheduling it fails
-- however looking at the committed account keys (see below) it is actually a different commit,
-  just that the signature matches
-- this could be confusing for users as they think their commit has been processed when it
-  actually failed
-
-#### Repro
-
-1. Terminal 1: `make programs && make setup-schedulecommit-devnet`
-2. Terminal 2: `make setup-schedulecommit-ephem`
-
-Third terminal run either of the below:
-
-###### Not reproducing issue
-
-```sh
-cargo nextest run test_committing_and_undelegating_two_accounts_modifying_them_after --nocapture
-```
-
-This passes usually (indicating the problem is due to a race condition).
-
-###### Reproducing issue
-
-```sh
-cargo nextest run -p schedulecommit-test-scenarios --no-fail-fast -j 16
-```
-
-This fails pretty consistently.
-
-I was able to repro this by disabling all tests (commenting `// #[test]`) except
-- test_committing_and_undelegating_two_accounts_success
-- test_committing_and_undelegating_two_accounts_modifying_them_after
-
-#### Problem
-
-When it fails we see the following for the (correctly) failed transaction:
-
-```
-Signature: L4kRWjjMxzRp3W4XUbAWdrr4HgQ6Q4XkmepPf7ZHjkNi5Fo1gwyTLdz5hk76iREdVeBHoNiEnAgViqjeES2UdFi
-> Program logged: "Processing schedulecommit_and_undelegation_cpi_with_mod_after instruction"
-> Program invoked: Unknown Program (Magic11111111111111111111111111111111111111)
-  > ScheduleCommit: parent program id: 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY
-  > ScheduleCommit: account BtQ2ZUQrFKJKuHEgFbrey9cr4eWLtDfeCHUtByAEDvKn owner set to delegation program
-  > ScheduleCommit: account ENDmT3tWsvURsKru1EWM3ixAHE3zv7tnR8Sx2gKxdvWJ owner set to delegation program
-  > Scheduled commit with ID: 563
-  > ScheduledCommitSent signature: 5HoxcgESqyLiCz8YPw8bHvt3xkMniKQ6Cp5wLyW4NgkXMzAk3ZHBf6aSJoyaHyfNUTdEm1QmDnmaKDPMmXzfz5qj
-  > Program returned success
-> Program consumed: 25866 of 200000 compute units
-> Program returned error: "instruction modified data of an account it does not own"
-```
-_It tries to modify the counter accounts after it commit + undelegation was requested in same
-transaction._
-
-However we still see that commit getting processed (it was still persisted to the magic context
-account even though the transaction failed).
-
-Tricky part is that it is actually a different commit, just that it is done using the same
-transaction signature.
-
-```
-Signature: 5HoxcgESqyLiCz8YPw8bHvt3xkMniKQ6Cp5wLyW4NgkXMzAk3ZHBf6aSJoyaHyfNUTdEm1QmDnmaKDPMmXzfz5qj
-Unknown Program Instruction
-> ScheduledCommitSent id: 563, slot: 15528, blockhash: 8dgSRHzm9NRYa98F4QSwGUaCEsULTuA82AU4BRZj5tpy
-> ScheduledCommitSent payer: 7YFFvXC8ymPwjF6wU5hRrMUz9ZMCPpxbGWqW26ApssVV
-> ScheduledCommitSent included: [EbmGz99yveTEtQyei51ZM1qiLjtjNZ72YbPFiv8bXVzV, 2spAy4qcZvoP48PKSjCnQtQJmomrYKtTsXnSTJyYoNSd]
-> ScheduledCommitSent excluded: []
-> ScheduledCommitSent signature[0]: 44iCY6TaV23KpDyc2Bxb1FBpRXjZAnhzMhMxpS1w7dNyXJmZqsg8LKc8mtGwyLTfTc5927Zrh5mvu17ETgV4CwUn
-> ScheduledCommitSent requested undelegation
-```
+- single remaining test hangs (most likely delegation issue) (tx not confirmed)
