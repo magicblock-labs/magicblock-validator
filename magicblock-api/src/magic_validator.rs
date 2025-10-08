@@ -183,11 +183,9 @@ impl MagicValidator {
             .expect("ledger_path didn't have a parent, should never happen");
 
         let latest_block = ledger.latest_block().load();
-        let accountsdb = AccountsDb::new(
-            &config.accounts.db,
-            storage_path,
-            latest_block.slot,
-        )?;
+        let slot = ledger_resume_strategy.slot().unwrap_or(latest_block.slot);
+        let accountsdb =
+            AccountsDb::new(&config.accounts.db, storage_path, slot)?;
         for (pubkey, account) in genesis_config.accounts {
             accountsdb.insert_account(&pubkey, &account.into());
         }
