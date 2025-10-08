@@ -40,6 +40,7 @@ const COUNTER: &str = "Counter of Payer";
 // 1. Check that it was cloned with the updated state
 // 2. Verify that it is no longer useable as as delegated account in the validator
 
+// Tracking: https://github.com/magicblock-labs/magicblock-validator/issues/565
 #[ignore = "This is currently no longer supported since we don't hydrate delegated accounts on startup"]
 #[test]
 fn test_restore_ledger_with_account_undelegated_before_restart() {
