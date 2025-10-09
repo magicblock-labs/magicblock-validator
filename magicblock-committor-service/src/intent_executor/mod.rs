@@ -221,7 +221,6 @@ where
                 persister,
             )?;
 
-            // TODO: move and handle retries within those/
             trace!("Executing intent in two stages");
             let output = self
                 .two_stage_execution_flow(
@@ -502,10 +501,9 @@ where
 
                 return;
             }
-            // TODO(edwin): Should we moe this inside InternalError?
-            Err(IntentExecutorError::CommitIDError)
-            | Err(IntentExecutorError::ActionsError)
-            | Err(IntentExecutorError::CpiLimitError) => None,
+            Err(IntentExecutorError::CommitIDError(_))
+            | Err(IntentExecutorError::ActionsError(_))
+            | Err(IntentExecutorError::CpiLimitError(_)) => None,
             Err(IntentExecutorError::EmptyIntentError)
             | Err(IntentExecutorError::FailedToFitError)
             | Err(IntentExecutorError::TaskBuilderError(_))
@@ -731,12 +729,12 @@ where
                 }
                 Err(InternalError::MagicBlockRpcClientError(err @ MagicBlockRpcClientError::GetSlot(_))) => {
                     // Unexpected error, returning right away
-                    warn!("MagicBlockRpcClientError::GetSlot during send transaction");
+                    error!("MagicBlockRpcClientError::GetSlot during send transaction");
                     ControlFlow::Break(TransactionStrategyExecutionError::InternalError(err.into()))
                 }
                 Err(InternalError::MagicBlockRpcClientError(err @ MagicBlockRpcClientError::LookupTableDeserialize(_))) => {
                     // Unexpected error, returning right away
-                    warn!(" MagicBlockRpcClientError::LookupTableDeserialize during send transaction");
+                    error!("MagicBlockRpcClientError::LookupTableDeserialize during send transaction");
                     ControlFlow::Break(TransactionStrategyExecutionError::InternalError(err.into()))
                 }
                 Err(err @ InternalError::MagicBlockRpcClientError(

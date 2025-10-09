@@ -110,6 +110,7 @@ impl TestEnv {
 #[tokio::test]
 async fn test_commit_id_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
+    const EXPECTED_ERR_MSG: &str = "Accounts committed with an invalid Commit id: Error processing Instruction 2: custom program error: 0xc";
 
     let TestEnv {
         fixture,
@@ -149,15 +150,18 @@ async fn test_commit_id_error_parsing() {
     // Verify that we got CommitIdError
     let execution_result = execution_result.unwrap();
     assert!(execution_result.is_err());
+    let err = execution_result.unwrap_err();
     assert!(matches!(
-        execution_result.unwrap_err(),
-        TransactionStrategyExecutionError::CommitIDError
-    ))
+        err,
+        TransactionStrategyExecutionError::CommitIDError(_)
+    ));
+    assert_eq!(err.to_string(), EXPECTED_ERR_MSG.to_string(),);
 }
 
 #[tokio::test]
 async fn test_action_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
+    const EXPECTED_ERR_MSG: &str = "User supplied actions are ill-formed: Error processing Instruction 5: Program failed to complete";
 
     let TestEnv {
         fixture,
@@ -205,16 +209,19 @@ async fn test_action_error_parsing() {
     // Verify that we got ActionsError
     let execution_result = execution_result.unwrap();
     assert!(execution_result.is_err());
+    let execution_err = execution_result.unwrap_err();
     assert!(matches!(
-        execution_result.unwrap_err(),
-        TransactionStrategyExecutionError::ActionsError
-    ))
+        execution_err,
+        TransactionStrategyExecutionError::ActionsError(_)
+    ));
+    assert_eq!(execution_err.to_string(), EXPECTED_ERR_MSG.to_string());
 }
 
 #[tokio::test]
 async fn test_cpi_limits_error_parsing() {
     const COUNTER_SIZE: u64 = 102;
     const COUNTER_NUM: u64 = 10;
+    const EXPECTED_ERR_MSG: &str = "Max instruction trace length exceeded: Error processing Instruction 26: Max instruction trace length exceeded";
 
     let TestEnv {
         fixture,
@@ -260,10 +267,12 @@ async fn test_cpi_limits_error_parsing() {
         execution_result.is_err(),
         "Execution of intent expected to fail"
     );
+    let execution_err = execution_result.unwrap_err();
     assert!(matches!(
-        execution_result.unwrap_err(),
-        TransactionStrategyExecutionError::CpiLimitError
+        execution_err,
+        TransactionStrategyExecutionError::CpiLimitError(_)
     ));
+    assert_eq!(execution_err.to_string(), EXPECTED_ERR_MSG.to_string());
 }
 
 #[tokio::test]

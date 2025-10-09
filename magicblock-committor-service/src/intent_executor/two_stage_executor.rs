@@ -151,6 +151,13 @@ where
         })
     }
 
+    /// Patches Commit stage `transaction_strategy` in response to a recoverable
+    /// [`TransactionStrategyExecutionError`], optionally preparing cleanup data
+    /// to be applied after a retry.
+    ///
+    /// [`TransactionStrategyExecutionError`], returning either:
+    /// - `Continue(to_cleanup)` when a retry should be attempted with cleanup metadata, or
+    /// - `Break(())` when this stage cannot be recovered.
     pub async fn patch_commit_strategy(
         &self,
         err: &TransactionStrategyExecutionError,
@@ -158,21 +165,21 @@ where
         committed_pubkeys: &[Pubkey],
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
         match err {
-            TransactionStrategyExecutionError::CommitIDError => {
+            TransactionStrategyExecutionError::CommitIDError(_) => {
                 let to_cleanup = self
                     .handle_commit_id_error(committed_pubkeys, commit_strategy)
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            TransactionStrategyExecutionError::ActionsError => {
+            TransactionStrategyExecutionError::ActionsError(_) => {
                 // Unexpected in Two Stage commit
                 // That would mean that Two Stage executes Standalone commit
-                warn!("Unexpected error in Two stage commit flow: {}", err);
+                error!("Unexpected error in Two stage commit flow: {}", err);
                 Ok(ControlFlow::Break(()))
             }
-            TransactionStrategyExecutionError::CpiLimitError => {
+            TransactionStrategyExecutionError::CpiLimitError(_) => {
                 // Can't be handled
-                warn!("Commit tasks exceeded CpiLimitError: {}", err);
+                error!("Commit tasks exceeded CpiLimitError: {}", err);
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::InternalError(_) => {
@@ -182,24 +189,31 @@ where
         }
     }
 
+    /// Patches Finalize stage `transaction_strategy` in response to a recoverable
+    /// [`TransactionStrategyExecutionError`], optionally preparing cleanup data
+    /// to be applied after a retry.
+    ///
+    /// [`TransactionStrategyExecutionError`], returning either:
+    /// - `Continue(to_cleanup)` when a retry should be attempted with cleanup metadata, or
+    /// - `Break(())` when this stage cannot be recovered.
     pub async fn patch_finalize_strategy(
         &self,
         err: &TransactionStrategyExecutionError,
         finalize_strategy: &mut TransactionStrategy,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
         match err {
-            TransactionStrategyExecutionError::CommitIDError => {
+            TransactionStrategyExecutionError::CommitIDError(_) => {
                 // Unexpected error in Two Stage commit
                 error!("Unexpected error in Two stage commit flow: {}", err);
                 Ok(ControlFlow::Break(()))
             }
-            TransactionStrategyExecutionError::ActionsError => {
+            TransactionStrategyExecutionError::ActionsError(_) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let to_cleanup = self.handle_actions_error(finalize_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            TransactionStrategyExecutionError::CpiLimitError => {
+            TransactionStrategyExecutionError::CpiLimitError(_) => {
                 // Can't be handled
                 warn!("Finalization tasks exceeded CpiLimitError: {}", err);
                 Ok(ControlFlow::Break(()))

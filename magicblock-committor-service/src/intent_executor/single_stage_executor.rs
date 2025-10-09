@@ -99,7 +99,7 @@ where
         if i < RECURSION_CEILING
             && matches!(
                 execution_err,
-                TransactionStrategyExecutionError::CpiLimitError
+                TransactionStrategyExecutionError::CpiLimitError(_)
             )
             && committed_pubkeys.is_some()
         {
@@ -137,6 +137,13 @@ where
         }
     }
 
+    /// Patch the current `transaction_strategy` in response to a recoverable
+    /// [`TransactionStrategyExecutionError`], optionally preparing cleanup data
+    /// to be applied after a retry.
+    ///
+    /// [`TransactionStrategyExecutionError`], returning either:
+    /// - `Continue(to_cleanup)` when a retry should be attempted with cleanup metadata, or
+    /// - `Break(())` when this stage cannot be recovered here.
     pub async fn patch_strategy(
         &self,
         err: &TransactionStrategyExecutionError,
@@ -150,14 +157,14 @@ where
         };
 
         match err {
-            TransactionStrategyExecutionError::ActionsError => {
+            TransactionStrategyExecutionError::ActionsError(_) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let to_cleanup =
                     self.handle_actions_error(transaction_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            TransactionStrategyExecutionError::CommitIDError => {
+            TransactionStrategyExecutionError::CommitIDError(_) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let to_cleanup = self
@@ -168,7 +175,7 @@ where
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            TransactionStrategyExecutionError::CpiLimitError => {
+            TransactionStrategyExecutionError::CpiLimitError(_) => {
                 // Can't be handled in scope of single stage execution
                 // We signal flow break
                 Ok(ControlFlow::Break(()))

@@ -35,12 +35,12 @@ impl InternalError {
 pub enum IntentExecutorError {
     #[error("EmptyIntentError")]
     EmptyIntentError,
-    #[error("User supplied action are ill-formed!")]
-    ActionsError,
-    #[error("Accounts committed with an invalid Commit id")]
-    CommitIDError,
-    #[error("Max instruction trace length exceeded")]
-    CpiLimitError,
+    #[error("User supplied actions are ill-formed: {0}")]
+    ActionsError(#[source] TransactionError),
+    #[error("Accounts committed with an invalid Commit id: {0}")]
+    CommitIDError(#[source] TransactionError),
+    #[error("Max instruction trace length exceeded: {0}")]
+    CpiLimitError(#[source] TransactionError),
     #[error("Failed to fit in single TX")]
     FailedToFitError,
     #[error("SignerError: {0}")]
@@ -69,7 +69,7 @@ pub enum IntentExecutorError {
 
 impl IntentExecutorError {
     pub fn is_cpi_limit_error(&self) -> bool {
-        matches!(self, IntentExecutorError::CpiLimitError)
+        matches!(self, IntentExecutorError::CpiLimitError(_))
     }
 
     pub fn from_strategy_execution_error<F>(
@@ -80,14 +80,14 @@ impl IntentExecutorError {
         F: FnOnce(InternalError) -> IntentExecutorError,
     {
         match error {
-            TransactionStrategyExecutionError::ActionsError => {
-                IntentExecutorError::ActionsError
+            TransactionStrategyExecutionError::ActionsError(err) => {
+                IntentExecutorError::ActionsError(err)
             }
-            TransactionStrategyExecutionError::CpiLimitError => {
-                IntentExecutorError::CpiLimitError
+            TransactionStrategyExecutionError::CpiLimitError(err) => {
+                IntentExecutorError::CpiLimitError(err)
             }
-            TransactionStrategyExecutionError::CommitIDError => {
-                IntentExecutorError::CommitIDError
+            TransactionStrategyExecutionError::CommitIDError(err) => {
+                IntentExecutorError::CommitIDError(err)
             }
             TransactionStrategyExecutionError::InternalError(err) => {
                 converter(err)
@@ -99,12 +99,12 @@ impl IntentExecutorError {
 /// Those are the errors that may occur during Commit/Finalize stages on Base layer
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionStrategyExecutionError {
-    #[error("User supplied actions are ill-formed!")]
-    ActionsError,
-    #[error("Accounts committed with an invalid Commit id")]
-    CommitIDError,
-    #[error("Max instruction trace length exceeded")]
-    CpiLimitError,
+    #[error("User supplied actions are ill-formed: {0}")]
+    ActionsError(#[source] TransactionError),
+    #[error("Accounts committed with an invalid Commit id: {0}")]
+    CommitIDError(#[source] TransactionError),
+    #[error("Max instruction trace length exceeded: {0}")]
+    CpiLimitError(#[source] TransactionError),
     #[error("InternalError: {0}")]
     InternalError(#[from] InternalError),
 }
@@ -123,38 +123,45 @@ impl TransactionStrategyExecutionError {
 
         match err {
             // Filter CommitIdError by custom error code
-            TransactionError::InstructionError(
+            transaction_err @ TransactionError::InstructionError(
                 _,
                 InstructionError::Custom(OUTDATED_SLOT),
-            ) => TransactionStrategyExecutionError::CommitIDError,
+            ) => TransactionStrategyExecutionError::CommitIDError(
+                transaction_err,
+            ),
             // Some tx may use too much CPIs and we can handle it in certain cases
-            TransactionError::InstructionError(
+            transaction_err @ TransactionError::InstructionError(
                 _,
                 InstructionError::MaxInstructionTraceLengthExceeded,
-            ) => TransactionStrategyExecutionError::CpiLimitError,
+            ) => TransactionStrategyExecutionError::CpiLimitError(
+                transaction_err,
+            ),
             // Filter ActionError, we can attempt recovery by stripping away actions
-            TransactionError::InstructionError(index, ix_err) => {
-                let transaction_error =
-                    TransactionError::InstructionError(index, ix_err);
-                let internal_err =
-                    TransactionStrategyExecutionError::InternalError(
+            transaction_err @ TransactionError::InstructionError(index, _) => {
+                let Some(action_index) = index.checked_sub(OFFSET) else {
+                    return TransactionStrategyExecutionError::InternalError(
                         InternalError::MagicBlockRpcClientError(map(
-                            transaction_error,
+                            transaction_err,
                         )),
                     );
-
-                let Some(action_index) = index.checked_sub(OFFSET) else {
-                    return internal_err;
                 };
 
-                // If index exists and corresponds to Action - return ActionsError
-                if let Some(TaskType::Action) = tasks
-                    .get(action_index as usize)
-                    .map(|task| task.task_type())
-                {
-                    TransactionStrategyExecutionError::ActionsError
+                // If index corresponds to an Action -> ActionsError; otherwise -> InternalError.
+                if matches!(
+                    tasks
+                        .get(action_index as usize)
+                        .map(|task| task.task_type()),
+                    Some(TaskType::Action)
+                ) {
+                    TransactionStrategyExecutionError::ActionsError(
+                        transaction_err,
+                    )
                 } else {
-                    internal_err
+                    TransactionStrategyExecutionError::InternalError(
+                        InternalError::MagicBlockRpcClientError(map(
+                            transaction_err,
+                        )),
+                    )
                 }
             }
             // This means transaction failed to other reasons that we don't handle - propagate
