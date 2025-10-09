@@ -202,7 +202,7 @@ async fn test_action_error_parsing() {
         .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
 
-    // Verify that we got CommitIdError
+    // Verify that we got ActionsError
     let execution_result = execution_result.unwrap();
     assert!(execution_result.is_err());
     assert!(matches!(
@@ -481,7 +481,7 @@ async fn test_cpi_limits_error_recovery() {
             &None::<IntentPersisterImpl>,
         )
         .await;
-    assert!(execution_result.is_ok(), "Intent excpected to recover");
+    assert!(execution_result.is_ok(), "Intent expected to recover");
     assert!(matches!(
         execution_result.unwrap(),
         ExecutionOutput::TwoStage {
@@ -765,7 +765,6 @@ fn create_scheduled_intent(
     }
 }
 
-// TODO(edwin): for convinience need to be provided as api
 async fn single_flow_transaction_strategy(
     authority: &Pubkey,
     task_info_fetcher: &Arc<CacheTaskInfoFetcher>,

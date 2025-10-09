@@ -122,7 +122,7 @@ where
             counter.count = u64::try_from(
                 counter.count as i64 + undelegation_action_data.counter_diff,
             )
-            .unwrap();
+            .map_err(|_| ProgramError::ArithmeticOverflow)?;
             counter.updates += 1;
 
             let counter_data = to_vec(&counter)?;

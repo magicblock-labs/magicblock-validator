@@ -34,7 +34,7 @@ where
         &self,
         committed_pubkeys: &[Pubkey],
         mut commit_strategy: TransactionStrategy,
-        mut finalize_srategy: TransactionStrategy,
+        mut finalize_strategy: TransactionStrategy,
         junk: &mut Vec<TransactionStrategy>,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
@@ -101,22 +101,22 @@ where
 
             // Prepare & execute message
             let execution_result = self
-                .prepare_and_execute_strategy(&mut finalize_srategy, persister)
+                .prepare_and_execute_strategy(&mut finalize_strategy, persister)
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
             let execution_err = match execution_result {
-                Ok(value) => break (Ok(value), finalize_srategy),
+                Ok(value) => break (Ok(value), finalize_strategy),
                 Err(err) => err,
             };
 
             let flow = self
-                .patch_finalize_strategy(&execution_err, &mut finalize_srategy)
+                .patch_finalize_strategy(&execution_err, &mut finalize_strategy)
                 .await?;
 
             let cleanup = match flow {
                 ControlFlow::Continue(cleanup) => cleanup,
                 ControlFlow::Break(()) => {
-                    break (Err(execution_err), finalize_srategy)
+                    break (Err(execution_err), finalize_strategy)
                 }
             };
 

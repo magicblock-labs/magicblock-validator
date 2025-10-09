@@ -420,7 +420,7 @@ where
             lookup_tables_keys: finalize_alt_pubkeys,
         };
 
-        // We tasksto clean up only ALTs
+        // We clean up only ALTs
         let to_cleanup = TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: strategy.lookup_tables_keys,

@@ -99,7 +99,7 @@ impl IntentExecutorError {
 /// Those are the errors that may occur during Commit/Finalize stages on Base layer
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionStrategyExecutionError {
-    #[error("User supplied action are ill-formed!")]
+    #[error("User supplied actions are ill-formed!")]
     ActionsError,
     #[error("Accounts committed with an invalid Commit id")]
     CommitIDError,
