@@ -1,4 +1,5 @@
 use log::*;
+use magicblock_chainlink::assert_cloned_as_empty_placeholder;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_subscribed, assert_subscribed,
@@ -104,10 +105,11 @@ async fn ixtest_feepayer_without_ephemeral_balance() {
     let (escrow_pda, escrow_deleg_record) = ctx.escrow_pdas(&payer_kp.pubkey());
 
     assert_cloned_as_undelegated!(&ctx.cloner, &[payer_kp.pubkey()]);
-    assert_subscribed!(ctx.chainlink, &[&payer_kp.pubkey()]);
+    assert_cloned_as_empty_placeholder!(&ctx.cloner, &[escrow_pda]);
+    assert_subscribed!(ctx.chainlink, &[&payer_kp.pubkey(), &escrow_pda]);
 
-    assert_not_cloned!(&ctx.cloner, &[escrow_pda, escrow_deleg_record]);
-    assert_not_subscribed!(ctx.chainlink, &[&escrow_pda, &escrow_deleg_record]);
+    assert_not_cloned!(&ctx.cloner, &[escrow_deleg_record]);
+    assert_not_subscribed!(ctx.chainlink, &[&escrow_deleg_record]);
 }
 
 #[tokio::test]
@@ -141,16 +143,14 @@ async fn ixtest_feepayer_delegated_to_us() {
     let (escrow_pda, _) = ctx.escrow_pdas(&counter_pda);
 
     assert_cloned_as_delegated!(&ctx.cloner, &[counter_pda]);
-    assert_not_cloned!(&ctx.cloner, &[escrow_pda]);
-
-    assert_not_subscribed!(ctx.chainlink, &[&counter_pda, &escrow_pda]);
+    assert_cloned_as_empty_placeholder!(&ctx.cloner, &[escrow_pda]);
+    assert_subscribed!(ctx.chainlink, &[&escrow_pda]);
+    assert_not_subscribed!(ctx.chainlink, &[&counter_pda]);
 
     // Initially the counter_pda is not in the bank, thus we optimistically
-    // try to clone its escrow and fail to find it
-    assert!(
-        res.pubkeys_not_found_on_chain().contains(&escrow_pda),
-        "does not find {escrow_pda}",
-    );
+    // try to clone its escrow and fail to find it, however we clone it as
+    // an empty placeholder. Thus it is not included as not found on chain
+    assert!(res.pubkeys_not_found_on_chain().is_empty());
 
     // 2. Send the second transaction with the counter_pda (it is now already in the bank)
     let res = ctx
@@ -163,11 +163,9 @@ async fn ixtest_feepayer_delegated_to_us() {
     debug!("cloned accounts: {}", ctx.cloner.dump_account_keys(false));
 
     assert_cloned_as_delegated!(&ctx.cloner, &[counter_pda]);
-    assert_not_cloned!(&ctx.cloner, &[escrow_pda]);
+    assert_cloned_as_empty_placeholder!(&ctx.cloner, &[escrow_pda]);
+    assert_subscribed!(ctx.chainlink, &[&escrow_pda]);
+    assert_not_subscribed!(ctx.chainlink, &[&counter_pda]);
 
-    assert_not_subscribed!(ctx.chainlink, &[&counter_pda, &escrow_pda]);
-
-    // Now we skip cloning the escrow since we can see that the counter_pda is delegated
-    // to us
     assert!(res.pubkeys_not_found_on_chain().is_empty());
 }
