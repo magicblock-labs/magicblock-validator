@@ -161,7 +161,7 @@ async fn test_commit_id_error_parsing() {
 #[tokio::test]
 async fn test_action_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "User supplied actions are ill-formed: Error processing Instruction 5: Program failed to complete";
+    const EXPECTED_ERR_MSG: &str = "User supplied actions are ill-formed: Error processing Instruction 5: Program arithmetic overflowed";
 
     let TestEnv {
         fixture,
