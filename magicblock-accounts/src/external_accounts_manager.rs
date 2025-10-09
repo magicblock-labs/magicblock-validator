@@ -29,7 +29,9 @@ use magicblock_committor_service::{
     transactions::MAX_PROCESS_PER_TX,
     types::{ScheduledBaseIntentWrapper, TriggerType},
 };
-use magicblock_magic_program_api::{self, MAGIC_CONTEXT_PUBKEY};
+use magicblock_magic_program_api::{
+    self, MAGIC_CONTEXT_PUBKEY, TASK_CONTEXT_PUBKEY,
+};
 use magicblock_program::{
     magic_scheduled_base_intent::{
         CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
@@ -445,7 +447,7 @@ where
 }
 
 fn should_clone_account(pubkey: &Pubkey) -> bool {
-    pubkey != &MAGIC_CONTEXT_PUBKEY
+    pubkey != &MAGIC_CONTEXT_PUBKEY && pubkey != &TASK_CONTEXT_PUBKEY
 }
 
 /// Creates deterministic hashes from account lamports, owner and data
