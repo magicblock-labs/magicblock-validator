@@ -213,6 +213,7 @@ pub fn standard_blacklisted_accounts(
     blacklisted_accounts.insert(NATIVE_SOL_ID);
     blacklisted_accounts.insert(magicblock_program::ID);
     blacklisted_accounts.insert(magicblock_program::MAGIC_CONTEXT_PUBKEY);
+    blacklisted_accounts.insert(magicblock_program::TASK_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
     blacklisted_accounts.insert(*faucet_id);
     blacklisted_accounts

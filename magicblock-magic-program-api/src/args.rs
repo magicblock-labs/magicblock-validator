@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use solana_program::{account_info::AccountInfo, instruction::AccountMeta};
+use solana_program::{
+    account_info::AccountInfo,
+    instruction::{AccountMeta, Instruction},
+};
 
 use crate::Pubkey;
 
@@ -97,4 +100,12 @@ impl<'a> From<&AccountInfo<'a>> for ShortAccountMeta {
             is_writable: value.is_writable,
         }
     }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct ScheduleTaskArgs {
+    pub task_id: u64,
+    pub execution_interval_millis: u64,
+    pub iterations: u64,
+    pub instructions: Vec<Instruction>,
 }

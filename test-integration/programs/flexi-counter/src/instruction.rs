@@ -17,6 +17,20 @@ pub struct DelegateArgs {
     pub commit_frequency_ms: u32,
 }
 
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct ScheduleArgs {
+    pub task_id: u64,
+    pub execution_interval_millis: u64,
+    pub iterations: u64,
+    pub error: bool,
+    pub signer: bool,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct CancelArgs {
+    pub task_id: u64,
+}
+
 pub const MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
 
 /// The counter has both mul and add instructions in order to facilitate tests where
@@ -59,6 +73,18 @@ pub enum FlexiCounterInstruction {
     /// 0. `[signer]` The payer that created the account.
     /// 1. `[write]` The counter PDA account that will be updated.
     Add { count: u8 },
+
+    /// Updates the FlexiCounter by adding the count to it without a signer.
+    ///
+    /// Accounts:
+    /// 0. `[write]` The counter PDA account that will be updated.
+    AddUnsigned { count: u8 },
+
+    /// Adds the count to the counter with an error.
+    ///
+    /// Accounts:
+    /// 0. `[write]` The counter PDA account that will be updated.
+    AddError { count: u8 },
 
     /// Updates the FlexiCounter by multiplying  the count with the multiplier.
     ///
@@ -137,6 +163,23 @@ pub enum FlexiCounterInstruction {
     /// 8. `[write]` The Magic Context
     /// 9. `[]` The Magic Program
     CreateRedelegationIntent,
+
+    /// Schedules a task to increase the counter.
+    ///
+    /// Accounts:
+    /// 0. `[]`       Magic Program account.
+    /// 1. `[signer]` The payer that created and is scheduling the task.
+    /// 2. `[write]`  Task context account.
+    /// 3. `[signer]` The counter PDA account whose size we are increasing.
+    Schedule(ScheduleArgs),
+
+    /// Schedules a task to increase the counter.
+    ///
+    /// Accounts:
+    /// 0. `[]`       Magic program account.
+    /// 1. `[signer]` The payer that created and is cancelling the task.
+    /// 2. `[write]`  Task context account.
+    Cancel(CancelArgs),
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -179,11 +222,35 @@ pub fn create_realloc_ix(
 pub fn create_add_ix(payer: Pubkey, count: u8) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = FlexiCounter::pda(&payer);
-    let accounts =
-        vec![AccountMeta::new(payer, true), AccountMeta::new(pda, false)];
+    let accounts = vec![
+        AccountMeta::new_readonly(payer, true),
+        AccountMeta::new(pda, false),
+    ];
     Instruction::new_with_borsh(
         *program_id,
         &FlexiCounterInstruction::Add { count },
+        accounts,
+    )
+}
+
+pub fn create_add_unsigned_ix(payer: Pubkey, count: u8) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    let accounts = vec![AccountMeta::new(pda, false)];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::AddUnsigned { count },
+        accounts,
+    )
+}
+
+pub fn create_add_error_ix(payer: Pubkey, count: u8) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    let accounts = vec![AccountMeta::new(pda, false)];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::AddError { count },
         accounts,
     )
 }
@@ -366,5 +433,56 @@ pub fn create_redelegation_intent_ix(payer: Pubkey) -> Instruction {
         *program_id,
         &FlexiCounterInstruction::CreateRedelegationIntent,
         account_metas,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create_schedule_task_ix(
+    payer: Pubkey,
+    task_context: Pubkey,
+    magic_program: Pubkey,
+    task_id: u64,
+    execution_interval_millis: u64,
+    iterations: u64,
+    error: bool,
+    signer: bool,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    let accounts = vec![
+        AccountMeta::new_readonly(magic_program, false),
+        AccountMeta::new(payer, true),
+        AccountMeta::new(task_context, false),
+        AccountMeta::new(pda, false),
+    ];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::Schedule(ScheduleArgs {
+            task_id,
+            execution_interval_millis,
+            iterations,
+            error,
+            signer,
+        }),
+        accounts,
+    )
+}
+
+pub fn create_cancel_task_ix(
+    payer: Pubkey,
+    task_context: Pubkey,
+    magic_program: Pubkey,
+    task_id: u64,
+) -> Instruction {
+    let program_id = &crate::id();
+    let accounts = vec![
+        AccountMeta::new_readonly(magic_program, false),
+        AccountMeta::new(payer, true),
+        AccountMeta::new(task_context, false),
+    ];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::Cancel(CancelArgs { task_id }),
+        accounts,
     )
 }

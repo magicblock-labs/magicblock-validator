@@ -14,3 +14,13 @@ pub const MAGIC_CONTEXT_PUBKEY: Pubkey =
 /// NOTE: the default max accumulated account size per transaction is 64MB.
 /// See: MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES inside program-runtime/src/compute_budget_processor.rs
 pub const MAGIC_CONTEXT_SIZE: usize = 1024 * 1024 * 5; // 5 MB
+
+pub const TASK_CONTEXT_PUBKEY: Pubkey =
+    pubkey!("TaskContext11111111111111111111111111111111");
+
+/// Requests are ix data, so they cannot exceed ~1kB.
+/// With 1000 schedules per slot, that's 1MB per slot.
+/// The task scheduler ticking once every 4 slots, that's 4MB.
+/// This can be drastically reduced once we have a channel to the transaction executor.
+/// https://github.com/magicblock-labs/magicblock-validator/issues/523
+pub const TASK_CONTEXT_SIZE: usize = 1024 * 1024 * 4; // 4 MB
