@@ -490,7 +490,7 @@ fn run_magicblock_api_tests(
     };
 
     let start_ephem_validator = || match start_validator(
-        "validator-api-offline.devnet.toml",
+        "api-conf.ephem.toml",
         ValidatorCluster::Ephem,
         &LoadedAccounts::with_delegation_program_test_authority(),
     ) {

@@ -26,7 +26,8 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_transaction_status::{
-    EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
+    EncodedConfirmedBlock, EncodedConfirmedTransactionWithStatusMeta,
+    UiTransactionEncoding,
 };
 
 use crate::{
@@ -1003,6 +1004,49 @@ impl IntegrationTestContext {
         rpc_client
             .get_latest_blockhash()
             .map_err(|e| anyhow::anyhow!("Failed to get blockhash{}", e))
+    }
+
+    // -----------------
+    // Block
+    // -----------------
+    pub fn try_get_block_ephem(
+        &self,
+        slot: Slot,
+    ) -> Result<EncodedConfirmedBlock> {
+        self.try_ephem_client()
+            .and_then(|ephem_client| Self::get_block(ephem_client, slot))
+    }
+    pub fn try_get_block_chain(
+        &self,
+        slot: Slot,
+    ) -> Result<EncodedConfirmedBlock> {
+        self.try_chain_client()
+            .and_then(|chain_client| Self::get_block(chain_client, slot))
+    }
+    fn get_block(
+        rpc_client: &RpcClient,
+        slot: Slot,
+    ) -> Result<EncodedConfirmedBlock> {
+        rpc_client
+            .get_block(slot)
+            .map_err(|e| anyhow::anyhow!("Failed to get block: {}", e))
+    }
+
+    // -----------------
+    // Blocktime
+    // -----------------
+    pub fn try_get_block_time_ephem(&self, slot: Slot) -> Result<i64> {
+        self.try_ephem_client()
+            .and_then(|ephem_client| Self::get_block_time(ephem_client, slot))
+    }
+    pub fn try_get_block_time_chain(&self, slot: Slot) -> Result<i64> {
+        self.try_chain_client()
+            .and_then(|chain_client| Self::get_block_time(chain_client, slot))
+    }
+    fn get_block_time(rpc_client: &RpcClient, slot: Slot) -> Result<i64> {
+        rpc_client
+            .get_block_time(slot)
+            .map_err(|e| anyhow::anyhow!("Failed to get blocktime: {}", e))
     }
 
     // -----------------

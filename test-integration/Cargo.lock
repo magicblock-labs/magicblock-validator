@@ -10596,6 +10596,7 @@ dependencies = [
  "integration-test-tools",
  "isocountry",
  "lazy_static",
+ "log",
  "magic-domain-program",
  "magicblock-api",
  "magicblock-config",
@@ -10606,6 +10607,7 @@ dependencies = [
  "solana-rpc-client-api",
  "solana-sdk",
  "solana-transaction-status",
+ "test-kit",
  "tokio",
 ]
 
