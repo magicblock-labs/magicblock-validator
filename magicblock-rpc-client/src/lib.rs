@@ -22,6 +22,7 @@ use solana_sdk::{
     signature::Signature,
     transaction::TransactionError,
 };
+use solana_transaction_error::TransactionResult;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
@@ -167,6 +168,7 @@ impl MagicBlockSendTransactionConfig {
     }
 }
 
+#[derive(Debug)]
 pub struct MagicBlockSendTransactionOutcome {
     signature: Signature,
     processed_err: Option<TransactionError>,
@@ -188,6 +190,18 @@ impl MagicBlockSendTransactionOutcome {
     /// NOTE: this is never set if we use the [MagicBlockSendConfig::Send] option.
     pub fn error(&self) -> Option<&TransactionError> {
         self.confirmed_err.as_ref().or(self.processed_err.as_ref())
+    }
+
+    pub fn into_error(self) -> Option<TransactionError> {
+        self.confirmed_err.or(self.processed_err)
+    }
+
+    pub fn into_result(self) -> Result<Signature, TransactionError> {
+        if let Some(err) = self.confirmed_err.or(self.processed_err) {
+            Err(err)
+        } else {
+            Ok(self.signature)
+        }
     }
 }
 
@@ -397,73 +411,20 @@ impl MagicblockRpcClient {
             });
         };
 
-        // 1. Get Signature Processed Status to Fail early on failed transactions
-        let start = Instant::now();
-        let recent_blockhash = tx.get_recent_blockhash();
-        debug_assert!(
-            recent_blockhash != &Hash::default(),
-            "BUG: recent blockhash is not set for the transaction"
-        );
-        let processed_status = loop {
-            let status = self
-                .client
-                .get_signature_status_with_commitment(
-                    &sig,
-                    CommitmentConfig::processed(),
-                )
-                .await?;
-
-            let check_for_processed_interval = check_for_processed_interval
-                .unwrap_or_else(|| Duration::from_millis(200));
-            match status {
-                Some(status) => break status,
-                None => {
-                    if let Some(wait_for_blockhash_to_become_valid) =
-                        wait_for_blockhash_to_become_valid
-                    {
-                        let blockhash_found = self
-                            .client
-                            .is_blockhash_valid(
-                                recent_blockhash,
-                                CommitmentConfig::processed(),
-                            )
-                            .await?;
-                        if !blockhash_found
-                            && &start.elapsed()
-                                < wait_for_blockhash_to_become_valid
-                        {
-                            trace!(
-                                "Waiting for blockhash {} to become valid",
-                                recent_blockhash
-                            );
-                            tokio::time::sleep(Duration::from_millis(400))
-                                .await;
-                            continue;
-                        } else if start.elapsed()
-                            < wait_for_processed_level.unwrap_or_default()
-                        {
-                            tokio::time::sleep(check_for_processed_interval)
-                                .await;
-                            continue;
-                        } else {
-                            return Err(MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
-                                sig,
-                                format!("blockhash {} found", if blockhash_found {
-                                    "was"
-                                } else {
-                                    "was not"
-                                }),
-                            ));
-                        }
-                    } else {
-                        return Err(MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
-                            sig,
-                            "timed out finding blockhash".to_string()
-                        ));
-                    }
-                }
-            }
-        };
+        // 1. Wait for processed status
+        let check_for_processed_interval = check_for_processed_interval
+            .unwrap_or_else(|| Duration::from_millis(200));
+        let wait_for_processed_level =
+            wait_for_processed_level.unwrap_or_default();
+        let processed_status = self
+            .wait_for_processed_status(
+                &sig,
+                tx.get_recent_blockhash(),
+                wait_for_processed_level,
+                check_for_processed_interval,
+                wait_for_blockhash_to_become_valid,
+            )
+            .await?;
 
         if let Err(err) = processed_status {
             return Err(MagicBlockRpcClientError::SentTransactionError(
@@ -471,37 +432,18 @@ impl MagicblockRpcClient {
             ));
         }
 
-        // 2. At this point we know the transaction isn't failing
-        //    and just wait for desired status
+        // 2. Wait for confirmed status if configured
         let confirmed_status = if let Some(wait_for_commitment_level) =
             wait_for_commitment_level
         {
-            let now = Instant::now();
-            let check_for_commitment_interval = check_for_commitment_interval
-                .unwrap_or_else(|| Duration::from_millis(200));
-            loop {
-                let confirmed_status = self
-                    .client
-                    .get_signature_status_with_commitment(
-                        &sig,
-                        self.client.commitment(),
-                    )
-                    .await?;
-
-                if let Some(confirmed_status) = confirmed_status {
-                    break Some(confirmed_status);
-                }
-
-                if &now.elapsed() < wait_for_commitment_level {
-                    tokio::time::sleep(check_for_commitment_interval).await;
-                    continue;
-                } else {
-                    return Err(MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(
-                        sig,
-                        self.client.commitment().commitment,
-                    ));
-                }
-            }
+            Some(
+                self.wait_for_confirmed_status(
+                    &sig,
+                    wait_for_commitment_level,
+                    check_for_commitment_interval,
+                )
+                .await?,
+            )
         } else {
             None
         };
@@ -511,6 +453,110 @@ impl MagicblockRpcClient {
             processed_err: processed_status.err(),
             confirmed_err: confirmed_status.and_then(|status| status.err()),
         })
+    }
+
+    /// Waits for a transaction to reach processed status
+    pub async fn wait_for_processed_status(
+        &self,
+        signature: &Signature,
+        recent_blockhash: &Hash,
+        timeout: Duration,
+        check_interval: Duration,
+        blockhash_valid_timeout: &Option<Duration>,
+    ) -> MagicBlockRpcClientResult<TransactionResult<()>> {
+        let mut last_err =
+            MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
+                *signature,
+                "blockhash was not found".into(),
+            );
+
+        let start = Instant::now();
+        while start.elapsed() < timeout {
+            let status = self
+                .client
+                .get_signature_status_with_commitment(
+                    signature,
+                    CommitmentConfig::processed(),
+                )
+                .await?;
+
+            if let Some(status) = status {
+                return Ok(status);
+            }
+
+            // Check if blockhash is still valid
+            let Some(blockhash_valid_timeout) = blockhash_valid_timeout else {
+                return Err(MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
+                    *signature,
+                    "timed out finding blockhash".to_string()
+                ));
+            };
+
+            let blockhash_found = self
+                .client
+                .is_blockhash_valid(
+                    recent_blockhash,
+                    CommitmentConfig::processed(),
+                )
+                .await?;
+
+            if !blockhash_found && &start.elapsed() < blockhash_valid_timeout {
+                trace!(
+                    "Waiting for blockhash {} to become valid",
+                    recent_blockhash
+                );
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                continue;
+            } else {
+                last_err = MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
+                    *signature,
+                    format!("blockhash {} found", if blockhash_found {
+                        "was"
+                    } else {
+                        "was not"
+                    }),
+                );
+                tokio::time::sleep(check_interval).await;
+            }
+        }
+
+        Err(last_err)
+    }
+
+    /// Waits for a transaction to reach confirmed status
+    pub async fn wait_for_confirmed_status(
+        &self,
+        signature: &Signature,
+        timeout: &Duration,
+        check_interval: &Option<Duration>,
+    ) -> MagicBlockRpcClientResult<TransactionResult<()>> {
+        let start = Instant::now();
+        let check_interval =
+            check_interval.unwrap_or_else(|| Duration::from_millis(200));
+
+        loop {
+            let status = self
+                .client
+                .get_signature_status_with_commitment(
+                    signature,
+                    self.client.commitment(),
+                )
+                .await?;
+
+            if let Some(status) = status {
+                return Ok(status);
+            }
+
+            if &start.elapsed() < timeout {
+                tokio::time::sleep(check_interval).await;
+                continue;
+            } else {
+                return Err(MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(
+                    *signature,
+                    self.client.commitment().commitment,
+                ));
+            }
+        }
     }
 
     pub async fn get_transaction(
@@ -562,5 +608,9 @@ impl MagicblockRpcClient {
     ) -> MagicBlockRpcClientResult<Option<u64>> {
         let tx = self.get_transaction(signature, config).await?;
         Ok(Self::get_cus_from_transaction(&tx))
+    }
+
+    pub fn get_inner(&self) -> &Arc<RpcClient> {
+        &self.client
     }
 }

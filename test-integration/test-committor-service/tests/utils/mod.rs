@@ -1,7 +1,16 @@
+use std::sync::Once;
+
+use magicblock_program::validator::{
+    init_validator_authority, validator_authority,
+};
 use solana_sdk::signature::Keypair;
+
+use crate::utils;
 
 pub mod instructions;
 pub mod transactions;
+
+#[allow(dead_code)]
 pub const TEST_TABLE_CLOSE: bool = cfg!(feature = "test_table_close");
 
 pub async fn sleep_millis(millis: u64) {
@@ -21,4 +30,15 @@ pub fn get_validator_auth() -> Keypair {
         156, 80, 96, 72,
     ];
     Keypair::from_bytes(&VALIDATOR_AUTHORITY).unwrap()
+}
+
+pub fn ensure_validator_authority() -> Keypair {
+    static ONCE: Once = Once::new();
+
+    ONCE.call_once(|| {
+        let validator_auth = utils::get_validator_auth();
+        init_validator_authority(validator_auth.insecure_clone());
+    });
+
+    validator_authority()
 }

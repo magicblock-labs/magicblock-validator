@@ -11,22 +11,26 @@ use lru::LruCache;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 
+const NUM_FETCH_RETRIES: NonZeroUsize =
+    unsafe { NonZeroUsize::new_unchecked(5) };
+const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
+
 #[async_trait]
 pub trait TaskInfoFetcher: Send + Sync + 'static {
-    // Fetches correct next ids for pubkeys
-    // Those ids can be used as correct commit_id during Commit
+    /// Fetches correct next ids for pubkeys
+    /// Those ids can be used as correct commit_id during Commit
     async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
 
-    // Fetches rent reimbursement address for pubkeys
+    /// Fetches rent reimbursement address for pubkeys
     async fn fetch_rent_reimbursements(
         &self,
         pubkeys: &[Pubkey],
     ) -> TaskInfoFetcherResult<Vec<Pubkey>>;
 
-    // Peeks current commit ids for pubkeys
+    /// Peeks current commit ids for pubkeys
     fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<u64>;
 
     /// Resets cache for some or all accounts
@@ -37,10 +41,6 @@ pub enum ResetType<'a> {
     All,
     Specific(&'a [Pubkey]),
 }
-
-const NUM_FETCH_RETRIES: NonZeroUsize =
-    unsafe { NonZeroUsize::new_unchecked(5) };
-const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
 
 pub struct CacheTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
@@ -80,7 +80,7 @@ impl CacheTaskInfoFetcher {
                     return err
                 }
                 Err(TaskInfoFetcherError::MagicBlockRpcClientError(err)) => {
-                    // TODO(edwin0: RPC error handlings should be more robust
+                    // TODO(edwin): RPC error handlings should be more robust
                     last_err =
                         TaskInfoFetcherError::MagicBlockRpcClientError(err)
                 }

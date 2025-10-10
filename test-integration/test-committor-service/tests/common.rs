@@ -16,7 +16,7 @@ use magicblock_committor_service::{
     },
     tasks::CommitTask,
     transaction_preparator::{
-        delivery_preparator::DeliveryPreparator, TransactionPreparatorV1,
+        delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
     ComputeBudgetConfig,
 };
@@ -42,14 +42,19 @@ pub async fn create_test_client() -> MagicblockRpcClient {
 // Test fixture structure
 pub struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
-    table_mania: TableMania,
+    pub table_mania: TableMania,
     pub authority: Keypair,
     pub compute_budget_config: ComputeBudgetConfig,
 }
 
 impl TestFixture {
+    #[allow(dead_code)]
     pub async fn new() -> Self {
         let authority = Keypair::new();
+        TestFixture::new_with_keypair(authority).await
+    }
+
+    pub async fn new_with_keypair(authority: Keypair) -> Self {
         let rpc_client = create_test_client().await;
 
         // TableMania
@@ -85,8 +90,8 @@ impl TestFixture {
     }
 
     #[allow(dead_code)]
-    pub fn create_transaction_preparator(&self) -> TransactionPreparatorV1 {
-        TransactionPreparatorV1::new(
+    pub fn create_transaction_preparator(&self) -> TransactionPreparatorImpl {
+        TransactionPreparatorImpl::new(
             self.rpc_client.clone(),
             self.table_mania.clone(),
             self.compute_budget_config.clone(),
@@ -96,7 +101,8 @@ impl TestFixture {
     #[allow(dead_code)]
     pub fn create_intent_executor(
         &self,
-    ) -> IntentExecutorImpl<TransactionPreparatorV1, MockTaskInfoFetcher> {
+    ) -> IntentExecutorImpl<TransactionPreparatorImpl, MockTaskInfoFetcher>
+    {
         let transaction_preparator = self.create_transaction_preparator();
         let task_info_fetcher = Arc::new(MockTaskInfoFetcher);
 

@@ -1,4 +1,4 @@
-use crate::tasks::{ArgsTask, BufferTask};
+use crate::tasks::{args_task::ArgsTask, buffer_task::BufferTask};
 
 pub trait Visitor {
     fn visit_args_task(&mut self, task: &ArgsTask);

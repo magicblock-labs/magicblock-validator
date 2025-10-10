@@ -8,7 +8,7 @@ use crate::{
         task_info_fetcher::CacheTaskInfoFetcher, IntentExecutor,
         IntentExecutorImpl,
     },
-    transaction_preparator::TransactionPreparatorV1,
+    transaction_preparator::TransactionPreparatorImpl,
     ComputeBudgetConfig,
 };
 
@@ -28,15 +28,15 @@ pub struct IntentExecutorFactoryImpl {
 
 impl IntentExecutorFactory for IntentExecutorFactoryImpl {
     type Executor =
-        IntentExecutorImpl<TransactionPreparatorV1, CacheTaskInfoFetcher>;
+        IntentExecutorImpl<TransactionPreparatorImpl, CacheTaskInfoFetcher>;
 
     fn create_instance(&self) -> Self::Executor {
-        let transaction_preparator = TransactionPreparatorV1::new(
+        let transaction_preparator = TransactionPreparatorImpl::new(
             self.rpc_client.clone(),
             self.table_mania.clone(),
             self.compute_budget_config.clone(),
         );
-        IntentExecutorImpl::<TransactionPreparatorV1, CacheTaskInfoFetcher>::new(
+        IntentExecutorImpl::<TransactionPreparatorImpl, CacheTaskInfoFetcher>::new(
             self.rpc_client.clone(),
             transaction_preparator,
             self.commit_id_tracker.clone(),

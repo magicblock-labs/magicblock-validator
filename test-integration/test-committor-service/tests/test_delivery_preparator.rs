@@ -3,8 +3,10 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
+        buffer_task::{BufferTask, BufferTaskType},
         task_strategist::{TaskStrategist, TransactionStrategy},
-        ArgsTask, BaseTask, BufferTask,
+        BaseTask, PreparationState,
     },
 };
 use solana_sdk::signer::Signer;
@@ -19,9 +21,11 @@ async fn test_prepare_10kb_buffer() {
     let preparator = fixture.create_delivery_preparator();
 
     let data = generate_random_bytes(10 * 1024);
-    let buffer_task = BufferTask::Commit(create_commit_task(&data));
-    let strategy = TransactionStrategy {
-        optimized_tasks: vec![Box::new(buffer_task)],
+    let buffer_task = BufferTaskType::Commit(create_commit_task(&data));
+    let mut strategy = TransactionStrategy {
+        optimized_tasks: vec![Box::new(BufferTask::new_preparation_required(
+            buffer_task,
+        ))],
         lookup_tables_keys: vec![],
     };
 
@@ -29,7 +33,7 @@ async fn test_prepare_10kb_buffer() {
     let result = preparator
         .prepare_for_delivery(
             &fixture.authority,
-            &strategy,
+            &mut strategy,
             &None::<IntentPersisterImpl>,
         )
         .await;
@@ -37,14 +41,17 @@ async fn test_prepare_10kb_buffer() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
     // Verify the buffer account was created and initialized
-    let preparation_info = strategy.optimized_tasks[0]
-        .preparation_info(&fixture.authority.pubkey())
-        .expect("Task should have preparation info");
+    let PreparationState::Cleanup(cleanup_task) =
+        strategy.optimized_tasks[0].preparation_state()
+    else {
+        panic!("unexpected PreparationState");
+    };
 
+    let buffer_pda = cleanup_task.buffer_pda(&fixture.authority.pubkey());
     // Check buffer account exists
     let buffer_account = fixture
         .rpc_client
-        .get_account(&preparation_info.buffer_pda)
+        .get_account(&buffer_pda)
         .await
         .unwrap()
         .expect("Buffer account should exist");
@@ -52,9 +59,10 @@ async fn test_prepare_10kb_buffer() {
     assert_eq!(buffer_account.data, data, "Buffer account size mismatch");
 
     // Check chunks account exists
+    let chunks_pda = cleanup_task.chunks_pda(&fixture.authority.pubkey());
     let chunks_account = fixture
         .rpc_client
-        .get_account(&preparation_info.chunks_pda)
+        .get_account(&chunks_pda)
         .await
         .unwrap()
         .expect("Chunks account should exist");
@@ -81,11 +89,13 @@ async fn test_prepare_multiple_buffers() {
     let buffer_tasks = datas
         .iter()
         .map(|data| {
-            let task = BufferTask::Commit(create_commit_task(data.as_slice()));
-            Box::new(task) as Box<dyn BaseTask>
+            let task =
+                BufferTaskType::Commit(create_commit_task(data.as_slice()));
+            Box::new(BufferTask::new_preparation_required(task))
+                as Box<dyn BaseTask>
         })
         .collect();
-    let strategy = TransactionStrategy {
+    let mut strategy = TransactionStrategy {
         optimized_tasks: buffer_tasks,
         lookup_tables_keys: vec![],
     };
@@ -94,7 +104,7 @@ async fn test_prepare_multiple_buffers() {
     let result = preparator
         .prepare_for_delivery(
             &fixture.authority,
-            &strategy,
+            &mut strategy,
             &None::<IntentPersisterImpl>,
         )
         .await;
@@ -102,16 +112,21 @@ async fn test_prepare_multiple_buffers() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
     // Verify the buffer account was created and initialized
-    let preparation_infos = strategy.optimized_tasks.iter().map(|el| {
-        el.preparation_info(&fixture.authority.pubkey())
-            .expect("Task should have preparation info")
+    let cleanup_tasks = strategy.optimized_tasks.iter().map(|el| {
+        let PreparationState::Cleanup(cleanup_task) = el.preparation_state()
+        else {
+            panic!("Unexpected preparation state!");
+        };
+
+        cleanup_task
     });
 
-    for (i, preparation_info) in preparation_infos.enumerate() {
+    for (i, cleanup_task) in cleanup_tasks.enumerate() {
         // Check buffer account exists
+        let buffer_pda = cleanup_task.buffer_pda(&fixture.authority.pubkey());
         let buffer_account = fixture
             .rpc_client
-            .get_account(&preparation_info.buffer_pda)
+            .get_account(&buffer_pda)
             .await
             .unwrap()
             .expect("Buffer account should exist");
@@ -122,9 +137,10 @@ async fn test_prepare_multiple_buffers() {
         );
 
         // Check chunks account exists
+        let chunks_pda = cleanup_task.chunks_pda(&fixture.authority.pubkey());
         let chunks_account = fixture
             .rpc_client
-            .get_account(&preparation_info.chunks_pda)
+            .get_account(&chunks_pda)
             .await
             .unwrap()
             .expect("Chunks account should exist");
@@ -152,8 +168,9 @@ async fn test_lookup_tables() {
     let tasks = datas
         .iter()
         .map(|data| {
-            let task = ArgsTask::Commit(create_commit_task(data.as_slice()));
-            Box::new(task) as Box<dyn BaseTask>
+            let task =
+                ArgsTaskType::Commit(create_commit_task(data.as_slice()));
+            Box::<ArgsTask>::new(task.into()) as Box<dyn BaseTask>
         })
         .collect::<Vec<_>>();
 
@@ -161,7 +178,7 @@ async fn test_lookup_tables() {
         &fixture.authority.pubkey(),
         &tasks,
     );
-    let strategy = TransactionStrategy {
+    let mut strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys,
     };
@@ -169,7 +186,7 @@ async fn test_lookup_tables() {
     let result = preparator
         .prepare_for_delivery(
             &fixture.authority,
-            &strategy,
+            &mut strategy,
             &None::<IntentPersisterImpl>,
         )
         .await;
