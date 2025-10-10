@@ -95,6 +95,7 @@ lazy_static = "1.4.0"
 libc = "0.2.153"
 # light-client = "0.14.0"
 light-client = { git = "https://github.com/Lightprotocol/light-protocol", branch = "jorrit/feat-sdk-v2" }
+light-compressed-account = { git = "https://github.com/Lightprotocol/light-protocol", branch = "jorrit/feat-sdk-v2" }
 light-sdk = "0.13.0"
 log = "0.4.20"
 lru = "0.16.0"

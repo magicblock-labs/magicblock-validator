@@ -4456,6 +4456,7 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "bincode",
+ "borsh 1.5.7",
  "env_logger 0.11.8",
  "futures-util",
  "light-client",
@@ -4579,6 +4580,7 @@ version = "0.1.7"
 dependencies = [
  "bincode",
  "flume",
+ "light-compressed-account 0.3.0 (git+https://github.com/Lightprotocol/light-protocol?branch=jorrit%2Ffeat-sdk-v2)",
  "light-sdk 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "serde",
