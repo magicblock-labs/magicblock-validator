@@ -182,6 +182,13 @@ impl RemoteAccount {
             source,
             RemoteAccountUpdateSource::Compressed
         ));
+        if source == RemoteAccountUpdateSource::Compressed {
+            // HACK: Assumes all compressed accounts that we read are compressed.
+            // This might be true for the first iteration of the feature but should change later.
+            // We should check when getting the account from photon that the account is owned by
+            // the compressed delegation program and delegated to this validator.
+            account_shared_data.set_delegated(true);
+        }
         RemoteAccount::Found(RemoteAccountState {
             account: ResolvedAccount::Fresh(account_shared_data),
             source,
