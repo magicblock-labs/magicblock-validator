@@ -33,10 +33,8 @@ function getExePath(): string {
   }
 }
 
-function runEphemeralValidator(location: string): void {
-  const args = process.argv.slice(2);
-  const ephemeralValidator = spawn(location, args, { stdio: "inherit" });
-  ephemeralValidator.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
+function runWithForwardedExit(child: ReturnType<typeof spawn>): void {
+  child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
     process.on("exit", () => {
       if (signal) {
         process.kill(process.pid, signal);
@@ -47,9 +45,15 @@ function runEphemeralValidator(location: string): void {
   });
 
   process.on("SIGINT", () => {
-    ephemeralValidator.kill("SIGINT");
-    ephemeralValidator.kill("SIGTERM");
+    child.kill("SIGINT");
+    child.kill("SIGTERM");
   });
+}
+
+function runEphemeralValidator(location: string): void {
+  const args = process.argv.slice(2);
+  const ephemeralValidator = spawn(location, args, { stdio: "inherit" });
+  runWithForwardedExit(ephemeralValidator);
 }
 
 function tryPackageEphemeralValidator(): boolean {
@@ -101,4 +105,6 @@ function trySystemEphemeralValidator(): void {
 
   runEphemeralValidator(absoluteBinaryPath);
 }
+
+// If the first argument is our special command, run the test validator and exit.
 tryPackageEphemeralValidator() || trySystemEphemeralValidator();
