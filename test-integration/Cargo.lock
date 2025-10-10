@@ -10676,10 +10676,12 @@ name = "test-schedule-intent"
 version = "0.0.0"
 dependencies = [
  "integration-test-tools",
+ "log",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "program-flexi-counter",
  "solana-rpc-client-api",
  "solana-sdk",
+ "test-kit",
 ]
 
 [[package]]
