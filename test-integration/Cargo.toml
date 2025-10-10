@@ -71,6 +71,7 @@ random-port = "0.1.1"
 rayon = "1.10.0"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
+serial_test = "3.2.0"
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "a892d2a" }
 solana-loader-v2-interface = "2.2"
 solana-loader-v3-interface = "4.0"

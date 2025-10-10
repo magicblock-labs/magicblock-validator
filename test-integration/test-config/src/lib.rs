@@ -2,7 +2,7 @@ use log::*;
 use std::process::Child;
 
 use integration_test_tools::{
-    expect,
+    dlp_interface, expect,
     loaded_accounts::LoadedAccounts,
     validator::{
         resolve_programs, start_magicblock_validator_with_config_struct,
@@ -19,7 +19,7 @@ use program_flexi_counter::instruction::{
 };
 use solana_sdk::{
     address_lookup_table, native_token::LAMPORTS_PER_SOL, signature::Keypair,
-    signer::Signer,
+    signer::Signer, transaction::Transaction,
 };
 use tempfile::TempDir;
 
@@ -85,10 +85,9 @@ pub fn start_validator_with_clone_config(
 }
 
 /// Wait for the validator to start up properly
-pub fn wait_for_startup(validator: &mut Child) {
-    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
-    // Wait for at least one slot to advance to ensure the validator is running
-    expect!(ctx.wait_for_next_slot_ephem(), validator);
+pub fn wait_for_startup(ctx: &IntegrationTestContext, validator: &mut Child) {
+    // Wait for the validator to advance a few slots
+    expect!(ctx.wait_for_delta_slot_ephem(20), validator);
 }
 
 /// Create an account on chain, delegate it, and send a transaction to ephemeral validator to trigger cloning
@@ -97,7 +96,7 @@ pub fn delegate_and_clone(
     validator: &mut Child,
 ) -> Keypair {
     let payer_chain = Keypair::new();
-    let payer_escrowed = Keypair::new();
+    let payer_ephem = Keypair::new();
 
     // 1. Airdrop to payer on chain
     expect!(
@@ -105,49 +104,70 @@ pub fn delegate_and_clone(
         validator
     );
     debug!(
-        "Airdropped 1 SOL to payer account on chain: {}",
+        "✅ Airdropped 1 SOL to payer account on chain: {}",
         payer_chain.pubkey()
     );
 
     // 2. Airdrop to payer used to pay transactions in the ephemeral validator
-    ctx.airdrop_chain_escrowed(&payer_escrowed, LAMPORTS_PER_SOL)
+    ctx.airdrop_chain(&payer_ephem.pubkey(), LAMPORTS_PER_SOL)
         .unwrap();
     debug!(
-        "Airdropped 1 SOL to escrowed payer account on chain: {}",
-        payer_escrowed.pubkey()
+        "✅ Airdropped 1 SOL to payer account on chain: {}",
+        payer_ephem.pubkey()
     );
 
     // 3. Create and send init counter instruction on chain and delegate it
     let init_ix =
-        create_init_ix(payer_chain.pubkey(), "TEST_COUNTER".to_string());
-    let delegate_ix = create_delegate_ix(payer_chain.pubkey());
+        create_init_ix(payer_ephem.pubkey(), "TEST_COUNTER".to_string());
+    let delegate_ix = create_delegate_ix(payer_ephem.pubkey());
     expect!(
         ctx.send_and_confirm_instructions_with_payer_chain(
             &[init_ix, delegate_ix],
-            &payer_chain
+            &payer_ephem
         ),
         validator
     );
     debug!(
-        "Initialized and delegated counter account to payer account on chain: {}",
-        payer_chain.pubkey()
+        "✅ Initialized and delegated counter account to payer account on chain: {}",
+        payer_ephem.pubkey()
     );
 
-    // 3. Send a transaction to ephemeral validator to trigger cloning
-    let add_ix = create_add_ix(payer_escrowed.pubkey(), 1);
+    // 4. Delegate payer so we can use it in ephemeral
+    let ixs = dlp_interface::create_delegate_ixs(
+        payer_chain.pubkey(),
+        payer_ephem.pubkey(),
+        ctx.ephem_validator_identity,
+    );
+    let mut tx = Transaction::new_with_payer(&ixs, Some(&payer_chain.pubkey()));
+    let (sig, confirmed) = expect!(
+        ctx.send_and_confirm_transaction_chain(
+            &mut tx,
+            &[&payer_chain, &payer_ephem]
+        ),
+        validator
+    );
+    assert!(confirmed);
+    debug!(
+        "✅ Delegated payer account {} to ephemeral validator with sig {}",
+        payer_chain.pubkey(),
+        sig
+    );
+
+    // 5. Send a transaction to ephemeral validator to trigger cloning
+    let add_ix = create_add_ix(payer_ephem.pubkey(), 1);
     expect!(
         ctx.send_and_confirm_instructions_with_payer_ephem(
             &[add_ix],
-            &payer_escrowed
+            &payer_ephem
         ),
         validator
     );
     debug!(
-        "Sent add instruction to ephemeral validator to trigger cloning for payer account on chain: {}",
+        "✅ Sent add instruction to ephemeral validator to trigger cloning for payer account on chain: {}",
         payer_chain.pubkey()
     );
 
-    payer_chain
+    payer_ephem
 }
 
 pub fn count_lookup_table_transactions_on_chain(
