@@ -32,6 +32,7 @@ members = [
   "magicblock-rpc",
   "magicblock-rpc-client",
   "magicblock-table-mania",
+  "magicblock-task-scheduler",
   "magicblock-tokens",
   "magicblock-transaction-status",
   "magicblock-validator",
@@ -69,6 +70,7 @@ bs58 = "0.4.0"
 byteorder = "1.5.0"
 cargo-expand = "1"
 cargo-lock = "10.0.0"
+chrono = "0.4"
 clap = "4.5.40"
 conjunto-transwise = { git = "https://github.com/magicblock-labs/conjunto.git", rev = "bf82b45" }
 console-subscriber = "0.2.0"
@@ -122,7 +124,9 @@ magicblock-config = { path = "./magicblock-config" }
 magicblock-config-helpers = { path = "./magicblock-config-helpers" }
 magicblock-config-macro = { path = "./magicblock-config-macro" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = ["no-entrypoint"] }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = [
+  "no-entrypoint",
+] }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-metrics = { path = "./magicblock-metrics" }
@@ -135,6 +139,7 @@ magicblock-pubsub = { path = "./magicblock-pubsub" }
 magicblock-rpc = { path = "./magicblock-rpc" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
+magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
 magicblock-tokens = { path = "./magicblock-tokens" }
 magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
@@ -152,7 +157,7 @@ protobuf-src = "1.1"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10.0"
-rusqlite = { version = "0.34.0", features = ["bundled"] } # bundled sqlite 3.44
+rusqlite = { version = "0.37.0", features = ["bundled"] } # bundled sqlite 3.44
 rustc_version = "0.4"
 semver = "1.0.22"
 serde = "1.0.217"

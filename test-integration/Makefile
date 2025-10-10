@@ -135,6 +135,14 @@ setup-schedule-intents-both:
 	RUN_TESTS=schedule_intents \
 	SETUP_ONLY=both \
 	$(MAKE) test
+	
+test-task-scheduler:
+	RUN_TESTS=task-scheduler \
+	$(MAKE) test
+setup-task-scheduler-devnet:
+	RUN_TESTS=task-scheduler \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
@@ -161,4 +169,4 @@ ci-fmt:
 ci-lint:
 	cargo clippy --all-targets -- -D warnings
 
-.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list ci-fmt ci-lint
+.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config test-task-scheduler deploy-flexi-counter list ci-fmt ci-lint
