@@ -205,7 +205,12 @@ where
                     }
                     if account.executable() {
                         Self::handle_executable_sub_update(
-                            &cloner, pubkey, account,
+                            &remote_account_provider,
+                            &bank,
+                            &fetch_count,
+                            &cloner,
+                            pubkey,
+                            account,
                         )
                         .await;
                     } else if let Err(err) =
@@ -221,6 +226,9 @@ where
     }
 
     async fn handle_executable_sub_update(
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        accounts_bank: &Arc<V>,
+        fetch_count: &Arc<AtomicU64>,
         cloner: &Arc<C>,
         pubkey: Pubkey,
         account: AccountSharedData,
@@ -229,14 +237,52 @@ where
             // This is a program deployed on chain with BPFLoader1111111111111111111111111111111111.
             // By definition it cannot be upgraded, hence we should never get a subscription
             // update for it.
-            error!("Unexpected subscription update for program to load with LoaderV3: {pubkey}.");
+            error!("Unexpected subscription update for program to loaded on chain with LoaderV1: {pubkey}.");
             return;
         }
+
+        // For LoaderV3 programs we need to fetch the program data account
+        let (program_account, program_data_account) = if account
+            .owner()
+            .eq(&LOADER_V3)
+        {
+            match Self::task_to_fetch_with_program_data(
+                remote_account_provider,
+                accounts_bank,
+                fetch_count.clone(),
+                pubkey,
+                account.remote_slot(),
+            )
+            .await
+            {
+                Ok(Ok(account_with_companion)) => (
+                    account_with_companion.account.into_account_shared_data(),
+                    account_with_companion
+                        .companion_account
+                        .map(|x| x.into_account_shared_data()),
+                ),
+                Ok(Err(err)) => {
+                    error!(
+                        "Failed to fetch program data account for program {pubkey}: {err}."
+                    );
+                    return;
+                }
+                Err(err) => {
+                    error!(
+                        "Failed to fetch program data account for program {pubkey}: {err}."
+                    );
+                    return;
+                }
+            }
+        } else {
+            (account, None::<AccountSharedData>)
+        };
+
         let loaded_program = match ProgramAccountResolver::try_new(
             pubkey,
-            *account.owner(),
-            Some(account),
-            None,
+            *program_account.owner(),
+            Some(program_account),
+            program_data_account,
         ) {
             Ok(x) => x.into_loaded_program(),
             Err(err) => {
@@ -719,8 +765,9 @@ where
                     *account_slot
                 };
                 fetch_with_program_data_join_set.spawn(
-                    self.task_to_fetch_with_program_data(
+                    Self::task_to_fetch_with_program_data(
                         &self.remote_account_provider,
+                        &self.accounts_bank,
                         self.fetch_count.clone(),
                         *pubkey,
                         effective_slot,
@@ -1022,13 +1069,13 @@ where
     }
 
     fn task_to_fetch_with_program_data(
-        &self,
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        accounts_bank: &Arc<V>,
         fetch_count: Arc<AtomicU64>,
         pubkey: Pubkey,
         slot: u64,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
-        let bank = self.accounts_bank.clone();
+        let bank = accounts_bank.clone();
         let program_data_pubkey =
             get_loaderv3_get_program_data_address(&pubkey);
         Self::task_to_fetch_with_companion(

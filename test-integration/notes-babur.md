@@ -18,48 +18,39 @@
 - [x] correctly handle empty readonly accounts (Thorsten)
 - [x] we are removing programs on resume, ensured ledger replay completed before that (Thorsten)
 - [ ] not yet supporting airdrop (may have to see if we only support this on a separate branch)
+- [ ] remove _hack_ in svm entrypoint for magicblock program if no longer needed
 
-### Recheck Fails
+## Program Deploy Issue (Fixed)
 
-#### Chainlink (Fixed)
+### Repro
 
-- FAIL test-chainlink::ix_feepayer ixtest_feepayer_delegated_to_us
+1. run any transaction with custom program in the ER connected to local/devnet
+2. ER should create an account subscription for the program
+3. Redeploy the program
+
 ```
-thread 'ixtest_feepayer_without_ephemeral_balance' panicked at test-chainlink/tests/ix_feepayer.rs:109:5:
-Expected account ErGwWjtF4vifqVwVNwMhb74RJyQXNWWt9uMWXAcf85t7 to not be cloned
-```
-
-- FAIL test-chainlink::ix_feepayer ixtest_feepayer_without_ephemeral_balance
-```
-thread 'ixtest_feepayer_delegated_to_us' panicked at test-chainlink/tests/ix_feepayer.rs:144:5:
-Expected account 7YhoJB6ae4rB1vy1VoEk8rTPvMFp7ogw7nTcYyjmv63H to not be cloned
-```
-
-
-#### Cloning (Unable to reproduce)
-
-_Flaky_ failed once and then never again
-- FAIL test-cloning::01_program-deploy test_clone_mini_v4_loader_program_and_upgrade
-```
-Message:  assertion failed: logs.contains(&format!("Program log: LogMsg: {}",
-            format!("{} upgraded", msg)))
-Location: test-cloning/tests/01_program-deploy.rs:179
+[2025-10-04T12:39:24.892039Z ERROR magicblock_chainlink::chainlink::fetch_cloner]
+Failed to resolve program account 3JnJ727jWEmPVU8qfXwtH63sCNDX7nMgsLbg8qy8aaPX into bank:
+The LoaderV3 program 3JnJ727jWEmPVU8qfXwtH63sCNDX7nMgsLbg8qy8aaPX needs a program data account
+to be provided
 ```
 
-#### API (Fixed)
+The program is deployed on devnet
 
-- FAIL test-magicblock-api::test_clocks_match test_clocks_match
-- FAIL test-magicblock-api::test_get_block_timestamp_stability test_get_block_timestamp_stability
+### Related
+
+- problems cloning `PriCems5tHihc6UDXDjzjeawomAwBduWMGAi8ZUjppd` program in deployed node
+- locally when using same config (pointing at helius devnet endpoint) it works fine and is
+cloned via Loaderv4, including the setting of correct auth
+
+## MaxLoadedAccountsDataSizeExceeded Issue
+
 ```
-thread 'test_clocks_match' panicked at test-magicblock-api/tests/test_clocks_match.rs:25:10:
-called `Result::unwrap()` on an `Err` value: Error { request: None, kind: RpcError(ForUser("airdrop request failed. This can happen when the rate limit is reached.")) }
+[2025-10-09T17:19:06.115843Z WARN  magicblock_aperture::requests::http]
+    Failed to ensure transaction accounts:
+    ClonerError(FailedToCloneRegularAccount(
+        9WQsFbLPnqQ7waJqRfwSy3UMcVhzJw1HgQpiVBWnVd1k,
+        TransactionError(MaxLoadedAccountsDataSizeExceeded)))
 ```
 
-#### Config (Fixed)
-
-- still all failing
-
-#### Intents
-
-- single remaining test hangs (most likely delegation issue) (tx not confirmed)
-- they cannot be fixed due to the writable issue
+- none of those accounts exist on mainnet at this point
