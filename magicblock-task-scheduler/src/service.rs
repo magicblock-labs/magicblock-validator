@@ -9,8 +9,11 @@ use std::{
 
 use futures_util::StreamExt;
 use log::*;
-use magicblock_bank::bank::Bank;
 use magicblock_config::TaskSchedulerConfig;
+use magicblock_core::{
+    link::transactions::TransactionSchedulerHandle, traits::AccountsBank,
+};
+use magicblock_ledger::LatestBlock;
 use magicblock_program::{
     instruction_utils::InstructionUtils,
     validator::{validator_authority, validator_authority_id},
@@ -18,17 +21,9 @@ use magicblock_program::{
     TaskRequest, TASK_CONTEXT_PUBKEY,
 };
 use solana_sdk::{
-    account::ReadableAccount,
-    instruction::Instruction,
-    message::Message,
-    pubkey::Pubkey,
-    transaction::{SanitizedTransaction, Transaction},
+    account::ReadableAccount, instruction::Instruction, message::Message,
+    pubkey::Pubkey, signature::Signature, transaction::Transaction,
 };
-use solana_svm::{
-    transaction_commit_result::TransactionCommitResult,
-    transaction_processor::ExecutionRecordingConfig,
-};
-use solana_timings::ExecuteTimings;
 use tokio::{select, time::Duration};
 use tokio_util::{
     sync::CancellationToken,
@@ -43,11 +38,15 @@ use crate::{
 const NOOP_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
-pub struct TaskSchedulerService {
+pub struct TaskSchedulerService<T: AccountsBank> {
     /// Database for persisting tasks
     db: SchedulerDatabase,
     /// Bank for executing tasks
-    bank: Arc<Bank>,
+    bank: Arc<T>,
+    /// Used to send transactions for execution
+    tx_scheduler: TransactionSchedulerHandle,
+    /// Provides latest blockhash for signing transactions
+    block: LatestBlock,
     /// Interval at which the task scheduler will check for requests in the context
     tick_interval: Duration,
     /// Queue of tasks to execute
@@ -58,11 +57,15 @@ pub struct TaskSchedulerService {
     tx_counter: AtomicU64,
 }
 
-impl TaskSchedulerService {
+unsafe impl<T: AccountsBank> Send for TaskSchedulerService<T> {}
+unsafe impl<T: AccountsBank> Sync for TaskSchedulerService<T> {}
+impl<T: AccountsBank> TaskSchedulerService<T> {
     pub fn start(
         path: &Path,
         config: &TaskSchedulerConfig,
-        bank: Arc<Bank>,
+        bank: Arc<T>,
+        tx_scheduler: TransactionSchedulerHandle,
+        block: LatestBlock,
         token: CancellationToken,
     ) -> Result<
         tokio::task::JoinHandle<TaskSchedulerResult<()>>,
@@ -88,6 +91,8 @@ impl TaskSchedulerService {
         let mut service = Self {
             db,
             bank,
+            tx_scheduler,
+            block,
             tick_interval: Duration::from_millis(config.millis_per_tick),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
@@ -189,18 +194,15 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    fn execute_task(&mut self, task: &DbTask) -> TaskSchedulerResult<()> {
-        let output = self.process_transaction(task.instructions.clone())?;
+    async fn execute_task(&mut self, task: &DbTask) -> TaskSchedulerResult<()> {
+        let sig = self.process_transaction(task.instructions.clone()).await?;
 
+        // TODO(Dodecahedr0x): we don't get any output directly at this point
+        // we would have to fetch the transaction via its signature to see
+        // if it succeeded or failed.
+        // However that should not happen here, but on a separate task
         // If any instruction fails, the task is cancelled
-        for result in output {
-            if let Err(e) = result.and_then(|tx| tx.status) {
-                error!("Task {} failed to execute: {}", task.id, e);
-                self.db.insert_failed_task(task.id, format!("{:?}", e))?;
-                self.db.remove_task(task.id)?;
-                return Err(TaskSchedulerError::Transaction(e));
-            }
-        }
+        debug!("Executed task {} with signature {}", task.id, sig);
 
         if task.executions_left > 1 {
             // Reschedule the task
@@ -270,13 +272,12 @@ impl TaskSchedulerService {
                 Some(task) = self.task_queue.next() => {
                     let task = task.get_ref();
                     self.task_queue_keys.remove(&task.id);
-                    if let Err(e) = self.execute_task(task) {
+                    if let Err(e) = self.execute_task(task).await {
                         error!("Failed to execute task {}: {}", task.id, e);
                     }
                 }
                 _ = interval.tick() => {
-                    // HACK: we deserialize the context on every tick avoid using geyser.
-                    // This will be fixed once the channel to the transaction executor is implemented.
+                    // HACK: we deserialize the context on every tick avoid using geyser. This will be fixed once the channel to the transaction executor is implemented.
                     // Performance should not be too bad because the context should be small.
                     // https://github.com/magicblock-labs/magicblock-validator/issues/523
 
@@ -297,17 +298,23 @@ impl TaskSchedulerService {
 
                             // All requests were processed, reset the context
                             warn!("Failed to process {} requests out of {}", result.len(), task_context.requests.len());
-                            let output = self.process_transaction(vec![
+                            let sig = self.process_transaction(vec![
                                 InstructionUtils::process_tasks_instruction(
                                     &validator_authority_id(),
                                 ),
-                            ])?;
-                            for result in output {
-                                if let Err(e) = result.and_then(|tx| tx.status) {
-                                    error!("Failed to reset task context: {}", e);
-                                    return Err(TaskSchedulerError::Transaction(e));
-                                }
-                            }
+                            ]).await?;
+                            debug!("Processed {} requests with signature {}", task_context.requests.len(), sig);
+                            // TODO(Dodecahedr0x): we don't get any output directly at this point
+                            // we would have to fetch the transaction via its signature to see
+                            // if it succeeded or failed.
+                            // However that should not happen here, but on a separate task
+                            // If any instruction fails, the task is cancelled
+                            // for result in output {
+                            //     if let Err(e) = result.and_then(|tx| tx.status) {
+                            //         error!("Failed to reset task context: {}", e);
+                            //         return Err(TaskSchedulerError::Transaction(e));
+                            //     }
+                            // }
                         }
                         Err(e) => {
                             error!("Failed to process context requests: {}", e);
@@ -330,13 +337,13 @@ impl TaskSchedulerService {
         }
     }
 
-    fn process_transaction(
+    async fn process_transaction(
         &self,
         instructions: Vec<Instruction>,
-    ) -> TaskSchedulerResult<Vec<TransactionCommitResult>> {
+    ) -> TaskSchedulerResult<Signature> {
+        let blockhash = self.block.load().blockhash;
         // Execute unsigned transactions
         // We prepend a noop instruction to make each transaction unique.
-        let blockhash = self.bank.last_blockhash();
         let noop_instruction = Instruction::new_with_bytes(
             NOOP_PROGRAM_ID,
             &self
@@ -357,30 +364,8 @@ impl TaskSchedulerService {
             blockhash,
         );
 
-        // TODO: transaction should be sent to the transaction executor.
-        // This is a work in progress and this should be updated once implemented.
-        // https://github.com/magicblock-labs/magicblock-validator/issues/523
-        let sanitized_transaction =
-            match SanitizedTransaction::try_from_legacy_transaction(
-                tx,
-                &Default::default(),
-            ) {
-                Ok(tx) => [tx],
-                Err(e) => {
-                    error!("Failed to sanitize transaction: {}", e);
-                    return Err(TaskSchedulerError::Transaction(e));
-                }
-            };
-        let batch = self.bank.prepare_sanitized_batch(&sanitized_transaction);
-        let (output, _balances) =
-            self.bank.load_execute_and_commit_transactions(
-                &batch,
-                false,
-                ExecutionRecordingConfig::new_single_setting(true),
-                &mut ExecuteTimings::default(),
-                None,
-            );
-
-        Ok(output)
+        let sig = tx.signatures[0];
+        self.tx_scheduler.execute(tx).await?;
+        Ok(sig)
     }
 }

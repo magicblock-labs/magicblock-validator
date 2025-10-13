@@ -670,7 +670,9 @@ impl MagicValidator {
         let task_scheduler_handle = TaskSchedulerService::start(
             &task_scheduler_db_path,
             &self.config.task_scheduler,
-            self.bank.clone(),
+            self.accountsdb.clone(),
+            self.transaction_scheduler.clone(),
+            self.ledger.latest_block().clone(),
             self.token.clone(),
         )?;
         // TODO: we should shutdown gracefully.
