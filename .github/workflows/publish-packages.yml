@@ -191,7 +191,7 @@ jobs:
         run: echo "DRY_RUN=false" >> $GITHUB_ENV
         if: github.event_name == 'release' && github.event.action == 'published'
 
-      - uses: ./magicblock-validator/.github/actions/setup-solana
+      - uses: .github/actions/setup-solana
 
       - name: Publish the NPM package
         shell: bash
