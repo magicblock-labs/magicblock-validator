@@ -52,7 +52,11 @@ function runWithForwardedExit(child: ReturnType<typeof spawn>): void {
 
 function runEphemeralValidator(location: string): void {
   const args = process.argv.slice(2);
-  const ephemeralValidator = spawn(location, args, { stdio: "inherit" });
+  const env = {
+    ...process.env,
+    RUST_LOG: "quiet",
+  };
+  const ephemeralValidator = spawn(location, args, { stdio: "inherit", env});
   runWithForwardedExit(ephemeralValidator);
 }
 
