@@ -209,7 +209,7 @@ fn read(ledger_path: &Path, payer: &Keypair) -> Child {
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
 
-    // TODO: @@@ the below fails the following reason:
+    // TODO(thlorenz): the below fails the following reason:
     // 1. the undelegation did go through when we started the validator pointing at different
     //    ledger
     // 2. the validator started from original ledger does not hydrate the delegated account and
