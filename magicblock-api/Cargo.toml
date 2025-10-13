@@ -35,6 +35,7 @@ magicblock-metrics = { workspace = true }
 magicblock-processor = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-validator-admin = { workspace = true }
+magicblock-task-scheduler = { workspace = true }
 magic-domain-program = { workspace = true }
 
 solana-feature-set = { workspace = true }

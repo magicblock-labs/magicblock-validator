@@ -245,6 +245,39 @@ pub fn start_magicblock_validator_with_config_struct(
     )
 }
 
+pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
+    config: EphemeralConfig,
+    loaded_chain_accounts: &LoadedAccounts,
+    default_tmpdir: TempDir,
+    temp_dir: PathBuf,
+) -> (TempDir, Option<process::Child>) {
+    let workspace_dir = resolve_workspace_dir();
+    let release = std::env::var("RELEASE").is_ok();
+    let config_path = temp_dir.join("config.toml");
+    let config_toml = config.to_string();
+    fs::write(&config_path, config_toml).unwrap();
+
+    let root_dir = Path::new(&workspace_dir)
+        .join("..")
+        .canonicalize()
+        .unwrap()
+        .to_path_buf();
+    let paths = TestRunnerPaths {
+        config_path,
+        root_dir,
+        workspace_dir,
+    };
+    (
+        default_tmpdir,
+        start_magic_block_validator_with_config(
+            &paths,
+            "TEST",
+            loaded_chain_accounts,
+            release,
+        ),
+    )
+}
+
 pub fn cleanup(validator: &mut Child) {
     let _ = validator.kill().inspect_err(|e| {
         eprintln!("ERR: Failed to kill validator: {:?}", e);

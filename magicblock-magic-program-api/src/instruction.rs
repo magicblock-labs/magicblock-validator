@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use solana_program::pubkey::Pubkey;
 
-use crate::args::MagicBaseIntentArgs;
+use crate::args::{MagicBaseIntentArgs, ScheduleTaskArgs};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MagicBlockInstruction {
@@ -69,6 +69,30 @@ pub enum MagicBlockInstruction {
     /// Args: (intent_id, bump) - bump is needed in order to guarantee unique transactions
     ScheduledCommitSent((u64, u64)),
     ScheduleBaseIntent(MagicBaseIntentArgs),
+
+    /// Schedule a new task for execution
+    ///
+    /// # Account references
+    /// - **0.**    `[WRITE, SIGNER]` Payer (payer)
+    /// - **1.**    `[WRITE]`         Task context account
+    /// - **2..n**  `[]`              Accounts included in the task
+    ScheduleTask(ScheduleTaskArgs),
+
+    /// Cancel a task
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Task authority
+    /// - **1.** `[WRITE]`         Task context account
+    CancelTask {
+        task_id: u64,
+    },
+
+    /// Process all tasks
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]`         Validator authority
+    /// - **1.** `[WRITE]`          Task context account
+    ProcessTasks,
 }
 
 impl MagicBlockInstruction {

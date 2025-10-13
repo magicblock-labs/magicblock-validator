@@ -50,14 +50,18 @@ fn init_logger() {
 }
 
 /// Print informational startup messages.
-/// If RUST_LOG is not set, prints to stdout using println! so users always see it.
-/// If RUST_LOG is set, emits an info! log so operators can control visibility
-/// (e.g., by setting RUST_LOG=warn to hide it).
+/// - If `RUST_LOG` is not set or is set to "quiet", prints to stdout using `println!()`.
+/// - Otherwise, emits an `info!` log so operators can control visibility
+///   (e.g., by setting `RUST_LOG=warn` to hide it).
 fn print_info<S: std::fmt::Display>(msg: S) {
-    if std::env::var_os("RUST_LOG").is_some() {
-        info!("{}", msg);
-    } else {
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
+    let rust_log_trimmed = rust_log.trim().to_ascii_lowercase();
+    let use_plain_print =
+        rust_log_trimmed.is_empty() || rust_log_trimmed == "quiet";
+    if use_plain_print {
         println!("{}", msg);
+    } else {
+        info!("{}", msg);
     }
 }
 

@@ -246,7 +246,10 @@ where
             .execute(intent.inner.clone(), persister)
             .await
             .inspect_err(|err| {
-                error!("Failed to execute BaseIntent: {:?}", err)
+                error!(
+                    "Failed to execute BaseIntent. id: {}. {:?}",
+                    intent.id, err
+                )
             })
             .map(|output| ExecutionOutputWrapper {
                 id: intent.id,

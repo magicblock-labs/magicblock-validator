@@ -829,6 +829,66 @@ impl IntegrationTestContext {
         })
     }
 
+    pub fn send_transaction(
+        rpc_client: &RpcClient,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+    ) -> Result<Signature, client_error::Error> {
+        let blockhash = rpc_client.get_latest_blockhash()?;
+        tx.sign(signers, blockhash);
+        let sig = rpc_client.send_transaction_with_config(
+            tx,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )?;
+        rpc_client.confirm_transaction_with_commitment(
+            &sig,
+            CommitmentConfig::confirmed(),
+        )?;
+        Ok(sig)
+    }
+
+    pub fn send_instructions_with_payer(
+        rpc_client: &RpcClient,
+        ixs: &[Instruction],
+        payer: &Keypair,
+    ) -> Result<Signature, client_error::Error> {
+        let blockhash = rpc_client.get_latest_blockhash()?;
+        let mut tx = Transaction::new_with_payer(ixs, Some(&payer.pubkey()));
+        tx.sign(&[payer], blockhash);
+        Self::send_transaction(rpc_client, &mut tx, &[payer])
+    }
+
+    pub fn send_and_confirm_transaction(
+        rpc_client: &RpcClient,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+        commitment: CommitmentConfig,
+    ) -> Result<(Signature, bool), client_error::Error> {
+        let sig = Self::send_transaction(rpc_client, tx, signers)?;
+        Self::confirm_transaction(&sig, rpc_client, commitment)
+            .map(|confirmed| (sig, confirmed))
+    }
+
+    pub fn send_and_confirm_instructions_with_payer(
+        &self,
+        rpc_client: &RpcClient,
+        ixs: &[Instruction],
+        payer: &Keypair,
+        commitment: CommitmentConfig,
+    ) -> Result<(Signature, bool), client_error::Error> {
+        let sig = Self::send_instructions_with_payer(rpc_client, ixs, payer)?;
+        debug!("Confirming transaction with signature: {}", sig);
+        Self::confirm_transaction(&sig, rpc_client, commitment)
+            .map(|confirmed| (sig, confirmed))
+            .inspect_err(|_| {
+                self.dump_ephemeral_logs(sig);
+                self.dump_chain_logs(sig);
+            })
+    }
+
     pub fn get_transaction_chain(
         &self,
         sig: &Signature,

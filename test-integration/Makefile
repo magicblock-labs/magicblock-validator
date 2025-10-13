@@ -179,6 +179,14 @@ setup-schedule-intents-both:
 	SETUP_ONLY=both \
 	$(MAKE) test
 
+test-task-scheduler:
+	RUN_TESTS=task-scheduler \
+	$(MAKE) test
+setup-task-scheduler-devnet:
+	RUN_TESTS=task-scheduler \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml \
 		--sbf-out-dir $(DEPLOY_DIR)
@@ -208,4 +216,45 @@ ci-fmt:
 ci-lint:
 	cargo clippy --all-targets -- -D warnings
 
-.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-chainlink setup-chainlink-devnet test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list ci-fmt ci-lint programs
+.PHONY:
+	ci-fmt \
+	ci-lint \
+	deploy-flexi-counter \
+	fmt \
+	list \
+	list-programs \
+	programs \
+	setup-chainlink-devnet \
+	setup-cloning-both \
+	setup-cloning-devnet \
+	setup-cloning-ephem \
+	setup-committor-devnet \
+	setup-config-devnet \
+	setup-magicblock-api-both \
+	setup-magicblock-api-devnet \
+	setup-magicblock-api-ephem \
+	setup-pubsub-both \
+	setup-pubsub-devnet \
+	setup-pubsub-ephem \
+	setup-restore-ledger-devnet \
+	setup-schedule-intents-both \
+	setup-schedule-intents-devnet \
+	setup-schedule-intents-ephem \
+	setup-schedulecommit-both \
+	setup-schedulecommit-devnet \
+	setup-schedulecommit-ephem \
+	setup-table-mania-devnet \
+	setup-task-scheduler-devnet \
+	test \
+	test-chainlink \
+	test-cloning \
+	test-committor \
+	test-config \
+	test-force-mb \
+	test-magicblock-api \
+	test-pubsub \
+	test-restore-ledger \
+	test-schedule-intents \
+	test-schedulecommit \
+	test-table-mania \
+	test-task-scheduler

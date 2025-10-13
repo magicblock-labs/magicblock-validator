@@ -449,6 +449,7 @@ where
 
 fn should_clone_account(pubkey: &Pubkey) -> bool {
     pubkey != &magic_program::MAGIC_CONTEXT_PUBKEY
+        && pubkey != &magic_program::TASK_CONTEXT_PUBKEY
 }
 
 /// Creates deterministic hashes from account lamports, owner and data

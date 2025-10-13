@@ -13,8 +13,10 @@ use integration_test_tools::{
 };
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
-    LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
-    DEFAULT_LEDGER_SIZE_BYTES,
+    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
+    LifecycleMode, ProgramConfig, ProgramConfig, RemoteCluster, RemoteCluster,
+    RemoteConfig, RemoteConfig, TaskSchedulerConfig, ValidatorConfig,
+    ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES, DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::{
     instruction::{create_delegate_ix, create_init_ix},
@@ -152,6 +154,10 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
         },
         accounts: accounts_config.clone(),
         programs,
+        task_scheduler: TaskSchedulerConfig {
+            reset: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
     // Fund validator on chain

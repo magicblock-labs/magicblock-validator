@@ -28,6 +28,7 @@ members = [
   "magicblock-processor",
   "magicblock-rpc-client",
   "magicblock-table-mania",
+  "magicblock-task-scheduler",
   "magicblock-validator",
   "magicblock-validator-admin",
   "magicblock-version",
@@ -44,7 +45,7 @@ resolver = "2"
 
 [workspace.package]
 # Solana Version (2.2.x)
-version = "0.2.1"
+version = "0.2.3"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
@@ -64,6 +65,7 @@ bs58 = "0.5.1"
 byteorder = "1.5.0"
 cargo-expand = "1"
 cargo-lock = "10.0.0"
+chrono = "0.4"
 clap = "4.5.40"
 conjunto-transwise = { git = "https://github.com/magicblock-labs/conjunto.git", rev = "bf82b45" }
 console-subscriber = "0.2.0"
@@ -128,6 +130,7 @@ magicblock-program = { path = "./programs/magicblock" }
 magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
+magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
 magicblock-version = { path = "./magicblock-version" }
 test-kit = { path = "./test-kit" }
@@ -149,7 +152,8 @@ protobuf-src = "1.1"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10.0"
-rusqlite = { version = "0.34.0", features = ["bundled"] }                                           # bundled sqlite 3.44
+# bundled sqlite 3.44
+rusqlite = { version = "0.37.0", features = ["bundled"] }
 rustc_version = "0.4"
 scc = "2.4"
 semver = "1.0.22"

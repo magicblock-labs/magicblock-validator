@@ -3,10 +3,11 @@ use std::net::{IpAddr, Ipv4Addr};
 use isocountry::CountryCode;
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, AccountsDbConfig, AllowedProgram,
-    BlockSize, CommitStrategyConfig, EphemeralConfig, LedgerConfig,
-    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
-    MetricsConfig, MetricsServiceConfig, PrepareLookupTables, ProgramConfig,
-    RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
+    BlockSize, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
+    LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
+    LifecycleMode, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
+    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, TaskSchedulerConfig,
+    ValidatorConfig,
 };
 use solana_pubkey::pubkey;
 use url::Url;
@@ -120,6 +121,7 @@ fn test_local_dev_with_programs_toml() {
                 },
                 ..Default::default()
             },
+            task_scheduler: TaskSchedulerConfig::default(),
         }
     )
 }
@@ -279,6 +281,10 @@ fn test_everything_defined() {
                     port: 9999,
                     addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 },
+            },
+            task_scheduler: TaskSchedulerConfig {
+                reset: true,
+                millis_per_tick: 1000,
             },
         }
     );
