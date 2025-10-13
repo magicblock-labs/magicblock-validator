@@ -20,30 +20,41 @@
 - [ ] not yet supporting airdrop (may have to see if we only support this on a separate branch)
 - [ ] remove _hack_ in svm entrypoint for magicblock program if no longer needed
 
-## Program Deploy Issue (Fixed)
+## Unit Test Status
 
-### Repro
+### Fixed
 
-1. run any transaction with custom program in the ER connected to local/devnet
-2. ER should create an account subscription for the program
-3. Redeploy the program
+- magicblock-accounts-db tests::test_account_removal - fixed
+- magicblock-config-macro::test_merger test_merge_macro_codegen - fixed (required `cargo +nightly install cargo-expand --locked`)
 
-```
-[2025-10-04T12:39:24.892039Z ERROR magicblock_chainlink::chainlink::fetch_cloner]
-Failed to resolve program account 3JnJ727jWEmPVU8qfXwtH63sCNDX7nMgsLbg8qy8aaPX into bank:
-The LoaderV3 program 3JnJ727jWEmPVU8qfXwtH63sCNDX7nMgsLbg8qy8aaPX needs a program data account
-to be provided
-```
+### Need Babur's Help
 
-The program is deployed on devnet
+Not sure why these fail (assume `0` return value)
 
-### Related
+- magicblock-aperture::mocked test_get_epoch_schedule
+- magicblock-aperture::mocked test_get_supply - not sure why this fails (Babur)
+
+#### Failing with `RpcError(DeadlineExceeded)`
+
+This is most likely due to RPC node closing connection before response is sent back.
+Need Babur's help to understand how to fix this.
+
+- magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_extremely_large_changeset
+- magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_insanely_large_changeset
+- magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_large_changeset
+- magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_small_changeset
+- magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_small_single_account
+- magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_very_large_changeset
+
+## CI
+
+### Program Deploy
 
 - problems cloning `PriCems5tHihc6UDXDjzjeawomAwBduWMGAi8ZUjppd` program in deployed node
 - locally when using same config (pointing at helius devnet endpoint) it works fine and is
 cloned via Loaderv4, including the setting of correct auth
 
-## MaxLoadedAccountsDataSizeExceeded Issue
+### MaxLoadedAccountsDataSizeExceeded Issue
 
 ```
 [2025-10-09T17:19:06.115843Z WARN  magicblock_aperture::requests::http]

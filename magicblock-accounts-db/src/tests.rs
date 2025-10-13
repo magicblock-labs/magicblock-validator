@@ -394,9 +394,10 @@ fn test_account_removal() {
 
     tenv.insert_account(&pk, &acc.account);
 
+    // NOTE: we use empty accounts to mark escrow accounts that were not found on chain
     assert!(
-        tenv.get_account(&pk).is_none(),
-        "account should have been deleted after lamports have been zeroed out"
+        tenv.get_account(&pk).is_some(),
+        "account is not deleted after lamports have been zeroed out"
     );
 }
 
