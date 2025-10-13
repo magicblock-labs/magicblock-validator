@@ -59,16 +59,7 @@ use magicblock_program::{
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
-use magicblock_pubsub::pubsub_service::{
-    PubsubConfig, PubsubService, PubsubServiceCloseHandle,
-};
-use magicblock_rpc::{
-    json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
-};
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
-use magicblock_transaction_status::{
-    TransactionStatusMessage, TransactionStatusSender,
-};
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use mdp::state::{
     features::FeaturesSet,
@@ -211,7 +202,7 @@ impl MagicValidator {
 
         init_validator_identity(&accountsdb, &validator_pubkey);
         fund_magic_context(&accountsdb);
-        fund_task_context(&bank);
+        fund_task_context(&accountsdb);
 
         let faucet_keypair =
             funded_faucet(&accountsdb, ledger.ledger_path().as_path())?;
@@ -668,29 +659,6 @@ impl MagicValidator {
 
         self.ledger_truncator.start();
 
-        self.rpc_service.start().map_err(|err| {
-            ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
-        })?;
-
-        info!(
-            "Launched JSON RPC service at {:?} as part of process with pid {}",
-            self.rpc_service.rpc_addr(),
-            process::id(),
-        );
-
-        // NOTE: we need to create the pubsub service on each start since spawning
-        // it takes ownership
-        let pubsub_service = PubsubService::new(
-            self.pubsub_config.clone(),
-            self.geyser_rpc_service.clone(),
-            self.bank.clone(),
-        );
-
-        let (pubsub_handle, pubsub_close_handle) =
-            pubsub_service.spawn(self.pubsub_config.socket())?;
-        self.pubsub_handle.write().unwrap().replace(pubsub_handle);
-        self.pubsub_close_handle = pubsub_close_handle;
-
         let task_scheduler_db_path =
             SchedulerDatabase::path(self.ledger.ledger_path().parent().expect(
                 "ledger_path didn't have a parent, should never happen",
@@ -726,13 +694,6 @@ impl MagicValidator {
                 }
             }
         }));
-
-        self.sample_performance_service
-            .replace(SamplePerformanceService::new(
-                &self.bank,
-                &self.ledger,
-                self.exit.clone(),
-            ));
 
         validator::finished_starting_up();
         Ok(())

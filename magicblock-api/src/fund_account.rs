@@ -1,7 +1,7 @@
+use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
 use std::path::Path;
 
 use magicblock_accounts_db::AccountsDb;
-use magicblock_bank::bank::Bank;
 use magicblock_core::traits::AccountsBank;
 use magicblock_magic_program_api as magic_program;
 use magicblock_program::{MagicContext, TaskContext};
@@ -77,16 +77,16 @@ pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
         accountsdb,
         &magic_program::MAGIC_CONTEXT_PUBKEY,
         u64::MAX,
-        MagicContext::ZERO.to_vec(),
+        MagicContext::SIZE,
     );
 }
 
-pub(crate) fn fund_task_context(bank: &Bank) {
+pub(crate) fn fund_task_context(accountsdb: &AccountsDb) {
     fund_account_with_data(
-        bank,
+        accountsdb,
         &TASK_CONTEXT_PUBKEY,
         u64::MAX,
-        TaskContext::ZERO.to_vec(),
+        TaskContext::SIZE,
     );
     let mut magic_context = accountsdb
         .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)

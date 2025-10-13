@@ -10,7 +10,7 @@ use magicblock_config::{
     LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
     LifecycleMode, MagicBlockConfig, MetricsConfig, MetricsServiceConfig,
     PrepareLookupTables, ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig,
-    ValidatorConfig,
+    TaskSchedulerConfig, ValidatorConfig,
 };
 use solana_pubkey::pubkey;
 use url::Url;

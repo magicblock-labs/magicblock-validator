@@ -3,10 +3,10 @@ use std::net::{IpAddr, Ipv4Addr};
 use isocountry::CountryCode;
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, AccountsDbConfig, AllowedProgram,
-    BlockSize, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
-    LifecycleMode, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
-    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, TaskSchedulerConfig,
+    BlockSize, CommitStrategyConfig, EphemeralConfig, LedgerConfig,
+    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
+    MetricsConfig, MetricsServiceConfig, PrepareLookupTables, ProgramConfig,
+    RemoteCluster, RemoteConfig, RpcConfig, TaskSchedulerConfig,
     ValidatorConfig,
 };
 use solana_pubkey::pubkey;
