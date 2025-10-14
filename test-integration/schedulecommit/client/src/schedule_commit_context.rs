@@ -5,7 +5,7 @@ use integration_test_tools::IntegrationTestContext;
 use log::*;
 use program_schedulecommit::api::{
     delegate_account_cpi_instruction, init_account_instruction,
-    init_payer_escrow, pda_and_bump,
+    init_order_book_instruction, init_payer_escrow,
 };
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -13,6 +13,7 @@ use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::signer::SeedDerivable;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
+    compute_budget::ComputeBudgetInstruction,
     hash::Hash,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
@@ -30,6 +31,7 @@ pub struct ScheduleCommitTestContext {
     pub payer_ephem: Keypair,
     // The Payer keypairs along with its PDA pubkey which we'll commit
     pub committees: Vec<(Keypair, Pubkey)>,
+    user_seed: Vec<u8>,
 
     common_ctx: IntegrationTestContext,
 }
@@ -61,14 +63,21 @@ impl ScheduleCommitTestContext {
     // -----------------
     // Init
     // -----------------
-    pub fn try_new_random_keys(ncommittees: usize) -> Result<Self> {
-        Self::try_new_internal(ncommittees, true)
+    pub fn try_new_random_keys(
+        ncommittees: usize,
+        user_seed: &[u8],
+    ) -> Result<Self> {
+        Self::try_new_internal(ncommittees, true, user_seed)
     }
-    pub fn try_new(ncommittees: usize) -> Result<Self> {
-        Self::try_new_internal(ncommittees, false)
+    pub fn try_new(ncommittees: usize, user_seed: &[u8]) -> Result<Self> {
+        Self::try_new_internal(ncommittees, false, user_seed)
     }
 
-    fn try_new_internal(ncommittees: usize, random_keys: bool) -> Result<Self> {
+    fn try_new_internal(
+        ncommittees: usize,
+        random_keys: bool,
+        user_seed: &[u8],
+    ) -> Result<Self> {
         let ictx = IntegrationTestContext::try_new()?;
 
         let payer_chain = if random_keys {
@@ -103,7 +112,10 @@ impl ScheduleCommitTestContext {
                     lamports,
                 )
                 .unwrap();
-                let (pda, _) = pda_and_bump(&payer_ephem.pubkey());
+                let (pda, _bump) = Pubkey::find_program_address(
+                    &[user_seed, &payer_ephem.pubkey().as_ref()],
+                    &program_schedulecommit::ID,
+                );
                 (payer_ephem, pda)
             })
             .collect::<Vec<(Keypair, Pubkey)>>();
@@ -143,6 +155,7 @@ impl ScheduleCommitTestContext {
             payer_ephem,
             committees,
             common_ctx: ictx,
+            user_seed: user_seed.to_vec(),
         })
     }
 
@@ -150,17 +163,44 @@ impl ScheduleCommitTestContext {
     // Schedule Commit specific Transactions
     // -----------------
     pub fn init_committees(&self) -> Result<Signature> {
-        let ixs = self
-            .committees
-            .iter()
-            .map(|(player, committee)| {
+        let mut ixs = vec![
+            ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
+            ComputeBudgetInstruction::set_compute_unit_price(10_000),
+        ];
+        if self.user_seed == b"magic_schedule_commit" {
+            ixs.extend(self.committees.iter().map(|(player, committee)| {
                 init_account_instruction(
                     self.payer_chain.pubkey(),
                     player.pubkey(),
                     *committee,
                 )
-            })
-            .collect::<Vec<_>>();
+            }));
+        } else {
+            ixs.extend(self.committees.iter().map(
+                |(book_manager, committee)| {
+                    init_order_book_instruction(
+                        self.payer_chain.pubkey(),
+                        book_manager.pubkey(),
+                        *committee,
+                    )
+                },
+            ));
+
+            //// TODO (snawaz): currently the size of delegatable-account cannot be
+            //// more than 10K, else delegation will fail. So Let's revisit this when
+            //// we relax the limit on the account size, then we can use larger
+            //// account, say even 10 MB, and execute CommitDiff.
+            //
+            // ixs.extend(self.committees.iter().flat_map(
+            //     |(payer, committee)| {
+            //         [grow_order_book_instruction(
+            //             payer.pubkey(),
+            //             *committee,
+            //             10 * 1024
+            //         )]
+            //     },
+            // ));
+        }
 
         let mut signers = self
             .committees
@@ -224,6 +264,7 @@ impl ScheduleCommitTestContext {
                 self.payer_chain.pubkey(),
                 self.ephem_validator_identity,
                 player.pubkey(),
+                &self.user_seed,
             );
             ixs.push(ix);
         }

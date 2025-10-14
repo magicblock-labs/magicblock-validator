@@ -15,16 +15,22 @@ use solana_sdk::{
 // -----------------
 pub fn get_context_with_delegated_committees(
     ncommittees: usize,
+    user_seed: &[u8],
 ) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
-        ScheduleCommitTestContext::try_new(ncommittees)
+        ScheduleCommitTestContext::try_new(ncommittees, user_seed)
     } else {
-        ScheduleCommitTestContext::try_new_random_keys(ncommittees)
+        ScheduleCommitTestContext::try_new_random_keys(ncommittees, user_seed)
     }
     .unwrap();
+    println!("get_context_with_delegated_committees inside");
 
-    ctx.init_committees().unwrap();
-    ctx.delegate_committees().unwrap();
+    let txhash = ctx.init_committees().unwrap();
+    println!("txhash (init_committees): {}", txhash);
+
+    let txhash = ctx.delegate_committees().unwrap();
+    println!("txhash (delegate_committees): {}", txhash);
+
     ctx
 }
 
@@ -32,11 +38,13 @@ pub fn get_context_with_delegated_committees(
 // Asserts
 // -----------------
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_one_committee_was_committed(
+pub fn assert_one_committee_was_committed<T>(
     ctx: &ScheduleCommitTestContext,
-    res: &ScheduledCommitResult<MainAccount>,
+    res: &ScheduledCommitResult<T>,
     is_single_stage: bool,
-) {
+) 
+where
+    T: std::fmt::Debug + borsh::BorshDeserialize + PartialEq + Eq {
     let pda = ctx.committees[0].1;
 
     assert_eq!(res.included.len(), 1, "includes 1 pda");
