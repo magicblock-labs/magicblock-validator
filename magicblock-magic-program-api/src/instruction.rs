@@ -92,6 +92,8 @@ pub enum MagicBlockInstruction {
     /// - **0.** `[SIGNER]`         Validator authority
     /// - **1.** `[WRITE]`          Task context account
     ProcessTasks,
+
+    ScheduleCommitDiffAndUndelegate,
 }
 
 impl MagicBlockInstruction {

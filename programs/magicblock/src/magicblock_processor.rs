@@ -75,6 +75,9 @@ declare_process_instruction!(
             MagicBlockInstruction::ProcessTasks => {
                 process_process_tasks(signers, invoke_context)
             }
+            MagicBlockInstruction::ScheduleCommitDiffAndUndelegate => {
+                todo!();
+            }
         }
     }
 );
