@@ -3462,7 +3462,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
- "magicblock-mutator",
+ "magicblock-magic-program-api 0.2.3",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-sdk",
@@ -3487,7 +3487,6 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-magic-program-api 0.2.3",
  "magicblock-metrics",
- "magicblock-mutator",
  "magicblock-processor",
  "magicblock-program",
  "solana-rpc-client",
@@ -3588,7 +3587,6 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-magic-program-api 0.2.3",
  "magicblock-metrics",
- "magicblock-mutator",
  "magicblock-processor",
  "magicblock-program",
  "magicblock-task-scheduler",
@@ -3840,20 +3838,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-mutator"
-version = "0.2.3"
-dependencies = [
- "bincode",
- "log",
- "magicblock-core",
- "magicblock-program",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-sdk",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "magicblock-processor"
 version = "0.2.3"
 dependencies = [
@@ -3967,7 +3951,6 @@ dependencies = [
  "log",
  "magicblock-config",
  "magicblock-delegation-program 1.0.0",
- "magicblock-mutator",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-rpc-client",

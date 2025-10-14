@@ -20,7 +20,6 @@ members = [
   "magicblock-magic-program-api",
   "magicblock-ledger",
   "magicblock-metrics",
-  "magicblock-mutator",
   "magicblock-processor",
   "magicblock-rpc-client",
   "magicblock-table-mania",
@@ -115,7 +114,6 @@ magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-metrics = { path = "./magicblock-metrics" }
-magicblock-mutator = { path = "./magicblock-mutator" }
 magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
 magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }

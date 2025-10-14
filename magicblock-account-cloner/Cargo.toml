@@ -17,8 +17,8 @@ magicblock-committor-service = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
-magicblock-mutator = { workspace = true }
 magicblock-program = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 thiserror = { workspace = true }

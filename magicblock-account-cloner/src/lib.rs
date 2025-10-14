@@ -23,10 +23,11 @@ use magicblock_committor_service::{
 use magicblock_config::AccountsCloneConfig;
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_ledger::LatestBlock;
-use magicblock_mutator::AccountModification;
+use magicblock_magic_program_api::instruction::AccountModification;
 use magicblock_program::{
     instruction_utils::InstructionUtils, validator::validator_authority,
 };
+
 use magicblock_rpc_client::MagicblockRpcClient;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},

@@ -2,7 +2,7 @@ use magicblock_chainlink::{
     cloner::errors::{ClonerError, ClonerResult},
     remote_account_provider::program_account::LoadedProgram,
 };
-use magicblock_mutator::AccountModification;
+use magicblock_magic_program_api::instruction::AccountModification;
 use solana_sdk::{
     bpf_loader_upgradeable::{self, UpgradeableLoaderState},
     pubkey::Pubkey,
