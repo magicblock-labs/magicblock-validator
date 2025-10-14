@@ -115,10 +115,9 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
 
     fn process_context_requests(
         &mut self,
-        task_context: &mut TaskContext,
+        requests: &Vec<TaskRequest>,
     ) -> TaskSchedulerResult<Vec<TaskSchedulerError>> {
-        let requests = &task_context.requests;
-        let mut result = Vec::with_capacity(requests.len());
+        let mut errors = Vec::with_capacity(requests.len());
         for request in requests {
             match request {
                 TaskRequest::Schedule(schedule_request) => {
@@ -133,7 +132,7 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
                             "Failed to process schedule request {}: {}",
                             schedule_request.id, e
                         );
-                        result.push(e);
+                        errors.push(e);
                     }
                 }
                 TaskRequest::Cancel(cancel_request) => {
@@ -147,13 +146,13 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
                             "Failed to process cancel request for task {}: {}",
                             cancel_request.task_id, e
                         );
-                        result.push(e);
+                        errors.push(e);
                     }
                 }
             };
         }
 
-        Ok(result)
+        Ok(errors)
     }
 
     fn process_schedule_request(
@@ -287,17 +286,20 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
                         return Err(TaskSchedulerError::TaskContextNotFound);
                     };
 
-                    let mut task_context = bincode::deserialize::<TaskContext>(context_account.data()).unwrap_or_default();
+                    let task_context = bincode::deserialize::<TaskContext>(context_account.data()).unwrap_or_default();
 
-                    match self.process_context_requests(&mut task_context) {
-                        Ok(result) => {
-                            if task_context.requests.is_empty() {
-                                // Nothing to do because there are no requests in the context
-                                continue;
+                    if task_context.requests.is_empty() {
+                        // Nothing to do because there are no requests in the context
+                        continue;
+                    }
+
+                    match self.process_context_requests(&task_context.requests) {
+                        Ok(errors) => {
+                            if !errors.is_empty() {
+                                warn!("Failed to process {} requests out of {}", errors.len(), task_context.requests.len());
                             }
 
                             // All requests were processed, reset the context
-                            warn!("Failed to process {} requests out of {}", result.len(), task_context.requests.len());
                             let sig = self.process_transaction(vec![
                                 InstructionUtils::process_tasks_instruction(
                                     &validator_authority_id(),
