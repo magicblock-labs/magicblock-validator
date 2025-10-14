@@ -303,6 +303,7 @@ impl<'a> From<CommittedAccountRef<'a>> for CommittedAccount {
 pub enum CommitType {
     /// Regular commit without actions
     Standalone(Vec<CommittedAccount>), // accounts to commit
+    StandaloneDiff(Vec<CommittedAccount>), // accounts to commit
     /// Commits accounts and runs actions
     WithBaseActions {
         committed_accounts: Vec<CommittedAccount>,
@@ -432,6 +433,7 @@ impl CommitType {
     pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
+            Self::StandaloneDiff(committed_accounts) => committed_accounts,
             Self::WithBaseActions {
                 committed_accounts, ..
             } => committed_accounts,
@@ -441,6 +443,7 @@ impl CommitType {
     pub fn get_committed_accounts_mut(&mut self) -> &mut Vec<CommittedAccount> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
+            Self::StandaloneDiff(committed_accounts) => committed_accounts,
             Self::WithBaseActions {
                 committed_accounts, ..
             } => committed_accounts,
@@ -450,6 +453,9 @@ impl CommitType {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Standalone(committed_accounts) => {
+                committed_accounts.is_empty()
+            }
+            Self::StandaloneDiff(committed_accounts) => {
                 committed_accounts.is_empty()
             }
             Self::WithBaseActions {

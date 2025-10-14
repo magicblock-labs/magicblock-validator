@@ -138,6 +138,9 @@ impl TasksBuilder for TaskBuilderImpl {
                 CommitType::Standalone(accounts) => {
                     accounts.iter().map(finalize_task).collect()
                 }
+                CommitType::StandaloneDiff(accounts) => {
+                    accounts.iter().map(finalize_task).collect()
+                }
                 CommitType::WithBaseActions {
                     committed_accounts,
                     base_actions,

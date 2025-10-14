@@ -41,6 +41,7 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: false,
+                    request_diff: false,
                 },
             ),
             MagicBlockInstruction::ScheduleCommitAndUndelegate => {
@@ -49,6 +50,7 @@ declare_process_instruction!(
                     invoke_context,
                     ProcessScheduleCommitOptions {
                         request_undelegation: true,
+                        request_diff: false,
                     },
                 )
             }
@@ -76,7 +78,14 @@ declare_process_instruction!(
                 process_process_tasks(signers, invoke_context)
             }
             MagicBlockInstruction::ScheduleCommitDiffAndUndelegate => {
-                todo!();
+                process_schedule_commit(
+                    signers,
+                    invoke_context,
+                    ProcessScheduleCommitOptions {
+                        request_undelegation: true,
+                        request_diff: true,
+                    },
+                )
             }
         }
     }
