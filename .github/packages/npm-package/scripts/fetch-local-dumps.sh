@@ -35,6 +35,7 @@ programs=(
   DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh
   noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV
   Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz
+  DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1
 )
 
 for prog in "${programs[@]}"; do
