@@ -57,7 +57,12 @@ fn test_cancel_ongoing_task() {
         ),
         validator
     );
-    let status = expect!(ctx.get_transaction_ephem(&sig), validator);
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+    let status = expect!(
+        ctx.get_transaction_ephem(&sig),
+        format!("Failed to get transaction {:?}", sig),
+        validator
+    );
     expect!(
         status
             .transaction
@@ -88,7 +93,12 @@ fn test_cancel_ongoing_task() {
         ),
         validator
     );
-    let status = expect!(ctx.get_transaction_ephem(&sig), validator);
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+    let status = expect!(
+        ctx.get_transaction_ephem(&sig),
+        format!("Failed to get transaction {:?}", sig),
+        validator
+    );
     expect!(
         status
             .transaction

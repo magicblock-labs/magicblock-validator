@@ -101,6 +101,7 @@ pub fn create_delegated_counter(
             ),
             &[payer]
         ),
+        format!("Failed to send init transaction: blockhash {:?}", blockhash),
         validator
     );
 
