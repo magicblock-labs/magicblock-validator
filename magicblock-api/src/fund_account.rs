@@ -3,7 +3,7 @@ use std::path::Path;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::magic_program;
 use magicblock_core::traits::AccountsBank;
-use magicblock_program::MAGIC_CONTEXT_SIZE;
+use magicblock_program::MagicContext;
 use solana_sdk::{
     account::{AccountSharedData, WritableAccount},
     pubkey::Pubkey,
@@ -76,6 +76,12 @@ pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
         accountsdb,
         &magic_program::MAGIC_CONTEXT_PUBKEY,
         u64::MAX,
-        MAGIC_CONTEXT_SIZE,
+        MagicContext::SIZE,
     );
+    let mut magic_context = accountsdb
+        .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+        .unwrap();
+    magic_context.set_delegated(true);
+    accountsdb
+        .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
 }
