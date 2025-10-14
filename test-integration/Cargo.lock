@@ -3540,20 +3540,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-account-dumper"
-version = "0.2.3"
-dependencies = [
- "async-trait",
- "bincode",
- "magicblock-accounts-db",
- "magicblock-core",
- "magicblock-mutator",
- "magicblock-processor",
- "solana-sdk",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "magicblock-account-fetcher"
 version = "0.2.3"
 dependencies = [
@@ -3597,7 +3583,6 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "magicblock-account-cloner",
- "magicblock-account-dumper",
  "magicblock-account-fetcher",
  "magicblock-account-updates",
  "magicblock-accounts-api",
@@ -3710,7 +3695,6 @@ dependencies = [
  "log",
  "magic-domain-program",
  "magicblock-account-cloner",
- "magicblock-account-dumper",
  "magicblock-account-fetcher",
  "magicblock-account-updates",
  "magicblock-accounts",

@@ -6,7 +6,6 @@ split-debuginfo = "packed"
 [workspace]
 members = [
   "magicblock-account-cloner",
-  "magicblock-account-dumper",
   "magicblock-account-fetcher",
   "magicblock-account-updates",
   "magicblock-accounts",
@@ -101,7 +100,6 @@ lru = "0.16.0"
 macrotest = "1"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
-magicblock-account-dumper = { path = "./magicblock-account-dumper" }
 magicblock-account-fetcher = { path = "./magicblock-account-fetcher" }
 magicblock-account-updates = { path = "./magicblock-account-updates" }
 magicblock-accounts = { path = "./magicblock-accounts" }

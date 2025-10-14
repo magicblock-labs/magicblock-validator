@@ -18,7 +18,6 @@ log = { workspace = true }
 paste = { workspace = true }
 num_cpus = { workspace = true }
 magicblock-account-cloner = { workspace = true }
-magicblock-account-dumper = { workspace = true }
 magicblock-account-fetcher = { workspace = true }
 magicblock-account-updates = { workspace = true }
 magicblock-accounts = { workspace = true }
