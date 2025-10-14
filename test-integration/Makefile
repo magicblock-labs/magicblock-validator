@@ -216,7 +216,7 @@ ci-fmt:
 ci-lint:
 	cargo clippy --all-targets -- -D warnings
 
-.PHONY:
+.PHONY: \
 	ci-fmt \
 	ci-lint \
 	deploy-flexi-counter \
