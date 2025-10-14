@@ -9,7 +9,7 @@ use solana_rpc_client::{
 };
 use solana_rpc_client_api::{
     client_error::{self, Error as ClientError, ErrorKind as ClientErrorKind},
-    config::RpcTransactionConfig,
+    config::{RpcSendTransactionConfig, RpcTransactionConfig},
 };
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
@@ -868,7 +868,7 @@ impl IntegrationTestContext {
         commitment: CommitmentConfig,
     ) -> Result<(Signature, bool), client_error::Error> {
         let sig = Self::send_transaction(rpc_client, tx, signers)?;
-        Self::confirm_transaction(&sig, rpc_client, commitment)
+        confirm_transaction(&sig, rpc_client, commitment, Some(tx))
             .map(|confirmed| (sig, confirmed))
     }
 
@@ -881,7 +881,7 @@ impl IntegrationTestContext {
     ) -> Result<(Signature, bool), client_error::Error> {
         let sig = Self::send_instructions_with_payer(rpc_client, ixs, payer)?;
         debug!("Confirming transaction with signature: {}", sig);
-        Self::confirm_transaction(&sig, rpc_client, commitment)
+        confirm_transaction(&sig, rpc_client, commitment, None)
             .map(|confirmed| (sig, confirmed))
             .inspect_err(|_| {
                 self.dump_ephemeral_logs(sig);

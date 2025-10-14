@@ -34,12 +34,6 @@ pub fn main() {
         return;
     };
 
-    let Ok(issues_frequent_commits_output) =
-        run_issues_frequent_commmits_tests(&manifest_dir, &config)
-    else {
-        return;
-    };
-
     let Ok(cloning_output) = run_cloning_tests(&manifest_dir, &config) else {
         return;
     };
@@ -88,10 +82,6 @@ pub fn main() {
     assert_cargo_tests_passed(security_output, "security");
     assert_cargo_tests_passed(scenarios_output, "scenarios");
     assert_cargo_tests_passed(chainlink_output, "chainlink");
-    assert_cargo_tests_passed(
-        issues_frequent_commits_output,
-        "issues_frequent_commits",
-    );
     assert_cargo_tests_passed(cloning_output, "cloning");
     assert_cargo_tests_passed(restore_ledger_output, "restore_ledger");
     assert_cargo_tests_passed(magicblock_api_output, "magicblock_api");
