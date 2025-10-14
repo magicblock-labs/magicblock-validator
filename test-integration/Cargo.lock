@@ -3540,25 +3540,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-account-updates"
-version = "0.2.3"
-dependencies = [
- "bincode",
- "conjunto-transwise",
- "futures-util",
- "log",
- "magicblock-metrics",
- "solana-account-decoder",
- "solana-pubsub-client",
- "solana-rpc-client-api",
- "solana-sdk",
- "thiserror 1.0.69",
- "tokio",
- "tokio-stream",
- "tokio-util 0.7.15",
-]
-
-[[package]]
 name = "magicblock-accounts"
 version = "0.2.3"
 dependencies = [
@@ -3568,7 +3549,6 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "magicblock-account-cloner",
- "magicblock-account-updates",
  "magicblock-accounts-api",
  "magicblock-accounts-db",
  "magicblock-chainlink",
@@ -3679,7 +3659,6 @@ dependencies = [
  "log",
  "magic-domain-program",
  "magicblock-account-cloner",
- "magicblock-account-updates",
  "magicblock-accounts",
  "magicblock-accounts-api",
  "magicblock-accounts-db",
