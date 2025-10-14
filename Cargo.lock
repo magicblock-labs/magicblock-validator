@@ -3565,7 +3565,6 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "magicblock-account-cloner",
- "magicblock-accounts-api",
  "magicblock-accounts-db",
  "magicblock-chainlink",
  "magicblock-committor-service",
@@ -3586,16 +3585,6 @@ dependencies = [
  "tokio",
  "tokio-util 0.7.15",
  "url 2.5.4",
-]
-
-[[package]]
-name = "magicblock-accounts-api"
-version = "0.2.3"
-dependencies = [
- "magicblock-accounts-db",
- "magicblock-core",
- "solana-account",
- "solana-pubkey",
 ]
 
 [[package]]
@@ -3684,7 +3673,6 @@ dependencies = [
  "magic-domain-program",
  "magicblock-account-cloner",
  "magicblock-accounts",
- "magicblock-accounts-api",
  "magicblock-accounts-db",
  "magicblock-aperture",
  "magicblock-chainlink",

@@ -16,7 +16,6 @@ itertools = { workspace = true }
 log = { workspace = true }
 
 magicblock-account-cloner = { workspace = true }
-magicblock-accounts-api = { workspace = true }
 magicblock-accounts-db = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }

@@ -7,7 +7,6 @@ split-debuginfo = "packed"
 members = [
   "magicblock-account-cloner",
   "magicblock-accounts",
-  "magicblock-accounts-api",
   "magicblock-accounts-db",
   "magicblock-api",
   "magicblock-chainlink",
@@ -99,7 +98,6 @@ macrotest = "1"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
 magicblock-accounts = { path = "./magicblock-accounts" }
-magicblock-accounts-api = { path = "./magicblock-accounts-api" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-api = { path = "./magicblock-api" }
 magicblock-chainlink = { path = "./magicblock-chainlink" }
