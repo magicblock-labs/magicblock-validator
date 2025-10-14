@@ -37,7 +37,7 @@ fn test_reschedule_task() {
     let execution_interval_millis = 100;
     let iterations = 2;
     let sig = expect!(
-        ctx.send_transaction_ephem(
+        ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
                 &[create_schedule_task_ix(
                     payer.pubkey(),
@@ -57,7 +57,6 @@ fn test_reschedule_task() {
         ),
         validator
     );
-    expect!(ctx.wait_for_next_slot_ephem(), validator);
     let status = expect!(ctx.get_transaction_ephem(&sig), validator);
     expect!(
         status
@@ -74,7 +73,7 @@ fn test_reschedule_task() {
     // Reschedule the task
     let new_execution_interval_millis = 200;
     let sig = expect!(
-        ctx.send_transaction_ephem(
+        ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
                 &[create_schedule_task_ix(
                     payer.pubkey(),
@@ -94,7 +93,6 @@ fn test_reschedule_task() {
         ),
         validator
     );
-    expect!(ctx.wait_for_next_slot_ephem(), validator);
     let status = expect!(ctx.get_transaction_ephem(&sig), validator);
     expect!(
         status
@@ -167,7 +165,7 @@ fn test_reschedule_task() {
 
     // Cancel the task
     let sig = expect!(
-        ctx.send_transaction_ephem(
+        ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
                 &[create_cancel_task_ix(
                     payer.pubkey(),
@@ -183,7 +181,6 @@ fn test_reschedule_task() {
         ),
         validator
     );
-    expect!(ctx.wait_for_next_slot_ephem(), validator);
     let status = expect!(ctx.get_transaction_ephem(&sig), validator);
     expect!(
         status

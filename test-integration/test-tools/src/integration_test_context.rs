@@ -710,6 +710,23 @@ impl IntegrationTestContext {
             })?,
             tx,
             signers,
+            true,
+        )
+    }
+
+    pub fn send_transaction_ephem_with_preflight(
+        &self,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+    ) -> Result<Signature, client_error::Error> {
+        send_transaction(
+            self.try_ephem_client().map_err(|err| client_error::Error {
+                request: None,
+                kind: client_error::ErrorKind::Custom(err.to_string()),
+            })?,
+            tx,
+            signers,
+            false,
         )
     }
 
@@ -725,6 +742,7 @@ impl IntegrationTestContext {
             })?,
             tx,
             signers,
+            true,
         )
     }
 
