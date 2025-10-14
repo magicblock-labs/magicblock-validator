@@ -1720,21 +1720,19 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk"
 version = "0.3.4"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk-attribute-commit",
  "ephemeral-rollups-sdk-attribute-delegate",
  "ephemeral-rollups-sdk-attribute-ephemeral",
  "magicblock-delegation-program",
- "magicblock-magic-program-api 0.2.1",
+ "magicblock-magic-program-api",
  "solana-program",
 ]
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
 version = "0.3.4"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1743,7 +1741,6 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
 version = "0.3.4"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1753,7 +1750,6 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
 version = "0.3.4"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1844,9 +1840,9 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
 name = "faststr"
-version = "0.2.31"
+version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6503af7917fea18ffef8f7e8553fb8dff89e2e6837e94e09dd7fb069c82d62c"
+checksum = "baec6a0289d7f1fe5665586ef7340af82e3037207bef60f5785e57569776f0c8"
 dependencies = [
  "bytes",
  "rkyv",
@@ -2653,9 +2649,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.16"
+version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d9b05277c7e8da2c93a568989bb6207bef0112e8d17df7a6eda4a3cf143bc5e"
+checksum = "3c6995591a8f1380fcb4ba966a252a4b29188d51d2b89e3a252f5305be65aea8"
 dependencies = [
  "bytes",
  "futures-core",
@@ -3462,7 +3458,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-sdk",
@@ -3485,7 +3481,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
@@ -3585,7 +3581,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
@@ -3618,7 +3614,7 @@ dependencies = [
  "lru 0.16.0",
  "magicblock-core",
  "magicblock-delegation-program",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api",
  "serde_json",
  "solana-account",
  "solana-account-decoder",
@@ -3698,7 +3694,7 @@ dependencies = [
  "serde",
  "solana-keypair",
  "solana-pubkey",
- "strum",
+ "strum 0.24.1",
  "thiserror 1.0.69",
  "toml 0.8.23",
  "url 2.5.4",
@@ -3726,7 +3722,7 @@ version = "0.2.3"
 dependencies = [
  "bincode",
  "flume",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api",
  "serde",
  "solana-account",
  "solana-account-decoder",
@@ -3743,8 +3739,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-delegation-program"
-version = "1.1.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=aa1de56d90c#aa1de56d90c8a242377accd59899f272f0131f8c"
+version = "1.1.2"
 dependencies = [
  "bincode",
  "borsh 1.5.7",
@@ -3758,6 +3753,7 @@ dependencies = [
  "solana-curve25519",
  "solana-program",
  "solana-security-txt",
+ "strum 0.27.2",
  "thiserror 1.0.69",
 ]
 
@@ -3789,17 +3785,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.15",
-]
-
-[[package]]
-name = "magicblock-magic-program-api"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349b26eb6d819328dad699a6c9a26234548d366d9a30e7edf0d296180188ee27"
-dependencies = [
- "bincode",
- "serde",
- "solana-program",
 ]
 
 [[package]]
@@ -3865,7 +3850,7 @@ dependencies = [
  "bincode",
  "lazy_static",
  "magicblock-core",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api",
  "magicblock-metrics",
  "num-derive",
  "num-traits",
@@ -4118,18 +4103,18 @@ checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
 
 [[package]]
 name = "munge"
-version = "0.4.6"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7feb0b48aa0a25f9fe0899482c6e1379ee7a11b24a53073eacdecb9adb6dc60"
+checksum = "5e17401f259eba956ca16491461b6e8f72913a0a114e39736ce404410f915a0c"
 dependencies = [
  "munge_macro",
 ]
 
 [[package]]
 name = "munge_macro"
-version = "0.4.6"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2e3795a5d2da581a8b252fec6022eee01aea10161a4d1bf237d4cbe47f7e988"
+checksum = "4568f25ccbd45ab5d5603dc34318c1ec56b117531781260002151b8530a9f931"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4841,7 +4826,7 @@ dependencies = [
  "bincode",
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api",
  "serde",
  "solana-program",
 ]
@@ -4984,18 +4969,18 @@ dependencies = [
 
 [[package]]
 name = "ptr_meta"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe9e76f66d3f9606f44e45598d155cb13ecf09f4a28199e48daf8c8fc937ea90"
+checksum = "0b9a0cf95a1196af61d4f1cbdab967179516d9a4a4312af1f31948f8f6224a79"
 dependencies = [
  "ptr_meta_derive",
 ]
 
 [[package]]
 name = "ptr_meta_derive"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca414edb151b4c8d125c12566ab0d74dc9cdba36fb80eb7b848c15f495fd32d1"
+checksum = "7347867d0a7e1208d93b46767be83e2b8f978c3dad35f775ac8d8847551d6fe1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5117,9 +5102,9 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "rancor"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caf5f7161924b9d1cea0e4cabc97c372cea92b5f927fc13c6bca67157a0ad947"
+checksum = "a063ea72381527c2a0561da9c80000ef822bdd7c3241b1cc1b12100e3df081ee"
 dependencies = [
  "ptr_meta",
 ]
@@ -5328,18 +5313,18 @@ dependencies = [
 
 [[package]]
 name = "ref-cast"
-version = "1.0.24"
+version = "1.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a0ae411dbe946a674d89546582cea4ba2bb8defac896622d6496f14c23ba5cf"
+checksum = "f354300ae66f76f1c85c5f84693f0ce81d747e2c3f21a45fef496d89c960bf7d"
 dependencies = [
  "ref-cast-impl",
 ]
 
 [[package]]
 name = "ref-cast-impl"
-version = "1.0.24"
+version = "1.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1165225c21bff1f3bbce98f5a1f889949bc902d3575308cc7b0de30b4f6d27c7"
+checksum = "b7186006dcb21920990093f30e3dea63b7d6e977bf1256be20c3563a5db070da"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5389,9 +5374,9 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
 name = "rend"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a35e8a6bf28cd121053a66aa2e6a2e3eaffad4a60012179f0e864aa5ffeff215"
+checksum = "cadadef317c2f20755a64d7fdc48f9e7178ee6b0e1f7fce33fa60f1d68a276e6"
 
 [[package]]
 name = "reqwest"
@@ -5471,9 +5456,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv"
-version = "0.8.11"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19f5c3e5da784cd8c69d32cdc84673f3204536ca56e1fa01be31a74b92c932ac"
+checksum = "35a640b26f007713818e9a9b65d34da1cf58538207b052916a83d80e43f3ffa4"
 dependencies = [
  "bytes",
  "hashbrown 0.15.4",
@@ -5489,9 +5474,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv_derive"
-version = "0.8.11"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4270433626cffc9c4c1d3707dd681f2a2718d3d7b09ad754bec137acecda8d22"
+checksum = "bd83f5f173ff41e00337d97f6572e416d022ef8a19f371817259ae960324c482"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5816,12 +5801,14 @@ dependencies = [
 name = "schedulecommit-test-scenarios"
 version = "0.0.0"
 dependencies = [
+ "borsh 1.5.7",
  "ephemeral-rollups-sdk",
  "integration-test-tools",
  "log",
  "magicblock-core",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api",
  "program-schedulecommit",
+ "rand 0.8.5",
  "schedulecommit-client",
  "solana-program",
  "solana-rpc-client",
@@ -5836,7 +5823,7 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "magicblock-core",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api",
  "program-schedulecommit",
  "program-schedulecommit-security",
  "schedulecommit-client",
@@ -7505,8 +7492,8 @@ dependencies = [
  "spl-token",
  "spl-token-2022 7.0.0",
  "static_assertions",
- "strum",
- "strum_macros",
+ "strum 0.24.1",
+ "strum_macros 0.24.3",
  "tar",
  "tempfile",
  "thiserror 2.0.12",
@@ -8517,8 +8504,8 @@ dependencies = [
  "solana-vote",
  "solana-vote-program",
  "static_assertions",
- "strum",
- "strum_macros",
+ "strum 0.24.1",
+ "strum_macros 0.24.3",
  "symlink",
  "tar",
  "tempfile",
@@ -9757,9 +9744,9 @@ dependencies = [
 
 [[package]]
 name = "sonic-rs"
-version = "0.5.3"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd1adc42def3cb101f3ebef3cd2d642f9a21072bbcd4ec9423343ccaa6afa596"
+checksum = "22540d56ba14521e4878ad436d498518c59698c39a89d5905c694932f0bf7134"
 dependencies = [
  "ahash 0.8.12",
  "bumpalo",
@@ -10212,7 +10199,16 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.24.3",
+]
+
+[[package]]
+name = "strum"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+dependencies = [
+ "strum_macros 0.27.2",
 ]
 
 [[package]]
@@ -10226,6 +10222,18 @@ dependencies = [
  "quote",
  "rustversion",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -11236,9 +11244,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.18.0"
+version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f33196643e165781c20a5ead5582283a7dacbb87855d867fbc2df3f81eddc1be"
+checksum = "2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

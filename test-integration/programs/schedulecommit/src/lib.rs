@@ -4,15 +4,22 @@ use ephemeral_rollups_sdk::{
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
-    ephem::{commit_accounts, commit_and_undelegate_accounts},
+    ephem::{
+        commit_accounts, commit_and_undelegate_accounts,
+        commit_diff_and_undelegate_accounts,
+    },
 };
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     declare_id,
     entrypoint::{self, ProgramResult},
     msg,
+    program::invoke,
     program_error::ProgramError,
     pubkey::Pubkey,
+    rent::Rent,
+    system_instruction,
+    sysvar::Sysvar,
 };
 
 use crate::{
@@ -24,7 +31,12 @@ use crate::{
 };
 pub mod api;
 pub mod magicblock_program;
+mod order_book;
 mod utils;
+
+use order_book::*;
+
+pub use order_book::{BookUpdate, OrderBookOwned, OrderLevel};
 
 declare_id!("9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY");
 
@@ -36,6 +48,12 @@ pub struct DelegateCpiArgs {
     valid_until: i64,
     commit_frequency_ms: u32,
     player: Pubkey,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct DelegateOrderBookArgs {
+    commit_frequency_ms: u32,
+    book_manager: Pubkey,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -104,6 +122,19 @@ pub enum ScheduleCommitInstruction {
     //
     // It is not part of this enum as it has a custom discriminator
     // Undelegate,
+    /// Initialize an OrderBook
+    InitOrderBook,
+
+    GrowOrderBook(u64), // additional_space
+
+    /// Delegate order book to ER nodes
+    DelegateOrderBook(DelegateOrderBookArgs),
+
+    /// Update order book
+    UpdateOrderBook(BookUpdate),
+
+    /// ScheduleCommitDiffCpi
+    ScheduleCommitForOrderBook,
 }
 
 pub fn process_instruction<'a>(
@@ -127,6 +158,7 @@ pub fn process_instruction<'a>(
             msg!("ERROR: failed to parse instruction data {:?}", err);
             ProgramError::InvalidArgument
         })?;
+
     use ScheduleCommitInstruction::*;
     match ix {
         Init => process_init(program_id, accounts),
@@ -146,6 +178,15 @@ pub fn process_instruction<'a>(
             )
         }
         IncreaseCount => process_increase_count(accounts),
+        InitOrderBook => process_init_order_book(accounts),
+        GrowOrderBook(additional_space) => {
+            process_grow_order_book(accounts, additional_space)
+        }
+        DelegateOrderBook(args) => process_delegate_order_book(accounts, args),
+        UpdateOrderBook(args) => process_update_order_book(accounts, args),
+        ScheduleCommitForOrderBook => {
+            process_schedulecommit_for_orderbook(accounts)
+        }
     }
 }
 
@@ -159,7 +200,7 @@ pub struct MainAccount {
 }
 
 impl MainAccount {
-    pub const SIZE: usize = std::mem::size_of::<Self>();
+    pub const SIZE: u64 = std::mem::size_of::<Self>() as u64;
 
     pub fn try_decode(data: &[u8]) -> std::io::Result<Self> {
         Self::try_from_slice(data)
@@ -229,6 +270,185 @@ fn process_init<'a>(
 
     let mut acc_data = pda_info.try_borrow_mut_data()?;
     account.serialize(&mut &mut acc_data.as_mut())?;
+
+    Ok(())
+}
+
+// -----------------
+// InitOrderBook
+// -----------------
+fn process_init_order_book<'a>(
+    accounts: &'a [AccountInfo<'a>],
+) -> entrypoint::ProgramResult {
+    msg!("Init OrderBook account");
+    let [payer, book_manager, order_book, _system_program] = accounts else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    assert_is_signer(payer, "payer")?;
+
+    let (pda, bump) = Pubkey::find_program_address(
+        &[b"order_book", book_manager.key.as_ref()],
+        &crate::ID,
+    );
+
+    assert_keys_equal(order_book.key, &pda, || {
+        format!(
+            "PDA for the account ('{}') and for book_manager ('{}') is incorrect",
+            order_book.key, book_manager.key
+        )
+    })?;
+
+    allocate_account_and_assign_owner(AllocateAndAssignAccountArgs {
+        payer_info: payer,
+        account_info: order_book,
+        owner: &crate::ID,
+        signer_seeds: &[b"order_book", book_manager.key.as_ref(), &[bump]],
+        size: 10 * 1024,
+    })?;
+
+    Ok(())
+}
+
+fn process_grow_order_book<'a>(
+    accounts: &'a [AccountInfo<'a>],
+    additional_space: u64,
+) -> entrypoint::ProgramResult {
+    msg!("Grow OrderBook account");
+    let [payer, book_manager, order_book, system_program] = accounts else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    assert_is_signer(payer, "payer")?;
+
+    let (pda, _bump) = Pubkey::find_program_address(
+        &[b"order_book", book_manager.key.as_ref()],
+        &crate::ID,
+    );
+
+    assert_keys_equal(order_book.key, &pda, || {
+        format!(
+            "PDA for the account ('{}') and for book_manager ('{}') is incorrect",
+            order_book.key, payer.key
+        )
+    })?;
+
+    let new_size = order_book.data_len() + additional_space as usize;
+
+    // Ideally, we should transfer some lamports from payer to order_book
+    // so that realloc could use it
+
+    let rent = Rent::get()?;
+    let required = rent.minimum_balance(new_size);
+    let current = order_book.lamports();
+    if current < required {
+        let diff = required - current;
+        invoke(
+            &system_instruction::transfer(payer.key, order_book.key, diff),
+            &[payer.clone(), order_book.clone(), system_program.clone()],
+        )?;
+    }
+
+    order_book.realloc(new_size, true)?;
+
+    Ok(())
+}
+
+// -----------------
+// Delegate OrderBook
+// -----------------
+pub fn process_delegate_order_book(
+    accounts: &[AccountInfo],
+    args: DelegateOrderBookArgs,
+) -> Result<(), ProgramError> {
+    msg!("Processing delegate_order_book instruction");
+
+    let [payer, order_book, owner_program, buffer, delegation_record, delegation_metadata, delegation_program, system_program] =
+        accounts
+    else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    let seeds_no_bump = [b"order_book", args.book_manager.as_ref()];
+
+    delegate_account(
+        DelegateAccounts {
+            payer,
+            pda: order_book,
+            buffer,
+            delegation_record,
+            delegation_metadata,
+            owner_program,
+            delegation_program,
+            system_program,
+        },
+        &seeds_no_bump,
+        DelegateConfig {
+            commit_frequency_ms: args.commit_frequency_ms,
+            ..DelegateConfig::default()
+        },
+    )?;
+
+    Ok(())
+}
+
+// -----------------
+// UpdateOrderBook
+// -----------------
+fn process_update_order_book<'a>(
+    accounts: &'a [AccountInfo<'a>],
+    updates: BookUpdate,
+) -> entrypoint::ProgramResult {
+    msg!("Init account");
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let order_book_account = next_account_info(account_info_iter)?;
+
+    assert_is_signer(payer_info, "payer")?;
+
+    let mut book_raw = order_book_account.try_borrow_mut_data()?;
+
+    OrderBook::new(&mut book_raw).update_from(updates);
+
+    Ok(())
+}
+
+// -----------------
+// Schedule Commit
+// -----------------
+pub fn process_schedulecommit_for_orderbook(
+    accounts: &[AccountInfo],
+) -> Result<(), ProgramError> {
+    msg!("Processing schedulecommit (for orderbook) instruction");
+
+    let [payer, order_book_account, magic_context, magic_program] = accounts
+    else {
+        return Err(ProgramError::MissingRequiredSignature);
+    };
+
+    // IMPORTANT: it seems the scoping matters to avoid following error:
+    //  -  TransactionError(InstructionError(0, AccountBorrowFailed))
+    //  - Program 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY failed: instruction tries to borrow reference for an account which is already borrowed
+    {
+        // let mut book_raw = order_book_account.try_borrow_mut_data()?;
+        // let mut order_book = OrderBook::new(&mut book_raw);
+
+        // order_book.add_bids(&[OrderLevel {
+        //     price: 90000,
+        //     size: 10,
+        // }]);
+        // order_book.add_asks(&[OrderLevel {
+        //     price: 125000,
+        //     size: 16,
+        // }]);
+    }
+
+    commit_diff_and_undelegate_accounts(
+        payer,
+        vec![order_book_account],
+        magic_context,
+        magic_program,
+    )?;
 
     Ok(())
 }
@@ -339,7 +559,7 @@ pub fn process_schedulecommit_cpi(
     );
 
     if args.undelegate {
-        commit_and_undelegate_accounts(
+        commit_diff_and_undelegate_accounts(
             payer,
             committees,
             magic_context,

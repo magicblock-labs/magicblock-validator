@@ -1,4 +1,5 @@
 use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+use solana_log_collector::ic_msg;
 use solana_program_runtime::declare_process_instruction;
 use solana_sdk::program_utils::limited_deserialize;
 
@@ -34,6 +35,8 @@ declare_process_instruction!(
             transaction_context.get_current_instruction_context()?;
         let signers = instruction_context.get_signers(transaction_context)?;
 
+        ic_msg!(invoke_context, "MagicBlockInstruction: {:?}", instruction);
+
         match instruction {
             ModifyAccounts(mut account_mods) => process_mutate_accounts(
                 signers,
@@ -46,16 +49,20 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: false,
+                    request_diff: false,
                 },
             ),
-            ScheduleCommitAndUndelegate => process_schedule_commit(
-                signers,
-                invoke_context,
-                ProcessScheduleCommitOptions {
-                    request_undelegation: true,
-                },
-            ),
-            AcceptScheduleCommits => {
+            MagicBlockInstruction::ScheduleCommitAndUndelegate => {
+                process_schedule_commit(
+                    signers,
+                    invoke_context,
+                    ProcessScheduleCommitOptions {
+                        request_undelegation: true,
+                        request_diff: false,
+                    },
+                )
+            }
+            MagicBlockInstruction::AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
             ScheduledCommitSent((id, _bump)) => process_scheduled_commit_sent(
@@ -79,6 +86,16 @@ declare_process_instruction!(
             }
             EnableExecutableCheck => {
                 process_toggle_executable_check(signers, invoke_context, true)
+            }
+            MagicBlockInstruction::ScheduleCommitDiffAndUndelegate => {
+                process_schedule_commit(
+                    signers,
+                    invoke_context,
+                    ProcessScheduleCommitOptions {
+                        request_undelegation: true,
+                        request_diff: true,
+                    },
+                )
             }
         }
     }
