@@ -9,7 +9,6 @@ edition.workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
-conjunto-transwise = { workspace = true }
 magicblock-delegation-program = { workspace = true }
 futures-util = { workspace = true }
 itertools = { workspace = true }

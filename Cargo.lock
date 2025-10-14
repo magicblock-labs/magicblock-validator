@@ -1092,75 +1092,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "conjunto-addresses"
-version = "0.0.0"
-source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
-dependencies = [
- "paste",
- "solana-sdk",
-]
-
-[[package]]
-name = "conjunto-core"
-version = "0.0.0"
-source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
-dependencies = [
- "async-trait",
- "serde",
- "solana-rpc-client-api",
- "solana-sdk",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "conjunto-lockbox"
-version = "0.0.0"
-source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
-dependencies = [
- "async-trait",
- "bytemuck",
- "conjunto-addresses",
- "conjunto-core",
- "conjunto-providers",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c)",
- "serde",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-sdk",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "conjunto-providers"
-version = "0.0.0"
-source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
-dependencies = [
- "async-trait",
- "conjunto-addresses",
- "conjunto-core",
- "solana-account-decoder",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-sdk",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "conjunto-transwise"
-version = "0.0.0"
-source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
-dependencies = [
- "async-trait",
- "conjunto-core",
- "conjunto-lockbox",
- "conjunto-providers",
- "futures-util",
- "serde",
- "solana-sdk",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "console"
 version = "0.15.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3560,7 +3491,6 @@ name = "magicblock-accounts"
 version = "0.2.3"
 dependencies = [
  "async-trait",
- "conjunto-transwise",
  "futures-util",
  "itertools 0.14.0",
  "log",
@@ -3570,7 +3500,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+ "magicblock-delegation-program",
  "magicblock-ledger",
  "magicblock-magic-program-api",
  "magicblock-metrics",
@@ -3664,7 +3594,6 @@ dependencies = [
  "anyhow",
  "bincode",
  "borsh 1.5.7",
- "conjunto-transwise",
  "crossbeam-channel",
  "fd-lock",
  "itertools 0.14.0",
@@ -3679,7 +3608,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+ "magicblock-delegation-program",
  "magicblock-ledger",
  "magicblock-magic-program-api",
  "magicblock-metrics",
@@ -3716,7 +3645,7 @@ dependencies = [
  "lru 0.16.0",
  "magicblock-chainlink",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+ "magicblock-delegation-program",
  "magicblock-magic-program-api",
  "serde_json",
  "solana-account",
@@ -3769,7 +3698,7 @@ dependencies = [
  "log",
  "lru 0.16.0",
  "magicblock-committor-program",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+ "magicblock-delegation-program",
  "magicblock-metrics",
  "magicblock-program",
  "magicblock-rpc-client",
@@ -3846,22 +3775,6 @@ dependencies = [
  "solana-transaction-error",
  "solana-transaction-status-client-types",
  "tokio",
-]
-
-[[package]]
-name = "magicblock-delegation-program"
-version = "1.0.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c#4af7f1cefe0915f0760ed5c38b25b7d41c31a474"
-dependencies = [
- "bincode",
- "borsh 1.5.7",
- "bytemuck",
- "num_enum",
- "paste",
- "solana-curve25519",
- "solana-program",
- "solana-security-txt",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -4087,7 +4000,7 @@ dependencies = [
  "anyhow",
  "log",
  "magicblock-config",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+ "magicblock-delegation-program",
  "magicblock-mutator",
  "magicblock-program",
  "magicblock-rpc-client",

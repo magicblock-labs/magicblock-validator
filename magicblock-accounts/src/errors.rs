@@ -13,9 +13,6 @@ pub type AccountsResult<T> = std::result::Result<T, AccountsError>;
 
 #[derive(Error, Debug)]
 pub enum AccountsError {
-    #[error("TranswiseError: {0}")]
-    TranswiseError(#[from] Box<conjunto_transwise::errors::TranswiseError>),
-
     #[error("UrlParseError: {0}")]
     UrlParseError(#[from] Box<url::ParseError>),
 

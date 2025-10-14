@@ -7,14 +7,13 @@ use std::{
     time::Duration,
 };
 
-use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
     map_committor_request_result, ChainlinkCloner,
 };
 use magicblock_accounts::{
-    scheduled_commits_processor::ScheduledCommitsProcessorImpl,
-    utils::try_rpc_cluster_from_cluster, ScheduledCommitsProcessor,
+    scheduled_commits_processor::ScheduledCommitsProcessorImpl, RemoteCluster,
+    ScheduledCommitsProcessor,
 };
 use magicblock_accounts_db::AccountsDb;
 use magicblock_aperture::{
@@ -81,7 +80,9 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
-    external_config::{cluster_from_remote, try_convert_accounts_config},
+    external_config::{
+        remote_cluster_from_remote, try_convert_accounts_config,
+    },
     fund_account::{
         fund_magic_context, fund_task_context, funded_faucet,
         init_validator_identity,
@@ -232,8 +233,7 @@ impl MagicValidator {
             None
         };
 
-        let (accounts_config, remote_rpc_config) =
-            try_get_remote_accounts_and_rpc_config(&config.accounts)?;
+        let accounts_config = try_get_remote_accounts_config(&config.accounts)?;
 
         let (dispatch, validator_channels) = link();
 
@@ -247,7 +247,6 @@ impl MagicValidator {
         let committor_service = Self::init_committor_service(
             &identity_keypair,
             committor_persist_path,
-            &remote_rpc_config,
             &accounts_config,
             &config.accounts.clone.prepare_lookup_tables,
         )
@@ -255,7 +254,7 @@ impl MagicValidator {
         let chainlink = Arc::new(
             Self::init_chainlink(
                 committor_service.clone(),
-                &remote_rpc_config,
+                &accounts_config.remote_cluster,
                 &config,
                 &dispatch.transaction_scheduler,
                 &ledger.latest_block().clone(),
@@ -348,7 +347,6 @@ impl MagicValidator {
     async fn init_committor_service(
         identity_keypair: &Keypair,
         committor_persist_path: PathBuf,
-        remote_rpc_config: &RpcProviderConfig,
         accounts_config: &magicblock_accounts::AccountsConfig,
         prepare_lookup_tables: &PrepareLookupTables,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
@@ -357,10 +355,8 @@ impl MagicValidator {
             identity_keypair.insecure_clone(),
             committor_persist_path,
             ChainConfig {
-                rpc_uri: remote_rpc_config.url().to_string(),
-                commitment: remote_rpc_config
-                    .commitment()
-                    .unwrap_or(CommitmentLevel::Confirmed),
+                rpc_uri: accounts_config.remote_cluster.url.clone(),
+                commitment: CommitmentLevel::Confirmed,
                 compute_budget_config: ComputeBudgetConfig::new(
                     accounts_config.commit_compute_unit_price,
                 ),
@@ -383,7 +379,7 @@ impl MagicValidator {
     #[allow(clippy::too_many_arguments)]
     async fn init_chainlink(
         committor_service: Option<Arc<CommittorService>>,
-        rpc_config: &RpcProviderConfig,
+        remote_cluster: &RemoteCluster,
         config: &EphemeralConfig,
         transaction_scheduler: &TransactionSchedulerHandle,
         latest_block: &LatestBlock,
@@ -392,16 +388,13 @@ impl MagicValidator {
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
         use magicblock_chainlink::remote_account_provider::Endpoint;
-        let accounts = try_convert_accounts_config(&config.accounts).expect(
-            "Failed to derive accounts config from provided magicblock config",
-        );
-        let endpoints = accounts
-            .remote_cluster
-            .ws_urls()
-            .into_iter()
+        let rpc_url = remote_cluster.url.clone();
+        let endpoints = remote_cluster
+            .ws_urls
+            .iter()
             .map(|pubsub_url| Endpoint {
-                rpc_url: rpc_config.url().to_string(),
-                pubsub_url,
+                rpc_url: rpc_url.clone(),
+                pubsub_url: pubsub_url.clone(),
             })
             .collect::<Vec<_>>();
 
@@ -418,9 +411,7 @@ impl MagicValidator {
             LifecycleMode::Ephemeral.into(),
         );
         let commitment_config = {
-            let level = rpc_config
-                .commitment()
-                .unwrap_or(CommitmentLevel::Confirmed);
+            let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }
         };
         let chainlink = ChainlinkImpl::try_new_from_endpoints(
@@ -552,7 +543,8 @@ impl MagicValidator {
         &self,
         fqdn: impl ToString,
     ) -> ApiResult<()> {
-        let url = cluster_from_remote(&self.config.accounts.remote);
+        let remote_cluster =
+            remote_cluster_from_remote(&self.config.accounts.remote);
         let country_code =
             CountryCode::from(self.config.validator.country_code.alpha3());
         let validator_keypair = validator_authority();
@@ -568,7 +560,7 @@ impl MagicValidator {
         });
 
         DomainRegistryManager::handle_registration_static(
-            url.url(),
+            remote_cluster.url,
             &validator_keypair,
             validator_info,
         )
@@ -578,11 +570,12 @@ impl MagicValidator {
     }
 
     fn unregister_validator_on_chain(&self) -> ApiResult<()> {
-        let url = cluster_from_remote(&self.config.accounts.remote);
+        let remote_cluster =
+            remote_cluster_from_remote(&self.config.accounts.remote);
         let validator_keypair = validator_authority();
 
         DomainRegistryManager::handle_unregistration_static(
-            url.url(),
+            remote_cluster.url,
             &validator_keypair,
         )
         .map_err(|err| {
@@ -593,15 +586,13 @@ impl MagicValidator {
     async fn ensure_validator_funded_on_chain(&self) -> ApiResult<()> {
         // NOTE: 5 SOL seems reasonable, but we may require a different amount in the future
         const MIN_BALANCE_SOL: u64 = 5;
-        let (_, remote_rpc_config) =
-            try_get_remote_accounts_and_rpc_config(&self.config.accounts)?;
+        let accounts_config =
+            try_get_remote_accounts_config(&self.config.accounts)?;
 
         let lamports = RpcClient::new_with_commitment(
-            remote_rpc_config.url().to_string(),
+            accounts_config.remote_cluster.url.clone(),
             CommitmentConfig {
-                commitment: remote_rpc_config
-                    .commitment()
-                    .unwrap_or(CommitmentLevel::Confirmed),
+                commitment: CommitmentLevel::Confirmed,
             },
         )
         .get_balance(&self.identity)
@@ -645,7 +636,10 @@ impl MagicValidator {
         }
 
         // Now we are ready to start all services and are ready to accept transactions
-        self.claim_fees_task.start(self.config.clone());
+        let remote_cluster =
+            remote_cluster_from_remote(&self.config.accounts.remote);
+        self.claim_fees_task
+            .start(self.config.clone(), remote_cluster.url);
 
         self.slot_ticker = Some(init_slot_ticker(
             self.accountsdb.clone(),
@@ -750,14 +744,8 @@ fn programs_to_load(programs: &[ProgramConfig]) -> Vec<(Pubkey, String)> {
         .collect()
 }
 
-fn try_get_remote_accounts_and_rpc_config(
+fn try_get_remote_accounts_config(
     accounts: &magicblock_config::AccountsConfig,
-) -> ApiResult<(magicblock_accounts::AccountsConfig, RpcProviderConfig)> {
-    let accounts_config =
-        try_convert_accounts_config(accounts).map_err(ApiError::ConfigError)?;
-    let remote_rpc_config = RpcProviderConfig::new(
-        try_rpc_cluster_from_cluster(&accounts_config.remote_cluster)?,
-        Some(CommitmentLevel::Confirmed),
-    );
-    Ok((accounts_config, remote_rpc_config))
+) -> ApiResult<magicblock_accounts::AccountsConfig> {
+    try_convert_accounts_config(accounts).map_err(ApiError::ConfigError)
 }
