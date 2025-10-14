@@ -273,6 +273,10 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
                     self.task_queue_keys.remove(&task.id);
                     if let Err(e) = self.execute_task(task).await {
                         error!("Failed to execute task {}: {}", task.id, e);
+
+                        // If any instruction fails, the task is cancelled
+                        self.db.remove_task(task.id)?;
+                        self.db.insert_failed_task(task.id, format!("{:?}", e))?;
                     }
                 }
                 _ = interval.tick() => {
@@ -300,23 +304,15 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
                             }
 
                             // All requests were processed, reset the context
-                            let sig = self.process_transaction(vec![
+                            if let Err(e) =  self.process_transaction(vec![
                                 InstructionUtils::process_tasks_instruction(
                                     &validator_authority_id(),
                                 ),
-                            ]).await?;
-                            debug!("Processed {} requests with signature {}", task_context.requests.len(), sig);
-                            // TODO(Dodecahedr0x): we don't get any output directly at this point
-                            // we would have to fetch the transaction via its signature to see
-                            // if it succeeded or failed.
-                            // However that should not happen here, but on a separate task
-                            // If any instruction fails, the task is cancelled
-                            // for result in output {
-                            //     if let Err(e) = result.and_then(|tx| tx.status) {
-                            //         error!("Failed to reset task context: {}", e);
-                            //         return Err(TaskSchedulerError::Transaction(e));
-                            //     }
-                            // }
+                            ]).await {
+                                error!("Failed to reset task context: {}", e);
+                                return Err(e);
+                            }
+                            debug!("Processed {} requests", task_context.requests.len());
                         }
                         Err(e) => {
                             error!("Failed to process context requests: {}", e);
