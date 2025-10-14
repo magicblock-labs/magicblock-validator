@@ -13,10 +13,8 @@ use integration_test_tools::{
 };
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
-    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
-    LifecycleMode, ProgramConfig, ProgramConfig, RemoteCluster, RemoteCluster,
-    RemoteConfig, RemoteConfig, TaskSchedulerConfig, ValidatorConfig,
-    ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES, DEFAULT_LEDGER_SIZE_BYTES,
+    LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig,
+    TaskSchedulerConfig, ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::{
     instruction::{create_delegate_ix, create_init_ix},
