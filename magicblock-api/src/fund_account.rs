@@ -79,6 +79,12 @@ pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
         u64::MAX,
         MagicContext::SIZE,
     );
+    let mut magic_context = accountsdb
+        .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+        .unwrap();
+    magic_context.set_delegated(true);
+    accountsdb
+        .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
 }
 
 pub(crate) fn fund_task_context(accountsdb: &AccountsDb) {
@@ -88,10 +94,10 @@ pub(crate) fn fund_task_context(accountsdb: &AccountsDb) {
         u64::MAX,
         TaskContext::SIZE,
     );
-    let mut magic_context = accountsdb
-        .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+    let mut task_context = accountsdb
+        .get_account(&magic_program::TASK_CONTEXT_PUBKEY)
         .unwrap();
-    magic_context.set_delegated(true);
+    task_context.set_delegated(true);
     accountsdb
-        .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
+        .insert_account(&magic_program::TASK_CONTEXT_PUBKEY, &task_context);
 }
