@@ -20,6 +20,21 @@
 - [ ] not yet supporting airdrop (may have to see if we only support this on a separate branch)
 - [ ] remove _hack_ in svm entrypoint for magicblock program if no longer needed
 
+## After Master Merge 1
+
+- [x] test-schedulecommit
+- [x] test-chainlink
+- [x] test-cloning
+- [x] test-restore-ledger
+- [x] test-magicblock-api
+- [x] test-table-mania
+- [x] test-committor
+- [x] test-pubsub
+- [x] test-config
+- [x] test-schedule-intents
+- [ ] test-task-scheduler
+    - failing
+
 ## Unit Test Status
 
 ### Fixed
