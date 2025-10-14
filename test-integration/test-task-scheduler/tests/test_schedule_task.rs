@@ -57,6 +57,7 @@ fn test_schedule_task() {
         ),
         validator
     );
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
     let status = expect!(ctx.get_transaction_ephem(&sig), validator);
     expect!(
         status
@@ -145,6 +146,7 @@ fn test_schedule_task() {
         ),
         validator
     );
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
     let status = expect!(ctx.get_transaction_ephem(&sig), validator);
     expect!(
         status

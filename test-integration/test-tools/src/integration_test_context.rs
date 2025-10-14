@@ -1004,6 +1004,12 @@ impl IntegrationTestContext {
         self.try_chain_client().and_then(Self::wait_for_next_slot)
     }
 
+    pub fn wait_for_delta_slot_chain(&self, delta: Slot) -> Result<Slot> {
+        self.try_chain_client().and_then(|chain_client| {
+            Self::wait_for_delta_slot(chain_client, delta)
+        })
+    }
+
     fn wait_for_next_slot(rpc_client: &RpcClient) -> Result<Slot> {
         let initial_slot = rpc_client.get_slot()?;
         Self::wait_until_slot(rpc_client, initial_slot + 1)
