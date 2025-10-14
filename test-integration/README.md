@@ -8,6 +8,26 @@ To run all tests automatically, use the following command:
 make test
 ```
 
+### Running Separate Test Suites
+
+You can run either of the below make tasks to run individual test suites:
+
+```sh
+make test-schedulecommit
+make test-chainlink
+make test-cloning
+make test-restore-ledger
+make test-magicblock-api
+make test-table-mania
+make test-committor
+make test-pubsub
+make test-config
+make test-schedule-intents
+make test-task-scheduler
+```
+
+### Running Test Suites with Validators in separate Terminals
+
 In order to isolate issues you can run one set of the below (each command in its own terminal):
 You an then also run individual tests of the respective suite while keeping the setup
 validators running in the other terminals.
