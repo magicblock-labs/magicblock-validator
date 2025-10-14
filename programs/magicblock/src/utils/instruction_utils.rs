@@ -105,7 +105,8 @@ impl InstructionUtils {
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
-    pub(crate) fn scheduled_commit_sent_instruction(
+    //pub(crate)
+    fn scheduled_commit_sent_instruction(
         magic_block_program: &Pubkey,
         validator_authority: &Pubkey,
         scheduled_commit_id: u64,
