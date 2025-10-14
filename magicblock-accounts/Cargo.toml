@@ -15,7 +15,6 @@ futures-util = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 
-magicblock-account-fetcher = { workspace = true }
 magicblock-account-cloner = { workspace = true }
 magicblock-account-updates = { workspace = true }
 magicblock-accounts-api = { workspace = true }
