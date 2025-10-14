@@ -5,7 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
-use magicblock_account_cloner::chainext::ChainlinkCloner;
+use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     remote_account_provider::{

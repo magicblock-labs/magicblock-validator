@@ -3475,15 +3475,6 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f8cc7106155f10bdf99a6f379688f543ad6596a415375b36a59a054ceda1198"
-dependencies = [
- "hashbrown 0.15.4",
-]
-
-[[package]]
-name = "lru"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86ea4e65087ff52f3862caff188d489f1fab49a0cb09e01b2e3f1a617b10aaed"
@@ -3549,30 +3540,19 @@ version = "0.2.3"
 dependencies = [
  "async-trait",
  "bincode",
- "conjunto-transwise",
- "flume",
- "futures-util",
  "log",
- "lru 0.14.0",
- "magicblock-account-dumper",
- "magicblock-account-fetcher",
- "magicblock-account-updates",
- "magicblock-accounts-api",
  "magicblock-accounts-db",
  "magicblock-chainlink",
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
  "magicblock-ledger",
- "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-sdk",
  "thiserror 1.0.69",
  "tokio",
- "tokio-util 0.7.15",
 ]
 
 [[package]]
@@ -3770,6 +3750,7 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-magic-program-api",
  "magicblock-metrics",
+ "magicblock-mutator",
  "magicblock-processor",
  "magicblock-program",
  "magicblock-task-scheduler",
@@ -4134,7 +4115,6 @@ dependencies = [
  "chrono",
  "futures-util",
  "log",
- "magicblock-accounts",
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
@@ -4173,9 +4153,9 @@ version = "0.2.3"
 dependencies = [
  "anyhow",
  "log",
- "magicblock-accounts",
  "magicblock-config",
  "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20)",
+ "magicblock-mutator",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-rpc-client",

@@ -1,4 +1,4 @@
-use magicblock_accounts::Cluster;
+use magicblock_mutator::Cluster;
 use solana_sdk::genesis_config::ClusterType;
 
 pub(crate) fn cluster_from_remote(

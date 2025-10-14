@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
-use magicblock_accounts::{AccountsConfig, Cluster, LifecycleMode};
+use magicblock_accounts::AccountsConfig;
 use magicblock_config::errors::ConfigResult;
+use magicblock_mutator::Cluster;
 use solana_sdk::{genesis_config::ClusterType, pubkey::Pubkey};
 
 pub(crate) fn try_convert_accounts_config(
@@ -16,7 +17,7 @@ pub(crate) fn try_convert_accounts_config(
         ),
     })
 }
-pub(crate) fn cluster_from_remote(
+pub fn cluster_from_remote(
     remote: &magicblock_config::RemoteConfig,
 ) -> Cluster {
     use magicblock_config::RemoteCluster::*;
@@ -57,13 +58,13 @@ pub(crate) fn cluster_from_remote(
 
 fn lifecycle_mode_from_lifecycle_mode(
     clone: &magicblock_config::LifecycleMode,
-) -> LifecycleMode {
+) -> magicblock_accounts::LifecycleMode {
     use magicblock_config::LifecycleMode::*;
     match clone {
-        ProgramsReplica => LifecycleMode::ProgramsReplica,
-        Replica => LifecycleMode::Replica,
-        Ephemeral => LifecycleMode::Ephemeral,
-        Offline => LifecycleMode::Offline,
+        ProgramsReplica => magicblock_accounts::LifecycleMode::ProgramsReplica,
+        Replica => magicblock_accounts::LifecycleMode::Replica,
+        Ephemeral => magicblock_accounts::LifecycleMode::Ephemeral,
+        Offline => magicblock_accounts::LifecycleMode::Offline,
     }
 }
 

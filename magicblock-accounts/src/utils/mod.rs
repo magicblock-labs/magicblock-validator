@@ -1,5 +1,3 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use conjunto_transwise::RpcCluster;
 use magicblock_mutator::Cluster;
 use solana_sdk::genesis_config::ClusterType;
@@ -7,12 +5,7 @@ use url::Url;
 
 use crate::errors::{AccountsError, AccountsResult};
 
-pub(crate) fn get_epoch() -> Duration {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards")
-}
-
+// TODO: @@@ remove conjunto references
 pub fn try_rpc_cluster_from_cluster(
     cluster: &Cluster,
 ) -> AccountsResult<RpcCluster> {

@@ -10,7 +10,7 @@ use std::{
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
-    chainext::ChainlinkCloner, map_committor_request_result,
+    map_committor_request_result, ChainlinkCloner,
 };
 use magicblock_accounts::{
     scheduled_commits_processor::ScheduledCommitsProcessorImpl,

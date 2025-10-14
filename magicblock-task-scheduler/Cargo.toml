@@ -12,7 +12,7 @@ bincode = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
-magicblock-accounts = { workspace = true }
+# magicblock-accounts = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-ledger = { workspace = true }
