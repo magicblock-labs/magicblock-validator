@@ -44,6 +44,7 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: false,
+                    request_diff: false,
                 },
             ),
             ScheduleCommitAndUndelegate => process_schedule_commit(
@@ -51,6 +52,7 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: true,
+                    request_diff: false,
                 },
             ),
             AcceptScheduleCommits => {
@@ -77,6 +79,14 @@ declare_process_instruction!(
             EnableExecutableCheck => {
                 process_toggle_executable_check(signers, invoke_context, true)
             }
+            ScheduleCommitDiffAndUndelegate => process_schedule_commit(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions {
+                    request_undelegation: true,
+                    request_diff: true,
+                },
+            ),
         }
     }
 );

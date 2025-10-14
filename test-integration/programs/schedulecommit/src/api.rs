@@ -9,7 +9,8 @@ use solana_program::{
 };
 
 use crate::{
-    DelegateCpiArgs, ScheduleCommitCpiArgs, ScheduleCommitInstruction,
+    BookUpdate, DelegateCpiArgs, DelegateOrderBookArgs, ScheduleCommitCpiArgs,
+    ScheduleCommitInstruction,
 };
 
 pub fn init_account_instruction(
@@ -28,6 +29,47 @@ pub fn init_account_instruction(
     Instruction::new_with_borsh(
         program_id,
         &ScheduleCommitInstruction::Init,
+        account_metas,
+    )
+}
+
+pub fn init_order_book_instruction(
+    payer: Pubkey,
+    book_manager: Pubkey,
+    order_book: Pubkey,
+) -> Instruction {
+    let program_id = crate::id();
+    let account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new_readonly(book_manager, true),
+        AccountMeta::new(order_book, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::InitOrderBook,
+        account_metas,
+    )
+}
+
+pub fn grow_order_book_instruction(
+    payer: Pubkey,
+    book_manager: Pubkey,
+    order_book: Pubkey,
+    additional_space: u64,
+) -> Instruction {
+    let program_id = crate::id();
+    let account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new_readonly(book_manager, false),
+        AccountMeta::new(order_book, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::GrowOrderBook(additional_space),
         account_metas,
     )
 }
@@ -58,17 +100,14 @@ pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
 pub fn delegate_account_cpi_instruction(
     payer: Pubkey,
     validator: Option<Pubkey>,
-    player: Pubkey,
+    player_or_book_manager: Pubkey,
+    user_seed: &[u8],
 ) -> Instruction {
     let program_id = crate::id();
-    let (pda, _) = pda_and_bump(&player);
-
-    let args = DelegateCpiArgs {
-        valid_until: i64::MAX,
-        commit_frequency_ms: 1_000_000_000,
-        validator,
-        player,
-    };
+    let (pda, _) = Pubkey::find_program_address(
+        &[user_seed, player_or_book_manager.as_ref()],
+        &crate::ID,
+    );
 
     let delegate_accounts = DelegateAccounts::new(pda, program_id);
     let delegate_metas = DelegateAccountMetas::from(delegate_accounts);
@@ -85,7 +124,21 @@ pub fn delegate_account_cpi_instruction(
 
     Instruction::new_with_borsh(
         program_id,
-        &ScheduleCommitInstruction::DelegateCpi(args),
+        &if user_seed == b"magic_schedule_commit" {
+            ScheduleCommitInstruction::DelegateCpi(DelegateCpiArgs {
+                valid_until: i64::MAX,
+                commit_frequency_ms: 1_000_000_000,
+                player: player_or_book_manager,
+                validator,
+            })
+        } else {
+            ScheduleCommitInstruction::DelegateOrderBook(
+                DelegateOrderBookArgs {
+                    commit_frequency_ms: 1_000_000_000,
+                    book_manager: player_or_book_manager,
+                },
+            )
+        },
         account_metas,
     )
 }
@@ -118,6 +171,45 @@ pub fn schedule_commit_cpi_instruction(
             undelegate: false,
             commit_payer: false,
         },
+    )
+}
+
+pub fn update_order_book_instruction(
+    payer: Pubkey,
+    order_book: Pubkey,
+    update: BookUpdate,
+) -> Instruction {
+    let program_id = crate::id();
+    let account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(order_book, false),
+    ];
+
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::UpdateOrderBook(update),
+        account_metas,
+    )
+}
+
+pub fn schedule_commit_diff_instruction_for_order_book(
+    payer: Pubkey,
+    order_book: Pubkey,
+    magic_program_id: Pubkey,
+    magic_context_id: Pubkey,
+) -> Instruction {
+    let program_id = crate::id();
+    let account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(order_book, false),
+        AccountMeta::new(magic_context_id, false),
+        AccountMeta::new_readonly(magic_program_id, false),
+    ];
+
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::ScheduleCommitForOrderBook,
+        account_metas,
     )
 }
 
