@@ -48,25 +48,29 @@ impl TasksBuilder for TaskBuilderImpl {
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
-        let (accounts, allow_undelegation) = match &base_intent.base_intent {
-            MagicBaseIntent::BaseActions(actions) => {
-                let tasks = actions
-                    .iter()
-                    .map(|el| {
-                        let task = BaseActionTask { action: el.clone() };
-                        let task =
-                            ArgsTask::new(ArgsTaskType::BaseAction(task));
-                        Box::new(task) as Box<dyn BaseTask>
-                    })
-                    .collect();
-
-                return Ok(tasks);
-            }
-            MagicBaseIntent::Commit(t) => (t.get_committed_accounts(), false),
-            MagicBaseIntent::CommitAndUndelegate(t) => {
-                (t.commit_action.get_committed_accounts(), true)
-            }
-        };
+        let (accounts, allow_undelegation, commit_diff) =
+            match &base_intent.base_intent {
+                MagicBaseIntent::BaseActions(actions) => {
+                    let tasks = actions
+                        .iter()
+                        .map(|el| {
+                            let task = BaseActionTask { action: el.clone() };
+                            let task =
+                                ArgsTask::new(ArgsTaskType::BaseAction(task));
+                            Box::new(task) as Box<dyn BaseTask>
+                        })
+                        .collect();
+                    return Ok(tasks);
+                }
+                MagicBaseIntent::Commit(t) => {
+                    (t.get_committed_accounts(), false, t.is_commit_diff())
+                }
+                MagicBaseIntent::CommitAndUndelegate(t) => (
+                    t.commit_action.get_committed_accounts(),
+                    true,
+                    t.commit_action.is_commit_diff(),
+                ),
+            };
 
         let committed_pubkeys = accounts
             .iter()
@@ -90,11 +94,16 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .map(|account| {
                 let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                let task = ArgsTaskType::Commit(CommitTask {
+                let task = CommitTask {
                     commit_id,
                     allow_undelegation,
                     committed_account: account.clone(),
-                });
+                };
+                let task = if commit_diff {
+                    ArgsTaskType::CommitDiff(task)
+                } else {
+                    ArgsTaskType::Commit(task)
+                };
 
                 Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
             })
@@ -133,6 +142,9 @@ impl TasksBuilder for TaskBuilderImpl {
         fn process_commit(commit: &CommitType) -> Vec<Box<dyn BaseTask>> {
             match commit {
                 CommitType::Standalone(accounts) => {
+                    accounts.iter().map(finalize_task).collect()
+                }
+                CommitType::StandaloneDiff(accounts) => {
                     accounts.iter().map(finalize_task).collect()
                 }
                 CommitType::WithBaseActions {

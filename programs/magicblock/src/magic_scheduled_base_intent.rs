@@ -102,6 +102,10 @@ impl ScheduledBaseIntent {
         self.base_intent.is_undelegate()
     }
 
+    pub fn is_commit_diff(&self) -> bool {
+        self.base_intent.is_commit_diff()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.base_intent.is_empty()
     }
@@ -146,6 +150,16 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => false,
             MagicBaseIntent::Commit(_) => false,
             MagicBaseIntent::CommitAndUndelegate(_) => true,
+        }
+    }
+
+    pub fn is_commit_diff(&self) -> bool {
+        match &self {
+            MagicBaseIntent::BaseActions(_) => false,
+            MagicBaseIntent::Commit(c) => c.is_commit_diff(),
+            MagicBaseIntent::CommitAndUndelegate(c) => {
+                c.commit_action.is_commit_diff()
+            }
         }
     }
 
@@ -309,6 +323,7 @@ impl BaseAction {
 }
 
 type CommittedAccountRef<'a> = (Pubkey, &'a RefCell<AccountSharedData>);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommittedAccount {
     pub pubkey: Pubkey,
@@ -328,6 +343,7 @@ impl<'a> From<CommittedAccountRef<'a>> for CommittedAccount {
 pub enum CommitType {
     /// Regular commit without actions
     Standalone(Vec<CommittedAccount>), // accounts to commit
+    StandaloneDiff(Vec<CommittedAccount>), // accounts to commit
     /// Commits accounts and runs actions
     WithBaseActions {
         committed_accounts: Vec<CommittedAccount>,
@@ -451,9 +467,14 @@ impl CommitType {
         }
     }
 
+    pub fn is_commit_diff(&self) -> bool {
+        matches!(self, Self::StandaloneDiff(_))
+    }
+
     pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
+            Self::StandaloneDiff(committed_accounts) => committed_accounts,
             Self::WithBaseActions {
                 committed_accounts, ..
             } => committed_accounts,
@@ -463,6 +484,7 @@ impl CommitType {
     pub fn get_committed_accounts_mut(&mut self) -> &mut Vec<CommittedAccount> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
+            Self::StandaloneDiff(committed_accounts) => committed_accounts,
             Self::WithBaseActions {
                 committed_accounts, ..
             } => committed_accounts,
@@ -472,6 +494,9 @@ impl CommitType {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Standalone(committed_accounts) => {
+                committed_accounts.is_empty()
+            }
+            Self::StandaloneDiff(committed_accounts) => {
                 committed_accounts.is_empty()
             }
             Self::WithBaseActions {

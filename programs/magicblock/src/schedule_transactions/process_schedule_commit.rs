@@ -26,6 +26,7 @@ use crate::{
 #[derive(Default)]
 pub(crate) struct ProcessScheduleCommitOptions {
     pub request_undelegation: bool,
+    pub request_diff: bool,
 }
 
 pub(crate) fn process_schedule_commit(
@@ -242,13 +243,19 @@ pub(crate) fn process_schedule_commit(
         InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
     let commit_sent_sig = action_sent_transaction.signatures[0];
 
+    let commit_action = if opts.request_diff {
+        CommitType::StandaloneDiff(committed_accounts)
+    } else {
+        CommitType::Standalone(committed_accounts)
+    };
+
     let base_intent = if opts.request_undelegation {
         MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(committed_accounts),
+            commit_action,
             undelegate_action: UndelegateType::Standalone,
         })
     } else {
-        MagicBaseIntent::Commit(CommitType::Standalone(committed_accounts))
+        MagicBaseIntent::Commit(commit_action)
     };
     let scheduled_base_intent = ScheduledBaseIntent {
         id: intent_id,
