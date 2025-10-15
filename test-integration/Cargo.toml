@@ -37,7 +37,7 @@ cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
 ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "faad3eb3b44cba9f80ca059297b91053f64def27" }
-futures = "0.3"
+futures = "0.3.31"
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"

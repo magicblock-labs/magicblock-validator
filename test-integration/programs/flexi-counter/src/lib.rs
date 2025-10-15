@@ -2,7 +2,7 @@
 #![allow(unexpected_cfgs)]
 use solana_program::declare_id;
 
-mod args;
+pub mod args;
 pub mod instruction;
 mod processor;
 pub mod state;
