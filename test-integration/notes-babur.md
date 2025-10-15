@@ -17,8 +17,11 @@
 - [x] replay - remove all non-delegated accounts from bank (Thorsten - fixed)
 - [x] correctly handle empty readonly accounts (Thorsten)
 - [x] we are removing programs on resume, ensured ledger replay completed before that (Thorsten)
+
+## TODOs
+
 - [ ] not yet supporting airdrop (may have to see if we only support this on a separate branch)
-- [ ] remove _hack_ in svm entrypoint for magicblock program if no longer needed
+- [x] remove _hack_ in svm entrypoint for magicblock program if no longer needed
 
 ## After Master Merge 1
 
@@ -32,8 +35,7 @@
 - [x] test-pubsub
 - [x] test-config
 - [x] test-schedule-intents
-- [ ] test-task-scheduler
-    - failing
+- [x] test-task-scheduler (fixed by Dode)
 
 ## Unit Test Status
 
@@ -62,6 +64,9 @@ Need Babur's help to understand how to fix this.
 - magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_very_large_changeset
 
 ## CI
+
+Problems below most likely caused due to restarting with an incompatible accountsdb snapshot.
+We may need a migration script to be able to restart from an older snapshot.
 
 ### Program Deploy
 
