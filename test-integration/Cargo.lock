@@ -4180,6 +4180,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
+ "solana-transaction-error",
  "solana-transaction-status-client-types",
  "thiserror 1.0.69",
  "tokio",
@@ -6043,6 +6044,7 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "borsh 1.5.7",
+ "futures 0.3.31",
  "log",
  "magicblock-committor-program",
  "magicblock-committor-service",

@@ -1,9 +1,15 @@
+use log::error;
 use magicblock_rpc_client::MagicBlockRpcClientError;
-use solana_sdk::signature::{Signature, SignerError};
+use solana_sdk::{
+    instruction::InstructionError,
+    signature::{Signature, SignerError},
+    transaction::TransactionError,
+};
 
 use crate::{
     tasks::{
         task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
+        BaseTask, TaskType,
     },
     transaction_preparator::error::TransactionPreparatorError,
 };
@@ -16,10 +22,25 @@ pub enum InternalError {
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
 }
 
+impl InternalError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::SignerError(_) => None,
+            Self::MagicBlockRpcClientError(err) => err.signature(),
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum IntentExecutorError {
     #[error("EmptyIntentError")]
     EmptyIntentError,
+    #[error("User supplied actions are ill-formed: {0}")]
+    ActionsError(#[source] TransactionError),
+    #[error("Accounts committed with an invalid Commit id: {0}")]
+    CommitIDError(#[source] TransactionError),
+    #[error("Max instruction trace length exceeded: {0}")]
+    CpiLimitError(#[source] TransactionError),
     #[error("Failed to fit in single TX")]
     FailedToFitError,
     #[error("SignerError: {0}")]
@@ -44,6 +65,117 @@ pub enum IntentExecutorError {
     FailedCommitPreparationError(#[source] TransactionPreparatorError),
     #[error("FailedFinalizePreparationError: {0}")]
     FailedFinalizePreparationError(#[source] TransactionPreparatorError),
+}
+
+impl IntentExecutorError {
+    pub fn is_cpi_limit_error(&self) -> bool {
+        matches!(self, IntentExecutorError::CpiLimitError(_))
+    }
+
+    pub fn from_strategy_execution_error<F>(
+        error: TransactionStrategyExecutionError,
+        converter: F,
+    ) -> IntentExecutorError
+    where
+        F: FnOnce(InternalError) -> IntentExecutorError,
+    {
+        match error {
+            TransactionStrategyExecutionError::ActionsError(err) => {
+                IntentExecutorError::ActionsError(err)
+            }
+            TransactionStrategyExecutionError::CpiLimitError(err) => {
+                IntentExecutorError::CpiLimitError(err)
+            }
+            TransactionStrategyExecutionError::CommitIDError(err) => {
+                IntentExecutorError::CommitIDError(err)
+            }
+            TransactionStrategyExecutionError::InternalError(err) => {
+                converter(err)
+            }
+        }
+    }
+}
+
+/// Those are the errors that may occur during Commit/Finalize stages on Base layer
+#[derive(thiserror::Error, Debug)]
+pub enum TransactionStrategyExecutionError {
+    #[error("User supplied actions are ill-formed: {0}")]
+    ActionsError(#[source] TransactionError),
+    #[error("Accounts committed with an invalid Commit id: {0}")]
+    CommitIDError(#[source] TransactionError),
+    #[error("Max instruction trace length exceeded: {0}")]
+    CpiLimitError(#[source] TransactionError),
+    #[error("InternalError: {0}")]
+    InternalError(#[from] InternalError),
+}
+
+impl TransactionStrategyExecutionError {
+    /// Convert [`TransactionError`] into known errors that can be handled
+    /// [`TransactionStrategyExecutionError`]
+    pub fn from_transaction_error(
+        err: TransactionError,
+        tasks: &[Box<dyn BaseTask>],
+        map: impl FnOnce(TransactionError) -> MagicBlockRpcClientError,
+    ) -> Self {
+        // There's always 2 budget instructions in front
+        const OFFSET: u8 = 2;
+        const OUTDATED_SLOT: u32 = dlp::error::DlpError::OutdatedSlot as u32;
+
+        match err {
+            // Filter CommitIdError by custom error code
+            transaction_err @ TransactionError::InstructionError(
+                _,
+                InstructionError::Custom(OUTDATED_SLOT),
+            ) => TransactionStrategyExecutionError::CommitIDError(
+                transaction_err,
+            ),
+            // Some tx may use too much CPIs and we can handle it in certain cases
+            transaction_err @ TransactionError::InstructionError(
+                _,
+                InstructionError::MaxInstructionTraceLengthExceeded,
+            ) => TransactionStrategyExecutionError::CpiLimitError(
+                transaction_err,
+            ),
+            // Filter ActionError, we can attempt recovery by stripping away actions
+            transaction_err @ TransactionError::InstructionError(index, _) => {
+                let Some(action_index) = index.checked_sub(OFFSET) else {
+                    return TransactionStrategyExecutionError::InternalError(
+                        InternalError::MagicBlockRpcClientError(map(
+                            transaction_err,
+                        )),
+                    );
+                };
+
+                // If index corresponds to an Action -> ActionsError; otherwise -> InternalError.
+                if matches!(
+                    tasks
+                        .get(action_index as usize)
+                        .map(|task| task.task_type()),
+                    Some(TaskType::Action)
+                ) {
+                    TransactionStrategyExecutionError::ActionsError(
+                        transaction_err,
+                    )
+                } else {
+                    TransactionStrategyExecutionError::InternalError(
+                        InternalError::MagicBlockRpcClientError(map(
+                            transaction_err,
+                        )),
+                    )
+                }
+            }
+            // This means transaction failed to other reasons that we don't handle - propagate
+            err => {
+                error!(
+                    "Message execution failed and we can not handle it: {}",
+                    err
+                );
+                TransactionStrategyExecutionError::InternalError(
+                    InternalError::MagicBlockRpcClientError(map(err)),
+                )
+            }
+        }
+    }
 }
 
 impl From<TaskStrategistError> for IntentExecutorError {

@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Once},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -13,31 +13,28 @@ use magicblock_committor_service::{
     types::{ScheduledBaseIntentWrapper, TriggerType},
     BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
 };
-use magicblock_program::{
-    magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
-        ScheduledBaseIntent, UndelegateType,
-    },
-    validator::{init_validator_authority, validator_authority},
+use magicblock_program::magic_scheduled_base_intent::{
+    CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
+    ScheduledBaseIntent, UndelegateType,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
-    commitment_config::CommitmentConfig, hash::Hash,
-    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-    transaction::Transaction,
+    commitment_config::CommitmentConfig, hash::Hash, signature::Keypair,
+    signer::Signer, transaction::Transaction,
 };
 use test_tools_core::init_logger;
 use tokio::task::JoinSet;
-use utils::{
-    instructions::{
-        init_account_and_delegate_ixs, init_validator_fees_vault_ix,
-        InitAccountAndDelegateIxs,
+use utils::transactions::tx_logs_contain;
+
+use crate::utils::{
+    ensure_validator_authority,
+    transactions::{
+        fund_validator_auth_and_ensure_validator_fees_vault,
+        init_and_delegate_account_on_chain,
     },
-    transactions::tx_logs_contain,
 };
 
 mod utils;
@@ -55,209 +52,6 @@ fn expect_strategies(
         *expected_strategies.entry(*strategy).or_insert(0) += count;
     }
     expected_strategies
-}
-
-fn ensure_validator_authority() -> Keypair {
-    static ONCE: Once = Once::new();
-
-    ONCE.call_once(|| {
-        let validator_auth = utils::get_validator_auth();
-        init_validator_authority(validator_auth.insecure_clone());
-    });
-
-    validator_authority()
-}
-
-macro_rules! get_account {
-    ($rpc_client:ident, $pubkey:expr, $label:literal, $predicate:expr) => {{
-        const GET_ACCOUNT_RETRIES: u8 = 12;
-
-        let mut remaining_tries = GET_ACCOUNT_RETRIES;
-        loop {
-            let acc = $rpc_client
-                .get_account_with_commitment(
-                    &$pubkey,
-                    CommitmentConfig::confirmed(),
-                )
-                .await
-                .ok()
-                .and_then(|acc| acc.value);
-            if let Some(acc) = acc {
-                if $predicate(&acc, remaining_tries) {
-                    break acc;
-                }
-                remaining_tries -= 1;
-                if remaining_tries == 0 {
-                    panic!(
-                        "{} account ({}) does not match condition after {} retries",
-                        $label, $pubkey, GET_ACCOUNT_RETRIES
-                    );
-                }
-                utils::sleep_millis(800).await;
-            } else {
-                remaining_tries -= 1;
-                if remaining_tries == 0 {
-                    panic!(
-                        "Unable to get {} account ({}) matching condition after {} retries",
-                        $label, $pubkey, GET_ACCOUNT_RETRIES
-                    );
-                }
-                if remaining_tries % 10 == 0 {
-                    debug!(
-                        "Waiting for {} account ({}) to become available",
-                        $label, $pubkey
-                    );
-                }
-                utils::sleep_millis(800).await;
-            }
-        }
-    }};
-    ($rpc_client:ident, $pubkey:expr, $label:literal) => {{
-        get_account!($rpc_client, $pubkey, $label, |_: &Account, _: u8| true)
-    }};
-}
-
-/// This needs to be run once for all tests
-async fn fund_validator_auth_and_ensure_validator_fees_vault(
-    validator_auth: &Keypair,
-) {
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
-    rpc_client
-        .request_airdrop(&validator_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
-        .await
-        .unwrap();
-    debug!("Airdropped to validator: {} ", validator_auth.pubkey(),);
-
-    let validator_fees_vault_exists = rpc_client
-        .get_account(&validator_auth.pubkey())
-        .await
-        .is_ok();
-
-    if !validator_fees_vault_exists {
-        let latest_block_hash =
-            rpc_client.get_latest_blockhash().await.unwrap();
-        let init_validator_fees_vault_ix =
-            init_validator_fees_vault_ix(validator_auth.pubkey());
-        // If this fails it might be due to a race condition where another test
-        // already initialized it, so we can safely ignore the error
-        let _ = rpc_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &Transaction::new_signed_with_payer(
-                    &[init_validator_fees_vault_ix],
-                    Some(&validator_auth.pubkey()),
-                    &[&validator_auth],
-                    latest_block_hash,
-                ),
-                CommitmentConfig::confirmed(),
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(|err| {
-                error!("Failed to init validator fees vault: {}", err);
-            });
-    }
-}
-
-/// This needs to be run for each test that required a new counter to be delegated
-async fn init_and_delegate_account_on_chain(
-    counter_auth: &Keypair,
-    bytes: u64,
-) -> (Pubkey, Account) {
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
-
-    rpc_client
-        .request_airdrop(&counter_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
-        .await
-        .unwrap();
-    debug!("Airdropped to counter auth: {} SOL", 777 * LAMPORTS_PER_SOL);
-
-    let InitAccountAndDelegateIxs {
-        init: init_counter_ix,
-        reallocs: realloc_ixs,
-        delegate: delegate_ix,
-        pda,
-        rent_excempt,
-    } = init_account_and_delegate_ixs(counter_auth.pubkey(), bytes);
-
-    let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
-    // 1. Init account
-    rpc_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &Transaction::new_signed_with_payer(
-                &[init_counter_ix],
-                Some(&counter_auth.pubkey()),
-                &[&counter_auth],
-                latest_block_hash,
-            ),
-            CommitmentConfig::confirmed(),
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("Failed to init account");
-    debug!("Init account: {:?}", pda);
-
-    // 2. Airdrop to account for extra rent needed for reallocs
-    rpc_client
-        .request_airdrop(&pda, rent_excempt)
-        .await
-        .unwrap();
-
-    debug!(
-        "Airdropped to account: {:4} {}SOL to pay rent for {} bytes",
-        pda,
-        rent_excempt as f64 / LAMPORTS_PER_SOL as f64,
-        bytes
-    );
-
-    // 3. Run reallocs
-    for realloc_ix_chunk in realloc_ixs.chunks(10) {
-        let tx = Transaction::new_signed_with_payer(
-            realloc_ix_chunk,
-            Some(&counter_auth.pubkey()),
-            &[&counter_auth],
-            latest_block_hash,
-        );
-        rpc_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                CommitmentConfig::confirmed(),
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            )
-            .await
-            .expect("Failed to realloc");
-    }
-    debug!("Reallocs done");
-
-    // 4. Delegate account
-    rpc_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &Transaction::new_signed_with_payer(
-                &[delegate_ix],
-                Some(&counter_auth.pubkey()),
-                &[&counter_auth],
-                latest_block_hash,
-            ),
-            CommitmentConfig::confirmed(),
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("Failed to delegate");
-    debug!("Delegated account: {:?}", pda);
-    let pda_acc = get_account!(rpc_client, pda, "pda");
-
-    (pda, pda_acc)
 }
 
 // -----------------

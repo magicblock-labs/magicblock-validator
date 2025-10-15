@@ -39,6 +39,7 @@ integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"
 log = "0.4.20"
+futures = "0.3.31"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [
   "dev-tools",

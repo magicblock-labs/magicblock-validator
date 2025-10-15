@@ -1,13 +1,19 @@
 use async_trait::async_trait;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
+use solana_pubkey::Pubkey;
 use solana_sdk::{message::VersionedMessage, signature::Keypair};
 
 use crate::{
     persist::IntentPersister,
-    tasks::{task_strategist::TransactionStrategy, utils::TransactionUtils},
+    tasks::{
+        task_strategist::TransactionStrategy, utils::TransactionUtils, BaseTask,
+    },
     transaction_preparator::{
-        delivery_preparator::DeliveryPreparator, error::PreparatorResult,
+        delivery_preparator::{
+            DeliveryPreparator, DeliveryPreparatorResult, InternalError,
+        },
+        error::PreparatorResult,
     },
     ComputeBudgetConfig,
 };
@@ -22,20 +28,29 @@ pub trait TransactionPreparator: Send + Sync + 'static {
     async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        transaction_strategy: &TransactionStrategy,
+        transaction_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
+
+    /// Cleans up after strategy
+    async fn cleanup_for_strategy(
+        &self,
+        authority: &Keypair,
+        tasks: &[Box<dyn BaseTask>],
+        lookup_table_keys: &[Pubkey],
+    ) -> DeliveryPreparatorResult<(), InternalError>;
 }
 
-/// [`TransactionPreparatorV1`] first version of preparator
+/// [`TransactionPreparatorImpl`] first version of preparator
 /// It omits future commit_bundle/finalize_bundle logic
 /// It creates TXs using current per account commit/finalize
-pub struct TransactionPreparatorV1 {
+#[derive(Clone)]
+pub struct TransactionPreparatorImpl {
     delivery_preparator: DeliveryPreparator,
     compute_budget_config: ComputeBudgetConfig,
 }
 
-impl TransactionPreparatorV1 {
+impl TransactionPreparatorImpl {
     pub fn new(
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
@@ -55,11 +70,11 @@ impl TransactionPreparatorV1 {
 }
 
 #[async_trait]
-impl TransactionPreparator for TransactionPreparatorV1 {
+impl TransactionPreparator for TransactionPreparatorImpl {
     async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        tx_strategy: &TransactionStrategy,
+        tx_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
         // If message won't fit, there's no reason to prepare anything
@@ -92,5 +107,16 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         .message;
 
         Ok(message)
+    }
+
+    async fn cleanup_for_strategy(
+        &self,
+        authority: &Keypair,
+        tasks: &[Box<dyn BaseTask>],
+        lookup_table_keys: &[Pubkey],
+    ) -> DeliveryPreparatorResult<(), InternalError> {
+        self.delivery_preparator
+            .cleanup(authority, tasks, lookup_table_keys)
+            .await
     }
 }
