@@ -13,9 +13,7 @@ use solana_program::{
     program_error::ProgramError,
 };
 
-use crate::args::{
-    CallHandlerDiscriminator, CommitActionData, UndelegateActionData,
-};
+use crate::instruction::FlexiCounterInstruction;
 
 pub const ACTOR_ESCROW_INDEX: u8 = 1;
 const PRIZE: u64 = 1_000_000;
@@ -55,10 +53,8 @@ pub fn process_create_intent(
     let committees = next_account_infos(account_info_iter, num_committees)?;
 
     // Create commit actions
-    let commit_action = CommitActionData {
-        transfer_amount: PRIZE,
-    };
-    let commit_action_data = to_vec(&commit_action)?;
+    let commit_action =
+        FlexiCounterInstruction::CommitActionHandler { amount: PRIZE };
     let call_handlers = committees
         .iter()
         .zip(escrow_authorities.iter().cloned())
@@ -75,11 +71,7 @@ pub fn process_create_intent(
 
             CallHandler {
                 args: ActionArgs {
-                    data: [
-                        CallHandlerDiscriminator::Simple.to_vec(),
-                        commit_action_data.clone(),
-                    ]
-                    .concat(),
+                    data: to_vec(&commit_action).unwrap(),
                     escrow_index: ACTOR_ESCROW_INDEX,
                 },
                 compute_units,
@@ -100,10 +92,11 @@ pub fn process_create_intent(
             .zip(escrow_authorities.iter().cloned())
             .zip(counter_diffs.iter().copied())
             .map(|((committee, escrow_authority), counter_diff)| {
-                let undelegate_action_data = UndelegateActionData {
-                    counter_diff,
-                    transfer_amount: PRIZE,
-                };
+                let undelegate_action =
+                    FlexiCounterInstruction::UndelegateActionHandler {
+                        counter_diff,
+                        amount: PRIZE,
+                    };
 
                 let other_accounts = vec![
                     // counter account
@@ -117,11 +110,7 @@ pub fn process_create_intent(
 
                 Ok(CallHandler {
                     args: ActionArgs {
-                        data: [
-                            CallHandlerDiscriminator::Simple.to_vec(),
-                            to_vec(&undelegate_action_data)?,
-                        ]
-                        .concat(),
+                        data: to_vec(&undelegate_action).unwrap(),
                         escrow_index: ACTOR_ESCROW_INDEX,
                     },
                     compute_units,

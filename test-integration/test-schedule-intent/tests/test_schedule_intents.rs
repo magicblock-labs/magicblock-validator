@@ -6,7 +6,6 @@ use program_flexi_counter::{
     delegation_program_id,
     instruction::{
         create_add_ix, create_delegate_ix, create_init_ix, create_intent_ix,
-        create_redelegation_intent_ix,
     },
     state::FlexiCounter,
 };
@@ -218,7 +217,7 @@ fn test_redelegation_intent() {
     // Delegate counter
     delegate_counter(&ctx, &payer);
     add_to_counter(&ctx, &payer, 101);
-    redelegate_intent(&ctx, &payer);
+    // redelegate_intent(&ctx, &payer);
 }
 
 fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
@@ -405,27 +404,4 @@ fn schedule_intent(
         transfer_destination_balance,
         mutiplier * payers.len() as u64 * 1_000_000
     );
-}
-
-fn redelegate_intent(ctx: &IntegrationTestContext, payer: &Keypair) {
-    ctx.wait_for_next_slot_ephem().unwrap();
-
-    let (pda, _) = FlexiCounter::pda(&payer.pubkey());
-    let ix = create_redelegation_intent_ix(payer.pubkey());
-    let (sig, confirmed) = ctx
-        .send_and_confirm_instructions_with_payer_ephem(&[ix], payer)
-        .unwrap();
-    assert!(confirmed);
-
-    // Confirm was sent on Base Layer
-    let commit_result = ctx
-        .fetch_schedule_commit_result::<FlexiCounter>(sig)
-        .unwrap();
-    commit_result
-        .confirm_commit_transactions_on_chain(ctx)
-        .unwrap();
-
-    // Confirm that it got delegated back
-    let owner = ctx.fetch_chain_account_owner(pda).unwrap();
-    assert_eq!(owner, dlp::id());
 }

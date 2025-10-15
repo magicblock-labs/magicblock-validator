@@ -147,22 +147,26 @@ pub enum FlexiCounterInstruction {
         compute_units: u32,
     },
 
-    /// Creates intent that will undelegate an account,
-    /// and delegate is back in an Action
-    /// NOTE: This will be abled in the future and left as an example for now
+    /// Handler for scheduled action after commit.
     ///
-    /// Accounts:
-    /// 0. `[signer]` The payer that is delegating the account. Escrow authority
-    /// 1. `[write]` The counter PDA account that will be delegated.
-    /// 2. `[]` The owner program of the delegated account
-    /// 3. `[write]` The buffer account of the delegated account
-    /// 4. `[write]` The delegation record account of the delegated account
-    /// 5. `[write]` The delegation metadata account of the delegated account
-    /// 6. `[]` The delegation program
-    /// 7. `[]` The system program
-    /// 8. `[write]` The Magic Context
-    /// 9. `[]` The Magic Program
-    CreateRedelegationIntent,
+    /// Accounts (order must match handler below):
+    /// 0. `[]`       Escrow authority (creator) – unchecked
+    /// 1. `[signer]` Escrow account (must sign; escrow PDA)
+    /// 2. `[]`       Delegated account (must be owned by ER during commit)
+    /// 3. `[write]`  Destination account to receive lamports
+    /// 4. `[]`       System program
+    CommitActionHandler { amount: u64 },
+
+    /// (Optional) Handler for scheduled action after undelegate.
+    ///
+    /// Accounts (order must match handler below):
+    /// 0. `[]`       Escrow authority (creator) – unchecked
+    /// 1. `[signer]` Escrow account (must sign; escrow PDA)
+    /// 2. `[]`       Previously delegated account (must NOT be owned by ER)
+    /// 3. `[write]`  Destination account to receive lamports
+    /// 4. `[write]`  Counter account (your FlexiCounter)
+    /// 5. `[]`       System program
+    UndelegateActionHandler { amount: u64, counter_diff: i64 },
 
     /// Schedules a task to increase the counter.
     ///
@@ -405,34 +409,6 @@ pub fn create_intent_ix(
             compute_units,
         },
         accounts,
-    )
-}
-
-pub fn create_redelegation_intent_ix(payer: Pubkey) -> Instruction {
-    let program_id = &crate::id();
-    let (pda, _) = FlexiCounter::pda(&payer);
-
-    let delegate_accounts = DelegateAccounts::new(pda, *program_id);
-    // NOTE: accounts like: buffer, delegation_record & delegation_metadata can't be writable
-    // The reason is - ER accepts only delegated account as writable
-    // There will be a functionality in sdk that will allow to specify overwrites for Base Layer execution
-    let account_metas = vec![
-        AccountMeta::new(payer, true),
-        AccountMeta::new(delegate_accounts.delegated_account, false),
-        AccountMeta::new_readonly(delegate_accounts.owner_program, false),
-        AccountMeta::new_readonly(delegate_accounts.delegate_buffer, false),
-        AccountMeta::new_readonly(delegate_accounts.delegation_record, false),
-        AccountMeta::new_readonly(delegate_accounts.delegation_metadata, false),
-        AccountMeta::new_readonly(delegate_accounts.delegation_program, false),
-        AccountMeta::new_readonly(delegate_accounts.system_program, false),
-        AccountMeta::new(MAGIC_CONTEXT_ID, false),
-        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
-    ];
-
-    Instruction::new_with_borsh(
-        *program_id,
-        &FlexiCounterInstruction::CreateRedelegationIntent,
-        account_metas,
     )
 }
 

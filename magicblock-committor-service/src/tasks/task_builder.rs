@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use dlp::args::Context;
 use log::error;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
@@ -54,7 +53,6 @@ impl TasksBuilder for TaskBuilderImpl {
                     .iter()
                     .map(|el| {
                         let task = BaseActionTask {
-                            context: Context::Standalone,
                             action: el.clone(),
                         };
                         let task =
@@ -148,7 +146,6 @@ impl TasksBuilder for TaskBuilderImpl {
                         .collect::<Vec<_>>();
                     tasks.extend(base_actions.iter().map(|action| {
                         let task = BaseActionTask {
-                            context: Context::Commit,
                             action: action.clone(),
                         };
                         let task =
@@ -188,7 +185,6 @@ impl TasksBuilder for TaskBuilderImpl {
                     UndelegateType::WithBaseActions(actions) => {
                         tasks.extend(actions.iter().map(|action| {
                             let task = BaseActionTask {
-                                context: Context::Undelegate,
                                 action: action.clone(),
                             };
                             let task =
