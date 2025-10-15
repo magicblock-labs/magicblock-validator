@@ -102,6 +102,7 @@ dyn_clone::clone_trait_object!(BaseTask);
 pub struct CommitTask {
     pub commit_id: u64,
     pub allow_undelegation: bool,
+    pub commit_diff: bool,
     pub committed_account: CommittedAccount,
 }
 

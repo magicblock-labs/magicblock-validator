@@ -11,7 +11,10 @@ use ephemeral_rollups_sdk::{
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
-    ephem::{commit_accounts, commit_and_undelegate_accounts},
+    ephem::{
+        commit_accounts, commit_and_undelegate_accounts,
+        commit_diff_and_undelegate_accounts,
+    },
 };
 use magicblock_magic_program_api::{
     args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
@@ -333,7 +336,7 @@ fn process_add_and_schedule_commit(
 
     // Request the PDA counter account to be committed
     if undelegate {
-        commit_and_undelegate_accounts(
+        commit_diff_and_undelegate_accounts(
             payer_info,
             vec![counter_pda_info],
             magic_context_info,

@@ -62,13 +62,16 @@ impl TasksBuilder for TaskBuilderImpl {
                         Box::new(task) as Box<dyn BaseTask>
                     })
                     .collect();
-
                 return Ok(tasks);
             }
-            MagicBaseIntent::Commit(t) => (t.get_committed_accounts(), false),
-            MagicBaseIntent::CommitAndUndelegate(t) => {
-                (t.commit_action.get_committed_accounts(), true)
+            MagicBaseIntent::Commit(t) => {
+                (t.get_committed_accounts(), false, t.is_commit_diff())
             }
+            MagicBaseIntent::CommitAndUndelegate(t) => (
+                t.commit_action.get_committed_accounts(),
+                true,
+                t.commit_action.is_commit_diff(),
+            ),
         };
 
         let committed_pubkeys = accounts
@@ -96,6 +99,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 let task = ArgsTaskType::Commit(CommitTask {
                     commit_id,
                     allow_undelegation,
+                    commit_diff,
                     committed_account: account.clone(),
                 });
 
