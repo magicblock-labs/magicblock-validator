@@ -187,15 +187,8 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
 
 pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 
-/// Stringifies the config and writes it to a temporary config file.
-/// Sets the RPC port to a random available port to allow multiple tests to
-/// run in parallel.
-/// Then uses that config to start the validator.
-pub fn start_magicblock_validator_with_config_struct(
-    config: EphemeralConfig,
-    loaded_chain_accounts: &LoadedAccounts,
-) -> (TempDir, Option<process::Child>, u16) {
-    let port = std::env::var("EPHEM_PORT")
+fn resolve_port() -> u16 {
+    std::env::var("EPHEM_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or_else(|| {
@@ -204,7 +197,18 @@ pub fn start_magicblock_validator_with_config_struct(
                 .protocol(Protocol::Tcp)
                 .pick()
                 .unwrap()
-        });
+        })
+}
+
+/// Stringifies the config and writes it to a temporary config file.
+/// Sets the RPC port to a random available port to allow multiple tests to
+/// run in parallel.
+/// Then uses that config to start the validator.
+pub fn start_magicblock_validator_with_config_struct(
+    config: EphemeralConfig,
+    loaded_chain_accounts: &LoadedAccounts,
+) -> (TempDir, Option<process::Child>, u16) {
+    let port = resolve_port();
     let config = EphemeralConfig {
         rpc: RpcConfig {
             port,
@@ -250,7 +254,20 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
     loaded_chain_accounts: &LoadedAccounts,
     default_tmpdir: TempDir,
     temp_dir: PathBuf,
-) -> (TempDir, Option<process::Child>) {
+) -> (TempDir, Option<process::Child>, u16) {
+    let port = resolve_port();
+    let config = EphemeralConfig {
+        rpc: RpcConfig {
+            port,
+            ..config.rpc.clone()
+        },
+        metrics: MetricsConfig {
+            enabled: false,
+            ..config.metrics.clone()
+        },
+        ..config.clone()
+    };
+
     let workspace_dir = resolve_workspace_dir();
     let release = std::env::var("RELEASE").is_ok();
     let config_path = temp_dir.join("config.toml");
@@ -275,6 +292,7 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
             loaded_chain_accounts,
             release,
         ),
+        port,
     )
 }
 
