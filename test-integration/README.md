@@ -86,3 +86,8 @@ make setup-schedule-intents-devnet
 make setup-schedule-intents-ephem
 cargo nextest run -p test-schedule-intent --no-fail-fast -j16
 ```
+
+```sh
+make setup-task-scheduler-devnet
+cargo nextest run -p test-task-scheduler --no-fail-fast -j16
+```
