@@ -23,6 +23,11 @@
 - [ ] not yet supporting airdrop (may have to see if we only support this on a separate branch)
 - [x] remove _hack_ in svm entrypoint for magicblock program if no longer needed
 
+## After Master Merge 2
+
+- [ ] test-chainlink/tests/ix_full_scenarios.rs failing
+- [ ] task scheduler tests failing (Program cloning issue)
+
 ## After Master Merge 1
 
 - [x] test-schedulecommit

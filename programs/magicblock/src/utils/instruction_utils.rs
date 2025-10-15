@@ -287,6 +287,33 @@ impl InstructionUtils {
     }
 
     // -----------------
+    // Executable Check
+    // -----------------
+    pub fn disable_executable_check_instruction(
+        authority: &Pubkey,
+    ) -> Instruction {
+        let account_metas = vec![AccountMeta::new(*authority, true)];
+
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::DisableExecutableCheck,
+            account_metas,
+        )
+    }
+
+    pub fn enable_executable_check_instruction(
+        authority: &Pubkey,
+    ) -> Instruction {
+        let account_metas = vec![AccountMeta::new(*authority, true)];
+
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::EnableExecutableCheck,
+            account_metas,
+        )
+    }
+
+    // -----------------
     // Utils
     // -----------------
     pub(crate) fn into_transaction(

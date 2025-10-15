@@ -177,6 +177,11 @@ impl ChainlinkCloner {
                 let lamports = Rent::default()
                     .minimum_balance(pre_deploy_loader_state.len());
 
+                let disable_executable_check_instruction =
+                    InstructionUtils::disable_executable_check_instruction(
+                        &validator_kp.pubkey(),
+                    );
+
                 let pre_deploy_mod_instruction = {
                     let pre_deploy_mods = vec![AccountModification {
                         pubkey: program_id,
@@ -202,10 +207,17 @@ impl ChainlinkCloner {
                     )
                 };
 
+                let enable_executable_check_instruction =
+                    InstructionUtils::enable_executable_check_instruction(
+                        &validator_kp.pubkey(),
+                    );
+
                 let ixs = vec![
+                    disable_executable_check_instruction,
                     pre_deploy_mod_instruction,
                     deploy_instruction,
                     post_deploy_mod_instruction,
+                    enable_executable_check_instruction,
                 ];
                 let tx = Transaction::new_signed_with_payer(
                     &ixs,
