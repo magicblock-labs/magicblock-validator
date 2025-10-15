@@ -1,6 +1,8 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_pubkey::Pubkey;
 
+// this is deployed on Base chain as user-program
+
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub enum CommittorInstruction {
     /// Initializes the buffer and [Chunks] accounts which will be used to

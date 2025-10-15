@@ -20,6 +20,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;
 
+// ER chain
 pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
     bank: &Arc<Bank>,
     committor_processor: &Option<Arc<C>>,
@@ -71,6 +72,7 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
     })
 }
 
+// ER chain
 async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
     bank: &Arc<Bank>,
     committor_processor: &Arc<C>,

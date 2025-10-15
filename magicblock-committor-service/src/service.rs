@@ -30,6 +30,8 @@ pub struct LookupTables {
     pub released: Vec<Pubkey>,
 }
 
+// this is a part of ER.. and communicates with Base chain
+
 #[derive(Debug)]
 pub enum CommittorMessage {
     ReservePubkeysForCommittee {
