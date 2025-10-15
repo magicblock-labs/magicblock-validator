@@ -27,17 +27,6 @@ declare_process_instruction!(
                 .get_current_instruction_context()?
                 .get_instruction_data(),
         )?;
-        let disable_executable_check = matches!(instruction, ModifyAccounts(_));
-        // The below is necessary to avoid:
-        // 'instruction changed executable accounts data'
-        // writing data to and deploying a program account.
-        // NOTE: better to make this an instruction which does nothing but toggle
-        // this flag on and off around the instructions which need it off.
-        if disable_executable_check {
-            invoke_context
-                .transaction_context
-                .set_remove_accounts_executable_flag_checks(true);
-        }
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context =
             transaction_context.get_current_instruction_context()?;
