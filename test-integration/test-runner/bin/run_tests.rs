@@ -15,7 +15,7 @@ use integration_test_tools::{
 };
 use teepee::Teepee;
 use test_runner::{
-    cleanup::{cleanup_devnet_only, cleanup_validator, cleanup_validators},
+    cleanup::{cleanup_devnet_only, cleanup_validators},
     env_config::TestConfigViaEnvVars,
     signal::wait_for_ctrlc,
 };
@@ -579,7 +579,7 @@ fn run_magicblock_pubsub_tests(
 
         let output = run_test(test_dir, Default::default()).map_err(|err| {
             eprintln!("Failed to magicblock pubsub tests: {:?}", err);
-            cleanup_validator(&mut ephem_validator, "ephemeral");
+            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
             err
         })?;
 

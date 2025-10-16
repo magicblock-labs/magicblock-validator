@@ -164,7 +164,7 @@ fn test_2_payers_intent_with_undelegation() {
     // fund transactions in ephemeral
     let payers = (0..PAYERS).map(|_| Keypair::new()).collect::<Vec<_>>();
     for payer in &payers {
-        ctx.airdrop_chain_escrowed(&payer, 2 * LAMPORTS_PER_SOL)
+        ctx.airdrop_chain_escrowed(payer, 2 * LAMPORTS_PER_SOL)
             .unwrap();
     }
     debug!("✅ Airdropped to payers on chain with escrow");

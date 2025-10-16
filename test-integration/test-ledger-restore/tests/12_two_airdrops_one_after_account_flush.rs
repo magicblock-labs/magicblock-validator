@@ -70,7 +70,7 @@ fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
             &mut validator,
             &transfer_payer,
             &transfer_receiver.pubkey(),
-            0_000_111,
+            111,
         );
         let lamports = expect!(
             ctx.fetch_ephem_account_balance(&transfer_receiver.pubkey()),
@@ -98,7 +98,7 @@ fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
             &mut validator,
             &transfer_payer,
             &transfer_receiver.pubkey(),
-            0_111_000,
+            111_000,
         );
         let lamports = expect!(
             ctx.fetch_ephem_account_balance(&transfer_receiver.pubkey()),

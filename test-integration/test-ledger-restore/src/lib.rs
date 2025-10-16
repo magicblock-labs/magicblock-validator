@@ -285,7 +285,7 @@ pub fn airdrop_and_delegate_accounts(
     );
     // 2. Airdrop to ephem payers and delegate them
     let keypairs_lamports = lamports
-        .into_iter()
+        .iter()
         .map(|&l| (Keypair::new(), l))
         .collect::<Vec<_>>();
 
