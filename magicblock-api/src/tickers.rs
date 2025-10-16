@@ -102,36 +102,6 @@ async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
     }
 }
 
-/* TODO: @@@ remove properly
-pub async fn init_commit_accounts_ticker(
-    manager: Arc<AccountsManager>,
-    tick_duration: Duration,
-    token: CancellationToken,
-) {
-    loop {
-        tokio::select! {
-            _ = tokio::time::sleep(tick_duration) => {
-                let sigs = manager.commit_delegated().await;
-                match sigs {
-                    Ok(sigs) if sigs.is_empty() => {
-                        trace!("No accounts committed");
-                    }
-                    Ok(sigs) => {
-                        debug!("Commits: {:?}", sigs);
-                    }
-                    Err(err) => {
-                        error!("Failed to commit accounts: {:?}", err);
-                    }
-                }
-            }
-            _ = token.cancelled() => {
-                break;
-            }
-        }
-    }
-}
-*/
-
 #[allow(unused_variables)]
 pub fn init_system_metrics_ticker(
     tick_duration: Duration,
