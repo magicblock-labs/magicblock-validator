@@ -27,7 +27,10 @@ async fn exec(
     let mut transaction =
         Transaction::new_with_payer(ixs, Some(&auth.pubkey()));
     transaction.sign(&[auth.insecure_clone()], latest_blockhash);
-    banks_client.process_transaction(transaction).await.unwrap()
+    banks_client
+        .process_transaction_with_preflight(transaction)
+        .await
+        .unwrap()
 }
 
 // Replace get_chunks! macro
