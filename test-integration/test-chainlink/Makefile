@@ -43,7 +43,7 @@ chainlink-build-mini-v2:
 	cargo build-sbf \
 		--manifest-path $(TEST_CHAINLINK_MINI_PROGRAM_DIR)Cargo.toml \
 		--sbf-out-dir $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2 && \
-	base64 -i $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.so -o $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/mini_program.base64 && \
+	base64 -i $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.so > $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/mini_program.base64 && \
 	JSON_CONTENT='{\n \
 		"pubkey": "MiniV21111111111111111111111111111111111111",\n \
 		"account": {\n \
