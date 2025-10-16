@@ -69,14 +69,17 @@ pub fn process_undelegate_action_handler(
 
     // Update counter
     {
-        let mut counter =
-            FlexiCounter::try_from_slice(&undelegated_counter.data.borrow())?;
-        counter.count = (counter.count as i64 + counter_diff) as u64;
+        let mut counter = {
+            let data = undelegated_counter.data.borrow();
+            FlexiCounter::deserialize(&mut data.as_ref())?
+        };
+
+        counter.count = u64::try_from(counter.count as i64 + counter_diff)
+            .map_err(|_| ProgramError::ArithmeticOverflow)?;
         counter.updates += 1;
 
-        let size = undelegated_counter.data_len();
         let counter_data = to_vec(&counter)?;
-        undelegated_counter.data.borrow_mut()[..size]
+        undelegated_counter.data.borrow_mut()[..counter_data.len()]
             .copy_from_slice(&counter_data);
     }
 

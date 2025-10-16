@@ -52,9 +52,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 let tasks = actions
                     .iter()
                     .map(|el| {
-                        let task = BaseActionTask {
-                            action: el.clone(),
-                        };
+                        let task = BaseActionTask { action: el.clone() };
                         let task =
                             ArgsTask::new(ArgsTaskType::BaseAction(task));
                         Box::new(task) as Box<dyn BaseTask>
