@@ -61,6 +61,15 @@ Not sure why these fail (assume `0` return value)
 This is most likely due to RPC node closing connection before response is sent back.
 Need Babur's help to understand how to fix this.
 
+This is due to `InvalidFeePayerForTransaction`, we need to delegate the account.
+However that fails since we need to _add_ an `Account` to the test env which looses the
+_delegated_ flag.
+
+Either we add that flag to the `Account` struct or we need to modify the account via a
+transaction in the test (not sure if that is possible).
+
+See [this slack thread](https://magicblock-labs.slack.com/archives/C07QF4P5HJ8/p1760608866099959).
+
 - magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_extremely_large_changeset
 - magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_insanely_large_changeset
 - magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_large_changeset
