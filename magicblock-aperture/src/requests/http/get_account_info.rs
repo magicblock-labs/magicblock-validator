@@ -1,3 +1,4 @@
+use log::*;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
 use super::prelude::*;
@@ -21,6 +22,8 @@ impl HttpDispatcher {
         let pubkey: Pubkey = some_or_err!(pubkey);
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
+
+        debug!("get_account_info: '{}'", pubkey);
 
         // `read_account_with_ensure` guarantees the account is clone from chain if not in database.
         let account = self

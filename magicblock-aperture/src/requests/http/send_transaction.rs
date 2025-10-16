@@ -32,7 +32,7 @@ impl HttpDispatcher {
         {
             return Err(TransactionError::AlreadyProcessed.into());
         }
-        trace!("Received transaction: {signature}, ensuring accounts");
+        debug!("Received transaction: {signature}, ensuring accounts");
         self.ensure_transaction_accounts(&transaction).await?;
 
         // Based on the preflight flag, either execute and await the result,
