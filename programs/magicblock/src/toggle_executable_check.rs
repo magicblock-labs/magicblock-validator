@@ -22,7 +22,7 @@ pub(crate) fn process_toggle_executable_check(
 
     // Check that the validator authority (first account) is correct and signer
     let provided_validator_auth = get_instruction_pubkey_with_idx(
-        &invoke_context.transaction_context,
+        invoke_context.transaction_context,
         VALIDATOR_AUTHORITY_IDX,
     )?;
     let validator_auth = validator_authority_id();
