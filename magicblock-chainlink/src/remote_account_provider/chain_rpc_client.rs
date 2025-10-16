@@ -1,4 +1,3 @@
-use log::*;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -77,12 +76,6 @@ impl ChainRpcClient for ChainRpcClientImpl {
         pubkeys: &[Pubkey],
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Vec<Option<Account>>> {
-        let pubkeys_str = pubkeys
-            .iter()
-            .map(|pk| pk.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        debug!("Fetching multiple accounts ({pubkeys_str}) get_multiple_accounts_with_config");
         self.rpc_client
             .get_multiple_accounts_with_config(pubkeys, config)
             .await
