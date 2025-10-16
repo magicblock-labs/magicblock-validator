@@ -1846,7 +1846,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk"
 version = "0.3.4"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=5c60b60#5c60b60576f406f3b39e3f2734f26719de613df5"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk-attribute-commit",
@@ -1860,7 +1860,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
 version = "0.3.4"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=5c60b60#5c60b60576f406f3b39e3f2734f26719de613df5"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1869,7 +1869,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
 version = "0.3.4"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=5c60b60#5c60b60576f406f3b39e3f2734f26719de613df5"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1879,7 +1879,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
 version = "0.3.4"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=5c60b60#5c60b60576f406f3b39e3f2734f26719de613df5"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3931,7 +3931,7 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program"
 version = "1.1.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=c99dd946b#c99dd946bdeba5661e49020720a5b3bf32874bda"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=aa1de56d90c#aa1de56d90c8a242377accd59899f272f0131f8c"
 dependencies = [
  "bincode",
  "borsh 1.5.7",

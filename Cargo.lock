@@ -4191,7 +4191,7 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program"
 version = "1.1.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=c99dd946b#c99dd946bdeba5661e49020720a5b3bf32874bda"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=aa1de56d90c#aa1de56d90c8a242377accd59899f272f0131f8c"
 dependencies = [
  "bincode",
  "borsh 1.5.7",
