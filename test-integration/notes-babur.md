@@ -77,7 +77,12 @@ See [this slack thread](https://magicblock-labs.slack.com/archives/C07QF4P5HJ8/p
 - magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_small_single_account
 - magicblock-committor-program::prog_init_write_and_close test_init_write_and_close_very_large_changeset
 
-## CI
+### Need Edwin's Help
+
+Tests inside `programs/magicblock/src/schedule_transactions/process_schedule_commit_tests.rs`
+are failing on an `assert` that was added with intents in CI only.
+
+## Test Node
 
 Problems below most likely caused due to restarting with an incompatible accountsdb snapshot.
 We may need a migration script to be able to restart from an older snapshot.
