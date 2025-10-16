@@ -4,19 +4,19 @@
 // @docs/flows/deleg-us-redeleg-other.md
 
 use log::*;
-use magicblock_chainlink::testing::deleg::add_delegation_record_for;
-use magicblock_chainlink::testing::init_logger;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_subscribed, assert_remain_undelegating,
     assert_subscribed_without_delegation_record,
+    testing::{deleg::add_delegation_record_for, init_logger},
 };
 use solana_account::Account;
-use solana_sdk::clock::Slot;
-use utils::accounts::account_shared_with_owner_and_slot;
-use utils::test_context::{DelegateResult, TestContext};
-
 use solana_pubkey::Pubkey;
+use solana_sdk::clock::Slot;
+use utils::{
+    accounts::account_shared_with_owner_and_slot,
+    test_context::{DelegateResult, TestContext},
+};
 
 mod utils;
 

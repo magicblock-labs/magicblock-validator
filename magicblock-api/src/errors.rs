@@ -98,5 +98,7 @@ pub enum ApiError {
     ),
 
     #[error("Failed to sanitize transaction: {0}")]
-    FailedToSanitizeTransaction(#[from] solana_sdk::transaction::TransactionError),
+    FailedToSanitizeTransaction(
+        #[from] solana_sdk::transaction::TransactionError,
+    ),
 }

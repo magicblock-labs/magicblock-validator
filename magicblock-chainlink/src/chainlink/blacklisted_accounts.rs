@@ -1,6 +1,7 @@
+use std::collections::HashSet;
+
 use magicblock_magic_program_api as magic_program;
 use solana_pubkey::Pubkey;
-use std::collections::HashSet;
 
 pub fn blacklisted_accounts(
     validator_id: &Pubkey,

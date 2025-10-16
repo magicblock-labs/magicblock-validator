@@ -274,7 +274,6 @@ pub(crate) fn process_mutate_accounts(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use test_kit::init_logger;
 
     use assert_matches::assert_matches;
     use magicblock_magic_program_api::instruction::AccountModification;
@@ -282,6 +281,7 @@ mod tests {
         account::{Account, AccountSharedData},
         pubkey::Pubkey,
     };
+    use test_kit::init_logger;
 
     use super::*;
     use crate::{

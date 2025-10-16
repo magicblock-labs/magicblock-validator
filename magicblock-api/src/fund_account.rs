@@ -1,9 +1,9 @@
-use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
 use std::path::Path;
 
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::traits::AccountsBank;
 use magicblock_magic_program_api as magic_program;
+use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
 use magicblock_program::{MagicContext, TaskContext};
 use solana_sdk::{
     account::{AccountSharedData, WritableAccount},

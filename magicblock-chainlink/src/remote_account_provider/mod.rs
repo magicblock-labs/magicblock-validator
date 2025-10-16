@@ -1,7 +1,3 @@
-use config::RemoteAccountProviderConfig;
-use lru_cache::AccountsLruCache;
-#[cfg(any(test, feature = "dev-context"))]
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -16,15 +12,19 @@ pub(crate) use chain_pubsub_client::{
     ChainPubsubClient, ChainPubsubClientImpl,
 };
 pub(crate) use chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl};
+use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 use log::*;
+use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_pubkey::Pubkey;
+#[cfg(any(test, feature = "dev-context"))]
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig,
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
@@ -46,7 +46,6 @@ pub mod program_account;
 mod remote_account;
 
 pub use chain_pubsub_actor::SubscriptionUpdate;
-
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{errors::ChainlinkResult, submux::SubMuxClient};
@@ -983,6 +982,9 @@ fn account_slots(accs: &[RemoteAccount]) -> Vec<u64> {
 
 #[cfg(test)]
 mod test {
+    use solana_system_interface::program as system_program;
+
+    use super::{chain_pubsub_client::mock::ChainPubsubClientMock, *};
     use crate::{
         config::LifecycleMode,
         testing::{
@@ -993,9 +995,6 @@ mod test {
             utils::random_pubkey,
         },
     };
-    use solana_system_interface::program as system_program;
-
-    use super::{chain_pubsub_client::mock::ChainPubsubClientMock, *};
 
     #[tokio::test]
     async fn test_get_non_existing_account() {

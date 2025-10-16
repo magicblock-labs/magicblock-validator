@@ -23,8 +23,9 @@ use magicblock_committor_service::{
     types::{ScheduledBaseIntentWrapper, TriggerType},
     BaseIntentCommittor, CommittorService,
 };
-use magicblock_core::link::transactions::TransactionSchedulerHandle;
-use magicblock_core::traits::AccountsBank;
+use magicblock_core::{
+    link::transactions::TransactionSchedulerHandle, traits::AccountsBank,
+};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,

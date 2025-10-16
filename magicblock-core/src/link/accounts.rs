@@ -1,8 +1,6 @@
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
-use solana_account::cow::AccountSeqLock;
+use solana_account::{cow::AccountSeqLock, AccountSharedData};
 use solana_account_decoder::{encode_ui_account, UiAccount, UiAccountEncoding};
-
-use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 
 use crate::Slot;

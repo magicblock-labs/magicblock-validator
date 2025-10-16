@@ -1,4 +1,3 @@
-use magicblock_core::traits::AccountsBank;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -10,8 +9,9 @@ use std::{
 use log::*;
 use magicblock_accounts::ScheduledCommitsProcessor;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_core::link::{
-    blocks::BlockUpdateTx, transactions::TransactionSchedulerHandle,
+use magicblock_core::{
+    link::{blocks::BlockUpdateTx, transactions::TransactionSchedulerHandle},
+    traits::AccountsBank,
 };
 use magicblock_ledger::{LatestBlock, Ledger};
 use magicblock_magic_program_api as magic_program;

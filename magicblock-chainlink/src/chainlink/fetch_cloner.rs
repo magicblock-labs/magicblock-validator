@@ -1,6 +1,3 @@
-use log::*;
-use magicblock_core::traits::AccountsBank;
-use solana_account::{AccountSharedData, ReadableAccount};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -9,11 +6,21 @@ use std::{
         Arc, Mutex,
     },
 };
+
+use dlp::{
+    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+};
+use log::*;
+use magicblock_core::traits::AccountsBank;
+use solana_account::{AccountSharedData, ReadableAccount};
+use solana_pubkey::Pubkey;
 use tokio::{
     sync::{mpsc, oneshot},
+    task,
     task::JoinSet,
 };
 
+use super::errors::{ChainlinkError, ChainlinkResult};
 use crate::{
     chainlink::blacklisted_accounts::blacklisted_accounts,
     cloner::{errors::ClonerResult, Cloner},
@@ -27,12 +34,6 @@ use crate::{
         ResolvedAccount, ResolvedAccountSharedData,
     },
 };
-use dlp::state::DelegationRecord;
-use solana_pubkey::Pubkey;
-
-use super::errors::{ChainlinkError, ChainlinkResult};
-use dlp::pda::delegation_record_pda_from_delegated_account;
-use tokio::task;
 
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
 
@@ -1375,6 +1376,12 @@ async fn cancel_subs<T: ChainRpcClient, U: ChainPubsubClient>(
 // -----------------
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use solana_account::{Account, AccountSharedData, WritableAccount};
+    use solana_sdk::system_program;
+    use tokio::sync::mpsc;
+
     use super::*;
     use crate::{
         accounts_bank::mock::AccountsBankStub,
@@ -1399,11 +1406,6 @@ mod tests {
             utils::random_pubkey,
         },
     };
-    use solana_account::Account;
-    use solana_account::{AccountSharedData, WritableAccount};
-    use solana_sdk::system_program;
-    use std::{collections::HashMap, sync::Arc};
-    use tokio::sync::mpsc;
 
     macro_rules! _cloned_account {
         ($bank:expr,

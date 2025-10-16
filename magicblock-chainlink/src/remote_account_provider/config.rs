@@ -1,6 +1,5 @@
-use crate::config::LifecycleMode;
-
 use super::{RemoteAccountProviderError, RemoteAccountProviderResult};
+use crate::config::LifecycleMode;
 
 pub const DEFAULT_SUBSCRIBED_ACCOUNTS_LRU_CAPACITY: usize = 1_0000;
 

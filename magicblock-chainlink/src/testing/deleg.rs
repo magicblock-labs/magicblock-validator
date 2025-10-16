@@ -1,6 +1,4 @@
 #[cfg(any(test, feature = "dev-context"))]
-use crate::testing::rpc_client_mock::ChainRpcClientMock;
-#[cfg(any(test, feature = "dev-context"))]
 use dlp::pda::delegation_record_pda_from_delegated_account;
 #[cfg(any(test, feature = "dev-context"))]
 use dlp::state::DelegationRecord;
@@ -8,6 +6,9 @@ use dlp::state::DelegationRecord;
 use solana_account::Account;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_pubkey::Pubkey;
+
+#[cfg(any(test, feature = "dev-context"))]
+use crate::testing::rpc_client_mock::ChainRpcClientMock;
 
 #[cfg(any(test, feature = "dev-context"))]
 pub fn delegation_record_to_vec(deleg_record: &DelegationRecord) -> Vec<u8> {

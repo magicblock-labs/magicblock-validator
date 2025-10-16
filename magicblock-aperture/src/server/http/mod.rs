@@ -6,17 +6,15 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn,
 };
+use magicblock_core::link::DispatchEndpoints;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::oneshot::Receiver,
 };
 use tokio_util::sync::CancellationToken;
 
-use magicblock_core::link::DispatchEndpoints;
-
-use crate::{state::SharedState, RpcResult};
-
 use super::Shutdown;
+use crate::{state::SharedState, RpcResult};
 
 /// A graceful, Tokio-based HTTP server built with Hyper.
 ///

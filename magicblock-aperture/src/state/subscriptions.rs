@@ -8,6 +8,13 @@ use std::{
     },
 };
 
+use magicblock_core::{
+    link::{
+        accounts::AccountWithSlot,
+        transactions::{TransactionResult, TransactionStatus},
+    },
+    Slot,
+};
 use parking_lot::RwLock;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
@@ -22,13 +29,6 @@ use crate::{
         connection::ConnectionID,
         dispatch::{ConnectionTx, WsConnectionChannel},
     },
-};
-use magicblock_core::{
-    link::{
-        accounts::AccountWithSlot,
-        transactions::{TransactionResult, TransactionStatus},
-    },
-    Slot,
 };
 
 /// Manages subscriptions to changes in specific account. Maps a `Pubkey` to its subscribers.

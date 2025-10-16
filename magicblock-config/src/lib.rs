@@ -159,12 +159,11 @@ fn program_config_parser(s: &str) -> Result<ProgramConfig, String> {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
-    use super::Pubkey;
     use isocountry::CountryCode;
     use magicblock_config_helpers::Merge;
     use url::Url;
 
-    use super::*;
+    use super::{Pubkey, *};
 
     #[test]
     fn test_program_config_parser() {
