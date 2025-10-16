@@ -526,6 +526,7 @@ impl TableMania {
                 .join(", ");
 
             loop {
+                debug!("Fetching multiple accounts {}", table_keys_str);
                 // Fetch the tables from chain
                 let remote_table_accs = self
                     .rpc_client
