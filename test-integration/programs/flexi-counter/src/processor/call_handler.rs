@@ -1,7 +1,6 @@
 use borsh::{to_vec, BorshDeserialize};
-use ephemeral_rollups_sdk::{
-    cpi::{delegate_account, DelegateAccounts, DelegateConfig},
-    pda::ephemeral_balance_pda_from_payer,
+use ephemeral_rollups_sdk::cpi::{
+    delegate_account, DelegateAccounts, DelegateConfig,
 };
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
@@ -51,26 +50,19 @@ pub fn process_undelegate_action_handler(
 ) -> ProgramResult {
     msg!("UndelegateActionHandler");
 
-    let [escrow_authority, escrow_account, delegated_account, destination_account, counter_account, system_program] =
+    let [_, escrow_account, undelegated_counter, destination_account, system_program] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
-    // Validate escrow PDA + signer.
-    let expected_escrow =
-        ephemeral_balance_pda_from_payer(escrow_authority.key, 0);
-    if &expected_escrow != escrow_account.key {
-        msg!("Escrow mismatch");
-        return Err(ProgramError::InvalidAccountData);
-    }
     if !escrow_account.is_signer {
         msg!("Escrow account shall be a signer");
         return Err(ProgramError::MissingRequiredSignature);
     }
 
     // After undelegation, delegated account must NOT be owned by ER anymore.
-    if delegated_account.owner == &ephemeral_rollups_sdk::id() {
+    if undelegated_counter.owner == &ephemeral_rollups_sdk::id() {
         msg!("account still owned by ER (dlp)!");
         return Err(ProgramError::InvalidAccountOwner);
     }
@@ -78,13 +70,13 @@ pub fn process_undelegate_action_handler(
     // Update counter
     {
         let mut counter =
-            FlexiCounter::try_from_slice(&counter_account.data.borrow())?;
+            FlexiCounter::try_from_slice(&undelegated_counter.data.borrow())?;
         counter.count = (counter.count as i64 + counter_diff) as u64;
         counter.updates += 1;
 
-        let size = counter_account.data_len();
+        let size = undelegated_counter.data_len();
         let counter_data = to_vec(&counter)?;
-        counter_account.data.borrow_mut()[..size]
+        undelegated_counter.data.borrow_mut()[..size]
             .copy_from_slice(&counter_data);
     }
 
