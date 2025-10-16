@@ -1,11 +1,10 @@
-use log::*;
 use std::{path::Path, process::Child};
-use test_kit::init_logger;
 
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, unwrap, validator::cleanup,
 };
+use log::*;
 use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
@@ -13,6 +12,7 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
 };
+use test_kit::init_logger;
 use test_ledger_restore::{
     airdrop_and_delegate_accounts, setup_offline_validator,
     setup_validator_with_local_remote, transfer_lamports,

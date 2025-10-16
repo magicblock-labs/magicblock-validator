@@ -1,4 +1,3 @@
-use log::*;
 use std::{path::Path, process::Child};
 
 use cleanass::assert_eq;
@@ -6,6 +5,7 @@ use integration_test_tools::{
     loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
+use log::*;
 use program_flexi_counter::{instruction::create_add_ix, state::FlexiCounter};
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use test_kit::init_logger;

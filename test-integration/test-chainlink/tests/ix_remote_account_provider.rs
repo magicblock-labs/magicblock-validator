@@ -1,13 +1,13 @@
 use log::{debug, info};
-use magicblock_chainlink::config::LifecycleMode;
-use magicblock_chainlink::remote_account_provider::config::RemoteAccountProviderConfig;
-use magicblock_chainlink::submux::SubMuxClient;
 use magicblock_chainlink::{
+    config::LifecycleMode,
     remote_account_provider::{
         chain_pubsub_client::ChainPubsubClientImpl,
-        chain_rpc_client::ChainRpcClientImpl, Endpoint, RemoteAccountProvider,
+        chain_rpc_client::ChainRpcClientImpl,
+        config::RemoteAccountProviderConfig, Endpoint, RemoteAccountProvider,
         RemoteAccountUpdateSource,
     },
+    submux::SubMuxClient,
     testing::utils::{
         airdrop, await_next_slot, current_slot, dump_remote_account_lamports,
         dump_remote_account_update_source, get_remote_account_lamports,

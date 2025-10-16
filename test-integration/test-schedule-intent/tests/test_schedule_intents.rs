@@ -1,6 +1,5 @@
-use log::*;
-
 use integration_test_tools::IntegrationTestContext;
+use log::*;
 use program_flexi_counter::{
     delegation_program_id,
     instruction::{

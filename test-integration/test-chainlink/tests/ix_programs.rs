@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use log::*;
 use magicblock_chainlink::{
     assert_loaded_program_with_size,
     assert_subscribed_without_loaderv3_program_data_account,
@@ -8,8 +9,6 @@ use magicblock_chainlink::{
     },
     testing::init_logger,
 };
-
-use log::*;
 use program_mini::common::IdlType;
 use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -18,18 +17,19 @@ use solana_sdk::{
 };
 use test_chainlink::{
     assert_program_owned_by_loader, fetch_and_assert_loaded_program_v1_v2_v4,
-    fetch_and_assert_loaded_program_v3, mini_upload_idl,
+    fetch_and_assert_loaded_program_v3,
+    ixtest_context::IxtestContext,
+    mini_upload_idl,
     programs::{
         airdrop_sol,
         deploy::{compile_mini, deploy_loader_v4},
+        memo,
         mini::{load_miniv2_so, load_miniv3_so},
         send_instructions, MEMOV1, MEMOV2, MINIV2, MINIV3, MINIV3_AUTH,
         OTHERV1,
     },
     test_mini_program, test_mini_program_log_msg,
 };
-
-use test_chainlink::{ixtest_context::IxtestContext, programs::memo};
 
 const RPC_URL: &str = "http://localhost:7799";
 fn get_rpc_client(commitment: CommitmentConfig) -> RpcClient {

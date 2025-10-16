@@ -1,12 +1,11 @@
-use log::*;
 use std::{path::Path, process::Child};
-use test_kit::init_logger;
 
 use cleanass::assert_eq;
 use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
+use log::*;
 use program_flexi_counter::{
     instruction::{create_add_counter_ix, create_add_ix, create_init_ix},
     state::FlexiCounter,
@@ -14,6 +13,7 @@ use program_flexi_counter::{
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
+use test_kit::init_logger;
 use test_ledger_restore::{
     confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
     fetch_counter_chain, fetch_counter_ephem,

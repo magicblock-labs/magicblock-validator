@@ -1,31 +1,34 @@
 #![allow(unused)]
-use super::accounts::account_shared_with_owner_and_slot;
-use log::*;
-use magicblock_chainlink::config::LifecycleMode;
-use magicblock_chainlink::errors::ChainlinkResult;
-use magicblock_chainlink::fetch_cloner::{FetchAndCloneResult, FetchCloner};
-use magicblock_chainlink::remote_account_provider::config::RemoteAccountProviderConfig;
-use magicblock_chainlink::remote_account_provider::RemoteAccountProvider;
-use magicblock_chainlink::testing::accounts::account_shared_with_owner;
-use magicblock_chainlink::testing::deleg::add_delegation_record_for;
-use magicblock_chainlink::Chainlink;
-use solana_sdk::clock::Slot;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-use magicblock_chainlink::accounts_bank::mock::AccountsBankStub;
-use magicblock_chainlink::remote_account_provider::chain_pubsub_client::{
-    mock::ChainPubsubClientMock, ChainPubsubClient,
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
 };
-use magicblock_chainlink::testing::rpc_client_mock::{
-    ChainRpcClientMock, ChainRpcClientMockBuilder,
+
+use log::*;
+use magicblock_chainlink::{
+    accounts_bank::mock::AccountsBankStub,
+    config::LifecycleMode,
+    errors::ChainlinkResult,
+    fetch_cloner::{FetchAndCloneResult, FetchCloner},
+    remote_account_provider::{
+        chain_pubsub_client::{mock::ChainPubsubClientMock, ChainPubsubClient},
+        config::RemoteAccountProviderConfig,
+        RemoteAccountProvider,
+    },
+    testing::{
+        accounts::account_shared_with_owner,
+        cloner_stub::ClonerStub,
+        deleg::add_delegation_record_for,
+        rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
+    },
+    Chainlink,
 };
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
-use solana_sdk::sysvar::clock;
+use solana_sdk::{clock::Slot, sysvar::clock};
 use tokio::sync::mpsc;
 
-use magicblock_chainlink::testing::cloner_stub::ClonerStub;
+use super::accounts::account_shared_with_owner_and_slot;
 pub type TestChainlink = Chainlink<
     ChainRpcClientMock,
     ChainPubsubClientMock,

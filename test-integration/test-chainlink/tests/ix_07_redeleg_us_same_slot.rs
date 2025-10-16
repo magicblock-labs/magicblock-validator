@@ -8,7 +8,6 @@ use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_not_subscribed, testing::init_logger,
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
-
 use test_chainlink::ixtest_context::IxtestContext;
 
 #[tokio::test]

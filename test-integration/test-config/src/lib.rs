@@ -1,4 +1,3 @@
-use log::*;
 use std::process::Child;
 
 use integration_test_tools::{
@@ -9,6 +8,7 @@ use integration_test_tools::{
     },
     IntegrationTestContext,
 };
+use log::*;
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, EphemeralConfig, LedgerConfig,
     LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,

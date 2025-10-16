@@ -1,7 +1,6 @@
-use cleanass::{assert, assert_eq};
-use log::*;
 use std::{path::Path, process::Child, thread::sleep, time::Duration};
 
+use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect,
     loaded_accounts::LoadedAccounts,
@@ -11,6 +10,7 @@ use integration_test_tools::{
     },
     IntegrationTestContext,
 };
+use log::*;
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
     LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig,

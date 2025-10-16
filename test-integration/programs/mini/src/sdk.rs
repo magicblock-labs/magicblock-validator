@@ -1,9 +1,10 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
 };
 use solana_sdk_ids::system_program;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
     common::{derive_anchor_idl_pda, derive_counter_pda, derive_shank_idl_pda},

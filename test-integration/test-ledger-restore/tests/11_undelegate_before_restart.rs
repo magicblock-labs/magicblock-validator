@@ -1,6 +1,4 @@
-use log::*;
 use std::{path::Path, process::Child};
-use test_kit::init_logger;
 
 use cleanass::assert;
 use integration_test_tools::{
@@ -8,6 +6,7 @@ use integration_test_tools::{
     loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir, unwrap,
     validator::cleanup,
 };
+use log::*;
 use program_flexi_counter::{
     instruction::{
         create_add_and_schedule_commit_ix, create_add_ix, create_delegate_ix,
@@ -19,6 +18,7 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
+use test_kit::init_logger;
 use test_ledger_restore::{
     airdrop_accounts_on_chain, assert_counter_state,
     confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
