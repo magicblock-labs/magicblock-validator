@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use log::*;
 use magicblock_chainlink::{
-    assert_loaded_program_with_size,
+    assert_data_has_size, assert_loaded_program_with_size,
     assert_subscribed_without_loaderv3_program_data_account,
     remote_account_provider::program_account::{
         LoadedProgram, ProgramAccountResolver, RemoteProgramLoader,
@@ -352,12 +352,16 @@ async fn ixtest_fetch_mini_v4_loader_program() {
     let prog_kp = Keypair::new();
     let auth_kp = Keypair::new();
 
+    // As mentioned above the v4 loader seems to pad with an extra 1KB
+    const MINI_SIZE_V4: usize = MINI_SIZE + 1024;
     let program_data = compile_mini(&prog_kp, None);
+    assert_data_has_size!(program_data, MINI_SIZE_V4);
     debug!(
         "Binary size: {} ({})",
         pretty_bytes(program_data.len()),
         program_data.len()
     );
+    assert_data_has_size!(program_data, MINI_SIZE);
 
     let commitment = CommitmentConfig::processed();
     let rpc_client = Arc::new(get_rpc_client(commitment));
@@ -530,7 +534,10 @@ async fn ixtest_clone_mini_v4_loader_program() {
     let prog_kp = Keypair::new();
     let auth_kp = Keypair::new();
 
+    // As mentioned above the v4 loader seems to pad with an extra 1KB
+    const MINI_SIZE_V4: usize = MINI_SIZE + 1024;
     let program_data = compile_mini(&prog_kp, None);
+    assert_data_has_size!(program_data, MINI_SIZE_V4);
     debug!(
         "Binary size: {} ({})",
         pretty_bytes(program_data.len()),
@@ -550,8 +557,6 @@ async fn ixtest_clone_mini_v4_loader_program() {
     debug!("Program deployed V4: {}", prog_kp.pubkey());
     assert_program_owned_by_loader!(&ctx.rpc_client, &prog_kp.pubkey(), 4);
 
-    // As mentioned above the v4 loader seems to pad with an extra 1KB
-    const MINI_SIZE_V4: usize = MINI_SIZE + 1024;
     let pubkeys = [prog_kp.pubkey()];
 
     ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
