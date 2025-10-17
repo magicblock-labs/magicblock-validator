@@ -318,7 +318,8 @@ macro_rules! assert_loaded_program_with_size {
             $loader_status
         );
         // Program size may vary a bit
-        const DEVIATION: usize = 200;
+        // especially across differnt solana versions + OSes
+        const DEVIATION: usize = 500;
         let actual_size = loaded_program.program_data.len();
         let min = $size - DEVIATION;
         let max = $size + DEVIATION;
@@ -330,6 +331,24 @@ macro_rules! assert_loaded_program_with_size {
             actual_size
         );
         loaded_program
+    }};
+}
+
+#[macro_export]
+macro_rules! assert_data_has_size {
+    ($data:expr, $size:expr) => {{
+        // Program size may vary a bit
+        // especially across differnt solana versions + OSes
+        const DEVIATION: usize = 500;
+        let actual_size = $data.len();
+        let min = $size - DEVIATION;
+        let max = $size + DEVIATION;
+        assert!(
+            actual_size >= min && actual_size <= max,
+            "Expected data to have size around {}, got {}",
+            $size,
+            actual_size
+        );
     }};
 }
 
