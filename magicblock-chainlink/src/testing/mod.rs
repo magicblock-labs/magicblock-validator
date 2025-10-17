@@ -317,6 +317,7 @@ macro_rules! assert_loaded_program_with_size {
             $loader,
             $loader_status
         );
+        let actual_size = loaded_program.program_data.len();
         let (min, max) = $crate::min_max_with_deviation_percent($size, 5.0);
         assert!(
             actual_size >= min && actual_size <= max,
@@ -332,8 +333,7 @@ macro_rules! assert_loaded_program_with_size {
 #[macro_export]
 macro_rules! assert_data_has_size {
     ($data:expr, $size:expr) => {{
-        // Program size may vary a bit
-        // especially across differnt solana versions + OSes
+        let actual_size = $data.len();
         let (min, max) = $crate::min_max_with_deviation_percent($size, 5.0);
         assert!(
             actual_size >= min && actual_size <= max,
