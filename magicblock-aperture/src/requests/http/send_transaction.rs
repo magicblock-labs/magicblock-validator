@@ -21,8 +21,13 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        let transaction =
-            self.prepare_transaction(&transaction_str, encoding, true, false)?;
+        let transaction = self
+            .prepare_transaction(&transaction_str, encoding, true, false)
+            .inspect_err(|err| {
+                error!(
+                    "Failed to prepare transaction: {transaction_str} ({err})"
+                )
+            })?;
         let signature = *transaction.signature();
 
         // Perform a replay check and reserve the signature in the cache. This prevents
