@@ -17,6 +17,9 @@
 - [x] replay - remove all non-delegated accounts from bank (Thorsten - fixed)
 - [x] correctly handle empty readonly accounts (Thorsten)
 - [x] we are removing programs on resume, ensured ledger replay completed before that (Thorsten)
+- [ ] magicblock-aperture/src/requests/http/get_fee_for_message.rs should check blockhash (Babur)
+- [ ] `self.blocks.contains(hash)` times out - noticed while investigating issue (Babur)
+    - + why aren't we using that instead of `self.blocks.get(hash)`?
 
 ## TODOs
 
