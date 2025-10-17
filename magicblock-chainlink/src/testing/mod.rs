@@ -318,7 +318,7 @@ macro_rules! assert_loaded_program_with_size {
             $loader_status
         );
         let actual_size = loaded_program.program_data.len();
-        let (min, max) = $crate::min_max_with_deviation_percent($size, 5.0);
+        let (min, max) = $crate::min_max_with_deviation_percent!($size, 5.0);
         assert!(
             actual_size >= min && actual_size <= max,
             "Expected program {} to have size around {}, got {}",
@@ -334,7 +334,7 @@ macro_rules! assert_loaded_program_with_size {
 macro_rules! assert_data_has_size {
     ($data:expr, $size:expr) => {{
         let actual_size = $data.len();
-        let (min, max) = $crate::min_max_with_deviation_percent($size, 5.0);
+        let (min, max) = $crate::min_max_with_deviation_percent!($size, 5.0);
         assert!(
             actual_size >= min && actual_size <= max,
             "Expected data to have size around {}, got {}",
@@ -344,14 +344,14 @@ macro_rules! assert_data_has_size {
     }};
 }
 
-#[allow(unused)]
-fn min_max_with_deviation_percent(size: usize, percent: f64) -> (usize, usize) {
-    // Program size may vary a bit
-    // especially across differnt solana versions + OSes
-    let deviation = (size as f64 * percent / 100.0).ceil() as usize;
-    let min = size.saturating_sub(deviation);
-    let max = size + deviation;
-    (min, max)
+#[macro_export]
+macro_rules! min_max_with_deviation_percent {
+    ($size:expr, $percent:expr) => {{
+        let deviation = ($size as f64 * $percent / 100.0).ceil() as usize;
+        let min = $size - deviation;
+        let max = $size + deviation;
+        (min, max)
+    }};
 }
 
 #[macro_export]
