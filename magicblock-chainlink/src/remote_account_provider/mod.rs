@@ -437,14 +437,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         };
         if refetch {
             if log::log_enabled!(log::Level::Trace) {
-                let pubkeys = pubkeys
-                    .iter()
-                    .map(|pk| pk.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 trace!(
                     "Triggering re-fetch for accounts [{}] at slot {}",
-                    pubkeys,
+                    pubkeys_str(pubkeys),
                     self.chain_slot()
                 );
             }
@@ -479,19 +474,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             retries += 1;
             if retries == config.max_retries {
-                let pubkeys = pubkeys
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 let remote_accounts =
                     remote_accounts.into_iter().map(|a| a.slot()).collect();
                 match slots_match_result {
+                    // SAFETY: Match case is already handled and returns
                     Match => unreachable!("we would have returned above"),
                     Mismatch => {
                         return Err(
                             RemoteAccountProviderError::SlotsDidNotMatch(
-                                pubkeys,
+                                pubkeys_str(pubkeys),
                                 remote_accounts,
                             ),
                         );
@@ -499,7 +490,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     MatchButBelowMinContextSlot(slot) => {
                         return Err(
                             RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
-                            pubkeys,
+                            pubkeys_str(pubkeys),
                             remote_accounts,
                             slot)
                         );
@@ -528,12 +519,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         if log_enabled!(log::Level::Debug) {
-            let pubkeys_str = pubkeys
-                .iter()
-                .map(|pk| pk.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            debug!("Fetching accounts: [{pubkeys_str}]");
+            debug!("Fetching accounts: [{}]", pubkeys_str(pubkeys));
         }
 
         // Create channels for potential subscription updates to override fetch results
@@ -733,6 +719,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(())
     }
 
+    /// Tries to fetch the given accounts from RPC.
+    /// NOTE: if we get an RPC error we just log it and give up since there is no
+    ///       obvious way how to handle this even if we were to bubble the error up.
+    /// Any action that depends on those accounts to be there will fail.
+    /// NOTE: this is not used during subscription updates since we receive the data
+    ///       as part of that update, thus we won't have stale data issues.
     fn fetch(
         &self,
         pubkeys: Vec<Pubkey>,
@@ -740,7 +732,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         min_context_slot: u64,
     ) {
         const MAX_RETRIES: u64 = 10;
-        let mut remaining_retries: u64 = 10;
+        let mut remaining_retries: u64 = MAX_RETRIES;
         macro_rules! retry {
             ($msg:expr) => {
                 trace!($msg);
@@ -763,12 +755,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             use RemoteAccount::*;
 
             if log_enabled!(log::Level::Debug) {
-                let pubkeys = pubkeys
-                    .iter()
-                    .map(|pk| pk.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                debug!("Fetch({pubkeys})");
+                debug!("Fetch ({})", pubkeys_str(&pubkeys));
             }
 
             let response = loop {
@@ -828,23 +815,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                             message,
                                             data,
                                         };
-                                        // TODO: we need to signal something bad happened
-                                        error!("RpcError fetching account: {err:?}");
+                                        error!(
+                                            "RpcError fetching accounts {}: {err:?}", pubkeys_str(&pubkeys)
+                                        );
                                         return;
                                     }
                                 }
                                 err => {
-                                    // TODO: we need to signal something bad happened
                                     error!(
-                                        "RpcError fetching accounts: {err:?}"
+                                        "RpcError fetching accounts {}: {err:?}", pubkeys_str(&pubkeys)
                                     );
                                     return;
                                 }
                             }
                         }
                         _ => {
-                            // TODO: we need to signal something bad happened
-                            error!("Error fetching account: {err:?}");
+                            error!(
+                                "RpcError fetching accounts {}: {err:?}",
+                                pubkeys_str(&pubkeys)
+                            );
                             return;
                         }
                     },
@@ -1445,4 +1434,12 @@ mod test {
             assert_eq!(removed_accounts, vec![expected_evicted]);
         }
     }
+}
+
+fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
+    pubkeys
+        .iter()
+        .map(|pk| pk.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
