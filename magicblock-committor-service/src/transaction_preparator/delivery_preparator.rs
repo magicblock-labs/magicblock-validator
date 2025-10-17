@@ -2,7 +2,8 @@ use std::{collections::HashSet, time::Duration};
 
 use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all};
-use log::error;
+use light_client::indexer::photon_indexer::PhotonIndexer;
+use log::*;
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
 };
@@ -27,7 +28,9 @@ use tokio::time::sleep;
 use crate::{
     persist::{CommitStatus, IntentPersister},
     tasks::{
-        task_strategist::TransactionStrategy, BaseTask, TaskPreparationInfo,
+        task_builder::{get_compressed_data, TaskBuilderError},
+        task_strategist::TransactionStrategy,
+        BaseTask, BufferPreparationInfo, TaskPreparationInfo,
     },
     utils::persist_status_update,
     ComputeBudgetConfig,
@@ -56,13 +59,19 @@ impl DeliveryPreparator {
     pub async fn prepare_for_delivery<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        strategy: &TransactionStrategy,
+        strategy: &mut TransactionStrategy,
         persister: &Option<P>,
+        photon_client: &Option<PhotonIndexer>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
-        let preparation_futures = strategy
-            .optimized_tasks
-            .iter()
-            .map(|task| self.prepare_task(authority, task.as_ref(), persister));
+        let preparation_futures =
+            strategy.optimized_tasks.iter_mut().map(|task| {
+                self.prepare_task(
+                    authority,
+                    task.as_mut(),
+                    persister,
+                    photon_client,
+                )
+            });
 
         let task_preparations = join_all(preparation_futures);
         let alts_preparations =
@@ -81,47 +90,86 @@ impl DeliveryPreparator {
     pub async fn prepare_task<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        task: &dyn BaseTask,
+        task: &mut dyn BaseTask,
         persister: &Option<P>,
+        photon_client: &Option<PhotonIndexer>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let Some(preparation_info) = task.preparation_info(&authority.pubkey())
         else {
             return Ok(());
         };
 
-        // Persist as failed until rewritten
-        let update_status = CommitStatus::BufferAndChunkPartiallyInitialized;
-        persist_status_update(
-            persister,
-            &preparation_info.pubkey,
-            preparation_info.commit_id,
-            update_status,
-        );
+        match preparation_info {
+            TaskPreparationInfo::Buffer(buffer_info) => {
+                // Persist as failed until rewritten
+                let update_status =
+                    CommitStatus::BufferAndChunkPartiallyInitialized;
+                persist_status_update(
+                    persister,
+                    &buffer_info.pubkey,
+                    buffer_info.commit_id,
+                    update_status,
+                );
 
-        // Initialize buffer account. Init + reallocs
-        self.initialize_buffer_account(authority, &preparation_info)
-            .await?;
+                // Initialize buffer account. Init + reallocs
+                self.initialize_buffer_account(authority, &buffer_info)
+                    .await?;
 
-        // Persist initialization success
-        let update_status = CommitStatus::BufferAndChunkInitialized;
-        persist_status_update(
-            persister,
-            &preparation_info.pubkey,
-            preparation_info.commit_id,
-            update_status,
-        );
+                // Persist initialization success
+                let update_status = CommitStatus::BufferAndChunkInitialized;
+                persist_status_update(
+                    persister,
+                    &buffer_info.pubkey,
+                    buffer_info.commit_id,
+                    update_status,
+                );
 
-        // Writing chunks with some retries
-        self.write_buffer_with_retries(authority, &preparation_info, 5)
-            .await?;
-        // Persist that buffer account initiated successfully
-        let update_status = CommitStatus::BufferAndChunkFullyInitialized;
-        persist_status_update(
-            persister,
-            &preparation_info.pubkey,
-            preparation_info.commit_id,
-            update_status,
-        );
+                // Writing chunks with some retries
+                self.write_buffer_with_retries(authority, &buffer_info, 5)
+                    .await?;
+                // Persist that buffer account initiated successfully
+                let update_status =
+                    CommitStatus::BufferAndChunkFullyInitialized;
+                persist_status_update(
+                    persister,
+                    &buffer_info.pubkey,
+                    buffer_info.commit_id,
+                    update_status,
+                );
+            }
+            TaskPreparationInfo::Compressed => {
+                // HACK: We retry until the hash changes to be sure that the indexer has the change.
+                // This is a bad way of doing it as it assumes that the hash changes.
+                // It will break if the action is done in an isolated manner.
+                let original_hash = task
+                    .get_compressed_data()
+                    .expect("Compressed data not found")
+                    .hash;
+                let delegated_account = task
+                    .delegated_account()
+                    .ok_or(InternalError::DelegatedAccountNotFound)?;
+                let photon_client = photon_client
+                    .as_ref()
+                    .ok_or(InternalError::PhotonClientNotFound)?;
+
+                // HACK: The indexer takes some time, so we retry a few times to be sure that the hash is updated.
+                // In the case where the hash is not supposed to change, we will have to do max retry, which is bad.
+                let mut retries = 10;
+                let compressed_data = loop {
+                    let compressed_data =
+                        get_compressed_data(&delegated_account, &photon_client)
+                            .await?;
+
+                    if compressed_data.hash != original_hash || retries == 0 {
+                        break compressed_data;
+                    }
+
+                    sleep(Duration::from_millis(100)).await;
+                    retries -= 1;
+                };
+                task.set_compressed_data(compressed_data);
+            }
+        }
 
         Ok(())
     }
@@ -131,11 +179,11 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        preparation_info: &TaskPreparationInfo,
+        info: &BufferPreparationInfo,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_instructions = chunk_realloc_ixs(
-            preparation_info.realloc_instructions.clone(),
-            Some(preparation_info.init_instruction.clone()),
+            info.realloc_instructions.clone(),
+            Some(info.init_instruction.clone()),
         );
         let preparation_instructions = preparation_instructions
             .into_iter()
@@ -172,7 +220,7 @@ impl DeliveryPreparator {
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
-        info: &TaskPreparationInfo,
+        info: &BufferPreparationInfo,
         max_retries: usize,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let mut last_error = InternalError::ZeroRetriesRequestedError;
@@ -344,6 +392,14 @@ pub enum InternalError {
     TransactionSigningError(#[from] SignerError),
     #[error("FailedToPrepareBufferError: {0}")]
     FailedToPrepareBufferError(#[from] MagicBlockRpcClientError),
+    #[error("InvalidPreparationInfo")]
+    InvalidPreparationInfo,
+    #[error("Delegated account not found")]
+    DelegatedAccountNotFound,
+    #[error("Photon client not found")]
+    PhotonClientNotFound,
+    #[error("Failed to prepare compressed data: {0}")]
+    TaskBuilderError(#[from] TaskBuilderError),
 }
 
 #[derive(thiserror::Error, Debug)]

@@ -7,7 +7,8 @@ use crate::{
     process_scheduled_commit_sent,
     schedule_transactions::{
         process_accept_scheduled_commits, process_schedule_base_intent,
-        process_schedule_commit, ProcessScheduleCommitOptions,
+        process_schedule_commit, process_schedule_compressed_commit,
+        ProcessScheduleCommitOptions,
     },
 };
 
@@ -54,6 +55,13 @@ declare_process_instruction!(
                     request_undelegation: false,
                 },
             ),
+            ScheduleCompressedCommit => process_schedule_compressed_commit(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions {
+                    request_undelegation: false,
+                },
+            ),
             ScheduleCommitAndUndelegate => process_schedule_commit(
                 signers,
                 invoke_context,
@@ -61,6 +69,15 @@ declare_process_instruction!(
                     request_undelegation: true,
                 },
             ),
+            ScheduleCompressedCommitAndUndelegate => {
+                process_schedule_compressed_commit(
+                    signers,
+                    invoke_context,
+                    ProcessScheduleCommitOptions {
+                        request_undelegation: true,
+                    },
+                )
+            }
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }

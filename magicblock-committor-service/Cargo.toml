@@ -15,10 +15,14 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 bincode = { workspace = true }
 borsh = { workspace = true }
+compressed-delegation-client = { workspace = true }
 dyn-clone = { workspace = true }
 futures-util = { workspace = true }
+light-client = { workspace = true, features = ["v2"] }
+light-sdk = { workspace = true, features = ["v2"] }
 log = { workspace = true }
 lru = { workspace = true }
+magicblock-core = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",
 ] }

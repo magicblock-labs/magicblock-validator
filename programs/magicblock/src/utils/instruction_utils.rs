@@ -55,6 +55,41 @@ impl InstructionUtils {
     }
 
     // -----------------
+    // Schedule Compressed Commit
+    // -----------------
+    #[cfg(test)]
+    pub fn schedule_compressed_commit(
+        payer: &Keypair,
+        pubkeys: Vec<Pubkey>,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::schedule_compressed_commit_instruction(
+            &payer.pubkey(),
+            pubkeys,
+        );
+        Self::into_transaction(payer, ix, recent_blockhash)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn schedule_compressed_commit_instruction(
+        payer: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        }
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleCompressedCommit,
+            account_metas,
+        )
+    }
+
+    // -----------------
     // Schedule Commit and Undelegate
     // -----------------
     #[cfg(test)]
@@ -85,6 +120,40 @@ impl InstructionUtils {
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleCommitAndUndelegate,
+            account_metas,
+        )
+    }
+    // -----------------
+    // Schedule Compressed Commit and Undelegate
+    // -----------------
+    #[cfg(test)]
+    pub fn schedule_compressed_commit_and_undelegate(
+        payer: &Keypair,
+        pubkeys: Vec<Pubkey>,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::schedule_compressed_commit_and_undelegate_instruction(
+            &payer.pubkey(),
+            pubkeys,
+        );
+        Self::into_transaction(payer, ix, recent_blockhash)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn schedule_compressed_commit_and_undelegate_instruction(
+        payer: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        }
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleCompressedCommitAndUndelegate,
             account_metas,
         )
     }

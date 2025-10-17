@@ -5,6 +5,7 @@ pub mod task_info_fetcher;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::{trace, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
@@ -100,6 +101,13 @@ where
     ) -> Result<Option<TransactionStrategy>, SignerError> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
 
+        // If any of the tasks are compressed, we can't unite them
+        if commit_tasks.iter().any(|task| task.is_compressed())
+            || finalize_task.iter().any(|task| task.is_compressed())
+        {
+            return Ok(None);
+        }
+
         // We can unite in 1 tx a lot of commits
         // but then there's a possibility of hitting CPI limit, aka
         // MaxInstructionTraceLengthExceeded error.
@@ -128,6 +136,7 @@ where
         &self,
         base_intent: ScheduledBaseIntent,
         persister: &Option<P>,
+        photon_client: &Option<PhotonIndexer>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         if base_intent.is_empty() {
             return Err(IntentExecutorError::EmptyIntentError);
@@ -149,44 +158,51 @@ where
             &self.task_info_fetcher,
             &base_intent,
             persister,
+            &photon_client,
         )
         .await?;
         let finalize_tasks = TaskBuilderV1::finalize_tasks(
             &self.task_info_fetcher,
             &base_intent,
+            &photon_client,
         )
         .await?;
 
         // See if we can squeeze them in one tx
-        if let Some(single_tx_strategy) = Self::try_unite_tasks(
+        if let Some(mut single_tx_strategy) = Self::try_unite_tasks(
             &commit_tasks,
             &finalize_tasks,
             &self.authority.pubkey(),
             persister,
         )? {
             trace!("Executing intent in single stage");
-            self.execute_single_stage(&single_tx_strategy, persister)
-                .await
+            self.execute_single_stage(
+                &mut single_tx_strategy,
+                persister,
+                &photon_client,
+            )
+            .await
         } else {
             trace!("Executing intent in two stages");
             // Build strategy for Commit stage
-            let commit_strategy = TaskStrategist::build_strategy(
+            let mut commit_strategy = TaskStrategist::build_strategy(
                 commit_tasks,
                 &self.authority.pubkey(),
                 persister,
             )?;
 
             // Build strategy for Finalize stage
-            let finalize_strategy = TaskStrategist::build_strategy(
+            let mut finalize_strategy = TaskStrategist::build_strategy(
                 finalize_tasks,
                 &self.authority.pubkey(),
                 persister,
             )?;
 
             self.execute_two_stages(
-                &commit_strategy,
-                &finalize_strategy,
+                &mut commit_strategy,
+                &mut finalize_strategy,
                 persister,
+                photon_client,
             )
             .await
         }
@@ -197,15 +213,17 @@ where
     // TODO(edwin): remove once challenge window introduced
     async fn execute_single_stage<P: IntentPersister>(
         &self,
-        transaction_strategy: &TransactionStrategy,
+        mut transaction_strategy: &mut TransactionStrategy,
         persister: &Option<P>,
+        photon_client: &Option<PhotonIndexer>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let prepared_message = self
             .transaction_preparator
             .prepare_for_strategy(
                 &self.authority,
-                transaction_strategy,
+                &mut transaction_strategy,
                 persister,
+                photon_client,
             )
             .await
             .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
@@ -224,14 +242,20 @@ where
     /// Executes Intent in 2 stage: Commit & Finalize
     async fn execute_two_stages<P: IntentPersister>(
         &self,
-        commit_strategy: &TransactionStrategy,
-        finalize_strategy: &TransactionStrategy,
+        commit_strategy: &mut TransactionStrategy,
+        finalize_strategy: &mut TransactionStrategy,
         persister: &Option<P>,
+        photon_client: &Option<PhotonIndexer>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         // Prepare everything for Commit stage execution
         let prepared_commit_message = self
             .transaction_preparator
-            .prepare_for_strategy(&self.authority, commit_strategy, persister)
+            .prepare_for_strategy(
+                &self.authority,
+                commit_strategy,
+                persister,
+                photon_client,
+            )
             .await
             .map_err(IntentExecutorError::FailedCommitPreparationError)?;
 
@@ -246,7 +270,12 @@ where
         // Prepare everything for Finalize stage execution
         let prepared_finalize_message = self
             .transaction_preparator
-            .prepare_for_strategy(&self.authority, finalize_strategy, persister)
+            .prepare_for_strategy(
+                &self.authority,
+                finalize_strategy,
+                persister,
+                photon_client,
+            )
             .await
             .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
 
@@ -432,8 +461,13 @@ where
     ) -> IntentExecutorResult<ExecutionOutput> {
         let message_id = base_intent.id;
         let pubkeys = base_intent.get_committed_pubkeys();
+        // TODO(dode): Get photon url and api key from config
+        let photon_client =
+            PhotonIndexer::new(String::from("http://localhost:8784"), None);
 
-        let result = self.execute_inner(base_intent, &persister).await;
+        let result = self
+            .execute_inner(base_intent, &persister, &Some(photon_client))
+            .await;
         if let Some(pubkeys) = pubkeys {
             // Reset TaskInfoFetcher, as cache could become invalid
             if result.is_err() {
@@ -452,6 +486,8 @@ where
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
+    use light_client::indexer::photon_indexer::PhotonIndexer;
+    use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
     use solana_pubkey::Pubkey;
 
     use crate::{
@@ -472,16 +508,17 @@ mod tests {
     impl TaskInfoFetcher for MockInfoFetcher {
         async fn fetch_next_commit_ids(
             &self,
-            pubkeys: &[Pubkey],
+            accounts: &[CommittedAccount],
+            _compressed: bool,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+            Ok(accounts.iter().map(|acc| (acc.pubkey, 0)).collect())
         }
 
         async fn fetch_rent_reimbursements(
             &self,
-            pubkeys: &[Pubkey],
+            accounts: &[Pubkey],
         ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
+            Ok(accounts.iter().map(|_| Pubkey::new_unique()).collect())
         }
 
         fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
@@ -496,18 +533,26 @@ mod tests {
         let pubkey = [Pubkey::new_unique()];
         let intent = create_test_intent(0, &pubkey);
 
+        let photon_client =
+            PhotonIndexer::new("https://api.photon.com".to_string(), None);
         let info_fetcher = Arc::new(MockInfoFetcher);
         let commit_task = TaskBuilderV1::commit_tasks(
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
+            &Some(photon_client),
         )
         .await
         .unwrap();
-        let finalize_task =
-            TaskBuilderV1::finalize_tasks(&info_fetcher, &intent)
-                .await
-                .unwrap();
+        let photon_client =
+            PhotonIndexer::new("https://api.photon.com".to_string(), None);
+        let finalize_task = TaskBuilderV1::finalize_tasks(
+            &info_fetcher,
+            &intent,
+            &Some(photon_client),
+        )
+        .await
+        .unwrap();
 
         let result = IntentExecutorImpl::<
             TransactionPreparatorV1,

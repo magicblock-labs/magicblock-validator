@@ -105,6 +105,14 @@ impl ScheduledBaseIntent {
     pub fn is_empty(&self) -> bool {
         self.base_intent.is_empty()
     }
+
+    pub fn is_compressed(&self) -> bool {
+        match &self.base_intent {
+            MagicBaseIntent::CompressedCommit(_)
+            | MagicBaseIntent::CompressedCommitAndUndelegate(_) => true,
+            _ => false,
+        }
+    }
 }
 
 // BaseIntent user wants to send to base layer
@@ -114,6 +122,8 @@ pub enum MagicBaseIntent {
     BaseActions(Vec<BaseAction>),
     Commit(CommitType),
     CommitAndUndelegate(CommitAndUndelegate),
+    CompressedCommit(CommitType),
+    CompressedCommitAndUndelegate(CommitAndUndelegate),
 }
 
 impl MagicBaseIntent {
@@ -146,6 +156,8 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => false,
             MagicBaseIntent::Commit(_) => false,
             MagicBaseIntent::CommitAndUndelegate(_) => true,
+            MagicBaseIntent::CompressedCommit(_) => false,
+            MagicBaseIntent::CompressedCommitAndUndelegate(_) => true,
         }
     }
 
@@ -154,6 +166,12 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts()),
             MagicBaseIntent::CommitAndUndelegate(t) => {
+                Some(t.get_committed_accounts())
+            }
+            MagicBaseIntent::CompressedCommit(t) => {
+                Some(t.get_committed_accounts())
+            }
+            MagicBaseIntent::CompressedCommitAndUndelegate(t) => {
                 Some(t.get_committed_accounts())
             }
         }
@@ -166,6 +184,12 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts_mut()),
             MagicBaseIntent::CommitAndUndelegate(t) => {
+                Some(t.get_committed_accounts_mut())
+            }
+            MagicBaseIntent::CompressedCommit(t) => {
+                Some(t.get_committed_accounts_mut())
+            }
+            MagicBaseIntent::CompressedCommitAndUndelegate(t) => {
                 Some(t.get_committed_accounts_mut())
             }
         }
@@ -182,6 +206,8 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(actions) => actions.is_empty(),
             MagicBaseIntent::Commit(t) => t.is_empty(),
             MagicBaseIntent::CommitAndUndelegate(t) => t.is_empty(),
+            MagicBaseIntent::CompressedCommit(t) => t.is_empty(),
+            MagicBaseIntent::CompressedCommitAndUndelegate(t) => t.is_empty(),
         }
     }
 }
@@ -339,7 +365,7 @@ impl<'a> From<CommittedAccountRef<'a>> for CommittedAccount {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommitType {
     /// Regular commit without actions
-    Standalone(Vec<CommittedAccount>), // accounts to commit
+    Standalone(Vec<CommittedAccount>),
     /// Commits accounts and runs actions
     WithBaseActions {
         committed_accounts: Vec<CommittedAccount>,
@@ -412,9 +438,9 @@ impl CommitType {
         context: &ConstructionContext<'_, '_>,
     ) -> Result<CommitType, InstructionError> {
         match args {
-            CommitTypeArgs::Standalone(accounts) => {
+            CommitTypeArgs::Standalone(committed_accounts) => {
                 let committed_accounts_ref = Self::extract_commit_accounts(
-                    accounts,
+                    committed_accounts,
                     context.transaction_context,
                 )?;
                 Self::validate_accounts(&committed_accounts_ref, context)?;

@@ -1,6 +1,8 @@
+use borsh::BorshDeserialize;
+use compressed_delegation_client::CompressedDelegationRecord;
 use log::*;
 use magicblock_core::traits::AccountsBank;
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -250,10 +252,10 @@ where
         let owned_by_delegation_program =
             account.is_owned_by_delegation_program();
 
-        if let Some(account) = account.fresh_account() {
+        if let Some(mut account) = account.fresh_account() {
             // If the account is owned by the delegation program we need to resolve
             // its true owner and determine if it is delegated to us
-            if owned_by_delegation_program {
+            if owned_by_delegation_program && !account.compressed() {
                 let delegation_record_pubkey =
                     delegation_record_pda_from_delegated_account(&pubkey);
 
@@ -363,6 +365,32 @@ where
                         None
                     }
                 }
+            } else if owned_by_delegation_program && account.compressed() {
+                // If the account is compressed, the delegation record is in the account itself
+                let delegation_record =
+                    match CompressedDelegationRecord::try_from_slice(
+                        account.data(),
+                    ) {
+                        Ok(delegation_record) => Some(delegation_record),
+                        Err(err) => {
+                            error!("failed to parse delegation record for {pubkey}: {err}. not cloning account.");
+                            None
+                        }
+                    };
+
+                if let Some(delegation_record) = delegation_record {
+                    account.set_owner(delegation_record.owner);
+                    account.set_data(delegation_record.data);
+                    account.set_lamports(delegation_record.lamports);
+
+                    let is_delegated_to_us =
+                        delegation_record.authority.eq(&validator_pubkey);
+                    account.set_delegated(is_delegated_to_us);
+
+                    Some(account)
+                } else {
+                    None
+                }
             } else {
                 // Accounts not owned by the delegation program can be cloned as is
                 // No unsubscription needed for undelegated accounts
@@ -424,11 +452,25 @@ where
             account_shared_data: AccountSharedData,
             plain: &mut Vec<(Pubkey, AccountSharedData)>,
             owned_by_deleg: &mut Vec<(Pubkey, AccountSharedData, u64)>,
+            owned_by_deleg_compressed: &mut Vec<(
+                Pubkey,
+                AccountSharedData,
+                u64,
+            )>,
             programs: &mut Vec<(Pubkey, AccountSharedData, u64)>,
         ) {
             let slot = account_shared_data.remote_slot();
             if account_shared_data.owner().eq(&dlp::id()) {
                 owned_by_deleg.push((pubkey, account_shared_data, slot));
+            } else if account_shared_data
+                .owner()
+                .eq(&compressed_delegation_client::id())
+            {
+                owned_by_deleg_compressed.push((
+                    pubkey,
+                    account_shared_data,
+                    slot,
+                ));
             } else if account_shared_data.executable() {
                 // We don't clone native loader programs.
                 // They should not pass the blacklist in the first place,
@@ -449,40 +491,55 @@ where
             }
         }
 
-        let (not_found, in_bank, plain, owned_by_deleg, programs) =
-            accs.into_iter().zip(pubkeys).fold(
-                (vec![], vec![], vec![], vec![], vec![]),
-                |(
-                    mut not_found,
-                    mut in_bank,
-                    mut plain,
-                    mut owned_by_deleg,
-                    mut programs,
-                ),
-                 (acc, &pubkey)| {
-                    use RemoteAccount::*;
-                    match acc {
-                        NotFound(slot) => not_found.push((pubkey, slot)),
-                        Found(remote_account_state) => {
-                            match remote_account_state.account {
-                                ResolvedAccount::Fresh(account_shared_data) => {
-                                    process_fresh_account(
-                                        pubkey,
-                                        account_shared_data,
-                                        &mut plain,
-                                        &mut owned_by_deleg,
-                                        &mut programs,
-                                    )
-                                }
-                                ResolvedAccount::Bank(pubkey) => {
-                                    in_bank.push(pubkey);
-                                }
-                            };
-                        }
+        let (
+            not_found,
+            in_bank,
+            plain,
+            owned_by_deleg,
+            owned_by_deleg_compressed,
+            programs,
+        ) = accs.into_iter().zip(pubkeys).fold(
+            (vec![], vec![], vec![], vec![], vec![], vec![]),
+            |(
+                mut not_found,
+                mut in_bank,
+                mut plain,
+                mut owned_by_deleg,
+                mut owned_by_deleg_compressed,
+                mut programs,
+            ),
+             (acc, &pubkey)| {
+                use RemoteAccount::*;
+                match acc {
+                    NotFound(slot) => not_found.push((pubkey, slot)),
+                    Found(remote_account_state) => {
+                        match remote_account_state.account {
+                            ResolvedAccount::Fresh(account_shared_data) => {
+                                process_fresh_account(
+                                    pubkey,
+                                    account_shared_data,
+                                    &mut plain,
+                                    &mut owned_by_deleg,
+                                    &mut owned_by_deleg_compressed,
+                                    &mut programs,
+                                )
+                            }
+                            ResolvedAccount::Bank(pubkey) => {
+                                in_bank.push(pubkey);
+                            }
+                        };
                     }
-                    (not_found, in_bank, plain, owned_by_deleg, programs)
-                },
-            );
+                }
+                (
+                    not_found,
+                    in_bank,
+                    plain,
+                    owned_by_deleg,
+                    owned_by_deleg_compressed,
+                    programs,
+                )
+            },
+        );
 
         if log::log_enabled!(log::Level::Trace) {
             let not_found = not_found
@@ -499,12 +556,16 @@ where
                 .iter()
                 .map(|(pubkey, _, slot)| (pubkey.to_string(), *slot))
                 .collect::<Vec<_>>();
+            let owned_by_deleg_compressed = owned_by_deleg_compressed
+                .iter()
+                .map(|(pubkey, _, slot)| (pubkey.to_string(), *slot))
+                .collect::<Vec<_>>();
             let programs = programs
                 .iter()
                 .map(|(p, _, _)| p.to_string())
                 .collect::<Vec<_>>();
             trace!(
-                "Fetched accounts: \nnot_found:      {not_found:?} \nin_bank:        {in_bank:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?}\nprograms:       {programs:?}",
+                "Fetched accounts: \nnot_found:      {not_found:?} \nin_bank:        {in_bank:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?} \nowned_by_deleg_compressed: {owned_by_deleg_compressed:?} \nprograms:       {programs:?}",
             );
         }
 
@@ -538,11 +599,7 @@ where
 
         // For potentially delegated accounts we update the owner and delegation state first
         let mut fetch_with_delegation_record_join_set = JoinSet::new();
-        for (pubkey, acc, account_slot) in &owned_by_deleg {
-            if acc.compressed() {
-                warn!("Extract delegation record from account itself instead of fetching it separately: {pubkey}");
-                continue;
-            }
+        for (pubkey, _, account_slot) in &owned_by_deleg {
             let effective_slot = if let Some(min_slot) = min_context_slot {
                 min_slot.max(*account_slot)
             } else {
@@ -606,6 +663,29 @@ where
             let mut record_subs =
                 Vec::with_capacity(accounts_fully_resolved.len());
             let mut accounts_to_clone = plain;
+            accounts_to_clone.extend(
+                owned_by_deleg_compressed.into_iter().map(
+                    |(pubkey, mut account, _)| {
+                        let delegation_record =
+                            CompressedDelegationRecord::try_from_slice(
+                                account.data(),
+                            )
+                            .expect("Failed to deserialize delegation record");
+
+                        if delegation_record
+                            .authority
+                            .eq(&self.validator_pubkey)
+                        {
+                            account.set_delegated(true);
+                        } else {
+                            account.set_delegated(false);
+                        }
+                        account.set_data(delegation_record.data);
+                        account.set_owner(delegation_record.owner);
+                        (pubkey, account)
+                    },
+                ),
+            );
 
             // Now process the accounts (this can fail without affecting unsubscription)
             for AccountWithCompanion {

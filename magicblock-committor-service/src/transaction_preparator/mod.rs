@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_sdk::{message::VersionedMessage, signature::Keypair};
@@ -22,8 +23,9 @@ pub trait TransactionPreparator: Send + Sync + 'static {
     async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        transaction_strategy: &TransactionStrategy,
+        transaction_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
+        photon_client: &Option<PhotonIndexer>,
     ) -> PreparatorResult<VersionedMessage>;
 }
 
@@ -59,8 +61,9 @@ impl TransactionPreparator for TransactionPreparatorV1 {
     async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        tx_strategy: &TransactionStrategy,
+        mut tx_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
+        photon_client: &Option<PhotonIndexer>,
     ) -> PreparatorResult<VersionedMessage> {
         // If message won't fit, there's no reason to prepare anything
         // Fail early
@@ -79,7 +82,12 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator
-            .prepare_for_delivery(authority, tx_strategy, intent_persister)
+            .prepare_for_delivery(
+                authority,
+                &mut tx_strategy,
+                intent_persister,
+                photon_client,
+            )
             .await?;
 
         let message = TransactionUtils::assemble_tasks_tx(

@@ -1,5 +1,6 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::*;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -49,6 +50,10 @@ impl CommittorProcessor {
         let rpc_client = Arc::new(rpc_client);
         let magic_block_rpc_client = MagicblockRpcClient::new(rpc_client);
 
+        // TODO(dode): Get photon url and api key from config
+        let photon_client =
+            PhotonIndexer::new(String::from("http://localhost:8784"), None);
+
         // Create TableMania
         let gc_config = GarbageCollectorConfig::default();
         let table_mania = TableMania::new(
@@ -63,6 +68,7 @@ impl CommittorProcessor {
         // Create commit scheduler
         let commits_scheduler = IntentExecutionManager::new(
             magic_block_rpc_client.clone(),
+            photon_client,
             DummyDB::new(),
             Some(persister.clone()),
             table_mania.clone(),

@@ -1,7 +1,9 @@
+use compressed_delegation_client::types::{CommitArgs, FinalizeArgs};
 use dlp::args::{
     CallHandlerArgs, CommitStateArgs, CommitStateFromBufferArgs, Context,
 };
 use dyn_clone::DynClone;
+use log::debug;
 use magicblock_committor_program::{
     instruction_builder::{
         init_buffer::{create_init_ix, CreateInitIxArgs},
@@ -18,7 +20,10 @@ use magicblock_program::magic_scheduled_base_intent::{
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 
-use crate::{consts::MAX_WRITE_CHUNK_SIZE, tasks::visitor::Visitor};
+use crate::{
+    consts::MAX_WRITE_CHUNK_SIZE,
+    tasks::{task_builder::CompressedData, visitor::Visitor},
+};
 
 pub mod task_builder;
 pub mod task_strategist;
@@ -33,7 +38,7 @@ pub enum TaskStrategy {
 }
 
 #[derive(Clone, Debug)]
-pub struct TaskPreparationInfo {
+pub struct BufferPreparationInfo {
     pub commit_id: u64,
     pub pubkey: Pubkey,
     pub chunks_pda: Pubkey,
@@ -41,6 +46,12 @@ pub struct TaskPreparationInfo {
     pub init_instruction: Instruction,
     pub realloc_instructions: Vec<Instruction>,
     pub write_instructions: Vec<Instruction>,
+}
+
+#[derive(Clone, Debug)]
+pub enum TaskPreparationInfo {
+    Buffer(BufferPreparationInfo),
+    Compressed,
 }
 
 /// A trait representing a task that can be executed on Base layer
@@ -77,6 +88,18 @@ pub trait BaseTask: Send + Sync + DynClone {
 
     /// Calls [`Visitor`] with specific task type
     fn visit(&self, visitor: &mut dyn Visitor);
+
+    /// Returns true if task is compressed
+    fn is_compressed(&self) -> bool;
+
+    /// Sets compressed data for task
+    fn set_compressed_data(&mut self, compressed_data: CompressedData);
+
+    /// Gets compressed data for task
+    fn get_compressed_data(&self) -> Option<CompressedData>;
+
+    /// Delegated account for task
+    fn delegated_account(&self) -> Option<Pubkey>;
 }
 
 dyn_clone::clone_trait_object!(BaseTask);
@@ -89,6 +112,14 @@ pub struct CommitTask {
 }
 
 #[derive(Clone)]
+pub struct CompressedCommitTask {
+    pub commit_id: u64,
+    pub allow_undelegation: bool,
+    pub committed_account: CommittedAccount,
+    pub compressed_data: CompressedData,
+}
+
+#[derive(Clone)]
 pub struct UndelegateTask {
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
@@ -96,8 +127,21 @@ pub struct UndelegateTask {
 }
 
 #[derive(Clone)]
+pub struct CompressedUndelegateTask {
+    pub delegated_account: Pubkey,
+    pub owner_program: Pubkey,
+    pub compressed_data: CompressedData,
+}
+
+#[derive(Clone)]
 pub struct FinalizeTask {
     pub delegated_account: Pubkey,
+}
+
+#[derive(Clone)]
+pub struct CompressedFinalizeTask {
+    pub delegated_account: Pubkey,
+    pub compressed_data: CompressedData,
 }
 
 #[derive(Clone)]
@@ -110,8 +154,11 @@ pub struct BaseActionTask {
 #[derive(Clone)]
 pub enum ArgsTask {
     Commit(CommitTask),
+    CompressedCommit(CompressedCommitTask),
     Finalize(FinalizeTask),
+    CompressedFinalize(CompressedFinalizeTask),
     Undelegate(UndelegateTask), // Special action really
+    CompressedUndelegate(CompressedUndelegateTask),
     BaseAction(BaseActionTask),
 }
 
@@ -119,6 +166,7 @@ impl BaseTask for ArgsTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match self {
             Self::Commit(value) => {
+                debug!("CommitTask");
                 let args = CommitStateArgs {
                     nonce: value.commit_id,
                     lamports: value.committed_account.account.lamports,
@@ -132,17 +180,75 @@ impl BaseTask for ArgsTask {
                     args,
                 )
             }
-            Self::Finalize(value) => dlp::instruction_builder::finalize(
-                *validator,
-                value.delegated_account,
-            ),
-            Self::Undelegate(value) => dlp::instruction_builder::undelegate(
-                *validator,
-                value.delegated_account,
-                value.owner_program,
-                value.rent_reimbursement,
-            ),
+            Self::CompressedCommit(value) => {
+                debug!("CompressedCommitTask");
+                compressed_delegation_client::CommitBuilder::new()
+                    .validator(*validator)
+                    .delegated_account(value.committed_account.pubkey)
+                    .args(CommitArgs {
+                        current_compressed_delegated_account_data: value
+                            .compressed_data
+                            .compressed_delegation_record_bytes
+                            .clone(),
+                        new_data: value.committed_account.account.data.clone(),
+                        account_meta: value.compressed_data.account_meta,
+                        validity_proof: value.compressed_data.proof,
+                        update_nonce: value.commit_id,
+                        allow_undelegation: value.allow_undelegation,
+                    })
+                    .add_remaining_accounts(
+                        &value.compressed_data.remaining_accounts,
+                    )
+                    .instruction()
+            }
+            Self::Finalize(value) => {
+                debug!("FinalizeTask");
+                dlp::instruction_builder::finalize(
+                    *validator,
+                    value.delegated_account,
+                )
+            }
+            Self::CompressedFinalize(value) => {
+                debug!("CompressedFinalizeTask");
+                compressed_delegation_client::FinalizeBuilder::new()
+                    .validator(*validator)
+                    .delegated_account(value.delegated_account)
+                    .args(FinalizeArgs {
+                        current_compressed_delegated_account_data: value
+                            .compressed_data
+                            .compressed_delegation_record_bytes
+                            .clone(),
+                        account_meta: value.compressed_data.account_meta,
+                        validity_proof: value.compressed_data.proof,
+                    })
+                    .add_remaining_accounts(
+                        &value.compressed_data.remaining_accounts,
+                    )
+                    .instruction()
+            }
+            Self::CompressedUndelegate(value) => {
+                debug!("CompressedUndelegateTask");
+                compressed_delegation_client::UndelegateBuilder::new()
+                    // .validator(*validator)
+                    .delegated_account(value.delegated_account)
+                    // .owner_program(value.owner_program)
+                    // .rent_reimbursement(value.rent_reimbursement)
+                    .add_remaining_accounts(
+                        &value.compressed_data.remaining_accounts,
+                    )
+                    .instruction()
+            }
+            Self::Undelegate(value) => {
+                debug!("UndelegateTask");
+                dlp::instruction_builder::undelegate(
+                    *validator,
+                    value.delegated_account,
+                    value.owner_program,
+                    value.rent_reimbursement,
+                )
+            }
             Self::BaseAction(value) => {
+                debug!("BaseActionTask");
                 let action = &value.action;
                 let account_metas = action
                     .account_metas_per_program
@@ -173,23 +279,38 @@ impl BaseTask for ArgsTask {
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
         match *self {
             Self::Commit(value) => Ok(Box::new(BufferTask::Commit(value))),
-            Self::BaseAction(_) | Self::Finalize(_) | Self::Undelegate(_) => {
-                Err(self)
-            }
+            Self::BaseAction(_)
+            | Self::Finalize(_)
+            | Self::Undelegate(_)
+            | Self::CompressedCommit(_)
+            | Self::CompressedFinalize(_)
+            | Self::CompressedUndelegate(_) => Err(self),
         }
     }
 
-    /// Nothing to prepare for [`ArgsTask`] type
     fn preparation_info(&self, _: &Pubkey) -> Option<TaskPreparationInfo> {
-        None
+        match self {
+            Self::Commit(_)
+            | Self::BaseAction(_)
+            | Self::Finalize(_)
+            | Self::Undelegate(_) => None,
+            Self::CompressedCommit(_)
+            | Self::CompressedFinalize(_)
+            | Self::CompressedUndelegate(_) => {
+                Some(TaskPreparationInfo::Compressed)
+            }
+        }
     }
 
     fn compute_units(&self) -> u32 {
         match self {
             Self::Commit(_) => 65_000,
+            Self::CompressedCommit(_) => 150_000,
             Self::BaseAction(task) => task.action.compute_units,
             Self::Undelegate(_) => 50_000,
+            Self::CompressedUndelegate(_) => 150_000,
             Self::Finalize(_) => 40_000,
+            Self::CompressedFinalize(_) => 150_000,
         }
     }
 
@@ -200,6 +321,59 @@ impl BaseTask for ArgsTask {
     /// For tasks using Args strategy call corresponding `Visitor` method
     fn visit(&self, visitor: &mut dyn Visitor) {
         visitor.visit_args_task(self);
+    }
+
+    fn is_compressed(&self) -> bool {
+        match self {
+            Self::CompressedCommit(_)
+            | Self::CompressedFinalize(_)
+            | Self::CompressedUndelegate(_) => true,
+            _ => false,
+        }
+    }
+
+    fn set_compressed_data(&mut self, compressed_data: CompressedData) {
+        match self {
+            Self::CompressedCommit(value) => {
+                value.compressed_data = compressed_data;
+            }
+            Self::CompressedFinalize(value) => {
+                value.compressed_data = compressed_data;
+            }
+            Self::CompressedUndelegate(value) => {
+                value.compressed_data = compressed_data;
+            }
+            _ => {}
+        }
+    }
+
+    fn get_compressed_data(&self) -> Option<CompressedData> {
+        match self {
+            Self::CompressedCommit(value) => {
+                Some(value.compressed_data.clone())
+            }
+            Self::CompressedFinalize(value) => {
+                Some(value.compressed_data.clone())
+            }
+            Self::CompressedUndelegate(value) => {
+                Some(value.compressed_data.clone())
+            }
+            _ => None,
+        }
+    }
+
+    fn delegated_account(&self) -> Option<Pubkey> {
+        match self {
+            Self::Commit(value) => Some(value.committed_account.pubkey),
+            Self::CompressedCommit(value) => {
+                Some(value.committed_account.pubkey)
+            }
+            Self::Finalize(value) => Some(value.delegated_account),
+            Self::CompressedFinalize(value) => Some(value.delegated_account),
+            Self::Undelegate(value) => Some(value.delegated_account),
+            Self::CompressedUndelegate(value) => Some(value.delegated_account),
+            Self::BaseAction(_) => None,
+        }
     }
 }
 
@@ -253,12 +427,7 @@ impl BaseTask for BufferTask {
             MAX_WRITE_CHUNK_SIZE,
         );
 
-        // SAFETY: as object_length internally uses only already allocated or static buffers,
-        // and we don't use any fs writers, so the only error that may occur here is of kind
-        // OutOfMemory or WriteZero. This is impossible due to:
-        // Chunks::new panics if its size exceeds MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE or 10_240
-        // https://github.com/near/borsh-rs/blob/f1b75a6b50740bfb6231b7d0b1bd93ea58ca5452/borsh/src/ser/helpers.rs#L59
-        let chunks_account_size = borsh::object_length(&chunks).unwrap() as u64;
+        let chunks_account_size = Chunks::struct_size(chunks.count()) as u64;
         let buffer_account_size = committed_account.account.data.len() as u64;
 
         let (init_instruction, chunks_pda, buffer_pda) =
@@ -294,15 +463,15 @@ impl BaseTask for BufferTask {
             })
             .collect::<Vec<_>>();
 
-        Some(TaskPreparationInfo {
+        Some(TaskPreparationInfo::Buffer(BufferPreparationInfo {
             commit_id: commit_task.commit_id,
             pubkey: commit_task.committed_account.pubkey,
             chunks_pda,
-            buffer_pda,
-            init_instruction,
-            realloc_instructions,
-            write_instructions,
-        })
+            buffer_pda: buffer_pda,
+            init_instruction: init_instruction,
+            realloc_instructions: realloc_instructions,
+            write_instructions: write_instructions,
+        }))
     }
 
     fn compute_units(&self) -> u32 {
@@ -318,6 +487,24 @@ impl BaseTask for BufferTask {
     /// For tasks using Args strategy call corresponding `Visitor` method
     fn visit(&self, visitor: &mut dyn Visitor) {
         visitor.visit_buffer_task(self);
+    }
+
+    fn is_compressed(&self) -> bool {
+        false
+    }
+
+    fn set_compressed_data(&mut self, _: CompressedData) {
+        // No need to set compressed data for BufferTask
+    }
+
+    fn get_compressed_data(&self) -> Option<CompressedData> {
+        None
+    }
+
+    fn delegated_account(&self) -> Option<Pubkey> {
+        match self {
+            Self::Commit(value) => Some(value.committed_account.pubkey),
+        }
     }
 }
 
@@ -429,7 +616,11 @@ mod serialization_safety_test {
             },
         });
 
-        let prep_info = buffer_task.preparation_info(&authority).unwrap();
+        let TaskPreparationInfo::Buffer(prep_info) =
+            buffer_task.preparation_info(&authority).unwrap()
+        else {
+            panic!("Expected BufferTask preparation info");
+        };
         assert_serializable(&prep_info.init_instruction);
         for ix in prep_info.realloc_instructions {
             assert_serializable(&ix);

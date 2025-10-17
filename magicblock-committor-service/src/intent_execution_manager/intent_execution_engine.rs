@@ -292,7 +292,9 @@ mod tests {
     };
 
     use async_trait::async_trait;
-    use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
+    use magicblock_program::magic_scheduled_base_intent::{
+        CommittedAccount, ScheduledBaseIntent,
+    };
     use solana_pubkey::{pubkey, Pubkey};
     use solana_sdk::{signature::Signature, signer::SignerError};
     use tokio::{sync::mpsc, time::sleep};
@@ -730,9 +732,10 @@ mod tests {
     impl TaskInfoFetcher for MockInfoFetcher {
         async fn fetch_next_commit_ids(
             &self,
-            pubkeys: &[Pubkey],
+            pubkeys: &[CommittedAccount],
+            _compressed: bool,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys.iter().map(|&k| (k, 1)).collect())
+            Ok(pubkeys.iter().map(|k| (k.pubkey, 1)).collect())
         }
 
         async fn fetch_rent_reimbursements(

@@ -35,6 +35,23 @@ pub(crate) fn process_schedule_commit(
     invoke_context: &mut InvokeContext,
     opts: ProcessScheduleCommitOptions,
 ) -> Result<(), InstructionError> {
+    schedule_commit(signers, invoke_context, opts, false)
+}
+
+pub(crate) fn process_schedule_compressed_commit(
+    signers: HashSet<Pubkey>,
+    invoke_context: &mut InvokeContext,
+    opts: ProcessScheduleCommitOptions,
+) -> Result<(), InstructionError> {
+    schedule_commit(signers, invoke_context, opts, true)
+}
+
+fn schedule_commit(
+    signers: HashSet<Pubkey>,
+    invoke_context: &mut InvokeContext,
+    opts: ProcessScheduleCommitOptions,
+    compressed: bool,
+) -> Result<(), InstructionError> {
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 
@@ -220,11 +237,20 @@ pub(crate) fn process_schedule_commit(
         InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
     let commit_sent_sig = action_sent_transaction.signatures[0];
 
-    let base_intent = if opts.request_undelegation {
+    let base_intent = if opts.request_undelegation && compressed {
+        MagicBaseIntent::CompressedCommitAndUndelegate(CommitAndUndelegate {
+            commit_action: CommitType::Standalone(committed_accounts),
+            undelegate_action: UndelegateType::Standalone,
+        })
+    } else if opts.request_undelegation && !compressed {
         MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
             commit_action: CommitType::Standalone(committed_accounts),
             undelegate_action: UndelegateType::Standalone,
         })
+    } else if compressed {
+        MagicBaseIntent::CompressedCommit(CommitType::Standalone(
+            committed_accounts,
+        ))
     } else {
         MagicBaseIntent::Commit(CommitType::Standalone(committed_accounts))
     };

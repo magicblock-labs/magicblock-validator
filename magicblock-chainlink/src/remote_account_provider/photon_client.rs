@@ -1,4 +1,3 @@
-use borsh::{BorshDeserialize, BorshSerialize};
 use log::*;
 use std::{ops::Deref, sync::Arc};
 
@@ -128,29 +127,14 @@ impl PhotonClient for PhotonClientImpl {
 // Helpers
 // -----------------
 
-// TODO: import the client struct once the validator is compatible with solana 2.3
-#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Eq, PartialEq)]
-pub struct CompressedDelegationRecord {
-    pub pda: Pubkey,
-    pub authority: Pubkey,
-    pub owner: Pubkey,
-    pub delegation_slot: u64,
-    pub lamports: u64,
-    pub data: Vec<u8>,
-}
-
 fn account_from_compressed_account(
     compressed_acc: Option<CompressedAccount>,
 ) -> Option<Account> {
-    let compressed_acc = compressed_acc?.data?;
-    let record =
-        CompressedDelegationRecord::try_from_slice(&compressed_acc.data)
-            .ok()?;
-
+    let compressed_acc = compressed_acc?;
     Some(Account {
-        lamports: record.lamports,
-        data: record.data,
-        owner: record.owner,
+        lamports: 0,
+        data: compressed_acc.data.unwrap_or_default().data,
+        owner: compressed_acc.owner,
         executable: false,
         rent_epoch: 0,
     })

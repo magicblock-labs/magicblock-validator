@@ -1,3 +1,4 @@
+use borsh::BorshSerialize;
 use solana_program::instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
@@ -82,5 +83,5 @@ fn create_realloc_buffer_ix(
         AccountMeta::new(authority, true),
         AccountMeta::new(buffer_pda, false),
     ];
-    Instruction::new_with_borsh(program_id, &ix, accounts)
+    Instruction::new_with_bytes(program_id, &ix.try_to_vec().unwrap(), accounts)
 }

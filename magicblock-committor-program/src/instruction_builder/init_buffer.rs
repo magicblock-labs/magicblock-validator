@@ -1,3 +1,4 @@
+use borsh::BorshSerialize;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     system_program,
@@ -66,7 +67,11 @@ pub fn create_init_ix(args: CreateInitIxArgs) -> (Instruction, Pubkey, Pubkey) {
         AccountMeta::new_readonly(system_program::id(), false),
     ];
     (
-        Instruction::new_with_borsh(program_id, &ix, accounts),
+        Instruction::new_with_bytes(
+            program_id,
+            &ix.try_to_vec().unwrap(),
+            accounts,
+        ),
         chunks_pda,
         buffer_pda,
     )
