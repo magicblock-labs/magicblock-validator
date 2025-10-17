@@ -35,8 +35,7 @@ use magicblock_program::{
 };
 use magicblock_table_mania::TableMania;
 use program_flexi_counter::{
-    args::{CallHandlerDiscriminator, UndelegateActionData},
-    state::FlexiCounter,
+    instruction::FlexiCounterInstruction, state::FlexiCounter,
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -646,18 +645,13 @@ fn failing_undelegate_action(
     const PRIZE: u64 = 1_000_000;
     const BREAKING_DIFF: i64 = -1000000; // Breaks action
 
-    let undelegate_action_data = UndelegateActionData {
-        counter_diff: BREAKING_DIFF,
-        transfer_amount: PRIZE,
-    };
+    let undelegate_action_data =
+        FlexiCounterInstruction::UndelegateActionHandler {
+            counter_diff: BREAKING_DIFF,
+            amount: PRIZE,
+        };
 
     let transfer_destination = Pubkey::new_unique();
-    let program_data = [
-        CallHandlerDiscriminator::Simple.to_vec(),
-        to_vec(&undelegate_action_data).unwrap(),
-    ]
-    .concat();
-
     let account_metas = vec![
         ShortAccountMeta {
             pubkey: undelegated_account,
@@ -679,7 +673,7 @@ fn failing_undelegate_action(
         escrow_authority,
         data_per_program: ProgramArgs {
             escrow_index: ACTOR_ESCROW_INDEX,
-            data: program_data,
+            data: to_vec(&undelegate_action_data).unwrap(),
         },
         account_metas_per_program: account_metas,
     }])

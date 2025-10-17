@@ -89,7 +89,6 @@ impl BaseTask for ArgsTask {
                     action.escrow_authority,
                     account_metas,
                     CallHandlerArgs {
-                        context: value.context,
                         data: action.data_per_program.data.clone(),
                         escrow_index: action.data_per_program.escrow_index,
                     },
