@@ -969,6 +969,14 @@ fn account_slots(accs: &[RemoteAccount]) -> Vec<u64> {
     accs.iter().map(|acc| acc.slot()).collect()
 }
 
+fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
+    pubkeys
+        .iter()
+        .map(|pk| pk.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[cfg(test)]
 mod test {
     use solana_system_interface::program as system_program;
@@ -1434,12 +1442,4 @@ mod test {
             assert_eq!(removed_accounts, vec![expected_evicted]);
         }
     }
-}
-
-fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
-    pubkeys
-        .iter()
-        .map(|pk| pk.to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
 }
