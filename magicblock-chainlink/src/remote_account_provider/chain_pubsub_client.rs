@@ -22,10 +22,9 @@ use tokio::{
 };
 
 use super::{
-    chain_pubsub_actor::{
-        ChainPubsubActor, ChainPubsubActorMessage, SubscriptionUpdate,
-    },
+    chain_pubsub_actor::ChainPubsubActor,
     errors::RemoteAccountProviderResult,
+    pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
 };
 
 type UnsubscribeFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;

@@ -36,6 +36,8 @@ use tokio::{
     time::{self, Duration},
 };
 
+pub(crate) mod chain_laser_actor;
+pub mod chain_laser_client;
 pub(crate) mod chain_pubsub_actor;
 pub mod chain_pubsub_client;
 pub mod chain_rpc_client;
@@ -43,6 +45,7 @@ pub mod config;
 pub mod errors;
 mod lru_cache;
 pub mod program_account;
+pub mod pubsub_common;
 mod remote_account;
 
 pub use chain_pubsub_actor::SubscriptionUpdate;
@@ -57,7 +60,11 @@ use magicblock_metrics::{
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
-use crate::{errors::ChainlinkResult, submux::SubMuxClient};
+use crate::{
+    errors::ChainlinkResult,
+    remote_account_provider::pubsub_common::SubscriptionUpdate,
+    submux::SubMuxClient,
+};
 
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 
