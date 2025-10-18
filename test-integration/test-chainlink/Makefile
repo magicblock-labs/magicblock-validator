@@ -43,23 +43,9 @@ chainlink-build-mini-v2:
 	cargo build-sbf \
 		--manifest-path $(TEST_CHAINLINK_MINI_PROGRAM_DIR)Cargo.toml \
 		--sbf-out-dir $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2 && \
-	base64 -i $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.so > $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/mini_program.base64 && \
-	echo '{' > $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo ' "pubkey": "MiniV21111111111111111111111111111111111111",' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo ' "account": {' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo '  "lamports": 1551155440,' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo '  "data": [' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	printf '"' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	printf  $$(cat $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/mini_program.base64) >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo '",' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo '   "base64"' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo '  ],' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo '  "owner": "BPFLoader2111111111111111111111111111111111",' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo '  "executable": true,' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo '  "rentEpoch": 18446744073709551615,' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo '  "space": 79061' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo ' }' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json && \
-	echo '}' >> $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json
+	node $(TEST_CHAINLINK_DIR)/scripts/miniv2-json-from-so.js \
+		$(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.so \
+		$(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json
 
 chainlink-build-mini-v3:
 	mkdir -p $(TEST_CHAINLINK_DEPLOY_DIR)/miniv3 && \
