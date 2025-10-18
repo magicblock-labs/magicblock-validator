@@ -1,63 +1,26 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt,
     sync::{Arc, Mutex},
 };
 
 use log::*;
-use solana_account_decoder_client_types::{UiAccount, UiAccountEncoding};
+use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
-use solana_rpc_client_api::{
-    config::RpcAccountInfoConfig, response::Response as RpcResponse,
-};
+use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use super::errors::{RemoteAccountProviderError, RemoteAccountProviderResult};
+use crate::remote_account_provider::pubsub_common::{
+    AccountSubscription, ChainPubsubActorMessage, PubsubClientConfig,
+    SubscriptionUpdate, MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+};
 
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
-
-#[derive(Debug, Clone)]
-pub struct PubsubClientConfig {
-    pub pubsub_url: String,
-    pub commitment_config: CommitmentConfig,
-}
-
-impl PubsubClientConfig {
-    pub fn from_url(
-        pubsub_url: impl Into<String>,
-        commitment_config: CommitmentConfig,
-    ) -> Self {
-        Self {
-            pubsub_url: pubsub_url.into(),
-            commitment_config,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SubscriptionUpdate {
-    pub pubkey: Pubkey,
-    pub rpc_response: RpcResponse<UiAccount>,
-}
-
-impl fmt::Display for SubscriptionUpdate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "SubscriptionUpdate(pubkey: {}, update: {:?})",
-            self.pubkey, self.rpc_response
-        )
-    }
-}
-
-struct AccountSubscription {
-    cancellation_token: CancellationToken,
-}
 
 // -----------------
 // ChainPubsubActor
@@ -81,24 +44,6 @@ pub struct ChainPubsubActor {
     /// message listener, essentially shutting down whis actor
     shutdown_token: CancellationToken,
 }
-
-#[derive(Debug)]
-pub enum ChainPubsubActorMessage {
-    AccountSubscribe {
-        pubkey: Pubkey,
-        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-    },
-    AccountUnsubscribe {
-        pubkey: Pubkey,
-        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-    },
-    RecycleConnections {
-        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-    },
-}
-
-const SUBSCRIPTION_UPDATE_CHANNEL_SIZE: usize = 5_000;
-const MESSAGE_CHANNEL_SIZE: usize = 1_000;
 
 impl ChainPubsubActor {
     pub async fn new_from_url(

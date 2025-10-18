@@ -7,10 +7,9 @@ use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::sync::{mpsc, oneshot};
 
 use super::{
-    chain_pubsub_actor::{
-        ChainPubsubActor, ChainPubsubActorMessage, SubscriptionUpdate,
-    },
+    chain_pubsub_actor::ChainPubsubActor,
     errors::RemoteAccountProviderResult,
+    pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
 };
 
 // -----------------

@@ -36,6 +36,8 @@ use tokio::{
     task::{self, JoinSet},
 };
 
+pub(crate) mod chain_laser_actor;
+pub mod chain_laser_client;
 pub(crate) mod chain_pubsub_actor;
 pub mod chain_pubsub_client;
 pub mod chain_rpc_client;
@@ -43,12 +45,16 @@ pub mod config;
 pub mod errors;
 mod lru_cache;
 pub mod program_account;
+pub mod pubsub_common;
 mod remote_account;
 
-pub use chain_pubsub_actor::SubscriptionUpdate;
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
-use crate::{errors::ChainlinkResult, submux::SubMuxClient};
+use crate::{
+    errors::ChainlinkResult,
+    remote_account_provider::pubsub_common::SubscriptionUpdate,
+    submux::SubMuxClient,
+};
 
 // Simple tracking for accounts currently being fetched to handle race conditions
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
