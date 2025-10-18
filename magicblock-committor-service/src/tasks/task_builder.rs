@@ -48,31 +48,32 @@ impl TasksBuilder for TaskBuilderImpl {
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
-        let (accounts, allow_undelegation) = match &base_intent.base_intent {
-            MagicBaseIntent::BaseActions(actions) => {
-                let tasks = actions
-                    .iter()
-                    .map(|el| {
-                        let task = BaseActionTask {
-                            context: Context::Standalone,
-                            action: el.clone(),
-                        };
-                        let task =
-                            ArgsTask::new(ArgsTaskType::BaseAction(task));
-                        Box::new(task) as Box<dyn BaseTask>
-                    })
-                    .collect();
-                return Ok(tasks);
-            }
-            MagicBaseIntent::Commit(t) => {
-                (t.get_committed_accounts(), false, t.is_commit_diff())
-            }
-            MagicBaseIntent::CommitAndUndelegate(t) => (
-                t.commit_action.get_committed_accounts(),
-                true,
-                t.commit_action.is_commit_diff(),
-            ),
-        };
+        let (accounts, allow_undelegation, commit_diff) =
+            match &base_intent.base_intent {
+                MagicBaseIntent::BaseActions(actions) => {
+                    let tasks = actions
+                        .iter()
+                        .map(|el| {
+                            let task = BaseActionTask {
+                                context: Context::Standalone,
+                                action: el.clone(),
+                            };
+                            let task =
+                                ArgsTask::new(ArgsTaskType::BaseAction(task));
+                            Box::new(task) as Box<dyn BaseTask>
+                        })
+                        .collect();
+                    return Ok(tasks);
+                }
+                MagicBaseIntent::Commit(t) => {
+                    (t.get_committed_accounts(), false, t.is_commit_diff())
+                }
+                MagicBaseIntent::CommitAndUndelegate(t) => (
+                    t.commit_action.get_committed_accounts(),
+                    true,
+                    t.commit_action.is_commit_diff(),
+                ),
+            };
 
         let committed_pubkeys = accounts
             .iter()
