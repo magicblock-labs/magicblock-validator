@@ -167,7 +167,7 @@ async fn test_clone_mini_v4_loader_program_and_upgrade() {
         )
         .await;
 
-        ctx.wait_for_next_slot_ephem().unwrap();
+        ctx.wait_for_delta_slot_ephem(20).unwrap();
 
         let msg = "Hola Mundo";
         let ix = sdk.log_msg_instruction(&payer.pubkey(), msg);
