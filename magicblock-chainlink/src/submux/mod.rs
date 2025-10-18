@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 
 use crate::remote_account_provider::{
     chain_pubsub_client::ChainPubsubClient,
-    errors::RemoteAccountProviderResult, SubscriptionUpdate,
+    errors::RemoteAccountProviderResult, pubsub_common::SubscriptionUpdate,
 };
 
 const SUBMUX_OUT_CHANNEL_SIZE: usize = 5_000;

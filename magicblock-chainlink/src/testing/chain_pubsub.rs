@@ -5,8 +5,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     remote_account_provider::{
-        chain_pubsub_actor::{ChainPubsubActor, ChainPubsubActorMessage},
-        SubscriptionUpdate,
+        chain_pubsub_actor::ChainPubsubActor,
+        pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
     },
     testing::utils::{PUBSUB_URL, RPC_URL},
 };

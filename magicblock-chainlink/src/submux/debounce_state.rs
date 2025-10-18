@@ -2,7 +2,7 @@ use std::{collections::VecDeque, time::Instant};
 
 use solana_pubkey::Pubkey;
 
-use crate::remote_account_provider::SubscriptionUpdate;
+use crate::remote_account_provider::pubsub_common::SubscriptionUpdate;
 
 /// Per-account debounce tracking state used by SubMuxClient.
 /// Maintains a small sliding-window history and scheduling info so
