@@ -1,15 +1,16 @@
+use std::sync::Arc;
+
 use dlp::pda::ephemeral_balance_pda_from_payer;
+use errors::ChainlinkResult;
+use fetch_cloner::FetchCloner;
 use log::*;
 use magicblock_core::traits::AccountsBank;
 use solana_account::AccountSharedData;
-use std::sync::Arc;
-use tokio::{sync::mpsc, task};
-
-use errors::ChainlinkResult;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     commitment_config::CommitmentConfig, transaction::SanitizedTransaction,
 };
+use tokio::{sync::mpsc, task};
 
 use crate::{
     cloner::Cloner,
@@ -22,7 +23,6 @@ use crate::{
     },
     submux::SubMuxClient,
 };
-use fetch_cloner::FetchCloner;
 
 mod blacklisted_accounts;
 pub mod config;
@@ -49,6 +49,9 @@ pub struct Chainlink<
     /// synchronized.
     #[allow(unused)] // needed to cleanup chainlink
     removed_accounts_sub: Option<task::JoinHandle<()>>,
+
+    validator_id: Pubkey,
+    faucet_id: Pubkey,
 }
 
 impl<
@@ -62,6 +65,8 @@ impl<
     pub fn try_new(
         accounts_bank: &Arc<V>,
         fetch_cloner: Option<FetchCloner<T, U, V, C, P>>,
+        validator_pubkey: Pubkey,
+        faucet_pubkey: Pubkey,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
@@ -77,6 +82,8 @@ impl<
             accounts_bank: accounts_bank.clone(),
             fetch_cloner,
             removed_accounts_sub,
+            validator_id: validator_pubkey,
+            faucet_id: faucet_pubkey,
         })
     }
 
@@ -122,7 +129,26 @@ impl<
             None
         };
 
-        Chainlink::try_new(accounts_bank, fetch_cloner)
+        Chainlink::try_new(
+            accounts_bank,
+            fetch_cloner,
+            validator_pubkey,
+            faucet_pubkey,
+        )
+    }
+
+    /// Removes all accounts that aren't delegated to us and not blacklisted from the bank
+    /// This should only be called _before_ the validator starts up, i.e.
+    /// when resuming an existing ledger to guarantee that we don't hold
+    /// accounts that might be stale.
+    pub fn reset_accounts_bank(&self) {
+        let blacklisted_accounts =
+            blacklisted_accounts(&self.validator_id, &self.faucet_id);
+        let removed = self.accounts_bank.remove_where(|pubkey, account| {
+            !account.delegated() && !blacklisted_accounts.contains(pubkey)
+        });
+
+        debug!("Removed {removed} non-delegated accounts");
     }
 
     fn subscribe_account_removals(
@@ -181,12 +207,19 @@ impl<
                 .get_account(feepayer)
                 .is_none_or(|a| !a.delegated())
         };
-        if clone_escrow {
+
+        let mark_empty_if_not_found = if clone_escrow {
             let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
             trace!("Adding balance PDA {balance_pda} for feepayer {feepayer}");
             pubkeys.push(balance_pda);
-        }
-        self.ensure_accounts(&pubkeys).await
+            vec![balance_pda]
+        } else {
+            vec![]
+        };
+        let mark_empty_if_not_found = (!mark_empty_if_not_found.is_empty())
+            .then(|| &mark_empty_if_not_found[..]);
+        self.ensure_accounts(&pubkeys, mark_empty_if_not_found)
+            .await
     }
 
     /// Same as fetch accounts, but does not return the accounts, just
@@ -195,11 +228,17 @@ impl<
     pub async fn ensure_accounts(
         &self,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(FetchAndCloneResult::default());
         };
-        self.fetch_accounts_common(fetch_cloner, pubkeys).await
+        self.fetch_accounts_common(
+            fetch_cloner,
+            pubkeys,
+            mark_empty_if_not_found,
+        )
+        .await
     }
 
     /// Fetches the accounts from the bank if we're offline and not syncing accounts.
@@ -225,7 +264,9 @@ impl<
                 .map(|pubkey| self.accounts_bank.get_account(pubkey))
                 .collect());
         };
-        let _ = self.fetch_accounts_common(fetch_cloner, pubkeys).await?;
+        let _ = self
+            .fetch_accounts_common(fetch_cloner, pubkeys, None)
+            .await?;
 
         let accounts = pubkeys
             .iter()
@@ -238,6 +279,7 @@ impl<
         &self,
         fetch_cloner: &FetchCloner<T, U, V, C, P>,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys_str = pubkeys
@@ -255,7 +297,11 @@ impl<
         // If any of the accounts was invalid and couldn't be fetched/cloned then
         // we return an error.
         let result = fetch_cloner
-            .fetch_and_clone_accounts_with_dedup(pubkeys, None)
+            .fetch_and_clone_accounts_with_dedup(
+                pubkeys,
+                mark_empty_if_not_found,
+                None,
+            )
             .await?;
         trace!("Fetched and cloned accounts: {result:?}");
         Ok(result)
@@ -267,7 +313,7 @@ impl<
     /// 2. When a subscription update is received we clone the new state as usual
     pub async fn undelegation_requested(
         &self,
-        pubkey: &Pubkey,
+        pubkey: Pubkey,
     ) -> ChainlinkResult<()> {
         trace!("Undelegation requested for account: {pubkey}");
 
@@ -277,7 +323,7 @@ impl<
 
         // Subscribe to updates for this account so we can track changes
         // once it's undelegated
-        fetch_cloner.subscribe_to_account(pubkey).await?;
+        fetch_cloner.subscribe_to_account(&pubkey).await?;
 
         trace!("Successfully subscribed to account {pubkey} for undelegation tracking");
         Ok(())

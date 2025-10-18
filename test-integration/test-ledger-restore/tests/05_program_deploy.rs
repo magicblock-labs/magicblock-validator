@@ -38,9 +38,9 @@ fn payer_keypair() -> Keypair {
 
 const COUNTER: &str = "Counter of Payer";
 
-#[ignore = "the ebpf deploy is failing in CI, but passing locally"]
+#[ignore = "the ebpf deploy was failing in CI and is not supported until we support non-ephemeral mode again"]
 #[test]
-fn restore_ledger_with_flexi_counter_deploy() {
+fn test_restore_ledger_with_flexi_counter_deploy() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer = payer_keypair();
     let flexi_counter_paths = TestProgramPaths::new(
@@ -105,15 +105,15 @@ fn write(
     expect!(ctx.wait_for_next_slot_ephem(), validator);
 
     let ix_init = create_init_ix(payer.pubkey(), COUNTER.to_string());
-    confirm_tx_with_payer_ephem(ix_init, payer, &mut validator);
+    confirm_tx_with_payer_ephem(ix_init, payer, &ctx, &mut validator);
 
     let ix_add = create_add_ix(payer.pubkey(), 5);
-    confirm_tx_with_payer_ephem(ix_add, payer, &mut validator);
+    confirm_tx_with_payer_ephem(ix_add, payer, &ctx, &mut validator);
 
     let ix_mul = create_mul_ix(payer.pubkey(), 2);
-    confirm_tx_with_payer_ephem(ix_mul, payer, &mut validator);
+    confirm_tx_with_payer_ephem(ix_mul, payer, &ctx, &mut validator);
 
-    let counter = fetch_counter_ephem(&payer.pubkey(), &mut validator);
+    let counter = fetch_counter_ephem(&ctx, &payer.pubkey(), &mut validator);
     assert_eq!(
         counter,
         FlexiCounter {
@@ -124,12 +124,12 @@ fn write(
         cleanup(&mut validator)
     );
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
     (validator, slot)
 }
 
 fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
-    let (_, mut validator, _) = setup_offline_validator(
+    let (_, mut validator, ctx) = setup_offline_validator(
         ledger_path,
         None,
         None,
@@ -137,7 +137,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
         false,
     );
 
-    let counter_decoded = fetch_counter_ephem(payer, &mut validator);
+    let counter_decoded = fetch_counter_ephem(&ctx, payer, &mut validator);
     assert_eq!(
         counter_decoded,
         FlexiCounter {

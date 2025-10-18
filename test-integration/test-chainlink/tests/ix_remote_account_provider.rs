@@ -1,14 +1,13 @@
 use log::{debug, info};
-use magicblock_chainlink::config::LifecycleMode;
-use magicblock_chainlink::remote_account_provider::config::RemoteAccountProviderConfig;
-use magicblock_chainlink::remote_account_provider::photon_client::PhotonClientImpl;
-use magicblock_chainlink::submux::SubMuxClient;
 use magicblock_chainlink::{
+    config::LifecycleMode,
     remote_account_provider::{
         chain_pubsub_client::ChainPubsubClientImpl,
-        chain_rpc_client::ChainRpcClientImpl, Endpoint, RemoteAccountProvider,
+        chain_rpc_client::ChainRpcClientImpl,
+        config::RemoteAccountProviderConfig, Endpoint, RemoteAccountProvider,
         RemoteAccountUpdateSource,
     },
+    submux::SubMuxClient,
     testing::utils::{
         airdrop, await_next_slot, current_slot, dump_remote_account_lamports,
         dump_remote_account_update_source, get_remote_account_lamports,
@@ -55,10 +54,7 @@ async fn ixtest_get_non_existing_account() {
     let remote_account_provider = init_remote_account_provider().await;
 
     let pubkey = random_pubkey();
-    let remote_account = remote_account_provider
-        .try_get(pubkey, false)
-        .await
-        .unwrap();
+    let remote_account = remote_account_provider.try_get(pubkey).await.unwrap();
     assert!(!remote_account.is_found());
 }
 
@@ -109,10 +105,8 @@ async fn ixtest_get_existing_account_for_valid_slot() {
 
     {
         // Fetching immediately does not return the account yet
-        let remote_account = remote_account_provider
-            .try_get(pubkey, false)
-            .await
-            .unwrap();
+        let remote_account =
+            remote_account_provider.try_get(pubkey).await.unwrap();
         assert!(!remote_account.is_found());
     }
 
@@ -122,10 +116,8 @@ async fn ixtest_get_existing_account_for_valid_slot() {
     {
         // After waiting for a bit the subscription update came in
         let cs = current_slot(rpc_client).await;
-        let remote_account = remote_account_provider
-            .try_get(pubkey, false)
-            .await
-            .unwrap();
+        let remote_account =
+            remote_account_provider.try_get(pubkey).await.unwrap();
         assert!(remote_account.is_found());
         assert!(remote_account.slot() >= cs);
     }
@@ -155,7 +147,7 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
         // Fetching immediately does not return the accounts yet
         // They are updated via subscriptions instead
         let remote_accounts = remote_account_provider
-            .try_get_multi(&all_pubkeys, false)
+            .try_get_multi(&all_pubkeys, None)
             .await
             .unwrap();
 
@@ -178,7 +170,7 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
     {
         // Fetching after a bit
         let remote_accounts = remote_account_provider
-            .try_get_multi(&all_pubkeys, false)
+            .try_get_multi(&all_pubkeys, None)
             .await
             .unwrap();
         let remote_lamports =
@@ -207,7 +199,7 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
     {
         // Fetching after a bit
         let remote_accounts = remote_account_provider
-            .try_get_multi(&all_pubkeys, false)
+            .try_get_multi(&all_pubkeys, None)
             .await
             .unwrap();
         let remote_lamports =

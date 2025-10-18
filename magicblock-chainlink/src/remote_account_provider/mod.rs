@@ -1,7 +1,3 @@
-use config::RemoteAccountProviderConfig;
-use lru_cache::AccountsLruCache;
-#[cfg(any(test, feature = "dev-context"))]
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -16,15 +12,19 @@ pub(crate) use chain_pubsub_client::{
     ChainPubsubClient, ChainPubsubClientImpl,
 };
 pub(crate) use chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl};
+use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 use log::*;
+use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_pubkey::Pubkey;
+#[cfg(any(test, feature = "dev-context"))]
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig,
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
@@ -47,7 +47,6 @@ pub mod program_account;
 mod remote_account;
 
 pub use chain_pubsub_actor::SubscriptionUpdate;
-
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{
@@ -241,7 +240,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
 
         let updates = me.pubsub_client.take_updates();
         me.listen_for_account_updates(updates)?;
-        let clock_remote_account = me.try_get(clock::ID, false).await?;
+        let clock_remote_account = me.try_get(clock::ID).await?;
         match clock_remote_account {
             RemoteAccount::NotFound(_) => {
                 Err(RemoteAccountProviderError::ClockAccountCouldNotBeResolved(
@@ -460,9 +459,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
     pub async fn try_get(
         &self,
         pubkey: Pubkey,
-        force_refetch: bool,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey], force_refetch)
+        self.try_get_multi(&[pubkey], None)
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
@@ -478,7 +476,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
 
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
-        let remote_accounts = self.try_get_multi(pubkeys, false).await?;
+        let remote_accounts = self.try_get_multi(pubkeys, None).await?;
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
             config.as_ref().and_then(|c| c.min_context_slot),
@@ -495,18 +493,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         };
         if refetch {
             if log::log_enabled!(log::Level::Trace) {
-                let pubkeys = pubkeys
-                    .iter()
-                    .map(|pk| pk.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 trace!(
                     "Triggering re-fetch for accounts [{}] at slot {}",
-                    pubkeys,
+                    pubkeys_str(pubkeys),
                     self.chain_slot()
                 );
             }
-            self.fetch(pubkeys.to_vec(), self.chain_slot());
+            self.fetch(pubkeys.to_vec(), None, self.chain_slot());
         }
 
         // 3. Wait for the slots to match
@@ -526,7 +519,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     pubkey_slots
                 );
             }
-            let remote_accounts = self.try_get_multi(pubkeys, true).await?;
+            let remote_accounts = self.try_get_multi(pubkeys, None).await?;
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
                 config.min_context_slot,
@@ -537,19 +530,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
 
             retries += 1;
             if retries == config.max_retries {
-                let pubkeys = pubkeys
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 let remote_accounts =
                     remote_accounts.into_iter().map(|a| a.slot()).collect();
                 match slots_match_result {
+                    // SAFETY: Match case is already handled and returns
                     Match => unreachable!("we would have returned above"),
                     Mismatch => {
                         return Err(
                             RemoteAccountProviderError::SlotsDidNotMatch(
-                                pubkeys,
+                                pubkeys_str(pubkeys),
                                 remote_accounts,
                             ),
                         );
@@ -557,7 +546,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     MatchButBelowMinContextSlot(slot) => {
                         return Err(
                             RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
-                            pubkeys,
+                            pubkeys_str(pubkeys),
                             remote_accounts,
                             slot)
                         );
@@ -579,19 +568,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
     pub async fn try_get_multi(
         &self,
         pubkeys: &[Pubkey],
-        _force_refetch: bool, // No longer needed since we don't cache
+        mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
             return Ok(vec![]);
         }
 
         if log_enabled!(log::Level::Debug) {
-            let pubkeys_str = pubkeys
-                .iter()
-                .map(|pk| pk.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            debug!("Fetching accounts: [{pubkeys_str}]");
+            debug!("Fetching accounts: [{}]", pubkeys_str(pubkeys));
         }
 
         // Create channels for potential subscription updates to override fetch results
@@ -612,7 +596,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
 
         // Start the fetch
         let min_context_slot = fetch_start_slot;
-        self.fetch(pubkeys.to_vec(), min_context_slot);
+        self.fetch(pubkeys.to_vec(), mark_empty_if_not_found, min_context_slot);
 
         // Wait for all accounts to resolve (either from fetch or subscription override)
         let mut resolved_accounts = vec![];
@@ -791,17 +775,31 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         Ok(())
     }
 
-    fn fetch(&self, pubkeys: Vec<Pubkey>, min_context_slot: u64) {
+    /// Tries to fetch the given accounts from RPC.
+    /// NOTE: if we get an RPC error we just log it and give up since there is no
+    ///       obvious way how to handle this even if we were to bubble the error up.
+    /// Any action that depends on those accounts to be there will fail.
+    /// NOTE: this is not used during subscription updates since we receive the data
+    ///       as part of that update, thus we won't have stale data issues.
+    fn fetch(
+        &self,
+        pubkeys: Vec<Pubkey>,
+        mark_empty_if_not_found: Option<&[Pubkey]>,
+        min_context_slot: u64,
+    ) {
         let rpc_client = self.rpc_client.clone();
         let photon_client = self.photon_client.clone();
         let fetching_accounts = self.fetching_accounts.clone();
         let pubkeys = Arc::new(pubkeys);
         let pubkeys = pubkeys.clone();
+        let mark_empty_if_not_found =
+            mark_empty_if_not_found.unwrap_or(&[]).to_vec();
         tokio::spawn(async move {
             let mut join_set = JoinSet::new();
             join_set.spawn(Self::fetch_from_rpc(
                 rpc_client,
                 pubkeys.clone(),
+                mark_empty_if_not_found,
                 min_context_slot,
             ));
             if let Some(photon_client) = photon_client {
@@ -820,13 +818,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             );
 
             if log_enabled!(log::Level::Trace) {
-                let pubkeys = &pubkeys
-                    .iter()
-                    .map(|pk| pk.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 trace!(
-                    "Fetched({pubkeys}) {remote_accounts:?}, notifying pending requests"
+                    "Fetched({}) {remote_accounts:?}, notifying pending requests",
+                    pubkeys_str(&pubkeys)
                 );
             }
 
@@ -862,6 +856,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
     async fn fetch_from_rpc(
         rpc_client: T,
         pubkeys: Arc<Vec<Pubkey>>,
+        mark_empty_if_not_found: Vec<Pubkey>,
         min_context_slot: u64,
     ) -> FetchedRemoteAccounts {
         const MAX_RETRIES: u64 = 10;
@@ -886,22 +881,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 use RemoteAccount::*;
 
                 if log_enabled!(log::Level::Debug) {
-                    let pubkeys = &pubkeys
-                        .iter()
-                        .map(|pk| pk.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    debug!("Fetch({pubkeys})");
+                    debug!("Fetch ({})", pubkeys_str(&pubkeys));
                 }
 
                 let response = loop {
-                    let pubkeys =&pubkeys.clone();
                     // We provide the min_context slot in order to _force_ the RPC to update
                     // its account cache. Otherwise we could just keep fetching the accounts
                     // until the context slot is high enough.
                     match rpc_client
                         .get_multiple_accounts_with_config(
-                            pubkeys,
+                            &pubkeys,
                             RpcAccountInfoConfig {
                                 commitment: Some(commitment),
                                 min_context_slot: Some(min_context_slot),
@@ -975,17 +964,30 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     };
                 };
 
-                debug_assert!(response.context.slot >= min_context_slot);
+                // TODO: should we retry if not or respond with an error?
+                assert!(response.context.slot >= min_context_slot);
 
-                Ok(response
-                    .value
-                    .into_iter()
-                    .map(|acc| match acc {
+                Ok(pubkeys.iter().zip(response
+                    .value)
+                    .map(|(pubkey, acc)| match acc {
                         Some(value) => RemoteAccount::from_fresh_account(
                             value,
                             response.context.slot,
                             RemoteAccountUpdateSource::Fetch,
                         ),
+                        None if mark_empty_if_not_found.contains(&pubkey) => {
+                            RemoteAccount::from_fresh_account(
+                                Account {
+                                    lamports: 0,
+                                    data: vec![],
+                                    owner: Pubkey::default(),
+                                    executable: false,
+                                    rent_epoch: 0,
+                                },
+                                response.context.slot,
+                                RemoteAccountUpdateSource::Fetch,
+                            )
+                        }
                         None => NotFound(response.context.slot),
                     })
                     .collect::<Vec<_>>())
@@ -1169,8 +1171,19 @@ fn account_slots(accs: &[RemoteAccount]) -> Vec<u64> {
     accs.iter().map(|acc| acc.slot()).collect()
 }
 
+fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
+    pubkeys
+        .iter()
+        .map(|pk| pk.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[cfg(test)]
 mod test {
+    use solana_system_interface::program as system_program;
+
+    use super::{chain_pubsub_client::mock::ChainPubsubClientMock, *};
     use crate::{
         config::LifecycleMode,
         testing::{
@@ -1182,9 +1195,6 @@ mod test {
             utils::random_pubkey,
         },
     };
-    use solana_system_interface::program as system_program;
-
-    use super::{chain_pubsub_client::mock::ChainPubsubClientMock, *};
 
     #[tokio::test]
     async fn test_get_non_existing_account() {
@@ -1210,10 +1220,8 @@ mod test {
         };
 
         let pubkey = random_pubkey();
-        let remote_account = remote_account_provider
-            .try_get(pubkey, false)
-            .await
-            .unwrap();
+        let remote_account =
+            remote_account_provider.try_get(pubkey).await.unwrap();
         assert!(!remote_account.is_found());
     }
 
@@ -1259,10 +1267,8 @@ mod test {
             )
         };
 
-        let remote_account = remote_account_provider
-            .try_get(pubkey, false)
-            .await
-            .unwrap();
+        let remote_account =
+            remote_account_provider.try_get(pubkey).await.unwrap();
         let AccountAtSlot { account, slot } =
             rpc_client.get_account_at_slot(&pubkey).unwrap();
         assert_eq!(
@@ -1571,7 +1577,7 @@ mod test {
 
         // Add three accounts (up to limit)
         for pk in pubkeys {
-            provider.try_get(*pk, false).await.unwrap();
+            provider.try_get(*pk).await.unwrap();
         }
 
         // No evictions should occur
@@ -1598,16 +1604,16 @@ mod test {
             setup_with_accounts(pubkeys, 3).await;
 
         // Fill cache: [1, 2, 3] (1 is least recently used)
-        provider.try_get(pubkey1, false).await.unwrap();
-        provider.try_get(pubkey2, false).await.unwrap();
-        provider.try_get(pubkey3, false).await.unwrap();
+        provider.try_get(pubkey1).await.unwrap();
+        provider.try_get(pubkey2).await.unwrap();
+        provider.try_get(pubkey3).await.unwrap();
 
         // Access pubkey1 to make it more recently used: [2, 3, 1]
         // This should just promote, making order [2, 3, 1]
-        provider.try_get(pubkey1, false).await.unwrap();
+        provider.try_get(pubkey1).await.unwrap();
 
         // Add pubkey4, should evict pubkey2 (now least recently used)
-        provider.try_get(pubkey4, false).await.unwrap();
+        provider.try_get(pubkey4).await.unwrap();
 
         // Check channel received the evicted account
 
@@ -1615,7 +1621,7 @@ mod test {
         assert_eq!(removed_accounts, [pubkey2]);
 
         // Add pubkey5, should evict pubkey3 (now least recently used)
-        provider.try_get(pubkey5, false).await.unwrap();
+        provider.try_get(pubkey5).await.unwrap();
 
         // Check channel received the second evicted account
         let removed_accounts = drain_removed_account_rx(&mut removed_rx);
@@ -1638,12 +1644,12 @@ mod test {
 
         // Fill cache to capacity (no evictions)
         for pk in pubkeys.iter().take(4) {
-            provider.try_get(*pk, false).await.unwrap();
+            provider.try_get(*pk).await.unwrap();
         }
 
         // Add more accounts and verify evictions happen in LRU order
         for i in 4..7 {
-            provider.try_get(pubkeys[i], false).await.unwrap();
+            provider.try_get(pubkeys[i]).await.unwrap();
             let expected_evicted = pubkeys[i - 4]; // Should evict the account added 4 steps ago
 
             // Verify the evicted account was sent over the channel
@@ -1755,7 +1761,7 @@ mod test {
         let (provider, _, _) =
             setup_with_mixed_accounts(&[], compressed_pubkeys).await;
         let accs = provider
-            .try_get_multi(compressed_pubkeys, false)
+            .try_get_multi(compressed_pubkeys, None)
             .await
             .unwrap();
         let [acc1, acc2, acc3] = accs.as_slice() else {
@@ -1765,7 +1771,7 @@ mod test {
         assert_compressed_account!(acc2, 777, 2);
         assert_compressed_account!(acc3, 777, 3);
 
-        let acc2 = provider.try_get(cpk2, false).await.unwrap();
+        let acc2 = provider.try_get(cpk2).await.unwrap();
         assert_compressed_account!(acc2, 777, 2);
     }
 
@@ -1789,7 +1795,7 @@ mod test {
             setup_with_mixed_accounts(pubkeys, compressed_pubkeys).await;
 
         let mixed_keys = &[pk1, cpk1, pk2, cpk2, cpk3, pk3];
-        let accs = provider.try_get_multi(mixed_keys, false).await.unwrap();
+        let accs = provider.try_get_multi(mixed_keys, None).await.unwrap();
         let [acc1, cacc1, acc2, cacc2, cacc3, acc3] = accs.as_slice() else {
             panic!("Expected 6 accounts");
         };
@@ -1801,10 +1807,10 @@ mod test {
         assert_regular_account!(acc2, 555, 2);
         assert_regular_account!(acc3, 555, 3);
 
-        let cacc2 = provider.try_get(cpk2, false).await.unwrap();
+        let cacc2 = provider.try_get(cpk2).await.unwrap();
         assert_compressed_account!(cacc2, 777, 2);
 
-        let acc2 = provider.try_get(pk2, false).await.unwrap();
+        let acc2 = provider.try_get(pk2).await.unwrap();
         assert_regular_account!(acc2, 555, 2);
     }
 
@@ -1828,7 +1834,7 @@ mod test {
             setup_with_mixed_accounts(pubkeys, compressed_pubkeys).await;
 
         let mixed_keys = &[pk1, cpk1, pk2, cpk2, cpk3, pk3];
-        let accs = provider.try_get_multi(mixed_keys, false).await.unwrap();
+        let accs = provider.try_get_multi(mixed_keys, None).await.unwrap();
         let [acc1, cacc1, acc2, cacc2, cacc3, acc3] = accs.as_slice() else {
             panic!("Expected 6 accounts");
         };
@@ -1840,14 +1846,15 @@ mod test {
         assert_regular_account!(acc2, 555, 2);
         assert!(!acc3.is_found());
 
-        let cacc2 = provider.try_get(cpk2, false).await.unwrap();
+        let cacc2 = provider.try_get(cpk2).await.unwrap();
         assert_compressed_account!(cacc2, 777, 2);
-        let cacc3 = provider.try_get(cpk3, false).await.unwrap();
+        let cacc3 = provider.try_get(cpk3).await.unwrap();
+        assert_compressed_account!(cacc3, 777, 3);
         assert!(!cacc3.is_found());
 
-        let acc2 = provider.try_get(pk2, false).await.unwrap();
+        let acc2 = provider.try_get(pk2).await.unwrap();
         assert_regular_account!(acc2, 555, 2);
-        let acc3 = provider.try_get(pk3, false).await.unwrap();
+        let acc3 = provider.try_get(pk3).await.unwrap();
         assert!(!acc3.is_found());
     }
 }

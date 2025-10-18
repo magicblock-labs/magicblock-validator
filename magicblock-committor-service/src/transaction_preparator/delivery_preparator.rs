@@ -1,9 +1,9 @@
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use borsh::BorshDeserialize;
-use futures_util::future::{join, join_all};
+use futures_util::future::{join, join_all, try_join_all};
 use light_client::indexer::photon_indexer::PhotonIndexer;
-use log::*;
+use log::error;
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
 };
@@ -15,6 +15,7 @@ use magicblock_table_mania::{error::TableManiaError, TableMania};
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
     message::{
         v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
@@ -30,12 +31,14 @@ use crate::{
     tasks::{
         task_builder::{get_compressed_data, TaskBuilderError},
         task_strategist::TransactionStrategy,
-        BaseTask, BufferPreparationInfo, TaskPreparationInfo,
+        BaseTask, BaseTaskError, BufferPreparationTask, CleanupTask,
+        PreparationState, PreparationTask,
     },
     utils::persist_status_update,
     ComputeBudgetConfig,
 };
 
+#[derive(Clone)]
 pub struct DeliveryPreparator {
     rpc_client: MagicblockRpcClient,
     table_mania: TableMania,
@@ -61,7 +64,7 @@ impl DeliveryPreparator {
         authority: &Keypair,
         strategy: &mut TransactionStrategy,
         persister: &Option<P>,
-        photon_client: &Option<PhotonIndexer>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures =
             strategy.optimized_tasks.iter_mut().map(|task| {
@@ -92,15 +95,16 @@ impl DeliveryPreparator {
         authority: &Keypair,
         task: &mut dyn BaseTask,
         persister: &Option<P>,
-        photon_client: &Option<PhotonIndexer>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
-        let Some(preparation_info) = task.preparation_info(&authority.pubkey())
+        let PreparationState::Required(preparation_task) =
+            task.preparation_state()
         else {
             return Ok(());
         };
 
-        match preparation_info {
-            TaskPreparationInfo::Buffer(buffer_info) => {
+        match preparation_task {
+            PreparationTask::Buffer(buffer_info) => {
                 // Persist as failed until rewritten
                 let update_status =
                     CommitStatus::BufferAndChunkPartiallyInitialized;
@@ -136,8 +140,13 @@ impl DeliveryPreparator {
                     buffer_info.commit_id,
                     update_status,
                 );
+
+                let cleanup_task = buffer_info.cleanup_task();
+                task.switch_preparation_state(PreparationState::Cleanup(
+                    cleanup_task,
+                ))?;
             }
-            TaskPreparationInfo::Compressed => {
+            PreparationTask::Compressed => {
                 // HACK: We retry until the hash changes to be sure that the indexer has the change.
                 // This is a bad way of doing it as it assumes that the hash changes.
                 // It will break if the action is done in an isolated manner.
@@ -179,12 +188,16 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        info: &BufferPreparationInfo,
+        preparation_task: &BufferPreparationTask,
     ) -> DeliveryPreparatorResult<(), InternalError> {
-        let preparation_instructions = chunk_realloc_ixs(
-            info.realloc_instructions.clone(),
-            Some(info.init_instruction.clone()),
-        );
+        let authority_pubkey = authority.pubkey();
+        let init_instruction =
+            preparation_task.init_instruction(&authority_pubkey);
+        let realloc_instructions =
+            preparation_task.realloc_instructions(&authority_pubkey);
+
+        let preparation_instructions =
+            chunk_realloc_ixs(realloc_instructions, Some(init_instruction));
         let preparation_instructions = preparation_instructions
             .into_iter()
             .enumerate()
@@ -209,7 +222,7 @@ impl DeliveryPreparator {
 
         // Initialization & reallocs
         for instructions in preparation_instructions {
-            self.send_ixs_with_retry::<2>(&instructions, authority)
+            self.send_ixs_with_retry(&instructions, authority, 5)
                 .await?;
         }
 
@@ -220,39 +233,37 @@ impl DeliveryPreparator {
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
-        info: &BufferPreparationInfo,
+        preparation_task: &BufferPreparationTask,
         max_retries: usize,
     ) -> DeliveryPreparatorResult<(), InternalError> {
+        let authority_pubkey = authority.pubkey();
+        let chunks_pda = preparation_task.chunks_pda(&authority_pubkey);
+        let write_instructions =
+            preparation_task.write_instructions(&authority_pubkey);
+
         let mut last_error = InternalError::ZeroRetriesRequestedError;
         for _ in 0..max_retries {
-            let chunks =
-                match self.rpc_client.get_account(&info.chunks_pda).await {
-                    Ok(Some(account)) => {
-                        Chunks::try_from_slice(account.data())?
-                    }
-                    Ok(None) => {
-                        error!(
-                            "Chunks PDA does not exist for writing. pda: {}",
-                            info.chunks_pda
-                        );
-                        return Err(InternalError::ChunksPDAMissingError(
-                            info.chunks_pda,
-                        ));
-                    }
-                    Err(err) => {
-                        error!("Failed to fetch chunks PDA: {:?}", err);
-                        last_error = err.into();
-                        sleep(Duration::from_millis(100)).await;
-                        continue;
-                    }
-                };
+            let chunks = match self.rpc_client.get_account(&chunks_pda).await {
+                Ok(Some(account)) => Chunks::try_from_slice(account.data())?,
+                Ok(None) => {
+                    error!(
+                        "Chunks PDA does not exist for writing. pda: {}",
+                        chunks_pda
+                    );
+                    return Err(InternalError::ChunksPDAMissingError(
+                        chunks_pda,
+                    ));
+                }
+                Err(err) => {
+                    error!("Failed to fetch chunks PDA: {:?}", err);
+                    last_error = err.into();
+                    sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+            };
 
             match self
-                .write_missing_chunks(
-                    authority,
-                    &chunks,
-                    &info.write_instructions,
-                )
+                .write_missing_chunks(authority, &chunks, &write_instructions)
                 .await
             {
                 Ok(()) => return Ok(()),
@@ -288,25 +299,22 @@ impl DeliveryPreparator {
             .collect::<Vec<_>>();
 
         let fut_iter = chunks_write_instructions.iter().map(|instructions| {
-            self.send_ixs_with_retry::<2>(instructions.as_slice(), authority)
+            self.send_ixs_with_retry(instructions.as_slice(), authority, 5)
         });
-
-        join_all(fut_iter)
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
+        try_join_all(fut_iter).await?;
 
         Ok(())
     }
 
     // CommitProcessor::init_accounts analog
-    async fn send_ixs_with_retry<const MAX_RETRIES: usize>(
+    async fn send_ixs_with_retry(
         &self,
         instructions: &[Instruction],
         authority: &Keypair,
+        max_retries: usize,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let mut last_error = InternalError::ZeroRetriesRequestedError;
-        for _ in 0..MAX_RETRIES {
+        for _ in 0..max_retries {
             match self.try_send_ixs(instructions, authority).await {
                 Ok(()) => return Ok(()),
                 Err(err) => {
@@ -370,10 +378,71 @@ impl DeliveryPreparator {
         Ok(alts)
     }
 
-    // TODO(edwin): cleanup
-    // async fn clean() {
-    //     todo!()
-    // }
+    /// Releases pubkeys from TableMania and
+    /// cleans up after buffer tasks
+    pub async fn cleanup(
+        &self,
+        authority: &Keypair,
+        tasks: &[Box<dyn BaseTask>],
+        lookup_table_keys: &[Pubkey],
+    ) -> DeliveryPreparatorResult<(), InternalError> {
+        self.table_mania
+            .release_pubkeys(&HashSet::from_iter(
+                lookup_table_keys.iter().cloned(),
+            ))
+            .await;
+
+        let cleanup_tasks: Vec<_> = tasks
+            .iter()
+            .filter_map(|task| {
+                if let PreparationState::Cleanup(cleanup_task) =
+                    task.preparation_state()
+                {
+                    Some(cleanup_task)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if cleanup_tasks.is_empty() {
+            return Ok(());
+        }
+
+        let close_futs = cleanup_tasks
+            .chunks(CleanupTask::max_tx_fit_count_with_budget())
+            .map(|cleanup_tasks| {
+                let compute_units = cleanup_tasks[0].compute_units()
+                    * cleanup_tasks.len() as u32;
+                let mut instructions = vec![
+                    ComputeBudgetInstruction::set_compute_unit_limit(
+                        compute_units,
+                    ),
+                    ComputeBudgetInstruction::set_compute_unit_price(
+                        self.compute_budget_config.compute_unit_price,
+                    ),
+                ];
+                instructions.extend(
+                    cleanup_tasks
+                        .iter()
+                        .map(|task| task.instruction(&authority.pubkey())),
+                );
+
+                async move {
+                    self.send_ixs_with_retry(&instructions, authority, 1).await
+                }
+            });
+
+        join_all(close_futs)
+            .await
+            .into_iter()
+            .inspect(|res| {
+                if let Err(err) = res {
+                    error!("Failed to cleanup buffers: {}", err);
+                }
+            })
+            .collect::<Result<(), _>>()
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -400,6 +469,8 @@ pub enum InternalError {
     PhotonClientNotFound,
     #[error("Failed to prepare compressed data: {0}")]
     TaskBuilderError(#[from] TaskBuilderError),
+    #[error("BaseTaskError: {0}")]
+    BaseTaskError(#[from] BaseTaskError),
 }
 
 #[derive(thiserror::Error, Debug)]

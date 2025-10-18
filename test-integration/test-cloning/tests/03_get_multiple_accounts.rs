@@ -20,8 +20,8 @@ fn test_get_multiple_accounts_non_existing() {
     assert!(accs.unwrap().iter().all(|acc| acc.is_none()));
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_get_multiple_accounts_both_existing_and_not() {
+#[test]
+fn test_get_multiple_accounts_both_existing_and_not() {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
@@ -40,7 +40,6 @@ async fn test_get_multiple_accounts_both_existing_and_not() {
         escrow_lamports,
     ) = ctx
         .airdrop_chain_escrowed(&escrowed_kp, 2 * LAMPORTS_PER_SOL)
-        .await
         .expect("failed to airdrop to escrowed on-chain account");
 
     let pubkeys =

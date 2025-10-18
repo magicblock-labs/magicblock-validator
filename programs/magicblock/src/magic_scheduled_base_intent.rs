@@ -1,8 +1,8 @@
 use std::{cell::RefCell, collections::HashSet};
 
-use magicblock_core::magic_program::args::{
+use magicblock_magic_program_api::args::{
     ActionArgs, BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
-    MagicBaseIntentArgs, UndelegateTypeArgs,
+    MagicBaseIntentArgs, ShortAccountMeta, UndelegateTypeArgs,
 };
 use serde::{Deserialize, Serialize};
 use solana_log_collector::ic_msg;
@@ -20,7 +20,6 @@ use solana_sdk::{
 use crate::{
     instruction_utils::InstructionUtils,
     utils::accounts::{
-        get_instruction_account_short_meta_with_idx,
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
 };
@@ -63,7 +62,7 @@ pub struct ScheduledBaseIntent {
 
 impl ScheduledBaseIntent {
     pub fn try_new(
-        args: &MagicBaseIntentArgs,
+        args: MagicBaseIntentArgs,
         commit_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
@@ -128,13 +127,13 @@ pub enum MagicBaseIntent {
 
 impl MagicBaseIntent {
     pub fn try_from_args(
-        args: &MagicBaseIntentArgs,
+        args: MagicBaseIntentArgs,
         context: &ConstructionContext<'_, '_>,
     ) -> Result<MagicBaseIntent, InstructionError> {
         match args {
             MagicBaseIntentArgs::BaseActions(base_actions) => {
                 let base_actions = base_actions
-                    .iter()
+                    .into_iter()
                     .map(|args| BaseAction::try_from_args(args, context))
                     .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 Ok(MagicBaseIntent::BaseActions(base_actions))
@@ -220,13 +219,13 @@ pub struct CommitAndUndelegate {
 
 impl CommitAndUndelegate {
     pub fn try_from_args(
-        args: &CommitAndUndelegateArgs,
+        args: CommitAndUndelegateArgs,
         context: &ConstructionContext<'_, '_>,
     ) -> Result<CommitAndUndelegate, InstructionError> {
         let commit_action =
-            CommitType::try_from_args(&args.commit_type, context)?;
+            CommitType::try_from_args(args.commit_type, context)?;
         let undelegate_action =
-            UndelegateType::try_from_args(&args.undelegate_type, context)?;
+            UndelegateType::try_from_args(args.undelegate_type, context)?;
 
         Ok(Self {
             commit_action,
@@ -269,12 +268,6 @@ impl From<&ActionArgs> for ProgramArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ShortAccountMeta {
-    pub pubkey: Pubkey,
-    pub is_writable: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaseAction {
     pub compute_units: u32,
     pub destination_program: Pubkey,
@@ -285,28 +278,9 @@ pub struct BaseAction {
 
 impl BaseAction {
     pub fn try_from_args(
-        args: &BaseActionArgs,
+        args: BaseActionArgs,
         context: &ConstructionContext<'_, '_>,
     ) -> Result<BaseAction, InstructionError> {
-        let destination_program_pubkey = *get_instruction_pubkey_with_idx(
-            context.transaction_context,
-            args.destination_program as u16,
-        )?;
-        let destination_program = get_instruction_account_with_idx(
-            context.transaction_context,
-            args.destination_program as u16,
-        )?;
-        if !destination_program.borrow().executable() {
-            ic_msg!(
-                context.invoke_context,
-                &format!(
-                    "BaseAction: destination_program must be an executable. got: {}",
-                    destination_program_pubkey
-                )
-            );
-            return Err(InstructionError::AccountNotExecutable);
-        }
-
         // Since action on Base layer performed on behalf of some escrow
         // We need to ensure that action was authorized by legit owner
         let authority_pubkey = get_instruction_pubkey_with_idx(
@@ -325,23 +299,12 @@ impl BaseAction {
             return Err(InstructionError::MissingRequiredSignature);
         }
 
-        let account_metas = args
-            .accounts
-            .iter()
-            .map(|i| {
-                get_instruction_account_short_meta_with_idx(
-                    context.transaction_context,
-                    *i as u16,
-                )
-            })
-            .collect::<Result<Vec<ShortAccountMeta>, InstructionError>>()?;
-
         Ok(BaseAction {
             compute_units: args.compute_units,
-            destination_program: destination_program_pubkey,
+            destination_program: args.destination_program,
             escrow_authority: *authority_pubkey,
-            data_per_program: args.args.clone().into(),
-            account_metas_per_program: account_metas,
+            data_per_program: args.args.into(),
+            account_metas_per_program: args.accounts,
         })
     }
 }
@@ -434,13 +397,13 @@ impl CommitType {
     }
 
     pub fn try_from_args(
-        args: &CommitTypeArgs,
+        args: CommitTypeArgs,
         context: &ConstructionContext<'_, '_>,
     ) -> Result<CommitType, InstructionError> {
         match args {
             CommitTypeArgs::Standalone(committed_accounts) => {
                 let committed_accounts_ref = Self::extract_commit_accounts(
-                    committed_accounts,
+                    &committed_accounts,
                     context.transaction_context,
                 )?;
                 Self::validate_accounts(&committed_accounts_ref, context)?;
@@ -463,13 +426,13 @@ impl CommitType {
                 base_actions,
             } => {
                 let committed_accounts_ref = Self::extract_commit_accounts(
-                    committed_accounts,
+                    &committed_accounts,
                     context.transaction_context,
                 )?;
                 Self::validate_accounts(&committed_accounts_ref, context)?;
 
                 let base_actions = base_actions
-                    .iter()
+                    .into_iter()
                     .map(|args| BaseAction::try_from_args(args, context))
                     .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 let committed_accounts = committed_accounts_ref
@@ -531,14 +494,14 @@ pub enum UndelegateType {
 
 impl UndelegateType {
     pub fn try_from_args(
-        args: &UndelegateTypeArgs,
+        args: UndelegateTypeArgs,
         context: &ConstructionContext<'_, '_>,
     ) -> Result<UndelegateType, InstructionError> {
         match args {
             UndelegateTypeArgs::Standalone => Ok(UndelegateType::Standalone),
             UndelegateTypeArgs::WithBaseActions { base_actions } => {
                 let base_actions = base_actions
-                    .iter()
+                    .into_iter()
                     .map(|base_action| {
                         BaseAction::try_from_args(base_action, context)
                     })

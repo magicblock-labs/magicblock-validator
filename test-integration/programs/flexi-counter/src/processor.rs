@@ -6,17 +6,22 @@ use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::{
     consts::{
         EXTERNAL_CALL_HANDLER_DISCRIMINATOR, EXTERNAL_UNDELEGATE_DISCRIMINATOR,
+        MAGIC_PROGRAM_ID,
     },
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
     ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
+use magicblock_magic_program_api::{
+    args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
+};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
+    instruction::{AccountMeta, Instruction},
     msg,
-    program::invoke_signed,
+    program::{invoke, invoke_signed},
     program_error::ProgramError,
     pubkey::Pubkey,
     rent::Rent,
@@ -26,7 +31,8 @@ use solana_program::{
 
 use crate::{
     instruction::{
-        DelegateArgs, FlexiCounterInstruction,
+        create_add_error_ix, create_add_ix, create_add_unsigned_ix, CancelArgs,
+        DelegateArgs, FlexiCounterInstruction, ScheduleArgs,
         MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
     },
     processor::{
@@ -66,6 +72,8 @@ pub fn process(
             invocation_count,
         } => process_realloc(accounts, bytes, invocation_count),
         Add { count } => process_add(accounts, count),
+        AddUnsigned { count } => process_add_unsigned(accounts, count),
+        AddError { count } => process_add_error(accounts, count),
         Mul { multiplier } => process_mul(accounts, multiplier),
         Delegate(args) => process_delegate(accounts, &args),
         AddAndScheduleCommit { count, undelegate } => {
@@ -84,9 +92,11 @@ pub fn process(
             is_undelegate,
             compute_units,
         ),
-        CreateRedelegationIntont => {
+        CreateRedelegationIntent => {
             process_create_redelegation_intent(accounts)
         }
+        Schedule(args) => process_schedule_task(accounts, args),
+        Cancel(args) => process_cancel_task(accounts, args),
     }?;
     Ok(())
 }
@@ -188,6 +198,29 @@ fn process_add(accounts: &[AccountInfo], count: u8) -> ProgramResult {
     let counter_pda_info = next_account_info(account_info_iter)?;
 
     add(payer_info, counter_pda_info, count)
+}
+
+fn process_add_unsigned(accounts: &[AccountInfo], count: u8) -> ProgramResult {
+    msg!("Add {}", count);
+
+    let account_info_iter = &mut accounts.iter();
+    let counter_pda_info = next_account_info(account_info_iter)?;
+
+    let mut counter =
+        FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
+
+    counter.count += count as u64;
+    counter.updates += 1;
+
+    let size = counter_pda_info.data_len();
+    let counter_data = to_vec(&counter)?;
+    counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
+
+    Ok(())
+}
+
+fn process_add_error(_accounts: &[AccountInfo], _count: u8) -> ProgramResult {
+    Err(ProgramError::Custom(0))
 }
 
 fn add(
@@ -365,5 +398,101 @@ fn process_undelegate_request(
         system_program,
         account_seeds,
     )?;
+    Ok(())
+}
+
+fn process_schedule_task(
+    accounts: &[AccountInfo],
+    args: ScheduleArgs,
+) -> ProgramResult {
+    msg!("ScheduleTask");
+
+    let account_info_iter = &mut accounts.iter();
+    let _magic_program_info = next_account_info(account_info_iter)?;
+    let payer_info = next_account_info(account_info_iter)?;
+    let task_context_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+
+    let (counter_pda, bump) = FlexiCounter::pda(payer_info.key);
+    if counter_pda_info.key.ne(&counter_pda) {
+        msg!(
+            "Invalid counter PDA {}, should be {}",
+            counter_pda_info.key,
+            counter_pda
+        );
+        return Err(ProgramError::InvalidSeeds);
+    }
+    let bump = &[bump];
+    let seeds = FlexiCounter::seeds_with_bump(payer_info.key, bump);
+    let ix_data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(
+        ScheduleTaskArgs {
+            task_id: args.task_id,
+            execution_interval_millis: args.execution_interval_millis,
+            iterations: args.iterations,
+            instructions: vec![match (args.error, args.signer) {
+                (true, false) => create_add_error_ix(*payer_info.key, 1),
+                (false, true) => create_add_ix(*payer_info.key, 1),
+                _ => create_add_unsigned_ix(*payer_info.key, 1),
+            }],
+        },
+    ))
+    .map_err(|err| {
+        msg!("ERROR: failed to serialize args {:?}", err);
+        ProgramError::InvalidArgument
+    })?;
+
+    let ix = Instruction::new_with_bytes(
+        MAGIC_PROGRAM_ID,
+        &ix_data,
+        vec![
+            AccountMeta::new(*payer_info.key, true),
+            AccountMeta::new(*task_context_info.key, false),
+            AccountMeta::new(*counter_pda_info.key, true),
+        ],
+    );
+
+    invoke_signed(
+        &ix,
+        &[
+            payer_info.clone(),
+            task_context_info.clone(),
+            counter_pda_info.clone(),
+        ],
+        &[&seeds],
+    )?;
+
+    Ok(())
+}
+
+fn process_cancel_task(
+    accounts: &[AccountInfo],
+    args: CancelArgs,
+) -> ProgramResult {
+    msg!("CancelTask");
+
+    let account_info_iter = &mut accounts.iter();
+    let _magic_program_info = next_account_info(account_info_iter)?;
+    let payer_info = next_account_info(account_info_iter)?;
+    let task_context_info = next_account_info(account_info_iter)?;
+
+    let ix_data = bincode::serialize(&MagicBlockInstruction::CancelTask {
+        task_id: args.task_id,
+    })
+    .map_err(|err| {
+        msg!("ERROR: failed to serialize args {:?}", err);
+        ProgramError::InvalidArgument
+    })?;
+
+    let ix = Instruction::new_with_bytes(
+        MAGIC_PROGRAM_ID,
+        &ix_data,
+        vec![
+            AccountMeta::new(*payer_info.key, true),
+            AccountMeta::new(*task_context_info.key, false),
+        ],
+    );
+
+    invoke(&ix, &[payer_info.clone(), task_context_info.clone()])?;
+
     Ok(())
 }

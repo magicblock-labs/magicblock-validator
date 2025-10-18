@@ -1,65 +1,77 @@
 use std::time::Duration;
 
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use integration_test_tools::IntegrationTestContext;
+use log::*;
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, system_instruction, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    system_instruction,
 };
-use solana_transaction_status::UiTransactionEncoding;
-
-const EPHEM_URL: &str = "http://localhost:8899";
+use test_kit::init_logger;
 
 /// Test that verifies transaction timestamps, block timestamps, and ledger block timestamps all match
-#[tokio::test]
-async fn test_clocks_match() {
+#[test]
+fn test_clocks_match() {
+    init_logger!();
+
     let iterations = 10;
     let millis_per_slot = 50;
 
+    let chain_payer = Keypair::new();
     let from_keypair = Keypair::new();
-    let to_pubkey = Pubkey::new_unique();
+    let to_keypair = Keypair::new();
 
-    let rpc_client = RpcClient::new(EPHEM_URL.to_string());
-    rpc_client
-        .request_airdrop(&from_keypair.pubkey(), LAMPORTS_PER_SOL)
-        .await
+    let ctx = IntegrationTestContext::try_new().unwrap();
+    ctx.airdrop_chain(&chain_payer.pubkey(), 10 * LAMPORTS_PER_SOL)
         .unwrap();
+    ctx.airdrop_chain_and_delegate(
+        &chain_payer,
+        &from_keypair,
+        LAMPORTS_PER_SOL,
+    )
+    .unwrap();
+    ctx.airdrop_chain_and_delegate(&chain_payer, &to_keypair, LAMPORTS_PER_SOL)
+        .unwrap();
+
+    debug!(
+        "✅ Airdropped and delegated from {} and to {}",
+        from_keypair.pubkey(),
+        to_keypair.pubkey()
+    );
 
     // Test multiple slots to ensure consistency
     for _ in 0..iterations {
-        let blockhash = rpc_client.get_latest_blockhash().await.unwrap();
-        let transfer_tx = Transaction::new_signed_with_payer(
-            &[system_instruction::transfer(
-                &from_keypair.pubkey(),
-                &to_pubkey,
-                1000000,
-            )],
-            Some(&from_keypair.pubkey()),
-            &[&from_keypair],
-            blockhash,
+        let (sig, confirmed) = ctx
+            .send_and_confirm_instructions_with_payer_ephem(
+                &[system_instruction::transfer(
+                    &from_keypair.pubkey(),
+                    &to_keypair.pubkey(),
+                    1000000,
+                )],
+                &from_keypair,
+            )
+            .unwrap();
+        debug!("✅ Transfer tx {sig} confirmed: {confirmed}");
+        assert!(confirmed);
+
+        let mut tx = ctx.get_transaction_ephem(&sig).unwrap();
+        // Wait until we're sure the slot is written to the ledger
+        while ctx.get_slot_ephem().unwrap() < tx.slot + 10 {
+            tx = ctx.get_transaction_ephem(&sig).unwrap();
+            std::thread::sleep(Duration::from_millis(millis_per_slot));
+        }
+        debug!(
+            "✅ Transaction {} with slot {} and block time {:?} written to ledger",
+            sig, tx.slot, tx.block_time
         );
 
-        let tx_result = rpc_client
-            .send_and_confirm_transaction(&transfer_tx)
-            .await
-            .unwrap();
-
-        let mut tx = rpc_client
-            .get_transaction(&tx_result, UiTransactionEncoding::Base64)
-            .await
-            .unwrap();
-        // Wait until we're sure the slot is written to the ledger
-        while rpc_client.get_slot().await.unwrap() < tx.slot + 10 {
-            tx = rpc_client
-                .get_transaction(&tx_result, UiTransactionEncoding::Base64)
-                .await
-                .unwrap();
-            tokio::time::sleep(Duration::from_millis(millis_per_slot)).await;
-        }
-
-        let ledger_timestamp =
-            rpc_client.get_block_time(tx.slot).await.unwrap();
-        let block_timestamp = rpc_client.get_block(tx.slot).await.unwrap();
+        let ledger_timestamp = ctx.try_get_block_time_ephem(tx.slot).unwrap();
+        let block_timestamp = ctx.try_get_block_ephem(tx.slot).unwrap();
         let block_timestamp = block_timestamp.block_time;
+
+        debug!(
+            "Ledger block time for slot {} is {:?}, block time is {:?}",
+            tx.slot, ledger_timestamp, block_timestamp
+        );
 
         // Verify timestamps match
         assert_eq!(

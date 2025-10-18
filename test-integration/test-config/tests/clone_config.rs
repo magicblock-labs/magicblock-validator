@@ -4,6 +4,7 @@ use integration_test_tools::{
 };
 use log::*;
 use magicblock_config::PrepareLookupTables;
+use serial_test::file_serial;
 use test_config::{
     count_lookup_table_transactions_on_chain, delegate_and_clone,
     start_validator_with_clone_config, wait_for_startup,
@@ -23,7 +24,7 @@ fn lookup_table_interaction(
         config,
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
-    wait_for_startup(&mut validator);
+    wait_for_startup(&ctx, &mut validator);
 
     let lookup_table_tx_count_after_start = expect!(
         count_lookup_table_transactions_on_chain(&ctx),
@@ -50,7 +51,11 @@ fn lookup_table_interaction(
     )
 }
 
+// NOTE: since both tests affect the global state of the validator representing chain
+// they need to run sequentially
+
 #[test]
+#[file_serial]
 fn test_clone_config_never() {
     init_logger!();
 
@@ -80,6 +85,7 @@ fn test_clone_config_never() {
 }
 
 #[test]
+#[file_serial]
 fn test_clone_config_always() {
     init_logger!();
 
@@ -105,8 +111,9 @@ fn test_clone_config_always() {
 
     // The pubkeys needed to commit the cloned account should be reserved when it was cloned
     // in a single lookup table transaction
+    // NOTE: we clone both the payer account and the counter account
     assert_eq!(
         lookup_table_tx_count_after_clone,
-        lookup_table_tx_count_after_start + 1
+        lookup_table_tx_count_after_start + 2
     );
 }

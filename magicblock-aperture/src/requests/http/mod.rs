@@ -1,5 +1,3 @@
-use log::*;
-use magicblock_core::traits::AccountsBank;
 use std::{mem::size_of, ops::Range};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -8,7 +6,10 @@ use hyper::{
     body::{Bytes, Incoming},
     Request, Response,
 };
-use magicblock_core::link::transactions::SanitizeableTransaction;
+use log::*;
+use magicblock_core::{
+    link::transactions::SanitizeableTransaction, traits::AccountsBank,
+};
 use prelude::JsonBody;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -17,11 +18,10 @@ use solana_transaction::{
 };
 use solana_transaction_status::UiTransactionEncoding;
 
+use super::JsonHttpRequest;
 use crate::{
     error::RpcError, server::http::dispatch::HttpDispatcher, RpcResult,
 };
-
-use super::JsonHttpRequest;
 
 pub(crate) type HandlerResult = RpcResult<Response<JsonBody>>;
 
@@ -88,7 +88,7 @@ impl HttpDispatcher {
         debug!("Ensuring account {pubkey}");
         let _ = self
             .chainlink
-            .ensure_accounts(&[*pubkey])
+            .ensure_accounts(&[*pubkey], None)
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the account fails
@@ -112,15 +112,15 @@ impl HttpDispatcher {
                 .join(", ");
             debug!("Ensuring accounts {pubkeys}");
         }
-        let _ =
-            self.chainlink
-                .ensure_accounts(pubkeys)
-                .await
-                .inspect_err(|e| {
-                    // There is nothing we can do if fetching the accounts fails
-                    // Log the error and return whatever is in the accounts db
-                    error!("Failed to ensure accounts: {e}");
-                });
+        let _ = self
+            .chainlink
+            .ensure_accounts(pubkeys, None)
+            .await
+            .inspect_err(|e| {
+                // There is nothing we can do if fetching the accounts fails
+                // Log the error and return whatever is in the accounts db
+                error!("Failed to ensure accounts: {e}");
+            });
         pubkeys
             .iter()
             .map(|pubkey| self.accountsdb.get_account(pubkey))
@@ -195,7 +195,7 @@ impl HttpDispatcher {
                 // setup a subscription, etc.
                 // In that case we don't even want to run the transaction.
                 warn!("Failed to ensure transaction accounts: {:?}", err);
-                Err(RpcError::transaction_verification(err.to_string()))
+                Err(RpcError::transaction_verification(err))
             }
         }
     }
@@ -203,6 +203,11 @@ impl HttpDispatcher {
 
 /// A prelude module to provide common imports for all RPC handler modules.
 mod prelude {
+    pub(super) use magicblock_core::{link::accounts::LockedAccount, Slot};
+    pub(super) use solana_account::ReadableAccount;
+    pub(super) use solana_account_decoder::UiAccountEncoding;
+    pub(super) use solana_pubkey::Pubkey;
+
     pub(super) use super::HandlerResult;
     pub(super) use crate::{
         error::RpcError,
@@ -215,10 +220,6 @@ mod prelude {
         some_or_err,
         utils::{AccountWithPubkey, JsonBody},
     };
-    pub(super) use magicblock_core::{link::accounts::LockedAccount, Slot};
-    pub(super) use solana_account::ReadableAccount;
-    pub(super) use solana_account_decoder::UiAccountEncoding;
-    pub(super) use solana_pubkey::Pubkey;
 }
 
 // --- SPL Token Account Layout Constants ---

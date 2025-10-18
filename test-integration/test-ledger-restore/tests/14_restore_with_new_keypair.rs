@@ -3,11 +3,10 @@ use std::{path::Path, process::Child};
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
-    validator::cleanup,
+    validator::cleanup, IntegrationTestContext,
 };
-use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
-    account::Account, bpf_loader_upgradeable, instruction::Instruction,
+    account::Account, instruction::Instruction, loader_v4,
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
     signer::Signer, transaction::Transaction,
 };
@@ -25,7 +24,7 @@ const MEMO_PROGRAM_PK: Pubkey = Pubkey::new_from_array([
 // This assumes a solana-test-validator is running on port 7799.
 
 #[test]
-fn restore_ledger_with_new_validator_authority() {
+fn test_restore_ledger_with_new_validator_authority() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     // Write a transaction that clones the memo program
@@ -41,8 +40,9 @@ fn write(ledger_path: &Path) -> (Child, u64) {
     let loaded_chain_accounts =
         LoadedAccounts::new_with_new_validator_authority();
     // Airdrop to the new validator authority
-    RpcClient::new("http://localhost:7799")
-        .request_airdrop(
+    IntegrationTestContext::try_new_chain_only()
+        .unwrap()
+        .airdrop_chain(
             &loaded_chain_accounts.validator_authority(),
             10 * LAMPORTS_PER_SOL,
         )
@@ -87,10 +87,10 @@ fn write(ledger_path: &Path) -> (Child, u64) {
     let Account {
         owner, executable, ..
     } = account;
-    assert_eq!(owner, bpf_loader_upgradeable::ID, cleanup(&mut validator));
+    assert_eq!(owner, loader_v4::ID, cleanup(&mut validator));
     assert!(executable, cleanup(&mut validator));
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
     (validator, slot)
 }
@@ -99,8 +99,9 @@ fn read(ledger_path: &Path) -> Child {
     let loaded_chain_accounts =
         LoadedAccounts::new_with_new_validator_authority();
     // Airdrop to the new validator authority
-    RpcClient::new("http://localhost:7799")
-        .request_airdrop(
+    IntegrationTestContext::try_new_chain_only()
+        .unwrap()
+        .airdrop_chain(
             &loaded_chain_accounts.validator_authority(),
             10 * LAMPORTS_PER_SOL,
         )
@@ -124,7 +125,7 @@ fn read(ledger_path: &Path) -> Child {
     let Account {
         owner, executable, ..
     } = account;
-    assert_eq!(owner, bpf_loader_upgradeable::ID, cleanup(&mut validator));
+    assert_eq!(owner, loader_v4::ID, cleanup(&mut validator));
     assert!(executable, cleanup(&mut validator));
 
     validator

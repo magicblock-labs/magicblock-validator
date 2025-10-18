@@ -4,7 +4,7 @@ use futures::StreamExt;
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, signer::Signer};
 use test_pubsub::PubSubEnv;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_account_subscribe() {
     let env = PubSubEnv::new().await;
     let (mut rx1, cancel1) = env
@@ -19,7 +19,7 @@ async fn test_account_subscribe() {
         .expect("failed to subscribe to account 2");
 
     const TRANSFER_AMOUNT: u64 = 10_000;
-    env.transfer(TRANSFER_AMOUNT).await;
+    env.transfer(TRANSFER_AMOUNT);
     let update = rx1
         .next()
         .await
@@ -70,7 +70,7 @@ async fn test_account_subscribe() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_account_subscribe_multiple_updates() {
     let env = PubSubEnv::new().await;
     let (mut rx1, _) = env
@@ -81,7 +81,7 @@ async fn test_account_subscribe_multiple_updates() {
 
     const TRANSFER_AMOUNT: u64 = 10_000;
     for i in 0..10 {
-        env.transfer(TRANSFER_AMOUNT).await;
+        env.transfer(TRANSFER_AMOUNT);
         let update = rx1
             .next()
             .await

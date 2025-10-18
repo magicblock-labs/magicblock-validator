@@ -105,7 +105,7 @@ jobs:
         run: |
           cd magicblock-validator
           bin="ephemeral-validator"
-          mv target/${{ matrix.build.TARGET }}/release/rpc target/${{ matrix.build.TARGET }}/release/${bin}
+          mv target/${{ matrix.build.TARGET }}/release/magicblock-validator target/${{ matrix.build.TARGET }}/release/${bin}
           node_os=$(echo "${{ matrix.build.NAME }}" | cut -d '-' -f1)
           export node_os
           node_arch=$(echo "${{ matrix.build.NAME }}" | cut -d '-' -f2)
@@ -190,6 +190,8 @@ jobs:
         shell: bash
         run: echo "DRY_RUN=false" >> $GITHUB_ENV
         if: github.event_name == 'release' && github.event.action == 'published'
+
+      - uses: ./.github/actions/setup-solana
 
       - name: Publish the NPM package
         shell: bash

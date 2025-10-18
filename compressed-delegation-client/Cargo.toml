@@ -10,6 +10,9 @@ edition.workspace = true
 [features]
 default = []
 serde = ["dep:serde"]
+anchor = []
+anchor-idl-build = []
+fetch = []
 
 [dependencies]
 borsh = { workspace = true }

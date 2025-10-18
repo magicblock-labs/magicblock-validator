@@ -4,15 +4,18 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
+        buffer_task::{BufferTask, BufferTaskType},
         task_strategist::{TaskStrategist, TransactionStrategy},
         utils::TransactionUtils,
-        ArgsTask, BaseActionTask, BaseTask, BufferTask, CommitTask,
-        FinalizeTask, UndelegateTask,
+        BaseActionTask, BaseTask, CommitTask, FinalizeTask, PreparationState,
+        UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
 };
-use magicblock_program::magic_scheduled_base_intent::{
-    BaseAction, ProgramArgs, ShortAccountMeta,
+use magicblock_program::{
+    args::ShortAccountMeta,
+    magic_scheduled_base_intent::{BaseAction, ProgramArgs},
 };
 use solana_pubkey::Pubkey;
 use solana_sdk::{signer::Signer, system_program};
@@ -33,16 +36,16 @@ async fn test_prepare_commit_tx_with_single_account() {
     let committed_account = create_committed_account(&account_data);
 
     let tasks = vec![
-        Box::new(ArgsTask::Commit(CommitTask {
+        Box::new(ArgsTask::new(ArgsTaskType::Commit(CommitTask {
             commit_id: 1,
             committed_account: committed_account.clone(),
             allow_undelegation: true,
-        })) as Box<dyn BaseTask>,
-        Box::new(ArgsTask::Finalize(FinalizeTask {
+        }))) as Box<dyn BaseTask>,
+        Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
-        })),
+        }))),
     ];
-    let tx_strategy = TransactionStrategy {
+    let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys: vec![],
     };
@@ -51,7 +54,7 @@ async fn test_prepare_commit_tx_with_single_account() {
     let result = preparator
         .prepare_for_strategy(
             &fixture.authority,
-            &tx_strategy,
+            &mut tx_strategy,
             &None::<IntentPersisterImpl>,
         )
         .await;
@@ -87,31 +90,33 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     let account2_data = generate_random_bytes(12);
     let committed_account2 = create_committed_account(&account2_data);
 
-    let buffer_commit_task = BufferTask::Commit(CommitTask {
-        commit_id: 1,
-        committed_account: committed_account2.clone(),
-        allow_undelegation: true,
-    });
+    let buffer_commit_task = BufferTask::new_preparation_required(
+        BufferTaskType::Commit(CommitTask {
+            commit_id: 1,
+            committed_account: committed_account2.clone(),
+            allow_undelegation: true,
+        }),
+    );
     // Create test data
     let tasks = vec![
         // account 1
-        Box::new(ArgsTask::Commit(CommitTask {
+        Box::new(ArgsTask::new(ArgsTaskType::Commit(CommitTask {
             commit_id: 1,
             committed_account: committed_account1.clone(),
             allow_undelegation: true,
-        })) as Box<dyn BaseTask>,
+        }))) as Box<dyn BaseTask>,
         // account 2
-        Box::new(buffer_commit_task.clone()),
+        Box::new(buffer_commit_task),
         // finalize account 1
-        Box::new(ArgsTask::Finalize(FinalizeTask {
+        Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account1.pubkey,
-        })),
+        }))),
         // finalize account 2
-        Box::new(ArgsTask::Finalize(FinalizeTask {
+        Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account2.pubkey,
-        })),
+        }))),
     ];
-    let tx_strategy = TransactionStrategy {
+    let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys: vec![],
     };
@@ -120,7 +125,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     let mut actual_message = preparator
         .prepare_for_strategy(
             &fixture.authority,
-            &tx_strategy,
+            &mut tx_strategy,
             &None::<IntentPersisterImpl>,
         )
         .await
@@ -140,20 +145,25 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     actual_message.set_recent_blockhash(*expected_message.recent_blockhash());
     assert_eq!(actual_message, expected_message);
 
-    // Now we verify that buffers were created
-    let preparation_info = buffer_commit_task
-        .preparation_info(&fixture.authority.pubkey())
-        .unwrap();
+    for task in tx_strategy.optimized_tasks {
+        let cleanup_task = match task.preparation_state() {
+            PreparationState::NotNeeded => continue,
+            PreparationState::Required(_) => {
+                panic!("Expected state is: PreparationState::Cleanup!")
+            }
+            PreparationState::Cleanup(value) => value,
+        };
+        let chunks_pda = cleanup_task.chunks_pda(&fixture.authority.pubkey());
+        let chunks_account = fixture
+            .rpc_client
+            .get_account(&chunks_pda)
+            .await
+            .unwrap()
+            .unwrap();
+        let chunks = Chunks::try_from_slice(&chunks_account.data).unwrap();
 
-    let chunks_account = fixture
-        .rpc_client
-        .get_account(&preparation_info.chunks_pda)
-        .await
-        .unwrap()
-        .unwrap();
-    let chunks = Chunks::try_from_slice(&chunks_account.data).unwrap();
-
-    assert!(chunks.is_complete());
+        assert!(chunks.is_complete());
+    }
 }
 
 #[tokio::test]
@@ -177,27 +187,29 @@ async fn test_prepare_commit_tx_with_base_actions() {
         }],
     };
 
-    let buffer_commit_task = BufferTask::Commit(CommitTask {
-        commit_id: 1,
-        committed_account: committed_account.clone(),
-        allow_undelegation: true,
-    });
+    let buffer_commit_task = BufferTask::new_preparation_required(
+        BufferTaskType::Commit(CommitTask {
+            commit_id: 1,
+            committed_account: committed_account.clone(),
+            allow_undelegation: true,
+        }),
+    );
     let tasks = vec![
         // commit account
         Box::new(buffer_commit_task.clone()) as Box<dyn BaseTask>,
         // finalize account
-        Box::new(ArgsTask::Finalize(FinalizeTask {
+        Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
-        })),
+        }))),
         // BaseAction
-        Box::new(ArgsTask::BaseAction(BaseActionTask {
+        Box::new(ArgsTask::new(ArgsTaskType::BaseAction(BaseActionTask {
             context: Context::Commit,
             action: base_action,
-        })),
+        }))),
     ];
 
     // Test preparation
-    let tx_strategy = TransactionStrategy {
+    let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys: vec![],
     };
@@ -206,7 +218,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
     let mut actual_message = preparator
         .prepare_for_strategy(
             &fixture.authority,
-            &tx_strategy,
+            &mut tx_strategy,
             &None::<IntentPersisterImpl>,
         )
         .await
@@ -227,19 +239,24 @@ async fn test_prepare_commit_tx_with_base_actions() {
     assert_eq!(actual_message, expected_message);
 
     // Now we verify that buffers were created
-    let preparation_info = buffer_commit_task
-        .preparation_info(&fixture.authority.pubkey())
-        .unwrap();
+    for task in tx_strategy.optimized_tasks {
+        let cleanup_task = match task.preparation_state() {
+            PreparationState::NotNeeded => continue,
+            PreparationState::Required(_) => panic!("Expected Cleanup state!"),
+            PreparationState::Cleanup(value) => value,
+        };
+        let chunks_pda = cleanup_task.chunks_pda(&fixture.authority.pubkey());
 
-    let chunks_account = fixture
-        .rpc_client
-        .get_account(&preparation_info.chunks_pda)
-        .await
-        .unwrap()
-        .unwrap();
-    let chunks = Chunks::try_from_slice(&chunks_account.data).unwrap();
+        let chunks_account = fixture
+            .rpc_client
+            .get_account(&chunks_pda)
+            .await
+            .unwrap()
+            .unwrap();
+        let chunks = Chunks::try_from_slice(&chunks_account.data).unwrap();
 
-    assert!(chunks.is_complete());
+        assert!(chunks.is_complete());
+    }
 }
 
 #[tokio::test]
@@ -251,22 +268,22 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
     let committed_account = create_committed_account(&[1, 2, 3]);
     let tasks: Vec<Box<dyn BaseTask>> = vec![
         // finalize account
-        Box::new(ArgsTask::Finalize(FinalizeTask {
+        Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
-        })),
+        }))),
         // BaseAction
-        Box::new(ArgsTask::Undelegate(UndelegateTask {
+        Box::new(ArgsTask::new(ArgsTaskType::Undelegate(UndelegateTask {
             delegated_account: committed_account.pubkey,
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
-        })),
+        }))),
     ];
 
     let lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
         &fixture.authority.pubkey(),
         &tasks,
     );
-    let tx_strategy = TransactionStrategy {
+    let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys,
     };
@@ -275,7 +292,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
     let result = preparator
         .prepare_for_strategy(
             &fixture.authority,
-            &tx_strategy,
+            &mut tx_strategy,
             &None::<IntentPersisterImpl>,
         )
         .await;

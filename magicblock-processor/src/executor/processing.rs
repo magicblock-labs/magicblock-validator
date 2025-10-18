@@ -1,23 +1,26 @@
 use std::sync::atomic::Ordering;
 
 use log::error;
-use solana_svm::{
-    account_loader::{AccountsBalances, CheckedTransactionDetails},
-    transaction_processing_result::{
-        ProcessedTransaction, TransactionProcessingResult,
-    },
-};
-use solana_transaction::sanitized::SanitizedTransaction;
-use solana_transaction_status::{
-    map_inner_instructions, TransactionStatusMeta,
-};
-
 use magicblock_core::link::{
     accounts::{AccountWithSlot, LockedAccount},
     transactions::{
         TransactionExecutionResult, TransactionSimulationResult,
         TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
     },
+};
+use solana_pubkey::Pubkey;
+use solana_svm::{
+    account_loader::{AccountsBalances, CheckedTransactionDetails},
+    rollback_accounts::RollbackAccounts,
+    transaction_processing_result::{
+        ProcessedTransaction, TransactionProcessingResult,
+    },
+};
+use solana_svm_transaction::svm_message::SVMMessage;
+use solana_transaction::sanitized::SanitizedTransaction;
+use solana_transaction_error::TransactionResult;
+use solana_transaction_status::{
+    map_inner_instructions, TransactionStatusMeta,
 };
 
 impl super::TransactionExecutor {
@@ -46,23 +49,38 @@ impl super::TransactionExecutor {
         let (result, balances) = self.process(&transaction);
         let [txn] = transaction;
 
-        // If the transaction fails to load entirely, we don't commit anything.
-        let result = result.and_then(|mut processed| {
+        // Transaction failed to load, we persist it to the
+        // ledger, only for the convenience of the user
+        if let Err(err) = result {
+            let status = Err(err);
+            self.commit_failed_transaction(txn, status.clone());
+            tx.map(|tx| tx.send(status));
+            return;
+        }
+
+        // If the transaction failed to load entirely, then it was handled above
+        let result = result.and_then(|processed| {
             let result = processed.status();
 
-            // If the transaction failed and the caller is waiting
-            // for the result, do not persist any changes.
+            // If the transaction failed during the execution and the caller is waiting
+            // for the result, do not persist any changes (preflight check is true)
             if result.is_err() && tx.is_some() {
+                // But we always commit transaction to the ledger (mostly for user convenience)
+                if !is_replay {
+                    self.commit_transaction(txn, processed, balances);
+                }
                 return result;
             }
 
+            let feepayer = *txn.fee_payer();
             // Otherwise commit the account state changes
-            self.commit_accounts(&mut processed, is_replay);
+            self.commit_accounts(feepayer, &processed, is_replay);
 
-            // For new transactions, also commit the transaction to the ledger.
+            // And commit transaction to the ledger
             if !is_replay {
                 self.commit_transaction(txn, processed, balances);
             }
+
             result
         });
 
@@ -206,43 +224,81 @@ impl super::TransactionExecutor {
         let _ = self.transaction_tx.send(status);
     }
 
+    /// A helper method that persists a transaction that couldn't even be loaded properly,
+    /// to the ledger. This is done primarily for the convenience of the user, so that the
+    /// status of transaction can always be queried, even if it didn't pass the load stage
+    fn commit_failed_transaction(
+        &self,
+        txn: SanitizedTransaction,
+        status: TransactionResult<()>,
+    ) {
+        let meta = TransactionStatusMeta {
+            status,
+            pre_balances: vec![0; txn.message().account_keys().len()],
+            post_balances: vec![0; txn.message().account_keys().len()],
+            ..Default::default()
+        };
+        let signature = *txn.signature();
+        if let Err(error) = self.ledger.write_transaction(
+            signature,
+            self.processor.slot,
+            txn,
+            meta,
+            self.index.fetch_add(1, Ordering::Relaxed),
+        ) {
+            error!("failed to commit transaction to the ledger: {error}");
+        }
+    }
+
     /// A helper method that persists modified account states to the `AccountsDb`.
     fn commit_accounts(
         &self,
-        result: &mut ProcessedTransaction,
+        feepayer: Pubkey,
+        result: &ProcessedTransaction,
         is_replay: bool,
     ) {
-        let ProcessedTransaction::Executed(executed) = result else {
-            return;
+        let succeeded = result.status().is_ok();
+        let accounts = match result {
+            ProcessedTransaction::Executed(executed) => {
+                let programs = &executed.programs_modified_by_tx;
+                if !programs.is_empty() && succeeded {
+                    self.processor
+                        .program_cache
+                        .write()
+                        .unwrap()
+                        .merge(programs);
+                }
+                if !succeeded {
+                    // For failed transactions, only persist the payer's account to charge the fee.
+                    &executed.loaded_transaction.accounts[..1]
+                } else {
+                    &executed.loaded_transaction.accounts
+                }
+            }
+            ProcessedTransaction::FeesOnly(fo) => {
+                let RollbackAccounts::FeePayerOnly { fee_payer_account } =
+                    &fo.rollback_accounts
+                else {
+                    return;
+                };
+                &[(feepayer, fee_payer_account.clone())]
+            }
         };
-        let succeeded = executed.was_successful();
-        if !succeeded {
-            // For failed transactions, only persist the payer's account to charge the fee.
-            executed.loaded_transaction.accounts.drain(1..);
-        }
-        let programs = &executed.programs_modified_by_tx;
-        if !programs.is_empty() && succeeded {
-            self.processor
-                .program_cache
-                .write()
-                .unwrap()
-                .merge(programs);
-        }
-        for (pubkey, account) in executed.loaded_transaction.accounts.drain(..)
-        {
+
+        for (pubkey, account) in accounts {
             // only persist account's update if it was actually modified, ignore
             // the rest, even if an account was writeable in the transaction
             if !account.is_dirty() {
                 continue;
             }
-            self.accountsdb.insert_account(&pubkey, &account);
+            self.accountsdb.insert_account(pubkey, account);
 
             if is_replay {
                 continue;
             }
             let account = AccountWithSlot {
                 slot: self.processor.slot,
-                account: LockedAccount::new(pubkey, account),
+                account: LockedAccount::new(*pubkey, account.clone()),
             };
             let _ = self.accounts_tx.send(account);
         }

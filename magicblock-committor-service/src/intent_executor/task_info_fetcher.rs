@@ -15,27 +15,30 @@ use light_client::{
 use log::{error, warn};
 use lru::LruCache;
 use magicblock_core::compression::derive_cda_from_pda;
-use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 
+const NUM_FETCH_RETRIES: NonZeroUsize =
+    unsafe { NonZeroUsize::new_unchecked(5) };
+const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
+
 #[async_trait]
 pub trait TaskInfoFetcher: Send + Sync + 'static {
-    // Fetches correct next ids for pubkeys
-    // Those ids can be used as correct commit_id during Commit
+    /// Fetches correct next ids for pubkeys
+    /// Those ids can be used as correct commit_id during Commit
     async fn fetch_next_commit_ids(
         &self,
-        accounts: &[CommittedAccount],
+        pubkeys: &[Pubkey],
         compressed: bool,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
 
-    // Fetches rent reimbursement address for pubkeys
+    /// Fetches rent reimbursement address for pubkeys
     async fn fetch_rent_reimbursements(
         &self,
         pubkeys: &[Pubkey],
     ) -> TaskInfoFetcherResult<Vec<Pubkey>>;
 
-    // Peeks current commit ids for pubkeys
+    /// Peeks current commit ids for pubkeys
     fn peek_commit_id(&self, pubkey: &Pubkey) -> Option<u64>;
 
     /// Resets cache for some or all accounts
@@ -46,10 +49,6 @@ pub enum ResetType<'a> {
     All,
     Specific(&'a [Pubkey]),
 }
-
-const NUM_FETCH_RETRIES: NonZeroUsize =
-    unsafe { NonZeroUsize::new_unchecked(5) };
-const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
 
 pub struct CacheTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
@@ -103,7 +102,7 @@ impl CacheTaskInfoFetcher {
                     last_err = TaskInfoFetcherError::LightRpcError(err)
                 }
                 Err(TaskInfoFetcherError::MagicBlockRpcClientError(err)) => {
-                    // TODO(edwin0: RPC error handlings should be more robust
+                    // TODO(edwin): RPC error handlings should be more robust
                     last_err =
                         TaskInfoFetcherError::MagicBlockRpcClientError(err)
                 }
@@ -252,10 +251,10 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
     /// If key isn't in cache, it will be requested
     async fn fetch_next_commit_ids(
         &self,
-        accounts: &[CommittedAccount],
+        pubkeys: &[Pubkey],
         compressed: bool,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        if accounts.is_empty() {
+        if pubkeys.is_empty() {
             return Ok(HashMap::new());
         }
 
@@ -264,16 +263,16 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         // Lock cache and extract whatever ids we can
         {
             let mut cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
-            for account in accounts {
+            for pubkey in pubkeys {
                 // in case already inserted
-                if result.contains_key(&account.pubkey) {
+                if result.contains_key(pubkey) {
                     continue;
                 }
 
-                if let Some(id) = cache.get(&account.pubkey) {
-                    result.insert(account.pubkey, *id + 1);
+                if let Some(id) = cache.get(pubkey) {
+                    result.insert(*pubkey, *id + 1);
                 } else {
-                    to_request.push(account.pubkey);
+                    to_request.push(*pubkey);
                 }
             }
         }

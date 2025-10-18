@@ -1,15 +1,19 @@
-use magicblock_core::magic_program::instruction::MagicBlockInstruction;
+use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 use solana_program_runtime::declare_process_instruction;
 use solana_sdk::program_utils::limited_deserialize;
 
 use crate::{
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
+    schedule_task::{
+        process_cancel_task, process_process_tasks, process_schedule_task,
+    },
     schedule_transactions::{
         process_accept_scheduled_commits, process_schedule_base_intent,
         process_schedule_commit, process_schedule_compressed_commit,
         ProcessScheduleCommitOptions,
     },
+    toggle_executable_check::process_toggle_executable_check,
 };
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
@@ -25,17 +29,7 @@ declare_process_instruction!(
                 .get_current_instruction_context()?
                 .get_instruction_data(),
         )?;
-        let disable_executable_check = matches!(instruction, ModifyAccounts(_));
-        // The below is necessary to avoid:
-        // 'instruction changed executable accounts data'
-        // writing data to and deploying a program account.
-        // NOTE: better to make this an instruction which does nothing but toggle
-        // this flag on and off around the instructions which need it off.
-        if disable_executable_check {
-            invoke_context
-                .transaction_context
-                .set_remove_accounts_executable_flag_checks(true);
-        }
+
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context =
             transaction_context.get_current_instruction_context()?;
@@ -81,7 +75,7 @@ declare_process_instruction!(
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
-            ScheduledCommitSent(id) => process_scheduled_commit_sent(
+            ScheduledCommitSent((id, _bump)) => process_scheduled_commit_sent(
                 signers,
                 invoke_context,
                 transaction_context,
@@ -89,6 +83,19 @@ declare_process_instruction!(
             ),
             ScheduleBaseIntent(args) => {
                 process_schedule_base_intent(signers, invoke_context, args)
+            }
+            ScheduleTask(args) => {
+                process_schedule_task(signers, invoke_context, args)
+            }
+            CancelTask { task_id } => {
+                process_cancel_task(signers, invoke_context, task_id)
+            }
+            ProcessTasks => process_process_tasks(signers, invoke_context),
+            DisableExecutableCheck => {
+                process_toggle_executable_check(signers, invoke_context, false)
+            }
+            EnableExecutableCheck => {
+                process_toggle_executable_check(signers, invoke_context, true)
             }
         }
     }

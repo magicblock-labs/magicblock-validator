@@ -1,5 +1,12 @@
 use hyper::body::Bytes;
 use json::Serialize;
+use magicblock_core::{
+    link::{
+        accounts::LockedAccount,
+        transactions::{TransactionResult, TransactionStatus},
+    },
+    Slot,
+};
 use solana_account::ReadableAccount;
 use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
 use solana_pubkey::Pubkey;
@@ -9,13 +16,6 @@ use crate::{
     requests::{params::SerdeSignature, payload::NotificationPayload},
     state::subscriptions::SubscriptionID,
     utils::{AccountWithPubkey, ProgramFilters},
-};
-use magicblock_core::{
-    link::{
-        accounts::LockedAccount,
-        transactions::{TransactionResult, TransactionStatus},
-    },
-    Slot,
 };
 
 /// An abstraction trait over types which specialize in turning various

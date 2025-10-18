@@ -1,10 +1,11 @@
 #[cfg(any(test, feature = "dev-context"))]
 pub mod mock {
+    use std::{collections::HashMap, fmt, sync::Mutex};
+
     use log::*;
     use magicblock_core::traits::AccountsBank;
     use solana_account::{AccountSharedData, WritableAccount};
     use solana_pubkey::Pubkey;
-    use std::{collections::HashMap, fmt, sync::Mutex};
 
     use crate::blacklisted_accounts;
 
@@ -91,6 +92,15 @@ pub mod mock {
         }
         fn remove_account(&self, pubkey: &Pubkey) {
             self.accounts.lock().unwrap().remove(pubkey);
+        }
+        fn remove_where(
+            &self,
+            predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+        ) -> usize {
+            let mut accounts = self.accounts.lock().unwrap();
+            let initial_len = accounts.len();
+            accounts.retain(|k, v| !predicate(k, v));
+            initial_len - accounts.len()
         }
     }
 

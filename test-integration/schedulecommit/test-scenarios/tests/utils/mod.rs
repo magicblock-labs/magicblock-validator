@@ -2,6 +2,7 @@ use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
 use integration_test_tools::scheduled_commits::ScheduledCommitResult;
 use program_schedulecommit::MainAccount;
 use schedulecommit_client::ScheduleCommitTestContext;
+use solana_rpc_client_api::client_error;
 use solana_sdk::{
     instruction::InstructionError,
     pubkey::Pubkey,
@@ -15,20 +16,6 @@ use solana_sdk::{
 pub fn get_context_with_delegated_committees(
     ncommittees: usize,
 ) -> ScheduleCommitTestContext {
-    get_context_with_delegated_committees_impl(ncommittees, true)
-}
-
-#[allow(dead_code)] // used in 03_commits_fee_payer.rs
-pub fn get_context_with_delegated_committees_without_payer_escrow(
-    ncommittees: usize,
-) -> ScheduleCommitTestContext {
-    get_context_with_delegated_committees_impl(ncommittees, false)
-}
-
-fn get_context_with_delegated_committees_impl(
-    ncommittees: usize,
-    escrow_lamports_for_payer: bool,
-) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
         ScheduleCommitTestContext::try_new(ncommittees)
     } else {
@@ -37,10 +24,7 @@ fn get_context_with_delegated_committees_impl(
     .unwrap();
 
     ctx.init_committees().unwrap();
-    ctx.delegate_committees(None).unwrap();
-    if escrow_lamports_for_payer {
-        ctx.escrow_lamports_for_payer().unwrap();
-    }
+    ctx.delegate_committees().unwrap();
     ctx
 }
 
@@ -104,7 +88,7 @@ pub fn assert_feepayer_was_committed(
     res: &ScheduledCommitResult<MainAccount>,
     is_single_stage: bool,
 ) {
-    let payer = ctx.payer.pubkey();
+    let payer = ctx.payer_ephem.pubkey();
 
     assert_eq!(res.feepayers.len(), 1, "includes 1 payer");
 
@@ -229,21 +213,10 @@ pub fn assert_account_was_undelegated_on_chain(
     assert_eq!(owner, new_owner, "{} has new owner", pda);
 }
 
-#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_tx_failed_with_instruction_error(
-    tx_result: Result<Signature, solana_rpc_client_api::client_error::Error>,
-    ix_error: InstructionError,
-) {
-    let (tx_result_err, tx_err) = extract_transaction_error(tx_result);
-    let tx_err = tx_err.unwrap_or_else(|| {
-        panic!("Expected TransactionError, got: {:?}", tx_result_err)
-    });
-    assert_is_instruction_error(tx_err, &tx_result_err, ix_error);
-}
-
+#[allow(dead_code)] // used in tests
 pub fn assert_is_instruction_error(
     tx_err: TransactionError,
-    tx_result_err: &solana_rpc_client_api::client_error::Error,
+    tx_result_err: &client_error::Error,
     ix_error: InstructionError,
 ) {
     assert!(
@@ -254,16 +227,34 @@ pub fn assert_is_instruction_error(
         ),
         "Expected InstructionError({:?}), got: {:?}",
         ix_error,
-        tx_result_err
+        tx_result_err.get_transaction_error()
     );
 }
 
-pub fn extract_transaction_error(
-    tx_result: Result<Signature, solana_rpc_client_api::client_error::Error>,
-) -> (
-    solana_rpc_client_api::client_error::Error,
-    Option<TransactionError>,
+#[allow(dead_code)] // used in tests
+pub fn assert_is_one_of_instruction_errors(
+    tx_err: TransactionError,
+    tx_result_err: &client_error::Error,
+    ix_error1: InstructionError,
+    ix_error2: InstructionError,
 ) {
+    assert!(
+        matches!(
+            tx_err,
+            TransactionError::InstructionError(_, err)
+            if err == ix_error1 || err == ix_error2
+        ),
+        "Expected InstructionError({:?} | {:?}), got: {:?}",
+        ix_error1,
+        ix_error2,
+        tx_result_err.get_transaction_error()
+    );
+}
+
+#[allow(dead_code)] // used in tests
+pub fn extract_transaction_error(
+    tx_result: Result<Signature, client_error::Error>,
+) -> (client_error::Error, Option<TransactionError>) {
     let tx_result_err = match tx_result {
         Ok(sig) => panic!("Expected error, got signature: {:?}", sig),
         Err(err) => err,

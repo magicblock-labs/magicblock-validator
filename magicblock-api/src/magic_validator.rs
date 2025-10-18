@@ -1,5 +1,5 @@
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -7,12 +7,13 @@ use std::{
     time::Duration,
 };
 
-use conjunto_transwise::RpcProviderConfig;
 use log::*;
-use magicblock_account_cloner::chainext::ChainlinkCloner;
+use magicblock_account_cloner::{
+    map_committor_request_result, ChainlinkCloner,
+};
 use magicblock_accounts::{
-    scheduled_commits_processor::ScheduledCommitsProcessorImpl,
-    utils::try_rpc_cluster_from_cluster, ScheduledCommitsProcessor,
+    scheduled_commits_processor::ScheduledCommitsProcessorImpl, RemoteCluster,
+    ScheduledCommitsProcessor,
 };
 use magicblock_accounts_db::AccountsDb;
 use magicblock_aperture::{
@@ -34,7 +35,7 @@ use magicblock_committor_service::{
 };
 use magicblock_config::{
     EphemeralConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
-    ProgramConfig,
+    PrepareLookupTables, ProgramConfig,
 };
 use magicblock_core::{
     link::{
@@ -57,6 +58,7 @@ use magicblock_program::{
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
+use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use mdp::state::{
     features::FeaturesSet,
@@ -78,9 +80,12 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
-    external_config::{cluster_from_remote, try_convert_accounts_config},
+    external_config::{
+        remote_cluster_from_remote, try_convert_accounts_config,
+    },
     fund_account::{
-        fund_magic_context, funded_faucet, init_validator_identity,
+        fund_magic_context, fund_task_context, funded_faucet,
+        init_validator_identity,
     },
     genesis_utils::{create_genesis_config_with_leader, GenesisConfigInfo},
     ledger::{
@@ -128,12 +133,14 @@ pub struct MagicValidator {
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     committor_service: Option<Arc<CommittorService>>,
     scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
+    chainlink: Arc<ChainlinkImpl>,
     rpc_handle: JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
     block_udpate_tx: BlockUpdateTx,
     _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
     claim_fees_task: ClaimFeesTask,
+    task_scheduler_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl MagicValidator {
@@ -181,11 +188,9 @@ impl MagicValidator {
             .expect("ledger_path didn't have a parent, should never happen");
 
         let latest_block = ledger.latest_block().load();
-        let accountsdb = AccountsDb::new(
-            &config.accounts.db,
-            storage_path,
-            latest_block.slot,
-        )?;
+        let slot = ledger_resume_strategy.slot().unwrap_or(latest_block.slot);
+        let accountsdb =
+            AccountsDb::new(&config.accounts.db, storage_path, slot)?;
         for (pubkey, account) in genesis_config.accounts {
             accountsdb.insert_account(&pubkey, &account.into());
         }
@@ -199,6 +204,8 @@ impl MagicValidator {
 
         init_validator_identity(&accountsdb, &validator_pubkey);
         fund_magic_context(&accountsdb);
+        fund_task_context(&accountsdb);
+
         let faucet_keypair =
             funded_faucet(&accountsdb, ledger.ledger_path().as_path())?;
 
@@ -227,8 +234,7 @@ impl MagicValidator {
             None
         };
 
-        let (accounts_config, remote_rpc_config) =
-            try_get_remote_accounts_and_rpc_config(&config.accounts)?;
+        let accounts_config = try_get_remote_accounts_config(&config.accounts)?;
 
         let (dispatch, validator_channels) = link();
 
@@ -239,37 +245,33 @@ impl MagicValidator {
             committor_persist_path.display()
         );
 
-        // TODO(thlorenz): when we support lifecycle modes again, only start it when needed
-        let committor_service = Some(Arc::new(CommittorService::try_start(
-            identity_keypair.insecure_clone(),
+        let committor_service = Self::init_committor_service(
+            &identity_keypair,
             committor_persist_path,
-            ChainConfig {
-                rpc_uri: remote_rpc_config.url().to_string(),
-                commitment: remote_rpc_config
-                    .commitment()
-                    .unwrap_or(CommitmentLevel::Confirmed),
-                compute_budget_config: ComputeBudgetConfig::new(
-                    accounts_config.commit_compute_unit_price,
-                ),
-            },
-        )?));
-        let chainlink = Self::init_chainlink(
-            committor_service.clone(),
-            &remote_rpc_config,
-            &config,
-            &dispatch.transaction_scheduler,
-            &ledger.latest_block().clone(),
-            &accountsdb,
-            validator_pubkey,
-            faucet_keypair.pubkey(),
+            &accounts_config,
+            &config.accounts.clone.prepare_lookup_tables,
         )
         .await?;
+        let chainlink = Arc::new(
+            Self::init_chainlink(
+                committor_service.clone(),
+                &accounts_config.remote_cluster,
+                &config,
+                &dispatch.transaction_scheduler,
+                &ledger.latest_block().clone(),
+                &accountsdb,
+                validator_pubkey,
+                faucet_keypair.pubkey(),
+            )
+            .await?,
+        );
 
         let scheduled_commits_processor =
             committor_service.as_ref().map(|committor_service| {
                 Arc::new(ScheduledCommitsProcessorImpl::new(
                     accountsdb.clone(),
                     committor_service.clone(),
+                    chainlink.clone(),
                     dispatch.transaction_scheduler.clone(),
                 ))
             });
@@ -309,7 +311,7 @@ impl MagicValidator {
             node_context,
             accountsdb.clone(),
             ledger.clone(),
-            chainlink,
+            chainlink.clone(),
             config.validator.millis_per_slot,
         );
         let rpc = JsonRpcServer::new(
@@ -330,6 +332,7 @@ impl MagicValidator {
             slot_ticker: None,
             committor_service,
             scheduled_commits_processor,
+            chainlink,
             token,
             ledger,
             ledger_truncator,
@@ -338,13 +341,46 @@ impl MagicValidator {
             identity: validator_pubkey,
             transaction_scheduler: dispatch.transaction_scheduler,
             block_udpate_tx: validator_channels.block_update,
+            task_scheduler_handle: None,
         })
+    }
+
+    async fn init_committor_service(
+        identity_keypair: &Keypair,
+        committor_persist_path: PathBuf,
+        accounts_config: &magicblock_accounts::AccountsConfig,
+        prepare_lookup_tables: &PrepareLookupTables,
+    ) -> ApiResult<Option<Arc<CommittorService>>> {
+        // TODO(thlorenz): when we support lifecycle modes again, only start it when needed
+        let committor_service = Some(Arc::new(CommittorService::try_start(
+            identity_keypair.insecure_clone(),
+            committor_persist_path,
+            ChainConfig {
+                rpc_uri: accounts_config.remote_cluster.url.clone(),
+                commitment: CommitmentLevel::Confirmed,
+                compute_budget_config: ComputeBudgetConfig::new(
+                    accounts_config.commit_compute_unit_price,
+                ),
+            },
+        )?));
+
+        if let Some(committor_service) = &committor_service {
+            if prepare_lookup_tables == &PrepareLookupTables::Always {
+                debug!("Reserving common pubkeys for committor service");
+                map_committor_request_result(
+                    committor_service.reserve_common_pubkeys(),
+                    committor_service.clone(),
+                )
+                .await?;
+            }
+        }
+        Ok(committor_service)
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn init_chainlink(
         committor_service: Option<Arc<CommittorService>>,
-        rpc_config: &RpcProviderConfig,
+        remote_cluster: &RemoteCluster,
         config: &EphemeralConfig,
         transaction_scheduler: &TransactionSchedulerHandle,
         latest_block: &LatestBlock,
@@ -353,16 +389,13 @@ impl MagicValidator {
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
         use magicblock_chainlink::remote_account_provider::Endpoint;
-        let accounts = try_convert_accounts_config(&config.accounts).expect(
-            "Failed to derive accounts config from provided magicblock config",
-        );
-        let mut endpoints = accounts
-            .remote_cluster
-            .ws_urls()
-            .into_iter()
+        let rpc_url = remote_cluster.url.clone();
+        let mut endpoints = remote_cluster
+            .ws_urls
+            .iter()
             .map(|pubsub_url| Endpoint::Rpc {
-                rpc_url: rpc_config.url().to_string(),
-                pubsub_url,
+                rpc_url: rpc_url.clone(),
+                pubsub_url: pubsub_url.clone(),
             })
             .collect::<Vec<_>>();
 
@@ -380,25 +413,25 @@ impl MagicValidator {
         );
         let cloner = Arc::new(cloner);
         let accounts_bank = accountsdb.clone();
-        let config = ChainlinkConfig::default_with_lifecycle_mode(
+        let chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral.into(),
         );
         let commitment_config = {
-            let level = rpc_config
-                .commitment()
-                .unwrap_or(CommitmentLevel::Confirmed);
+            let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }
         };
-        Ok(ChainlinkImpl::try_new_from_endpoints(
+        let chainlink = ChainlinkImpl::try_new_from_endpoints(
             &endpoints,
             commitment_config,
             &accounts_bank,
             &cloner,
             validator_pubkey,
             faucet_pubkey,
-            config,
+            chainlink_config,
         )
-        .await?)
+        .await?;
+
+        Ok(chainlink)
     }
 
     fn init_ledger(
@@ -452,7 +485,7 @@ impl MagicValidator {
         // we have this number for our max blockhash age in slots, which correspond to 60 seconds
         let max_block_age =
             SOLANA_VALID_BLOCKHASH_AGE / self.config.validator.millis_per_slot;
-        let slot_to_continue_at = process_ledger(
+        let mut slot_to_continue_at = process_ledger(
             &self.ledger,
             &self.accountsdb,
             self.transaction_scheduler.clone(),
@@ -485,12 +518,23 @@ impl MagicValidator {
             return Err(err.into());
         }
         if self.accountsdb.slot() != slot_to_continue_at {
-            return Err(
+            // NOTE: we used to return this error here, but this occurs very frequently
+            // when running ledger restore integration tests, especially after
+            // 6f52e376 (fix: sync accountsdb slot after ledger replay) was added.
+            // It is a somewhat valid scenario in which the accounts db snapshot is more up to
+            // date than the last ledger entry.
+            // This means we lost some history, but our state is most up to date. In this case
+            // we also don't need to replay anything.
+            let err =
                 ApiError::NextSlotAfterLedgerProcessingNotMatchingBankSlot(
                     slot_to_continue_at,
                     self.accountsdb.slot(),
-                ),
+                );
+            warn!(
+                "{err}, correcting to accoutns db slot {}",
+                self.accountsdb.slot()
             );
+            slot_to_continue_at = self.accountsdb.slot();
         }
 
         info!(
@@ -505,7 +549,8 @@ impl MagicValidator {
         &self,
         fqdn: impl ToString,
     ) -> ApiResult<()> {
-        let url = cluster_from_remote(&self.config.accounts.remote);
+        let remote_cluster =
+            remote_cluster_from_remote(&self.config.accounts.remote);
         let country_code =
             CountryCode::from(self.config.validator.country_code.alpha3());
         let validator_keypair = validator_authority();
@@ -521,7 +566,7 @@ impl MagicValidator {
         });
 
         DomainRegistryManager::handle_registration_static(
-            url.url(),
+            remote_cluster.url,
             &validator_keypair,
             validator_info,
         )
@@ -531,11 +576,12 @@ impl MagicValidator {
     }
 
     fn unregister_validator_on_chain(&self) -> ApiResult<()> {
-        let url = cluster_from_remote(&self.config.accounts.remote);
+        let remote_cluster =
+            remote_cluster_from_remote(&self.config.accounts.remote);
         let validator_keypair = validator_authority();
 
         DomainRegistryManager::handle_unregistration_static(
-            url.url(),
+            remote_cluster.url,
             &validator_keypair,
         )
         .map_err(|err| {
@@ -546,15 +592,13 @@ impl MagicValidator {
     async fn ensure_validator_funded_on_chain(&self) -> ApiResult<()> {
         // NOTE: 5 SOL seems reasonable, but we may require a different amount in the future
         const MIN_BALANCE_SOL: u64 = 5;
-        let (_, remote_rpc_config) =
-            try_get_remote_accounts_and_rpc_config(&self.config.accounts)?;
+        let accounts_config =
+            try_get_remote_accounts_config(&self.config.accounts)?;
 
         let lamports = RpcClient::new_with_commitment(
-            remote_rpc_config.url().to_string(),
+            accounts_config.remote_cluster.url.clone(),
             CommitmentConfig {
-                commitment: remote_rpc_config
-                    .commitment()
-                    .unwrap_or(CommitmentLevel::Confirmed),
+                commitment: CommitmentLevel::Confirmed,
             },
         )
         .get_balance(&self.identity)
@@ -583,9 +627,25 @@ impl MagicValidator {
             }
         }
 
+        // Ledger processing needs to happen before anything of the below
         self.maybe_process_ledger().await?;
 
-        self.claim_fees_task.start(self.config.clone());
+        // Ledger replay has completed, we can now clean non-delegated accounts
+        // including programs from the bank
+        if !self
+            .config
+            .ledger
+            .resume_strategy()
+            .is_removing_accountsdb()
+        {
+            self.chainlink.reset_accounts_bank();
+        }
+
+        // Now we are ready to start all services and are ready to accept transactions
+        let remote_cluster =
+            remote_cluster_from_remote(&self.config.accounts.remote);
+        self.claim_fees_task
+            .start(self.config.clone(), remote_cluster.url);
 
         self.slot_ticker = Some(init_slot_ticker(
             self.accountsdb.clone(),
@@ -598,6 +658,44 @@ impl MagicValidator {
         ));
 
         self.ledger_truncator.start();
+
+        let task_scheduler_db_path =
+            SchedulerDatabase::path(self.ledger.ledger_path().parent().expect(
+                "ledger_path didn't have a parent, should never happen",
+            ));
+        debug!(
+            "Task scheduler persists to: {}",
+            task_scheduler_db_path.display()
+        );
+        let task_scheduler_handle = TaskSchedulerService::start(
+            &task_scheduler_db_path,
+            &self.config.task_scheduler,
+            self.accountsdb.clone(),
+            self.transaction_scheduler.clone(),
+            self.ledger.latest_block().clone(),
+            self.token.clone(),
+        )?;
+        // TODO: we should shutdown gracefully.
+        // This is discussed in this comment:
+        // https://github.com/magicblock-labs/magicblock-validator/pull/493#discussion_r2324560798
+        // However there is no proper solution for this right now.
+        // An issue to create a shutdown system is open here:
+        // https://github.com/magicblock-labs/magicblock-validator/issues/524
+        self.task_scheduler_handle = Some(tokio::spawn(async move {
+            match task_scheduler_handle.await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    error!("An error occurred while running the task scheduler: {:?}", err);
+                    error!("Exiting process...");
+                    std::process::exit(1);
+                }
+                Err(err) => {
+                    error!("Failed to start task scheduler: {:?}", err);
+                    error!("Exiting process...");
+                    std::process::exit(1);
+                }
+            }
+        }));
 
         validator::finished_starting_up();
         Ok(())
@@ -652,14 +750,8 @@ fn programs_to_load(programs: &[ProgramConfig]) -> Vec<(Pubkey, String)> {
         .collect()
 }
 
-fn try_get_remote_accounts_and_rpc_config(
+fn try_get_remote_accounts_config(
     accounts: &magicblock_config::AccountsConfig,
-) -> ApiResult<(magicblock_accounts::AccountsConfig, RpcProviderConfig)> {
-    let accounts_config =
-        try_convert_accounts_config(accounts).map_err(ApiError::ConfigError)?;
-    let remote_rpc_config = RpcProviderConfig::new(
-        try_rpc_cluster_from_cluster(&accounts_config.remote_cluster)?,
-        Some(CommitmentLevel::Confirmed),
-    );
-    Ok((accounts_config, remote_rpc_config))
+) -> ApiResult<magicblock_accounts::AccountsConfig> {
+    try_convert_accounts_config(accounts).map_err(ApiError::ConfigError)
 }

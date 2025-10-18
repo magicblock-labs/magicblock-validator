@@ -13,6 +13,7 @@ flume = { workspace = true }
 light-sdk = { workspace = true }
 light-compressed-account = { workspace = true }
 magicblock-delegation-program = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
 solana-account = { workspace = true }

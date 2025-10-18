@@ -278,17 +278,12 @@ fn test_restore_from_snapshot() {
     );
     tenv.set_slot(SNAPSHOT_FREQUENCY * 3);
 
-    let mut accountsdb = Arc::try_unwrap(tenv.adb)
-        .expect("this is the only Arc reference to accountsdb");
-    assert!(
-        matches!(
-            accountsdb.ensure_at_most(SNAPSHOT_FREQUENCY * 2),
-            Ok(SNAPSHOT_FREQUENCY)
-        ),
-        "failed to rollback to snapshot"
+    tenv = tenv.ensure_at_most(SNAPSHOT_FREQUENCY * 2);
+    assert_eq!(
+        tenv.slot(),
+        SNAPSHOT_FREQUENCY,
+        "slot should have been rolled back"
     );
-    tenv.adb = Arc::new(accountsdb);
-
     let acc_rolledback = tenv
         .get_account(&acc.pubkey)
         .expect("account should be in database");
@@ -321,13 +316,8 @@ fn test_get_all_accounts_after_rollback() {
         post_snap_pks.push(acc.pubkey);
     }
 
-    let mut accountsdb = Arc::try_unwrap(tenv.adb)
-        .expect("this is the only Arc reference to accountsdb");
-    assert!(
-        matches!(accountsdb.ensure_at_most(ITERS), Ok(ITERS)),
-        "failed to rollback to snapshot"
-    );
-    tenv.adb = Arc::new(accountsdb);
+    tenv = tenv.ensure_at_most(ITERS);
+    assert_eq!(tenv.slot(), ITERS, "failed to rollback to snapshot");
 
     let asserter = |(pk, acc): (_, AccountSharedData)| {
         assert_eq!(
@@ -371,12 +361,7 @@ fn test_db_size_after_rollback() {
         .expect("failed to get metadata for adb file")
         .len();
 
-    let mut accountsdb = Arc::try_unwrap(tenv.adb)
-        .expect("this is the only Arc reference to accountsdb");
-    accountsdb
-        .ensure_at_most(last_slot)
-        .expect("failed to rollback accounts database");
-    tenv.adb = Arc::new(accountsdb);
+    tenv = tenv.ensure_at_most(last_slot);
 
     assert_eq!(
         tenv.storage_size(),
@@ -409,9 +394,10 @@ fn test_account_removal() {
 
     tenv.insert_account(&pk, &acc.account);
 
+    // NOTE: we use empty accounts to mark escrow accounts that were not found on chain
     assert!(
-        tenv.get_account(&pk).is_none(),
-        "account should have been deleted after lamports have been zeroed out"
+        tenv.get_account(&pk).is_some(),
+        "account is not deleted after lamports have been zeroed out"
     );
 }
 
@@ -553,6 +539,23 @@ fn test_many_insertions_to_accountsdb() {
     });
 }
 
+#[test]
+fn test_reallocation_split() {
+    let tenv = init_test_env();
+    const SIZE: usize = 1024;
+    tenv.account();
+    let account1 = tenv.account_with_size(SIZE * 2);
+    let data_ptr1 = account1.account.data().as_ptr();
+    let account2 = tenv.account_with_size(SIZE);
+    let data_ptr2 = account2.account.data().as_ptr();
+    tenv.remove_account(&account1.pubkey);
+    let account3 = tenv.account_with_size(SIZE / 4);
+    let account4 = tenv.account_with_size(SIZE / 4);
+    assert_eq!(account3.account.data().as_ptr(), data_ptr1);
+    assert!(account4.account.data().as_ptr() < data_ptr2);
+    assert!(account4.account.data().as_ptr() > data_ptr1);
+}
+
 // ==============================================================
 // ==============================================================
 //                      UTILITY CODE BELOW
@@ -591,8 +594,12 @@ fn init_test_env() -> AdbTestEnv {
 
 impl AdbTestEnv {
     fn account(&self) -> AccountWithPubkey {
+        self.account_with_size(SPACE)
+    }
+
+    fn account_with_size(&self, size: usize) -> AccountWithPubkey {
         let pubkey = Pubkey::new_unique();
-        let mut account = AccountSharedData::new(LAMPORTS, SPACE, &OWNER);
+        let mut account = AccountSharedData::new(LAMPORTS, size, &OWNER);
         account.data_as_mut_slice()[..INIT_DATA_LEN]
             .copy_from_slice(ACCOUNT_DATA);
         self.adb.insert_account(&pubkey, &account);
@@ -607,6 +614,16 @@ impl AdbTestEnv {
         while Arc::strong_count(&self.adb) > 1 {
             std::thread::yield_now();
         }
+    }
+
+    fn ensure_at_most(mut self, slot: u64) -> Self {
+        let mut accountsdb = Arc::try_unwrap(self.adb)
+            .expect("this is the only Arc reference to accountsdb");
+        accountsdb
+            .ensure_at_most(slot)
+            .expect("failed to rollback accounts database");
+        self.adb = Arc::new(accountsdb);
+        self
     }
 }
 

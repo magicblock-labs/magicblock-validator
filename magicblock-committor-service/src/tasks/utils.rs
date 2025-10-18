@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use log::debug;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
@@ -14,7 +13,7 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 
-use crate::tasks::{task_strategist::TaskStrategistResult, ArgsTask, BaseTask};
+use crate::tasks::{task_strategist::TaskStrategistResult, BaseTask};
 
 pub struct TransactionUtils;
 impl TransactionUtils {

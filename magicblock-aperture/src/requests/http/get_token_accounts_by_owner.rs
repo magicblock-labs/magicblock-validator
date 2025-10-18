@@ -2,12 +2,11 @@ use solana_rpc_client_api::config::{
     RpcAccountInfoConfig, RpcTokenAccountsFilter,
 };
 
+use super::prelude::*;
 use crate::{
     requests::http::{SPL_MINT_OFFSET, SPL_OWNER_OFFSET, TOKEN_PROGRAM_ID},
     utils::{ProgramFilter, ProgramFilters},
 };
-
-use super::prelude::*;
 
 impl HttpDispatcher {
     /// Handles the `getTokenAccountsByOwner` RPC request.

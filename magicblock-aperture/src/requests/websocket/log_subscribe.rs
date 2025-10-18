@@ -1,8 +1,7 @@
 use json::Deserialize;
 
-use crate::{encoder::TransactionLogsEncoder, some_or_err};
-
 use super::prelude::*;
+use crate::{encoder::TransactionLogsEncoder, some_or_err};
 
 impl WsDispatcher {
     /// Handles the `logsSubscribe` WebSocket RPC request.

@@ -1,8 +1,3 @@
-use borsh::BorshDeserialize;
-use compressed_delegation_client::CompressedDelegationRecord;
-use log::*;
-use magicblock_core::traits::AccountsBank;
-use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -11,11 +6,23 @@ use std::{
         Arc, Mutex,
     },
 };
+
+use borsh::BorshDeserialize;
+use compressed_delegation_client::CompressedDelegationRecord;
+use dlp::{
+    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+};
+use log::*;
+use magicblock_core::traits::AccountsBank;
+use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
+use solana_pubkey::Pubkey;
 use tokio::{
     sync::{mpsc, oneshot},
+    task,
     task::JoinSet,
 };
 
+use super::errors::{ChainlinkError, ChainlinkResult};
 use crate::{
     chainlink::blacklisted_accounts::blacklisted_accounts,
     cloner::{errors::ClonerResult, Cloner},
@@ -30,12 +37,6 @@ use crate::{
         ResolvedAccount, ResolvedAccountSharedData,
     },
 };
-use dlp::state::DelegationRecord;
-use solana_pubkey::Pubkey;
-
-use super::errors::{ChainlinkError, ChainlinkResult};
-use dlp::pda::delegation_record_pda_from_delegated_account;
-use tokio::task;
 
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
 
@@ -195,9 +196,27 @@ where
                     )
                     .await;
                 if let Some(account) = resolved_account {
+                    // Once we clone an account that is delegated to us we no longer need
+                    // to receive updates for it from chain
+                    // The subscription will be turned back on once the committor service schedules
+                    // a commit for it that includes undelegation
+                    if account.delegated() {
+                        if let Err(err) =
+                            remote_account_provider.unsubscribe(&pubkey).await
+                        {
+                            error!(
+                                "Failed to unsubscribe from delegated account {pubkey}: {err}"
+                            );
+                        }
+                    }
                     if account.executable() {
                         Self::handle_executable_sub_update(
-                            &cloner, pubkey, account,
+                            &remote_account_provider,
+                            &bank,
+                            &fetch_count,
+                            &cloner,
+                            pubkey,
+                            account,
                         )
                         .await;
                     } else if let Err(err) =
@@ -213,6 +232,9 @@ where
     }
 
     async fn handle_executable_sub_update(
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
+        accounts_bank: &Arc<V>,
+        fetch_count: &Arc<AtomicU64>,
         cloner: &Arc<C>,
         pubkey: Pubkey,
         account: AccountSharedData,
@@ -221,14 +243,52 @@ where
             // This is a program deployed on chain with BPFLoader1111111111111111111111111111111111.
             // By definition it cannot be upgraded, hence we should never get a subscription
             // update for it.
-            error!("Unexpected subscription update for program to load with LoaderV3: {pubkey}.");
+            error!("Unexpected subscription update for program to loaded on chain with LoaderV1: {pubkey}.");
             return;
         }
+
+        // For LoaderV3 programs we need to fetch the program data account
+        let (program_account, program_data_account) = if account
+            .owner()
+            .eq(&LOADER_V3)
+        {
+            match Self::task_to_fetch_with_program_data(
+                remote_account_provider,
+                accounts_bank,
+                fetch_count.clone(),
+                pubkey,
+                account.remote_slot(),
+            )
+            .await
+            {
+                Ok(Ok(account_with_companion)) => (
+                    account_with_companion.account.into_account_shared_data(),
+                    account_with_companion
+                        .companion_account
+                        .map(|x| x.into_account_shared_data()),
+                ),
+                Ok(Err(err)) => {
+                    error!(
+                        "Failed to fetch program data account for program {pubkey}: {err}."
+                    );
+                    return;
+                }
+                Err(err) => {
+                    error!(
+                        "Failed to fetch program data account for program {pubkey}: {err}."
+                    );
+                    return;
+                }
+            }
+        } else {
+            (account, None::<AccountSharedData>)
+        };
+
         let loaded_program = match ProgramAccountResolver::try_new(
             pubkey,
-            *account.owner(),
-            Some(account),
-            None,
+            *program_account.owner(),
+            Some(program_account),
+            program_data_account,
         ) {
             Ok(x) => x.into_loaded_program(),
             Err(err) => {
@@ -404,9 +464,18 @@ where
         }
     }
 
+    /// Tries to fetch all accounts in `pubkeys` and clone them into the bank.
+    /// If `mark_empty` is provided, accounts in that list that are
+    /// not found on chain will be added with zero lamports to the bank.
+    ///
+    /// - **pubkeys**: list of accounts to fetch and clone
+    /// - **mark_empty**: optional list of accounts that should be added as empty if not found on
+    ///   chain
+    /// - **slot**: optional slot to use as minimum context slot for the accounts being cloned
     async fn fetch_and_clone_accounts(
         &self,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
@@ -442,7 +511,7 @@ where
 
         let accs = self
             .remote_account_provider
-            .try_get_multi(pubkeys, false)
+            .try_get_multi(pubkeys, mark_empty_if_not_found)
             .await?;
 
         trace!("Fetched {accs:?}");
@@ -569,6 +638,15 @@ where
             );
         }
 
+        let (clone_as_empty, not_found) =
+            if let Some(mark_empty) = mark_empty_if_not_found {
+                not_found
+                    .into_iter()
+                    .partition::<Vec<_>, _>(|(p, _)| mark_empty.contains(p))
+            } else {
+                (vec![], not_found)
+            };
+
         // For accounts we couldn't find we cannot do anything. We will let code depending
         // on them to be in the bank fail on its own
         if !not_found.is_empty() {
@@ -586,6 +664,17 @@ where
             trace!(
                 "Accounts already in bank: {:?}",
                 in_bank
+                    .iter()
+                    .map(|(p, _)| p.to_string())
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        // We mark some accounts as empty if we know that they will never exist on chain
+        if log::log_enabled!(log::Level::Trace) && !clone_as_empty.is_empty() {
+            trace!(
+                "Cloning accounts as empty: {:?}",
+                clone_as_empty
                     .iter()
                     .map(|(p, _)| p.to_string())
                     .collect::<Vec<_>>()
@@ -764,8 +853,9 @@ where
                     *account_slot
                 };
                 fetch_with_program_data_join_set.spawn(
-                    self.task_to_fetch_with_program_data(
+                    Self::task_to_fetch_with_program_data(
                         &self.remote_account_provider,
+                        &self.accounts_bank,
                         self.fetch_count.clone(),
                         *pubkey,
                         effective_slot,
@@ -938,6 +1028,7 @@ where
     pub async fn fetch_and_clone_accounts_with_dedup(
         &self,
         pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         // We cannot clone blacklisted accounts, thus either they are already
@@ -995,7 +1086,12 @@ where
         // If we have accounts to fetch, delegate to the existing implementation
         // but notify all pending requests when done
         let result = if !fetch_new.is_empty() {
-            self.fetch_and_clone_accounts(&fetch_new, slot).await
+            self.fetch_and_clone_accounts(
+                &fetch_new,
+                mark_empty_if_not_found,
+                slot,
+            )
+            .await
         } else {
             Ok(FetchAndCloneResult {
                 not_found_on_chain: vec![],
@@ -1061,13 +1157,13 @@ where
     }
 
     fn task_to_fetch_with_program_data(
-        &self,
         remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
+        accounts_bank: &Arc<V>,
         fetch_count: Arc<AtomicU64>,
         pubkey: Pubkey,
         slot: u64,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
-        let bank = self.accounts_bank.clone();
+        let bank = accounts_bank.clone();
         let program_data_pubkey =
             get_loaderv3_get_program_data_address(&pubkey);
         Self::task_to_fetch_with_companion(
@@ -1371,10 +1467,16 @@ async fn cancel_subs<
 // -----------------
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use solana_account::{Account, AccountSharedData, WritableAccount};
+    use solana_sdk::system_program;
+    use tokio::sync::mpsc;
+
     use super::*;
     use crate::{
         accounts_bank::mock::AccountsBankStub,
-        assert_not_subscribed, assert_subscribed,
+        assert_not_cloned, assert_not_subscribed, assert_subscribed,
         assert_subscribed_without_delegation_record,
         config::LifecycleMode,
         remote_account_provider::{
@@ -1396,10 +1498,6 @@ mod tests {
             utils::random_pubkey,
         },
     };
-    use solana_account::Account;
-    use solana_account::{AccountSharedData, WritableAccount};
-    use std::{collections::HashMap, sync::Arc};
-    use tokio::sync::mpsc;
 
     macro_rules! _cloned_account {
         ($bank:expr,
@@ -1593,7 +1691,7 @@ mod tests {
             .await;
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1626,7 +1724,7 @@ mod tests {
         .await;
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[non_existing_pubkey], None)
+            .fetch_and_clone_accounts(&[non_existing_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1680,7 +1778,7 @@ mod tests {
 
         // Test fetch and clone
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1752,7 +1850,7 @@ mod tests {
         );
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -1829,7 +1927,7 @@ mod tests {
             account_owner,
         );
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[deleg_record_pubkey], None)
+            .fetch_and_clone_accounts(&[deleg_record_pubkey], None, None)
             .await;
         assert!(result.is_ok());
 
@@ -1838,7 +1936,7 @@ mod tests {
 
         // Fetch and clone the delegated account
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         assert!(result.is_ok());
@@ -1933,6 +2031,7 @@ mod tests {
                     delegated_account_pubkey,
                     delegation_record_pubkey,
                 ],
+                None,
                 None,
             )
             .await;
@@ -2035,6 +2134,7 @@ mod tests {
             .fetch_and_clone_accounts(
                 &[delegated_pubkey, invalid_delegated_pubkey],
                 None,
+                None,
             )
             .await;
 
@@ -2102,7 +2202,7 @@ mod tests {
         // Initially we should not be able to clone the account since we cannot
         // find a valid delegation record (up to date the same way the account is)
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -2118,7 +2218,7 @@ mod tests {
         // at the required slot then all is ok
         rpc_client.account_override_slot(&deleg_record_pubkey, CURRENT_SLOT);
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
         debug!("Test result after updating delegation record: {result:?}");
         assert!(result.is_ok());
@@ -2167,7 +2267,7 @@ mod tests {
         // Initially we should not be able to clone the account since the account
         // is stale (delegation record is up to date but account is behind)
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
 
         debug!("Test result: {result:?}");
@@ -2182,7 +2282,7 @@ mod tests {
         // After the RPC provider updates the account to the current slot
         rpc_client.account_override_slot(&account_pubkey, CURRENT_SLOT);
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
         debug!("Test result after updating account: {result:?}");
         assert!(result.is_ok());
@@ -2241,6 +2341,7 @@ mod tests {
                     fetch_cloner
                         .fetch_and_clone_accounts_with_dedup(
                             &[account_pubkey],
+                            None,
                             None,
                         )
                         .await
@@ -2308,6 +2409,7 @@ mod tests {
                 fetch_cloner
                     .fetch_and_clone_accounts_with_dedup(
                         &[account_pubkey],
+                        None,
                         None,
                     )
                     .await
@@ -2380,7 +2482,7 @@ mod tests {
         // Initially fetch and clone the delegated account
         // This should result in no active subscription since it's delegated to us
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None)
+            .fetch_and_clone_accounts(&[account_pubkey], None, None)
             .await;
         assert!(result.is_ok());
 
@@ -2467,7 +2569,7 @@ mod tests {
             let fetch_cloner = fetch_cloner.clone();
             tokio::spawn(async move {
                 fetch_cloner
-                    .fetch_and_clone_accounts_with_dedup(&accounts, None)
+                    .fetch_and_clone_accounts_with_dedup(&accounts, None, None)
                     .await
             })
         };
@@ -2508,6 +2610,86 @@ mod tests {
             account3,
             CURRENT_SLOT,
             account_owner
+        );
+    }
+
+    // -----------------
+    // Marked Non Existing Accounts
+    // -----------------
+    #[tokio::test]
+    async fn test_fetch_with_some_acounts_marked_as_empty_if_not_found() {
+        init_logger();
+        let validator_pubkey = random_pubkey();
+        let account_owner = random_pubkey();
+        const CURRENT_SLOT: u64 = 100;
+
+        // Create one existing account and one non-existing account
+        let existing_account_pubkey = random_pubkey();
+        let marked_non_existing_account_pubkey = random_pubkey();
+        let unmarked_non_existing_account_pubkey = random_pubkey();
+
+        let existing_account = Account {
+            lamports: 1_000_000,
+            data: vec![1, 2, 3, 4],
+            owner: account_owner,
+            executable: false,
+            rent_epoch: 0,
+        };
+        let accounts = [(existing_account_pubkey, existing_account.clone())];
+
+        let FetcherTestCtx {
+            accounts_bank,
+            fetch_cloner,
+            remote_account_provider,
+            ..
+        } = setup(accounts, CURRENT_SLOT, validator_pubkey).await;
+
+        // Configure fetch_cloner to mark some accounts as empty if not found
+        fetch_cloner
+            .fetch_and_clone_accounts(
+                &[
+                    existing_account_pubkey,
+                    marked_non_existing_account_pubkey,
+                    unmarked_non_existing_account_pubkey,
+                ],
+                Some(&[marked_non_existing_account_pubkey]),
+                None,
+            )
+            .await
+            .expect("Fetch and clone failed");
+
+        // Existing account should be cloned normally
+        assert_cloned_undelegated_account!(
+            accounts_bank,
+            existing_account_pubkey,
+            existing_account,
+            CURRENT_SLOT,
+            account_owner
+        );
+
+        // Non marked account should not be cloned
+        assert_not_cloned!(
+            accounts_bank,
+            &[unmarked_non_existing_account_pubkey]
+        );
+
+        // Marked non-existing account should be cloned as empty
+        assert_cloned_undelegated_account!(
+            accounts_bank,
+            marked_non_existing_account_pubkey,
+            Account {
+                lamports: 0,
+                data: vec![],
+                owner: Pubkey::default(),
+                executable: false,
+                rent_epoch: 0,
+            },
+            CURRENT_SLOT,
+            system_program::id()
+        );
+        assert_subscribed_without_delegation_record!(
+            remote_account_provider,
+            &[&marked_non_existing_account_pubkey]
         );
     }
 }

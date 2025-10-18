@@ -2,12 +2,15 @@ use std::{path::Path, process::Child};
 
 use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
+    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    validator::cleanup,
 };
-use magicblock_config::LedgerResumeStrategy;
-use solana_sdk::pubkey::Pubkey;
+use log::*;
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
+use test_kit::init_logger;
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,
+    airdrop_and_delegate_accounts, setup_validator_with_local_remote,
+    transfer_lamports, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,
     TMP_DIR_LEDGER,
 };
 
@@ -20,73 +23,119 @@ use test_ledger_restore::{
 // flushed.
 
 #[test]
-fn restore_ledger_with_two_airdrops_with_account_flush_in_between() {
+fn test_restore_ledger_with_two_airdrops_with_account_flush_in_between() {
+    init_logger!();
+
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
-    let pubkey = Pubkey::new_unique();
-
-    let (mut validator, slot) = write(&ledger_path, &pubkey);
+    let (mut validator, slot, keypair) = write(&ledger_path);
     validator.kill().unwrap();
 
     assert!(slot > SNAPSHOT_FREQUENCY);
 
-    let mut validator = read(&ledger_path, &pubkey);
+    let mut validator = read(&ledger_path, &keypair.pubkey());
     validator.kill().unwrap();
 }
 
-fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64) {
-    let (_, mut validator, ctx) = setup_offline_validator(
+fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
-        None,
-        LedgerResumeStrategy::Reset {
-            slot: 0,
-            keep_accounts: false,
-        },
-        false,
+        true,
+        true,
+        &LoadedAccounts::default(),
     );
 
-    // First airdrop followed by wait until account is flushed
-    {
-        expect!(ctx.airdrop_ephem(pubkey, 1_111_111), validator);
-        let lamports =
-            expect!(ctx.fetch_ephem_account_balance(pubkey), validator);
-        assert_eq!(lamports, 1_111_111, cleanup(&mut validator));
+    // Wait to make sure we don't process transactions on slot 0
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
 
-        // Snapshot frequency is set to 2 slots for the offline validator
+    // Airdrop and delegate account on chain
+    let mut keypairs = airdrop_and_delegate_accounts(
+        &ctx,
+        &mut validator,
+        &[1_111_111, 1_000_000],
+    );
+    let transfer_payer = keypairs.drain(0..1).next().unwrap();
+    let transfer_receiver = keypairs.drain(0..1).next().unwrap();
+    debug!(
+        "✅ Airdropped and delegated payer {} and receiver {} on chain",
+        transfer_payer.pubkey(),
+        transfer_receiver.pubkey()
+    );
+
+    // First transfer followed by wait until account is flushed
+    {
+        transfer_lamports(
+            &ctx,
+            &mut validator,
+            &transfer_payer,
+            &transfer_receiver.pubkey(),
+            111,
+        );
+        let lamports = expect!(
+            ctx.fetch_ephem_account_balance(&transfer_receiver.pubkey()),
+            validator
+        );
+        assert_eq!(lamports, 1_000_111, cleanup(&mut validator));
+        debug!(
+            "✅ First transfer complete, balance {} now has {} lamports",
+            transfer_receiver.pubkey(),
+            lamports
+        );
+
+        // Snapshot frequency is set to 2 slots for the validator
         expect!(
             ctx.wait_for_delta_slot_ephem(SNAPSHOT_FREQUENCY + 1),
             validator
         );
+        debug!("✅ Waited for account flush after first transfer");
     }
-    // Second airdrop
-    {
-        expect!(ctx.airdrop_ephem(pubkey, 2_222_222), validator);
-        let lamports =
-            expect!(ctx.fetch_ephem_account_balance(pubkey), validator);
-        assert_eq!(lamports, 3_333_333, cleanup(&mut validator));
-    }
-    let slot = wait_for_ledger_persist(&mut validator);
 
-    (validator, slot)
+    // Second transfer
+    {
+        transfer_lamports(
+            &ctx,
+            &mut validator,
+            &transfer_payer,
+            &transfer_receiver.pubkey(),
+            111_000,
+        );
+        let lamports = expect!(
+            ctx.fetch_ephem_account_balance(&transfer_receiver.pubkey()),
+            validator
+        );
+        assert_eq!(lamports, 1_111_111, cleanup(&mut validator));
+        debug!(
+            "✅ Second transfer complete, balance {} now has {} lamports",
+            transfer_receiver.pubkey(),
+            lamports
+        );
+    }
+
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
+    debug!("✅ Ledger persisted at slot {}", slot);
+
+    (validator, slot, transfer_receiver)
 }
 
 fn read(ledger_path: &Path, pubkey: &Pubkey) -> Child {
     // Measure time
-    let _ = std::time::Instant::now();
-    let (_, mut validator, ctx) = setup_offline_validator(
+    let start = std::time::Instant::now();
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
-        None,
-        LedgerResumeStrategy::Resume { replay: true },
         false,
+        false,
+        &LoadedAccounts::default(),
     );
-    eprintln!(
-        "Validator started in {:?}",
-        std::time::Instant::now().elapsed()
-    );
+    debug!("✅ Validator started in {:?}", start.elapsed());
 
     let lamports = expect!(ctx.fetch_ephem_account_balance(pubkey), validator);
-    assert_eq!(lamports, 3_333_333, cleanup(&mut validator));
+    assert_eq!(lamports, 1_111_111, cleanup(&mut validator));
+    debug!(
+        "✅ Verified account {} has {} lamports after restore",
+        pubkey, lamports
+    );
+
     validator
 }

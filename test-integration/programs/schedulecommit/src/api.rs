@@ -14,11 +14,13 @@ use crate::{
 
 pub fn init_account_instruction(
     payer: Pubkey,
+    player: Pubkey,
     committee: Pubkey,
 ) -> Instruction {
     let program_id = crate::id();
     let account_metas = vec![
         AccountMeta::new(payer, true),
+        AccountMeta::new(player, true),
         AccountMeta::new(committee, false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];
@@ -53,7 +55,10 @@ pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
     [top_up_ix, delegate_ix]
 }
 
-pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
+pub fn delegate_account_cpi_instruction(
+    payer: Pubkey,
+    player: Pubkey,
+) -> Instruction {
     let program_id = crate::id();
     let (pda, _) = pda_and_bump(&player);
 
@@ -66,7 +71,7 @@ pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
     let delegate_accounts = DelegateAccounts::new(pda, program_id);
     let delegate_metas = DelegateAccountMetas::from(delegate_accounts);
     let account_metas = vec![
-        AccountMeta::new(player, true),
+        AccountMeta::new(payer, true),
         delegate_metas.delegated_account,
         delegate_metas.owner_program,
         delegate_metas.delegate_buffer,

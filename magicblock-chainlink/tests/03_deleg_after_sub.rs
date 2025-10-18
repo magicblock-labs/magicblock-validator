@@ -1,17 +1,16 @@
 use log::*;
-use magicblock_chainlink::testing::deleg::add_delegation_record_for;
-use magicblock_chainlink::testing::init_logger;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_subscribed,
     assert_subscribed_without_delegation_record,
+    testing::{deleg::add_delegation_record_for, init_logger},
 };
 use solana_account::Account;
-use solana_sdk::clock::Slot;
-use utils::accounts::account_shared_with_owner_and_slot;
-use utils::test_context::TestContext;
-
 use solana_pubkey::Pubkey;
+use solana_sdk::clock::Slot;
+use utils::{
+    accounts::account_shared_with_owner_and_slot, test_context::TestContext,
+};
 
 mod utils;
 
@@ -54,7 +53,7 @@ async fn test_deleg_after_subscribe_case2() {
         info!("1. Initially the account does not exist");
         assert_not_cloned!(cloner, &[pubkey]);
 
-        chainlink.ensure_accounts(&[pubkey]).await.unwrap();
+        chainlink.ensure_accounts(&[pubkey], None).await.unwrap();
         assert_not_cloned!(cloner, &[pubkey]);
     }
 
@@ -76,7 +75,7 @@ async fn test_deleg_after_subscribe_case2() {
             .await;
         assert!(!updated);
 
-        chainlink.ensure_accounts(&[pubkey]).await.unwrap();
+        chainlink.ensure_accounts(&[pubkey], None).await.unwrap();
         assert_cloned_as_undelegated!(cloner, &[pubkey], slot, program_pubkey);
         assert_subscribed_without_delegation_record!(&chainlink, &[&pubkey]);
     }

@@ -11,4 +11,8 @@ pub trait PersistsAccountModData: Sync + Send + fmt::Display + 'static {
 pub trait AccountsBank: Send + Sync + 'static {
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
     fn remove_account(&self, pubkey: &Pubkey);
+    fn remove_where(
+        &self,
+        predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+    ) -> usize;
 }

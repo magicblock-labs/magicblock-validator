@@ -243,7 +243,8 @@ impl LedgerTrunctationWorker {
 
         // Compaction can be run concurrently for different cf
         // but it utilizes rocksdb threads, in order not to drain
-        // our tokio rt threads, we split the effort in just 3 tasks
+        // our tokio rt threads, we split offload the effort to a
+        // separate thread
         let mut measure = Measure::start("Manual compaction");
         let ledger = ledger.clone();
         let compaction = tokio::task::spawn_blocking(move || {
@@ -269,9 +270,12 @@ impl LedgerTrunctationWorker {
             ledger.compact_slot_range_cf::<AddressSignatures>(None, None);
         });
 
-        let _ = compaction.await;
         measure.stop();
-        info!("Manual compaction took: {measure}");
+        if let Err(error) = compaction.await {
+            error!("compaction aborted: {error}");
+        } else {
+            info!("Manual compaction took: {measure}");
+        }
     }
 }
 

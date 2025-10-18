@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 
 use log::{Level::Trace, *};
 use magicblock_accounts_db::AccountsDb;
@@ -141,14 +141,14 @@ async fn replay_blocks(
         }
         slot += 1;
     }
-    Ok(slot.max(1))
+    Ok(slot + 1)
 }
 
 /// Processes the provided ledger updating the bank and returns the slot
 /// at which the validator should continue processing (last processed slot + 1).
 pub async fn process_ledger(
     ledger: &Ledger,
-    accountsdb: &AccountsDb,
+    accountsdb: &Arc<AccountsDb>,
     transaction_scheduler: TransactionSchedulerHandle,
     max_age: u64,
 ) -> LedgerResult<u64> {
@@ -167,7 +167,7 @@ pub async fn process_ledger(
         "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
         blockhashes_only_starting_slot, full_process_starting_slot
     );
-    replay_blocks(
+    let slot = replay_blocks(
         IterBlocksParams {
             ledger,
             full_process_starting_slot,
@@ -175,5 +175,7 @@ pub async fn process_ledger(
         },
         transaction_scheduler,
     )
-    .await
+    .await?;
+    accountsdb.set_slot(slot);
+    Ok(slot)
 }

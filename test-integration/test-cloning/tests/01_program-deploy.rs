@@ -46,14 +46,13 @@ macro_rules! check_v4_program_status {
     };
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_clone_memo_v1_loader_program() {
+#[test]
+fn test_clone_memo_v1_loader_program() {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
     let payer = Keypair::new();
     ctx.airdrop_chain_escrowed(&payer, LAMPORTS_PER_SOL)
-        .await
         .unwrap();
     let msg = "Hello World";
     let ix =
@@ -64,15 +63,14 @@ async fn test_clone_memo_v1_loader_program() {
     assert!(found);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_clone_mini_v2_loader_program() {
+#[test]
+fn test_clone_mini_v2_loader_program() {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
     let sdk = MiniSdk::new(MINIV2);
     let payer = Keypair::new();
     ctx.airdrop_chain_escrowed(&payer, LAMPORTS_PER_SOL)
-        .await
         .unwrap();
 
     let program = ctx.fetch_ephem_account(MINIV2).unwrap();
@@ -88,15 +86,14 @@ async fn test_clone_mini_v2_loader_program() {
     assert_tx_logs!(ctx, sig, msg);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_clone_mini_v3_loader_program() {
+#[test]
+fn test_clone_mini_v3_loader_program() {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
     let sdk = MiniSdk::new(MINIV3);
     let payer = Keypair::new();
     ctx.airdrop_chain_escrowed(&payer, LAMPORTS_PER_SOL)
-        .await
         .unwrap();
     let msg = "Hello World";
     let ix = sdk.log_msg_instruction(&payer.pubkey(), msg);
@@ -123,7 +120,6 @@ async fn test_clone_mini_v4_loader_program_and_upgrade() {
     // Setting up escrowed payer
     let payer = Keypair::new();
     ctx.airdrop_chain_escrowed(&payer, LAMPORTS_PER_SOL)
-        .await
         .unwrap();
 
     let sdk = MiniSdk::new(prog_kp.pubkey());
@@ -170,6 +166,8 @@ async fn test_clone_mini_v4_loader_program_and_upgrade() {
             false,
         )
         .await;
+
+        ctx.wait_for_next_slot_ephem().unwrap();
 
         let msg = "Hola Mundo";
         let ix = sdk.log_msg_instruction(&payer.pubkey(), msg);

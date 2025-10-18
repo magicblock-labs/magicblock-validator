@@ -17,6 +17,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+use super::Shutdown;
 use crate::{
     error::RpcError,
     state::{
@@ -25,8 +26,6 @@ use crate::{
     },
     RpcResult,
 };
-
-use super::Shutdown;
 
 /// The main WebSocket server.
 ///

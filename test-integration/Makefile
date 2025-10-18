@@ -27,13 +27,15 @@ list:
 list-programs:
 	@echo $(PROGRAMS_SO)
 
+programs: $(PROGRAMS_SO)
+
 test: $(PROGRAMS_SO)
 	$(MAKE) chainlink-prep-programs -C ./test-chainlink && \
 	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \
 	cargo run --package test-runner --bin run-tests
 
-test-force-mb: $(PROGRAMS_SO) test-ledger-restore
+test-force-mb: $(PROGRAMS_SO)
 	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
 	cargo run --package test-runner --bin run-tests
@@ -46,23 +48,14 @@ setup-schedulecommit-devnet:
 	RUN_TESTS=schedulecommit \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-schedulecommit-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=schedulecommit \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-schedulecommit-both:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedulecommit \
-	SETUP_ONLY=both \
-	$(MAKE) test
-
-test-issues-frequent-commits:
-	RUN_TESTS=issues_frequent_commits \
-	$(MAKE) test
-setup-issues-frequent-commits-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=issues_frequent_commits \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
-setup-issues-frequent-commits-both:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=issues_frequent_commits \
 	SETUP_ONLY=both \
 	$(MAKE) test
 
@@ -110,6 +103,11 @@ setup-magicblock-api-devnet:
 	RUN_TESTS=magicblock_api \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-magicblock-api-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=magicblock_api \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-magicblock-api-both:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=magicblock_api \
@@ -137,10 +135,20 @@ setup-committor-devnet:
 test-pubsub:
 	RUN_TESTS=pubsub \
 	$(MAKE) test
+setup-pubsub-devnet:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=pubsub \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
 setup-pubsub-ephem:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=pubsub \
 	SETUP_ONLY=ephem \
+	$(MAKE) test
+setup-pubsub-both:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=pubsub \
+	SETUP_ONLY=both \
 	$(MAKE) test
 
 test-config:
@@ -160,10 +168,23 @@ setup-schedule-intents-devnet:
 	RUN_TESTS=schedule_intents \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-schedule-intents-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=schedule_intents \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-schedule-intents-both:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedule_intents \
 	SETUP_ONLY=both \
+	$(MAKE) test
+
+test-task-scheduler:
+	RUN_TESTS=task-scheduler \
+	$(MAKE) test
+setup-task-scheduler-devnet:
+	RUN_TESTS=task-scheduler \
+	SETUP_ONLY=devnet \
 	$(MAKE) test
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
@@ -195,4 +216,45 @@ ci-fmt:
 ci-lint:
 	cargo clippy --all-targets -- -D warnings
 
-.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-chainlink setup-chainlink-devnet test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list ci-fmt ci-lint
+.PHONY: \
+	ci-fmt \
+	ci-lint \
+	deploy-flexi-counter \
+	fmt \
+	list \
+	list-programs \
+	programs \
+	setup-chainlink-devnet \
+	setup-cloning-both \
+	setup-cloning-devnet \
+	setup-cloning-ephem \
+	setup-committor-devnet \
+	setup-config-devnet \
+	setup-magicblock-api-both \
+	setup-magicblock-api-devnet \
+	setup-magicblock-api-ephem \
+	setup-pubsub-both \
+	setup-pubsub-devnet \
+	setup-pubsub-ephem \
+	setup-restore-ledger-devnet \
+	setup-schedule-intents-both \
+	setup-schedule-intents-devnet \
+	setup-schedule-intents-ephem \
+	setup-schedulecommit-both \
+	setup-schedulecommit-devnet \
+	setup-schedulecommit-ephem \
+	setup-table-mania-devnet \
+	setup-task-scheduler-devnet \
+	test \
+	test-chainlink \
+	test-cloning \
+	test-committor \
+	test-config \
+	test-force-mb \
+	test-magicblock-api \
+	test-pubsub \
+	test-restore-ledger \
+	test-schedule-intents \
+	test-schedulecommit \
+	test-table-mania \
+	test-task-scheduler

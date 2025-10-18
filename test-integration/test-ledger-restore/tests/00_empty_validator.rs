@@ -12,7 +12,7 @@ use test_ledger_restore::{
 // in that case.
 
 #[test]
-fn restore_ledger_empty_validator() {
+fn test_restore_ledger_empty_validator() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _) = write(&ledger_path);
@@ -24,7 +24,7 @@ fn restore_ledger_empty_validator() {
 
 fn write(ledger_path: &Path) -> (Child, u64) {
     // Launch a validator and airdrop to an account
-    let (_, mut validator, _) = setup_validator_with_local_remote(
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
         true,
@@ -32,7 +32,7 @@ fn write(ledger_path: &Path) -> (Child, u64) {
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
     validator.kill().unwrap();
     (validator, slot)

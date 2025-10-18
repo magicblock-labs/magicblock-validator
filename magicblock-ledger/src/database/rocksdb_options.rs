@@ -9,19 +9,23 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     options.create_if_missing(true);
     options.create_missing_column_families(true);
 
-    // Per the docs, a good value for this is the number of cores on the machine
-    options.increase_parallelism(num_cpus::get() as i32);
-
     // Background thread prioritization: give flushes more threads, limit compaction threads (low-priority)
     let mut env = rocksdb::Env::new().unwrap();
     let cpus_env = num_cpus::get() as i32;
-    // Low-priority threads are used for compaction. Keep them small to favor foreground writes.
-    let low_pri = (cpus_env / 4).clamp(1, 2);
-    env.set_background_threads(low_pri);
+
+    // Bottom-priority are used for bottommost compactions. Keep it minimal - 1
+    let bottom_pri = 1;
+    env.set_bottom_priority_background_threads(bottom_pri);
     // High-priority threads are used for flush. Keep a few to avoid memtable flush backlog.
     let high_pri = cpus_env.clamp(2, 4);
     env.set_high_priority_background_threads(high_pri);
     options.set_env(&env);
+
+    // For every job RocksDB picks a thread from available pools
+    // Here we select ceiling so RocksDB doesn't use all of HIGH + LOW + BOTTOM threads
+    // By default num of threads in LOW is 1
+    let max_jobs = std::cmp::max(high_pri + 1, bottom_pri);
+    options.set_max_background_jobs(max_jobs);
 
     // Bound WAL size
     options.set_max_total_wal_size(4 * 1024 * 1024 * 1024);
@@ -44,13 +48,6 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     options.set_enable_pipelined_write(true);
     options.set_enable_write_thread_adaptive_yield(true);
 
-    // Background jobs: enough to keep up, not to starve CPU
-    // Cap at 8 or number of CPUs, whichever is smaller but at least 4
-    let cpus = num_cpus::get() as i32;
-    let max_jobs = cpus.clamp(4, 8);
-    options.set_max_background_jobs(max_jobs);
-    options.set_max_subcompactions(2);
-
     // Use direct IO for compaction/flush to avoid page cache contention
     options.set_use_direct_reads(true);
     options.set_use_direct_io_for_flush_and_compaction(true);
@@ -60,10 +57,6 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     // RateLimiter parameters: rate_bytes_per_sec, refill_period_us, fairness
     // Start with a conservative 128 MiB/s, adjustable via config later if needed
     options.set_ratelimiter(128 * 1024 * 1024, 100 * 1000, 10);
-
-    // Prevent large compactions from monopolizing resources
-    options.set_soft_pending_compaction_bytes_limit(8 * 1024 * 1024 * 1024); // 8 GiB
-    options.set_hard_pending_compaction_bytes_limit(32 * 1024 * 1024 * 1024); // 32 GiB
 
     // Dynamic level bytes is a good default to balance levels
     options.set_level_compaction_dynamic_level_bytes(true);

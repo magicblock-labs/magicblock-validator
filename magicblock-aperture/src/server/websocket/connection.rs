@@ -19,15 +19,14 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+use super::{
+    dispatch::{WsDispatchResult, WsDispatcher},
+    ConnectionState,
+};
 use crate::{
     error::RpcError,
     requests::payload::{ResponseErrorPayload, ResponsePayload},
     server::{websocket::dispatch::WsConnectionChannel, Shutdown},
-};
-
-use super::{
-    dispatch::{WsDispatchResult, WsDispatcher},
-    ConnectionState,
 };
 
 /// A type alias for the underlying WebSocket stream provided by `fastwebsockets`.

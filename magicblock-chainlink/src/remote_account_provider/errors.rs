@@ -32,7 +32,7 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to send message to pubsub actor: {0} ({1})")]
     ChainPubsubActorSendError(String, String),
 
-    #[error("Failed to setup an account subscriptions ({0})")]
+    #[error("Failed to setup an account subscription ({0})")]
     AccountSubscriptionsFailed(String),
 
     #[error("Failed to resolve accounts ({0})")]

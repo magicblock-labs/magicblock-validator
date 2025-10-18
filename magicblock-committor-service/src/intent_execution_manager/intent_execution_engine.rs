@@ -246,7 +246,10 @@ where
             .execute(intent.inner.clone(), persister)
             .await
             .inspect_err(|err| {
-                error!("Failed to execute BaseIntent: {:?}", err)
+                error!(
+                    "Failed to execute BaseIntent. id: {}. {:?}",
+                    intent.id, err
+                )
             })
             .map(|output| ExecutionOutputWrapper {
                 id: intent.id,
@@ -292,9 +295,7 @@ mod tests {
     };
 
     use async_trait::async_trait;
-    use magicblock_program::magic_scheduled_base_intent::{
-        CommittedAccount, ScheduledBaseIntent,
-    };
+    use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
     use solana_pubkey::{pubkey, Pubkey};
     use solana_sdk::{signature::Signature, signer::SignerError};
     use tokio::{sync::mpsc, time::sleep};
@@ -732,10 +733,10 @@ mod tests {
     impl TaskInfoFetcher for MockInfoFetcher {
         async fn fetch_next_commit_ids(
             &self,
-            pubkeys: &[CommittedAccount],
+            pubkeys: &[Pubkey],
             _compressed: bool,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys.iter().map(|k| (k.pubkey, 1)).collect())
+            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 1)).collect())
         }
 
         async fn fetch_rent_reimbursements(

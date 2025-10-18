@@ -11,7 +11,6 @@ members = [
   "schedulecommit/test-security",
   "test-chainlink",
   "test-cloning",
-  "test-issues",
   "test-ledger-restore",
   "test-magicblock-api",
   "test-runner",
@@ -20,6 +19,7 @@ members = [
   "test-pubsub",
   "test-config",
   "test-schedule-intent",
+  "test-task-scheduler",
 ]
 resolver = "2"
 
@@ -32,10 +32,12 @@ anyhow = "1.0.86"
 async-trait = "0.1.77"
 bincode = "1.3.3"
 borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
+chrono = "0.4"
 cleanass = "0.0.1"
+color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "54fe6f8" }
-futures = "0.3"
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "faad3eb3b44cba9f80ca059297b91053f64def27" }
+futures = "0.3.31"
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"
@@ -54,6 +56,7 @@ magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
+magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = [
   "no-entrypoint",
 ] }
@@ -66,11 +69,12 @@ program-mini = { path = "./programs/mini" }
 program-schedulecommit = { path = "programs/schedulecommit" }
 program-schedulecommit-security = { path = "programs/schedulecommit-security" }
 rand = "0.8.5"
+random-port = "0.1.1"
 rayon = "1.10.0"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
-# solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "a892d2a" }
-solana-account = { path = "../../solana-account" }
+serial_test = "3.2.0"
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "a892d2a" }
 solana-loader-v2-interface = "2.2"
 solana-loader-v3-interface = "4.0"
 solana-loader-v4-interface = "2.1"

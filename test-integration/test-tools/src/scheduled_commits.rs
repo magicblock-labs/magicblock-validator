@@ -152,7 +152,7 @@ where
     ) -> Result<()> {
         for sig in &self.sigs {
             let confirmed =
-                ctx.confirm_transaction_chain(sig).with_context(|| {
+                ctx.confirm_transaction_chain(sig, None).with_context(|| {
                     format!(
                         "Transaction with sig {:?} confirmation on chain failed",
                         sig

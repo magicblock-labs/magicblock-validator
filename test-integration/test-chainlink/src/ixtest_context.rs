@@ -137,7 +137,13 @@ impl IxtestContext {
                 _ => (None, None),
             }
         };
-        let chainlink = Chainlink::try_new(&bank, fetch_cloner).unwrap();
+        let chainlink = Chainlink::try_new(
+            &bank,
+            fetch_cloner,
+            validator_kp.pubkey(),
+            faucet_kp.pubkey(),
+        )
+        .unwrap();
 
         let rpc_client = IxtestContext::get_rpc_client(commitment);
         Self {
@@ -285,7 +291,7 @@ impl IxtestContext {
         let counter_pda = self.counter_pda(&counter_auth.pubkey());
         // The committor service will call this in order to have
         // chainlink subscribe to account updates of the counter account
-        self.chainlink.undelegation_requested(&counter_pda).await;
+        self.chainlink.undelegation_requested(counter_pda).await;
 
         // In order to make the account undelegatable we first need to
         // commmit and finalize

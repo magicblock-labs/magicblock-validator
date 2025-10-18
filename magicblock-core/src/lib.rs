@@ -15,5 +15,4 @@ macro_rules! debug_panic {
 
 pub mod compression;
 pub mod link;
-pub mod magic_program;
 pub mod traits;

@@ -2,12 +2,11 @@ use solana_rpc_client_api::config::{
     RpcAccountInfoConfig, RpcTokenAccountsFilter,
 };
 
+use super::prelude::*;
 use crate::{
     requests::http::{SPL_DELEGATE_OFFSET, SPL_MINT_OFFSET, TOKEN_PROGRAM_ID},
     utils::{ProgramFilter, ProgramFilters},
 };
-
-use super::prelude::*;
 
 impl HttpDispatcher {
     /// Handles the `getTokenAccountsByDelegate` RPC request.

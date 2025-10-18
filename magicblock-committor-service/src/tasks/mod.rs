@@ -1,57 +1,56 @@
-use compressed_delegation_client::types::{CommitArgs, FinalizeArgs};
-use dlp::args::{
-    CallHandlerArgs, CommitStateArgs, CommitStateFromBufferArgs, Context,
-};
+use dlp::args::Context;
 use dyn_clone::DynClone;
-use log::debug;
 use magicblock_committor_program::{
     instruction_builder::{
+        close_buffer::{create_close_ix, CreateCloseIxArgs},
         init_buffer::{create_init_ix, CreateInitIxArgs},
         realloc_buffer::{
             create_realloc_buffer_ixs, CreateReallocBufferIxArgs,
         },
         write_buffer::{create_write_ix, CreateWriteIxArgs},
     },
-    ChangesetChunks, Chunks,
+    pdas, ChangesetChunks, Chunks,
 };
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::instruction::{AccountMeta, Instruction};
+use solana_sdk::instruction::Instruction;
+use thiserror::Error;
 
-use crate::{
-    consts::MAX_WRITE_CHUNK_SIZE,
-    tasks::{task_builder::CompressedData, visitor::Visitor},
-};
+use crate::tasks::{task_builder::CompressedData, visitor::Visitor};
 
+pub mod args_task;
+pub mod buffer_task;
 pub mod task_builder;
 pub mod task_strategist;
 pub(crate) mod task_visitors;
 pub mod utils;
 pub mod visitor;
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TaskType {
+    Commit,
+    CompressedCommit,
+    Finalize,
+    CompressedFinalize,
+    Undelegate,
+    CompressedUndelegate,
+    Action,
+}
+
+#[derive(Clone, Debug)]
+pub enum PreparationState {
+    NotNeeded,
+    Required(PreparationTask),
+    Cleanup(CleanupTask),
+}
+
+#[cfg(test)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TaskStrategy {
     Args,
     Buffer,
-}
-
-#[derive(Clone, Debug)]
-pub struct BufferPreparationInfo {
-    pub commit_id: u64,
-    pub pubkey: Pubkey,
-    pub chunks_pda: Pubkey,
-    pub buffer_pda: Pubkey,
-    pub init_instruction: Instruction,
-    pub realloc_instructions: Vec<Instruction>,
-    pub write_instructions: Vec<Instruction>,
-}
-
-#[derive(Clone, Debug)]
-pub enum TaskPreparationInfo {
-    Buffer(BufferPreparationInfo),
-    Compressed,
 }
 
 /// A trait representing a task that can be executed on Base layer
@@ -73,18 +72,25 @@ pub trait BaseTask: Send + Sync + DynClone {
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>>;
 
-    /// Returns [`TaskPreparationInfo`] if task needs to be prepared before executing,
+    /// Returns [`PreparationTask`] if task needs to be prepared before executing,
     /// otherwise returns None
-    fn preparation_info(
-        &self,
-        authority_pubkey: &Pubkey,
-    ) -> Option<TaskPreparationInfo>;
+    fn preparation_state(&self) -> &PreparationState;
+
+    /// Switched [`PreparationTask`] to a new one
+    fn switch_preparation_state(
+        &mut self,
+        new_state: PreparationState,
+    ) -> BaseTaskResult<()>;
 
     /// Returns [`Task`] budget
     fn compute_units(&self) -> u32;
 
     /// Returns current [`TaskStrategy`]
+    #[cfg(test)]
     fn strategy(&self) -> TaskStrategy;
+
+    /// Returns [`TaskType`]
+    fn task_type(&self) -> TaskType;
 
     /// Calls [`Visitor`] with specific task type
     fn visit(&self, visitor: &mut dyn Visitor);
@@ -100,6 +106,9 @@ pub trait BaseTask: Send + Sync + DynClone {
 
     /// Delegated account for task
     fn delegated_account(&self) -> Option<Pubkey>;
+
+    /// Resets commit id
+    fn reset_commit_id(&mut self, commit_id: u64);
 }
 
 dyn_clone::clone_trait_object!(BaseTask);
@@ -162,360 +171,187 @@ pub enum ArgsTask {
     BaseAction(BaseActionTask),
 }
 
-impl BaseTask for ArgsTask {
-    fn instruction(&self, validator: &Pubkey) -> Instruction {
-        match self {
-            Self::Commit(value) => {
-                debug!("CommitTask");
-                let args = CommitStateArgs {
-                    nonce: value.commit_id,
-                    lamports: value.committed_account.account.lamports,
-                    data: value.committed_account.account.data.clone(),
-                    allow_undelegation: value.allow_undelegation,
-                };
-                dlp::instruction_builder::commit_state(
-                    *validator,
-                    value.committed_account.pubkey,
-                    value.committed_account.account.owner,
-                    args,
-                )
-            }
-            Self::CompressedCommit(value) => {
-                debug!("CompressedCommitTask");
-                compressed_delegation_client::CommitBuilder::new()
-                    .validator(*validator)
-                    .delegated_account(value.committed_account.pubkey)
-                    .args(CommitArgs {
-                        current_compressed_delegated_account_data: value
-                            .compressed_data
-                            .compressed_delegation_record_bytes
-                            .clone(),
-                        new_data: value.committed_account.account.data.clone(),
-                        account_meta: value.compressed_data.account_meta,
-                        validity_proof: value.compressed_data.proof,
-                        update_nonce: value.commit_id,
-                        allow_undelegation: value.allow_undelegation,
-                    })
-                    .add_remaining_accounts(
-                        &value.compressed_data.remaining_accounts,
-                    )
-                    .instruction()
-            }
-            Self::Finalize(value) => {
-                debug!("FinalizeTask");
-                dlp::instruction_builder::finalize(
-                    *validator,
-                    value.delegated_account,
-                )
-            }
-            Self::CompressedFinalize(value) => {
-                debug!("CompressedFinalizeTask");
-                compressed_delegation_client::FinalizeBuilder::new()
-                    .validator(*validator)
-                    .delegated_account(value.delegated_account)
-                    .args(FinalizeArgs {
-                        current_compressed_delegated_account_data: value
-                            .compressed_data
-                            .compressed_delegation_record_bytes
-                            .clone(),
-                        account_meta: value.compressed_data.account_meta,
-                        validity_proof: value.compressed_data.proof,
-                    })
-                    .add_remaining_accounts(
-                        &value.compressed_data.remaining_accounts,
-                    )
-                    .instruction()
-            }
-            Self::CompressedUndelegate(value) => {
-                debug!("CompressedUndelegateTask");
-                compressed_delegation_client::UndelegateBuilder::new()
-                    // .validator(*validator)
-                    .delegated_account(value.delegated_account)
-                    // .owner_program(value.owner_program)
-                    // .rent_reimbursement(value.rent_reimbursement)
-                    .add_remaining_accounts(
-                        &value.compressed_data.remaining_accounts,
-                    )
-                    .instruction()
-            }
-            Self::Undelegate(value) => {
-                debug!("UndelegateTask");
-                dlp::instruction_builder::undelegate(
-                    *validator,
-                    value.delegated_account,
-                    value.owner_program,
-                    value.rent_reimbursement,
-                )
-            }
-            Self::BaseAction(value) => {
-                debug!("BaseActionTask");
-                let action = &value.action;
-                let account_metas = action
-                    .account_metas_per_program
-                    .iter()
-                    .map(|short_meta| AccountMeta {
-                        pubkey: short_meta.pubkey,
-                        is_writable: short_meta.is_writable,
-                        is_signer: false,
-                    })
-                    .collect();
-                dlp::instruction_builder::call_handler(
-                    *validator,
-                    action.destination_program,
-                    action.escrow_authority,
-                    account_metas,
-                    CallHandlerArgs {
-                        context: value.context,
-                        data: action.data_per_program.data.clone(),
-                        escrow_index: action.data_per_program.escrow_index,
-                    },
-                )
-            }
-        }
-    }
+#[derive(Clone, Debug)]
+pub struct BufferPreparationTask {
+    pub commit_id: u64,
+    pub pubkey: Pubkey,
+    pub chunks: Chunks,
 
-    fn optimize(
-        self: Box<Self>,
-    ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
-        match *self {
-            Self::Commit(value) => Ok(Box::new(BufferTask::Commit(value))),
-            Self::BaseAction(_)
-            | Self::Finalize(_)
-            | Self::Undelegate(_)
-            | Self::CompressedCommit(_)
-            | Self::CompressedFinalize(_)
-            | Self::CompressedUndelegate(_) => Err(self),
-        }
-    }
-
-    fn preparation_info(&self, _: &Pubkey) -> Option<TaskPreparationInfo> {
-        match self {
-            Self::Commit(_)
-            | Self::BaseAction(_)
-            | Self::Finalize(_)
-            | Self::Undelegate(_) => None,
-            Self::CompressedCommit(_)
-            | Self::CompressedFinalize(_)
-            | Self::CompressedUndelegate(_) => {
-                Some(TaskPreparationInfo::Compressed)
-            }
-        }
-    }
-
-    fn compute_units(&self) -> u32 {
-        match self {
-            Self::Commit(_) => 65_000,
-            Self::CompressedCommit(_) => 150_000,
-            Self::BaseAction(task) => task.action.compute_units,
-            Self::Undelegate(_) => 50_000,
-            Self::CompressedUndelegate(_) => 150_000,
-            Self::Finalize(_) => 40_000,
-            Self::CompressedFinalize(_) => 150_000,
-        }
-    }
-
-    fn strategy(&self) -> TaskStrategy {
-        TaskStrategy::Args
-    }
-
-    /// For tasks using Args strategy call corresponding `Visitor` method
-    fn visit(&self, visitor: &mut dyn Visitor) {
-        visitor.visit_args_task(self);
-    }
-
-    fn is_compressed(&self) -> bool {
-        match self {
-            Self::CompressedCommit(_)
-            | Self::CompressedFinalize(_)
-            | Self::CompressedUndelegate(_) => true,
-            _ => false,
-        }
-    }
-
-    fn set_compressed_data(&mut self, compressed_data: CompressedData) {
-        match self {
-            Self::CompressedCommit(value) => {
-                value.compressed_data = compressed_data;
-            }
-            Self::CompressedFinalize(value) => {
-                value.compressed_data = compressed_data;
-            }
-            Self::CompressedUndelegate(value) => {
-                value.compressed_data = compressed_data;
-            }
-            _ => {}
-        }
-    }
-
-    fn get_compressed_data(&self) -> Option<CompressedData> {
-        match self {
-            Self::CompressedCommit(value) => {
-                Some(value.compressed_data.clone())
-            }
-            Self::CompressedFinalize(value) => {
-                Some(value.compressed_data.clone())
-            }
-            Self::CompressedUndelegate(value) => {
-                Some(value.compressed_data.clone())
-            }
-            _ => None,
-        }
-    }
-
-    fn delegated_account(&self) -> Option<Pubkey> {
-        match self {
-            Self::Commit(value) => Some(value.committed_account.pubkey),
-            Self::CompressedCommit(value) => {
-                Some(value.committed_account.pubkey)
-            }
-            Self::Finalize(value) => Some(value.delegated_account),
-            Self::CompressedFinalize(value) => Some(value.delegated_account),
-            Self::Undelegate(value) => Some(value.delegated_account),
-            Self::CompressedUndelegate(value) => Some(value.delegated_account),
-            Self::BaseAction(_) => None,
-        }
-    }
+    // TODO(edwin): replace with reference once done
+    pub committed_data: Vec<u8>,
 }
 
-/// Tasks that could be executed using buffers
-#[derive(Clone)]
-pub enum BufferTask {
-    Commit(CommitTask),
-    // Action in the future
+#[derive(Clone, Debug)]
+pub enum PreparationTask {
+    Buffer(BufferPreparationTask),
+    Compressed,
 }
 
-impl BaseTask for BufferTask {
-    fn instruction(&self, validator: &Pubkey) -> Instruction {
-        let Self::Commit(value) = self;
-        let commit_id_slice = value.commit_id.to_le_bytes();
-        let (commit_buffer_pubkey, _) =
-            magicblock_committor_program::pdas::buffer_pda(
-                validator,
-                &value.committed_account.pubkey,
-                &commit_id_slice,
-            );
+impl BufferPreparationTask {
+    /// Returns initialization [`Instruction`]
+    pub fn init_instruction(&self, authority: &Pubkey) -> Instruction {
+        let chunks_account_size =
+            Chunks::struct_size(self.chunks.count()) as u64;
+        let buffer_account_size = self.committed_data.len() as u64;
 
-        dlp::instruction_builder::commit_state_from_buffer(
-            *validator,
-            value.committed_account.pubkey,
-            value.committed_account.account.owner,
-            commit_buffer_pubkey,
-            CommitStateFromBufferArgs {
-                nonce: value.commit_id,
-                lamports: value.committed_account.account.lamports,
-                allow_undelegation: value.allow_undelegation,
-            },
-        )
+        let (instruction, _, _) = create_init_ix(CreateInitIxArgs {
+            authority: *authority,
+            pubkey: self.pubkey,
+            chunks_account_size,
+            buffer_account_size,
+            commit_id: self.commit_id,
+            chunk_count: self.chunks.count(),
+            chunk_size: self.chunks.chunk_size(),
+        });
+
+        instruction
     }
 
-    /// No further optimizations
-    fn optimize(
-        self: Box<Self>,
-    ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
-        Err(self)
+    /// Returns compute units required for realloc instruction
+    pub fn init_compute_units(&self) -> u32 {
+        12_000
     }
 
-    fn preparation_info(
-        &self,
-        authority_pubkey: &Pubkey,
-    ) -> Option<TaskPreparationInfo> {
-        let Self::Commit(commit_task) = self;
-
-        let committed_account = &commit_task.committed_account;
-        let chunks = Chunks::from_data_length(
-            committed_account.account.data.len(),
-            MAX_WRITE_CHUNK_SIZE,
-        );
-
-        let chunks_account_size = Chunks::struct_size(chunks.count()) as u64;
-        let buffer_account_size = committed_account.account.data.len() as u64;
-
-        let (init_instruction, chunks_pda, buffer_pda) =
-            create_init_ix(CreateInitIxArgs {
-                authority: *authority_pubkey,
-                pubkey: committed_account.pubkey,
-                chunks_account_size,
-                buffer_account_size,
-                commit_id: commit_task.commit_id,
-                chunk_count: chunks.count(),
-                chunk_size: chunks.chunk_size(),
-            });
-
+    /// Returns realloc instruction required for Buffer preparation
+    #[allow(clippy::let_and_return)]
+    pub fn realloc_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
+        let buffer_account_size = self.committed_data.len() as u64;
         let realloc_instructions =
             create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
-                authority: *authority_pubkey,
-                pubkey: committed_account.pubkey,
+                authority: *authority,
+                pubkey: self.pubkey,
                 buffer_account_size,
-                commit_id: commit_task.commit_id,
+                commit_id: self.commit_id,
             });
 
-        let chunks_iter = ChangesetChunks::new(&chunks, chunks.chunk_size())
-            .iter(&committed_account.account.data);
+        realloc_instructions
+    }
+
+    /// Returns compute units required for realloc instruction
+    pub fn realloc_compute_units(&self) -> u32 {
+        6_000
+    }
+
+    /// Returns realloc instruction required for Buffer preparation
+    #[allow(clippy::let_and_return)]
+    pub fn write_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
+        let chunks_iter =
+            ChangesetChunks::new(&self.chunks, self.chunks.chunk_size())
+                .iter(&self.committed_data);
         let write_instructions = chunks_iter
             .map(|chunk| {
                 create_write_ix(CreateWriteIxArgs {
-                    authority: *authority_pubkey,
-                    pubkey: committed_account.pubkey,
+                    authority: *authority,
+                    pubkey: self.pubkey,
                     offset: chunk.offset,
                     data_chunk: chunk.data_chunk,
-                    commit_id: commit_task.commit_id,
+                    commit_id: self.commit_id,
                 })
             })
             .collect::<Vec<_>>();
 
-        Some(TaskPreparationInfo::Buffer(BufferPreparationInfo {
-            commit_id: commit_task.commit_id,
-            pubkey: commit_task.committed_account.pubkey,
-            chunks_pda,
-            buffer_pda: buffer_pda,
-            init_instruction: init_instruction,
-            realloc_instructions: realloc_instructions,
-            write_instructions: write_instructions,
-        }))
+        write_instructions
     }
 
-    fn compute_units(&self) -> u32 {
-        match self {
-            Self::Commit(_) => 65_000,
-        }
+    pub fn write_compute_units(&self, bytes_count: usize) -> u32 {
+        const PER_BYTE: u32 = 3;
+
+        u32::try_from(bytes_count)
+            .ok()
+            .and_then(|bytes_count| bytes_count.checked_mul(PER_BYTE))
+            .unwrap_or(u32::MAX)
     }
 
-    fn strategy(&self) -> TaskStrategy {
-        TaskStrategy::Buffer
+    pub fn chunks_pda(&self, authority: &Pubkey) -> Pubkey {
+        pdas::chunks_pda(
+            authority,
+            &self.pubkey,
+            self.commit_id.to_le_bytes().as_slice(),
+        )
+        .0
     }
 
-    /// For tasks using Args strategy call corresponding `Visitor` method
-    fn visit(&self, visitor: &mut dyn Visitor) {
-        visitor.visit_buffer_task(self);
+    pub fn buffer_pda(&self, authority: &Pubkey) -> Pubkey {
+        pdas::buffer_pda(
+            authority,
+            &self.pubkey,
+            self.commit_id.to_le_bytes().as_slice(),
+        )
+        .0
     }
 
-    fn is_compressed(&self) -> bool {
-        false
-    }
-
-    fn set_compressed_data(&mut self, _: CompressedData) {
-        // No need to set compressed data for BufferTask
-    }
-
-    fn get_compressed_data(&self) -> Option<CompressedData> {
-        None
-    }
-
-    fn delegated_account(&self) -> Option<Pubkey> {
-        match self {
-            Self::Commit(value) => Some(value.committed_account.pubkey),
+    pub fn cleanup_task(&self) -> CleanupTask {
+        CleanupTask {
+            pubkey: self.pubkey,
+            commit_id: self.commit_id,
         }
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct CleanupTask {
+    pub pubkey: Pubkey,
+    pub commit_id: u64,
+}
+
+impl CleanupTask {
+    pub fn instruction(&self, authority: &Pubkey) -> Instruction {
+        create_close_ix(CreateCloseIxArgs {
+            authority: *authority,
+            pubkey: self.pubkey,
+            commit_id: self.commit_id,
+        })
+    }
+
+    /// Returns compute units required to execute [`CleanupTask`]
+    pub fn compute_units(&self) -> u32 {
+        30_000
+    }
+
+    /// Returns a number of [`CleanupTask`]s that is possible to fit in single
+    pub const fn max_tx_fit_count_with_budget() -> usize {
+        8
+    }
+
+    pub fn chunks_pda(&self, authority: &Pubkey) -> Pubkey {
+        pdas::chunks_pda(
+            authority,
+            &self.pubkey,
+            self.commit_id.to_le_bytes().as_slice(),
+        )
+        .0
+    }
+
+    pub fn buffer_pda(&self, authority: &Pubkey) -> Pubkey {
+        pdas::buffer_pda(
+            authority,
+            &self.pubkey,
+            self.commit_id.to_le_bytes().as_slice(),
+        )
+        .0
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum BaseTaskError {
+    #[error("Invalid preparation state transition")]
+    PreparationStateTransitionError,
+}
+
+pub type BaseTaskResult<T> = Result<T, BaseTaskError>;
+
 #[cfg(test)]
 mod serialization_safety_test {
-    use magicblock_program::magic_scheduled_base_intent::{
-        ProgramArgs, ShortAccountMeta,
+    use magicblock_program::{
+        args::ShortAccountMeta, magic_scheduled_base_intent::ProgramArgs,
     };
     use solana_account::Account;
 
-    use crate::tasks::*;
+    use crate::tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
+        buffer_task::{BufferTask, BufferTaskType},
+        *,
+    };
 
     // Test all ArgsTask variants
     #[test]
@@ -523,7 +359,7 @@ mod serialization_safety_test {
         let validator = Pubkey::new_unique();
 
         // Test Commit variant
-        let commit_task = ArgsTask::Commit(CommitTask {
+        let commit_task: ArgsTask = ArgsTaskType::Commit(CommitTask {
             commit_id: 123,
             allow_undelegation: true,
             committed_account: CommittedAccount {
@@ -536,25 +372,29 @@ mod serialization_safety_test {
                     rent_epoch: 0,
                 },
             },
-        });
+        })
+        .into();
         assert_serializable(&commit_task.instruction(&validator));
 
         // Test Finalize variant
-        let finalize_task = ArgsTask::Finalize(FinalizeTask {
-            delegated_account: Pubkey::new_unique(),
-        });
+        let finalize_task =
+            ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+                delegated_account: Pubkey::new_unique(),
+            }));
         assert_serializable(&finalize_task.instruction(&validator));
 
         // Test Undelegate variant
-        let undelegate_task = ArgsTask::Undelegate(UndelegateTask {
-            delegated_account: Pubkey::new_unique(),
-            owner_program: Pubkey::new_unique(),
-            rent_reimbursement: Pubkey::new_unique(),
-        });
+        let undelegate_task: ArgsTask =
+            ArgsTaskType::Undelegate(UndelegateTask {
+                delegated_account: Pubkey::new_unique(),
+                owner_program: Pubkey::new_unique(),
+                rent_reimbursement: Pubkey::new_unique(),
+            })
+            .into();
         assert_serializable(&undelegate_task.instruction(&validator));
 
         // Test BaseAction variant
-        let base_action = ArgsTask::BaseAction(BaseActionTask {
+        let base_action: ArgsTask = ArgsTaskType::BaseAction(BaseActionTask {
             context: Context::Undelegate,
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
@@ -569,7 +409,8 @@ mod serialization_safety_test {
                 },
                 compute_units: 10_000,
             },
-        });
+        })
+        .into();
         assert_serializable(&base_action.instruction(&validator));
     }
 
@@ -578,20 +419,22 @@ mod serialization_safety_test {
     fn test_buffer_task_instruction_serialization() {
         let validator = Pubkey::new_unique();
 
-        let buffer_task = BufferTask::Commit(CommitTask {
-            commit_id: 456,
-            allow_undelegation: false,
-            committed_account: CommittedAccount {
-                pubkey: Pubkey::new_unique(),
-                account: Account {
-                    lamports: 2000,
-                    data: vec![7, 8, 9],
-                    owner: Pubkey::new_unique(),
-                    executable: false,
-                    rent_epoch: 0,
+        let buffer_task = BufferTask::new_preparation_required(
+            BufferTaskType::Commit(CommitTask {
+                commit_id: 456,
+                allow_undelegation: false,
+                committed_account: CommittedAccount {
+                    pubkey: Pubkey::new_unique(),
+                    account: Account {
+                        lamports: 2000,
+                        data: vec![7, 8, 9],
+                        owner: Pubkey::new_unique(),
+                        executable: false,
+                        rent_epoch: 0,
+                    },
                 },
-            },
-        });
+            }),
+        );
         assert_serializable(&buffer_task.instruction(&validator));
     }
 
@@ -601,31 +444,33 @@ mod serialization_safety_test {
         let authority = Pubkey::new_unique();
 
         // Test BufferTask preparation
-        let buffer_task = BufferTask::Commit(CommitTask {
-            commit_id: 789,
-            allow_undelegation: true,
-            committed_account: CommittedAccount {
-                pubkey: Pubkey::new_unique(),
-                account: Account {
-                    lamports: 3000,
-                    data: vec![0; 1024], // Larger data to test chunking
-                    owner: Pubkey::new_unique(),
-                    executable: false,
-                    rent_epoch: 0,
+        let buffer_task = BufferTask::new_preparation_required(
+            BufferTaskType::Commit(CommitTask {
+                commit_id: 789,
+                allow_undelegation: true,
+                committed_account: CommittedAccount {
+                    pubkey: Pubkey::new_unique(),
+                    account: Account {
+                        lamports: 3000,
+                        data: vec![0; 1024], // Larger data to test chunking
+                        owner: Pubkey::new_unique(),
+                        executable: false,
+                        rent_epoch: 0,
+                    },
                 },
-            },
-        });
+            }),
+        );
 
-        let TaskPreparationInfo::Buffer(prep_info) =
-            buffer_task.preparation_info(&authority).unwrap()
+        let PreparationState::Required(preparation_task) =
+            buffer_task.preparation_state()
         else {
-            panic!("Expected BufferTask preparation info");
+            panic!("invalid preparation state on creation!");
         };
-        assert_serializable(&prep_info.init_instruction);
-        for ix in prep_info.realloc_instructions {
-            assert_serializable(&ix);
-        }
-        for ix in prep_info.write_instructions {
+        let PreparationTask::Buffer(preparation_task) = preparation_task else {
+            panic!("invalid preparation task on creation!");
+        };
+        assert_serializable(&preparation_task.init_instruction(&authority));
+        for ix in preparation_task.realloc_instructions(&authority) {
             assert_serializable(&ix);
         }
     }
@@ -636,4 +481,58 @@ mod serialization_safety_test {
             panic!("Failed to serialize instruction {:?}: {}", ix, e)
         });
     }
+}
+
+#[test]
+fn test_close_buffer_limit() {
+    use solana_sdk::{
+        compute_budget::ComputeBudgetInstruction, signature::Keypair,
+        signer::Signer, transaction::Transaction,
+    };
+
+    use crate::transactions::{
+        serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE,
+    };
+
+    let authority = Keypair::new();
+
+    // Budget ixs (fixed)
+    let compute_budget_ix =
+        ComputeBudgetInstruction::set_compute_unit_limit(30_000);
+    let compute_unit_price_ix =
+        ComputeBudgetInstruction::set_compute_unit_price(101);
+
+    // Each task unique: commit_id increments; pubkey is new_unique each time
+    let base_commit_id = 101u64;
+    let ixs_iter = (0..CleanupTask::max_tx_fit_count_with_budget()).map(|i| {
+        let task = CleanupTask {
+            commit_id: base_commit_id + i as u64,
+            pubkey: Pubkey::new_unique(),
+        };
+        task.instruction(&authority.pubkey())
+    });
+
+    let mut ixs: Vec<_> = [compute_budget_ix, compute_unit_price_ix]
+        .into_iter()
+        .chain(ixs_iter)
+        .collect();
+
+    let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
+    println!("{}", serialize_and_encode_base64(&tx).len());
+    assert!(
+        serialize_and_encode_base64(&tx).len() <= MAX_ENCODED_TRANSACTION_SIZE
+    );
+
+    // One more unique task should overflow
+    let overflow_task = CleanupTask {
+        commit_id: base_commit_id
+            + CleanupTask::max_tx_fit_count_with_budget() as u64,
+        pubkey: Pubkey::new_unique(),
+    };
+    ixs.push(overflow_task.instruction(&authority.pubkey()));
+
+    let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
+    assert!(
+        serialize_and_encode_base64(&tx).len() > MAX_ENCODED_TRANSACTION_SIZE
+    );
 }

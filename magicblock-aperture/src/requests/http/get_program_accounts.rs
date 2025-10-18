@@ -1,8 +1,7 @@
 use solana_rpc_client_api::config::RpcProgramAccountsConfig;
 
-use crate::utils::ProgramFilters;
-
 use super::prelude::*;
+use crate::utils::ProgramFilters;
 
 impl HttpDispatcher {
     /// Handles the `getProgramAccounts` RPC request.

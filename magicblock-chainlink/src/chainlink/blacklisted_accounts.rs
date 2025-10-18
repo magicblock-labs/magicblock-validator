@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use magicblock_magic_program_api as magic_program;
 use solana_pubkey::Pubkey;
 
 pub fn blacklisted_accounts(
@@ -21,9 +22,9 @@ pub fn blacklisted_accounts(
 
     blacklisted_accounts.insert(NATIVE_SOL_ID);
 
-    // TODO: @@@ integration
-    // blacklisted_accounts.insert(magic_program::ID);
-    // blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
+    blacklisted_accounts.insert(magic_program::ID);
+    blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
+    // TODO(thlorenz: once we merge task PR add this
     // blacklisted_accounts.insert(magic_program::TASK_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
     blacklisted_accounts.insert(*faucet_id);
