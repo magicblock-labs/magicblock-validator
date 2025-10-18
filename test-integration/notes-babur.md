@@ -20,6 +20,15 @@
 - [ ] magicblock-aperture/src/requests/http/get_fee_for_message.rs should check blockhash (Babur)
 - [ ] `self.blocks.contains(hash)` times out - noticed while investigating issue (Babur)
     - + why aren't we using that instead of `self.blocks.get(hash)`?
+- [ ] we won't know if an account delegated to system program is updated or undelegated, but I
+  suppose that is ok since we treat them as isolated in our validator? (Gabriele)
+- [ ] ensure that we only unsubscribe when an account changes to delegated, _not_ when it
+previously was delegated to avoid
+    1. have delegated account in our validator
+    2. Commit acc
+    3. Commit and undelegate -> turn on subscription
+    4. Get update for 2. -> turn off subscription
+    5. Never heaer about updates to that account again
 
 ## TODOs
 
