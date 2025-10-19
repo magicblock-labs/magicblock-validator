@@ -822,8 +822,6 @@ fn start_validator(
         ValidatorCluster::Chain(program_loader)
             if std::env::var("FORCE_MAGIC_BLOCK_VALIDATOR").is_err() =>
         {
-            panic!("FORCE_MAGIC_BLOCK_VALIDATOR");
-
             start_test_validator_with_config(
                 &test_runner_paths,
                 program_loader,

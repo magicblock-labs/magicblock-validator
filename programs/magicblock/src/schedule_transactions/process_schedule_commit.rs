@@ -222,6 +222,7 @@ pub(crate) fn process_schedule_commit(
     let commit_sent_sig = action_sent_transaction.signatures[0];
 
     let commit_action = if opts.request_diff {
+        ic_msg!(invoke_context, "CommitType::StandaloneDiff");
         CommitType::StandaloneDiff(committed_accounts)
     } else {
         CommitType::Standalone(committed_accounts)

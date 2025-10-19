@@ -192,6 +192,8 @@ impl IntegrationTestContext {
                         format!("ScheduledCommitSent signature not found in logs, {:#?}", logs)
                     })?;
 
+            println!("LOGS: {:#?}", logs);
+
             (logs, sig)
         };
 
@@ -207,6 +209,7 @@ impl IntegrationTestContext {
                 )
             })?;
 
+        println!("CHAIN_LOGS: {:#?}", chain_logs);
         println!("Found chain commit signatures");
 
         let (included, excluded, feepayers, sigs) =

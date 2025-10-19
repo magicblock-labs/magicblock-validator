@@ -1,4 +1,5 @@
 use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+use solana_log_collector::ic_msg;
 use solana_program_runtime::declare_process_instruction;
 use solana_sdk::program_utils::limited_deserialize;
 
@@ -26,6 +27,8 @@ declare_process_instruction!(
         let instruction_data = instruction_context.get_instruction_data();
         let instruction = limited_deserialize(instruction_data)?;
         let signers = instruction_context.get_signers(transaction_context)?;
+
+        ic_msg!(invoke_context, "MagicBlockInstruction: {:?}", instruction);
 
         match instruction {
             MagicBlockInstruction::ModifyAccounts(mut account_mods) => {
