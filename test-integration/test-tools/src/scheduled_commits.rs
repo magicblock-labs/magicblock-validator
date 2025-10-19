@@ -195,6 +195,8 @@ impl IntegrationTestContext {
             (logs, sig)
         };
 
+        println!("Find chain commit signatures");
+
         // 2. Find chain commit signatures
         let chain_logs = self
             .fetch_ephemeral_logs(scheduled_commmit_sent_sig)
@@ -204,6 +206,8 @@ impl IntegrationTestContext {
                     ephem_logs, scheduled_commmit_sent_sig
                 )
             })?;
+
+        println!("Found chain commit signatures");
 
         let (included, excluded, feepayers, sigs) =
             extract_sent_commit_info_from_logs(&chain_logs);

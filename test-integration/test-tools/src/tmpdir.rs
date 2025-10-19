@@ -10,6 +10,7 @@ pub fn resolve_tmp_dir(env_var_override: &str) -> (TempDir, PathBuf) {
     let default_tmpdir = tempdir().unwrap();
     let tmpdir_path = std::env::var(env_var_override)
         .map(|s| PathBuf::from_str(&s).unwrap())
+        //.unwrap_or(default_tmpdir.keep());
         .unwrap_or(default_tmpdir.path().to_path_buf());
     (default_tmpdir, tmpdir_path)
 }

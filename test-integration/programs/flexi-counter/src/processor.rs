@@ -336,7 +336,7 @@ fn process_add_and_schedule_commit(
 
     // Request the PDA counter account to be committed
     if undelegate {
-        commit_diff_and_undelegate_accounts(
+        commit_and_undelegate_accounts(
             payer_info,
             vec![counter_pda_info],
             magic_context_info,

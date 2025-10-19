@@ -140,7 +140,7 @@ impl IntegrationTestContext {
 
         // Try this up to 50 times since devnet here returns the version response instead of
         // the EncodedConfirmedTransactionWithStatusMeta at times
-        for idx in 1..=50 {
+        for idx in 1..=100 {
             let status = match rpc_client.get_transaction_with_config(
                 &sig,
                 RpcTransactionConfig {
@@ -156,10 +156,15 @@ impl IntegrationTestContext {
                             label, err
                         );
                     }
+                    // println!(
+                    //     "Failed to fetch transaction from {}: SLEEP for 400ms",
+                    //     label
+                    // );
                     sleep(Duration::from_millis(400));
                     continue;
                 }
             };
+            println!("RETURN LOGS");
             return Option::<Vec<String>>::from(
                 status
                     .transaction
@@ -176,6 +181,7 @@ impl IntegrationTestContext {
                     .clone(),
             );
         }
+        println!("RETURN NONE");
         None
     }
 
