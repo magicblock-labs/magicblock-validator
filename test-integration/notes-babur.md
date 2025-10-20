@@ -17,9 +17,36 @@
 - [x] replay - remove all non-delegated accounts from bank (Thorsten - fixed)
 - [x] correctly handle empty readonly accounts (Thorsten)
 - [x] we are removing programs on resume, ensured ledger replay completed before that (Thorsten)
-- [ ] magicblock-aperture/src/requests/http/get_fee_for_message.rs should check blockhash (Babur)
-- [ ] `self.blocks.contains(hash)` times out - noticed while investigating issue (Babur)
+- [x] magicblock-aperture/src/requests/http/get_fee_for_message.rs should check blockhash (Babur)
+- [x] `self.blocks.contains(hash)` times out - noticed while investigating issue (Babur)
     - + why aren't we using that instead of `self.blocks.get(hash)`?
+- [x] we won't know if an account delegated to system program is updated or undelegated, but I
+  suppose that is ok since we treat them as isolated in our validator? (Gabriele)
+  - commits of those would fail (Gabriele) and the committor won't retry (Edwin)
+- [ ] LRU cache capacity from config
+- [ ] fix all use of `_` when assigning tmp dir in tests
+
+## Race Conditions Around Undelegation
+
+First problem revolves around the fact that we don't listen to updates of accounts that are
+delegated to us.
+
+1. have delegated account in our validator
+2. Commit account
+3. Commit and undelegate -> turn on subscription (via committor service)
+4. Get update for 2. -> turn off subscription (since account still delegated until 3. runs)
+5. Never hear about updates to that account again even though it is now undelegated
+
+Second problem revolves around keeping an account a borked while undelegation is processing:
+
+1. have delegated account in our validator
+2. Commit account
+3. Commit and undelegate -> account owner is delegation program
+4. Get update for 2.
+    -> account owner is original owner again -> it is considered delegated
+    -> we also unsubscribe from updates
+5. We can now write to the account again and won't receive the undelegation update
+
 
 ## TODOs
 

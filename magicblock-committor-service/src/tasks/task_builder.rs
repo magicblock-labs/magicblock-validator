@@ -74,37 +74,37 @@ impl TasksBuilder for TaskBuilderImpl {
         persister: &Option<P>,
         photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
-        let (accounts, allow_undelegation, compressed) = match &base_intent
-            .base_intent
-        {
-            MagicBaseIntent::BaseActions(actions) => {
-                let tasks = actions
-                    .iter()
-                    .map(|el| {
-                        let task = BaseActionTask {
-                            context: Context::Standalone,
-                            action: el.clone(),
-                        };
-                        Box::new(ArgsTask::new(ArgsTaskType::BaseAction(task)))
-                            as Box<dyn BaseTask>
-                    })
-                    .collect();
+        let (accounts, allow_undelegation, compressed) =
+            match &base_intent.base_intent {
+                MagicBaseIntent::BaseActions(actions) => {
+                    let tasks = actions
+                        .iter()
+                        .map(|el| {
+                            let task = BaseActionTask {
+                                context: Context::Standalone,
+                                action: el.clone(),
+                            };
+                            let task =
+                                ArgsTask::new(ArgsTaskType::BaseAction(task));
+                            Box::new(task) as Box<dyn BaseTask>
+                        })
+                        .collect();
 
-                return Ok(tasks);
-            }
-            MagicBaseIntent::Commit(t) => {
-                (t.get_committed_accounts(), false, false)
-            }
-            MagicBaseIntent::CommitAndUndelegate(t) => {
-                (t.commit_action.get_committed_accounts(), true, false)
-            }
-            MagicBaseIntent::CompressedCommit(t) => {
-                (t.get_committed_accounts(), false, true)
-            }
-            MagicBaseIntent::CompressedCommitAndUndelegate(t) => {
-                (t.commit_action.get_committed_accounts(), true, true)
-            }
-        };
+                    return Ok(tasks);
+                }
+                MagicBaseIntent::Commit(t) => {
+                    (t.get_committed_accounts(), false, false)
+                }
+                MagicBaseIntent::CommitAndUndelegate(t) => {
+                    (t.commit_action.get_committed_accounts(), true, false)
+                }
+                MagicBaseIntent::CompressedCommit(t) => {
+                    (t.get_committed_accounts(), false, true)
+                }
+                MagicBaseIntent::CompressedCommitAndUndelegate(t) => {
+                    (t.commit_action.get_committed_accounts(), true, true)
+                }
+            };
 
         let committed_pubkeys = accounts
             .iter()
@@ -290,8 +290,9 @@ impl TasksBuilder for TaskBuilderImpl {
                             context: Context::Commit,
                             action: action.clone(),
                         };
-                        let task_type = ArgsTaskType::BaseAction(task);
-                        Box::new(ArgsTask::new(task_type)) as Box<dyn BaseTask>
+                        let task =
+                            ArgsTask::new(ArgsTaskType::BaseAction(task));
+                        Box::new(task) as Box<dyn BaseTask>
                     }));
                     Ok(tasks)
                 }

@@ -461,13 +461,11 @@ pub enum InternalError {
     TransactionSigningError(#[from] SignerError),
     #[error("FailedToPrepareBufferError: {0}")]
     FailedToPrepareBufferError(#[from] MagicBlockRpcClientError),
-    #[error("InvalidPreparationInfo")]
-    InvalidPreparationInfo,
     #[error("Delegated account not found")]
     DelegatedAccountNotFound,
-    #[error("Photon client not found")]
+    #[error("PhotonClientNotFound")]
     PhotonClientNotFound,
-    #[error("Failed to prepare compressed data: {0}")]
+    #[error("TaskBuilderError: {0}")]
     TaskBuilderError(#[from] TaskBuilderError),
     #[error("BaseTaskError: {0}")]
     BaseTaskError(#[from] BaseTaskError),

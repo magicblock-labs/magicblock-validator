@@ -4284,6 +4284,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-sdk",
  "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
  "solana-transaction",
  "tempfile",
  "thiserror 1.0.69",
