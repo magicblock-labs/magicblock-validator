@@ -357,6 +357,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
             excluded_pubkeys: intent_meta.excluded_pubkeys,
             feepayers: intent_meta.feepayers,
             requested_undelegation: intent_meta.requested_undelegation,
+            commit_diff: intent_meta.commit_diff,
         }
     }
 }
@@ -424,6 +425,7 @@ struct ScheduledBaseIntentMeta {
     feepayers: HashSet<FeePayerAccount>,
     intent_sent_transaction: Transaction,
     requested_undelegation: bool,
+    commit_diff: bool,
 }
 
 impl ScheduledBaseIntentMeta {
@@ -443,6 +445,7 @@ impl ScheduledBaseIntentMeta {
             feepayers,
             intent_sent_transaction: intent.action_sent_transaction.clone(),
             requested_undelegation: intent.is_undelegate(),
+            commit_diff: intent.is_commit_diff(),
         }
     }
 }

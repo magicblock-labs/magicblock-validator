@@ -101,6 +101,10 @@ impl ScheduledBaseIntent {
         self.base_intent.is_undelegate()
     }
 
+    pub fn is_commit_diff(&self) -> bool {
+        self.base_intent.is_commit_diff()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.base_intent.is_empty()
     }
@@ -145,6 +149,16 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => false,
             MagicBaseIntent::Commit(_) => false,
             MagicBaseIntent::CommitAndUndelegate(_) => true,
+        }
+    }
+
+    pub fn is_commit_diff(&self) -> bool {
+        match &self {
+            MagicBaseIntent::BaseActions(_) => false,
+            MagicBaseIntent::Commit(c) => c.is_commit_diff(),
+            MagicBaseIntent::CommitAndUndelegate(c) => {
+                c.commit_action.is_commit_diff()
+            }
         }
     }
 
