@@ -311,11 +311,13 @@ where
         let ForwardedSubscriptionUpdate { pubkey, account } = update;
         let owned_by_delegation_program =
             account.is_owned_by_delegation_program();
+        let owned_by_compressed_delegation_program =
+            account.is_owned_by_compressed_delegation_program();
 
         if let Some(mut account) = account.fresh_account() {
             // If the account is owned by the delegation program we need to resolve
             // its true owner and determine if it is delegated to us
-            if owned_by_delegation_program && !account.compressed() {
+            if owned_by_delegation_program {
                 let delegation_record_pubkey =
                     delegation_record_pda_from_delegated_account(&pubkey);
 
@@ -425,20 +427,38 @@ where
                         None
                     }
                 }
-            } else if owned_by_delegation_program && account.compressed() {
+            } else if owned_by_compressed_delegation_program {
                 // If the account is compressed, the delegation record is in the account itself
                 let delegation_record =
                     match CompressedDelegationRecord::try_from_slice(
                         account.data(),
                     ) {
                         Ok(delegation_record) => Some(delegation_record),
-                        Err(err) => {
-                            error!("failed to parse delegation record for {pubkey}: {err}. not cloning account.");
-                            None
+                        Err(_err) => {
+                            info!("Failed to parse compressed delegation record for {pubkey} directly from the data. Fetching from photon instead.");
+                            if let Some(acc) = remote_account_provider
+                                .try_get(pubkey)
+                                .await
+                                .map(|acc| acc.fresh_account())
+                                .ok()
+                                .flatten()
+                            {
+                                match CompressedDelegationRecord::try_from_slice(
+                                    acc.data(),
+                                ) {
+                                    Ok(delegation_record) => {
+                                        Some(delegation_record)
+                                    }
+                                    Err(_err) => None,
+                                }
+                            } else {
+                                None
+                            }
                         }
                     };
 
                 if let Some(delegation_record) = delegation_record {
+                    account.set_compressed(true);
                     account.set_owner(delegation_record.owner);
                     account.set_data(delegation_record.data);
                     account.set_lamports(delegation_record.lamports);

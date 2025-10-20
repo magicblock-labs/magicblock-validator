@@ -260,10 +260,12 @@ impl RemoteAccount {
     }
 
     pub fn is_owned_by_delegation_program(&self) -> bool {
-        self.owner().is_some_and(|owner| {
-            owner.eq(&dlp::id())
-                || owner.eq(&compressed_delegation_client::id())
-        })
+        self.owner().is_some_and(|owner| owner.eq(&dlp::id()))
+    }
+
+    pub fn is_owned_by_compressed_delegation_program(&self) -> bool {
+        self.owner()
+            .is_some_and(|owner| owner.eq(&compressed_delegation_client::id()))
     }
 }
 
