@@ -48,6 +48,7 @@ cargo nextest run -p test-chainlink --no-fail-fast -j16
 make setup-cloning-devnet
 make setup-cloning-ephem
 cargo nextest run -p test-cloning --no-fail-fast -j16
+```
 
 ```sh
 make setup-restore-ledger-devnet
