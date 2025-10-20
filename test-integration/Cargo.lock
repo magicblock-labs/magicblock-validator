@@ -1719,22 +1719,22 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.3.0"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=faad3eb3b44cba9f80ca059297b91053f64def27#faad3eb3b44cba9f80ca059297b91053f64def27"
+version = "0.3.4"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk-attribute-commit",
  "ephemeral-rollups-sdk-attribute-delegate",
  "ephemeral-rollups-sdk-attribute-ephemeral",
- "magicblock-delegation-program 1.1.1",
+ "magicblock-delegation-program",
  "magicblock-magic-program-api 0.2.1",
  "solana-program",
 ]
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.3.0"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=faad3eb3b44cba9f80ca059297b91053f64def27#faad3eb3b44cba9f80ca059297b91053f64def27"
+version = "0.3.4"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1742,8 +1742,8 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.3.0"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=faad3eb3b44cba9f80ca059297b91053f64def27#faad3eb3b44cba9f80ca059297b91053f64def27"
+version = "0.3.4"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1752,8 +1752,8 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
-version = "0.3.0"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=faad3eb3b44cba9f80ca059297b91053f64def27#faad3eb3b44cba9f80ca059297b91053f64def27"
+version = "0.3.4"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=2d0f16b#2d0f16bf18a8618dcac07a8dc271dd3a30096c7c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2923,7 +2923,7 @@ dependencies = [
  "log",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "random-port",
  "rayon",
  "serde",
@@ -3483,7 +3483,7 @@ dependencies = [
  "magicblock-chainlink",
  "magicblock-committor-service",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "magicblock-ledger",
  "magicblock-magic-program-api 0.2.3",
  "magicblock-metrics",
@@ -3583,7 +3583,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "magicblock-ledger",
  "magicblock-magic-program-api 0.2.3",
  "magicblock-metrics",
@@ -3617,7 +3617,7 @@ dependencies = [
  "log",
  "lru 0.16.0",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "magicblock-magic-program-api 0.2.3",
  "serde_json",
  "solana-account",
@@ -3666,7 +3666,7 @@ dependencies = [
  "log",
  "lru 0.16.0",
  "magicblock-committor-program",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "magicblock-metrics",
  "magicblock-program",
  "magicblock-rpc-client",
@@ -3743,31 +3743,18 @@ dependencies = [
 
 [[package]]
 name = "magicblock-delegation-program"
-version = "1.0.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=5fb8d20#5fb8d20f3567113dc75c2c8047a80129f792c5bb"
+version = "1.1.0"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=aa1de56d90c#aa1de56d90c8a242377accd59899f272f0131f8c"
 dependencies = [
  "bincode",
  "borsh 1.5.7",
  "bytemuck",
  "num_enum",
  "paste",
- "solana-curve25519",
- "solana-program",
- "solana-security-txt",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "magicblock-delegation-program"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dd321b31bda8396e214ea675460f57e9e1770a69ea783ab63c0646666d9c410"
-dependencies = [
- "bincode",
- "borsh 1.5.7",
- "bytemuck",
- "num_enum",
- "paste",
+ "pinocchio",
+ "pinocchio-log",
+ "pinocchio-pubkey",
+ "pinocchio-system",
  "solana-curve25519",
  "solana-program",
  "solana-security-txt",
@@ -3807,7 +3794,8 @@ dependencies = [
 [[package]]
 name = "magicblock-magic-program-api"
 version = "0.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=959b63c37eaf07cce31a434c4dcad28ed3d452ef#959b63c37eaf07cce31a434c4dcad28ed3d452ef"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "349b26eb6d819328dad699a6c9a26234548d366d9a30e7edf0d296180188ee27"
 dependencies = [
  "bincode",
  "serde",
@@ -3951,7 +3939,7 @@ dependencies = [
  "anyhow",
  "log",
  "magicblock-config",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-rpc-client",
@@ -4655,6 +4643,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
+name = "pinocchio"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b971851087bc3699b001954ad02389d50c41405ece3548cbcafc88b3e20017a"
+
+[[package]]
+name = "pinocchio-log"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd11022408f312e6179ece321c1f7dc0d1b2aa7765fddd39b2a7378d65a899e8"
+dependencies = [
+ "pinocchio-log-macro",
+]
+
+[[package]]
+name = "pinocchio-log-macro"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69fb52edb3c5736b044cc462b0957b9767d0f574d138f4e2761438c498a4b467"
+dependencies = [
+ "quote",
+ "regex",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "pinocchio-pubkey"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb0225638cadcbebae8932cb7f49cb5da7c15c21beb19f048f05a5ca7d93f065"
+dependencies = [
+ "five8_const",
+ "pinocchio",
+ "sha2-const-stable",
+]
+
+[[package]]
+name = "pinocchio-system"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "141ed5eafb4ab04568bb0e224e3dc9a9de13c933de4c004e0d1a553498be3a7c"
+dependencies = [
+ "pinocchio",
+ "pinocchio-pubkey",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4829,7 +4864,7 @@ version = "0.0.0"
 dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "solana-program",
 ]
 
@@ -5744,7 +5779,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "program-schedulecommit",
  "solana-program",
  "solana-rpc-client",
@@ -5762,7 +5797,7 @@ dependencies = [
  "log",
  "magicblock-committor-program",
  "magicblock-committor-service",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
@@ -6062,6 +6097,12 @@ dependencies = [
  "cpufeatures",
  "digest 0.10.7",
 ]
+
+[[package]]
+name = "sha2-const-stable"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f179d4e11094a893b82fff208f74d448a7512f99f5a0acbd5c679b705f83ed9"
 
 [[package]]
 name = "sha3"
@@ -10376,7 +10417,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "magicblock-chainlink",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "program-flexi-counter",
  "program-mini",
  "solana-account",
@@ -10458,7 +10499,7 @@ dependencies = [
  "log",
  "magicblock-accounts-db",
  "magicblock-config",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "program-flexi-counter",
  "solana-rpc-client",
  "solana-sdk",
@@ -10479,7 +10520,7 @@ dependencies = [
  "magic-domain-program",
  "magicblock-api",
  "magicblock-config",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "magicblock-program",
  "magicblock-validator-admin",
  "solana-rpc-client",
@@ -10519,7 +10560,7 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "log",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program",
  "program-flexi-counter",
  "solana-rpc-client-api",
  "solana-sdk",

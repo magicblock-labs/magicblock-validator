@@ -119,13 +119,14 @@ impl TransactionStrategyExecutionError {
     ) -> Self {
         // There's always 2 budget instructions in front
         const OFFSET: u8 = 2;
-        const OUTDATED_SLOT: u32 = dlp::error::DlpError::OutdatedSlot as u32;
+        const NONCE_OUT_OF_ORDER: u32 =
+            dlp::error::DlpError::NonceOutOfOrder as u32;
 
         match err {
             // Filter CommitIdError by custom error code
             transaction_err @ TransactionError::InstructionError(
                 _,
-                InstructionError::Custom(OUTDATED_SLOT),
+                InstructionError::Custom(NONCE_OUT_OF_ORDER),
             ) => TransactionStrategyExecutionError::CommitIDError(
                 transaction_err,
             ),

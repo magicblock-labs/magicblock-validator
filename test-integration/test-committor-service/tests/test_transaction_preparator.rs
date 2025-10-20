@@ -1,5 +1,4 @@
 use borsh::BorshDeserialize;
-use dlp::args::Context;
 use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
@@ -203,7 +202,6 @@ async fn test_prepare_commit_tx_with_base_actions() {
         }))),
         // BaseAction
         Box::new(ArgsTask::new(ArgsTaskType::BaseAction(BaseActionTask {
-            context: Context::Commit,
             action: base_action,
         }))),
     ];
