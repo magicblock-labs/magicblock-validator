@@ -24,29 +24,8 @@
   suppose that is ok since we treat them as isolated in our validator? (Gabriele)
   - commits of those would fail (Gabriele) and the committor won't retry (Edwin)
 - [x] LRU cache capacity from config set to const for now (https://github.com/magicblock-labs/magicblock-validator/issues/577)
+- [x] ignore sub update that's out of order
 - [ ] fix all use of `_` when assigning tmp dir in tests
-
-## Race Conditions Around Undelegation
-
-First problem revolves around the fact that we don't listen to updates of accounts that are
-delegated to us.
-
-1. have delegated account in our validator
-2. Commit account
-3. Commit and undelegate -> turn on subscription (via committor service)
-4. Get update for 2. -> turn off subscription (since account still delegated until 3. runs)
-5. Never hear about updates to that account again even though it is now undelegated
-
-Second problem revolves around keeping an account a borked while undelegation is processing:
-
-1. have delegated account in our validator
-2. Commit account
-3. Commit and undelegate -> account owner is delegation program
-4. Get update for 2.
-    -> account owner is original owner again -> it is considered delegated
-    -> we also unsubscribe from updates
-5. We can now write to the account again and won't receive the undelegation update
-
 
 ## TODOs
 
