@@ -1,6 +1,6 @@
 #!/bin/bash
+#--log \
 solana-test-validator \
-  --log \
   --rpc-port \
   7799 \
   -r \

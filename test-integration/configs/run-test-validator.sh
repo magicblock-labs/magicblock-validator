@@ -4,9 +4,9 @@ solana-test-validator \
   --log \
   --rpc-port 7799 \
   -r \
-  --account tEsT3eV6RFCWs1BZ7AXTzasHqTtMnMLCB2tjQ42TDXD \
+  --account mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev \
   $DIR/accounts/validator-authority.json \
-  --account DUH8h7rYjdTPYyBUEGAUwZv9ffz5wiM45GdYWYzogXjp \
+  --account EpJnX7ueXk7fKojBymqmVuCuwyhDQsYcLVL1XMsBbvDX \
   $DIR/accounts/validator-fees-vault.json \
   --account 7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg \
   $DIR/accounts/protocol-fees-vault.json \
