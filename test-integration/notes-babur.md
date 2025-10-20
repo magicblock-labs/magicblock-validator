@@ -23,7 +23,7 @@
 - [x] we won't know if an account delegated to system program is updated or undelegated, but I
   suppose that is ok since we treat them as isolated in our validator? (Gabriele)
   - commits of those would fail (Gabriele) and the committor won't retry (Edwin)
-- [ ] LRU cache capacity from config
+- [x] LRU cache capacity from config set to const for now (https://github.com/magicblock-labs/magicblock-validator/issues/577)
 - [ ] fix all use of `_` when assigning tmp dir in tests
 
 ## Race Conditions Around Undelegation
