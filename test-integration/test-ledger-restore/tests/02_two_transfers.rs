@@ -19,7 +19,7 @@ use test_ledger_restore::{
 
 #[test]
 fn test_restore_ledger_with_two_airdropped_accounts_same_slot() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (
         mut validator,
@@ -44,7 +44,7 @@ fn test_restore_ledger_with_two_airdropped_accounts_same_slot() {
 
 #[test]
 fn test_restore_ledger_with_two_airdropped_accounts_separate_slot() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (
         mut validator,
@@ -189,7 +189,7 @@ fn read(
 
 // #[test]
 fn _diagnose_write() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, transfer_sig1, transfer_sig2, slot, kp1, kp2, kp3) =
         write(&ledger_path, true);
@@ -204,7 +204,7 @@ fn _diagnose_write() {
 
 // #[test]
 fn _diagnose_read() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let pubkey1 = Pubkey::new_unique();
     let pubkey2 = Pubkey::new_unique();

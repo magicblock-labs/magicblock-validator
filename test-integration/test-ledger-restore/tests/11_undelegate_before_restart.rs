@@ -45,7 +45,7 @@ const COUNTER: &str = "Counter of Payer";
 #[test]
 fn test_restore_ledger_with_account_undelegated_before_restart() {
     init_logger!();
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     // Original instance delegates and updates account
     let (mut validator, _, payer) = write(&ledger_path);

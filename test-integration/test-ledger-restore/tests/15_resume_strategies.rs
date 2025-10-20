@@ -50,7 +50,7 @@ fn test_restore_ledger_resume_strategy_resume_without_replay() {
 }
 
 pub fn test_resume_strategy(strategy: LedgerResumeStrategy) {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let mut kp = Keypair::new();
 
     let (mut validator, slot, signature) = write(&ledger_path, &mut kp);

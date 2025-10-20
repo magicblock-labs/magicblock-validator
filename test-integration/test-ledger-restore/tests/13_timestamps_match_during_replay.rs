@@ -26,7 +26,7 @@ use test_ledger_restore::{
 fn test_restore_preserves_timestamps() {
     init_logger!();
 
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, slot, signature, block_time, _payer) =
         write(&ledger_path);

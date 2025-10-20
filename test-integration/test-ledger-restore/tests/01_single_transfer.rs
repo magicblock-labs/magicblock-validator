@@ -23,7 +23,7 @@ use test_ledger_restore::{
 fn test_restore_ledger_with_transferred_account() {
     init_logger!();
 
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, transfer_sig, _slot, _keypair1, keypair2) =
         write_ledger(&ledger_path);
