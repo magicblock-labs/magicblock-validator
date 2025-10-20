@@ -25,17 +25,18 @@
   - commits of those would fail (Gabriele) and the committor won't retry (Edwin)
 - [x] LRU cache capacity from config set to const for now (https://github.com/magicblock-labs/magicblock-validator/issues/577)
 - [x] ignore sub update that's out of order
-- [ ] fix all use of `_` when assigning tmp dir in tests
+- [x] fix all use of `_` when assigning tmp dir in tests
 
 ## TODOs
 
 - [ ] not yet supporting airdrop (may have to see if we only support this on a separate branch)
-- [x] remove _hack_ in svm entrypoint for magicblock program if no longer needed
+- [x] remove _hack_ in svm entrypoint for magicblock program if no longer needed (improved via
+  separate ixs)
 
 ## After Master Merge 2
 
-- [ ] test-chainlink/tests/ix_full_scenarios.rs failing
-- [ ] task scheduler tests failing (Program cloning issue)
+- [x] test-chainlink/tests/ix_full_scenarios.rs failing
+- [x] task scheduler tests failing (Program cloning issue)
 
 ## After Master Merge 1
 
