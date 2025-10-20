@@ -191,6 +191,24 @@ where
                     )
                     .await;
                 if let Some(account) = resolved_account {
+                    // Ensure that the subscription update isn't out of order, i.e. we don't already
+                    // hold a newer version of the account in our bank
+                    let out_of_order_slot =
+                        bank.get_account(&pubkey).and_then(|in_bank| {
+                            if in_bank.remote_slot() >= account.remote_slot() {
+                                Some(in_bank.remote_slot())
+                            } else {
+                                None
+                            }
+                        });
+                    if let Some(in_bank_slot) = out_of_order_slot {
+                        warn!(
+                            "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
+                            account.remote_slot()
+                        );
+                        continue;
+                    }
+
                     // Once we clone an account that is delegated to us we no longer need
                     // to receive updates for it from chain
                     // The subscription will be turned back on once the committor service schedules
