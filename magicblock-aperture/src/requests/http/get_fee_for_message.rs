@@ -40,8 +40,6 @@ impl HttpDispatcher {
         )
         .map_err(RpcError::transaction_verification)?;
 
-        // TODO:(bmuddha) @@ should check blockhash validity?
-
         // Process any compute budget instructions to determine prioritization fee
         let budget = process_compute_budget_instructions(
             sanitized_message

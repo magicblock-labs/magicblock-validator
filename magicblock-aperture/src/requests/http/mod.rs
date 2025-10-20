@@ -164,9 +164,11 @@ impl HttpDispatcher {
                 .set_recent_blockhash(self.blocks.get_latest().hash);
         } else {
             let hash = transaction.message.recent_blockhash();
-            self.blocks.get(hash).ok_or_else(|| {
-                RpcError::transaction_verification("Blockhash not found")
-            })?;
+            if !self.blocks.contains(hash) {
+                return Err(RpcError::transaction_verification(
+                    "Blockhash not found",
+                ));
+            };
         }
 
         Ok(transaction.sanitize(sigverify)?)
