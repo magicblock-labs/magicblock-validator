@@ -20,15 +20,33 @@
 - [x] magicblock-aperture/src/requests/http/get_fee_for_message.rs should check blockhash (Babur)
 - [x] `self.blocks.contains(hash)` times out - noticed while investigating issue (Babur)
     - + why aren't we using that instead of `self.blocks.get(hash)`?
-- [ ] we won't know if an account delegated to system program is updated or undelegated, but I
+- [x] we won't know if an account delegated to system program is updated or undelegated, but I
   suppose that is ok since we treat them as isolated in our validator? (Gabriele)
-- [ ] ensure that we only unsubscribe when an account changes to delegated, _not_ when it
-previously was delegated to avoid
-    1. have delegated account in our validator
-    2. Commit acc
-    3. Commit and undelegate -> turn on subscription
-    4. Get update for 2. -> turn off subscription
-    5. Never heaer about updates to that account again
+  - commits of those would fail (Gabriele) and the committor won't retry (Edwin)
+- [ ] LRU cache capacity from config
+- [ ] fix all use of `_` when assigning tmp dir in tests
+
+## Race Conditions Around Undelegation
+
+First problem revolves around the fact that we don't listen to updates of accounts that are
+delegated to us.
+
+1. have delegated account in our validator
+2. Commit account
+3. Commit and undelegate -> turn on subscription (via committor service)
+4. Get update for 2. -> turn off subscription (since account still delegated until 3. runs)
+5. Never hear about updates to that account again even though it is now undelegated
+
+Second problem revolves around keeping an account a borked while undelegation is processing:
+
+1. have delegated account in our validator
+2. Commit account
+3. Commit and undelegate -> account owner is delegation program
+4. Get update for 2.
+    -> account owner is original owner again -> it is considered delegated
+    -> we also unsubscribe from updates
+5. We can now write to the account again and won't receive the undelegation update
+
 
 ## TODOs
 
@@ -56,12 +74,7 @@ previously was delegated to avoid
 
 ## Unit Test Status
 
-### Fixed
-
-- magicblock-accounts-db tests::test_account_removal - fixed
-- magicblock-config-macro::test_merger test_merge_macro_codegen - fixed (required `cargo +nightly install cargo-expand --locked`)
-
-### Need Babur's Help
+### Need Babur's Help _Fixed_
 
 Not sure why these fail (assume `0` return value)
 
@@ -69,9 +82,6 @@ Not sure why these fail (assume `0` return value)
 - magicblock-aperture::mocked test_get_supply - not sure why this fails (Babur)
 
 #### Failing with `RpcError(DeadlineExceeded)`
-
-This is most likely due to RPC node closing connection before response is sent back.
-Need Babur's help to understand how to fix this.
 
 This is due to `InvalidFeePayerForTransaction`, we need to delegate the account.
 However that fails since we need to _add_ an `Account` to the test env which looses the
@@ -94,12 +104,12 @@ See [this slack thread](https://magicblock-labs.slack.com/archives/C07QF4P5HJ8/p
 Tests inside `programs/magicblock/src/schedule_transactions/process_schedule_commit_tests.rs`
 are failing on an `assert` that was added with intents in CI only.
 
-## Test Node
+## Test Node _Fixed_
 
 Problems below most likely caused due to restarting with an incompatible accountsdb snapshot.
 We may need a migration script to be able to restart from an older snapshot.
 
-### Program Deploy
+### Program Deploy _Fixed_
 
 - problems cloning `PriCems5tHihc6UDXDjzjeawomAwBduWMGAi8ZUjppd` program in deployed node
 - locally when using same config (pointing at helius devnet endpoint) it works fine and is
