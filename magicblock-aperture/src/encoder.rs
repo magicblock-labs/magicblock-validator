@@ -22,7 +22,12 @@ use crate::{
 /// websocket notification payload types into sequence of bytes
 pub(crate) trait Encoder: Ord + Eq + Clone {
     type Data;
-    fn encode(&self, slot: u64, data: &Self::Data, id: u64) -> Option<Bytes>;
+    fn encode(
+        &self,
+        slot: Slot,
+        data: &Self::Data,
+        id: SubscriptionID,
+    ) -> Option<Bytes>;
 }
 
 /// A `accountSubscribe` payload encoder
@@ -85,7 +90,12 @@ impl Encoder for AccountEncoder {
 impl Encoder for ProgramAccountEncoder {
     type Data = LockedAccount;
 
-    fn encode(&self, slot: Slot, data: &Self::Data, id: u64) -> Option<Bytes> {
+    fn encode(
+        &self,
+        slot: Slot,
+        data: &Self::Data,
+        id: SubscriptionID,
+    ) -> Option<Bytes> {
         self.filters.matches(data.account.data()).then_some(())?;
         let value = AccountWithPubkey::new(data, (&self.encoder).into(), None);
         let method = "programNotification";

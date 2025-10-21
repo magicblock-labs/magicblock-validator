@@ -381,7 +381,7 @@ fn test_db_size_after_rollback() {
 }
 
 #[test]
-fn test_account_removal() {
+fn test_zero_lamports_account() {
     let tenv = init_test_env();
     let mut acc = tenv.account();
     let pk = acc.pubkey;
@@ -397,7 +397,7 @@ fn test_account_removal() {
     // NOTE: we use empty accounts to mark escrow accounts that were not found on chain
     assert!(
         tenv.get_account(&pk).is_some(),
-        "account is not deleted after lamports have been zeroed out"
+        "account should have been deleted after lamports have been zeroed out"
     );
 }
 
@@ -407,15 +407,15 @@ fn test_owner_change() {
     let mut acc = tenv.account();
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER]);
     assert!(matches!(result, Some(0)));
-    let mut accounts = tenv
-        .get_program_accounts(&OWNER, |_| true)
-        .expect("failed to get program accounts");
-    let expected = (acc.pubkey, acc.account.clone());
-    assert_eq!(accounts.next(), Some(expected));
-
+    {
+        let mut accounts = tenv
+            .get_program_accounts(&OWNER, |_| true)
+            .expect("failed to get program accounts");
+        let expected = (acc.pubkey, acc.account.clone());
+        assert_eq!(accounts.next(), Some(expected));
+    }
     let new_owner = Pubkey::new_unique();
     acc.account.set_owner(new_owner);
-    drop(accounts);
     tenv.insert_account(&acc.pubkey, &acc.account);
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER]);
     assert!(result.is_none());

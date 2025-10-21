@@ -7,9 +7,9 @@ impl HttpDispatcher {
     /// to the latest slot number from the `BlocksCache`.
     pub(crate) fn get_block_height(
         &self,
-        request: &mut JsonRequest,
+        request: &JsonRequest,
     ) -> HandlerResult {
-        let slot = self.blocks.block_height();
-        Ok(ResponsePayload::encode_no_context(&request.id, slot))
+        let height = self.blocks.block_height();
+        Ok(ResponsePayload::encode_no_context(&request.id, height))
     }
 }

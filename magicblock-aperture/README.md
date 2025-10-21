@@ -4,7 +4,7 @@ Provides the JSON-RPC (HTTP) and Pub/Sub (WebSocket) API Server for the Magicblo
 
 ## Overview
 
-This crate serves as the primary external interface for the validator, allowing clients to query the ledger, submit transactions, and subscribe to real-time events. It is a high-performance, asynchronous server built with low level libraries for maximum control over implementation.
+This crate serves as the primary external interface for the validator, allowing clients to query the ledger, submit transactions, and subscribe to real-time events. It is a high-performance, asynchronous server built with low-level libraries for maximum control over implementation.
 
 It provides two core services running on adjacent ports:
 1.  **JSON-RPC Server (HTTP):** Handles traditional request/response RPC methods like `getAccountInfo`, `getTransaction`, and `sendTransaction`.

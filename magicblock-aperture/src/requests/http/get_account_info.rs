@@ -22,6 +22,7 @@ impl HttpDispatcher {
         let pubkey: Pubkey = some_or_err!(pubkey);
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
+        let slice = config.data_slice;
 
         debug!("get_account_info: '{}'", pubkey);
 
@@ -30,7 +31,9 @@ impl HttpDispatcher {
             .read_account_with_ensure(&pubkey)
             .await
             // `LockedAccount` provides a race-free read of the account data before encoding.
-            .map(|acc| LockedAccount::new(pubkey, acc).ui_encode(encoding));
+            .map(|acc| {
+                LockedAccount::new(pubkey, acc).ui_encode(encoding, slice)
+            });
 
         let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, account, slot))

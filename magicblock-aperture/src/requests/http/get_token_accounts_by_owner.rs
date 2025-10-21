@@ -33,12 +33,13 @@ impl HttpDispatcher {
         // Build the primary filter based on either the mint or program ID.
         match filter {
             RpcTokenAccountsFilter::Mint(pubkey) => {
-                let bytes = bs58::decode(pubkey)
-                    .into_vec()
+                let mut buffer = [0; 32];
+                bs58::decode(pubkey)
+                    .onto(&mut buffer)
                     .map_err(RpcError::parse_error)?;
                 let filter = ProgramFilter::MemCmp {
                     offset: SPL_MINT_OFFSET,
-                    bytes,
+                    bytes: buffer.to_vec(),
                 };
                 filters.push(filter);
             }

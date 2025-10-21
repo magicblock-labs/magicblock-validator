@@ -1,6 +1,8 @@
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use solana_account::{cow::AccountSeqLock, AccountSharedData};
-use solana_account_decoder::{encode_ui_account, UiAccount, UiAccountEncoding};
+use solana_account_decoder::{
+    encode_ui_account, UiAccount, UiAccountEncoding, UiDataSliceConfig,
+};
 use solana_pubkey::Pubkey;
 
 use crate::Slot;
@@ -49,9 +51,13 @@ impl LockedAccount {
     /// Safely reads the account data and encodes it into the `UiAccount` format for RPC responses.
     /// This method internally uses `read_locked` to ensure data consistency.
     #[inline]
-    pub fn ui_encode(&self, encoding: UiAccountEncoding) -> UiAccount {
+    pub fn ui_encode(
+        &self,
+        encoding: UiAccountEncoding,
+        slice: Option<UiDataSliceConfig>,
+    ) -> UiAccount {
         self.read_locked(|pk, acc| {
-            encode_ui_account(pk, acc, encoding, None, None)
+            encode_ui_account(pk, acc, encoding, None, slice)
         })
     }
 

@@ -91,7 +91,7 @@ impl RpcTestEnv {
         // Try to find a free port, this is handy when using nextest
         // where each test needs to run in a separate process.
         let (server, config) = loop {
-            let port: u16 = rand::random_range(7000..u16::MAX);
+            let port: u16 = rand::random_range(7000..u16::MAX - 1);
             let node_context = NodeContext {
                 identity: execution.payer.pubkey(),
                 faucet: Some(faucet.insecure_clone()),
