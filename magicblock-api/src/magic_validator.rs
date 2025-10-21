@@ -707,11 +707,6 @@ impl MagicValidator {
             try_get_remote_accounts_and_rpc_config(&self.config.accounts)?;
         let validator_pubkey = self.bank().get_identity();
 
-        println!(
-            "ensure_validator_funded_on_chain: {}",
-            remote_rpc_config.url().to_string()
-        );
-
         let lamports = RpcClient::new_with_commitment(
             remote_rpc_config.url().to_string(),
             CommitmentConfig {
@@ -728,13 +723,6 @@ impl MagicValidator {
                 err.to_string(),
             )
         })?;
-
-        println!(
-            "validator_pubkey: {}, balance: {}",
-            validator_pubkey,
-            (lamports as f64) / (LAMPORTS_PER_SOL as f64)
-        );
-
         if lamports < MIN_BALANCE_SOL * LAMPORTS_PER_SOL {
             Err(ApiError::ValidatorInsufficientlyFunded(
                 validator_pubkey,

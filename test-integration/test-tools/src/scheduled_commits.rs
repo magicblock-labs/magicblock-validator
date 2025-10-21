@@ -27,20 +27,6 @@ pub fn extract_scheduled_commit_sent_signature_from_logs(
     None
 }
 
-pub fn extract_base_chain_commit_signature_from_logs(
-    logs: &[String],
-) -> Option<Signature> {
-    // ScheduledCommitSent signature[0]: <signature>
-    for log in logs {
-        if log.starts_with("ScheduledCommitSent signature[0]: ") {
-            let commit_sig =
-                log.split_whitespace().last().expect("No signature found");
-            return Signature::from_str(commit_sig).ok();
-        }
-    }
-    None
-}
-
 #[allow(clippy::type_complexity)]
 pub fn extract_sent_commit_info_from_logs(
     logs: &[String],
@@ -221,7 +207,7 @@ impl IntegrationTestContext {
                 )
             })?;
 
-        println!("Ephem Logs level-1: {:#?}", ephem_logs_l2);
+        println!("Ephem Logs level-2: {:#?}", ephem_logs_l2);
 
         let (included, excluded, feepayers, sigs) =
             extract_sent_commit_info_from_logs(&ephem_logs_l2);

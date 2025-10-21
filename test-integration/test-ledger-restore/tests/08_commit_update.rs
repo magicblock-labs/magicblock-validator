@@ -42,8 +42,6 @@ fn restore_ledger_committed_and_updated_account() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer = payer_keypair();
 
-    println!("PAYER: {:?}", payer.pubkey());
-
     let (mut validator, _) = write(&ledger_path, &payer);
     validator.kill().unwrap();
 

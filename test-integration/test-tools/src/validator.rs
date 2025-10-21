@@ -58,7 +58,7 @@ pub fn start_magic_block_validator_with_config(
         .env("VALIDATOR_KEYPAIR", keypair_base58.clone())
         .current_dir(root_dir);
 
-    eprintln!("Starting validator with: {:?}", command);
+    eprintln!("Starting validator with {:?}", command);
     eprintln!(
         "Setting validator keypair to {} ({})",
         loaded_chain_accounts.validator_authority(),
@@ -66,9 +66,6 @@ pub fn start_magic_block_validator_with_config(
     );
 
     let validator = command.spawn().expect("Failed to start validator");
-
-    eprintln!("validator process spawned");
-
     wait_for_validator(validator, port)
 }
 

@@ -60,7 +60,6 @@ pub struct IntegrationTestContext {
 
 impl IntegrationTestContext {
     pub fn try_new_ephem_only() -> Result<Self> {
-        println!(" == try_new_ephem_only ==");
         let commitment = CommitmentConfig::confirmed();
         let ephem_client = RpcClient::new_with_commitment(
             Self::url_ephem().to_string(),
@@ -79,7 +78,6 @@ impl IntegrationTestContext {
     }
 
     pub fn try_new_chain_only() -> Result<Self> {
-        println!(" == try_new_chain_only ==");
         let commitment = CommitmentConfig::confirmed();
         let chain_client = RpcClient::new_with_commitment(
             Self::url_chain().to_string(),
@@ -97,7 +95,6 @@ impl IntegrationTestContext {
     }
 
     pub fn try_new() -> Result<Self> {
-        println!(" == try_new ==");
         let commitment = CommitmentConfig::confirmed();
 
         let chain_client = RpcClient::new_with_commitment(
@@ -169,20 +166,21 @@ impl IntegrationTestContext {
                     continue;
                 }
             };
-            return status
-                .transaction
-                .meta
-                .as_ref()
-                .with_context(|| {
-                    format!(
-                        "No transaction meta found for signature {:?}: {:?}",
-                        sig, status
-                    )
-                })
-                .unwrap()
-                .log_messages
-                .clone()
-                .into();
+            return Option::<Vec<String>>::from(
+                status
+                    .transaction
+                    .meta
+                    .as_ref()
+                    .with_context(|| {
+                        format!(
+                            "No transaction meta found for signature {:?}: {:?}",
+                            sig, status
+                        )
+                    })
+                    .unwrap()
+                    .log_messages
+                    .clone(),
+            );
         }
         None
     }

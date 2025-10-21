@@ -22,11 +22,6 @@ use test_runner::{
 
 pub fn main() {
     let config = TestConfigViaEnvVars::default();
-    if config.selected_tests.len() != 0 {
-        println!("config: {:#?}", config);
-        // return;
-    }
-
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let Ok((security_output, scenarios_output)) =
         run_schedule_commit_tests(&manifest_dir, &config)
@@ -35,72 +30,72 @@ pub fn main() {
         return;
     };
 
-    // let Ok(issues_frequent_commits_output) =
-    //     run_issues_frequent_commmits_tests(&manifest_dir, &config)
-    // else {
-    //     return;
-    // };
+    let Ok(issues_frequent_commits_output) =
+        run_issues_frequent_commmits_tests(&manifest_dir, &config)
+    else {
+        return;
+    };
 
-    // let Ok(cloning_output) = run_cloning_tests(&manifest_dir, &config) else {
-    //     return;
-    // };
+    let Ok(cloning_output) = run_cloning_tests(&manifest_dir, &config) else {
+        return;
+    };
 
-    // let Ok(restore_ledger_output) =
-    //     run_restore_ledger_tests(&manifest_dir, &config)
-    // else {
-    //     return;
-    // };
+    let Ok(restore_ledger_output) =
+        run_restore_ledger_tests(&manifest_dir, &config)
+    else {
+        return;
+    };
 
-    // let Ok(magicblock_api_output) =
-    //     run_magicblock_api_tests(&manifest_dir, &config)
-    // else {
-    //     return;
-    // };
+    let Ok(magicblock_api_output) =
+        run_magicblock_api_tests(&manifest_dir, &config)
+    else {
+        return;
+    };
 
-    // let Ok((table_mania_output, committor_output)) =
-    //     run_table_mania_and_committor_tests(&manifest_dir, &config)
-    // else {
-    //     return;
-    // };
+    let Ok((table_mania_output, committor_output)) =
+        run_table_mania_and_committor_tests(&manifest_dir, &config)
+    else {
+        return;
+    };
 
-    // let Ok(magicblock_pubsub_output) =
-    //     run_magicblock_pubsub_tests(&manifest_dir, &config)
-    // else {
-    //     return;
-    // };
+    let Ok(magicblock_pubsub_output) =
+        run_magicblock_pubsub_tests(&manifest_dir, &config)
+    else {
+        return;
+    };
 
-    // let Ok(config_output) = run_config_tests(&manifest_dir, &config) else {
-    //     return;
-    // };
+    let Ok(config_output) = run_config_tests(&manifest_dir, &config) else {
+        return;
+    };
 
-    // let Ok(schedule_intents_output) =
-    //     run_schedule_intents_tests(&manifest_dir, &config)
-    // else {
-    //     return;
-    // };
+    let Ok(schedule_intents_output) =
+        run_schedule_intents_tests(&manifest_dir, &config)
+    else {
+        return;
+    };
 
-    // let Ok(task_scheduler_output) =
-    //     run_task_scheduler_tests(&manifest_dir, &config)
-    // else {
-    //     return;
-    // };
+    let Ok(task_scheduler_output) =
+        run_task_scheduler_tests(&manifest_dir, &config)
+    else {
+        return;
+    };
 
-    // // Assert that all tests passed
+    // Assert that all tests passed
     assert_cargo_tests_passed(security_output, "security");
     assert_cargo_tests_passed(scenarios_output, "scenarios");
-    // assert_cargo_tests_passed(cloning_output, "cloning");
-    // assert_cargo_tests_passed(
-    //     issues_frequent_commits_output,
-    //     "issues_frequent_commits",
-    // );
-    // assert_cargo_tests_passed(restore_ledger_output, "restore_ledger");
-    // assert_cargo_tests_passed(magicblock_api_output, "magicblock_api");
-    // assert_cargo_tests_passed(table_mania_output, "table_mania");
-    // assert_cargo_tests_passed(committor_output, "committor");
-    // assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
-    // assert_cargo_tests_passed(config_output, "config");
-    // assert_cargo_tests_passed(schedule_intents_output, "schedule_intents");
-    // assert_cargo_tests_passed(task_scheduler_output, "task_scheduler");
+    assert_cargo_tests_passed(cloning_output, "cloning");
+    assert_cargo_tests_passed(
+        issues_frequent_commits_output,
+        "issues_frequent_commits",
+    );
+    assert_cargo_tests_passed(restore_ledger_output, "restore_ledger");
+    assert_cargo_tests_passed(magicblock_api_output, "magicblock_api");
+    assert_cargo_tests_passed(table_mania_output, "table_mania");
+    assert_cargo_tests_passed(committor_output, "committor");
+    assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
+    assert_cargo_tests_passed(config_output, "config");
+    assert_cargo_tests_passed(schedule_intents_output, "schedule_intents");
+    assert_cargo_tests_passed(task_scheduler_output, "task_scheduler");
 }
 
 fn success_output() -> Output {
@@ -303,22 +298,22 @@ fn run_schedule_commit_tests(
         );
         let mut ephem_validator = start_ephem_validator();
 
-        // eprintln!("======== RUNNING SECURITY TESTS ========");
-        // let test_security_dir =
-        //     format!("{}/../{}", manifest_dir, "schedulecommit/test-security");
-        // eprintln!("Running security tests in {}", test_security_dir);
-        // let test_security_output =
-        //     match run_test(test_security_dir, Default::default()) {
-        //         Ok(output) => output,
-        //         Err(err) => {
-        //             eprintln!("Failed to run security: {:?}", err);
-        //             cleanup_validators(
-        //                 &mut ephem_validator,
-        //                 &mut devnet_validator,
-        //             );
-        //             return Err(err.into());
-        //         }
-        //     };
+        eprintln!("======== RUNNING SECURITY TESTS ========");
+        let test_security_dir =
+            format!("{}/../{}", manifest_dir, "schedulecommit/test-security");
+        eprintln!("Running security tests in {}", test_security_dir);
+        let test_security_output =
+            match run_test(test_security_dir, Default::default()) {
+                Ok(output) => output,
+                Err(err) => {
+                    eprintln!("Failed to run security: {:?}", err);
+                    cleanup_validators(
+                        &mut ephem_validator,
+                        &mut devnet_validator,
+                    );
+                    return Err(err.into());
+                }
+            };
 
         eprintln!("======== RUNNING SCENARIOS TESTS ========");
         let test_scenarios_dir =
@@ -337,8 +332,7 @@ fn run_schedule_commit_tests(
             };
 
         cleanup_validators(&mut ephem_validator, &mut devnet_validator);
-        //Ok((test_security_output, test_scenarios_output))
-        Ok((test_scenarios_output.clone(), test_scenarios_output))
+        Ok((test_security_output, test_scenarios_output))
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
@@ -767,11 +761,11 @@ fn run_test(
     config: RunTestConfig,
 ) -> io::Result<process::Output> {
     let mut cmd = process::Command::new("cargo");
-    // cmd.env(
-    //     "RUST_LOG",
-    //     std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
-    // )
-    cmd.arg("test");
+    cmd.env(
+        "RUST_LOG",
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+    )
+    .arg("test");
     if let Some(package) = config.package {
         cmd.arg("-p").arg(package);
     }
@@ -780,9 +774,6 @@ fn run_test(
     }
     cmd.arg("--").arg("--test-threads=1").arg("--nocapture");
     cmd.current_dir(manifest_dir.clone());
-
-    println!("run_test CMD: {:#?}", cmd);
-
     Teepee::new(cmd).output()
 }
 

@@ -5,7 +5,7 @@ use std::{
 
 use serde::Deserialize;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct Config {
     accounts: AccountsConfig,
     #[serde(default)]
@@ -14,18 +14,18 @@ struct Config {
     program: Vec<Program>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct AccountsConfig {
     remote: RemoteConfig,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct RemoteConfig {
     cluster: Option<String>,
     url: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct Rpc {
     port: u16,
 }
@@ -36,7 +36,7 @@ impl Default for Rpc {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct Program {
     id: String,
     path: String,

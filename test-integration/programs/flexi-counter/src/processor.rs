@@ -11,10 +11,7 @@ use ephemeral_rollups_sdk::{
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
-    ephem::{
-        commit_accounts, commit_and_undelegate_accounts,
-        commit_diff_and_undelegate_accounts,
-    },
+    ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
 use magicblock_magic_program_api::{
     args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
@@ -52,20 +49,15 @@ pub fn process(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
-    msg!("process entered");
     if instruction_data.len() >= EXTERNAL_UNDELEGATE_DISCRIMINATOR.len() {
         let (disc, data) =
             instruction_data.split_at(EXTERNAL_UNDELEGATE_DISCRIMINATOR.len());
 
-        msg!("process entered alternative");
-
         if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
-            msg!("process EXTERNAL_UNDELEGATE_DISCRIMINATOR");
             return process_undelegate_request(accounts, data);
         }
 
         if disc == EXTERNAL_CALL_HANDLER_DISCRIMINATOR {
-            msg!("process EXTERNAL_CALL_HANDLER_DISCRIMINATOR");
             return process_call_handler(accounts, data);
         }
     }
@@ -341,7 +333,6 @@ fn process_add_and_schedule_commit(
 
     // Request the PDA counter account to be committed
     if undelegate {
-        msg!("invoke commit_and_undelegate_accounts");
         commit_and_undelegate_accounts(
             payer_info,
             vec![counter_pda_info],
@@ -349,7 +340,6 @@ fn process_add_and_schedule_commit(
             magic_program_info,
         )?;
     } else {
-        msg!("invoke commit_accounts");
         commit_accounts(
             payer_info,
             vec![counter_pda_info],
