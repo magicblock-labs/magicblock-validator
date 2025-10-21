@@ -193,7 +193,7 @@ impl IntegrationTestContext {
     {
         // 1. Find scheduled commit sent signature via
         // ScheduledCommitSent signature: <signature>
-        let (ephem_logs, scheduled_commmit_sent_sig) = {
+        let (ephem_logs_l1, scheduled_commmit_sent_sig) = {
             let logs = self.fetch_ephemeral_logs(sig).with_context(|| {
                 format!(
                     "Scheduled commit sent logs not found for sig {:?}",
@@ -206,47 +206,25 @@ impl IntegrationTestContext {
                         format!("ScheduledCommitSent signature not found in logs, {:#?}", logs)
                     })?;
 
-            println!("LOGS: {:#?}", logs);
-
             (logs, sig)
         };
 
-        println!("Find chain commit signatures");
+        println!("Ephem Logs level-1: {:#?}", ephem_logs_l1);
 
         // 2. Find chain commit signatures
-        // let chain_logs = self
-        //     .fetch_ephemeral_logs(scheduled_commmit_sent_sig)
-        //     .with_context(|| {
-        //         format!(
-        //             "Logs {:#?}\nScheduled commit sent sig {:?}",
-        //             ephem_logs, scheduled_commmit_sent_sig
-        //         )
-        //     })?;
-        let (chain_logs, base_sig) = {
-            let logs = self
-                .fetch_ephemeral_logs(scheduled_commmit_sent_sig)
-                .with_context(|| {
-                    format!(
-                        "Logs {:#?}\nScheduled commit sent sig {:?}",
-                        ephem_logs, scheduled_commmit_sent_sig
-                    )
-                })?;
-            let sig =
-                extract_base_chain_commit_signature_from_logs(&logs)
-                    .with_context(|| {
-                        format!("ScheduledCommitSent signature not found in logs, {:#?}", logs)
-                    })?;
+        let ephem_logs_l2 = self
+            .fetch_ephemeral_logs(scheduled_commmit_sent_sig)
+            .with_context(|| {
+                format!(
+                    "Logs {:#?}\nScheduled commit sent sig {:?}",
+                    ephem_logs_l1, scheduled_commmit_sent_sig
+                )
+            })?;
 
-            (logs, sig)
-        };
-
-        println!("EPEHM_LOGS: {:#?}", chain_logs);
-        println!("Found chain commit signatures: |{scheduled_commmit_sent_sig}| / |{base_sig}|");
-
-        self.dump_chain_logs(base_sig);
+        println!("Ephem Logs level-1: {:#?}", ephem_logs_l2);
 
         let (included, excluded, feepayers, sigs) =
-            extract_sent_commit_info_from_logs(&chain_logs);
+            extract_sent_commit_info_from_logs(&ephem_logs_l2);
 
         let mut committed_accounts = HashMap::new();
         for pubkey in included {
@@ -264,6 +242,10 @@ impl IntegrationTestContext {
                     })?;
                 committed_accounts.insert(pubkey, ephem_account);
             };
+        }
+
+        for sig in sigs.iter() {
+            self.dump_chain_logs(sig.clone());
         }
 
         Ok(ScheduledCommitResult {
