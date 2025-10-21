@@ -51,12 +51,21 @@ impl BaseTask for ArgsTask {
                     data: value.committed_account.account.data.clone(),
                     allow_undelegation: value.allow_undelegation,
                 };
-                dlp::instruction_builder::commit_state(
-                    *validator,
-                    value.committed_account.pubkey,
-                    value.committed_account.account.owner,
-                    args,
-                )
+                if value.commit_diff {
+                    dlp::instruction_builder::commit_diff(
+                        *validator,
+                        value.committed_account.pubkey,
+                        value.committed_account.account.owner,
+                        args,
+                    )
+                } else {
+                    dlp::instruction_builder::commit_state(
+                        *validator,
+                        value.committed_account.pubkey,
+                        value.committed_account.account.owner,
+                        args,
+                    )
+                }
             }
             ArgsTaskType::Finalize(value) => {
                 dlp::instruction_builder::finalize(

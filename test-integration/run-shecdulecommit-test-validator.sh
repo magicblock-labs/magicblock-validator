@@ -1,6 +1,5 @@
 #!/bin/bash
 solana-test-validator \
-  --log \
   --rpc-port \
   7799 \
   -r \
@@ -8,7 +7,7 @@ solana-test-validator \
   10000 \
   --upgradeable-program \
   DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh \
-  /Users/snawaz/projects/mb/magicblock-validator/test-integration/schedulecommit/elfs/dlp.so \
+  /Users/snawaz/projects/mb/delegation-program/target/deploy/dlp.so \
   none \
   --upgradeable-program \
   DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1 \
