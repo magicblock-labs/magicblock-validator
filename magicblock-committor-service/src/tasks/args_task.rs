@@ -1,4 +1,4 @@
-use dlp::args::{CallHandlerArgs, CommitStateArgs};
+use dlp::args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs};
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 
@@ -15,6 +15,7 @@ use crate::tasks::{
 #[derive(Clone)]
 pub enum ArgsTaskType {
     Commit(CommitTask),
+    CommitDiff(CommitTask),
     Finalize(FinalizeTask),
     Undelegate(UndelegateTask), // Special action really
     BaseAction(BaseActionTask),
@@ -51,21 +52,51 @@ impl BaseTask for ArgsTask {
                     data: value.committed_account.account.data.clone(),
                     allow_undelegation: value.allow_undelegation,
                 };
-                if value.commit_diff {
-                    dlp::instruction_builder::commit_diff(
-                        *validator,
-                        value.committed_account.pubkey,
-                        value.committed_account.account.owner,
-                        args,
-                    )
-                } else {
-                    dlp::instruction_builder::commit_state(
-                        *validator,
-                        value.committed_account.pubkey,
-                        value.committed_account.account.owner,
-                        args,
-                    )
-                }
+                dlp::instruction_builder::commit_state(
+                    *validator,
+                    value.committed_account.pubkey,
+                    value.committed_account.account.owner,
+                    args,
+                )
+            }
+            // algo:
+            // - delegated_account, prev
+            // - changed delegated_account
+            // - diff = prev - delegated_account
+            // - commit
+            // - prev = delegated_account
+            // - update cache with prev
+            //
+            // relevant files/modules/crates:
+            // -
+            // - https://docs.rs/scc/latest/scc/#hashcache
+            //
+            // diff:
+            // - [offset1][offset2]data
+            //
+            // 100
+            //
+            // 11..15
+            //
+            // 31...40
+            //
+            // - complete: [2] [5][11] [10][31] [11..15 31 ..40]
+            //
+            // - [3][8][11..15 31 ..40]
+            //
+            ArgsTaskType::CommitDiff(value) => {
+                let args = CommitDiffArgs {
+                    nonce: value.commit_id,
+                    lamports: value.committed_account.account.lamports,
+                    diff: vec![], // compute diff for this field
+                    allow_undelegation: value.allow_undelegation,
+                };
+                dlp::instruction_builder::commit_diff(
+                    *validator,
+                    value.committed_account.pubkey,
+                    value.committed_account.account.owner,
+                    args,
+                )
             }
             ArgsTaskType::Finalize(value) => {
                 dlp::instruction_builder::finalize(
@@ -116,7 +147,8 @@ impl BaseTask for ArgsTask {
                     BufferTaskType::Commit(value),
                 )))
             }
-            ArgsTaskType::BaseAction(_)
+            ArgsTaskType::CommitDiff(_)
+            | ArgsTaskType::BaseAction(_)
             | ArgsTaskType::Finalize(_)
             | ArgsTaskType::Undelegate(_) => Err(self),
         }
@@ -142,6 +174,7 @@ impl BaseTask for ArgsTask {
     fn compute_units(&self) -> u32 {
         match &self.task_type {
             ArgsTaskType::Commit(_) => 65_000,
+            ArgsTaskType::CommitDiff(_) => 40_000,
             ArgsTaskType::BaseAction(task) => task.action.compute_units,
             ArgsTaskType::Undelegate(_) => 70_000,
             ArgsTaskType::Finalize(_) => 40_000,
@@ -156,6 +189,9 @@ impl BaseTask for ArgsTask {
     fn task_type(&self) -> TaskType {
         match &self.task_type {
             ArgsTaskType::Commit(_) => TaskType::Commit,
+            // TODO (snawaz): What should we use here? Commit (in the sense of "category of task"), or add a
+            // new variant "CommitDiff" to indicate a specific instruction?
+            ArgsTaskType::CommitDiff(_) => TaskType::Commit,
             ArgsTaskType::BaseAction(_) => TaskType::Action,
             ArgsTaskType::Undelegate(_) => TaskType::Undelegate,
             ArgsTaskType::Finalize(_) => TaskType::Finalize,
@@ -168,6 +204,7 @@ impl BaseTask for ArgsTask {
     }
 
     fn reset_commit_id(&mut self, commit_id: u64) {
+        // TODO (snawaz): handle CommitDiff as well?
         let ArgsTaskType::Commit(commit_task) = &mut self.task_type else {
             return;
         };
