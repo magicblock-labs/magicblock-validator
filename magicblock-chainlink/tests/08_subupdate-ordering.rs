@@ -2,7 +2,6 @@ use log::*;
 use magicblock_chainlink::testing::init_logger;
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
-
 use solana_sdk::clock::Slot;
 use utils::{
     accounts::account_shared_with_owner_and_slot, test_context::TestContext,
