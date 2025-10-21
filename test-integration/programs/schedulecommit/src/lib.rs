@@ -4,7 +4,10 @@ use ephemeral_rollups_sdk::{
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
-    ephem::{commit_accounts, commit_and_undelegate_accounts},
+    ephem::{
+        commit_accounts, commit_and_undelegate_accounts,
+        commit_diff_and_undelegate_accounts,
+    },
 };
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
@@ -314,7 +317,7 @@ pub fn process_schedulecommit_cpi(
     );
 
     if args.undelegate {
-        commit_and_undelegate_accounts(
+        commit_diff_and_undelegate_accounts(
             payer,
             committees,
             magic_context,
