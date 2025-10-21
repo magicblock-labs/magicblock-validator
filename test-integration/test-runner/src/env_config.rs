@@ -1,3 +1,4 @@
+#[derive(Debug)]
 enum ValidatorSetup {
     Devnet,
     Ephem,
@@ -26,9 +27,10 @@ impl From<&str> for ValidatorSetup {
     }
 }
 
+#[derive(Debug)]
 pub struct TestConfigViaEnvVars {
     validators_only: Option<ValidatorSetup>,
-    selected_tests: Vec<String>,
+    pub selected_tests: Vec<String>,
     skipped_tests: Vec<String>,
 }
 

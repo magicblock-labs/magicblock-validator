@@ -60,6 +60,7 @@ pub struct IntegrationTestContext {
 
 impl IntegrationTestContext {
     pub fn try_new_ephem_only() -> Result<Self> {
+        println!(" == try_new_ephem_only ==");
         let commitment = CommitmentConfig::confirmed();
         let ephem_client = RpcClient::new_with_commitment(
             Self::url_ephem().to_string(),
@@ -78,6 +79,7 @@ impl IntegrationTestContext {
     }
 
     pub fn try_new_chain_only() -> Result<Self> {
+        println!(" == try_new_chain_only ==");
         let commitment = CommitmentConfig::confirmed();
         let chain_client = RpcClient::new_with_commitment(
             Self::url_chain().to_string(),
@@ -95,6 +97,7 @@ impl IntegrationTestContext {
     }
 
     pub fn try_new() -> Result<Self> {
+        println!(" == try_new ==");
         let commitment = CommitmentConfig::confirmed();
 
         let chain_client = RpcClient::new_with_commitment(
@@ -136,15 +139,21 @@ impl IntegrationTestContext {
         rpc_client: Option<&RpcClient>,
         label: &str,
     ) -> Option<Vec<String>> {
-        let rpc_client = rpc_client.or(self.chain_client.as_ref())?;
+        let rpc_client =
+            rpc_client.expect("rpc_client for [{}] does not exist");
 
         // Try this up to 50 times since devnet here returns the version response instead of
         // the EncodedConfirmedTransactionWithStatusMeta at times
-        for idx in 1..=100 {
+        for idx in 1..=50 {
             let status = match rpc_client.get_transaction_with_config(
                 &sig,
                 RpcTransactionConfig {
                     commitment: Some(self.commitment),
+                    max_supported_transaction_version: if label == "chain" {
+                        Some(0)
+                    } else {
+                        None
+                    },
                     ..Default::default()
                 },
             ) {
@@ -156,32 +165,25 @@ impl IntegrationTestContext {
                             label, err
                         );
                     }
-                    // println!(
-                    //     "Failed to fetch transaction from {}: SLEEP for 400ms",
-                    //     label
-                    // );
                     sleep(Duration::from_millis(400));
                     continue;
                 }
             };
-            println!("RETURN LOGS");
-            return Option::<Vec<String>>::from(
-                status
-                    .transaction
-                    .meta
-                    .as_ref()
-                    .with_context(|| {
-                        format!(
-                            "No transaction meta found for signature {:?}: {:?}",
-                            sig, status
-                        )
-                    })
-                    .unwrap()
-                    .log_messages
-                    .clone(),
-            );
+            return status
+                .transaction
+                .meta
+                .as_ref()
+                .with_context(|| {
+                    format!(
+                        "No transaction meta found for signature {:?}: {:?}",
+                        sig, status
+                    )
+                })
+                .unwrap()
+                .log_messages
+                .clone()
+                .into();
         }
-        println!("RETURN NONE");
         None
     }
 
