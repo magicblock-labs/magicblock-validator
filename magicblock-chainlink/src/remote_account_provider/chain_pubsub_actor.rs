@@ -267,10 +267,11 @@ impl ChainPubsubActor {
                                rpc_response.context.slot % CLOCK_LOG_SLOT_FREQ == 0) {
                                     trace!("Received update for {pubkey}: {rpc_response:?}");
                             }
-                            let _ = subscription_updates_sender.send(SubscriptionUpdate {
+                            let update = SubscriptionUpdate::from((
                                 pubkey,
                                 rpc_response,
-                            }).await.inspect_err(|err| {
+                            ));
+                            let _ = subscription_updates_sender.send(update).await.inspect_err(|err| {
                                 error!("Failed to send {pubkey} subscription update: {err:?}");
                             });
                         } else {

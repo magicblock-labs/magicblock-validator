@@ -353,7 +353,7 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
     ) {
         while let Some(update) = inner_rx.recv().await {
             let now = Instant::now();
-            let key = (update.pubkey, update.rpc_response.context.slot);
+            let key = (update.pubkey, update.slot);
             if !Self::should_forward_dedup(
                 &params.cache,
                 key,
@@ -631,7 +631,8 @@ mod tests {
 
         assert_eq!(u1.pubkey, pk);
         assert_eq!(u2.pubkey, pk);
-        let lamports = |u: &SubscriptionUpdate| u.rpc_response.value.lamports;
+        let lamports =
+            |u: &SubscriptionUpdate| u.account.as_ref().unwrap().lamports;
         let mut lams = vec![lamports(&u1), lamports(&u2)];
         lams.sort();
         assert_eq!(lams, vec![10, 20]);
@@ -721,7 +722,7 @@ mod tests {
         .expect("first update expected")
         .expect("stream open");
         assert_eq!(first.pubkey, pk);
-        assert_eq!(first.rpc_response.context.slot, 7);
+        assert_eq!(first.slot, 7);
 
         // No second within short timeout (dedup window is 2s)
         let recv = tokio::time::timeout(
@@ -742,7 +743,7 @@ mod tests {
         .await
         .expect("next update expected")
         .expect("stream open");
-        assert_eq!(next.rpc_response.context.slot, 8);
+        assert_eq!(next.slot, 8);
 
         mux.shutdown().await;
     }
@@ -792,7 +793,7 @@ mod tests {
             .await
             .expect("expected update")
             .expect("stream open");
-            received.push(up.rpc_response.context.slot);
+            received.push(up.slot);
         }
         received.sort_unstable();
         assert_eq!(received, vec![1, 2, 3]);
@@ -866,7 +867,7 @@ mod tests {
             .await
             .expect("expected first-batch update")
             .expect("stream open");
-            first_batch.push(up.rpc_response.context.slot);
+            first_batch.push(up.slot);
         }
         first_batch.sort_unstable();
         assert_eq!(first_batch, vec![1, 2, 3]);
@@ -885,7 +886,7 @@ mod tests {
         .await
         .expect("expected second-batch update")
         .expect("stream open");
-        assert_eq!(up.rpc_response.context.slot, 1);
+        assert_eq!(up.slot, 1);
 
         mux.shutdown().await;
     }
@@ -936,7 +937,7 @@ mod tests {
         )
         .await
         {
-            slots.push(update.rpc_response.context.slot);
+            slots.push(update.slot);
         }
         slots
     }

@@ -1,9 +1,10 @@
 use std::fmt;
 
+use solana_account::Account;
 use solana_account_decoder::UiAccount;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::response::Response as RpcResponse;
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_sdk::{clock::Slot, commitment_config::CommitmentConfig};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
@@ -29,16 +30,32 @@ impl PubsubClientConfig {
 
 #[derive(Debug, Clone)]
 pub struct SubscriptionUpdate {
+    /// The pubkey of the account that was updated
     pub pubkey: Pubkey,
-    pub rpc_response: RpcResponse<UiAccount>,
+    /// The remote slot at which the update occurred
+    pub slot: Slot,
+    /// The updated account.
+    /// It is `None` if the [UiAccount] of an [RpcResponse] could not be decoded
+    pub account: Option<Account>,
+}
+
+impl From<(Pubkey, RpcResponse<UiAccount>)> for SubscriptionUpdate {
+    fn from((pubkey, rpc_response): (Pubkey, RpcResponse<UiAccount>)) -> Self {
+        let account: Option<Account> = rpc_response.value.decode::<Account>();
+        Self {
+            pubkey,
+            slot: rpc_response.context.slot,
+            account,
+        }
+    }
 }
 
 impl fmt::Display for SubscriptionUpdate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "SubscriptionUpdate(pubkey: {}, update: {:?})",
-            self.pubkey, self.rpc_response
+            "SubscriptionUpdate(pubkey: {}, update: {:?}) at slot {}",
+            self.pubkey, self.account, self.slot
         )
     }
 }
