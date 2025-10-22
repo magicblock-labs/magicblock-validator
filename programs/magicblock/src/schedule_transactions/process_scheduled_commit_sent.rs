@@ -266,6 +266,7 @@ mod tests {
             excluded_pubkeys: Default::default(),
             feepayers: Default::default(),
             requested_undelegation: false,
+            commit_diff: false,
         }
     }
 

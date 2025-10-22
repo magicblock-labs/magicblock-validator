@@ -162,7 +162,7 @@ impl MagicBaseIntent {
         }
     }
 
-    fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccount>> {
+    pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccount>> {
         match self {
             MagicBaseIntent::BaseActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts()),
@@ -172,7 +172,7 @@ impl MagicBaseIntent {
         }
     }
 
-    fn get_committed_accounts_mut(
+    pub fn get_committed_accounts_mut(
         &mut self,
     ) -> Option<&mut Vec<CommittedAccount>> {
         match self {
