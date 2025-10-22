@@ -233,10 +233,11 @@ impl ChainlinkCloner {
     fn maybe_prepare_lookup_tables(&self, pubkey: Pubkey, owner: Pubkey) {
         // Allow the committer service to reserve pubkeys in lookup tables
         // that could be needed when we commit this account
-        if let Some(committor) = self.changeset_committor.clone() {
+        if let Some(committor) = self.changeset_committor.as_ref() {
             if self.clone_config.prepare_lookup_tables
                 == PrepareLookupTables::Always
             {
+                let committor = committor.clone();
                 tokio::spawn(async move {
                     match Self::map_committor_request_result(
                         committor.reserve_pubkeys_for_committee(pubkey, owner),
