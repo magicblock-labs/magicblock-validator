@@ -214,11 +214,8 @@ pub mod mock {
                 },
                 value: ui_acc,
             };
-            self.send(SubscriptionUpdate {
-                pubkey,
-                rpc_response,
-            })
-            .await;
+            let update = SubscriptionUpdate::from((pubkey, rpc_response));
+            self.send(update).await;
         }
     }
 

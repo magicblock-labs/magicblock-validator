@@ -321,7 +321,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let subscription_forwarder = self.subscription_forwarder.clone();
         task::spawn(async move {
             while let Some(update) = updates.recv().await {
-                let slot = update.rpc_response.context.slot;
+                let slot = update.slot;
 
                 received_updates_count.fetch_add(1, Ordering::Relaxed);
                 last_update_slot.store(slot, Ordering::Relaxed);
@@ -337,21 +337,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         update.pubkey,
                         slot
                     );
-                    let remote_account =
-                        match update.rpc_response.value.decode::<Account>() {
-                            Some(account) => RemoteAccount::from_fresh_account(
-                                account,
-                                slot,
-                                RemoteAccountUpdateSource::Subscription,
-                            ),
-                            None => {
-                                error!(
+                    let remote_account = match update.account {
+                        Some(account) => RemoteAccount::from_fresh_account(
+                            account,
+                            slot,
+                            RemoteAccountUpdateSource::Subscription,
+                        ),
+                        None => {
+                            error!(
                                 "Account for {} update could not be decoded",
                                 update.pubkey
                             );
-                                RemoteAccount::NotFound(slot)
-                            }
-                        };
+                            RemoteAccount::NotFound(slot)
+                        }
+                    };
 
                     // Check if we're currently fetching this account
                     let forward_update = {
