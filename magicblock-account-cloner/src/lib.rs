@@ -26,7 +26,6 @@ use magicblock_magic_program_api::instruction::AccountModification;
 use magicblock_program::{
     instruction_utils::InstructionUtils, validator::validator_authority,
 };
-use magicblock_rpc_client::MagicblockRpcClient;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     hash::Hash,
@@ -42,6 +41,7 @@ use crate::bpf_loader_v1::BpfUpgradableProgramModifications;
 
 mod account_cloner;
 mod bpf_loader_v1;
+mod util;
 
 pub use account_cloner::*;
 
@@ -280,21 +280,9 @@ impl ChainlinkCloner {
                                 format!("{:?}", table_mania_err),
                             ));
                         };
-                        let (logs, cus) = if let Ok(Ok(transaction)) =
-                            committor.get_transaction(&sig).await
-                        {
-                            let cus =
-                                MagicblockRpcClient::get_cus_from_transaction(
-                                    &transaction,
-                                );
-                            let logs =
-                                MagicblockRpcClient::get_logs_from_transaction(
-                                    &transaction,
-                                );
-                            (logs, cus)
-                        } else {
-                            (None, None)
-                        };
+                        let (logs, cus) =
+                            crate::util::get_tx_diagnostics(&sig, committor)
+                                .await;
 
                         let cus_str = cus
                             .map(|cus| format!("{:?}", cus))
