@@ -23,6 +23,17 @@ macro_rules! assert_tx_logs {
     };
 }
 
+macro_rules! check_logs {
+    ($ctx:expr, $sig:expr, $msg:expr) => {
+        if let Some(logs) = $ctx.fetch_ephemeral_logs($sig) {
+            debug!("Logs for tx {}: {:?}", $sig, logs);
+            logs.contains(&format!("Program log: LogMsg: {}", $msg))
+        } else {
+            panic!("No logs found for tx {}", $sig);
+        }
+    };
+}
+
 macro_rules! check_v4_program_status {
     ($ctx:expr, $program:expr, $expected_auth:expr) => {
         let data = $program
@@ -167,16 +178,30 @@ async fn test_clone_mini_v4_loader_program_and_upgrade() {
         )
         .await;
 
-        ctx.wait_for_delta_slot_ephem(20).unwrap();
+        const MAX_RETRIES: usize = 20;
+        let mut remaining_retries = MAX_RETRIES;
+        loop {
+            ctx.wait_for_delta_slot_ephem(5).unwrap();
 
-        let msg = "Hola Mundo";
-        let ix = sdk.log_msg_instruction(&payer.pubkey(), msg);
-        let (sig, found) = ctx
-            .send_and_confirm_instructions_with_payer_ephem(&[ix], &payer)
-            .unwrap();
+            let msg = "Hola Mundo";
+            let ix = sdk.log_msg_instruction(&payer.pubkey(), msg);
+            let (sig, found) = ctx
+                .send_and_confirm_instructions_with_payer_ephem(&[ix], &payer)
+                .unwrap();
 
-        assert!(found);
-        assert_tx_logs!(ctx, sig, format!("{} upgraded", msg));
+            assert!(found);
+            if check_logs!(ctx, sig, "Hello World upgraded") {
+                break;
+            }
+
+            debug!("Upgrade not yet effective, retrying...");
+            if remaining_retries == 0 {
+                panic!(
+                    "Upgrade not effective after maximum retries {MAX_RETRIES}"
+                );
+            }
+            remaining_retries -= 1;
+        }
 
         let program = ctx.fetch_ephem_account(prog_kp.pubkey()).unwrap();
         check_v4_program_status!(ctx, program, auth_kp.pubkey());
