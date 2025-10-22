@@ -385,7 +385,9 @@ pub fn create_intent_ix(
         } else {
             (false, vec![])
         };
-    let payers_meta = payers.iter().map(|payer| AccountMeta::new(*payer, true));
+    let payers_meta = payers
+        .iter()
+        .map(|payer| AccountMeta::new_readonly(*payer, true));
     let counter_metas = payers
         .iter()
         .map(|payer| AccountMeta::new(FlexiCounter::pda(payer).0, false));
@@ -393,7 +395,7 @@ pub fn create_intent_ix(
         AccountMeta::new_readonly(crate::id(), false),
         AccountMeta::new(MAGIC_CONTEXT_ID, false),
         AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
-        AccountMeta::new(transfer_destination, false),
+        AccountMeta::new_readonly(transfer_destination, false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];
     accounts.extend(payers_meta);

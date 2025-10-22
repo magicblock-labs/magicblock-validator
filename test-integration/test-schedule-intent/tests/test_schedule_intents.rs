@@ -1,3 +1,4 @@
+use dlp::pda::ephemeral_balance_pda_from_payer;
 use integration_test_tools::IntegrationTestContext;
 use log::*;
 use program_flexi_counter::{
@@ -8,14 +9,13 @@ use program_flexi_counter::{
     state::FlexiCounter,
 };
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, rent::Rent,
+    signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use test_kit::init_logger;
 
 const LABEL: &str = "I am a label";
 
-#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_basic() {
     // Init context
@@ -48,7 +48,6 @@ fn test_schedule_intent_basic() {
     );
 }
 
-#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_and_undelegate() {
     // Init context
@@ -74,7 +73,6 @@ fn test_schedule_intent_and_undelegate() {
     );
 }
 
-#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_2_commits() {
     // Init context
@@ -109,7 +107,6 @@ fn test_schedule_intent_2_commits() {
     );
 }
 
-#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_undelegate_delegate_back_undelegate_again() {
     // Init context
@@ -145,7 +142,6 @@ fn test_schedule_intent_undelegate_delegate_back_undelegate_again() {
     );
 }
 
-#[ignore = "The writable accounts for intents need to also be writable in ephemeral which is not correct"]
 #[test]
 fn test_2_payers_intent_with_undelegation() {
     init_logger!();
@@ -153,19 +149,7 @@ fn test_2_payers_intent_with_undelegation() {
 
     // Init context
     let ctx = IntegrationTestContext::try_new().unwrap();
-
-    // Payer to fund all transactions on chain
-    let chain_payer = Keypair::new();
-    ctx.airdrop_chain(&chain_payer.pubkey(), 10 * LAMPORTS_PER_SOL)
-        .unwrap();
-
-    // Payers to first init and delegate counters and then be delegated to
-    // fund transactions in ephemeral
-    let payers = (0..PAYERS).map(|_| Keypair::new()).collect::<Vec<_>>();
-    for payer in &payers {
-        ctx.airdrop_chain_escrowed(payer, 2 * LAMPORTS_PER_SOL)
-            .unwrap();
-    }
+    let payers = (0..PAYERS).map(|_| setup_payer(&ctx)).collect::<Vec<_>>();
     debug!("✅ Airdropped to payers on chain with escrow");
 
     // Init and setup counters for each payer
@@ -189,8 +173,6 @@ fn test_2_payers_intent_with_undelegation() {
         &ctx,
         payers.iter().collect::<Vec<&Keypair>>().as_slice(),
         Some(vec![-50, 25]),
-        // We cannot wait that long in a test ever, so this option was removed
-        // Some(Duration::from_secs(50)),
     );
     debug!("✅ Scheduled intent for all payers");
 
@@ -206,6 +188,51 @@ fn test_2_payers_intent_with_undelegation() {
                 expected: 225,
             },
         ],
+        true,
+    );
+    debug!("✅ Verified counters on base layer");
+}
+
+#[test]
+fn test_1_payers_intent_with_undelegation() {
+    init_logger!();
+    const PAYERS: usize = 1;
+
+    // Init context
+    let ctx = IntegrationTestContext::try_new().unwrap();
+    let payers = (0..PAYERS).map(|_| setup_payer(&ctx)).collect::<Vec<_>>();
+    debug!("✅ Airdropped to payers on chain with escrow");
+
+    // Init and setup counters for each payer
+    let values: [u8; PAYERS] = [100];
+    for (idx, payer) in payers.iter().enumerate() {
+        // Init counter on chain and delegate it to ephemeral
+        init_counter(&ctx, payer);
+        delegate_counter(&ctx, payer);
+        debug!(
+            "✅ Initialized and delegated counter for payer {}",
+            payer.pubkey()
+        );
+
+        // Add to counter in ephemeral
+        add_to_counter(&ctx, payer, values[idx]);
+        debug!("✅ Added to counter for payer {}", payer.pubkey());
+    }
+
+    // Schedule intent affecting all counters
+    schedule_intent(
+        &ctx,
+        payers.iter().collect::<Vec<&Keypair>>().as_slice(),
+        Some(vec![-50]),
+    );
+    debug!("✅ Scheduled intent for all payers");
+
+    assert_counters(
+        &ctx,
+        &[ExpectedCounter {
+            pda: FlexiCounter::pda(&payers[0].pubkey()).0,
+            expected: 50,
+        }],
         true,
     );
     debug!("✅ Verified counters on base layer");
@@ -234,8 +261,6 @@ fn test_5_payers_intent_only_commit() {
         &ctx,
         payers.iter().collect::<Vec<&Keypair>>().as_slice(),
         Some(counter_diffs.to_vec()),
-        // We cannot wait that long in a test ever, so this option was removed
-        // Some(Duration::from_secs(40)),
     );
 }
 
@@ -262,6 +287,25 @@ fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
     let payer = Keypair::new();
     ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
         .unwrap();
+
+    // Create actor escrow
+    let ix = dlp::instruction_builder::top_up_ephemeral_balance(
+        payer.pubkey(),
+        payer.pubkey(),
+        Some(LAMPORTS_PER_SOL / 2),
+        Some(1),
+    );
+    ctx.send_and_confirm_instructions_with_payer_chain(&[ix], &payer)
+        .unwrap();
+
+    // Confirm actor escrow
+    let escrow_pda = ephemeral_balance_pda_from_payer(&payer.pubkey(), 1);
+    let rent = Rent::default().minimum_balance(0);
+    assert_eq!(
+        ctx.fetch_chain_account(escrow_pda).unwrap().lamports,
+        LAMPORTS_PER_SOL / 2 + rent
+    );
+
     payer
 }
 
@@ -371,8 +415,6 @@ fn schedule_intent(
 
     let transfer_destination = Keypair::new();
     let payers_pubkeys = payers.iter().map(|payer| payer.pubkey()).collect();
-    // transfer destination is not writable in ephemeral which is why the below
-    // cannot work
     let ix = create_intent_ix(
         payers_pubkeys,
         transfer_destination.pubkey(),
@@ -380,11 +422,10 @@ fn schedule_intent(
         100_000,
     );
 
-    let mut tx = Transaction::new_with_payer(&[ix], None);
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&payers[0].pubkey()));
     let (sig, confirmed) = ctx
         .send_and_confirm_transaction_ephem(&mut tx, payers)
         .unwrap();
-
     assert!(confirmed);
 
     // Confirm was sent on Base Layer
@@ -403,6 +444,6 @@ fn schedule_intent(
     let mutiplier = if counter_diffs.is_some() { 2 } else { 1 };
     assert_eq!(
         transfer_destination_balance,
-        mutiplier * payers.len() as u64 * 1_000_000 + LAMPORTS_PER_SOL
+        mutiplier * payers.len() as u64 * 1_000_000
     );
 }
