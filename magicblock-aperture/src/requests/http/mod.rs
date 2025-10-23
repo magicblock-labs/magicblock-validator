@@ -244,7 +244,7 @@ mod prelude {
 // These constants define the data layout of a standard SPL Token account.
 const SPL_MINT_OFFSET: usize = 0;
 const SPL_OWNER_OFFSET: usize = 32;
-const SPL_DECIMALS_OFFSET: usize = 40;
+const MINT_DECIMALS_OFFSET: usize = 44;
 const SPL_TOKEN_AMOUNT_OFFSET: usize = 64;
 const SPL_DELEGATE_OFFSET: usize = 76;
 

@@ -4,7 +4,7 @@ use solana_account::AccountSharedData;
 use solana_account_decoder::parse_token::UiTokenAmount;
 
 use super::{
-    prelude::*, SPL_DECIMALS_OFFSET, SPL_MINT_RANGE, SPL_TOKEN_AMOUNT_RANGE,
+    prelude::*, MINT_DECIMALS_OFFSET, SPL_MINT_RANGE, SPL_TOKEN_AMOUNT_RANGE,
 };
 
 impl HttpDispatcher {
@@ -42,12 +42,10 @@ impl HttpDispatcher {
             self.read_account_with_ensure(&mint_pubkey).await,
             "mint account not found"
         );
-        let decimals = *mint_account
-            .data()
-            .get(SPL_DECIMALS_OFFSET)
-            .ok_or_else(|| {
-                RpcError::invalid_params("invalid mint account data")
-            })?;
+        let decimals =
+            *mint_account.data().get(MINT_DECIMALS_OFFSET).ok_or_else(
+                || RpcError::invalid_params("invalid mint account data"),
+            )?;
 
         // Parse the raw token amount from the token account's data.
         let token_amount = {
