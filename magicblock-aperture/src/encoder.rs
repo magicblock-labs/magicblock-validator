@@ -96,7 +96,9 @@ impl Encoder for ProgramAccountEncoder {
         data: &Self::Data,
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        self.filters.matches(data.account.data()).then_some(())?;
+        data.read_locked(|_, acc| {
+            self.filters.matches(acc.data()).then_some(())
+        })?;
         let value = AccountWithPubkey::new(data, (&self.encoder).into(), None);
         let method = "programNotification";
         NotificationPayload::encode(value, slot, method, id)

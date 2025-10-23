@@ -397,7 +397,7 @@ fn test_zero_lamports_account() {
     // NOTE: we use empty accounts to mark escrow accounts that were not found on chain
     assert!(
         tenv.get_account(&pk).is_some(),
-        "account should have been deleted after lamports have been zeroed out"
+        "account should not have been deleted after lamports have been zeroed out"
     );
 }
 

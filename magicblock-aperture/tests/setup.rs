@@ -165,7 +165,7 @@ impl RpcTestEnv {
         const OWNER_OFFSET: usize = 32;
         const AMOUNT_OFFSET: usize = 64;
         const DELEGATE_OFFSET: usize = 76;
-        const MINT_DECIMALS_OFFSET: usize = 40;
+        const MINT_DECIMALS_OFFSET: usize = 44;
         const MINT_DATA_LEN: usize = 88;
         const TOKEN_ACCOUNT_DATA_LEN: usize = 165;
 

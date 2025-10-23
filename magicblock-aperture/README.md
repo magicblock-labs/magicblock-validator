@@ -23,15 +23,18 @@ The name "Aperture" was chosen to reflect the crate's role as a controlled openi
 The server's architecture is divided into logical components for handling HTTP and WebSocket traffic, all underpinned by a shared state.
 
 ### HTTP Server
+
 -   **`HttpServer`**: The low-level server built on Hyper that accepts TCP connections and manages the HTTP 1/2 protocol.
 -   **`HttpDispatcher`**: The central router for all HTTP requests. It deserializes incoming JSON, identifies the RPC method, and calls the appropriate handler function. It holds a reference to the `SharedState` to access caches and databases.
 
 ### WebSocket Server
+
 -   **`WebsocketServer`**: Manages the initial HTTP Upgrade handshake to establish a WebSocket connection.
 -   **`ConnectionHandler`**: A long-lived task that manages the entire lifecycle of a single WebSocket client connection. It is responsible for the message-reading loop, keep-alive pings, and pushing outbound notifications.
 -   **`WsDispatcher`**: A stateful handler created for *each* `ConnectionHandler`. It manages the specific set of active subscriptions for a single client, handling `*Subscribe` and `*Unsubscribe` requests.
 
 ### Shared Infrastructure
+
 -   **`SharedState`**: The global, read-only context that is shared across all handlers. It provides `Arc`-wrapped access to the `AccountsDb`, `Ledger`, various caches, and the `DispatchEndpoints` for communicating with the processor.
 -   **`EventProcessor`**: A background worker that listens for broadcasted events from the validator core (e.g., `TransactionStatus`, `AccountUpdate`) and forwards them to the appropriate WebSocket subscribers via the `SubscriptionsDb`.
 
