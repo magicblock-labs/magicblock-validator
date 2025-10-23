@@ -1,7 +1,6 @@
 mod compute_budget;
 pub mod config;
 mod consts;
-pub mod diff;
 pub mod error;
 pub mod persist;
 mod pubkeys_provider;

@@ -1,4 +1,7 @@
-use dlp::args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs};
+use dlp::{
+    args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs},
+    compute_diff,
+};
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::RpcClient;
@@ -11,7 +14,6 @@ use solana_sdk::{
 use crate::tasks::TaskStrategy;
 use crate::{
     config::ChainConfig,
-    diff::compute_diff,
     tasks::{
         buffer_task::{BufferTask, BufferTaskType},
         visitor::Visitor,
@@ -134,26 +136,20 @@ impl BaseTask for ArgsTask {
                 let args = CommitDiffArgs {
                     nonce: value.commit_id,
                     lamports: value.committed_account.account.lamports,
-                    diff: value.committed_account.account.data.clone(),
-                    //diff: compute_diff(
-                    //    //&vec![0; value.committed_account.account.data().len()],
-                    //    account.data(),
-                    //    value.committed_account.account.data(),
-                    //),
+                    //diff: value.committed_account.account.data.clone(),
+                    diff: compute_diff(
+                        account.data(),
+                        value.committed_account.account.data(),
+                    ),
                     allow_undelegation: value.allow_undelegation,
                 };
 
-                let mut ix = dlp::instruction_builder::commit_diff(
+                dlp::instruction_builder::commit_diff(
                     *validator,
                     value.committed_account.pubkey,
                     value.committed_account.account.owner,
                     args,
-                );
-
-                //let id = &mut ix.data[..8];
-                //id.copy_from_slice(&1u64.to_le_bytes());
-
-                ix
+                )
             }
             ArgsTaskType::Finalize(value) => {
                 dlp::instruction_builder::finalize(
