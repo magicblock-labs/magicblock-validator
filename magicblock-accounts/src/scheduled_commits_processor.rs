@@ -155,8 +155,7 @@ impl ScheduledCommitsProcessorImpl {
                 if let Err(err) = inner_result {
                     Some(format!(
                         "Subscribing to account {} failed: {}",
-                        pubkey,
-                        err
+                        pubkey, err
                     ))
                 } else {
                     None
