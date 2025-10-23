@@ -88,7 +88,31 @@ impl BaseTask for ArgsTask {
                     .get_account(&value.committed_account.pubkey)
                 {
                     Ok(account) => {
-                        log::info!("Account Found: {:?}", account);
+                        log::debug!(
+                            "Account Found with datalen: {:?}",
+                            account
+                        );
+                        if account.data().len() == 0 {
+                            let args = CommitStateArgs {
+                                nonce: value.commit_id,
+                                lamports: value
+                                    .committed_account
+                                    .account
+                                    .lamports,
+                                data: value
+                                    .committed_account
+                                    .account
+                                    .data
+                                    .clone(),
+                                allow_undelegation: value.allow_undelegation,
+                            };
+                            return dlp::instruction_builder::commit_state(
+                                *validator,
+                                value.committed_account.pubkey,
+                                value.committed_account.account.owner,
+                                args,
+                            );
+                        }
                         account
                     }
                     Err(e) => {
@@ -110,21 +134,25 @@ impl BaseTask for ArgsTask {
                 let args = CommitDiffArgs {
                     nonce: value.commit_id,
                     lamports: value.committed_account.account.lamports,
-                    diff: compute_diff(
-                        //&vec![0; value.committed_account.account.data().len()],
-                        account.data(),
-                        value.committed_account.account.data(),
-                    ),
+                    diff: value.committed_account.account.data.clone(),
+                    //diff: compute_diff(
+                    //    //&vec![0; value.committed_account.account.data().len()],
+                    //    account.data(),
+                    //    value.committed_account.account.data(),
+                    //),
                     allow_undelegation: value.allow_undelegation,
                 };
-                log::info!("commit_diff: create instruction");
-                let ix = dlp::instruction_builder::commit_diff(
+
+                let mut ix = dlp::instruction_builder::commit_diff(
                     *validator,
                     value.committed_account.pubkey,
                     value.committed_account.account.owner,
                     args,
                 );
-                log::info!("commit_diff: created instruction");
+
+                //let id = &mut ix.data[..8];
+                //id.copy_from_slice(&1u64.to_le_bytes());
+
                 ix
             }
             ArgsTaskType::Finalize(value) => {

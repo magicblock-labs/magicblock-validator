@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use solana_log_collector::ic_msg;
+use solana_log_collector::{ic_msg, log};
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
     account::{Account, ReadableAccount},
@@ -254,6 +254,8 @@ pub(crate) fn process_schedule_commit(
         "ScheduledCommitSent signature: {}",
         commit_sent_sig,
     );
+
+    log::info!("process_schedule_commit DONE");
 
     Ok(())
 }

@@ -4,11 +4,12 @@ pub mod single_stage_executor;
 pub mod task_info_fetcher;
 pub mod two_stage_executor;
 
+use core::slice;
 use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures_util::future::try_join_all;
-use log::{error, trace, warn};
+use log::{error, info, trace, warn};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
@@ -20,6 +21,7 @@ use magicblock_rpc_client::{
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::client_error::ErrorKind;
 use solana_sdk::{
+    instruction::CompiledInstruction,
     message::VersionedMessage,
     signature::{Keypair, Signature, Signer, SignerError},
     transaction::{TransactionError, VersionedTransaction},
@@ -685,9 +687,26 @@ where
         // This is needed because DEFAULT_MAX_TIME_TO_PROCESSED is 50 sec
         while start.elapsed() < RETRY_FOR || i < MIN_RETRIES {
             i += 1;
+            let message = prepared_message.clone();
+            let changed = {
+                let len = message.instructions().len();
+                let ixs = unsafe {
+                    let ix = message.instructions().as_ptr()
+                        as *mut CompiledInstruction;
+                    slice::from_raw_parts_mut(ix, len)
+                };
+                let mut changed = 0;
+                for ix in ixs.iter_mut() {
+                    if ix.data.len() != 0 && ix.data[0] == 16 {
+                        //ix.data[0] = 1; // CommitState
+                        changed += 1;
+                    }
+                }
+                changed
+            };
+            info!("> changed [{changed}] prepared_message: {:?}", message);
 
-            let result =
-                self.send_prepared_message(prepared_message.clone()).await;
+            let result = self.send_prepared_message(message).await;
             let flow = match result {
                 Ok(result) => {
                     return match result.into_result() {
@@ -708,6 +727,7 @@ where
                     // TransactionError can be mapped to known set of error
                     // We return right away to retry recovery, because this can't be fixed with retries
                     ControlFlow::Break(TransactionStrategyExecutionError::from_transaction_error(err, tasks, |err| {
+                        error!("> ERROR: {:?}", err);
                         MagicBlockRpcClientError::SentTransactionError(err, signature)
                     }))
                 }

@@ -62,6 +62,8 @@ where
                 Err(err) => err,
             };
 
+            error!("execution_err: {}", execution_err);
+
             // Attempt patching
             let flow = self
                 .patch_strategy(
@@ -79,6 +81,7 @@ where
                     cleanup
                 }
                 ControlFlow::Break(()) => {
+                    info!("base_intent: {:?}", base_intent);
                     error!("Could not patch failed intent: {}", base_intent.id);
                     break (execution_err, transaction_strategy);
                 }

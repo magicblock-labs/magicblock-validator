@@ -4,7 +4,7 @@ use std::{
 };
 
 use lazy_static::lazy_static;
-use solana_log_collector::ic_msg;
+use solana_log_collector::{ic_msg, log};
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
     clock::Slot, hash::Hash, instruction::InstructionError, pubkey::Pubkey,
@@ -229,6 +229,8 @@ pub fn process_scheduled_commit_sent(
     if commit.commit_diff {
         ic_msg!(invoke_context, "ScheduledCommitSent requested commit_diff",);
     }
+
+    log::info!("process_scheduled_commit_sent DONE");
 
     Ok(())
 }
