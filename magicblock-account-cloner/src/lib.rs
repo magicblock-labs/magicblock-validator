@@ -124,8 +124,15 @@ impl ChainlinkCloner {
 
                 // BPF Loader (non-upgradeable) cannot be loaded via newer loaders,
                 // thus we just copy the account as is. It won't be upgradeable.
+                // For these programs, we use a slot that's earlier than the current slot to simulate
+                // that the program was deployed earlier and is ready to be used.
+                let deploy_slot =
+                    self.accounts_db.slot().saturating_sub(5).max(1);
                 let modifications =
-                    BpfUpgradableProgramModifications::try_from(&program)?;
+                    BpfUpgradableProgramModifications::try_from(
+                        &program,
+                        deploy_slot,
+                    )?;
                 let mod_ix =
                     InstructionUtils::modify_accounts_instruction(vec![
                         modifications.program_id_modification,
