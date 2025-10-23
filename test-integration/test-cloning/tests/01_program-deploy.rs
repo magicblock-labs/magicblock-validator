@@ -183,14 +183,15 @@ async fn test_clone_mini_v4_loader_program_and_upgrade() {
         loop {
             ctx.wait_for_delta_slot_ephem(5).unwrap();
 
-            let msg = "Hola Mundo";
-            let ix = sdk.log_msg_instruction(&payer.pubkey(), msg);
+            let bump = remaining_retries - MAX_RETRIES + 1;
+            let msg = format!("Hola Mundo {bump}");
+            let ix = sdk.log_msg_instruction(&payer.pubkey(), &msg);
             let (sig, found) = ctx
                 .send_and_confirm_instructions_with_payer_ephem(&[ix], &payer)
                 .unwrap();
 
             assert!(found);
-            if check_logs!(ctx, sig, "Hello World upgraded") {
+            if check_logs!(ctx, sig, format!("{msg} upgraded")) {
                 break;
             }
 
