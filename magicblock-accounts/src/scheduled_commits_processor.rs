@@ -123,7 +123,7 @@ impl ScheduledCommitsProcessorImpl {
                 }
                 None => {
                     warn!(
-                        "Account {} not found in bank, skipping from commit",
+                        "Account {} not found in AccountsDb, skipping from commit",
                         pubkey
                     );
                     false
