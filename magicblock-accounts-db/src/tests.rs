@@ -395,9 +395,15 @@ fn test_zero_lamports_account() {
     tenv.insert_account(&pk, &acc.account);
 
     // NOTE: we use empty accounts to mark escrow accounts that were not found on chain
+    let retained_account = tenv.get_account(&pk);
     assert!(
-        tenv.get_account(&pk).is_some(),
-        "account should not have been deleted after lamports have been zeroed out"
+        retained_account.is_some(),
+        "account should be retained at 0 lamports as an empty escrow account"
+    );
+    assert_eq!(
+        retained_account.unwrap().lamports(),
+        0,
+        "retained escrow account should have 0 lamports"
     );
 }
 
