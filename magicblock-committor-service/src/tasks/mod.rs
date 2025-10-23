@@ -54,6 +54,8 @@ pub enum TaskStrategy {
 pub trait BaseTask: Send + Sync + DynClone {
     /// Gets all pubkeys that involved in Task's instruction
     fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
+        // TODO (snawaz): can be optimized.
+        // currently it is slow as it discards lots of computations and memory allocations.
         self.instruction(validator)
             .accounts
             .iter()

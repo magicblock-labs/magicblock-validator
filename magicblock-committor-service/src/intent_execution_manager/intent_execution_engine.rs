@@ -242,6 +242,7 @@ where
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
+        info!("execute: {:#?}", intent);
         let result = executor
             .execute(intent.inner.clone(), persister)
             .await
