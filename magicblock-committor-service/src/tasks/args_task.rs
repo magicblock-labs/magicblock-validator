@@ -75,10 +75,6 @@ impl BaseTask for ArgsTask {
                 let chain_config =
                     ChainConfig::local(ComputeBudgetConfig::new(1_000_000));
 
-                log::info!(
-                    "Fetch account from the main chain: {}",
-                    value.committed_account.pubkey
-                );
                 let rpc_client = RpcClient::new_with_commitment(
                     chain_config.rpc_uri.to_string(),
                     CommitmentConfig {
@@ -89,36 +85,9 @@ impl BaseTask for ArgsTask {
                 let account = match rpc_client
                     .get_account(&value.committed_account.pubkey)
                 {
-                    Ok(account) => {
-                        log::debug!(
-                            "Account Found with datalen: {:?}",
-                            account
-                        );
-                        if account.data().len() == 0 {
-                            let args = CommitStateArgs {
-                                nonce: value.commit_id,
-                                lamports: value
-                                    .committed_account
-                                    .account
-                                    .lamports,
-                                data: value
-                                    .committed_account
-                                    .account
-                                    .data
-                                    .clone(),
-                                allow_undelegation: value.allow_undelegation,
-                            };
-                            return dlp::instruction_builder::commit_state(
-                                *validator,
-                                value.committed_account.pubkey,
-                                value.committed_account.account.owner,
-                                args,
-                            );
-                        }
-                        account
-                    }
+                    Ok(account) => account,
                     Err(e) => {
-                        log::error!("error while receiving account: {}", e);
+                        log::warn!("Fallback to commit_state and send full-bytes, as rpc failed to fetch the delegated-account from base chain: {}", e);
                         let args = CommitStateArgs {
                             nonce: value.commit_id,
                             lamports: value.committed_account.account.lamports,
@@ -133,17 +102,16 @@ impl BaseTask for ArgsTask {
                         );
                     }
                 };
+
                 let args = CommitDiffArgs {
                     nonce: value.commit_id,
                     lamports: value.committed_account.account.lamports,
-                    //diff: value.committed_account.account.data.clone(),
                     diff: compute_diff(
                         account.data(),
                         value.committed_account.account.data(),
                     ),
                     allow_undelegation: value.allow_undelegation,
                 };
-
                 dlp::instruction_builder::commit_diff(
                     *validator,
                     value.committed_account.pubkey,

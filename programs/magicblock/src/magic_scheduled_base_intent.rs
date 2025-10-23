@@ -446,11 +446,10 @@ impl CommitType {
     }
 
     pub fn is_commit_diff(&self) -> bool {
-        if let Self::StandaloneDiff(_) = self {
-            true
-        } else {
-            false
-        }
+        let Self::StandaloneDiff(_) = self else {
+            return false;
+        };
+        true
     }
 
     pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use solana_log_collector::{ic_msg, log};
+use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
     account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
@@ -107,8 +107,6 @@ pub fn process_accept_scheduled_commits(
             );
             InstructionError::GenericError
         })?;
-
-    log::info!("process_accept_scheduled_commits DONE");
 
     Ok(())
 }
