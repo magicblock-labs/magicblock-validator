@@ -93,6 +93,15 @@ pub mod mock {
         fn remove_account(&self, pubkey: &Pubkey) {
             self.accounts.lock().unwrap().remove(pubkey);
         }
+        fn remove_where(
+            &self,
+            predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+        ) -> usize {
+            let mut accounts = self.accounts.lock().unwrap();
+            let initial_len = accounts.len();
+            accounts.retain(|k, v| !predicate(k, v));
+            initial_len - accounts.len()
+        }
     }
 
     impl fmt::Display for AccountsBankStub {

@@ -218,6 +218,36 @@ macro_rules! assert_not_cloned {
 }
 
 #[macro_export]
+macro_rules! assert_cloned_as_empty_placeholder {
+    ($cloner:expr, $pubkeys:expr) => {{
+        use solana_account::ReadableAccount;
+        for pubkey in $pubkeys {
+            let account = $cloner
+                .get_account(pubkey)
+                .expect(&format!("Expected account {} to be cloned", pubkey));
+            assert_eq!(
+                account.lamports(),
+                0,
+                "Expected account {} to have 0 lamports",
+                pubkey
+            );
+            assert!(
+                account.data().is_empty(),
+                "Expected account {} to have no data",
+                pubkey
+            );
+            assert_eq!(
+                account.owner(),
+                &::solana_sdk::system_program::id(),
+                "Expected account {} to be owned by system program",
+                pubkey
+            );
+        }
+    }};
+    ($cloner:expr, $pubkeys:expr, $slot:expr) => {{}};
+}
+
+#[macro_export]
 macro_rules! assert_remain_undelegating {
     ($cloner:expr, $pubkeys:expr, $slot:expr) => {{
         use solana_account::ReadableAccount;
@@ -287,11 +317,8 @@ macro_rules! assert_loaded_program_with_size {
             $loader,
             $loader_status
         );
-        // Program size may vary a bit
-        const DEVIATION: usize = 200;
         let actual_size = loaded_program.program_data.len();
-        let min = $size - DEVIATION;
-        let max = $size + DEVIATION;
+        let (min, max) = $crate::min_max_with_deviation_percent!($size, 5.0);
         assert!(
             actual_size >= min && actual_size <= max,
             "Expected program {} to have size around {}, got {}",
@@ -300,6 +327,30 @@ macro_rules! assert_loaded_program_with_size {
             actual_size
         );
         loaded_program
+    }};
+}
+
+#[macro_export]
+macro_rules! assert_data_has_size {
+    ($data:expr, $size:expr) => {{
+        let actual_size = $data.len();
+        let (min, max) = $crate::min_max_with_deviation_percent!($size, 5.0);
+        assert!(
+            actual_size >= min && actual_size <= max,
+            "Expected data to have size around {}, got {}",
+            $size,
+            actual_size
+        );
+    }};
+}
+
+#[macro_export]
+macro_rules! min_max_with_deviation_percent {
+    ($size:expr, $percent:expr) => {{
+        let deviation = ($size as f64 * $percent / 100.0).ceil() as usize;
+        let min = $size - deviation;
+        let max = $size + deviation;
+        (min, max)
     }};
 }
 

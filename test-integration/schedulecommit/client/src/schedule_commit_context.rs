@@ -1,8 +1,8 @@
-use log::*;
 use std::{fmt, ops::Deref};
 
 use anyhow::{Context, Result};
 use integration_test_tools::IntegrationTestContext;
+use log::*;
 use program_schedulecommit::api::{
     delegate_account_cpi_instruction, init_account_instruction,
     init_payer_escrow, pda_and_bump,

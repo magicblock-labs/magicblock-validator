@@ -13,7 +13,6 @@ use magicblock_chainlink::{
         utils::{airdrop, random_pubkey, PUBSUB_URL, RPC_URL},
     },
 };
-
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{

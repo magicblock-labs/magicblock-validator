@@ -20,18 +20,21 @@ impl HttpDispatcher {
             RpcAccountInfoConfig
         );
 
-        let pubkeys: Vec<_> = some_or_err!(pubkeys);
-        // SAFETY: Pubkey has the same memory layout and size as Serde32Bytes
-        let pubkeys: Vec<Pubkey> = unsafe { std::mem::transmute(pubkeys) };
+        let pubkeys: Vec<Serde32Bytes> = some_or_err!(pubkeys);
+        let pubkeys: Vec<Pubkey> =
+            pubkeys.into_iter().map(Into::into).collect();
 
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
+        let slice = config.data_slice;
 
         let accounts = pubkeys
             .iter()
             .zip(self.read_accounts_with_ensure(&pubkeys).await.into_iter())
             .map(|(pubkey, acc)| {
-                acc.map(|a| LockedAccount::new(*pubkey, a).ui_encode(encoding))
+                acc.map(|a| {
+                    LockedAccount::new(*pubkey, a).ui_encode(encoding, slice)
+                })
             })
             .collect::<Vec<_>>();
 

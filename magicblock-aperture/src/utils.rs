@@ -109,6 +109,7 @@ impl From<Option<Vec<RpcFilterType>>> for ProgramFilters {
                         bytes,
                     })
                 }
+                // for now we don't support other filter types
                 _ => None,
             })
             .collect();

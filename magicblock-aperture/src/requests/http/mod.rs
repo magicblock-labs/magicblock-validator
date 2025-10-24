@@ -33,6 +33,16 @@ pub(crate) enum Data {
     MultiChunk(Vec<u8>),
 }
 
+impl Data {
+    fn len(&self) -> usize {
+        match self {
+            Self::Empty => 0,
+            Self::SingleChunk(b) => b.len(),
+            Self::MultiChunk(b) => b.len(),
+        }
+    }
+}
+
 /// Deserializes the raw request body bytes into a structured `JsonHttpRequest`.
 pub(crate) fn parse_body(body: Data) -> RpcResult<JsonHttpRequest> {
     let body_bytes = match &body {
@@ -49,6 +59,7 @@ pub(crate) fn parse_body(body: Data) -> RpcResult<JsonHttpRequest> {
 pub(crate) async fn extract_bytes(
     request: Request<Incoming>,
 ) -> RpcResult<Data> {
+    const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MiB
     let mut body = request.into_body();
     let mut data = Data::Empty;
 
@@ -71,6 +82,11 @@ pub(crate) async fn extract_bytes(
                 buffer.extend_from_slice(&chunk);
             }
         }
+        if data.len() > MAX_BODY_SIZE {
+            return Err(RpcError::invalid_request(
+                "request body exceed 1MiB limit",
+            ));
+        }
     }
     Ok(data)
 }
@@ -88,7 +104,7 @@ impl HttpDispatcher {
         debug!("Ensuring account {pubkey}");
         let _ = self
             .chainlink
-            .ensure_accounts(&[*pubkey])
+            .ensure_accounts(&[*pubkey], None)
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the account fails
@@ -112,15 +128,15 @@ impl HttpDispatcher {
                 .join(", ");
             debug!("Ensuring accounts {pubkeys}");
         }
-        let _ =
-            self.chainlink
-                .ensure_accounts(pubkeys)
-                .await
-                .inspect_err(|e| {
-                    // There is nothing we can do if fetching the accounts fails
-                    // Log the error and return whatever is in the accounts db
-                    error!("Failed to ensure accounts: {e}");
-                });
+        let _ = self
+            .chainlink
+            .ensure_accounts(pubkeys, None)
+            .await
+            .inspect_err(|e| {
+                // There is nothing we can do if fetching the accounts fails
+                // Log the error and return whatever is in the accounts db
+                error!("Failed to ensure accounts: {e}");
+            });
         pubkeys
             .iter()
             .map(|pubkey| self.accountsdb.get_account(pubkey))
@@ -164,9 +180,11 @@ impl HttpDispatcher {
                 .set_recent_blockhash(self.blocks.get_latest().hash);
         } else {
             let hash = transaction.message.recent_blockhash();
-            self.blocks.get(hash).ok_or_else(|| {
-                RpcError::transaction_verification("Blockhash not found")
-            })?;
+            if !self.blocks.contains(hash) {
+                return Err(RpcError::transaction_verification(
+                    "Blockhash not found",
+                ));
+            };
         }
 
         Ok(transaction.sanitize(sigverify)?)
@@ -195,7 +213,7 @@ impl HttpDispatcher {
                 // setup a subscription, etc.
                 // In that case we don't even want to run the transaction.
                 warn!("Failed to ensure transaction accounts: {:?}", err);
-                Err(RpcError::transaction_verification(err.to_string()))
+                Err(RpcError::transaction_verification(err))
             }
         }
     }
@@ -226,7 +244,7 @@ mod prelude {
 // These constants define the data layout of a standard SPL Token account.
 const SPL_MINT_OFFSET: usize = 0;
 const SPL_OWNER_OFFSET: usize = 32;
-const SPL_DECIMALS_OFFSET: usize = 40;
+const MINT_DECIMALS_OFFSET: usize = 44;
 const SPL_TOKEN_AMOUNT_OFFSET: usize = 64;
 const SPL_DELEGATE_OFFSET: usize = 76;
 

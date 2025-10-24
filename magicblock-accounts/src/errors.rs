@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_account_cloner::{
-    AccountClonerError, AccountClonerUnclonableReason,
-};
+use magicblock_account_cloner::AccountClonerError;
 use magicblock_committor_service::{
     error::CommittorServiceError, service_ext::CommittorServiceExtError,
     ChangesetMeta,
@@ -15,9 +13,6 @@ pub type AccountsResult<T> = std::result::Result<T, AccountsError>;
 
 #[derive(Error, Debug)]
 pub enum AccountsError {
-    #[error("TranswiseError: {0}")]
-    TranswiseError(#[from] Box<conjunto_transwise::errors::TranswiseError>),
-
     #[error("UrlParseError: {0}")]
     UrlParseError(#[from] Box<url::ParseError>),
 
@@ -35,12 +30,6 @@ pub enum AccountsError {
 
     #[error("AccountClonerError")]
     AccountClonerError(#[from] AccountClonerError),
-
-    #[error("UnclonableAccountUsedAsWritableInEphemeral '{0}' ('{1:?}')")]
-    UnclonableAccountUsedAsWritableInEphemeral(
-        Pubkey,
-        AccountClonerUnclonableReason,
-    ),
 
     #[error("InvalidRpcUrl '{0}'")]
     InvalidRpcUrl(String),

@@ -234,6 +234,8 @@ impl super::TransactionExecutor {
     ) {
         let meta = TransactionStatusMeta {
             status,
+            pre_balances: vec![0; txn.message().account_keys().len()],
+            post_balances: vec![0; txn.message().account_keys().len()],
             ..Default::default()
         };
         let signature = *txn.signature();
@@ -245,7 +247,6 @@ impl super::TransactionExecutor {
             self.index.fetch_add(1, Ordering::Relaxed),
         ) {
             error!("failed to commit transaction to the ledger: {error}");
-            return;
         }
     }
 

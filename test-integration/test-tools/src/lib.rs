@@ -10,7 +10,6 @@ pub mod workspace_paths;
 
 pub mod toml_to_args;
 pub mod validator;
+pub use color_backtrace;
 pub use integration_test_context::IntegrationTestContext;
 pub use run_test::*;
-
-pub use color_backtrace;

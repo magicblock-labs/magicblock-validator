@@ -43,24 +43,9 @@ chainlink-build-mini-v2:
 	cargo build-sbf \
 		--manifest-path $(TEST_CHAINLINK_MINI_PROGRAM_DIR)Cargo.toml \
 		--sbf-out-dir $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2 && \
-	base64 -i $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.so -o $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/mini_program.base64 && \
-	JSON_CONTENT='{\n \
-		"pubkey": "MiniV21111111111111111111111111111111111111",\n \
-		"account": {\n \
-			"lamports": 1551155440,\n \
-			"data": [\n \
-				"<base64 encoded data>",\n \
-				"base64"\n \
-			], \n \
-			"owner": "BPFLoader2111111111111111111111111111111111",\n \
-			"executable": true,\n \
-			"rentEpoch": 18446744073709551615,\n \
-			"space": 79061\n \
-		}\n \
-	}' && \
-	BASE64_DATA=$$(cat $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/mini_program.base64) && \
-	echo "$${JSON_CONTENT/<base64 encoded data>/$$BASE64_DATA}" > $(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json
-
+	node $(TEST_CHAINLINK_DIR)/scripts/miniv2-json-from-so.js \
+		$(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.so \
+		$(TEST_CHAINLINK_DEPLOY_DIR)/miniv2/program_mini.json
 
 chainlink-build-mini-v3:
 	mkdir -p $(TEST_CHAINLINK_DEPLOY_DIR)/miniv3 && \

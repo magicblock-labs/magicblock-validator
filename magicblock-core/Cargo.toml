@@ -24,3 +24,4 @@ solana-transaction = { workspace = true }
 solana-transaction-context = { workspace = true }
 solana-transaction-error = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
+magicblock-magic-program-api = { workspace = true }

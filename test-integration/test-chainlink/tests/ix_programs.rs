@@ -1,15 +1,14 @@
 use std::sync::Arc;
 
+use log::*;
 use magicblock_chainlink::{
-    assert_loaded_program_with_size,
+    assert_data_has_size, assert_loaded_program_with_size,
     assert_subscribed_without_loaderv3_program_data_account,
     remote_account_provider::program_account::{
         LoadedProgram, ProgramAccountResolver, RemoteProgramLoader,
     },
     testing::init_logger,
 };
-
-use log::*;
 use program_mini::common::IdlType;
 use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -18,18 +17,19 @@ use solana_sdk::{
 };
 use test_chainlink::{
     assert_program_owned_by_loader, fetch_and_assert_loaded_program_v1_v2_v4,
-    fetch_and_assert_loaded_program_v3, mini_upload_idl,
+    fetch_and_assert_loaded_program_v3,
+    ixtest_context::IxtestContext,
+    mini_upload_idl,
     programs::{
         airdrop_sol,
         deploy::{compile_mini, deploy_loader_v4},
+        memo,
         mini::{load_miniv2_so, load_miniv3_so},
         send_instructions, MEMOV1, MEMOV2, MINIV2, MINIV3, MINIV3_AUTH,
         OTHERV1,
     },
     test_mini_program, test_mini_program_log_msg,
 };
-
-use test_chainlink::{ixtest_context::IxtestContext, programs::memo};
 
 const RPC_URL: &str = "http://localhost:7799";
 fn get_rpc_client(commitment: CommitmentConfig) -> RpcClient {
@@ -352,12 +352,16 @@ async fn ixtest_fetch_mini_v4_loader_program() {
     let prog_kp = Keypair::new();
     let auth_kp = Keypair::new();
 
+    // As mentioned above the v4 loader seems to pad with an extra 1KB
+    const MINI_SIZE_V4: usize = MINI_SIZE + 1024;
     let program_data = compile_mini(&prog_kp, None);
+    assert_data_has_size!(program_data, MINI_SIZE_V4);
     debug!(
         "Binary size: {} ({})",
         pretty_bytes(program_data.len()),
         program_data.len()
     );
+    assert_data_has_size!(program_data, MINI_SIZE);
 
     let commitment = CommitmentConfig::processed();
     let rpc_client = Arc::new(get_rpc_client(commitment));
@@ -431,7 +435,7 @@ async fn ixtest_clone_memo_v1_loader_program() {
 
     let pubkeys = [MEMOV1];
 
-    ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+    ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
 
     debug!("{}", ctx.cloner);
     assert_loaded_program_with_size!(
@@ -456,7 +460,7 @@ async fn ixtest_clone_memo_v2_loader_program() {
 
     let pubkeys = [MEMOV2];
 
-    ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+    ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
 
     debug!("{}", ctx.cloner);
     assert_loaded_program_with_size!(
@@ -482,7 +486,7 @@ async fn ixtest_clone_mini_v2_loader_program() {
 
     let pubkeys = [MINIV2];
 
-    ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+    ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
 
     debug!("{}", ctx.cloner);
     assert_loaded_program_with_size!(
@@ -506,7 +510,7 @@ async fn ixtest_clone_mini_v3_loader_program() {
     let ctx = IxtestContext::init().await;
     let pubkeys = [MINIV3];
 
-    ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+    ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
 
     debug!("{}", ctx.cloner);
     assert_loaded_program_with_size!(
@@ -530,7 +534,10 @@ async fn ixtest_clone_mini_v4_loader_program() {
     let prog_kp = Keypair::new();
     let auth_kp = Keypair::new();
 
+    // As mentioned above the v4 loader seems to pad with an extra 1KB
+    const MINI_SIZE_V4: usize = MINI_SIZE + 1024;
     let program_data = compile_mini(&prog_kp, None);
+    assert_data_has_size!(program_data, MINI_SIZE_V4);
     debug!(
         "Binary size: {} ({})",
         pretty_bytes(program_data.len()),
@@ -550,11 +557,9 @@ async fn ixtest_clone_mini_v4_loader_program() {
     debug!("Program deployed V4: {}", prog_kp.pubkey());
     assert_program_owned_by_loader!(&ctx.rpc_client, &prog_kp.pubkey(), 4);
 
-    // As mentioned above the v4 loader seems to pad with an extra 1KB
-    const MINI_SIZE_V4: usize = MINI_SIZE + 1024;
     let pubkeys = [prog_kp.pubkey()];
 
-    ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+    ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
 
     debug!("{}", ctx.cloner);
     assert_loaded_program_with_size!(
@@ -579,7 +584,7 @@ async fn ixtest_clone_multiple_programs_v1_v2_v3() {
 
     let pubkeys = [MEMOV1, MEMOV2, MINIV3];
 
-    ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+    ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
 
     debug!("{}", ctx.cloner);
 

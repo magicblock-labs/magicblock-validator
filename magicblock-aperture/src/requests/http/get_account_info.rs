@@ -1,3 +1,4 @@
+use log::*;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
 use super::prelude::*;
@@ -21,13 +22,18 @@ impl HttpDispatcher {
         let pubkey: Pubkey = some_or_err!(pubkey);
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
+        let slice = config.data_slice;
+
+        debug!("get_account_info: '{}'", pubkey);
 
         // `read_account_with_ensure` guarantees the account is clone from chain if not in database.
         let account = self
             .read_account_with_ensure(&pubkey)
             .await
             // `LockedAccount` provides a race-free read of the account data before encoding.
-            .map(|acc| LockedAccount::new(pubkey, acc).ui_encode(encoding));
+            .map(|acc| {
+                LockedAccount::new(pubkey, acc).ui_encode(encoding, slice)
+            });
 
         let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, account, slot))

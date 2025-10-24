@@ -43,7 +43,7 @@ pub fn send_instructions_with_payer(
     let blockhash = rpc_client.get_latest_blockhash()?;
     let mut tx = Transaction::new_with_payer(ixs, Some(&payer.pubkey()));
     tx.sign(&[payer], blockhash);
-    let sig = send_transaction(rpc_client, &mut tx, &[payer])?;
+    let sig = send_transaction(rpc_client, &mut tx, &[payer], true)?;
     Ok((sig, tx))
 }
 
@@ -51,13 +51,14 @@ pub fn send_transaction(
     rpc_client: &RpcClient,
     tx: &mut Transaction,
     signers: &[&Keypair],
+    skip_preflight: bool,
 ) -> Result<Signature, client_error::Error> {
     let blockhash = rpc_client.get_latest_blockhash()?;
     tx.sign(signers, blockhash);
     let sig = rpc_client.send_transaction_with_config(
         tx,
         RpcSendTransactionConfig {
-            skip_preflight: true,
+            skip_preflight,
             ..Default::default()
         },
     )?;
@@ -70,7 +71,7 @@ pub fn send_and_confirm_transaction(
     signers: &[&Keypair],
     commitment: CommitmentConfig,
 ) -> Result<(Signature, bool), client_error::Error> {
-    let sig = send_transaction(rpc_client, tx, signers)?;
+    let sig = send_transaction(rpc_client, tx, signers, true)?;
     confirm_transaction(&sig, rpc_client, commitment, Some(tx))
         .map(|confirmed| (sig, confirmed))
 }

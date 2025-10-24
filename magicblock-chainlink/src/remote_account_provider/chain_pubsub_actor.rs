@@ -329,7 +329,7 @@ impl ChainPubsubActor {
                                 error!("Failed to send {pubkey} subscription update: {err:?}");
                             });
                         } else {
-                            warn!("Subscription for {pubkey} ended by update stream");
+                            debug!("Subscription for {pubkey} ended by update stream");
                             break;
                         }
                     }

@@ -100,7 +100,13 @@ impl TestContext {
                 _ => (None, None),
             }
         };
-        let chainlink = Chainlink::try_new(&bank, fetch_cloner).unwrap();
+        let chainlink = Chainlink::try_new(
+            &bank,
+            fetch_cloner,
+            validator_pubkey,
+            faucet_pubkey,
+        )
+        .unwrap();
         Self {
             rpc_client,
             pubsub_client,
@@ -191,7 +197,7 @@ impl TestContext {
         &self,
         pubkey: &Pubkey,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        self.chainlink.ensure_accounts(&[*pubkey]).await
+        self.chainlink.ensure_accounts(&[*pubkey], None).await
     }
 
     /// Force undelegation of an account in the bank to mark it as such until

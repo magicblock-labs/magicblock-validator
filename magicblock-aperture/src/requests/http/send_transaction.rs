@@ -21,8 +21,9 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        let transaction =
-            self.prepare_transaction(&transaction_str, encoding, true, false)?;
+        let transaction = self
+            .prepare_transaction(&transaction_str, encoding, true, false)
+            .inspect_err(|err| warn!("Failed to prepare transaction: {err}"))?;
         let signature = *transaction.signature();
 
         // Perform a replay check and reserve the signature in the cache. This prevents
@@ -38,10 +39,10 @@ impl HttpDispatcher {
         // Based on the preflight flag, either execute and await the result,
         // or schedule (fire-and-forget) for background processing.
         if config.skip_preflight {
-            debug!("Scheduling transaction: {signature}");
+            trace!("Scheduling transaction: {signature}");
             self.transactions_scheduler.schedule(transaction).await?;
         } else {
-            debug!("Executing transaction: {signature}");
+            trace!("Executing transaction: {signature}");
             self.transactions_scheduler.execute(transaction).await?;
         }
 

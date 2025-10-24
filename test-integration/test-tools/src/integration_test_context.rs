@@ -9,7 +9,7 @@ use solana_rpc_client::{
 };
 use solana_rpc_client_api::{
     client_error::{self, Error as ClientError, ErrorKind as ClientErrorKind},
-    config::RpcTransactionConfig,
+    config::{RpcSendTransactionConfig, RpcTransactionConfig},
 };
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
@@ -26,7 +26,8 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_transaction_status::{
-    EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
+    EncodedConfirmedBlock, EncodedConfirmedTransactionWithStatusMeta,
+    UiTransactionEncoding,
 };
 
 use crate::{
@@ -110,6 +111,10 @@ impl IntegrationTestContext {
     }
 
     pub fn try_new() -> Result<Self> {
+        Self::try_new_with_ephem_port(8899)
+    }
+
+    pub fn try_new_with_ephem_port(port: u16) -> Result<Self> {
         color_backtrace::install();
 
         let commitment = CommitmentConfig::confirmed();
@@ -119,7 +124,7 @@ impl IntegrationTestContext {
             commitment,
         );
         let ephem_client = RpcClient::new_with_commitment(
-            Self::url_ephem().to_string(),
+            Self::url_local_ephem_at_port(port).to_string(),
             commitment,
         );
         let validator_identity = ephem_client.get_identity()?;
@@ -564,19 +569,9 @@ impl IntegrationTestContext {
             .map(|owner| owner.eq(&dlp::id()))
             .unwrap_or(false);
         let deleg_sig = if !delegated_already {
-            let ixs = dlp_interface::create_delegate_ixs(
-                // We change the owner of the ephem account, thus cannot use it as payer
-                payer_chain.pubkey(),
-                payer_ephem.pubkey(),
-                self.ephem_validator_identity,
-            );
-            let mut tx =
-                Transaction::new_with_payer(&ixs, Some(&payer_chain.pubkey()));
-            let (deleg_sig, confirmed) = self
-                .send_and_confirm_transaction_chain(
-                    &mut tx,
-                    &[payer_chain, payer_ephem],
-                )?;
+            let (deleg_sig, confirmed) =
+                self.delegate_account(payer_chain, payer_ephem)?;
+
             assert!(confirmed, "Failed to confirm airdrop delegation");
             debug!("Delegated payer {}", payer_ephem.pubkey());
             deleg_sig
@@ -589,6 +584,26 @@ impl IntegrationTestContext {
         };
 
         Ok((payer_ephem_airdrop_sig, deleg_sig))
+    }
+
+    pub fn delegate_account(
+        &self,
+        payer_chain: &Keypair,
+        payer_ephem: &Keypair,
+    ) -> anyhow::Result<(Signature, bool)> {
+        let ixs = dlp_interface::create_delegate_ixs(
+            // We change the owner of the ephem account, thus cannot use it as payer
+            payer_chain.pubkey(),
+            payer_ephem.pubkey(),
+            self.ephem_validator_identity,
+        );
+        let mut tx =
+            Transaction::new_with_payer(&ixs, Some(&payer_chain.pubkey()));
+        let (deleg_sig, confirmed) = self.send_and_confirm_transaction_chain(
+            &mut tx,
+            &[payer_chain, payer_ephem],
+        )?;
+        Ok((deleg_sig, confirmed))
     }
 
     pub fn airdrop(
@@ -695,6 +710,23 @@ impl IntegrationTestContext {
             })?,
             tx,
             signers,
+            true,
+        )
+    }
+
+    pub fn send_transaction_ephem_with_preflight(
+        &self,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+    ) -> Result<Signature, client_error::Error> {
+        send_transaction(
+            self.try_ephem_client().map_err(|err| client_error::Error {
+                request: None,
+                kind: client_error::ErrorKind::Custom(err.to_string()),
+            })?,
+            tx,
+            signers,
+            false,
         )
     }
 
@@ -710,6 +742,7 @@ impl IntegrationTestContext {
             })?,
             tx,
             signers,
+            true,
         )
     }
 
@@ -812,6 +845,66 @@ impl IntegrationTestContext {
                 )
             })
         })
+    }
+
+    pub fn send_transaction(
+        rpc_client: &RpcClient,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+    ) -> Result<Signature, client_error::Error> {
+        let blockhash = rpc_client.get_latest_blockhash()?;
+        tx.sign(signers, blockhash);
+        let sig = rpc_client.send_transaction_with_config(
+            tx,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )?;
+        rpc_client.confirm_transaction_with_commitment(
+            &sig,
+            CommitmentConfig::confirmed(),
+        )?;
+        Ok(sig)
+    }
+
+    pub fn send_instructions_with_payer(
+        rpc_client: &RpcClient,
+        ixs: &[Instruction],
+        payer: &Keypair,
+    ) -> Result<Signature, client_error::Error> {
+        let blockhash = rpc_client.get_latest_blockhash()?;
+        let mut tx = Transaction::new_with_payer(ixs, Some(&payer.pubkey()));
+        tx.sign(&[payer], blockhash);
+        Self::send_transaction(rpc_client, &mut tx, &[payer])
+    }
+
+    pub fn send_and_confirm_transaction(
+        rpc_client: &RpcClient,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+        commitment: CommitmentConfig,
+    ) -> Result<(Signature, bool), client_error::Error> {
+        let sig = Self::send_transaction(rpc_client, tx, signers)?;
+        confirm_transaction(&sig, rpc_client, commitment, Some(tx))
+            .map(|confirmed| (sig, confirmed))
+    }
+
+    pub fn send_and_confirm_instructions_with_payer(
+        &self,
+        rpc_client: &RpcClient,
+        ixs: &[Instruction],
+        payer: &Keypair,
+        commitment: CommitmentConfig,
+    ) -> Result<(Signature, bool), client_error::Error> {
+        let sig = Self::send_instructions_with_payer(rpc_client, ixs, payer)?;
+        debug!("Confirming transaction with signature: {}", sig);
+        confirm_transaction(&sig, rpc_client, commitment, None)
+            .map(|confirmed| (sig, confirmed))
+            .inspect_err(|_| {
+                self.dump_ephemeral_logs(sig);
+                self.dump_chain_logs(sig);
+            })
     }
 
     pub fn get_transaction_chain(
@@ -929,6 +1022,12 @@ impl IntegrationTestContext {
         self.try_chain_client().and_then(Self::wait_for_next_slot)
     }
 
+    pub fn wait_for_delta_slot_chain(&self, delta: Slot) -> Result<Slot> {
+        self.try_chain_client().and_then(|chain_client| {
+            Self::wait_for_delta_slot(chain_client, delta)
+        })
+    }
+
     fn wait_for_next_slot(rpc_client: &RpcClient) -> Result<Slot> {
         let initial_slot = rpc_client.get_slot()?;
         Self::wait_until_slot(rpc_client, initial_slot + 1)
@@ -992,10 +1091,56 @@ impl IntegrationTestContext {
     }
 
     // -----------------
+    // Block
+    // -----------------
+    pub fn try_get_block_ephem(
+        &self,
+        slot: Slot,
+    ) -> Result<EncodedConfirmedBlock> {
+        self.try_ephem_client()
+            .and_then(|ephem_client| Self::get_block(ephem_client, slot))
+    }
+    pub fn try_get_block_chain(
+        &self,
+        slot: Slot,
+    ) -> Result<EncodedConfirmedBlock> {
+        self.try_chain_client()
+            .and_then(|chain_client| Self::get_block(chain_client, slot))
+    }
+    fn get_block(
+        rpc_client: &RpcClient,
+        slot: Slot,
+    ) -> Result<EncodedConfirmedBlock> {
+        rpc_client
+            .get_block(slot)
+            .map_err(|e| anyhow::anyhow!("Failed to get block: {}", e))
+    }
+
+    // -----------------
+    // Blocktime
+    // -----------------
+    pub fn try_get_block_time_ephem(&self, slot: Slot) -> Result<i64> {
+        self.try_ephem_client()
+            .and_then(|ephem_client| Self::get_block_time(ephem_client, slot))
+    }
+    pub fn try_get_block_time_chain(&self, slot: Slot) -> Result<i64> {
+        self.try_chain_client()
+            .and_then(|chain_client| Self::get_block_time(chain_client, slot))
+    }
+    fn get_block_time(rpc_client: &RpcClient, slot: Slot) -> Result<i64> {
+        rpc_client
+            .get_block_time(slot)
+            .map_err(|e| anyhow::anyhow!("Failed to get blocktime: {}", e))
+    }
+
+    // -----------------
     // RPC Clients
     // -----------------
     pub fn url_ephem() -> &'static str {
         URL_EPHEM
+    }
+    pub fn url_local_ephem_at_port(port: u16) -> String {
+        format!("http://localhost:{}", port)
     }
     pub fn url_chain() -> &'static str {
         URL_CHAIN

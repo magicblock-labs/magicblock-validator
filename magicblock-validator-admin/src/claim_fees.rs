@@ -13,8 +13,6 @@ use solana_sdk::{
 use tokio::{task::JoinHandle, time::Instant};
 use tokio_util::sync::CancellationToken;
 
-use crate::external_config::cluster_from_remote;
-
 pub struct ClaimFeesTask {
     pub handle: Option<JoinHandle<()>>,
     token: CancellationToken,
@@ -28,7 +26,7 @@ impl ClaimFeesTask {
         }
     }
 
-    pub fn start(&mut self, config: EphemeralConfig) {
+    pub fn start(&mut self, config: EphemeralConfig, url: String) {
         if self.handle.is_some() {
             error!("Claim fees task already started");
             return;
@@ -45,7 +43,7 @@ impl ClaimFeesTask {
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        if let Err(err) = claim_fees(config.clone()).await {
+                        if let Err(err) = claim_fees(url.clone()).await {
                             error!("Failed to claim fees: {:?}", err);
                         }
                     },
@@ -72,16 +70,11 @@ impl Default for ClaimFeesTask {
     }
 }
 
-async fn claim_fees(
-    config: EphemeralConfig,
-) -> Result<(), MagicBlockRpcClientError> {
+async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
     info!("Claiming validator fees");
 
-    let url = cluster_from_remote(&config.accounts.remote);
-    let rpc_client = RpcClient::new_with_commitment(
-        url.url().to_string(),
-        CommitmentConfig::confirmed(),
-    );
+    let rpc_client =
+        RpcClient::new_with_commitment(url, CommitmentConfig::confirmed());
 
     let keypair_ref = &validator_authority();
     let validator = keypair_ref.pubkey();

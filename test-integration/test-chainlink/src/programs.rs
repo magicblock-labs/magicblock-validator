@@ -3,14 +3,17 @@
 use log::*;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_rpc_client_api::client_error::Result as ClientResult;
-use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::instruction::Instruction;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::pubkey;
-use solana_sdk::signature::{Keypair, Signature};
-use solana_sdk::signer::Signer;
-use solana_sdk::transaction::Transaction;
+use solana_rpc_client_api::{
+    client_error::Result as ClientResult, config::RpcSendTransactionConfig,
+};
+use solana_sdk::{
+    instruction::Instruction,
+    native_token::LAMPORTS_PER_SOL,
+    pubkey,
+    signature::{Keypair, Signature},
+    signer::Signer,
+    transaction::Transaction,
+};
 
 /// The memo v1 program is predeployed with the v1 loader
 /// (BPFLoader1111111111111111111111111111111111)
@@ -249,7 +252,6 @@ pub mod memo {
 
 #[allow(unused)]
 pub mod mini {
-    use super::send_instructions;
     use program_mini::{common::IdlType, sdk};
     use solana_pubkey::Pubkey;
     use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -257,6 +259,8 @@ pub mod mini {
         signature::{Keypair, Signature},
         signer::Signer,
     };
+
+    use super::send_instructions;
 
     // -----------------
     // Binaries
@@ -541,21 +545,22 @@ pub mod mini {
 
 #[allow(unused)]
 pub mod deploy {
-    use super::{airdrop_sol, send_instructions, CHUNK_SIZE};
-    use crate::programs::{mini, try_send_instructions};
+    use std::{fs, path::PathBuf, process::Command, sync::Arc};
+
     use log::*;
     use solana_loader_v4_interface::instruction::LoaderV4Instruction as LoaderInstructionV4;
     use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-    use solana_sdk::instruction::{AccountMeta, Instruction};
-    use solana_sdk::native_token::LAMPORTS_PER_SOL;
-    use solana_sdk::signature::Keypair;
-    use solana_sdk::signer::Signer;
-    use solana_sdk::{loader_v4, loader_v4_instruction};
+    use solana_sdk::{
+        instruction::{AccountMeta, Instruction},
+        loader_v4, loader_v4_instruction,
+        native_token::LAMPORTS_PER_SOL,
+        signature::Keypair,
+        signer::Signer,
+    };
     use solana_system_interface::instruction as system_instruction;
-    use std::fs;
-    use std::path::PathBuf;
-    use std::process::Command;
-    use std::sync::Arc;
+
+    use super::{airdrop_sol, send_instructions, CHUNK_SIZE};
+    use crate::programs::{mini, try_send_instructions};
 
     pub fn compile_mini(keypair: &Keypair, suffix: Option<&str>) -> Vec<u8> {
         let workspace_root_path =
@@ -782,7 +787,10 @@ pub mod deploy {
 // -----------------
 #[allow(unused)]
 pub mod not_working {
+    use std::sync::Arc;
+
     use log::*;
+    use magicblock_chainlink::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
     use solana_loader_v2_interface::LoaderInstruction as LoaderInstructionV2;
     use solana_loader_v3_interface::instruction::UpgradeableLoaderInstruction as LoaderInstructionV3;
     use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -794,9 +802,6 @@ pub mod not_working {
         transaction::Transaction,
     };
     use solana_system_interface::instruction as system_instruction;
-    use std::sync::Arc;
-
-    use magicblock_chainlink::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
 
     use super::{airdrop_sol, send_transaction, CHUNK_SIZE};
     pub async fn deploy_loader_v1(
