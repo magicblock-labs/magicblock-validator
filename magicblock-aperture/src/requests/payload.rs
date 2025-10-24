@@ -1,9 +1,10 @@
-use crate::{
-    error::RpcError, state::subscriptions::SubscriptionID, utils::JsonBody,
-};
 use hyper::{body::Bytes, Response};
 use json::{Serialize, Value};
 use magicblock_core::Slot;
+
+use crate::{
+    error::RpcError, state::subscriptions::SubscriptionID, utils::JsonBody,
+};
 
 /// Represents a JSON-RPC 2.0 Notification object, used for pub/sub updates.
 /// It is generic over the type of the result payload.

@@ -1,6 +1,13 @@
 use std::sync::atomic::Ordering;
 
 use log::error;
+use magicblock_core::link::{
+    accounts::{AccountWithSlot, LockedAccount},
+    transactions::{
+        TransactionExecutionResult, TransactionSimulationResult,
+        TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
+    },
+};
 use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
 use solana_pubkey::Pubkey;
 use solana_svm::{
@@ -15,14 +22,6 @@ use solana_transaction::sanitized::SanitizedTransaction;
 use solana_transaction_error::TransactionResult;
 use solana_transaction_status::{
     map_inner_instructions, TransactionStatusMeta,
-};
-
-use magicblock_core::link::{
-    accounts::{AccountWithSlot, LockedAccount},
-    transactions::{
-        TransactionExecutionResult, TransactionSimulationResult,
-        TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
-    },
 };
 
 impl super::TransactionExecutor {
@@ -237,6 +236,8 @@ impl super::TransactionExecutor {
     ) {
         let meta = TransactionStatusMeta {
             status,
+            pre_balances: vec![0; txn.message().account_keys().len()],
+            post_balances: vec![0; txn.message().account_keys().len()],
             ..Default::default()
         };
         let signature = *txn.signature();

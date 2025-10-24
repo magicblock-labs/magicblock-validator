@@ -1,6 +1,7 @@
 #![allow(unused)] // most of these utilities will come in useful later
 use std::cell::RefCell;
 
+use magicblock_magic_program_api::args::ShortAccountMeta;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
@@ -10,8 +11,6 @@ use solana_sdk::{
     pubkey::Pubkey,
     transaction_context::TransactionContext,
 };
-
-use crate::magic_scheduled_base_intent::ShortAccountMeta;
 
 pub(crate) fn find_tx_index_of_instruction_account(
     invoke_context: &InvokeContext,
@@ -100,6 +99,15 @@ pub(crate) fn get_instruction_pubkey_with_idx(
     let tx_idx = ix_ctx.get_index_of_instruction_account_in_transaction(idx)?;
     let pubkey = transaction_context.get_key_of_account_at_index(tx_idx)?;
     Ok(pubkey)
+}
+
+pub(crate) fn get_writable_with_idx(
+    transaction_context: &TransactionContext,
+    idx: u16,
+) -> Result<bool, InstructionError> {
+    let ix_ctx = transaction_context.get_current_instruction_context()?;
+    let writable = ix_ctx.is_instruction_account_writable(idx)?;
+    Ok(writable)
 }
 
 pub(crate) fn get_instruction_account_short_meta_with_idx(

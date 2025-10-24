@@ -215,6 +215,13 @@ impl LedgerResumeStrategy {
     pub fn should_override_bank_slot(&self) -> bool {
         matches!(self, Self::Reset { .. })
     }
+
+    pub fn slot(&self) -> Option<u64> {
+        match self {
+            Self::Reset { slot, .. } => Some(*slot),
+            Self::Resume { .. } => None,
+        }
+    }
 }
 
 const fn default_ledger_size() -> u64 {

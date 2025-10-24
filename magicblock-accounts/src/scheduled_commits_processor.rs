@@ -5,7 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
-use magicblock_account_cloner::chainext::ChainlinkCloner;
+use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     remote_account_provider::{
@@ -23,8 +23,9 @@ use magicblock_committor_service::{
     types::{ScheduledBaseIntentWrapper, TriggerType},
     BaseIntentCommittor, CommittorService,
 };
-use magicblock_core::link::transactions::TransactionSchedulerHandle;
-use magicblock_core::traits::AccountsBank;
+use magicblock_core::{
+    link::transactions::TransactionSchedulerHandle, traits::AccountsBank,
+};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
@@ -122,7 +123,7 @@ impl ScheduledCommitsProcessorImpl {
                 }
                 None => {
                     warn!(
-                        "Account {} not found in bank, skipping from commit",
+                        "Account {} not found in AccountsDb, skipping from commit",
                         pubkey
                     );
                     false
@@ -140,23 +141,21 @@ impl ScheduledCommitsProcessorImpl {
 
     async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
         let mut join_set = task::JoinSet::new();
-        for pubkey in pubkeys.clone().into_iter() {
+        for pubkey in pubkeys.into_iter() {
             let chainlink = self.chainlink.clone();
             join_set.spawn(async move {
-                chainlink.undelegation_requested(pubkey).await
+                (pubkey, chainlink.undelegation_requested(pubkey).await)
             });
         }
         let sub_errors = join_set
             .join_all()
             .await
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, res)| {
-                if let Err(err) = res {
+            .into_iter()
+            .filter_map(|(pubkey, inner_result)| {
+                if let Err(err) = inner_result {
                     Some(format!(
                         "Subscribing to account {} failed: {}",
-                        pubkeys.get(idx).copied().unwrap_or_default(),
-                        err
+                        pubkey, err
                     ))
                 } else {
                     None

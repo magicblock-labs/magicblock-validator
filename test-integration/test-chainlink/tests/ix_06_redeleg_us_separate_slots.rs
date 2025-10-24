@@ -10,10 +10,7 @@ use magicblock_chainlink::{
     testing::init_logger,
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
-
-use test_chainlink::ixtest_context::IxtestContext;
-
-use test_chainlink::sleep_ms;
+use test_chainlink::{ixtest_context::IxtestContext, sleep_ms};
 
 #[tokio::test]
 async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {

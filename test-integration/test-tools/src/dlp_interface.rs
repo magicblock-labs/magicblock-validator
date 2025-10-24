@@ -4,12 +4,12 @@ use log::*;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::instruction::Instruction;
-use solana_sdk::system_instruction;
 use solana_sdk::{
+    instruction::Instruction,
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signature},
     signer::Signer,
+    system_instruction,
     transaction::Transaction,
 };
 

@@ -1,12 +1,11 @@
 use std::{ops::Deref, time::Duration};
 
-use magicblock_ledger::LatestBlock;
-use solana_rpc_client_api::response::RpcBlockhash;
-
 use magicblock_core::{
     link::blocks::{BlockHash, BlockMeta, BlockUpdate},
     Slot,
 };
+use magicblock_ledger::LatestBlock;
+use solana_rpc_client_api::response::RpcBlockhash;
 
 use super::ExpiringCache;
 

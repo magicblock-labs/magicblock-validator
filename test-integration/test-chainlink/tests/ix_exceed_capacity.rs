@@ -1,11 +1,9 @@
 use log::*;
 use magicblock_chainlink::{
-    config::ChainlinkConfig,
-    config::LifecycleMode,
+    config::{ChainlinkConfig, LifecycleMode},
     remote_account_provider::config::RemoteAccountProviderConfig,
     testing::{init_logger, utils::random_pubkeys},
 };
-
 use test_chainlink::ixtest_context::IxtestContext;
 
 async fn setup(

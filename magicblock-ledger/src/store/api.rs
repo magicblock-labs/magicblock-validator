@@ -1284,7 +1284,11 @@ impl Ledger {
         from: Option<C::Index>,
         to: Option<C::Index>,
     ) {
+        let mut measure = Measure::start("compaction");
         self.db.column::<C>().compact_range(from, to);
+        measure.stop();
+
+        info!("Compaction of column {} took: {}", C::NAME, measure);
     }
 
     /// Flushes all columns

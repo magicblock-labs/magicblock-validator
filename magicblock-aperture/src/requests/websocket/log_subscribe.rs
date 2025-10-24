@@ -1,8 +1,5 @@
-use json::Deserialize;
-
-use crate::{encoder::TransactionLogsEncoder, some_or_err};
-
 use super::prelude::*;
+use crate::{encoder::TransactionLogsEncoder, some_or_err};
 
 impl WsDispatcher {
     /// Handles the `logsSubscribe` WebSocket RPC request.
@@ -15,7 +12,7 @@ impl WsDispatcher {
         request: &mut JsonRequest,
     ) -> RpcResult<SubResult> {
         // A local enum to deserialize the first parameter of the logsSubscribe request.
-        #[derive(Deserialize)]
+        #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
         enum LogFilter {
             #[serde(alias = "allWithVotes")]

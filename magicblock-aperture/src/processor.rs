@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
 use log::info;
+use magicblock_core::link::{
+    accounts::AccountUpdateRx, blocks::BlockUpdateRx,
+    transactions::TransactionStatusRx, DispatchEndpoints,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::state::{
@@ -8,11 +12,6 @@ use crate::state::{
     subscriptions::SubscriptionsDb,
     transactions::{SignatureResult, TransactionsCache},
     SharedState,
-};
-
-use magicblock_core::link::{
-    accounts::AccountUpdateRx, blocks::BlockUpdateRx,
-    transactions::TransactionStatusRx, DispatchEndpoints,
 };
 
 /// A worker that processes and dispatches validator events.

@@ -1,9 +1,10 @@
 use std::path::Path;
 
 use magicblock_accounts_db::AccountsDb;
-use magicblock_core::magic_program;
 use magicblock_core::traits::AccountsBank;
-use magicblock_program::MAGIC_CONTEXT_SIZE;
+use magicblock_magic_program_api as magic_program;
+use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
+use magicblock_program::{MagicContext, TaskContext};
 use solana_sdk::{
     account::{AccountSharedData, WritableAccount},
     pubkey::Pubkey,
@@ -76,13 +77,27 @@ pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
         accountsdb,
         &magic_program::MAGIC_CONTEXT_PUBKEY,
         u64::MAX,
-        MAGIC_CONTEXT_SIZE,
+        MagicContext::SIZE,
     );
     let mut magic_context = accountsdb
         .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
         .unwrap();
-    // TODO: @@@ ensure that we never commit this account
     magic_context.set_delegated(true);
     accountsdb
         .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
+}
+
+pub(crate) fn fund_task_context(accountsdb: &AccountsDb) {
+    fund_account_with_data(
+        accountsdb,
+        &TASK_CONTEXT_PUBKEY,
+        u64::MAX,
+        TaskContext::SIZE,
+    );
+    let mut task_context = accountsdb
+        .get_account(&magic_program::TASK_CONTEXT_PUBKEY)
+        .unwrap();
+    task_context.set_delegated(true);
+    accountsdb
+        .insert_account(&magic_program::TASK_CONTEXT_PUBKEY, &task_context);
 }

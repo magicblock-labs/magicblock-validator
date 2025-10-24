@@ -1,5 +1,4 @@
-use std::collections::VecDeque;
-use std::time::Instant;
+use std::{collections::VecDeque, time::Instant};
 
 use solana_pubkey::Pubkey;
 

@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use blocks::BlocksCache;
 use cache::ExpiringCache;
-use magicblock_account_cloner::chainext::ChainlinkCloner;
+use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     remote_account_provider::{

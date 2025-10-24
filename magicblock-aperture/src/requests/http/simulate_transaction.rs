@@ -1,3 +1,4 @@
+use log::*;
 use solana_message::inner_instruction::InnerInstructions;
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig,
@@ -37,7 +38,11 @@ impl HttpDispatcher {
             encoding,
             config.sig_verify,
             config.replace_recent_blockhash,
-        )?;
+        ).inspect_err(|err| {
+            error!(
+                "Failed to prepare transaction to simulate: {transaction_str} ({err})"
+            )
+        })?;
         self.ensure_transaction_accounts(&transaction).await?;
 
         let replacement_blockhash = config

@@ -9,11 +9,12 @@ use solana_sdk::{
 use crate::{
     persist::IntentPersister,
     tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
         task_visitors::persistor_visitor::{
             PersistorContext, PersistorVisitor,
         },
         utils::TransactionUtils,
-        ArgsTask, BaseTask, FinalizeTask,
+        BaseTask, FinalizeTask,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
@@ -21,6 +22,25 @@ use crate::{
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<Box<dyn BaseTask>>,
     pub lookup_tables_keys: Vec<Pubkey>,
+}
+
+impl TransactionStrategy {
+    /// In case old strategy used ALTs recalculate old value
+    /// NOTE: this can be used when full revaluation is unnecessary, like:
+    /// some tasks were reset, number of tasks didn't increase
+    pub fn dummy_revaluate_alts(&mut self, authority: &Pubkey) -> Vec<Pubkey> {
+        if self.lookup_tables_keys.is_empty() {
+            vec![]
+        } else {
+            std::mem::replace(
+                &mut self.lookup_tables_keys,
+                TaskStrategist::collect_lookup_table_keys(
+                    authority,
+                    &self.optimized_tasks,
+                ),
+            )
+        }
+    }
 }
 
 pub struct TaskStrategist;
@@ -179,9 +199,10 @@ impl TaskStrategist {
 
             let task = {
                 // This is tmp task that will be replaced by old or optimized one
-                let tmp_task = ArgsTask::Finalize(FinalizeTask {
-                    delegated_account: Pubkey::new_unique(),
-                });
+                let tmp_task =
+                    ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+                        delegated_account: Pubkey::new_unique(),
+                    }));
                 let tmp_task = Box::new(tmp_task) as Box<dyn BaseTask>;
                 std::mem::replace(&mut tasks[index], tmp_task)
             };
@@ -228,7 +249,6 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 
 #[cfg(test)]
 mod tests {
-    use dlp::args::Context;
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, CommittedAccount, ProgramArgs,
     };
@@ -243,7 +263,7 @@ mod tests {
 
     // Helper to create a simple commit task
     fn create_test_commit_task(commit_id: u64, data_size: usize) -> ArgsTask {
-        ArgsTask::Commit(CommitTask {
+        ArgsTask::new(ArgsTaskType::Commit(CommitTask {
             commit_id,
             allow_undelegation: false,
             committed_account: CommittedAccount {
@@ -256,13 +276,12 @@ mod tests {
                     rent_epoch: 0,
                 },
             },
-        })
+        }))
     }
 
     // Helper to create a Base action task
     fn create_test_base_action_task(len: usize) -> ArgsTask {
-        ArgsTask::BaseAction(BaseActionTask {
-            context: Context::Commit,
+        ArgsTask::new(ArgsTaskType::BaseAction(BaseActionTask {
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
                 escrow_authority: Pubkey::new_unique(),
@@ -273,23 +292,23 @@ mod tests {
                 },
                 compute_units: 30_000,
             },
-        })
+        }))
     }
 
     // Helper to create a finalize task
     fn create_test_finalize_task() -> ArgsTask {
-        ArgsTask::Finalize(FinalizeTask {
+        ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: Pubkey::new_unique(),
-        })
+        }))
     }
 
     // Helper to create an undelegate task
     fn create_test_undelegate_task() -> ArgsTask {
-        ArgsTask::Undelegate(UndelegateTask {
+        ArgsTask::new(ArgsTaskType::Undelegate(UndelegateTask {
             delegated_account: Pubkey::new_unique(),
             owner_program: system_program::id(),
             rent_reimbursement: Pubkey::new_unique(),
-        })
+        }))
     }
 
     #[test]
@@ -334,7 +353,7 @@ mod tests {
     fn test_build_strategy_optimizes_to_buffer_u16_exceeded() {
         let validator = Pubkey::new_unique();
 
-        let task = create_test_commit_task(1, 9_060_000); // Large task
+        let task = create_test_commit_task(1, 66_000); // Large task
         let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
 
         let strategy = TaskStrategist::build_strategy(

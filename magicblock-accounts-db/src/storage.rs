@@ -152,8 +152,8 @@ impl AccountsStorage {
         let storage = unsafe { self.store.add(offset * self.block_size()) };
         Allocation {
             storage,
-            offset: offset as u32,
-            blocks: blocks as u32,
+            offset: offset as Offset,
+            blocks: blocks as Blocks,
         }
     }
 
@@ -208,7 +208,7 @@ impl AccountsStorage {
     pub(crate) fn get_block_count(&self, size: usize) -> Blocks {
         let block_size = self.block_size();
         let blocks = size.div_ceil(block_size);
-        blocks as u32
+        blocks as Blocks
     }
 
     pub(crate) fn flush(&self) {

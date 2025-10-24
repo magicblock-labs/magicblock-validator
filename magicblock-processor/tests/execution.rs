@@ -1,8 +1,9 @@
-use magicblock_core::traits::AccountsBank;
 use std::{collections::HashSet, time::Duration};
 
 use guinea::GuineaInstruction;
-use magicblock_core::link::transactions::TransactionResult;
+use magicblock_core::{
+    link::transactions::TransactionResult, traits::AccountsBank,
+};
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},

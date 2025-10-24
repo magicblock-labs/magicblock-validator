@@ -60,7 +60,7 @@ pub fn cf_descriptors(
     let detected_cfs = match DB::list_cf(&Options::default(), path) {
         Ok(detected_cfs) => detected_cfs,
         Err(err) => {
-            warn!("Unable to detect Rocks columns: {err:?}. This is expected for a new ledger.");
+            debug!("Unable to detect Rocks columns: {err:?}. This is expected for a new ledger.");
             vec![]
         }
     };

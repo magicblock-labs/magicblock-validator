@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use dlp::args::Context;
 use log::error;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
@@ -15,8 +14,8 @@ use crate::{
     },
     persist::IntentPersister,
     tasks::{
-        ArgsTask, BaseActionTask, BaseTask, CommitTask, FinalizeTask,
-        UndelegateTask,
+        args_task::{ArgsTask, ArgsTaskType},
+        BaseActionTask, BaseTask, CommitTask, FinalizeTask, UndelegateTask,
     },
 };
 
@@ -38,10 +37,10 @@ pub trait TasksBuilder {
 
 /// V1 Task builder
 /// V1: Actions are part of finalize tx
-pub struct TaskBuilderV1;
+pub struct TaskBuilderImpl;
 
 #[async_trait]
-impl TasksBuilder for TaskBuilderV1 {
+impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
         commit_id_fetcher: &Arc<C>,
@@ -53,12 +52,10 @@ impl TasksBuilder for TaskBuilderV1 {
                 let tasks = actions
                     .iter()
                     .map(|el| {
-                        let task = BaseActionTask {
-                            context: Context::Standalone,
-                            action: el.clone(),
-                        };
-                        Box::new(ArgsTask::BaseAction(task))
-                            as Box<dyn BaseTask>
+                        let task = BaseActionTask { action: el.clone() };
+                        let task =
+                            ArgsTask::new(ArgsTaskType::BaseAction(task));
+                        Box::new(task) as Box<dyn BaseTask>
                     })
                     .collect();
 
@@ -92,13 +89,13 @@ impl TasksBuilder for TaskBuilderV1 {
             .iter()
             .map(|account| {
                 let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                let task = ArgsTask::Commit(CommitTask {
+                let task = ArgsTaskType::Commit(CommitTask {
                     commit_id,
                     allow_undelegation,
                     committed_account: account.clone(),
                 });
 
-                Box::new(task) as Box<dyn BaseTask>
+                Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
             })
             .collect();
 
@@ -112,9 +109,10 @@ impl TasksBuilder for TaskBuilderV1 {
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
         fn finalize_task(account: &CommittedAccount) -> Box<dyn BaseTask> {
-            Box::new(ArgsTask::Finalize(FinalizeTask {
+            let task_type = ArgsTaskType::Finalize(FinalizeTask {
                 delegated_account: account.pubkey,
-            }))
+            });
+            Box::new(ArgsTask::new(task_type))
         }
 
         // Helper to create an undelegate task
@@ -122,11 +120,12 @@ impl TasksBuilder for TaskBuilderV1 {
             account: &CommittedAccount,
             rent_reimbursement: &Pubkey,
         ) -> Box<dyn BaseTask> {
-            Box::new(ArgsTask::Undelegate(UndelegateTask {
+            let task_type = ArgsTaskType::Undelegate(UndelegateTask {
                 delegated_account: account.pubkey,
                 owner_program: account.account.owner,
                 rent_reimbursement: *rent_reimbursement,
-            }))
+            });
+            Box::new(ArgsTask::new(task_type))
         }
 
         // Helper to process commit types
@@ -145,11 +144,11 @@ impl TasksBuilder for TaskBuilderV1 {
                         .collect::<Vec<_>>();
                     tasks.extend(base_actions.iter().map(|action| {
                         let task = BaseActionTask {
-                            context: Context::Commit,
                             action: action.clone(),
                         };
-                        Box::new(ArgsTask::BaseAction(task))
-                            as Box<dyn BaseTask>
+                        let task =
+                            ArgsTask::new(ArgsTaskType::BaseAction(task));
+                        Box::new(task) as Box<dyn BaseTask>
                     }));
                     tasks
                 }
@@ -184,11 +183,11 @@ impl TasksBuilder for TaskBuilderV1 {
                     UndelegateType::WithBaseActions(actions) => {
                         tasks.extend(actions.iter().map(|action| {
                             let task = BaseActionTask {
-                                context: Context::Undelegate,
                                 action: action.clone(),
                             };
-                            Box::new(ArgsTask::BaseAction(task))
-                                as Box<dyn BaseTask>
+                            let task =
+                                ArgsTask::new(ArgsTaskType::BaseAction(task));
+                            Box::new(task) as Box<dyn BaseTask>
                         }));
 
                         Ok(tasks)

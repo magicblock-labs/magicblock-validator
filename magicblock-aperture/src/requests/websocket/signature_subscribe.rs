@@ -1,11 +1,10 @@
+use super::prelude::*;
 use crate::{
     encoder::{Encoder, TransactionResultEncoder},
     requests::params::SerdeSignature,
     some_or_err,
     state::subscriptions::SubscriptionsDb,
 };
-
-use super::prelude::*;
 
 impl WsDispatcher {
     /// Handles the `signatureSubscribe` WebSocket RPC request.

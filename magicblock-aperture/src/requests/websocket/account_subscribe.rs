@@ -1,9 +1,8 @@
 use solana_account_decoder::UiAccountEncoding;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
-use crate::some_or_err;
-
 use super::prelude::*;
+use crate::some_or_err;
 
 impl WsDispatcher {
     /// Handles the `accountSubscribe` WebSocket RPC request.

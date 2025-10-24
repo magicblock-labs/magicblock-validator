@@ -9,7 +9,7 @@ use std::{
 
 use log::{info, warn};
 use memmap2::MmapMut;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLockWriteGuard};
 use reflink::reflink;
 
 use crate::{
@@ -54,6 +54,7 @@ impl SnapshotEngine {
         &self,
         slot: u64,
         mmap: &[u8],
+        lock: RwLockWriteGuard<()>,
     ) -> AccountsDbResult<()> {
         let slot = SnapSlot(slot);
         // this lock is always free, as we take StWLock higher up in the call stack and
@@ -70,7 +71,11 @@ impl SnapshotEngine {
         if self.is_cow_supported {
             self.reflink_dir(&snapout)?;
         } else {
-            rcopy_dir(&self.dbpath, &snapout, mmap)?;
+            let source = self.dbpath.clone();
+            let destination = snapout.clone();
+            let mmap = mmap.to_vec();
+            drop(lock);
+            rcopy_dir(&source, &destination, &mmap)?;
         }
         snapshots.push_back(snapout);
         Ok(())
@@ -270,12 +275,9 @@ fn rcopy_dir(src: &Path, dst: &Path, mmap: &[u8]) -> io::Result<()> {
                     "memory mapping the snapshot file for the accountsdb file",
                 ))?;
             dst.copy_from_slice(mmap);
-            // we move the flushing to separate thread to avoid blocking
-            std::thread::spawn(move || {
-                dst.flush().inspect_err(log_err!(
-                    "flushing accounts.db file after mmap copy"
-                ))
-            });
+            dst.flush().inspect_err(log_err!(
+                "flushing accounts.db file after mmap copy"
+            ))?;
         } else {
             std::fs::copy(&src, &dst)?;
         }

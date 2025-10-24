@@ -1,8 +1,7 @@
 use solana_rpc_client_api::config::RpcProgramAccountsConfig;
 
-use crate::utils::ProgramFilters;
-
 use super::prelude::*;
+use crate::utils::ProgramFilters;
 
 impl HttpDispatcher {
     /// Handles the `getProgramAccounts` RPC request.
@@ -40,7 +39,7 @@ impl HttpDispatcher {
         // Encode the filtered accounts for the RPC response.
         let accounts = accounts
             .map(|(pubkey, account)| {
-                // lock account to prevent data races with concurrently modifiying
+                // lock account to prevent data races with concurrently modifying
                 // transaction executor threads (unlikely, but not impossible)
                 let locked = LockedAccount::new(pubkey, account);
                 AccountWithPubkey::new(&locked, encoding, slice)

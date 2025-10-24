@@ -5,21 +5,21 @@ use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
+use log::*;
 use program_flexi_counter::{
-    instruction::{
-        create_add_counter_ix, create_add_ix, create_delegate_ix,
-        create_init_ix,
-    },
+    instruction::{create_add_counter_ix, create_add_ix, create_init_ix},
     state::FlexiCounter,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
+use test_kit::init_logger;
 use test_ledger_restore::{
     confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
-    fetch_counter_chain, fetch_counter_ephem, get_programs_with_flexi_counter,
-    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
-    wait_for_ledger_persist, TMP_DIR_LEDGER,
+    fetch_counter_chain, fetch_counter_ephem,
+    init_and_delegate_counter_and_payer, setup_validator_with_local_remote,
+    wait_for_cloned_accounts_hydration, wait_for_ledger_persist,
+    TMP_DIR_LEDGER,
 };
 const COUNTER_MAIN: &str = "Main Counter";
 const COUNTER_READONLY: &str = "Readonly Counter";
@@ -39,13 +39,13 @@ fn payer_keypair() -> Keypair {
 // NOTE: this same setup is repeated in ./10_readonly_update_after.rs except
 // we only check here that we can properly restore all of these accounts at all
 #[test]
-fn restore_ledger_different_accounts_multiple_times() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
-    let payer_main = payer_keypair();
+fn test_restore_ledger_different_accounts_multiple_times() {
+    init_logger!();
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer_readonly = payer_keypair();
 
-    let (mut validator, _, payer_main_lamports) =
-        write(&ledger_path, &payer_main, &payer_readonly);
+    let (mut validator, _, payer_main_lamports, payer_main) =
+        write(&ledger_path, &payer_readonly);
     validator.kill().unwrap();
 
     for _ in 0..5 {
@@ -61,54 +61,54 @@ fn restore_ledger_different_accounts_multiple_times() {
 
 fn write(
     ledger_path: &Path,
-    payer_main: &Keypair,
     payer_readonly: &Keypair,
-) -> (Child, u64, u64) {
-    let programs = get_programs_with_flexi_counter();
-
+) -> (Child, u64, u64, Keypair) {
     let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
-        Some(programs),
+        None,
         true,
         false,
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
-    // Airdrop to payers on chain
-    expect!(
-        ctx.airdrop_chain(&payer_main.pubkey(), LAMPORTS_PER_SOL),
-        validator
-    );
-    expect!(
-        ctx.airdrop_chain(&payer_readonly.pubkey(), LAMPORTS_PER_SOL),
-        validator
-    );
-
-    // Create and send init counter instructions on chain
-    confirm_tx_with_payer_chain(
-        create_init_ix(payer_main.pubkey(), COUNTER_MAIN.to_string()),
-        payer_main,
-        &mut validator,
-    );
-    confirm_tx_with_payer_chain(
-        create_init_ix(payer_readonly.pubkey(), COUNTER_READONLY.to_string()),
-        payer_readonly,
-        &mut validator,
-    );
-
-    // Delegate main counter to ephemeral and add 2
+    // Setup readonly counter
     {
-        confirm_tx_with_payer_chain(
-            create_delegate_ix(payer_main.pubkey()),
-            payer_main,
-            &mut validator,
+        expect!(
+            ctx.airdrop_chain(&payer_readonly.pubkey(), LAMPORTS_PER_SOL),
+            validator
         );
 
+        confirm_tx_with_payer_chain(
+            create_init_ix(
+                payer_readonly.pubkey(),
+                COUNTER_READONLY.to_string(),
+            ),
+            payer_readonly,
+            &mut validator,
+        );
+        let (counter_pda, _) = FlexiCounter::pda(&payer_readonly.pubkey());
+        debug!(
+            "✅ Initialized readonly counter {counter_pda} for payer {} on chain",
+            payer_readonly.pubkey()
+        );
+    }
+
+    // Setup main counter
+    let (payer_main, counter_main) =
+        init_and_delegate_counter_and_payer(&ctx, &mut validator, COUNTER_MAIN);
+
+    debug!(
+        "✅ Initialized and delegated main counter {counter_main} for payer {}",
+        payer_main.pubkey()
+    );
+
+    // Add 2 to main counter in ephemeral
+    {
         let ix = create_add_ix(payer_main.pubkey(), 2);
-        confirm_tx_with_payer_ephem(ix, payer_main, &mut validator);
+        confirm_tx_with_payer_ephem(ix, &payer_main, &ctx, &mut validator);
 
         let counter_main_ephem =
-            fetch_counter_ephem(&payer_main.pubkey(), &mut validator);
+            fetch_counter_ephem(&ctx, &payer_main.pubkey(), &mut validator);
 
         assert_eq!(
             counter_main_ephem,
@@ -119,6 +119,7 @@ fn write(
             },
             cleanup(&mut validator)
         );
+        debug!("✅ Added 2 to Main Counter in ephemeral");
     }
     // Add 3 to Readonly Counter on chain
     {
@@ -136,6 +137,7 @@ fn write(
             },
             cleanup(&mut validator)
         );
+        debug!("✅ Added 3 to Readonly Counter on chain");
     }
 
     // Add Readonly Counter to Main Counter
@@ -143,10 +145,10 @@ fn write(
     {
         let ix =
             create_add_counter_ix(payer_main.pubkey(), payer_readonly.pubkey());
-        confirm_tx_with_payer_ephem(ix, payer_main, &mut validator);
+        confirm_tx_with_payer_ephem(ix, &payer_main, &ctx, &mut validator);
 
         let counter_main_ephem =
-            fetch_counter_ephem(&payer_main.pubkey(), &mut validator);
+            fetch_counter_ephem(&ctx, &payer_main.pubkey(), &mut validator);
         assert_eq!(
             counter_main_ephem,
             FlexiCounter {
@@ -156,15 +158,17 @@ fn write(
             },
             cleanup(&mut validator)
         );
+        debug!("✅ Added Readonly Counter to Main Counter in ephemeral");
     }
 
     let payer_main_ephem_lamports = expect!(
         ctx.fetch_ephem_account_balance(&payer_main.pubkey()),
         validator
     );
+    debug!("Payer main ephemeral lamports: {payer_main_ephem_lamports}");
 
-    let slot = wait_for_ledger_persist(&mut validator);
-    (validator, slot, payer_main_ephem_lamports)
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
+    (validator, slot, payer_main_ephem_lamports, payer_main)
 }
 
 fn read(
@@ -175,11 +179,10 @@ fn read(
 ) -> Child {
     let payer_main = &payer_main_kp.pubkey();
     let payer_readonly = &payer_readonly_kp.pubkey();
-    let programs = get_programs_with_flexi_counter();
 
     let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
-        Some(programs),
+        None,
         false,
         false,
         &LoadedAccounts::with_delegation_program_test_authority(),
@@ -193,20 +196,10 @@ fn read(
         payer_main_ephem, payer_main_lamports,
         cleanup(&mut validator)
     );
-
-    let counter_main_ephem = fetch_counter_ephem(payer_main, &mut validator);
-    assert_eq!(
-        counter_main_ephem,
-        FlexiCounter {
-            count: 5,
-            updates: 2,
-            label: COUNTER_MAIN.to_string()
-        },
-        cleanup(&mut validator)
-    );
+    debug!("✅ Verified main payer ephemeral lamports");
 
     let counter_readonly_ephem =
-        fetch_counter_ephem(payer_readonly, &mut validator);
+        fetch_counter_ephem(&ctx, payer_readonly, &mut validator);
     assert_eq!(
         counter_readonly_ephem,
         FlexiCounter {
@@ -216,6 +209,20 @@ fn read(
         },
         cleanup(&mut validator)
     );
+    debug!("✅ Verified readonly counter state after restore");
+
+    let counter_main_ephem =
+        fetch_counter_ephem(&ctx, payer_main, &mut validator);
+    assert_eq!(
+        counter_main_ephem,
+        FlexiCounter {
+            count: 5,
+            updates: 2,
+            label: COUNTER_MAIN.to_string()
+        },
+        cleanup(&mut validator)
+    );
+    debug!("✅ Verified main counter state after restore");
 
     validator
 }

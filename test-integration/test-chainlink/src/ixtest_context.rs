@@ -135,7 +135,13 @@ impl IxtestContext {
                 _ => (None, None),
             }
         };
-        let chainlink = Chainlink::try_new(&bank, fetch_cloner).unwrap();
+        let chainlink = Chainlink::try_new(
+            &bank,
+            fetch_cloner,
+            validator_kp.pubkey(),
+            faucet_kp.pubkey(),
+        )
+        .unwrap();
 
         let rpc_client = IxtestContext::get_rpc_client(commitment);
         Self {

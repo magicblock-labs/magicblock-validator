@@ -1,10 +1,10 @@
-use magicblock_core::traits::AccountsBank;
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
     thread,
 };
 
+pub use guinea;
 use log::error;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
@@ -17,6 +17,7 @@ use magicblock_core::{
         },
         DispatchEndpoints,
     },
+    traits::AccountsBank,
     Slot,
 };
 use magicblock_ledger::Ledger;
@@ -25,18 +26,16 @@ use magicblock_processor::{
     scheduler::{state::TransactionSchedulerState, TransactionScheduler},
 };
 use solana_account::AccountSharedData;
+pub use solana_instruction::*;
 use solana_keypair::Keypair;
 use solana_program::{
     hash::Hasher, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey,
 };
 use solana_signature::Signature;
+pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
-
-pub use guinea;
-pub use solana_instruction::*;
-pub use solana_signer::Signer;
 
 /// A simulated validator backend for integration tests.
 ///

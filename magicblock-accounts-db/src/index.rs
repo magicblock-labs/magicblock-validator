@@ -260,8 +260,8 @@ impl AccountsDbIndex {
         Ok(())
     }
 
-    /// Ensures that current owner of account matches the one recorded in index
-    /// if not, the index cleanup will be performed and new entries inserted to
+    /// Ensures that current owner of account matches the one recorded in index,
+    /// if not, the index cleanup will be performed and new entry inserted to
     /// match the current state
     pub(crate) fn ensure_correct_owner(
         &self,
@@ -375,7 +375,7 @@ impl AccountsDbIndex {
 
     /// Check whether allocation of given size (in blocks) exists.
     /// These are the allocations which are leftovers from
-    /// accounts' reallocations due to their resizing
+    /// accounts' reallocations due to their resizing/removal
     pub(crate) fn try_recycle_allocation(
         &self,
         space: Blocks,
@@ -389,9 +389,18 @@ impl AccountsDbIndex {
         let (_, val) =
             cursor.get(Some(&space.to_le_bytes()), None, MDB_SET_RANGE_OP)?;
 
-        let (offset, blocks) = bytes!(#unpack, val, Offset, Blocks);
+        let (offset, mut blocks) = bytes!(#unpack, val, Offset, Blocks);
         // delete the allocation record from recycleable list
         cursor.del(WEMPTY)?;
+        // check whether the found allocation contains more space than necessary
+        let remainder = blocks.saturating_sub(space);
+        if remainder > 0 {
+            // split the allocation, to maximize the efficiency of block reuse
+            blocks = space;
+            let new_offset = offset.saturating_add(blocks);
+            let index_value = bytes!(#pack, new_offset, u32, remainder, u32);
+            cursor.put(&remainder.to_le_bytes(), &index_value, WEMPTY)?;
+        }
 
         drop(cursor);
         txn.commit()?;

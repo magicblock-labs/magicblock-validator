@@ -1,13 +1,13 @@
-use log::*;
 use std::{sync::Arc, thread};
-use test_kit::init_logger;
-use tokio::task::JoinSet;
 
 use integration_test_tools::IntegrationTestContext;
+use log::*;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
     signer::Signer, system_instruction,
 };
+use test_kit::init_logger;
+use tokio::task::JoinSet;
 
 use crate::utils::init_and_delegate_flexi_counter;
 mod utils;

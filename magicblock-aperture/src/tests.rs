@@ -8,26 +8,23 @@ use std::{
 
 use hyper::body::Bytes;
 use magicblock_accounts_db::AccountsDb;
-use tokio::sync::mpsc::{channel, Receiver};
-
 use solana_pubkey::Pubkey;
-
-use tokio::time::timeout;
-use tokio_util::sync::CancellationToken;
-
 use test_kit::{
     guinea::{self, GuineaInstruction},
     AccountMeta, ExecutionTestEnv, Instruction, Signer,
 };
+use tokio::{
+    sync::mpsc::{channel, Receiver},
+    time::timeout,
+};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     encoder::{AccountEncoder, ProgramAccountEncoder, TransactionLogsEncoder},
-    state::SharedState,
+    server::websocket::dispatch::WsConnectionChannel,
+    state::{ChainlinkImpl, SharedState},
     utils::ProgramFilters,
     EventProcessor,
-};
-use crate::{
-    server::websocket::dispatch::WsConnectionChannel, state::ChainlinkImpl,
 };
 
 /// A test helper to create a unique WebSocket connection channel pair.
@@ -40,14 +37,18 @@ fn ws_channel() -> (WsConnectionChannel, Receiver<Bytes>) {
 }
 
 fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
-    ChainlinkImpl::try_new(accounts_db, None)
-        .expect("Failed to create Chainlink")
+    ChainlinkImpl::try_new(
+        accounts_db,
+        None,
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+    )
+    .expect("Failed to create Chainlink")
 }
 
 mod event_processor {
-    use crate::state::NodeContext;
-
     use super::*;
+    use crate::state::NodeContext;
 
     /// Sets up a shared state and test environment for event processor tests.
     /// This initializes a validator backend, starts the event processor, and

@@ -1,6 +1,5 @@
-use crate::error::BLOCK_NOT_FOUND;
-
 use super::prelude::*;
+use crate::error::BLOCK_NOT_FOUND;
 
 impl HttpDispatcher {
     /// Handles the `getBlockTime` RPC request.
@@ -23,7 +22,7 @@ impl HttpDispatcher {
 
         Ok(ResponsePayload::encode_no_context(
             &request.id,
-            block.block_time.unwrap_or_default(),
+            block.block_time,
         ))
     }
 }

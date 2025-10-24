@@ -6,11 +6,7 @@ split-debuginfo = "packed"
 [workspace]
 members = [
   "magicblock-account-cloner",
-  "magicblock-account-dumper",
-  "magicblock-account-fetcher",
-  "magicblock-account-updates",
   "magicblock-accounts",
-  "magicblock-accounts-api",
   "magicblock-accounts-db",
   "magicblock-api",
   "magicblock-chainlink",
@@ -21,12 +17,13 @@ members = [
   "magicblock-config-macro",
   "magicblock-core",
   "magicblock-aperture",
+  "magicblock-magic-program-api",
   "magicblock-ledger",
   "magicblock-metrics",
-  "magicblock-mutator",
   "magicblock-processor",
   "magicblock-rpc-client",
   "magicblock-table-mania",
+  "magicblock-task-scheduler",
   "magicblock-validator",
   "magicblock-validator-admin",
   "magicblock-version",
@@ -43,7 +40,7 @@ resolver = "2"
 
 [workspace.package]
 # Solana Version (2.2.x)
-version = "0.1.7"
+version = "0.2.3"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
@@ -63,8 +60,8 @@ bs58 = "0.5.1"
 byteorder = "1.5.0"
 cargo-expand = "1"
 cargo-lock = "10.0.0"
+chrono = "0.4"
 clap = "4.5.40"
-conjunto-transwise = { git = "https://github.com/magicblock-labs/conjunto.git", rev = "bf82b45" }
 console-subscriber = "0.2.0"
 const_format = "0.2.34"
 convert_case = "0.8.0"
@@ -73,6 +70,7 @@ dyn-clone = "1.0.20"
 ed25519-dalek = "1.0.1"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"
+fastwebsockets = "0.10"
 fd-lock = "4.0.2"
 flume = "0.11"
 fs_extra = "1.3.0"
@@ -98,11 +96,7 @@ lru = "0.16.0"
 macrotest = "1"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
-magicblock-account-dumper = { path = "./magicblock-account-dumper" }
-magicblock-account-fetcher = { path = "./magicblock-account-fetcher" }
-magicblock-account-updates = { path = "./magicblock-account-updates" }
 magicblock-accounts = { path = "./magicblock-accounts" }
-magicblock-accounts-api = { path = "./magicblock-accounts-api" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-api = { path = "./magicblock-api" }
 magicblock-chainlink = { path = "./magicblock-chainlink" }
@@ -114,18 +108,19 @@ magicblock-config = { path = "./magicblock-config" }
 magicblock-config-helpers = { path = "./magicblock-config-helpers" }
 magicblock-config-macro = { path = "./magicblock-config-macro" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "5fb8d20", features = [
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "aa1de56d90c", features = [
   "no-entrypoint",
 ] }
 magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-metrics = { path = "./magicblock-metrics" }
-magicblock-mutator = { path = "./magicblock-mutator" }
 magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
+magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
+magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
 magicblock-version = { path = "./magicblock-version" }
 test-kit = { path = "./test-kit" }
@@ -147,7 +142,8 @@ protobuf-src = "1.1"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10.0"
-rusqlite = { version = "0.34.0", features = ["bundled"] }                                           # bundled sqlite 3.44
+# bundled sqlite 3.44
+rusqlite = { version = "0.37.0", features = ["bundled"] }
 rustc_version = "0.4"
 scc = "2.4"
 semver = "1.0.22"
@@ -155,7 +151,7 @@ serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "a892d2a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "f454d4a" }
 solana-account-decoder = { version = "2.2" }
 solana-accounts-db = { version = "2.2" }
 solana-account-decoder-client-types = { version = "2.2" }
@@ -223,16 +219,14 @@ url = "2.5.0"
 vergen = "8.3.1"
 
 [workspace.dependencies.solana-svm]
-# git = "https://github.com/magicblock-labs/magicblock-svm.git"
-# rev = "11bbaf2"
-path = "../magicblock-svm"
+git = "https://github.com/magicblock-labs/magicblock-svm.git"
+rev = "11bbaf2"
 features = ["dev-context-only-utils"]
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "a892d2a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "f454d4a" }
 solana-storage-proto = { path = "./storage-proto" }
-# solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "11bbaf2" }
-solana-svm = { path = "../magicblock-svm" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "11bbaf2" }

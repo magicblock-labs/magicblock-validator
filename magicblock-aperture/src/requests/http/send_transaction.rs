@@ -1,3 +1,4 @@
+use log::warn;
 use magicblock_metrics::metrics::{
     TRANSACTION_PROCESSING_TIME, TRANSACTION_SKIP_PREFLIGHT,
 };
@@ -25,8 +26,9 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        let transaction =
-            self.prepare_transaction(&transaction_str, encoding, true, false)?;
+        let transaction = self
+            .prepare_transaction(&transaction_str, encoding, true, false)
+            .inspect_err(|err| warn!("Failed to prepare transaction: {err}"))?;
         let signature = *transaction.signature();
 
         // Perform a replay check and reserve the signature in the cache. This prevents

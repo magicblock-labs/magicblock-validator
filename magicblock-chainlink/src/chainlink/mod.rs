@@ -1,15 +1,16 @@
+use std::sync::Arc;
+
 use dlp::pda::ephemeral_balance_pda_from_payer;
+use errors::ChainlinkResult;
+use fetch_cloner::FetchCloner;
 use log::*;
 use magicblock_core::traits::AccountsBank;
 use solana_account::AccountSharedData;
-use std::sync::Arc;
-use tokio::{sync::mpsc, task};
-
-use errors::ChainlinkResult;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     commitment_config::CommitmentConfig, transaction::SanitizedTransaction,
 };
+use tokio::{sync::mpsc, task};
 
 use crate::{
     cloner::Cloner,
@@ -21,7 +22,6 @@ use crate::{
     },
     submux::SubMuxClient,
 };
-use fetch_cloner::FetchCloner;
 
 mod blacklisted_accounts;
 pub mod config;
@@ -40,13 +40,16 @@ pub struct Chainlink<
     C: Cloner,
 > {
     accounts_bank: Arc<V>,
-    fetch_cloner: Option<FetchCloner<T, U, V, C>>,
+    fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
     /// The subscription to events for each account that is removed from
     /// the accounts tracked by the provider.
     /// In that case we also remove it from the bank since it is no longer
     /// synchronized.
     #[allow(unused)] // needed to cleanup chainlink
     removed_accounts_sub: Option<task::JoinHandle<()>>,
+
+    validator_id: Pubkey,
+    faucet_id: Pubkey,
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
@@ -54,7 +57,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 {
     pub fn try_new(
         accounts_bank: &Arc<V>,
-        fetch_cloner: Option<FetchCloner<T, U, V, C>>,
+        fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+        validator_pubkey: Pubkey,
+        faucet_pubkey: Pubkey,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
@@ -70,6 +75,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             accounts_bank: accounts_bank.clone(),
             fetch_cloner,
             removed_accounts_sub,
+            validator_id: validator_pubkey,
+            faucet_id: faucet_pubkey,
         })
     }
 
@@ -114,17 +121,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             None
         };
 
-        Chainlink::try_new(accounts_bank, fetch_cloner)
+        Chainlink::try_new(
+            accounts_bank,
+            fetch_cloner,
+            validator_pubkey,
+            faucet_pubkey,
+        )
     }
 
-    /// Removes all accounts that aren't delegated to us from the bank
+    /// Removes all accounts that aren't delegated to us and not blacklisted from the bank
     /// This should only be called _before_ the validator starts up, i.e.
     /// when resuming an existing ledger to guarantee that we don't hold
     /// accounts that might be stale.
     pub fn reset_accounts_bank(&self) {
-        let removed = self
-            .accounts_bank
-            .remove_where(|_pubkey, account| !account.delegated());
+        let blacklisted_accounts =
+            blacklisted_accounts(&self.validator_id, &self.faucet_id);
+        let removed = self.accounts_bank.remove_where(|pubkey, account| {
+            !account.delegated() && !blacklisted_accounts.contains(pubkey)
+        });
 
         debug!("Removed {removed} non-delegated accounts");
     }
@@ -307,7 +321,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(())
     }
 
-    pub fn fetch_cloner(&self) -> Option<&FetchCloner<T, U, V, C>> {
+    pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
         self.fetch_cloner.as_ref()
     }
 

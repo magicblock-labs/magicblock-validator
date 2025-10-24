@@ -108,7 +108,8 @@ impl HttpDispatcher {
     }
 
     /// Handles the `getSupply` RPC request.
-    /// This is a **mocked implementation** that returns a supply struct with all values set to zero.
+    /// This is a **mocked implementation** that returns a
+    /// supply struct with all values set to hardcoded values.
     pub(crate) fn get_supply(&self, request: &JsonRequest) -> HandlerResult {
         let supply = RpcSupply {
             total: u64::MAX,

@@ -2,97 +2,50 @@ use std::{path::Path, process::Child};
 
 use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
-use magicblock_config::ProgramConfig;
-use program_flexi_counter::{
-    delegation_program_id,
-    instruction::{create_add_ix, create_delegate_ix, create_init_ix},
-    state::FlexiCounter,
-};
-use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer,
-};
+use log::*;
+use program_flexi_counter::{instruction::create_add_ix, state::FlexiCounter};
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
+use test_kit::init_logger;
 use test_ledger_restore::{
-    confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
-    fetch_counter_chain, fetch_counter_ephem, fetch_counter_owner_chain,
-    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    confirm_tx_with_payer_ephem, fetch_counter_ephem,
+    init_and_delegate_counter_and_payer, setup_validator_with_local_remote,
+    wait_for_cloned_accounts_hydration, wait_for_ledger_persist,
+    TMP_DIR_LEDGER,
 };
 
 const COUNTER: &str = "Counter of Payer";
-fn payer_keypair() -> Keypair {
-    Keypair::new()
-}
-
-fn get_programs() -> Vec<ProgramConfig> {
-    vec![ProgramConfig {
-        id: FLEXI_COUNTER_ID.try_into().unwrap(),
-        path: "program_flexi_counter.so".to_string(),
-    }]
-}
-
 #[test]
-fn restore_ledger_containing_delegated_account() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
-    let payer = payer_keypair();
-
-    let (mut validator, _) = write(&ledger_path, &payer);
+fn test_restore_ledger_containing_delegated_account() {
+    init_logger!();
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (mut validator, _, payer) = write(&ledger_path);
     validator.kill().unwrap();
 
     let mut validator = read(&ledger_path, &payer.pubkey());
     validator.kill().unwrap();
 }
 
-fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
-    let programs = get_programs();
-
-    // NOTE: in this test we preload the counter program in the ephemeral instead
-    // of relying on it being cloned from the remote
+fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
     let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
-        Some(programs),
+        None,
         true,
         false,
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
-    // Airdrop to payer on chain
-    expect!(
-        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL),
-        validator
-    );
-
-    {
-        // Create and send init counter instruction on chain
-        let ix = create_init_ix(payer.pubkey(), COUNTER.to_string());
-        confirm_tx_with_payer_chain(ix, payer, &mut validator);
-        let counter = fetch_counter_chain(&payer.pubkey(), &mut validator);
-        assert_eq!(
-            counter,
-            FlexiCounter {
-                count: 0,
-                updates: 0,
-                label: COUNTER.to_string()
-            },
-            cleanup(&mut validator)
-        );
-    }
-    {
-        // Delegate counter to ephemeral
-        let ix = create_delegate_ix(payer.pubkey());
-        confirm_tx_with_payer_chain(ix, payer, &mut validator);
-        let owner = fetch_counter_owner_chain(&payer.pubkey(), &mut validator);
-        assert_eq!(owner, delegation_program_id(), cleanup(&mut validator));
-    }
+    let (payer, _counter) =
+        init_and_delegate_counter_and_payer(&ctx, &mut validator, COUNTER);
 
     {
         // Increment counter in ephemeral
         let ix = create_add_ix(payer.pubkey(), 3);
-        confirm_tx_with_payer_ephem(ix, payer, &mut validator);
-        let counter = fetch_counter_ephem(&payer.pubkey(), &mut validator);
+        confirm_tx_with_payer_ephem(ix, &payer, &ctx, &mut validator);
+        let counter =
+            fetch_counter_ephem(&ctx, &payer.pubkey(), &mut validator);
         assert_eq!(
             counter,
             FlexiCounter {
@@ -104,16 +57,14 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
         );
     }
 
-    let slot = wait_for_ledger_persist(&mut validator);
-    (validator, slot)
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
+    (validator, slot, payer)
 }
 
 fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
-    let programs = get_programs();
-
-    let (_, mut validator, _) = setup_validator_with_local_remote(
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
-        Some(programs),
+        None,
         false,
         false,
         &LoadedAccounts::with_delegation_program_test_authority(),
@@ -121,7 +72,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
 
     wait_for_cloned_accounts_hydration();
 
-    let counter_decoded = fetch_counter_ephem(payer, &mut validator);
+    let counter_decoded = fetch_counter_ephem(&ctx, payer, &mut validator);
     assert_eq!(
         counter_decoded,
         FlexiCounter {
@@ -131,6 +82,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
         },
         cleanup(&mut validator)
     );
+    debug!("✅ Verified counter state after restore");
 
     validator
 }

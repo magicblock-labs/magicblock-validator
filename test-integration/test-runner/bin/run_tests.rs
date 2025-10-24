@@ -15,7 +15,7 @@ use integration_test_tools::{
 };
 use teepee::Teepee;
 use test_runner::{
-    cleanup::{cleanup_devnet_only, cleanup_validator, cleanup_validators},
+    cleanup::{cleanup_devnet_only, cleanup_validators},
     env_config::TestConfigViaEnvVars,
     signal::wait_for_ctrlc,
 };
@@ -33,6 +33,7 @@ pub fn main() {
     else {
         return;
     };
+
     let Ok(cloning_output) = run_cloning_tests(&manifest_dir, &config) else {
         return;
     };
@@ -54,6 +55,7 @@ pub fn main() {
     else {
         return;
     };
+
     let Ok(magicblock_pubsub_output) =
         run_magicblock_pubsub_tests(&manifest_dir, &config)
     else {
@@ -70,6 +72,12 @@ pub fn main() {
         return;
     };
 
+    let Ok(task_scheduler_output) =
+        run_task_scheduler_tests(&manifest_dir, &config)
+    else {
+        return;
+    };
+
     // Assert that all tests passed
     assert_cargo_tests_passed(security_output, "security");
     assert_cargo_tests_passed(scenarios_output, "scenarios");
@@ -82,6 +90,7 @@ pub fn main() {
     assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
     assert_cargo_tests_passed(config_output, "config");
     assert_cargo_tests_passed(schedule_intents_output, "schedule_intents");
+    assert_cargo_tests_passed(task_scheduler_output, "task_scheduler");
 }
 
 fn success_output() -> Output {
@@ -490,7 +499,7 @@ fn run_magicblock_api_tests(
     };
 
     let start_ephem_validator = || match start_validator(
-        "validator-api-offline.devnet.toml",
+        "api-conf.ephem.toml",
         ValidatorCluster::Ephem,
         &LoadedAccounts::with_delegation_program_test_authority(),
     ) {
@@ -570,7 +579,7 @@ fn run_magicblock_pubsub_tests(
 
         let output = run_test(test_dir, Default::default()).map_err(|err| {
             eprintln!("Failed to magicblock pubsub tests: {:?}", err);
-            cleanup_validator(&mut ephem_validator, "ephemeral");
+            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
             err
         })?;
 
@@ -689,6 +698,55 @@ fn run_schedule_intents_tests(
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+    }
+}
+
+fn run_task_scheduler_tests(
+    manifest_dir: &str,
+    config: &TestConfigViaEnvVars,
+) -> Result<Output, Box<dyn Error>> {
+    const TEST_NAME: &str = "task-scheduler";
+    if config.skip_entirely(TEST_NAME) {
+        return Ok(success_output());
+    }
+
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+
+    let start_devnet_validator = || match start_validator(
+        "schedule-task.devnet.toml",
+        ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+
+    if config.run_test(TEST_NAME) {
+        eprintln!("======== RUNNING TASK SCHEDULER TESTS ========");
+
+        let mut devnet_validator = start_devnet_validator();
+
+        let test_dir = format!("{}/../{}", manifest_dir, "test-task-scheduler");
+        eprintln!("Running task scheduler tests in {}", test_dir);
+
+        let output = match run_test(test_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run task scheduler tests: {:?}", err);
+                cleanup_devnet_only(&mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+
+        cleanup_devnet_only(&mut devnet_validator);
+        Ok(output)
+    } else {
+        let devnet_validator =
+            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        wait_for_ctrlc(devnet_validator, None, success_output())
     }
 }
 

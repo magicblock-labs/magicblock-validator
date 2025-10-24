@@ -1,6 +1,6 @@
-use async_trait::async_trait;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
