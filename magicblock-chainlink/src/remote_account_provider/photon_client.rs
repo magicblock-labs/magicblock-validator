@@ -1,4 +1,3 @@
-use log::*;
 use std::{ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
@@ -6,6 +5,7 @@ use light_client::indexer::{
     photon_indexer::PhotonIndexer, CompressedAccount, Context, Indexer,
     IndexerError, IndexerRpcConfig, Response,
 };
+use log::*;
 use magicblock_core::compression::derive_cda_from_pda;
 use solana_account::Account;
 use solana_pubkey::Pubkey;

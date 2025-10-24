@@ -9,10 +9,12 @@ use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_sdk::clock::Slot;
 
-use crate::remote_account_provider::{
-    photon_client::PhotonClient, RemoteAccountProviderResult,
+use crate::{
+    remote_account_provider::{
+        photon_client::PhotonClient, RemoteAccountProviderResult,
+    },
+    testing::rpc_client_mock::AccountAtSlot,
 };
-use crate::testing::rpc_client_mock::AccountAtSlot;
 
 #[derive(Clone, Default)]
 pub struct PhotonClientMock {

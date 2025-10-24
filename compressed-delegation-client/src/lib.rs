@@ -1,16 +1,12 @@
 //! A workaround crate used while the validator is incompatible with solana 2.3
 //! TODO: remove this once the validator is compatible with solana 2.3
 mod common;
+#[rustfmt::skip]
 #[path = "generated/mod.rs"]
 mod generated_original;
 
 pub mod generated_impl {
     pub mod types {
-        pub use super::super::generated_original::accounts::CompressedDelegationRecord;
-        pub use super::super::generated_original::types::*;
-        pub use crate::common::{
-            OptionalCompressedAccountMeta, OptionalPackedAddressTreeInfo,
-        };
         pub use light_compressed_account::instruction_data::{
             data::OutputCompressedAccountWithPackedContext,
             with_readonly::InAccount,
@@ -19,13 +15,22 @@ pub mod generated_impl {
             account_meta::CompressedAccountMeta, PackedAddressTreeInfo,
             ValidityProof,
         };
+
+        pub use super::super::generated_original::{
+            accounts::CompressedDelegationRecord, types::*,
+        };
+        pub use crate::common::{
+            OptionalCompressedAccountMeta, OptionalPackedAddressTreeInfo,
+        };
     }
 }
 
 // This is the façade everyone should use:
 pub mod generated {
-    pub use crate::generated_impl::*;
-    pub use crate::generated_original::{accounts::*, instructions::*};
+    pub use crate::{
+        generated_impl::*,
+        generated_original::{accounts::*, instructions::*},
+    };
 }
 
 pub use generated::*;
