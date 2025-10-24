@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use hyper::body::Bytes;
 use json::{Serialize, Value};
+use magicblock_metrics::metrics::RPC_REQUESTS_COUNT;
 use tokio::sync::mpsc;
 
 use super::connection::ConnectionID;
@@ -16,8 +17,6 @@ use crate::{
     },
     RpcResult,
 };
-
-use magicblock_metrics::metrics::RPC_REQUESTS_COUNT;
 
 /// The sender half of an MPSC channel used to push subscription notifications
 /// to a single WebSocket client.

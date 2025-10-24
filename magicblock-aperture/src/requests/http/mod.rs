@@ -1,5 +1,3 @@
-use log::*;
-use magicblock_metrics::metrics::ENSURE_ACCOUNTS_TIME;
 use std::{mem::size_of, ops::Range};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -8,9 +6,11 @@ use hyper::{
     body::{Bytes, Incoming},
     Request, Response,
 };
+use log::*;
 use magicblock_core::{
     link::transactions::SanitizeableTransaction, traits::AccountsBank,
 };
+use magicblock_metrics::metrics::ENSURE_ACCOUNTS_TIME;
 use prelude::JsonBody;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
