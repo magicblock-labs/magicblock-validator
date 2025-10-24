@@ -124,7 +124,7 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()>;
-    async fn shutdown(&self);
+    async fn shutdown(&self) -> RemoteAccountProviderResult<()>;
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate>;
 
@@ -182,8 +182,12 @@ impl ChainPubsubClientImpl {
 
 #[async_trait]
 impl ChainPubsubClient for ChainPubsubClientImpl {
-    async fn shutdown(&self) {
-        self.actor.shutdown().await;
+    async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.actor
+            .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
+            .await?;
+        rx.await?
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
@@ -406,7 +410,9 @@ pub mod mock {
             Ok(())
         }
 
-        async fn shutdown(&self) {}
+        async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+            Ok(())
+        }
 
         async fn subscription_count(
             &self,
@@ -460,7 +466,6 @@ pub mod mock {
                 // keep it small; tests shouldn't take long
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            Ok(())
         }
     }
 }

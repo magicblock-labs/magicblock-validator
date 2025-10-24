@@ -207,9 +207,15 @@ impl ChainPubsubActor {
                             let pubsub_client_config = pubsub_client_config.clone();
                             let abort_sender = abort_sender.clone();
                             let is_connected = is_connected.clone();
+                            let shutdown_token = shutdown_token.clone();
+                            let pubsub_client = pubsub_client.clone();
+                            let subscription_watchers = subscription_watchers.clone();
                             pending_messages.push(Self::handle_msg(
                                 subs,
                                 pubsub_connection,
+                                shutdown_token,
+                                pubusub_client,
+                                subscription_watchers,
                                 subscription_updates_sender,
                                 pubsub_client_config,
                                 abort_sender,
@@ -234,6 +240,9 @@ impl ChainPubsubActor {
     async fn handle_msg(
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         pubsub_connection: Arc<PubSubConnection>,
+        shutdown_token: CancellationToken,
+        pubsub_client: Arc<PubsubClient>,
+        subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         pubsub_client_config: PubsubClientConfig,
         abort_sender: mpsc::Sender<()>,
@@ -310,6 +319,13 @@ impl ChainPubsubActor {
                 )
                 .await;
                 let _ = response.send(result);
+            }
+            ChainPubsubActorMessage::Shutdown { response } => {
+                Self::shutdown(&subscriptions);
+                let _ = response.send(Ok(())).inspect_err(|err| {
+                    error!("Failed to send shutdown response: {err:?}");
+                });
+                pubsub_client
             }
         }
     }

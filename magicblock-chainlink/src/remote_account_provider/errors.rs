@@ -32,6 +32,9 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to manage subscriptions ({0})")]
     AccountSubscriptionsTaskFailed(String),
 
+    #[error("Failed to send message to laser actor: {0} ({1})")]
+    ChainLaserActorSendError(String, String),
+
     #[error("Failed to resolve accounts ({0})")]
     AccountResolutionsFailed(String),
 
