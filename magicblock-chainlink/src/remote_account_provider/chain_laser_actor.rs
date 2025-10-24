@@ -1,11 +1,8 @@
 #![allow(unused)]
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use log::*;
-use std::{
-    collections::HashMap,
-    pin::Pin,
-    sync::{Arc, Mutex},
-};
+use solana_account::Account;
+use std::{collections::HashMap, pin::Pin};
 use tokio_stream::StreamMap;
 
 use helius_laserstream::{
@@ -18,14 +15,14 @@ use helius_laserstream::{
 };
 use solana_pubkey::Pubkey;
 use tokio::sync::{mpsc, oneshot};
-use tokio_util::sync::CancellationToken;
 
 use crate::remote_account_provider::{
     pubsub_common::{
         ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
         SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
-    RemoteAccountProviderResult, SubscriptionUpdate,
+    RemoteAccountProviderError, RemoteAccountProviderResult,
+    SubscriptionUpdate,
 };
 
 type LaserResult = Result<SubscribeUpdate, LaserstreamError>;
@@ -39,21 +36,20 @@ pub struct ChainLaserActor {
     /// Configuration used to create the laser client
     laser_client_config: LaserstreamConfig,
     /// Active subscriptions
-    subscriptions: Arc<Mutex<StreamMap<Pubkey, LaserStream>>>,
+    subscriptions: StreamMap<Pubkey, LaserStream>,
     /// Sends subscribe/unsubscribe messages to this actor
     messages_sender: mpsc::Sender<ChainPubsubActorMessage>,
+    /// Receives subscribe/unsubscribe messages to this actor
+    messages_receiver: mpsc::Receiver<ChainPubsubActorMessage>,
     /// Sends updates for any account subscription that is received via
     /// the [Self::pubsub_client]
     subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
-    /// The tasks that watch subscriptions via the [Self::pubsub_client] and
-    /// channel them into the [Self::subscription_updates_sender]
-    subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
-    /// The token to use to cancel all subscriptions and shut down the
-    /// message listener, essentially shutting down whis actor
-    shutdown_token: CancellationToken,
     /// The commitment level to use for subscriptions
     commitment: CommitmentLevel,
 }
+
+unsafe impl Send for ChainLaserActor {}
+unsafe impl Sync for ChainLaserActor {}
 
 impl ChainLaserActor {
     pub fn new_from_url(
@@ -87,118 +83,76 @@ impl ChainLaserActor {
             mpsc::channel(SUBSCRIPTION_UPDATE_CHANNEL_SIZE);
         let (messages_sender, messages_receiver) =
             mpsc::channel(MESSAGE_CHANNEL_SIZE);
-        let subscription_watchers =
-            Arc::new(Mutex::new(tokio::task::JoinSet::new()));
-        let shutdown_token = CancellationToken::new();
         let commitment = grpc_commitment_from_solana(commitment);
 
         let me = Self {
             laser_client_config,
             messages_sender,
+            messages_receiver,
             subscriptions: Default::default(),
             subscription_updates_sender,
-            subscription_watchers,
-            shutdown_token,
             commitment,
         };
-        me.start_worker(messages_receiver);
 
         Ok((me, subscription_updates_receiver))
     }
 
-    pub async fn shutdown(&self) {
+    fn shutdown(&mut self) {
         info!("Shutting down ChainLaserActor");
-        // TODO: how to shut all subs  down?
-        self.shutdown_token.cancel();
+        self.subscriptions.clear();
     }
 
-    fn start_worker(
-        &self,
-        mut messages_receiver: mpsc::Receiver<ChainPubsubActorMessage>,
-    ) {
-        let subs = self.subscriptions.clone();
-        let subscription_watchers = self.subscription_watchers.clone();
-        let shutdown_token = self.shutdown_token.clone();
-        let laser_client_config = self.laser_client_config.clone();
-        let commitment = self.commitment;
-        let subscription_updates_sender =
-            self.subscription_updates_sender.clone();
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    msg = messages_receiver.recv() => {
-                        if let Some(msg) = msg {
-                            Self::handle_msg(
-                                laser_client_config.clone(),
-                                commitment,
-                                subs.clone(),
-                                subscription_watchers.clone(),
-                                subscription_updates_sender.clone(),
-                                msg
-                            );
-                        } else {
-                            break;
-                        }
-                    }
-                    _ = shutdown_token.cancelled() => {
+    pub async fn run(mut self) {
+        loop {
+            tokio::select! {
+                Some(msg) = self.messages_receiver.recv() => {
+                    let is_shutdown = self.handle_msg(msg);
+                    if is_shutdown {
                         break;
                     }
                 }
+                Some(update) = self.subscriptions.next(), if !self.subscriptions.is_empty() => {
+                    self.handle_account_update(update).await;
+                },
             }
-        });
+        }
     }
 
-    fn handle_msg(
-        laser_client_config: LaserstreamConfig,
-        commitment: CommitmentLevel,
-        subscriptions: Arc<Mutex<StreamMap<Pubkey, LaserStream>>>,
-        subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
-        subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
-        msg: ChainPubsubActorMessage,
-    ) -> () {
+    fn handle_msg(&mut self, msg: ChainPubsubActorMessage) -> bool {
         use ChainPubsubActorMessage::*;
         match msg {
             AccountSubscribe { pubkey, response } => {
-                Self::add_sub(
-                    pubkey,
-                    laser_client_config,
-                    commitment,
-                    subscriptions,
-                    response,
-                    subscription_watchers,
-                    subscription_updates_sender,
-                );
+                self.add_sub(pubkey, response);
+                false
             }
             AccountUnsubscribe { pubkey, response } => {
-                Self::remove_sub(&pubkey, subscriptions, response);
+                self.remove_sub(&pubkey, response);
+                false
             }
             RecycleConnections { .. } => {
-                // TODO(thlorenz): use `recycles_connections` flag to avoid this call
-                trace!("No need to recycle laserstream connections");
+                // No-op for laserstream
+                false
+            }
+            Shutdown { response } => {
+                self.shutdown();
+                response.send(Ok(())).unwrap_or_else(|_| {
+                    warn!("Failed to send shutdown response")
+                });
+                true
             }
         }
     }
 
     fn add_sub(
+        &mut self,
         pubkey: Pubkey,
-        laser_client_config: LaserstreamConfig,
-        commitment: CommitmentLevel,
-        subs: Arc<Mutex<StreamMap<Pubkey, LaserStream>>>,
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-        subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
-        subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
     ) {
-        let stream = Self::create_account_stream(
-            pubkey,
-            laser_client_config,
-            commitment,
-        );
-        let subs = &mut subs.lock().expect("subscriptions Mutex poisoned");
-        if subs.contains_key(&pubkey) {
+        let stream = self.create_account_stream(pubkey);
+        if self.subscriptions.contains_key(&pubkey) {
             warn!("Already subscribed to account {}", pubkey);
         } else {
-            subs.insert(pubkey, Box::pin(stream));
+            self.subscriptions.insert(pubkey, Box::pin(stream));
         }
         sub_response.send(Ok(())).unwrap_or_else(|_| {
             warn!("Failed to send subscribe response for account {}", pubkey)
@@ -206,16 +160,11 @@ impl ChainLaserActor {
     }
 
     fn remove_sub(
+        &mut self,
         pubkey: &Pubkey,
-        subs: Arc<Mutex<StreamMap<Pubkey, LaserStream>>>,
         unsub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
-        if subs
-            .lock()
-            .expect("subscriptions Mutex poisoned")
-            .remove(pubkey)
-            .is_some()
-        {
+        if self.subscriptions.remove(pubkey).is_some() {
             trace!("Unsubscribed from account {}", pubkey);
         }
         unsub_response.send(Ok(())).unwrap_or_else(|_| {
@@ -225,9 +174,8 @@ impl ChainLaserActor {
 
     /// Helper to create a dedicated stream for a single account.
     fn create_account_stream(
+        &self,
         pubkey: Pubkey,
-        config: LaserstreamConfig,
-        commitment: CommitmentLevel,
     ) -> impl Stream<Item = LaserResult> {
         let mut accounts = HashMap::new();
         accounts.insert(
@@ -239,22 +187,23 @@ impl ChainLaserActor {
         );
         let request = SubscribeRequest {
             accounts,
-            commitment: Some(commitment.into()),
+            commitment: Some(self.commitment.into()),
             ..Default::default()
         };
-        client::subscribe(config, request).0
+        client::subscribe(self.laser_client_config.clone(), request).0
     }
 
     /// Handles an update from one of the account data streams.
-    async fn handle_account_update(
-        (pubkey, result): LaserStreamUpdate,
-        subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
-    ) {
+    async fn handle_account_update(&self, (pubkey, result): LaserStreamUpdate) {
         match result {
             Ok(SubscribeUpdate {
                 update_oneof: Some(UpdateOneof::Account(acc)),
                 ..
             }) => {
+                // We verified via a script that we get an update with Some(Account) when it is
+                // closed. In that case lamports == 0 and owner is the system program.
+                // Thus an update of `None` is not expected and can be ignored.
+                // See: https://gist.github.com/thlorenz/d3d1a380678a030b3e833f8f979319ae
                 let (Some(account), slot) = (acc.account, acc.slot) else {
                     return;
                 };
@@ -272,12 +221,58 @@ impl ChainLaserActor {
                     );
                     return;
                 }
-                // TODO: send sub after we normalized SubscribeUpdate to something better
-                // than RpcResponse<UiAccount>
+                let Ok(owner) = account
+                    .owner
+                    .as_slice()
+                    .try_into()
+                    .map(Pubkey::new_from_array)
+                else {
+                    error!("Failed to parse owner pubkey in account update for account {}", pubkey);
+                    return;
+                };
+                let account = Account {
+                    lamports: account.lamports,
+                    data: account.data,
+                    owner,
+                    executable: account.executable,
+                    rent_epoch: account.rent_epoch,
+                };
+                let update = SubscriptionUpdate {
+                    pubkey,
+                    slot,
+                    account: Some(account),
+                };
+
+                self.subscription_updates_sender
+                    .send(update)
+                    .await
+                    .unwrap_or_else(|_| {
+                        error!(
+                            "Failed to send subscription update for account {}",
+                            pubkey
+                        )
+                    });
             }
-            Err(err) => {}
+            Err(err) => {
+                error!(
+                    "Error in account update stream for account {}: {}",
+                    pubkey, err
+                );
+            }
             _ => { /* Ignore other message types */ }
         }
+    }
+
+    pub async fn send_msg(
+        &self,
+        msg: ChainPubsubActorMessage,
+    ) -> RemoteAccountProviderResult<()> {
+        self.messages_sender.send(msg).await.map_err(|err| {
+            RemoteAccountProviderError::ChainLaserActorSendError(
+                err.to_string(),
+                format!("{err:#?}"),
+            )
+        })
     }
 }
 

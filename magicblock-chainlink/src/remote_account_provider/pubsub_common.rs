@@ -77,6 +77,9 @@ pub enum ChainPubsubActorMessage {
     RecycleConnections {
         response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     },
+    Shutdown {
+        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
+    },
 }
 
 pub const SUBSCRIPTION_UPDATE_CHANNEL_SIZE: usize = 5_000;

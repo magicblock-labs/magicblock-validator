@@ -86,21 +86,16 @@ impl ChainPubsubActor {
         Ok((me, subscription_updates_receiver))
     }
 
-    pub async fn shutdown(&self) {
+    fn shutdown(
+        subs: &Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        shutdown_token: CancellationToken,
+    ) {
         info!("Shutting down ChainPubsubActor");
-        let subs = self
-            .subscriptions
-            .lock()
-            .unwrap()
-            .drain()
-            .collect::<Vec<_>>();
+        let subs = subs.lock().unwrap().drain().collect::<Vec<_>>();
         for (_, sub) in subs {
             sub.cancellation_token.cancel();
         }
-        self.shutdown_token.cancel();
-        // TODO:
-        // let mut subs = self.subscription_watchers.lock().unwrap();;
-        // subs.join_all().await;
+        shutdown_token.cancel();
     }
 
     pub async fn send_msg(
@@ -133,6 +128,7 @@ impl ChainPubsubActor {
                         if let Some(msg) = msg {
                             pubsub_client = Self::handle_msg(
                                 subs.clone(),
+                                shutdown_token.clone(),
                                 pubsub_client.clone(),
                                 subscription_watchers.clone(),
                                 subscription_updates_sender.clone(),
@@ -153,6 +149,7 @@ impl ChainPubsubActor {
 
     async fn handle_msg(
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        shutdown_token: CancellationToken,
         pubsub_client: Arc<PubsubClient>,
         subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
@@ -208,6 +205,13 @@ impl ChainPubsubActor {
                         pubsub_client
                     }
                 }
+            }
+            ChainPubsubActorMessage::Shutdown { response } => {
+                Self::shutdown(&subscriptions, shutdown_token.clone());
+                let _ = response.send(Ok(())).inspect_err(|err| {
+                    error!("Failed to send shutdown response: {err:?}");
+                });
+                pubsub_client
             }
         }
     }

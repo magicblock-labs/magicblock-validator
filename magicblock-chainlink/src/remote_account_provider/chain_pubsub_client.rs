@@ -25,7 +25,7 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()>;
-    async fn shutdown(&self);
+    async fn shutdown(&self) -> RemoteAccountProviderResult<()>;
     async fn recycle_connections(&self);
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate>;
@@ -56,8 +56,12 @@ impl ChainPubsubClientImpl {
 
 #[async_trait]
 impl ChainPubsubClient for ChainPubsubClientImpl {
-    async fn shutdown(&self) {
-        self.actor.shutdown().await;
+    async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.actor
+            .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
+            .await?;
+        rx.await?
     }
 
     async fn recycle_connections(&self) {
@@ -254,6 +258,8 @@ pub mod mock {
             Ok(())
         }
 
-        async fn shutdown(&self) {}
+        async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+            Ok(())
+        }
     }
 }

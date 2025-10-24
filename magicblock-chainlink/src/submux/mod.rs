@@ -544,10 +544,11 @@ impl<T: ChainPubsubClient> ChainPubsubClient for SubMuxClient<T> {
         Ok(())
     }
 
-    async fn shutdown(&self) {
+    async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
         for client in &self.clients {
-            client.shutdown().await;
+            client.shutdown().await?;
         }
+        Ok(())
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
@@ -637,7 +638,7 @@ mod tests {
         lams.sort();
         assert_eq!(lams, vec![10, 20]);
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -681,7 +682,7 @@ mod tests {
         .await;
         assert!(recv.is_err(), "no update after unsubscribe");
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     // -----------------
@@ -745,7 +746,7 @@ mod tests {
         .expect("stream open");
         assert_eq!(next.slot, 8);
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -806,7 +807,7 @@ mod tests {
         .await;
         assert!(recv_more.is_err(), "no extra updates expected");
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -888,7 +889,7 @@ mod tests {
         .expect("stream open");
         assert_eq!(up.slot, 1);
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     // -----------------
@@ -998,7 +999,7 @@ mod tests {
                 <= mux.allowed_in_debounce_window_count()
         );
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1035,7 +1036,7 @@ mod tests {
                 <= mux.allowed_in_debounce_window_count()
         );
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1095,7 +1096,7 @@ mod tests {
                 <= mux.allowed_in_debounce_window_count()
         );
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1137,7 +1138,7 @@ mod tests {
             assert_eq!(received.len(), 10, "no updates should be debounced");
         }
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     // -----------------
@@ -1182,7 +1183,7 @@ mod tests {
         assert_eq!(c2.recycle_calls(), 1);
         assert_eq!(c3.recycle_calls(), 1);
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1196,6 +1197,6 @@ mod tests {
         assert_eq!(c2.recycle_calls(), 0);
         assert_eq!(c3.recycle_calls(), 0);
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 }
