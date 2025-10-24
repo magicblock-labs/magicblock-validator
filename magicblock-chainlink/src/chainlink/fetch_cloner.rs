@@ -138,10 +138,10 @@ where
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
-    ) -> Self {
+    ) -> Arc<Self> {
         let blacklisted_accounts =
             blacklisted_accounts(&validator_pubkey, &faucet_pubkey);
-        let me = Self {
+        let me = Arc::new(Self {
             remote_account_provider: remote_account_provider.clone(),
             accounts_bank: accounts_bank.clone(),
             cloner: cloner.clone(),
@@ -149,9 +149,10 @@ where
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
-        };
+        });
 
-        me.start_subscription_listener(subscription_updates_rx);
+        me.clone()
+            .start_subscription_listener(subscription_updates_rx);
 
         me
     }
@@ -163,15 +164,9 @@ where
 
     /// Start listening to subscription updates
     pub fn start_subscription_listener(
-        &self,
+        self: Arc<Self>,
         mut subscription_updates: mpsc::Receiver<ForwardedSubscriptionUpdate>,
     ) {
-        let cloner = self.cloner.clone();
-        let bank = self.accounts_bank.clone();
-        let remote_account_provider = self.remote_account_provider.clone();
-        let fetch_count = self.fetch_count.clone();
-        let validator_pubkey = self.validator_pubkey;
-
         tokio::spawn(async move {
             while let Some(update) = subscription_updates.recv().await {
                 trace!("FetchCloner received subscription update for {} at slot {}",
@@ -182,19 +177,15 @@ where
                 // on a separate task so the fetches of delegation records can happen in
                 // parallel
                 let resolved_account =
-                    Self::resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
-                        update,
-                        &bank,
-                        &remote_account_provider,
-                        &fetch_count,
-                        validator_pubkey,
-                    )
+                    self.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(update)
                     .await;
                 if let Some(account) = resolved_account {
                     // Ensure that the subscription update isn't out of order, i.e. we don't already
                     // hold a newer version of the account in our bank
-                    let out_of_order_slot =
-                        bank.get_account(&pubkey).and_then(|in_bank| {
+                    let out_of_order_slot = self
+                        .accounts_bank
+                        .get_account(&pubkey)
+                        .and_then(|in_bank| {
                             if in_bank.remote_slot() >= account.remote_slot() {
                                 Some(in_bank.remote_slot())
                             } else {
@@ -214,8 +205,10 @@ where
                     // The subscription will be turned back on once the committor service schedules
                     // a commit for it that includes undelegation
                     if account.delegated() {
-                        if let Err(err) =
-                            remote_account_provider.unsubscribe(&pubkey).await
+                        if let Err(err) = self
+                            .remote_account_provider
+                            .unsubscribe(&pubkey)
+                            .await
                         {
                             error!(
                                 "Failed to unsubscribe from delegated account {pubkey}: {err}"
@@ -223,17 +216,10 @@ where
                         }
                     }
                     if account.executable() {
-                        Self::handle_executable_sub_update(
-                            &remote_account_provider,
-                            &bank,
-                            &fetch_count,
-                            &cloner,
-                            pubkey,
-                            account,
-                        )
-                        .await;
+                        self.handle_executable_sub_update(pubkey, account)
+                            .await;
                     } else if let Err(err) =
-                        cloner.clone_account(pubkey, account).await
+                        self.cloner.clone_account(pubkey, account).await
                     {
                         error!(
                             "Failed to clone account {pubkey} into bank: {err}"
@@ -245,10 +231,7 @@ where
     }
 
     async fn handle_executable_sub_update(
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
-        accounts_bank: &Arc<V>,
-        fetch_count: &Arc<AtomicU64>,
-        cloner: &Arc<C>,
+        &self,
         pubkey: Pubkey,
         account: AccountSharedData,
     ) {
@@ -266,9 +249,7 @@ where
             .eq(&LOADER_V3)
         {
             match Self::task_to_fetch_with_program_data(
-                remote_account_provider,
-                accounts_bank,
-                fetch_count.clone(),
+                self,
                 pubkey,
                 account.remote_slot(),
             )
@@ -309,17 +290,14 @@ where
                 return;
             }
         };
-        if let Err(err) = cloner.clone_program(loaded_program).await {
+        if let Err(err) = self.cloner.clone_program(loaded_program).await {
             error!("Failed to clone account {pubkey} into bank: {err}");
         }
     }
 
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
+        &self,
         update: ForwardedSubscriptionUpdate,
-        bank: &Arc<V>,
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
-        fetch_count: &Arc<AtomicU64>,
-        validator_pubkey: Pubkey,
     ) -> Option<AccountSharedData> {
         let ForwardedSubscriptionUpdate { pubkey, account } = update;
         let owned_by_delegation_program =
@@ -333,18 +311,17 @@ where
                     delegation_record_pda_from_delegated_account(&pubkey);
 
                 // Check existing subscriptions before fetching
-                let was_delegation_record_subscribed = remote_account_provider
+                let was_delegation_record_subscribed = self
+                    .remote_account_provider
                     .is_watching(&delegation_record_pubkey);
 
-                match Self::task_to_fetch_with_companion(
-                    bank.clone(),
-                    remote_account_provider,
-                    fetch_count.clone(),
-                    pubkey,
-                    delegation_record_pubkey,
-                    account.remote_slot(),
-                )
-                .await
+                match self
+                    .task_to_fetch_with_companion(
+                        pubkey,
+                        delegation_record_pubkey,
+                        account.remote_slot(),
+                    )
+                    .await
                 {
                     Ok(Ok(AccountWithCompanion {
                         pubkey,
@@ -392,7 +369,7 @@ where
                                 }
                                 let is_delegated_to_us = delegation_record
                                     .authority
-                                    .eq(&validator_pubkey) ||
+                                    .eq(&self.validator_pubkey) ||
                                     // TODO(thlorenz): @ once the delegation program supports
                                     // delegating to specific authority we need to remove the below
                                     delegation_record.authority.eq(&Pubkey::default());
@@ -421,7 +398,7 @@ where
 
                         if !subs_to_remove.is_empty() {
                             cancel_subs(
-                                remote_account_provider,
+                                &self.remote_account_provider,
                                 CancelStrategy::All(subs_to_remove),
                             )
                             .await;
@@ -650,8 +627,6 @@ where
             };
             fetch_with_delegation_record_join_set.spawn(
                 self.task_to_fetch_with_delegation_record(
-                    &self.remote_account_provider,
-                    self.fetch_count.clone(),
                     *pubkey,
                     effective_slot,
                 ),
@@ -784,10 +759,7 @@ where
                     *account_slot
                 };
                 fetch_with_program_data_join_set.spawn(
-                    Self::task_to_fetch_with_program_data(
-                        &self.remote_account_provider,
-                        &self.accounts_bank,
-                        self.fetch_count.clone(),
+                    self.task_to_fetch_with_program_data(
                         *pubkey,
                         effective_slot,
                     ),
@@ -1069,18 +1041,12 @@ where
 
     fn task_to_fetch_with_delegation_record(
         &self,
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
-        fetch_count: Arc<AtomicU64>,
         pubkey: Pubkey,
         slot: u64,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
-        let bank = self.accounts_bank.clone();
         let delegation_record_pubkey =
             delegation_record_pda_from_delegated_account(&pubkey);
-        Self::task_to_fetch_with_companion(
-            bank,
-            remote_account_provider,
-            fetch_count,
+        self.task_to_fetch_with_companion(
             pubkey,
             delegation_record_pubkey,
             slot,
@@ -1088,34 +1054,24 @@ where
     }
 
     fn task_to_fetch_with_program_data(
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
-        accounts_bank: &Arc<V>,
-        fetch_count: Arc<AtomicU64>,
+        &self,
         pubkey: Pubkey,
         slot: u64,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
-        let bank = accounts_bank.clone();
         let program_data_pubkey =
             get_loaderv3_get_program_data_address(&pubkey);
-        Self::task_to_fetch_with_companion(
-            bank,
-            remote_account_provider,
-            fetch_count,
-            pubkey,
-            program_data_pubkey,
-            slot,
-        )
+        self.task_to_fetch_with_companion(pubkey, program_data_pubkey, slot)
     }
 
     fn task_to_fetch_with_companion(
-        bank: Arc<V>,
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
-        fetch_count: Arc<AtomicU64>,
+        &self,
         pubkey: Pubkey,
         delegation_record_pubkey: Pubkey,
         slot: u64,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
-        let provider = remote_account_provider.clone();
+        let provider = self.remote_account_provider.clone();
+        let bank = self.accounts_bank.clone();
+        let fetch_count = self.fetch_count.clone();
         task::spawn(async move {
             trace!("Fetching account {pubkey} with delegation record {delegation_record_pubkey} at slot {slot}");
 
@@ -1485,11 +1441,13 @@ mod tests {
         rpc_client: crate::testing::rpc_client_mock::ChainRpcClientMock,
         #[allow(unused)]
         forward_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
-        fetch_cloner: FetchCloner<
-            ChainRpcClientMock,
-            ChainPubsubClientMock,
-            AccountsBankStub,
-            ClonerStub,
+        fetch_cloner: Arc<
+            FetchCloner<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                AccountsBankStub,
+                ClonerStub,
+            >,
         >,
         #[allow(unused)]
         subscription_tx: mpsc::Sender<ForwardedSubscriptionUpdate>,
@@ -1563,11 +1521,13 @@ mod tests {
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
     ) -> (
-        FetchCloner<
-            ChainRpcClientMock,
-            ChainPubsubClientMock,
-            AccountsBankStub,
-            ClonerStub,
+        Arc<
+            FetchCloner<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                AccountsBankStub,
+                ClonerStub,
+            >,
         >,
         mpsc::Sender<ForwardedSubscriptionUpdate>,
     ) {

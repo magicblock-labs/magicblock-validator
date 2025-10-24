@@ -40,7 +40,7 @@ pub struct Chainlink<
     C: Cloner,
 > {
     accounts_bank: Arc<V>,
-    fetch_cloner: Option<FetchCloner<T, U, V, C>>,
+    fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
     /// The subscription to events for each account that is removed from
     /// the accounts tracked by the provider.
     /// In that case we also remove it from the bank since it is no longer
@@ -57,7 +57,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 {
     pub fn try_new(
         accounts_bank: &Arc<V>,
-        fetch_cloner: Option<FetchCloner<T, U, V, C>>,
+        fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
     ) -> ChainlinkResult<Self> {
@@ -321,7 +321,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(())
     }
 
-    pub fn fetch_cloner(&self) -> Option<&FetchCloner<T, U, V, C>> {
+    pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
         self.fetch_cloner.as_ref()
     }
 
