@@ -5,14 +5,12 @@ use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
     assert_remain_undelegating, assert_subscribed_without_delegation_record,
+    testing::deleg::add_delegation_record_for,
 };
 use solana_account::{Account, AccountSharedData};
-use solana_sdk::clock::Slot;
-
-use magicblock_chainlink::testing::deleg::add_delegation_record_for;
-use utils::test_context::TestContext;
-
 use solana_pubkey::Pubkey;
+use solana_sdk::clock::Slot;
+use utils::test_context::TestContext;
 
 mod utils;
 

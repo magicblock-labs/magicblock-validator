@@ -1,8 +1,4 @@
 #[cfg(any(test, feature = "dev-context"))]
-use async_trait::async_trait;
-#[cfg(any(test, feature = "dev-context"))]
-use log::*;
-#[cfg(any(test, feature = "dev-context"))]
 use std::{
     collections::HashMap,
     sync::{
@@ -11,6 +7,10 @@ use std::{
     },
 };
 
+#[cfg(any(test, feature = "dev-context"))]
+use async_trait::async_trait;
+#[cfg(any(test, feature = "dev-context"))]
+use log::*;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
 #[cfg(any(test, feature = "dev-context"))]

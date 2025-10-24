@@ -1,9 +1,9 @@
-use magicblock_core::traits::AccountsBank;
 use std::sync::Arc;
 
 use magicblock_accounts_db::AccountsDb;
-use magicblock_core::link::{
-    blocks::BlockHash, transactions::TransactionSchedulerHandle,
+use magicblock_core::{
+    link::{blocks::BlockHash, transactions::TransactionSchedulerHandle},
+    traits::AccountsBank,
 };
 use magicblock_mutator::{
     transactions::transaction_to_clone_regular_account, AccountModification,

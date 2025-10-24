@@ -1,10 +1,11 @@
-use solana_account::AccountSharedData;
-use solana_account_decoder::parse_token::UiTokenAmount;
 use std::mem::size_of;
 
-use super::{SPL_DECIMALS_OFFSET, SPL_MINT_RANGE, SPL_TOKEN_AMOUNT_RANGE};
+use solana_account::AccountSharedData;
+use solana_account_decoder::parse_token::UiTokenAmount;
 
-use super::prelude::*;
+use super::{
+    prelude::*, SPL_DECIMALS_OFFSET, SPL_MINT_RANGE, SPL_TOKEN_AMOUNT_RANGE,
+};
 
 impl HttpDispatcher {
     /// Handles the `getTokenAccountBalance` RPC request.

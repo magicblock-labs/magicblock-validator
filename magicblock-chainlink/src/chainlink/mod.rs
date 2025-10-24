@@ -1,15 +1,16 @@
+use std::sync::Arc;
+
 use dlp::pda::ephemeral_balance_pda_from_payer;
+use errors::ChainlinkResult;
+use fetch_cloner::FetchCloner;
 use log::*;
 use magicblock_core::traits::AccountsBank;
 use solana_account::AccountSharedData;
-use std::sync::Arc;
-use tokio::{sync::mpsc, task};
-
-use errors::ChainlinkResult;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     commitment_config::CommitmentConfig, transaction::SanitizedTransaction,
 };
+use tokio::{sync::mpsc, task};
 
 use crate::{
     cloner::Cloner,
@@ -21,7 +22,6 @@ use crate::{
     },
     submux::SubMuxClient,
 };
-use fetch_cloner::FetchCloner;
 
 mod blacklisted_accounts;
 pub mod config;

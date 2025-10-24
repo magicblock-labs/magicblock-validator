@@ -1,8 +1,9 @@
+use std::collections::HashSet;
+
 use setup::{RpcTestEnv, TOKEN_PROGRAM_ID};
 use solana_account::{accounts_equal, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::request::TokenAccountsFilter;
-use std::collections::HashSet;
 use test_kit::guinea;
 
 mod setup;

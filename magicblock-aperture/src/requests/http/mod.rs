@@ -1,5 +1,3 @@
-use log::*;
-use magicblock_core::traits::AccountsBank;
 use std::{mem::size_of, ops::Range};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -8,7 +6,10 @@ use hyper::{
     body::{Bytes, Incoming},
     Request, Response,
 };
-use magicblock_core::link::transactions::SanitizeableTransaction;
+use log::*;
+use magicblock_core::{
+    link::transactions::SanitizeableTransaction, traits::AccountsBank,
+};
 use prelude::JsonBody;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -17,11 +18,10 @@ use solana_transaction::{
 };
 use solana_transaction_status::UiTransactionEncoding;
 
+use super::JsonHttpRequest;
 use crate::{
     error::RpcError, server::http::dispatch::HttpDispatcher, RpcResult,
 };
-
-use super::JsonHttpRequest;
 
 pub(crate) type HandlerResult = RpcResult<Response<JsonBody>>;
 
@@ -203,6 +203,11 @@ impl HttpDispatcher {
 
 /// A prelude module to provide common imports for all RPC handler modules.
 mod prelude {
+    pub(super) use magicblock_core::{link::accounts::LockedAccount, Slot};
+    pub(super) use solana_account::ReadableAccount;
+    pub(super) use solana_account_decoder::UiAccountEncoding;
+    pub(super) use solana_pubkey::Pubkey;
+
     pub(super) use super::HandlerResult;
     pub(super) use crate::{
         error::RpcError,
@@ -215,10 +220,6 @@ mod prelude {
         some_or_err,
         utils::{AccountWithPubkey, JsonBody},
     };
-    pub(super) use magicblock_core::{link::accounts::LockedAccount, Slot};
-    pub(super) use solana_account::ReadableAccount;
-    pub(super) use solana_account_decoder::UiAccountEncoding;
-    pub(super) use solana_pubkey::Pubkey;
 }
 
 // --- SPL Token Account Layout Constants ---

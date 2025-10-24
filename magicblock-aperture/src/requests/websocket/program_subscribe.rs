@@ -1,13 +1,12 @@
 use solana_account_decoder::UiAccountEncoding;
 use solana_rpc_client_api::config::RpcProgramAccountsConfig;
 
+use super::prelude::*;
 use crate::{
     encoder::{AccountEncoder, ProgramAccountEncoder},
     some_or_err,
     utils::ProgramFilters,
 };
-
-use super::prelude::*;
 
 impl WsDispatcher {
     /// Handles the `programSubscribe` WebSocket RPC request.

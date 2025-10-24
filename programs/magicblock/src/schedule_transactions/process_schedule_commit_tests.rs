@@ -234,9 +234,10 @@ fn assert_first_commit(
 
 #[cfg(test)]
 mod tests {
+    use test_kit::init_logger;
+
     use super::*;
     use crate::utils::instruction_utils::InstructionUtils;
-    use test_kit::init_logger;
 
     #[test]
     fn test_schedule_commit_single_account_success() {

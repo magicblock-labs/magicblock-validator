@@ -1,4 +1,3 @@
-use magicblock_config::PrepareLookupTables;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -20,7 +19,7 @@ use magicblock_committor_service::{
     error::{CommittorServiceError, CommittorServiceResult},
     BaseIntentCommittor, CommittorService,
 };
-use magicblock_config::AccountsCloneConfig;
+use magicblock_config::{AccountsCloneConfig, PrepareLookupTables};
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_ledger::LatestBlock;
 use magicblock_mutator::AccountModification;
@@ -30,12 +29,13 @@ use magicblock_program::{
 use magicblock_rpc_client::MagicblockRpcClient;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
+    hash::Hash,
+    loader_v4,
     pubkey::Pubkey,
-    signature::Signature,
+    rent::Rent,
+    signature::{Signature, Signer},
     transaction::Transaction,
 };
-use solana_sdk::{hash::Hash, rent::Rent};
-use solana_sdk::{loader_v4, signature::Signer};
 use tokio::sync::oneshot;
 
 use crate::chainext::bpf_loader_v1::BpfUpgradableProgramModifications;

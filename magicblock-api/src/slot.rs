@@ -1,11 +1,12 @@
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::blocks::{BlockMeta, BlockUpdate, BlockUpdateTx};
 use magicblock_ledger::{errors::LedgerResult, Ledger};
-use solana_sdk::clock::Slot;
-use solana_sdk::hash::Hasher;
+use solana_sdk::{clock::Slot, hash::Hasher};
 
 pub fn advance_slot_and_update_ledger(
     accountsdb: &Arc<AccountsDb>,

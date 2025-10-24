@@ -3,9 +3,8 @@ use std::{fs, path::Path};
 use lmdb::{Cursor, Environment, EnvironmentFlags, RoCursor, RoTransaction};
 use solana_pubkey::Pubkey;
 
-use crate::{index::Blocks, AccountsDbResult};
-
 use super::{table::Table, Offset};
+use crate::{index::Blocks, AccountsDbResult};
 
 // Below is the list of LMDB cursor operation consts, which were copy
 // pasted since they are not exposed in the public API of LMDB

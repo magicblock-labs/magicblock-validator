@@ -1,5 +1,3 @@
-use super::coordinator::{ExecutionCoordinator, TransactionWithId};
-
 use magicblock_core::link::transactions::{
     ProcessableTransaction, SanitizeableTransaction, TransactionProcessingMode,
 };
@@ -11,6 +9,8 @@ use solana_program::{
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
+
+use super::coordinator::{ExecutionCoordinator, TransactionWithId};
 
 // --- Test Setup ---
 

@@ -17,9 +17,9 @@ use magicblock_aperture::{
     JsonRpcServer,
 };
 use magicblock_config::RpcConfig;
-use magicblock_core::link::accounts::LockedAccount;
-use magicblock_core::traits::AccountsBank;
-use magicblock_core::Slot;
+use magicblock_core::{
+    link::accounts::LockedAccount, traits::AccountsBank, Slot,
+};
 use magicblock_ledger::LatestBlock;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_keypair::Keypair;

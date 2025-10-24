@@ -1,7 +1,7 @@
-use magicblock_core::traits::AccountsBank;
 use std::sync::Arc;
 
 use magicblock_accounts_db::AccountsDb;
+use magicblock_core::traits::AccountsBank;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 

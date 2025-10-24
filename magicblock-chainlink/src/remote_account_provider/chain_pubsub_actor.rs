@@ -1,20 +1,19 @@
-use log::*;
-use solana_rpc_client_api::response::Response as RpcResponse;
-use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::sysvar::clock;
-use std::fmt;
-use std::sync::Arc;
 use std::{
     collections::{HashMap, HashSet},
-    sync::Mutex,
+    fmt,
+    sync::{Arc, Mutex},
 };
-use tokio::sync::{mpsc, oneshot};
-use tokio_stream::StreamExt;
 
+use log::*;
 use solana_account_decoder_client_types::{UiAccount, UiAccountEncoding};
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
-use solana_rpc_client_api::config::RpcAccountInfoConfig;
+use solana_rpc_client_api::{
+    config::RpcAccountInfoConfig, response::Response as RpcResponse,
+};
+use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
+use tokio::sync::{mpsc, oneshot};
+use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use super::errors::{RemoteAccountProviderError, RemoteAccountProviderResult};

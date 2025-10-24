@@ -1,9 +1,9 @@
-use log::*;
-use solana_sdk::sysvar;
 use std::{collections::HashSet, num::NonZeroUsize, sync::Mutex};
 
+use log::*;
 use lru::LruCache;
 use solana_pubkey::Pubkey;
+use solana_sdk::sysvar;
 
 /// A simple wrapper around [lru::LruCache].
 /// When an account is evicted from the cache due to a new one being added,
@@ -117,8 +117,9 @@ impl AccountsLruCache {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::num::NonZeroUsize;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_lru_cache_add_accounts_up_to_limit_no_eviction() {
