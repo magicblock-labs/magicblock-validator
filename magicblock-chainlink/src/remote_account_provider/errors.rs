@@ -32,6 +32,9 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to send message to laser actor: {0} ({1})")]
     ChainLaserActorSendError(String, String),
 
+    #[error("Missing API key for: {0}")]
+    MissingApiKey(String),
+
     #[error("Failed to setup an account subscription ({0})")]
     AccountSubscriptionsFailed(String),
 

@@ -1,4 +1,3 @@
-#![allow(unused)]
 use futures_util::{Stream, StreamExt};
 use log::*;
 use solana_account::Account;
@@ -37,8 +36,6 @@ pub struct ChainLaserActor {
     laser_client_config: LaserstreamConfig,
     /// Active subscriptions
     subscriptions: StreamMap<Pubkey, LaserStream>,
-    /// Sends subscribe/unsubscribe messages to this actor
-    messages_sender: mpsc::Sender<ChainPubsubActorMessage>,
     /// Receives subscribe/unsubscribe messages to this actor
     messages_receiver: mpsc::Receiver<ChainPubsubActorMessage>,
     /// Sends updates for any account subscription that is received via
@@ -56,8 +53,11 @@ impl ChainLaserActor {
         pubsub_url: &str,
         api_key: &str,
         commitment: solana_sdk::commitment_config::CommitmentLevel,
-    ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
-    {
+    ) -> RemoteAccountProviderResult<(
+        Self,
+        mpsc::Sender<ChainPubsubActorMessage>,
+        mpsc::Receiver<SubscriptionUpdate>,
+    )> {
         let channel_options = ChannelOptions {
             connect_timeout_secs: Some(5),
             http2_keep_alive_interval_secs: Some(15),
@@ -77,8 +77,11 @@ impl ChainLaserActor {
     pub fn new(
         laser_client_config: LaserstreamConfig,
         commitment: solana_sdk::commitment_config::CommitmentLevel,
-    ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
-    {
+    ) -> RemoteAccountProviderResult<(
+        Self,
+        mpsc::Sender<ChainPubsubActorMessage>,
+        mpsc::Receiver<SubscriptionUpdate>,
+    )> {
         let (subscription_updates_sender, subscription_updates_receiver) =
             mpsc::channel(SUBSCRIPTION_UPDATE_CHANNEL_SIZE);
         let (messages_sender, messages_receiver) =
@@ -87,14 +90,13 @@ impl ChainLaserActor {
 
         let me = Self {
             laser_client_config,
-            messages_sender,
             messages_receiver,
             subscriptions: Default::default(),
             subscription_updates_sender,
             commitment,
         };
 
-        Ok((me, subscription_updates_receiver))
+        Ok((me, messages_sender, subscription_updates_receiver))
     }
 
     fn shutdown(&mut self) {
@@ -261,18 +263,6 @@ impl ChainLaserActor {
             }
             _ => { /* Ignore other message types */ }
         }
-    }
-
-    pub async fn send_msg(
-        &self,
-        msg: ChainPubsubActorMessage,
-    ) -> RemoteAccountProviderResult<()> {
-        self.messages_sender.send(msg).await.map_err(|err| {
-            RemoteAccountProviderError::ChainLaserActorSendError(
-                err.to_string(),
-                format!("{err:#?}"),
-            )
-        })
     }
 }
 

@@ -1,4 +1,3 @@
-#![allow(unused)]
 use log::*;
 use std::sync::{Arc, Mutex};
 
@@ -9,13 +8,44 @@ use tokio::sync::{mpsc, oneshot};
 use crate::remote_account_provider::{
     chain_laser_actor::ChainLaserActor,
     pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
-    ChainPubsubClient, RemoteAccountProviderResult,
+    ChainPubsubClient, RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 
 #[derive(Clone)]
 pub struct ChainLaserClientImpl {
-    actor: Arc<ChainLaserActor>,
+    /// Receiver for subscription updates
     updates: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
+    /// Channel to send messages to the actor
+    messages: mpsc::Sender<ChainPubsubActorMessage>,
+}
+
+impl ChainLaserClientImpl {
+    pub async fn new_from_url(
+        pubsub_url: &str,
+        api_key: &str,
+        commitment: solana_sdk::commitment_config::CommitmentLevel,
+    ) -> RemoteAccountProviderResult<Self> {
+        let (actor, messages, updates) =
+            ChainLaserActor::new_from_url(pubsub_url, api_key, commitment)?;
+        let client = Self {
+            updates: Arc::new(Mutex::new(Some(updates))),
+            messages,
+        };
+        actor.run().await;
+        Ok(client)
+    }
+
+    async fn send_msg(
+        &self,
+        msg: ChainPubsubActorMessage,
+    ) -> RemoteAccountProviderResult<()> {
+        self.messages.send(msg).await.map_err(|err| {
+            RemoteAccountProviderError::ChainLaserActorSendError(
+                err.to_string(),
+                format!("{err:#?}"),
+            )
+        })
+    }
 }
 
 #[async_trait]
@@ -25,12 +55,11 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.actor
-            .send_msg(ChainPubsubActorMessage::AccountSubscribe {
-                pubkey,
-                response: tx,
-            })
-            .await?;
+        self.send_msg(ChainPubsubActorMessage::AccountSubscribe {
+            pubkey,
+            response: tx,
+        })
+        .await?;
 
         rx.await?
     }
@@ -40,20 +69,18 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.actor
-            .send_msg(ChainPubsubActorMessage::AccountUnsubscribe {
-                pubkey,
-                response: tx,
-            })
-            .await?;
+        self.send_msg(ChainPubsubActorMessage::AccountUnsubscribe {
+            pubkey,
+            response: tx,
+        })
+        .await?;
 
         rx.await?
     }
 
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.actor
-            .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
+        self.send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
             .await?;
         rx.await?
     }
@@ -68,4 +95,9 @@ impl ChainPubsubClient for ChainLaserClientImpl {
             .take()
             .expect("ChainLaserClientImpl::take_updates called more than once")
     }
+}
+
+pub fn is_helius_laser_url(url: &str) -> bool {
+    // Example: https://laserstream-devnet-ewr.helius-rpc.com
+    url.contains("laserstream") && url.contains("helius-rpc.com")
 }
