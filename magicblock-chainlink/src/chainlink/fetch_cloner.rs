@@ -1385,6 +1385,18 @@ mod tests {
         },
     };
 
+    type TestFetchClonerResult = (
+        Arc<
+            FetchCloner<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                AccountsBankStub,
+                ClonerStub,
+            >,
+        >,
+        mpsc::Sender<ForwardedSubscriptionUpdate>,
+    );
+
     macro_rules! _cloned_account {
         ($bank:expr,
          $account_pubkey:expr,
@@ -1520,17 +1532,7 @@ mod tests {
         bank: &Arc<AccountsBankStub>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
-    ) -> (
-        Arc<
-            FetchCloner<
-                ChainRpcClientMock,
-                ChainPubsubClientMock,
-                AccountsBankStub,
-                ClonerStub,
-            >,
-        >,
-        mpsc::Sender<ForwardedSubscriptionUpdate>,
-    ) {
+    ) -> TestFetchClonerResult {
         let (subscription_tx, subscription_rx) = mpsc::channel(100);
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
         let fetch_cloner = FetchCloner::new(
