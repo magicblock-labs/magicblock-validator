@@ -8,6 +8,7 @@ use magicblock_core::link::{
         TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
     },
 };
+use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
 use solana_pubkey::Pubkey;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
@@ -54,6 +55,7 @@ impl super::TransactionExecutor {
         if let Err(err) = result {
             let status = Err(err);
             self.commit_failed_transaction(txn, status.clone());
+            FAILED_TRANSACTIONS_COUNT.inc();
             tx.map(|tx| tx.send(status));
             return;
         }
