@@ -14,30 +14,36 @@ use solana_sdk::{
 // -----------------
 pub fn get_context_with_delegated_committees(
     ncommittees: usize,
+    user_seed: &[u8],
 ) -> ScheduleCommitTestContext {
-    get_context_with_delegated_committees_impl(ncommittees, true)
+    get_context_with_delegated_committees_impl(ncommittees, true, user_seed)
 }
 
 #[allow(dead_code)] // used in 03_commits_fee_payer.rs
 pub fn get_context_with_delegated_committees_without_payer_escrow(
     ncommittees: usize,
+    user_seed: &[u8],
 ) -> ScheduleCommitTestContext {
-    get_context_with_delegated_committees_impl(ncommittees, false)
+    get_context_with_delegated_committees_impl(ncommittees, false, user_seed)
 }
 
 fn get_context_with_delegated_committees_impl(
     ncommittees: usize,
     escrow_lamports_for_payer: bool,
+    user_seed: &[u8],
 ) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
-        ScheduleCommitTestContext::try_new(ncommittees)
+        ScheduleCommitTestContext::try_new(ncommittees, user_seed)
     } else {
-        ScheduleCommitTestContext::try_new_random_keys(ncommittees)
+        ScheduleCommitTestContext::try_new_random_keys(ncommittees, user_seed)
     }
     .unwrap();
 
-    ctx.init_committees().unwrap();
-    ctx.delegate_committees(None).unwrap();
+    let txhash = ctx.init_committees().unwrap();
+    println!("txhash (init): {}", txhash);
+
+    let txhash = ctx.delegate_committees(None).unwrap();
+    println!("txhash (delegate): {}", txhash);
     if escrow_lamports_for_payer {
         ctx.escrow_lamports_for_payer().unwrap();
     }

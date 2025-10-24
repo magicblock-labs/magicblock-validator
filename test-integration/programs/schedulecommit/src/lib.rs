@@ -27,7 +27,10 @@ use crate::{
 };
 pub mod api;
 pub mod magicblock_program;
+mod order_book;
 mod utils;
+
+use order_book::*;
 
 declare_id!("9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY");
 
@@ -103,6 +106,13 @@ pub enum ScheduleCommitInstruction {
     //
     // It is not part of this enum as it has a custom discriminator
     // Undelegate,
+    /// Initialize an OrderBook
+    InitOrderBook,
+
+    DelegateOrderBook(DelegateCpiArgs),
+
+    /// Update order book
+    UpdateOrderBook,
 }
 
 pub fn process_instruction<'a>(
@@ -110,6 +120,12 @@ pub fn process_instruction<'a>(
     accounts: &'a [AccountInfo<'a>],
     instruction_data: &[u8],
 ) -> ProgramResult {
+    msg!(
+        "instruction_data: {} / {:?}",
+        instruction_data.len(),
+        instruction_data
+    );
+
     // Undelegate Instruction
     if instruction_data.len() >= EXTERNAL_UNDELEGATE_DISCRIMINATOR.len() {
         let (disc, seeds_data) =
@@ -120,12 +136,13 @@ pub fn process_instruction<'a>(
         }
     }
 
+    let (ix, data) = instruction_data.split_at(1);
+
     // Other instructions
-    let ix = ScheduleCommitInstruction::try_from_slice(instruction_data)
-        .map_err(|err| {
-            msg!("ERROR: failed to parse instruction data {:?}", err);
-            ProgramError::InvalidArgument
-        })?;
+    let ix = ScheduleCommitInstruction::try_from_slice(ix).map_err(|err| {
+        msg!("ERROR: failed to parse instruction data {:?}", err);
+        ProgramError::InvalidArgument
+    })?;
     use ScheduleCommitInstruction::*;
     match ix {
         Init => process_init(program_id, accounts),
@@ -145,6 +162,11 @@ pub fn process_instruction<'a>(
             )
         }
         IncreaseCount => process_increase_count(accounts),
+        InitOrderBook => process_init_order_book(program_id, accounts),
+        DelegateOrderBook(args) => process_delegate_order_book(accounts, args),
+        UpdateOrderBook => {
+            process_update_order_book(program_id, accounts, data)
+        }
     }
 }
 
@@ -207,6 +229,119 @@ fn process_init<'a>(
     };
 
     account.serialize(&mut &mut pda_info.try_borrow_mut_data()?.as_mut())?;
+
+    Ok(())
+}
+
+// -----------------
+// InitOrderBook
+// -----------------
+fn process_init_order_book<'a>(
+    program_id: &'a Pubkey,
+    accounts: &'a [AccountInfo<'a>],
+) -> entrypoint::ProgramResult {
+    msg!("Init OrderBook account");
+    let [payer, order_book] = accounts else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    assert_is_signer(payer, "payer")?;
+
+    let (pda, bump) = Pubkey::find_program_address(
+        &[b"order_book", payer.key.as_ref()],
+        &crate::ID,
+    );
+    let seeds = &[b"order_book", payer.key.as_ref(), &[bump]];
+    msg!("payer:    {}", payer.key);
+    msg!("pda:      {}", pda);
+    msg!("seeds:    {:?}", seeds);
+    msg!("seedsnb:  {:?}", &[b"order_book", payer.key.as_ref()]);
+    assert_keys_equal(order_book.key, &pda, || {
+        format!(
+            "PDA for the account ('{}') and for payer ('{}') is incorrect",
+            order_book.key, payer.key
+        )
+    })?;
+    allocate_account_and_assign_owner(AllocateAndAssignAccountArgs {
+        payer_info: payer,
+        account_info: order_book,
+        owner: program_id,
+        signer_seeds: seeds,
+        size: 10 * 1024,
+    })?;
+
+    Ok(())
+}
+
+// -----------------
+// Delegate OrderBook
+// -----------------
+pub fn process_delegate_order_book(
+    accounts: &[AccountInfo],
+    args: DelegateCpiArgs,
+) -> Result<(), ProgramError> {
+    msg!("Processing delegate_cpi instruction");
+
+    let [payer, order_book, owner_program, buffer, delegation_record, delegation_metadata, delegation_program, system_program] =
+        accounts
+    else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    let seeds_no_bump = [b"order_book", args.player.as_ref()];
+
+    msg!("seeds:  {:?}", seeds_no_bump);
+
+    delegate_account(
+        DelegateAccounts {
+            payer,
+            pda: order_book,
+            buffer,
+            delegation_record,
+            delegation_metadata,
+            owner_program,
+            delegation_program,
+            system_program,
+        },
+        &seeds_no_bump,
+        DelegateConfig {
+            commit_frequency_ms: args.commit_frequency_ms,
+            ..DelegateConfig::default()
+        },
+    )?;
+
+    Ok(())
+}
+
+#[derive(BorshDeserialize)]
+pub struct BookUpdate {
+    bids: Vec<OrderLevel>,
+    asks: Vec<OrderLevel>,
+}
+
+// -----------------
+// UpdateOrderBook
+// -----------------
+fn process_update_order_book<'a>(
+    _program_id: &'a Pubkey,
+    accounts: &'a [AccountInfo<'a>],
+    mut data: &[u8],
+) -> entrypoint::ProgramResult {
+    msg!("Init account");
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let book_account = next_account_info(account_info_iter)?;
+
+    assert_is_signer(payer_info, "payer")?;
+
+    let mut book_raw = book_account.try_borrow_mut_data()?;
+    let mut order_book = OrderBook::new(&mut book_raw);
+
+    // use zero copy once it worked
+    let updates = BookUpdate::deserialize(&mut data)?;
+
+    order_book.add_bids(&updates.bids);
+    order_book.add_asks(&updates.asks);
 
     Ok(())
 }

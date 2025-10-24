@@ -6,6 +6,7 @@ use log::*;
 use program_schedulecommit::api::{
     increase_count_instruction, schedule_commit_and_undelegate_cpi_instruction,
     schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
+    schedule_commit_diff_and_undelegate_cpi_instruction,
 };
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
@@ -46,7 +47,8 @@ fn commit_and_undelegate_one_account(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(1);
+    let ctx =
+        get_context_with_delegated_committees(1, b"magic_schedule_commit");
     let ScheduleCommitTestContextFields {
         payer,
         committees,
@@ -100,6 +102,54 @@ fn commit_and_undelegate_one_account(
     (ctx, *sig, tx_res)
 }
 
+fn commit_and_undelegate_order_book_account() -> (
+    ScheduleCommitTestContext,
+    Signature,
+    Result<Signature, ClientError>,
+) {
+    let ctx =
+        get_context_with_delegated_committees(1, b"magic_schedule_commit");
+    let ScheduleCommitTestContextFields {
+        payer,
+        committees,
+        commitment,
+        ephem_client,
+        ephem_blockhash,
+        ..
+    } = ctx.fields();
+
+    let ix = schedule_commit_diff_and_undelegate_cpi_instruction(
+        payer.pubkey(),
+        magicblock_magic_program_api::id(),
+        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        &committees
+            .iter()
+            .map(|(player, _)| player.pubkey())
+            .collect::<Vec<_>>(),
+        &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        *ephem_blockhash,
+    );
+
+    let sig = tx.get_signature();
+    let tx_res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+    debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
+    (ctx, *sig, tx_res)
+}
+
 fn commit_and_undelegate_two_accounts(
     modify_after: bool,
 ) -> (
@@ -107,7 +157,8 @@ fn commit_and_undelegate_two_accounts(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(2);
+    let ctx =
+        get_context_with_delegated_committees(2, b"magic_schedule_commit");
     let ScheduleCommitTestContextFields {
         payer,
         committees,
@@ -166,6 +217,21 @@ fn commit_and_undelegate_two_accounts(
 fn test_committing_and_undelegating_one_account() {
     run_test!({
         let (ctx, sig, tx_res) = commit_and_undelegate_one_account(false);
+        info!("'{}' {:?}", sig, tx_res);
+
+        let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
+
+        assert_one_committee_was_committed(&ctx, &res, true);
+        assert_one_committee_synchronized_count(&ctx, &res, 1);
+
+        assert_one_committee_account_was_undelegated_on_chain(&ctx);
+    });
+}
+
+#[test]
+fn test_committing_and_undelegating_huge_order_book_account() {
+    run_test!({
+        let (ctx, sig, tx_res) = commit_and_undelegate_order_book_account();
         info!("'{}' {:?}", sig, tx_res);
 
         let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);

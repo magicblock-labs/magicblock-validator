@@ -1,10 +1,10 @@
 use std::{fmt, ops::Deref};
 
 use anyhow::{Context, Result};
-use integration_test_tools::IntegrationTestContext;
+use integration_test_tools::{scheduled_commits, IntegrationTestContext};
 use program_schedulecommit::api::{
     delegate_account_cpi_instruction, init_account_instruction,
-    init_payer_escrow, pda_and_bump,
+    init_order_book_instruction, init_payer_escrow, pda_and_bump,
 };
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -25,6 +25,7 @@ pub struct ScheduleCommitTestContext {
     pub payer: Keypair,
     // The Payer keypairs along with its PDA pubkey which we'll commit
     pub committees: Vec<(Keypair, Pubkey)>,
+    user_seed: Vec<u8>,
 
     common_ctx: IntegrationTestContext,
 }
@@ -54,14 +55,21 @@ impl ScheduleCommitTestContext {
     // -----------------
     // Init
     // -----------------
-    pub fn try_new_random_keys(ncommittees: usize) -> Result<Self> {
-        Self::try_new_internal(ncommittees, true)
+    pub fn try_new_random_keys(
+        ncommittees: usize,
+        user_seed: &[u8],
+    ) -> Result<Self> {
+        Self::try_new_internal(ncommittees, true, user_seed)
     }
-    pub fn try_new(ncommittees: usize) -> Result<Self> {
-        Self::try_new_internal(ncommittees, false)
+    pub fn try_new(ncommittees: usize, user_seed: &[u8]) -> Result<Self> {
+        Self::try_new_internal(ncommittees, false, user_seed)
     }
 
-    fn try_new_internal(ncommittees: usize, random_keys: bool) -> Result<Self> {
+    fn try_new_internal(
+        ncommittees: usize,
+        random_keys: bool,
+        user_seed: &[u8],
+    ) -> Result<Self> {
         let ictx = IntegrationTestContext::try_new()?;
 
         // Each committee is the payer and the matching PDA
@@ -77,7 +85,10 @@ impl ScheduleCommitTestContext {
                 };
                 ictx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
                     .unwrap();
-                let (pda, _) = pda_and_bump(&payer.pubkey());
+                let (pda, _bump) = Pubkey::find_program_address(
+                    &[user_seed, &payer.pubkey().as_ref()],
+                    &program_schedulecommit::ID,
+                );
                 (payer, pda)
             })
             .collect::<Vec<(Keypair, Pubkey)>>();
@@ -87,6 +98,7 @@ impl ScheduleCommitTestContext {
             payer,
             committees,
             common_ctx: ictx,
+            user_seed: user_seed.to_vec(),
         })
     }
 
@@ -98,7 +110,11 @@ impl ScheduleCommitTestContext {
             .committees
             .iter()
             .map(|(payer, committee)| {
-                init_account_instruction(payer.pubkey(), *committee)
+                if self.user_seed == b"magic_schedule_commit" {
+                    init_account_instruction(payer.pubkey(), *committee)
+                } else {
+                    init_order_book_instruction(payer.pubkey(), *committee)
+                }
             })
             .collect::<Vec<_>>();
 
@@ -161,7 +177,10 @@ impl ScheduleCommitTestContext {
         let mut ixs = vec![];
         let mut payers = vec![];
         for (payer, _) in &self.committees {
-            let ix = delegate_account_cpi_instruction(payer.pubkey());
+            let ix = delegate_account_cpi_instruction(
+                payer.pubkey(),
+                &self.user_seed,
+            );
             ixs.push(ix);
             payers.push(payer);
         }

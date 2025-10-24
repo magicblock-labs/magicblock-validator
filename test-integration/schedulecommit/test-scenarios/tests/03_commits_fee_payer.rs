@@ -26,7 +26,10 @@ fn test_committing_fee_payer_without_escrowing_lamports() {
     //   base_fees = 1000
     // see ../../../configs/schedulecommit-conf-fees.ephem.toml
     run_test!({
-        let ctx = get_context_with_delegated_committees_without_payer_escrow(2);
+        let ctx = get_context_with_delegated_committees_without_payer_escrow(
+            2,
+            b"magic_schedule_commit",
+        );
 
         let ScheduleCommitTestContextFields {
             payer,
@@ -79,7 +82,8 @@ fn test_committing_fee_payer_without_escrowing_lamports() {
 #[test]
 fn test_committing_fee_payer_escrowing_lamports() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(2);
+        let ctx =
+            get_context_with_delegated_committees(2, b"magic_schedule_commit");
 
         let ScheduleCommitTestContextFields {
             payer,

@@ -30,6 +30,24 @@ pub fn init_account_instruction(
     )
 }
 
+pub fn init_order_book_instruction(
+    payer: Pubkey,
+    order_book: Pubkey,
+) -> Instruction {
+    let program_id = crate::id();
+    let account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(order_book, false),
+        //AccountMeta::new_readonly(system_program::id(), false),
+    ];
+
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::InitOrderBook,
+        account_metas,
+    )
+}
+
 pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
     let top_up_ix = dlp::instruction_builder::top_up_ephemeral_balance(
         payer,
@@ -53,9 +71,13 @@ pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
     [top_up_ix, delegate_ix]
 }
 
-pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
+pub fn delegate_account_cpi_instruction(
+    player: Pubkey,
+    user_seed: &[u8],
+) -> Instruction {
     let program_id = crate::id();
-    let (pda, _) = pda_and_bump(&player);
+    let (pda, _) =
+        Pubkey::find_program_address(&[user_seed, player.as_ref()], &crate::ID);
 
     let args = DelegateCpiArgs {
         valid_until: i64::MAX,
@@ -135,6 +157,26 @@ pub fn schedule_commit_with_payer_cpi_instruction(
 }
 
 pub fn schedule_commit_and_undelegate_cpi_instruction(
+    payer: Pubkey,
+    magic_program_id: Pubkey,
+    magic_context_id: Pubkey,
+    players: &[Pubkey],
+    committees: &[Pubkey],
+) -> Instruction {
+    schedule_commit_cpi_instruction_impl(
+        payer,
+        magic_program_id,
+        magic_context_id,
+        players,
+        committees,
+        ScheduleCommitCpiInstructionImplArgs {
+            undelegate: true,
+            commit_payer: false,
+        },
+    )
+}
+
+pub fn schedule_commit_diff_and_undelegate_cpi_instruction(
     payer: Pubkey,
     magic_program_id: Pubkey,
     magic_context_id: Pubkey,
