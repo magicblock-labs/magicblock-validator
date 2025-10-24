@@ -9,48 +9,44 @@ edition.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-conjunto-transwise = { workspace = true }
+bincode = { workspace = true }
+borsh = "1.5.3"
 crossbeam-channel = { workspace = true }
 fd-lock = { workspace = true }
 itertools = { workspace = true }
+libloading = "0.7.4"
 log = { workspace = true }
-paste = { workspace = true }
-num_cpus = { workspace = true }
+
+magic-domain-program = { workspace = true }
 magicblock-account-cloner = { workspace = true }
-magicblock-account-dumper = { workspace = true }
-magicblock-account-fetcher = { workspace = true }
-magicblock-account-updates = { workspace = true }
 magicblock-accounts = { workspace = true }
-magicblock-accounts-api = { workspace = true }
 magicblock-accounts-db = { workspace = true }
-magicblock-bank = { workspace = true }
+magicblock-aperture = { workspace = true }
+magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
-magicblock-magic-program-api = { workspace = true }
-magicblock-geyser-plugin = { workspace = true }
+magicblock-delegation-program = { workspace = true }
 magicblock-ledger = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
-magicblock-perf-service = { workspace = true }
 magicblock-processor = { workspace = true }
 magicblock-program = { workspace = true }
-magicblock-pubsub = { workspace = true }
-magicblock-rpc = { workspace = true }
-magicblock-transaction-status = { workspace = true }
-magicblock-validator-admin = { workspace = true }
 magicblock-task-scheduler = { workspace = true }
-magic-domain-program = { workspace = true }
-solana-geyser-plugin-interface = { workspace = true }
-solana-rpc-client = { workspace = true }
-solana-geyser-plugin-manager = { workspace = true }
+magicblock-validator-admin = { workspace = true }
+
+num_cpus = { workspace = true }
+paste = { workspace = true }
+
+solana-feature-set = { workspace = true }
+solana-inline-spl = { workspace = true }
 solana-rpc = { workspace = true }
+solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
+solana-transaction = { workspace = true }
+
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
-magicblock-delegation-program = { workspace = true }
-
-libloading = "0.7.4"
-borsh = "1.5.3"

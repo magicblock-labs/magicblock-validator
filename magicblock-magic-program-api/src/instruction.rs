@@ -66,7 +66,8 @@ pub enum MagicBlockInstruction {
     ///
     /// We implement it this way so we can log the signature of this transaction
     /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
-    ScheduledCommitSent(u64),
+    /// Args: (intent_id, bump) - bump is needed in order to guarantee unique transactions
+    ScheduledCommitSent((u64, u64)),
     ScheduleBaseIntent(MagicBaseIntentArgs),
 
     /// Schedule a new task for execution
@@ -92,6 +93,20 @@ pub enum MagicBlockInstruction {
     /// - **0.** `[SIGNER]`         Validator authority
     /// - **1.** `[WRITE]`          Task context account
     ProcessTasks,
+
+    /// Disables the executable check, needed to modify the data of a program
+    /// in preparation to deploying it via LoaderV4 and to modify its authority.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]`         Validator authority
+    DisableExecutableCheck,
+
+    /// Enables the executable check, and should run after
+    /// a program is deployed with the LoaderV4 and we modified its authority
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]`         Validator authority
+    EnableExecutableCheck,
 }
 
 impl MagicBlockInstruction {
@@ -107,7 +122,10 @@ pub struct AccountModification {
     pub owner: Option<Pubkey>,
     pub executable: Option<bool>,
     pub data: Option<Vec<u8>>,
+    // TODO(bmuddha/thlorenz): deprecate rent_epoch
+    // https://github.com/magicblock-labs/magicblock-validator/issues/580
     pub rent_epoch: Option<u64>,
+    pub delegated: Option<bool>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -116,5 +134,8 @@ pub struct AccountModificationForInstruction {
     pub owner: Option<Pubkey>,
     pub executable: Option<bool>,
     pub data_key: Option<u64>,
+    // TODO(bmuddha/thlorenz): deprecate rent_epoch
+    // https://github.com/magicblock-labs/magicblock-validator/issues/580
     pub rent_epoch: Option<u64>,
+    pub delegated: Option<bool>,
 }

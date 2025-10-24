@@ -1,0 +1,58 @@
+[accounts]
+remote.cluster = "devnet"
+lifecycle = "offline"
+commit = { frequency-millis = 9_000_000_000_000, compute-unit-price = 1_000_000 }
+
+[accounts.db]
+# size of the main storage, we have to preallocate in advance
+# it's advised to set this value based on formula 1KB * N * 3,
+# where N is the number of accounts expected to be stored in
+# database, e.g. for million accounts this would be 3GB
+db-size = 1048576000 # 1GB
+# minimal indivisible unit of addressing in main storage
+# offsets are calculated in terms of blocks
+block-size = "block256" # possible values block128 | block256 | block512
+# size of index file, we have to preallocate,
+# can be as low as 1% of main storage size, but setting it to higher values won't hurt
+index-map-size = 20485760
+# max number of snapshots to keep around
+max-snapshots = 7
+# how frequently (slot-wise) we should take snapshots
+snapshot-frequency = 1024
+
+[ledger]
+resume-strategy = { kind = "reset" }
+
+[validator]
+millis-per-slot = 50
+sigverify = true
+
+[[program]]
+id = "3JnJ727jWEmPVU8qfXwtH63sCNDX7nMgsLbg8qy8aaPX"
+path = "../programs/redline/redline.so"
+
+[[program]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+path = "../schedulecommit/elfs/dlp.so"
+
+[[program]]
+id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
+path = "../schedulecommit/elfs/mdp.so"
+
+[[program]]
+id = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4"
+path = "../target/deploy/program_flexi_counter.so"
+
+[[program]]
+id = "MiniV31111111111111111111111111111111111111"
+path = "../target/deploy/miniv3/program_mini.so"
+auth = "MiniV3AUTH111111111111111111111111111111111"
+
+[rpc]
+port = 7799
+
+[geyser-grpc]
+port = 10001
+
+[metrics]
+enabled = false

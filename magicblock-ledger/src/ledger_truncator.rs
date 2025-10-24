@@ -1,9 +1,9 @@
 use std::{cmp::min, sync::Arc, time::Duration};
 
 use log::{error, info, warn};
-use magicblock_core::traits::FinalityProvider;
+use solana_measure::measure::Measure;
 use tokio::{
-    task::{spawn_blocking, JoinError, JoinHandle},
+    task::{JoinError, JoinHandle},
     time::interval,
 };
 use tokio_util::sync::CancellationToken;
@@ -22,25 +22,22 @@ pub const DEFAULT_TRUNCATION_TIME_INTERVAL: Duration =
 const PERCENTAGE_TO_TRUNCATE: u8 = 10;
 const FILLED_PERCENTAGE_LIMIT: u8 = 100 - PERCENTAGE_TO_TRUNCATE;
 
-struct LedgerTrunctationWorker<T> {
-    finality_provider: Arc<T>,
+struct LedgerTrunctationWorker {
     ledger: Arc<Ledger>,
     truncation_time_interval: Duration,
     ledger_size: u64,
     cancellation_token: CancellationToken,
 }
 
-impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
+impl LedgerTrunctationWorker {
     pub fn new(
         ledger: Arc<Ledger>,
-        finality_provider: Arc<T>,
         truncation_time_interval: Duration,
         ledger_size: u64,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             ledger,
-            finality_provider,
             truncation_time_interval,
             ledger_size,
             cancellation_token,
@@ -129,20 +126,6 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
 
         // Calculating up to which slot we're truncating
         let truncate_to_slot = lowest_slot + num_slots_to_truncate - 1;
-        let finality_slot = self.finality_provider.get_latest_final_slot();
-        let truncate_to_slot = if truncate_to_slot >= finality_slot {
-            // Shouldn't really happen
-            warn!("LedgerTruncator: want to truncate past finality slot, finality slot:{}, truncating to: {}", finality_slot, truncate_to_slot);
-            if finality_slot == 0 {
-                // No truncation at that case
-                return Ok(());
-            } else {
-                // Not cleaning finality slot
-                finality_slot - 1
-            }
-        } else {
-            truncate_to_slot
-        };
 
         info!(
             "Fat truncation: truncating up to(inclusive): {}",
@@ -188,26 +171,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
     /// Returns [from_slot, to_slot] range that's safe to truncate
     fn available_truncation_range(&self) -> Option<(u64, u64)> {
         let lowest_cleanup_slot = self.ledger.get_lowest_cleanup_slot();
-        let latest_final_slot = self.finality_provider.get_latest_final_slot();
-
-        if latest_final_slot <= lowest_cleanup_slot {
-            // Could both be 0 at startup, no need to report
-            if lowest_cleanup_slot != 0 {
-                // This could not happen because of Truncator
-                warn!("Slots after latest final slot have been truncated!");
-            }
-
-            info!(
-                "Lowest cleanup slot ge than latest final slot. {}, {}",
-                lowest_cleanup_slot, latest_final_slot
-            );
-            return None;
-        }
-        // Nothing to truncate
-        if latest_final_slot == lowest_cleanup_slot + 1 {
-            info!("Nothing to truncate");
-            return None;
-        }
+        let (highest_cleanup_slot, _) = self.ledger.get_max_blockhash().ok()?;
 
         // Fresh start case
         let next_from_slot = if lowest_cleanup_slot == 0 {
@@ -217,7 +181,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         };
 
         // we don't clean latest final slot
-        Some((next_from_slot, latest_final_slot - 1))
+        Some((next_from_slot, highest_cleanup_slot))
     }
 
     /// Utility function for splitting truncation into smaller chunks
@@ -279,33 +243,38 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
 
         // Compaction can be run concurrently for different cf
         // but it utilizes rocksdb threads, in order not to drain
-        // our tokio rt threads, we split the effort in just 3 tasks
-        let ledger_copy = ledger.clone();
-        let handler = spawn_blocking(move || {
-            ledger_copy.compact_slot_range_cf::<Blocktime>(
+        // our tokio rt threads, we split offload the effort to a
+        // separate thread
+        let mut measure = Measure::start("Manual compaction");
+        let ledger = ledger.clone();
+        let compaction = tokio::task::spawn_blocking(move || {
+            ledger.compact_slot_range_cf::<Blocktime>(
                 Some(from_slot),
                 Some(to_slot + 1),
             );
-            ledger_copy.compact_slot_range_cf::<Blockhash>(
+            ledger.compact_slot_range_cf::<Blockhash>(
                 Some(from_slot),
                 Some(to_slot + 1),
             );
-            ledger_copy.compact_slot_range_cf::<PerfSamples>(
+            ledger.compact_slot_range_cf::<PerfSamples>(
                 Some(from_slot),
                 Some(to_slot + 1),
             );
-            ledger_copy.compact_slot_range_cf::<SlotSignatures>(
+            ledger.compact_slot_range_cf::<SlotSignatures>(
                 Some((from_slot, u32::MIN)),
                 Some((to_slot + 1, u32::MAX)),
             );
-
-            ledger_copy.compact_slot_range_cf::<TransactionStatus>(None, None);
-            ledger_copy.compact_slot_range_cf::<Transaction>(None, None);
-            ledger_copy.compact_slot_range_cf::<TransactionMemos>(None, None);
-            ledger_copy.compact_slot_range_cf::<AddressSignatures>(None, None);
+            ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
+            ledger.compact_slot_range_cf::<Transaction>(None, None);
+            ledger.compact_slot_range_cf::<TransactionMemos>(None, None);
+            ledger.compact_slot_range_cf::<AddressSignatures>(None, None);
         });
-        if let Err(err) = handler.await {
-            error!("compaction aborted {}", err);
+
+        measure.stop();
+        if let Err(error) = compaction.await {
+            error!("compaction aborted: {error}");
+        } else {
+            info!("Manual compaction took: {measure}");
         }
     }
 }
@@ -323,24 +292,21 @@ enum ServiceState {
     Stopped(JoinHandle<()>),
 }
 
-pub struct LedgerTruncator<T> {
-    finality_provider: Arc<T>,
+pub struct LedgerTruncator {
     ledger: Arc<Ledger>,
     ledger_size: u64,
     truncation_time_interval: Duration,
     state: ServiceState,
 }
 
-impl<T: FinalityProvider> LedgerTruncator<T> {
+impl LedgerTruncator {
     pub fn new(
         ledger: Arc<Ledger>,
-        finality_provider: Arc<T>,
         truncation_time_interval: Duration,
         ledger_size: u64,
     ) -> Self {
         Self {
             ledger,
-            finality_provider,
             truncation_time_interval,
             ledger_size,
             state: ServiceState::Created,
@@ -352,7 +318,6 @@ impl<T: FinalityProvider> LedgerTruncator<T> {
             let cancellation_token = CancellationToken::new();
             let worker = LedgerTrunctationWorker::new(
                 self.ledger.clone(),
-                self.finality_provider.clone(),
                 self.truncation_time_interval,
                 self.ledger_size,
                 cancellation_token.clone(),

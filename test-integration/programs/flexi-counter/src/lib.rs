@@ -1,5 +1,5 @@
+#![allow(deprecated)]
 #![allow(unexpected_cfgs)]
-
 use solana_program::declare_id;
 
 pub mod instruction;

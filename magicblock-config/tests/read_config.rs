@@ -1,20 +1,23 @@
 use std::{
     env,
     net::{IpAddr, Ipv4Addr},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use isocountry::CountryCode;
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, CommitStrategyConfig, EphemeralConfig,
-    GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategyConfig,
-    LedgerResumeStrategyType, LifecycleMode, MagicBlockConfig, MetricsConfig,
-    MetricsServiceConfig, PrepareLookupTables, ProgramConfig, RemoteCluster,
-    RemoteConfig, RpcConfig, TaskSchedulerConfig, ValidatorConfig,
+    LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
+    LifecycleMode, MagicBlockConfig, MetricsConfig, MetricsServiceConfig,
+    PrepareLookupTables, ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig,
+    TaskSchedulerConfig, ValidatorConfig,
 };
-use solana_sdk::pubkey;
-use test_tools_core::paths::cargo_workspace_dir;
+use solana_pubkey::pubkey;
 use url::Url;
+
+fn cargo_root_dir() -> PathBuf {
+    PathBuf::new().join(".").canonicalize().unwrap()
+}
 
 fn parse_config_with_file(config_file_dir: &Path) -> EphemeralConfig {
     MagicBlockConfig::try_parse_config_from_arg(&vec![
@@ -27,9 +30,8 @@ fn parse_config_with_file(config_file_dir: &Path) -> EphemeralConfig {
 
 #[test]
 fn test_load_custom_ws_remote_toml() {
-    let workspace_dir = cargo_workspace_dir();
+    let workspace_dir = cargo_root_dir();
     let config_file_dir = workspace_dir
-        .join("magicblock-config")
         .join("tests")
         .join("fixtures")
         .join("09_custom-ws-remote.toml");
@@ -39,9 +41,8 @@ fn test_load_custom_ws_remote_toml() {
 
 #[test]
 fn test_load_replay_toml() {
-    let workspace_dir = cargo_workspace_dir();
+    let workspace_dir = cargo_root_dir();
     let config_file_dir = workspace_dir
-        .join("magicblock-config")
         .join("tests")
         .join("fixtures")
         .join("12_replay.toml");
@@ -57,9 +58,8 @@ fn test_load_replay_toml() {
 
 #[test]
 fn test_load_local_dev_with_programs_toml() {
-    let workspace_dir = cargo_workspace_dir();
+    let workspace_dir = cargo_root_dir();
     let config_file_dir = workspace_dir
-        .join("magicblock-config")
         .join("tests")
         .join("fixtures")
         .join("06_local-dev-with-programs.toml");
@@ -85,11 +85,6 @@ fn test_load_local_dev_with_programs_toml() {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 7799,
-                max_ws_connections: 16384
-            },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                port: 11000,
             },
             validator: ValidatorConfig {
                 millis_per_slot: 14,
@@ -113,9 +108,8 @@ fn test_load_local_dev_with_programs_toml() {
 
 #[test]
 fn test_load_local_dev_with_programs_toml_envs_override() {
-    let workspace_dir = cargo_workspace_dir();
+    let workspace_dir = cargo_root_dir();
     let config_file_dir = workspace_dir
-        .join("magicblock-config")
         .join("tests")
         .join("fixtures")
         .join("06_local-dev-with-programs.toml");
@@ -180,11 +174,6 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 )
             }],
             rpc: RpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(0, 1, 0, 1)),
-                port: 123,
-                max_ws_connections: 16384
-            },
-            geyser_grpc: GeyserGrpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 1, 0, 1)),
                 port: 123,
             },

@@ -23,11 +23,6 @@ snapshot-frequency = 60000
 [rpc]
 addr = "127.0.0.1"
 port = 7799
-max-ws-connections = 1000
-
-[geyser-grpc]
-addr = "127.0.0.1"
-port = 11000
 
 [validator]
 millis-per-slot = 14

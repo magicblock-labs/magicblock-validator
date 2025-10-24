@@ -38,7 +38,7 @@ fn test_schedule_error() {
     let execution_interval_millis = 100;
     let iterations = 3;
     let sig = expect!(
-        ctx.send_transaction_ephem(
+        ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
                 &[create_schedule_task_ix(
                     payer.pubkey(),
@@ -124,7 +124,7 @@ fn test_schedule_error() {
 
     // Cancel the task
     let sig = expect!(
-        ctx.send_transaction_ephem(
+        ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
                 &[create_cancel_task_ix(
                     payer.pubkey(),

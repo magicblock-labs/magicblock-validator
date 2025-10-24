@@ -1,29 +1,12 @@
 mod common;
-use std::{
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
-use magicblock_core::traits::FinalityProvider;
 use magicblock_ledger::{ledger_truncator::LedgerTruncator, Ledger};
 use solana_sdk::{hash::Hash, signature::Signature};
 
 use crate::common::{setup, write_dummy_transaction};
 
 const TEST_TRUNCATION_TIME_INTERVAL: Duration = Duration::from_millis(50);
-#[derive(Default)]
-pub struct TestFinalityProvider {
-    pub latest_final_slot: AtomicU64,
-}
-
-impl FinalityProvider for TestFinalityProvider {
-    fn get_latest_final_slot(&self) -> u64 {
-        self.latest_final_slot.load(Ordering::Relaxed)
-    }
-}
 
 fn verify_transactions_state(
     ledger: &Ledger,
@@ -54,58 +37,15 @@ fn verify_transactions_state(
     }
 }
 
-/// Tests that ledger is not truncated if finality slot - 0
-#[tokio::test]
-async fn test_truncator_not_purged_finality() {
-    const SLOT_TRUNCATION_INTERVAL: u64 = 5;
-
-    let ledger = Arc::new(setup());
-    let finality_provider = TestFinalityProvider {
-        latest_final_slot: 0.into(),
-    };
-
-    let mut ledger_truncator = LedgerTruncator::new(
-        ledger.clone(),
-        Arc::new(finality_provider),
-        TEST_TRUNCATION_TIME_INTERVAL,
-        0,
-    );
-
-    for i in 0..SLOT_TRUNCATION_INTERVAL {
-        write_dummy_transaction(&ledger, i, 0);
-        ledger.write_block(i, 0, Hash::new_unique()).unwrap()
-    }
-    let signatures = (0..SLOT_TRUNCATION_INTERVAL)
-        .map(|i| {
-            let signature = ledger.read_slot_signature((i, 0)).unwrap();
-            assert!(signature.is_some());
-
-            signature.unwrap()
-        })
-        .collect::<Vec<_>>();
-
-    ledger_truncator.start();
-    tokio::time::sleep(Duration::from_millis(10)).await;
-    ledger_truncator.stop();
-    assert!(ledger_truncator.join().await.is_ok());
-
-    // Not truncated due to final_slot 0
-    verify_transactions_state(&ledger, 0, &signatures, true);
-}
-
 // Tests that ledger is not truncated while there is still enough space
 #[tokio::test]
 async fn test_truncator_not_purged_size() {
     const NUM_TRANSACTIONS: u64 = 100;
 
     let ledger = Arc::new(setup());
-    let finality_provider = TestFinalityProvider {
-        latest_final_slot: 0.into(),
-    };
 
     let mut ledger_truncator = LedgerTruncator::new(
         ledger.clone(),
-        Arc::new(finality_provider),
         TEST_TRUNCATION_TIME_INTERVAL,
         1 << 30, // 1 GB
     );
@@ -146,16 +86,8 @@ async fn test_truncator_non_empty_ledger() {
         })
         .collect::<Vec<_>>();
 
-    let finality_provider = Arc::new(TestFinalityProvider {
-        latest_final_slot: FINAL_SLOT.into(),
-    });
-
-    let mut ledger_truncator = LedgerTruncator::new(
-        ledger.clone(),
-        finality_provider,
-        TEST_TRUNCATION_TIME_INTERVAL,
-        0,
-    );
+    let mut ledger_truncator =
+        LedgerTruncator::new(ledger.clone(), TEST_TRUNCATION_TIME_INTERVAL, 0);
 
     ledger_truncator.start();
     tokio::time::sleep(TEST_TRUNCATION_TIME_INTERVAL).await;
@@ -181,7 +113,6 @@ async fn test_truncator_non_empty_ledger() {
 
 async fn transaction_spammer(
     ledger: Arc<Ledger>,
-    finality_provider: Arc<TestFinalityProvider>,
     num_of_iterations: usize,
     tx_per_operation: usize,
 ) -> Vec<Signature> {
@@ -195,37 +126,22 @@ async fn transaction_spammer(
             signatures.push(signature);
         }
 
-        finality_provider
-            .latest_final_slot
-            .store(signatures.len() as u64 - 1, Ordering::Relaxed);
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     signatures
 }
 
-// Tests if ledger truncated correctly during tx spamming with finality slot increments
+// Tests if ledger truncated correctly during tx spamming
 #[tokio::test]
 async fn test_truncator_with_tx_spammer() {
     let ledger = Arc::new(setup());
-    let finality_provider = Arc::new(TestFinalityProvider {
-        latest_final_slot: 0.into(),
-    });
 
-    let mut ledger_truncator = LedgerTruncator::new(
-        ledger.clone(),
-        finality_provider.clone(),
-        TEST_TRUNCATION_TIME_INTERVAL,
-        0,
-    );
+    let mut ledger_truncator =
+        LedgerTruncator::new(ledger.clone(), TEST_TRUNCATION_TIME_INTERVAL, 0);
 
     ledger_truncator.start();
-    let handle = tokio::spawn(transaction_spammer(
-        ledger.clone(),
-        finality_provider.clone(),
-        10,
-        20,
-    ));
+    let handle = tokio::spawn(transaction_spammer(ledger.clone(), 10, 20));
 
     // Sleep some time
     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -239,21 +155,11 @@ async fn test_truncator_with_tx_spammer() {
     ledger_truncator.stop();
     assert!(ledger_truncator.join().await.is_ok());
 
-    let lowest_existing =
-        finality_provider.latest_final_slot.load(Ordering::Relaxed);
-    assert_eq!(ledger.get_lowest_cleanup_slot(), lowest_existing - 1);
-    verify_transactions_state(
-        &ledger,
-        0,
-        &signatures[..lowest_existing as usize],
-        false,
+    assert_eq!(
+        ledger.get_lowest_cleanup_slot(),
+        signatures.len() as u64 - 1
     );
-    verify_transactions_state(
-        &ledger,
-        lowest_existing,
-        &signatures[lowest_existing as usize..],
-        true,
-    );
+    verify_transactions_state(&ledger, 0, &signatures, false);
 }
 
 #[ignore = "Long running test"]
@@ -276,13 +182,8 @@ async fn test_with_1gb_db() {
         slot += 1
     }
 
-    let finality_provider = Arc::new(TestFinalityProvider {
-        latest_final_slot: AtomicU64::new(slot - 1),
-    });
-
     let mut ledger_truncator = LedgerTruncator::new(
         ledger.clone(),
-        finality_provider.clone(),
         TEST_TRUNCATION_TIME_INTERVAL,
         DB_SIZE,
     );

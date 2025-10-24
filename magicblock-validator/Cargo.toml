@@ -17,7 +17,6 @@ magicblock-api = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-version = { workspace = true }
 solana-sdk = { workspace = true }
-test-tools = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [features]

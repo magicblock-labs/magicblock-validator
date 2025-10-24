@@ -9,14 +9,11 @@ pub enum ApiError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("GeyserPluginServiceError error: {0}")]
-    GeyserPluginServiceError(#[from] solana_geyser_plugin_manager::geyser_plugin_service::GeyserPluginServiceError),
-
     #[error("Config error: {0}")]
     ConfigError(#[from] magicblock_config::errors::ConfigError),
 
-    #[error("Pubsub error: {0}")]
-    PubsubError(#[from] magicblock_pubsub::errors::PubsubError),
+    #[error("RPC service error: {0}")]
+    RpcError(#[from] magicblock_aperture::error::RpcError),
 
     #[error("Accounts error: {0}")]
     AccountsError(#[from] magicblock_accounts::errors::AccountsError),
@@ -26,6 +23,9 @@ pub enum ApiError {
 
     #[error("Ledger error: {0}")]
     LedgerError(#[from] magicblock_ledger::errors::LedgerError),
+
+    #[error("Chainlink error: {0}")]
+    ChainlinkError(#[from] magicblock_chainlink::errors::ChainlinkError),
 
     #[error("Failed to obtain balance for validator '{0}' from chain. ({1})")]
     FailedToObtainValidatorOnChainBalance(Pubkey, String),
@@ -80,15 +80,16 @@ pub enum ApiError {
     #[error("Ledger could not write validator keypair file: {0} ({1})")]
     LedgerCouldNotWriteValidatorKeypair(String, String),
 
-    #[error("Ledger validator keypair '{0}' needs to match the provided one '{1}'")]
+    #[error(
+        "Ledger validator keypair '{0}' needs to match the provided one '{1}'"
+    )]
     LedgerValidatorKeypairNotMatchingProvidedKeypair(String, String),
 
     #[error("The slot at which we should continue after processing the ledger ({0}) does not match the bank slot ({1})"
     )]
     NextSlotAfterLedgerProcessingNotMatchingBankSlot(u64, u64),
 
-    #[error("Accounts Database couldn't be initialized"
-    )]
+    #[error("Accounts Database couldn't be initialized")]
     AccountsDbError(#[from] AccountsDbError),
 
     #[error("TaskSchedulerServiceError")]
@@ -97,5 +98,7 @@ pub enum ApiError {
     ),
 
     #[error("Failed to sanitize transaction: {0}")]
-    FailedToSanitizeTransaction(#[from] solana_sdk::transaction::TransactionError),
+    FailedToSanitizeTransaction(
+        #[from] solana_sdk::transaction::TransactionError,
+    ),
 }

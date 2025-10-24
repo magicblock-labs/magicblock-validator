@@ -11,7 +11,11 @@ use magicblock_config::{AccountsDbConfig, BlockSize};
 use memmap2::MmapMut;
 use solana_account::AccountSharedData;
 
-use crate::{error::AccountsDbError, log_err, AdbResult};
+use crate::{
+    error::AccountsDbError,
+    index::{Blocks, Offset},
+    log_err, AccountsDbResult,
+};
 
 /// Extra space in database storage file reserved for metadata
 /// Currently most of it is unused, but still reserved for future extensions
@@ -77,7 +81,7 @@ impl AccountsStorage {
     pub(crate) fn new(
         config: &AccountsDbConfig,
         directory: &Path,
-    ) -> AdbResult<Self> {
+    ) -> AccountsDbResult<Self> {
         let dbpath = directory.join(ADB_FILE);
         let mut file = File::options()
             .create(true)
@@ -139,10 +143,8 @@ impl AccountsStorage {
         // remapping with file growth, but considering that disk is limited,
         // this too can fail
         // https://github.com/magicblock-labs/magicblock-validator/issues/334
-        assert!(
-            head.load(Relaxed) < self.meta.total_blocks as u64,
-            "database is full",
-        );
+        let size = self.meta.total_blocks as usize;
+        assert!(offset < size, "database is full: {offset} > {size}",);
 
         // SAFETY:
         // we have validated above that we are within bounds of mmap and fetch_add
@@ -150,13 +152,13 @@ impl AccountsStorage {
         let storage = unsafe { self.store.add(offset * self.block_size()) };
         Allocation {
             storage,
-            offset: offset as u32,
-            blocks: blocks as u32,
+            offset: offset as Offset,
+            blocks: blocks as Blocks,
         }
     }
 
     #[inline(always)]
-    pub(crate) fn read_account(&self, offset: u32) -> AccountSharedData {
+    pub(crate) fn read_account(&self, offset: Offset) -> AccountSharedData {
         let memptr = self.offset(offset).as_ptr();
         // SAFETY:
         // offset is obtained from index and later transformed by storage (to translate to actual
@@ -179,7 +181,7 @@ impl AccountsStorage {
         }
     }
 
-    pub(crate) fn offset(&self, offset: u32) -> NonNull<u8> {
+    pub(crate) fn offset(&self, offset: Offset) -> NonNull<u8> {
         // SAFETY:
         // offset is calculated from existing allocation within the map, thus
         // jumping to that offset will land us somewhere within those bounds
@@ -195,38 +197,31 @@ impl AccountsStorage {
         self.meta.slot.store(val, Relaxed)
     }
 
-    pub(crate) fn increment_deallocations(&self, val: u32) {
+    pub(crate) fn increment_deallocations(&self, val: Blocks) {
         self.meta.deallocated.fetch_add(val, Relaxed);
     }
 
-    pub(crate) fn decrement_deallocations(&self, val: u32) {
+    pub(crate) fn decrement_deallocations(&self, val: Blocks) {
         self.meta.deallocated.fetch_sub(val, Relaxed);
     }
 
-    pub(crate) fn get_block_count(&self, size: usize) -> u32 {
+    pub(crate) fn get_block_count(&self, size: usize) -> Blocks {
         let block_size = self.block_size();
         let blocks = size.div_ceil(block_size);
-        blocks as u32
+        blocks as Blocks
     }
 
-    pub(crate) fn flush(&self, sync: bool) {
-        if sync {
-            let _ = self
-                .mmap
-                .flush()
-                .inspect_err(log_err!("failed to sync flush the mmap"));
-        } else {
-            let _ = self
-                .mmap
-                .flush_async()
-                .inspect_err(log_err!("failed to async flush the mmap"));
-        }
+    pub(crate) fn flush(&self) {
+        let _ = self
+            .mmap
+            .flush()
+            .inspect_err(log_err!("failed to sync flush the mmap"));
     }
 
     /// Reopen database from a different directory
     ///
     /// NOTE: this is a very cheap operation, as fast as opening a file
-    pub(crate) fn reload(&mut self, dbpath: &Path) -> AdbResult<()> {
+    pub(crate) fn reload(&mut self, dbpath: &Path) -> AccountsDbResult<()> {
         let mut file = File::options()
             .write(true)
             .read(true)
@@ -235,8 +230,9 @@ impl AccountsStorage {
                 "opening adb file from snapshot at {}",
                 dbpath.display()
             ))?;
-        // snapshot files are truncated, and contain only the actual data with no extra space to grow the
-        // database, so we readjust the file's length to the preconfigured value before performing mmap
+        // snapshot files might be truncated, and contain only the actual
+        // data with no extra space to grow the database, so we readjust the
+        // file's length to the preconfigured value before performing mmap
         adjust_database_file_size(&mut file, self.size())?;
 
         // Only accountsdb from the validator process is modifying the file contents
@@ -288,7 +284,7 @@ impl StorageMeta {
     fn init_adb_file(
         file: &mut File,
         config: &AccountsDbConfig,
-    ) -> AdbResult<()> {
+    ) -> AccountsDbResult<()> {
         // Somewhat arbitrary min size for database, should be good enough for most test
         // cases, and prevent accidental creation of few kilobyte large or 0 sized databases
         const MIN_DB_SIZE: usize = 16 * 1024 * 1024;
@@ -297,7 +293,7 @@ impl StorageMeta {
             "database file should be larger than {MIN_DB_SIZE} bytes in length"
         );
         let db_size = calculate_db_size(config);
-        let total_blocks = (db_size / config.block_size as usize) as u32;
+        let total_blocks = (db_size / config.block_size as usize) as Blocks;
         // grow the backing file as necessary
         adjust_database_file_size(file, db_size as u64)?;
 
@@ -327,7 +323,7 @@ impl StorageMeta {
         // be large enough, due to previous call to Self::init_adb_file
         //
         // The pointer to static reference conversion is also sound, because the
-        // memmap is kept in the accountsdb for the entirety of its lifecycle
+        // memmap is kept in the AccountsDb for the entirety of its lifecycle
 
         let ptr = store.as_mut_ptr();
 
@@ -350,13 +346,14 @@ impl StorageMeta {
         let mut total_blocks =
             unsafe { (ptr.add(TOTALBLOCKS_OFFSET) as *const u32).read() };
         // check whether the size of database file has been readjusted
-        let adjusted_total_blocks = (store.len() / block_size as usize) as u32;
+        let adjusted_total_blocks =
+            (store.len() / block_size as usize) as Blocks;
         if adjusted_total_blocks != total_blocks {
             // if so, use the adjusted number of total blocks
             total_blocks = adjusted_total_blocks;
             // and persist the new value to the disk via mmap
             // SAFETY:
-            // we just read this value, above, and now we are just overwriting it with new 4 bytes
+            // we just read this value above, and now we are just overwriting it with new 4 bytes
             unsafe {
                 (ptr.add(TOTALBLOCKS_OFFSET) as *mut u32)
                     .write(adjusted_total_blocks)
@@ -405,14 +402,14 @@ fn calculate_db_size(config: &AccountsDbConfig) -> usize {
 #[cfg_attr(test, derive(Clone, Copy))]
 pub(crate) struct Allocation {
     pub(crate) storage: NonNull<u8>,
-    pub(crate) offset: u32,
-    pub(crate) blocks: u32,
+    pub(crate) offset: Offset,
+    pub(crate) blocks: Blocks,
 }
 
 #[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 pub(crate) struct ExistingAllocation {
-    pub(crate) offset: u32,
-    pub(crate) blocks: u32,
+    pub(crate) offset: Offset,
+    pub(crate) blocks: Blocks,
 }
 
 #[cfg(test)]

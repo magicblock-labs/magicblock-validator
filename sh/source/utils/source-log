@@ -4,30 +4,30 @@ TRACE_ARR=(
 	"warn,"
 	"geyser_plugin=trace,"
 	"magicblock=trace,"
-  "rpc=trace,"
-  "solana_geyser_plugin_manager=trace,"
-  "solana_svm=trace,"
-  "test_tools=trace,"
+	"solana_geyser_plugin_manager=trace,"
+	"solana_svm=trace,"
+  "solana_runtime=trace,"
+	"test_tools=trace,"
 )
 
 DEBUG_ARR=(
 	"warn,"
 	"geyser_plugin=debug,"
 	"magicblock=debug,"
-  "rpc=debug,"
-  "solana_geyser_plugin_manager=debug,"
-  "solana_svm=debug,"
-  "test_tools=debug,"
+	"solana_geyser_plugin_manager=debug,"
+	"solana_svm=debug,"
+  "solana_runtime=debug,"
+	"test_tools=debug,"
 )
 
 INFO_ARR=(
 	"warn,"
 	"geyser_plugin=info,"
 	"magicblock=info,"
-  "rpc=info,"
-  "solana_geyser_plugin_manager=info,"
-  "solana_svm=info,"
-  "test_tools=info,"
+	"solana_geyser_plugin_manager=info,"
+	"solana_svm=info,"
+  "solana_runtime=info,"
+	"test_tools=info,"
 )
 
 LOG_LEVEL='info'

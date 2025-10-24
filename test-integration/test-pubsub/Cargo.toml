@@ -4,10 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+log = { workspace = true }
 solana-sdk = { workspace = true }
 solana-pubsub-client = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
+integration-test-tools = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]

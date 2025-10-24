@@ -5,7 +5,7 @@ use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{signer::Signer, transaction::Transaction};
-use test_tools_core::init_logger;
+use test_kit::init_logger;
 use utils::{
     assert_one_committee_synchronized_count,
     assert_one_committee_was_committed,
@@ -30,13 +30,14 @@ fn test_committing_one_account() {
         let ctx = get_context_with_delegated_committees(1);
 
         let ScheduleCommitTestContextFields {
-            payer,
+            payer_ephem: payer,
             committees,
             commitment,
             ephem_client,
-            ephem_blockhash,
             ..
         } = ctx.fields();
+
+        debug!("Context initialized: {ctx}");
 
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
@@ -49,14 +50,16 @@ fn test_committing_one_account() {
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         );
 
+        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
             Some(&payer.pubkey()),
             &[&payer],
-            *ephem_blockhash,
+            ephem_blockhash,
         );
 
         let sig = tx.get_signature();
+        debug!("Submitting tx to commit committee {sig}",);
         let res = ephem_client
             .send_and_confirm_transaction_with_spinner_and_config(
                 &tx,
@@ -80,11 +83,10 @@ fn test_committing_two_accounts() {
         let ctx = get_context_with_delegated_committees(2);
 
         let ScheduleCommitTestContextFields {
-            payer,
+            payer_ephem: payer,
             committees,
             commitment,
             ephem_client,
-            ephem_blockhash,
             ..
         } = ctx.fields();
 
@@ -99,11 +101,12 @@ fn test_committing_two_accounts() {
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         );
 
+        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
             Some(&payer.pubkey()),
             &[&payer],
-            *ephem_blockhash,
+            ephem_blockhash,
         );
 
         let sig = tx.get_signature();

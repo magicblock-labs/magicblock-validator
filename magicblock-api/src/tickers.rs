@@ -7,37 +7,44 @@ use std::{
 };
 
 use log::*;
-use magicblock_accounts::{AccountsManager, ScheduledCommitsProcessor};
-use magicblock_bank::bank::Bank;
-use magicblock_ledger::Ledger;
-use magicblock_magic_program_api::{self, MAGIC_CONTEXT_PUBKEY};
+use magicblock_accounts::ScheduledCommitsProcessor;
+use magicblock_accounts_db::AccountsDb;
+use magicblock_core::{
+    link::{blocks::BlockUpdateTx, transactions::TransactionSchedulerHandle},
+    traits::AccountsBank,
+};
+use magicblock_ledger::{LatestBlock, Ledger};
+use magicblock_magic_program_api as magic_program;
 use magicblock_metrics::metrics;
-use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{instruction_utils::InstructionUtils, MagicContext};
-use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;
 
 pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
-    bank: &Arc<Bank>,
+    accountsdb: Arc<AccountsDb>,
     committor_processor: &Option<Arc<C>>,
-    transaction_status_sender: TransactionStatusSender,
     ledger: Arc<Ledger>,
     tick_duration: Duration,
+    transaction_scheduler: TransactionSchedulerHandle,
+    block_updates_tx: BlockUpdateTx,
     exit: Arc<AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
-    let bank = bank.clone();
     let committor_processor = committor_processor.clone();
 
+    let latest_block = ledger.latest_block().clone();
     tokio::task::spawn(async move {
         let log = tick_duration >= Duration::from_secs(5);
         while !exit.load(Ordering::Relaxed) {
             tokio::time::sleep(tick_duration).await;
 
             let (update_ledger_result, next_slot) =
-                advance_slot_and_update_ledger(&bank, &ledger);
+                advance_slot_and_update_ledger(
+                    &accountsdb,
+                    &ledger,
+                    &block_updates_tx,
+                );
             if let Err(err) = update_ledger_result {
                 error!("Failed to write block: {:?}", err);
             }
@@ -54,35 +61,35 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
 
             // If accounts were scheduled to be committed, we accept them here
             // and processs the commits
-            let magic_context_acc = bank
-                .get_account(&MAGIC_CONTEXT_PUBKEY)
-                .expect(
-                "Validator found to be running without MagicContext account!",
-            );
+            let magic_context_acc = accountsdb.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+                .expect("Validator found to be running without MagicContext account!");
             if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
                 handle_scheduled_commits(
-                    &bank,
                     committor_processor,
-                    &transaction_status_sender,
+                    &transaction_scheduler,
+                    &latest_block,
                 )
                 .await;
             }
+            if log {
+                debug!("Advanced to slot {}", next_slot);
+            }
         }
+        metrics::inc_slot();
     })
 }
 
 async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
-    bank: &Arc<Bank>,
     committor_processor: &Arc<C>,
-    transaction_status_sender: &TransactionStatusSender,
+    transaction_scheduler: &TransactionSchedulerHandle,
+    latest_block: &LatestBlock,
 ) {
     // 1. Send the transaction to move the scheduled commits from the MagicContext
     //    to the global ScheduledCommit store
-    let tx = InstructionUtils::accept_scheduled_commits(bank.last_blockhash());
-    if let Err(err) =
-        execute_legacy_transaction(tx, bank, Some(transaction_status_sender))
-            .await
-    {
+    let tx = InstructionUtils::accept_scheduled_commits(
+        latest_block.load().blockhash,
+    );
+    if let Err(err) = transaction_scheduler.execute(tx).await {
         error!("Failed to accept scheduled commits: {:?}", err);
         return;
     }
@@ -95,42 +102,11 @@ async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
     }
 }
 
-pub fn init_commit_accounts_ticker(
-    manager: &Arc<AccountsManager>,
-    tick_duration: Duration,
-    token: CancellationToken,
-) -> tokio::task::JoinHandle<()> {
-    let manager = manager.clone();
-    tokio::task::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = tokio::time::sleep(tick_duration) => {
-                    let sigs = manager.commit_delegated().await;
-                    match sigs {
-                        Ok(sigs) if sigs.is_empty() => {
-                            trace!("No accounts committed");
-                        }
-                        Ok(sigs) => {
-                            debug!("Commits: {:?}", sigs);
-                        }
-                        Err(err) => {
-                            error!("Failed to commit accounts: {:?}", err);
-                        }
-                    }
-                }
-                _ = token.cancelled() => {
-                    break;
-                }
-            }
-        }
-    })
-}
-
 #[allow(unused_variables)]
 pub fn init_system_metrics_ticker(
     tick_duration: Duration,
     ledger: &Arc<Ledger>,
-    bank: &Arc<Bank>,
+    accountsdb: &Arc<AccountsDb>,
     token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     // fn try_set_ledger_counts(ledger: &Ledger) {

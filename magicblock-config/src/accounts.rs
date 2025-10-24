@@ -1,9 +1,10 @@
 use std::str::FromStr;
 
 use clap::{Args, ValueEnum};
+use magicblock_chainlink::chainlink;
 use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use strum::{Display, EnumString};
 use url::Url;
 
@@ -145,6 +146,21 @@ pub enum LifecycleMode {
     ProgramsReplica,
     Ephemeral,
     Offline,
+}
+
+impl From<LifecycleMode> for chainlink::config::LifecycleMode {
+    fn from(mode: LifecycleMode) -> Self {
+        match mode {
+            LifecycleMode::Replica => chainlink::config::LifecycleMode::Replica,
+            LifecycleMode::ProgramsReplica => {
+                chainlink::config::LifecycleMode::ProgramsReplica
+            }
+            LifecycleMode::Ephemeral => {
+                chainlink::config::LifecycleMode::Ephemeral
+            }
+            LifecycleMode::Offline => chainlink::config::LifecycleMode::Offline,
+        }
+    }
 }
 
 // -----------------

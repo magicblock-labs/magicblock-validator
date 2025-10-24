@@ -26,10 +26,15 @@ fn kill_process(name: &str) {
         .arg(name)
         .output()
         .unwrap();
+    process::Command::new("pkill")
+        .arg("-9") // Make sure it's really gone
+        .arg(name)
+        .output()
+        .unwrap();
 }
 
 fn kill_validators() {
-    // Makes sure all the rpc + solana teset validators  are really killed
-    kill_process("rpc");
+    // Makes sure all the magicblock-validator + solana test validators  are really killed
+    kill_process("magicblock-validator");
     kill_process("solana-test-validator");
 }

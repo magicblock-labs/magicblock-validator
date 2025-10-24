@@ -4,13 +4,12 @@ use clap::Args;
 use errors::{ConfigError, ConfigResult};
 use magicblock_config_macro::Mergeable;
 use serde::{Deserialize, Serialize};
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 
 mod accounts;
 mod accounts_db;
 mod cli;
 pub mod errors;
-mod geyser_grpc;
 mod helpers;
 mod ledger;
 mod metrics;
@@ -21,7 +20,6 @@ mod validator;
 pub use accounts::*;
 pub use accounts_db::*;
 pub use cli::*;
-pub use geyser_grpc::*;
 pub use ledger::*;
 pub use metrics::*;
 pub use program::*;
@@ -48,9 +46,6 @@ pub struct EphemeralConfig {
     #[serde(default)]
     #[command(flatten)]
     pub rpc: RpcConfig,
-    #[serde(default)]
-    #[command(flatten)]
-    pub geyser_grpc: GeyserGrpcConfig,
     #[serde(default)]
     #[command(flatten)]
     pub validator: ValidatorConfig,
@@ -166,10 +161,9 @@ mod tests {
 
     use isocountry::CountryCode;
     use magicblock_config_helpers::Merge;
-    use solana_sdk::pubkey::Pubkey;
     use url::Url;
 
-    use super::*;
+    use super::{Pubkey, *};
 
     #[test]
     fn test_program_config_parser() {
@@ -238,11 +232,6 @@ mod tests {
                 max_monitored_accounts: 1234,
             },
             rpc: RpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
-                port: 9090,
-                max_ws_connections: 8008,
-            },
-            geyser_grpc: GeyserGrpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
             },
@@ -333,11 +322,6 @@ mod tests {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
-                max_ws_connections: 8008,
-            },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
-                port: 9090,
             },
             validator: ValidatorConfig {
                 millis_per_slot: 5000,
@@ -423,11 +407,6 @@ mod tests {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(1, 0, 0, 127)),
                 port: 9091,
-                max_ws_connections: 8008,
-            },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(1, 0, 0, 127)),
-                port: 9091,
             },
             validator: ValidatorConfig {
                 millis_per_slot: 5001,
@@ -506,11 +485,6 @@ mod tests {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
-                max_ws_connections: 8008,
-            },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
-                port: 9090,
             },
             validator: ValidatorConfig {
                 millis_per_slot: 5000,
@@ -580,7 +554,6 @@ mod tests {
                 max_monitored_accounts: 2048,
             },
             rpc: RpcConfig::default(),
-            geyser_grpc: GeyserGrpcConfig::default(),
             validator: ValidatorConfig::default(),
             ledger: LedgerConfig {
                 resume_strategy_config: LedgerResumeStrategyConfig {

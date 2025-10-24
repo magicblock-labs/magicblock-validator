@@ -1,6 +1,10 @@
 use std::{fs, path::Path};
 
-use lmdb::{Environment, EnvironmentFlags};
+use lmdb::{Cursor, Environment, EnvironmentFlags, RoCursor, RoTransaction};
+use solana_pubkey::Pubkey;
+
+use super::{table::Table, Offset};
+use crate::{index::Blocks, AccountsDbResult};
 
 // Below is the list of LMDB cursor operation consts, which were copy
 // pasted since they are not exposed in the public API of LMDB
@@ -32,4 +36,33 @@ pub(super) fn lmdb_env(dir: &Path, size: usize) -> lmdb::Result<Environment> {
         .set_max_dbs(TABLES_COUNT)
         .set_flags(lmdb_env_flags)
         .open_with_permissions(&path, 0o644)
+}
+
+/// A wrapper around a cursor on the accounts table
+pub struct AccountOffsetFinder<'env> {
+    cursor: RoCursor<'env>,
+    _txn: RoTransaction<'env>,
+}
+
+impl<'env> AccountOffsetFinder<'env> {
+    /// Set up a new cursor
+    pub(super) fn new(
+        table: &Table,
+        txn: RoTransaction<'env>,
+    ) -> AccountsDbResult<Self> {
+        let cursor = table.cursor_ro(&txn)?;
+        // SAFETY:
+        // nasty/neat trick for lifetime erasure, but we are upholding
+        // the rust's ownership contracts by keeping txn around as well
+        let cursor: RoCursor = unsafe { std::mem::transmute(cursor) };
+        Ok(Self { cursor, _txn: txn })
+    }
+
+    /// Find a storage offset for the given account
+    pub(crate) fn find(&self, pubkey: &Pubkey) -> Option<Offset> {
+        self.cursor
+            .get(Some(pubkey.as_ref()), None, MDB_SET_OP)
+            .ok()
+            .map(|(_, v)| bytes!(#unpack, v, Offset, Blocks).0)
+    }
 }

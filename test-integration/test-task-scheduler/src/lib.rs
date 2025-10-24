@@ -61,7 +61,7 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
         },
         ..Default::default()
     };
-    let (default_tmpdir_config, Some(mut validator)) =
+    let (default_tmpdir_config, Some(mut validator), port) =
         start_magicblock_validator_with_config_struct_and_temp_dir(
             config,
             &LoadedAccounts::with_delegation_program_test_authority(),
@@ -72,7 +72,10 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
         panic!("validator should set up correctly");
     };
 
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let ctx = expect!(
+        IntegrationTestContext::try_new_with_ephem_port(port),
+        validator
+    );
     (default_tmpdir_config, validator, ctx)
 }
 
@@ -101,6 +104,7 @@ pub fn create_delegated_counter(
             ),
             &[payer]
         ),
+        format!("Failed to send init transaction: blockhash {:?}", blockhash),
         validator
     );
 

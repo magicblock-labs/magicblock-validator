@@ -22,4 +22,3 @@ serde = { workspace = true, features = ["derive"] }
 magicblock-config-helpers = { workspace = true }
 trybuild = { workspace = true }
 macrotest = { workspace = true }
-cargo-expand = { workspace = true }

@@ -1,10 +1,12 @@
 use std::{path::Path, sync::Arc};
 
-use const_format::concatcp;
 use error::AccountsDbError;
-use index::AccountsDbIndex;
+use index::{
+    iterator::OffsetPubkeyIter, utils::AccountOffsetFinder, AccountsDbIndex,
+};
 use log::{error, warn};
 use magicblock_config::AccountsDbConfig;
+use magicblock_core::traits::AccountsBank;
 use parking_lot::RwLock;
 use snapshot::SnapshotEngine;
 use solana_account::{
@@ -13,15 +15,12 @@ use solana_account::{
 use solana_pubkey::Pubkey;
 use storage::AccountsStorage;
 
-use crate::snapshot::SnapSlot;
-
-pub type AdbResult<T> = Result<T, AccountsDbError>;
-/// Stop the World Lock, used to halt all writes to adb while
-/// some critical operation is in action, e.g. snapshotting
+pub type AccountsDbResult<T> = Result<T, AccountsDbError>;
+/// Stop the World Lock, used to halt all writes to the accountsdb
+/// while some critical operation is in action, e.g. snapshotting
 pub type StWLock = Arc<RwLock<()>>;
 
 pub const ACCOUNTSDB_DIR: &str = "accountsdb";
-const ACCOUNTSDB_SUB_DIR: &str = concatcp!(ACCOUNTSDB_DIR, "/main");
 
 #[cfg_attr(test, derive(Debug))]
 pub struct AccountsDb {
@@ -29,10 +28,11 @@ pub struct AccountsDb {
     storage: AccountsStorage,
     /// Index manager, used for various lookup operations
     index: AccountsDbIndex,
-    /// Snapshots manager, boxed for cache efficiency, as this field is rarely used
-    snapshot_engine: Box<SnapshotEngine>,
-    /// Stop the world lock, currently used for snapshotting only
-    lock: StWLock,
+    /// Snapshots manager
+    snapshot_engine: Arc<SnapshotEngine>,
+    /// Synchronization lock, employed for preventing other threads from
+    /// writing to accountsdb, currently used for snapshotting only
+    synchronizer: StWLock,
     /// Slot wise frequency at which snapshots should be taken
     snapshot_frequency: u64,
 }
@@ -42,9 +42,10 @@ impl AccountsDb {
     pub fn new(
         config: &AccountsDbConfig,
         directory: &Path,
-        lock: StWLock,
-    ) -> AdbResult<Self> {
-        let directory = directory.join(ACCOUNTSDB_SUB_DIR);
+        max_slot: u64,
+    ) -> AccountsDbResult<Self> {
+        let directory = directory.join(format!("{ACCOUNTSDB_DIR}/main"));
+        let lock = StWLock::default();
 
         std::fs::create_dir_all(&directory).inspect_err(log_err!(
             "ensuring existence of accountsdb directory"
@@ -59,51 +60,36 @@ impl AccountsDb {
         let snapshot_frequency = config.snapshot_frequency;
         assert_ne!(snapshot_frequency, 0, "snapshot frequency cannot be zero");
 
-        Ok(Self {
+        let mut this = Self {
             storage,
             index,
             snapshot_engine,
-            lock,
+            synchronizer: lock,
             snapshot_frequency,
-        })
+        };
+        this.ensure_at_most(max_slot)?;
+        Ok(this)
     }
 
     /// Opens existing database with given snapshot_frequency, used for tests and tools
     /// most likely you want to use [new](AccountsDb::new) method
-    #[cfg(feature = "dev-tools")]
-    pub fn open(directory: &Path) -> AdbResult<Self> {
+    pub fn open(directory: &Path) -> AccountsDbResult<Self> {
         let config = AccountsDbConfig {
             snapshot_frequency: u64::MAX,
             ..Default::default()
         };
-        Self::new(&config, directory, StWLock::default())
-    }
-
-    /// Read account from with given pubkey from the database (if exists)
-    #[inline(always)]
-    pub fn get_account(&self, pubkey: &Pubkey) -> AdbResult<AccountSharedData> {
-        let offset = self.index.get_account_offset(pubkey)?;
-        Ok(self.storage.read_account(offset))
-    }
-
-    pub fn remove_account(&self, pubkey: &Pubkey) {
-        let _ = self
-            .index
-            .remove_account(pubkey)
-            .inspect_err(log_err!("removing an account {}", pubkey));
+        Self::new(&config, directory, 0)
     }
 
     /// Insert account with given pubkey into the database
     /// Note: this method removes zero lamport account from database
     pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
-        // don't store empty accounts
-        if account.lamports() == 0 {
-            let _ = self.index.remove_account(pubkey).inspect_err(log_err!(
-                "removing zero lamport account {}",
-                pubkey
-            ));
-            return;
-        }
+        // NOTE: we don't check for non-zero lamports since we allow to store zero-lamport accounts
+        // for the following two cases:
+        // - when we clone a compressed account we reflect the exact lamports it has which maybe
+        //   zero since compressed accounts don't need to be rent-exempt
+        // - when we clone an account to signal that we fetched it from chain already but did not
+        //   find it, i.e. in the case of an escrow account to avoid doing that over and over
         match account {
             AccountSharedData::Borrowed(acc) => {
                 // For borrowed variants everything is already written and we just increment the
@@ -180,17 +166,14 @@ impl AccountsDb {
         &self,
         account: &Pubkey,
         owners: &[Pubkey],
-    ) -> AdbResult<usize> {
-        let offset = self.index.get_account_offset(account)?;
+    ) -> Option<usize> {
+        let offset = self.index.get_account_offset(account).ok()?;
         let memptr = self.storage.offset(offset);
         // SAFETY:
         // memptr is obtained from the storage directly, which maintains
         // the integrity of account records, by making sure, that they are
         // initialized and laid out properly along with the shadow buffer
-        let position = unsafe {
-            AccountBorrowed::any_owner_matches(memptr.as_ptr(), owners)
-        };
-        position.ok_or(AccountsDbError::NotFound)
+        unsafe { AccountBorrowed::any_owner_matches(memptr.as_ptr(), owners) }
     }
 
     /// Scans the database accounts of given program, satisfying the provided filter
@@ -198,26 +181,30 @@ impl AccountsDb {
         &self,
         program: &Pubkey,
         filter: F,
-    ) -> AdbResult<Vec<(Pubkey, AccountSharedData)>>
+    ) -> AccountsDbResult<AccountsScanner<F>>
     where
-        F: Fn(&AccountSharedData) -> bool,
+        F: Fn(&AccountSharedData) -> bool + 'static,
     {
         // TODO(bmuddha): perf optimization in scanning logic
         // https://github.com/magicblock-labs/magicblock-validator/issues/328
 
-        let iter = self
+        let iterator = self
             .index
             .get_program_accounts_iter(program)
             .inspect_err(log_err!("program accounts retrieval"))?;
-        let mut accounts = Vec::with_capacity(4);
-        for (offset, pubkey) in iter {
-            let account = self.storage.read_account(offset);
+        Ok(AccountsScanner {
+            iterator,
+            storage: &self.storage,
+            filter,
+        })
+    }
 
-            if filter(&account) {
-                accounts.push((pubkey, account));
-            }
-        }
-        Ok(accounts)
+    pub fn reader(&self) -> AccountsDbResult<AccountsReader<'_>> {
+        let offset = self.index.offset_finder()?;
+        Ok(AccountsReader {
+            offset,
+            storage: &self.storage,
+        })
     }
 
     /// Check whether account with given pubkey exists in the database
@@ -252,23 +239,9 @@ impl AccountsDb {
     /// Set latest observed slot
     #[inline(always)]
     pub fn set_slot(self: &Arc<Self>, slot: u64) {
-        const PREEMPTIVE_FLUSHING_THRESHOLD: u64 = 5;
         self.storage.set_slot(slot);
-        let remainder = slot % self.snapshot_frequency;
 
-        let delta = self
-            .snapshot_frequency
-            .saturating_sub(PREEMPTIVE_FLUSHING_THRESHOLD);
-        let preemptive_flush = delta != 0 && remainder == delta;
-
-        if preemptive_flush {
-            // a few slots before next snapshot point, start flushing asynchronously so
-            // that at the actual snapshot point there will be very little to flush
-            self.flush(false);
-            return;
-        }
-
-        if remainder != 0 {
+        if 0 != slot % self.snapshot_frequency {
             return;
         }
         let this = self.clone();
@@ -279,56 +252,20 @@ impl AccountsDb {
         std::thread::spawn(move || {
             // acquire the lock, effectively stopping the world, nothing should be able
             // to modify underlying accounts database while this lock is active
-            let locked = this.lock.write();
+            let locked = this.synchronizer.write();
             // flush everything before taking the snapshot, in order to ensure consistent state
-            this.flush(true);
+            this.flush();
 
             let used_storage = this.storage.utilized_mmap();
             if let Err(err) =
                 this.snapshot_engine.snapshot(slot, used_storage, locked)
             {
-                error!(
+                warn!(
                     "failed to take snapshot at {}, slot {slot}: {err}",
                     this.snapshot_engine.database_path().display()
                 );
             }
         });
-    }
-
-    /// Returns slot of latest snapshot or None
-    /// Parses path to extract slot
-    pub fn get_latest_snapshot_slot(&self) -> Option<u64> {
-        self.snapshot_engine
-            .with_snapshots(|snapshots| -> Option<u64> {
-                let latest_path = snapshots.back()?;
-                SnapSlot::try_from_path(latest_path)
-                    .map(|snap_slot: SnapSlot| snap_slot.slot())
-                    .or_else(|| {
-                        error!(
-                            "Failed to parse the path into SnapSlot: {}",
-                            latest_path.display()
-                        );
-                        None
-                    })
-            })
-    }
-
-    /// Return slot of oldest maintained snapshot or None
-    /// Parses path to extract slot
-    pub fn get_oldest_snapshot_slot(&self) -> Option<u64> {
-        self.snapshot_engine
-            .with_snapshots(|snapshots| -> Option<u64> {
-                let latest_path = snapshots.front()?;
-                SnapSlot::try_from_path(latest_path)
-                    .map(|snap_slot: SnapSlot| snap_slot.slot())
-                    .or_else(|| {
-                        error!(
-                            "Failed to parse the path into SnapSlot: {}",
-                            latest_path.display()
-                        );
-                        None
-                    })
-            })
     }
 
     /// Checks whether AccountsDB has "freshness", not exceeding given slot
@@ -338,13 +275,13 @@ impl AccountsDb {
     /// Note: this will delete the current database state upon rollback.
     /// But in most cases, the ledger slot and adb slot will match and
     /// no rollback will take place, in any case use with care!
-    pub fn ensure_at_most(&mut self, slot: u64) -> AdbResult<u64> {
+    pub fn ensure_at_most(&mut self, slot: u64) -> AccountsDbResult<u64> {
         // if this is a fresh start or we just match, then there's nothing to ensure
         if slot >= self.slot().saturating_sub(1) {
             return Ok(self.slot());
         }
         // make sure that no one is reading the database
-        let _locked = self.lock.write();
+        let _locked = self.synchronizer.write();
 
         let rb_slot = self
             .snapshot_engine
@@ -380,15 +317,51 @@ impl AccountsDb {
     }
 
     /// Flush primary storage and indexes to disk
-    /// This operation can be done asynchronously (returning immediately)
-    /// or in a blocking fashion
-    pub fn flush(&self, sync: bool) {
-        self.storage.flush(sync);
-        // index is usually so small, that it takes a few ms at
-        // most to flush it, so no need to schedule async flush
-        if sync {
-            self.index.flush();
+    pub fn flush(&self) {
+        self.storage.flush();
+        self.index.flush();
+    }
+
+    /// Get a clone of synchronization lock, to suspend all the writes,
+    /// while some critical operation, like snapshotting is in progress
+    pub fn synchronizer(&self) -> StWLock {
+        self.synchronizer.clone()
+    }
+}
+
+impl AccountsBank for AccountsDb {
+    /// Read account from with given pubkey from the database (if exists)
+    #[inline(always)]
+    fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+        let offset = self.index.get_account_offset(pubkey).ok()?;
+        Some(self.storage.read_account(offset))
+    }
+
+    fn remove_account(&self, pubkey: &Pubkey) {
+        let _ = self
+            .index
+            .remove_account(pubkey)
+            .inspect_err(log_err!("removing an account {}", pubkey));
+    }
+
+    /// Remove all accounts matching the provided predicate
+    /// NOTE: accounts are not locked while this operation is in progress,
+    /// thus this should only be performed before the validator starts processing
+    /// transactions
+    fn remove_where(
+        &self,
+        predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+    ) -> usize {
+        let to_remove = self
+            .iter_all()
+            .filter(|(pk, acc)| predicate(pk, acc))
+            .map(|(pk, _)| pk)
+            .collect::<Vec<_>>();
+        let removed = to_remove.len();
+        for pk in to_remove {
+            self.remove_account(&pk);
         }
+        removed
     }
 }
 
@@ -397,6 +370,59 @@ impl AccountsDb {
 // write access to it is synchronized via atomic operations
 unsafe impl Sync for AccountsDb {}
 unsafe impl Send for AccountsDb {}
+
+/// Iterator to scan program accounts applying filtering logic on them
+pub struct AccountsScanner<'db, F> {
+    storage: &'db AccountsStorage,
+    filter: F,
+    iterator: OffsetPubkeyIter<'db>,
+}
+
+impl<F> Iterator for AccountsScanner<'_, F>
+where
+    F: Fn(&AccountSharedData) -> bool,
+{
+    type Item = (Pubkey, AccountSharedData);
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let (offset, pubkey) = self.iterator.next()?;
+            let account = self.storage.read_account(offset);
+            if (self.filter)(&account) {
+                break Some((pubkey, account));
+            }
+        }
+    }
+}
+
+/// Versatile and reusable account reader, can be used to perform multiple account queries
+/// from the database more efficiently, avoiding the cost of index/cursor setups
+pub struct AccountsReader<'db> {
+    offset: AccountOffsetFinder<'db>,
+    storage: &'db AccountsStorage,
+}
+
+// SAFETY:
+// AccountsReader is only ever used to get readable access to the
+// underlying database, and never outlives the the backing storage
+unsafe impl Send for AccountsReader<'_> {}
+unsafe impl Sync for AccountsReader<'_> {}
+
+impl AccountsReader<'_> {
+    /// Find the account specified by the pubkey and pass it to the reader function
+    pub fn read<F, R>(&self, pubkey: &Pubkey, reader: F) -> Option<R>
+    where
+        F: Fn(AccountSharedData) -> R,
+    {
+        let offset = self.offset.find(pubkey)?;
+        let account = self.storage.read_account(offset);
+        Some(reader(account))
+    }
+
+    /// Check whether given account exists in the AccountsDB
+    pub fn contains(&self, pubkey: &Pubkey) -> bool {
+        self.offset.find(pubkey).is_some()
+    }
+}
 
 #[cfg(test)]
 impl AccountsDb {

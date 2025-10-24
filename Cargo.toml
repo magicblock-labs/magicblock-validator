@@ -5,42 +5,31 @@ split-debuginfo = "packed"
 
 [workspace]
 members = [
-  "programs/magicblock",
   "magicblock-account-cloner",
-  "magicblock-account-dumper",
-  "magicblock-account-fetcher",
-  "magicblock-account-updates",
   "magicblock-accounts",
-  "magicblock-accounts-api",
   "magicblock-accounts-db",
   "magicblock-api",
-  "magicblock-bank",
+  "magicblock-chainlink",
   "magicblock-committor-program",
   "magicblock-committor-service",
   "magicblock-config",
   "magicblock-config-helpers",
   "magicblock-config-macro",
   "magicblock-core",
+  "magicblock-aperture",
   "magicblock-magic-program-api",
-  "magicblock-geyser-plugin",
   "magicblock-ledger",
   "magicblock-metrics",
-  "magicblock-mutator",
-  "magicblock-perf-service",
   "magicblock-processor",
-  "magicblock-pubsub",
-  "magicblock-rpc",
   "magicblock-rpc-client",
   "magicblock-table-mania",
   "magicblock-task-scheduler",
-  "magicblock-tokens",
-  "magicblock-transaction-status",
   "magicblock-validator",
-  "magicblock-version",
   "magicblock-validator-admin",
-  "test-tools",
-  "test-tools-core",
-  "utils/expiring-hashmap",
+  "magicblock-version",
+  "programs/guinea",
+  "programs/magicblock",
+  "test-kit",
   "tools/genx",
   "tools/keypair-base58",
   "tools/ledger-stats",
@@ -60,19 +49,19 @@ edition = "2021"
 
 [workspace.dependencies]
 anyhow = "1.0.86"
+arc-swap = { version = "1.7" }
 assert_matches = "1.5.0"
 async-trait = "0.1.77"
 base64 = "0.21.7"
 bincode = "1.3.3"
 borsh = { version = "1.5.1", features = ["derive", "unstable__schema"] }
 borsh-derive = "1.5.1"
-bs58 = "0.4.0"
+bs58 = "0.5.1"
 byteorder = "1.5.0"
 cargo-expand = "1"
 cargo-lock = "10.0.0"
 chrono = "0.4"
 clap = "4.5.40"
-conjunto-transwise = { git = "https://github.com/magicblock-labs/conjunto.git", rev = "bf82b45" }
 console-subscriber = "0.2.0"
 const_format = "0.2.34"
 convert_case = "0.8.0"
@@ -81,17 +70,17 @@ dyn-clone = "1.0.20"
 ed25519-dalek = "1.0.1"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"
-expiring-hashmap = { path = "./utils/expiring-hashmap" }
+fastwebsockets = "0.10"
 fd-lock = "4.0.2"
 flume = "0.11"
 fs_extra = "1.3.0"
+futures = "0.3"
 futures-util = "0.3.30"
-geyser-grpc-proto = { path = "./geyser-grpc-proto" }
 git-version = "0.3.9"
 hostname = "0.4.0"
-http-body-util = "0.1.2"
-hyper = "1.4.1"
-hyper-util = "0.1.9"
+http-body-util = "0.1.3"
+hyper = "1.6.0"
+hyper-util = "0.1.15"
 isocountry = "0.3.2"
 itertools = "0.14"
 jsonrpc-core = "18.0.0"
@@ -102,20 +91,15 @@ jsonrpc-pubsub = "18.0.0"
 jsonrpc-ws-server = "18.0.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
-libloading = "0.7.4"
 log = "0.4.20"
 lru = "0.16.0"
 macrotest = "1"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
-magicblock-account-dumper = { path = "./magicblock-account-dumper" }
-magicblock-account-fetcher = { path = "./magicblock-account-fetcher" }
-magicblock-account-updates = { path = "./magicblock-account-updates" }
 magicblock-accounts = { path = "./magicblock-accounts" }
-magicblock-accounts-api = { path = "./magicblock-accounts-api" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-api = { path = "./magicblock-api" }
-magicblock-bank = { path = "./magicblock-bank" }
+magicblock-chainlink = { path = "./magicblock-chainlink" }
 magicblock-committor-program = { path = "./magicblock-committor-program", features = [
   "no-entrypoint",
 ] }
@@ -127,57 +111,69 @@ magicblock-core = { path = "./magicblock-core" }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "aa1de56d90c", features = [
   "no-entrypoint",
 ] }
+magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-metrics = { path = "./magicblock-metrics" }
-magicblock-mutator = { path = "./magicblock-mutator" }
-magicblock-perf-service = { path = "./magicblock-perf-service" }
 magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
 magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
-magicblock-pubsub = { path = "./magicblock-pubsub" }
-magicblock-rpc = { path = "./magicblock-rpc" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
 magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
-magicblock-tokens = { path = "./magicblock-tokens" }
-magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
 magicblock-version = { path = "./magicblock-version" }
+test-kit = { path = "./test-kit" }
+
+guinea = { path = "./programs/guinea" }
+
 num-derive = "0.4"
 num-format = "0.4.4"
 num-traits = "0.2"
 num_cpus = "1.16.0"
+parking_lot = "0.12"
 paste = "1.0"
 proc-macro2 = "1.0"
 prometheus = "0.13.4"
 # Needs to match https://crates.io/crates/solana-storage-bigtable/2.1.13/dependencies
 prost = "0.11.9"
+json = { package = "sonic-rs", version = "0.5.3" }
 protobuf-src = "1.1"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10.0"
-rusqlite = { version = "0.37.0", features = ["bundled"] } # bundled sqlite 3.44
+# bundled sqlite 3.44
+rusqlite = { version = "0.37.0", features = ["bundled"] }
 rustc_version = "0.4"
+scc = "2.4"
 semver = "1.0.22"
 serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "176540a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "f454d4a" }
 solana-account-decoder = { version = "2.2" }
 solana-accounts-db = { version = "2.2" }
+solana-account-decoder-client-types = { version = "2.2" }
 solana-address-lookup-table-program = { version = "2.2" }
 solana-bpf-loader-program = { version = "2.2" }
 solana-compute-budget-instruction = { version = "2.2" }
 solana-compute-budget-program = { version = "2.2" }
 solana-cost-model = { version = "2.2" }
+solana-feature-set = { version = "2.2" }
+solana-fee = { version = "2.2" }
+solana-fee-structure = { version = "2.2" }
 solana-frozen-abi-macro = { version = "2.2" }
-solana-geyser-plugin-interface = { version = "2.2", package = "agave-geyser-plugin-interface" }
-solana-geyser-plugin-manager = { version = "2.2" }
+solana-hash = { version = "2.2" }
 solana-inline-spl = { version = "2.2" }
+solana-instruction = { version = "2.2" }
+solana-keypair = { version = "2.2" }
+solana-loader-v3-interface = { version = "3.0" }
+solana-loader-v4-interface = { version = "2.0" }
+solana-loader-v4-program = { version = "2.2" }
 solana-log-collector = { version = "2.2" }
 solana-measure = { version = "2.2" }
+solana-message = { version = "2.2" }
 solana-metrics = { version = "2.2" }
 solana-perf = { version = "2.2" }
 solana-program = "2.2"
@@ -186,19 +182,24 @@ solana-program-test = "2.2"
 solana-pubkey = { version = "2.2" }
 solana-pubsub-client = { version = "2.2" }
 solana-rayon-threadlimit = { version = "2.2" }
+solana-rent-collector = { version = "2.2" }
 solana-rpc = "2.2"
 solana-rpc-client = { version = "2.2" }
 solana-rpc-client-api = { version = "2.2" }
 solana-sdk = { version = "2.2" }
+solana-sdk-ids = { version = "2.2" }
+solana-signature = { version = "2.2" }
+solana-signer = { version = "2.2" }
 solana-storage-proto = { path = "storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "e93eb57", features = [
-  "dev-context-only-utils",
-] }
 solana-svm-transaction = { version = "2.2" }
+solana-system-interface = { version = "1.0" }
 solana-system-program = { version = "2.2" }
+solana-system-transaction = { version = "2.2" }
 solana-timings = "2.2"
+solana-transaction = { version = "2.2" }
+solana-transaction-context = { version = "2.2" }
+solana-transaction-error = { version = "2.2" }
 solana-transaction-status = { version = "2.2" }
-solana-transaction-error = "2.2"
 solana-transaction-status-client-types = "2.2"
 spl-token = "=7.0"
 spl-token-2022 = "=6.0"
@@ -207,27 +208,25 @@ strum = "0.24"
 strum_macros = "0.24"
 syn = "2.0"
 tempfile = "3.10.1"
-test-tools = { path = "./test-tools" }
-test-tools-core = { path = "./test-tools-core" }
 thiserror = "1.0.57"
-# Update solana-tokio patch below when updating this version
 tokio = "1.0"
 tokio-stream = "0.1.15"
 tokio-util = "0.7.10"
 toml = "0.8.13"
-# Tonic version 11 conflicts with lower level deps of solana and 0.9.x is the last
-# version that allows prost 0.11.x to be used
-tonic = "0.9.2"
 tonic-build = "0.9.2"
-tonic-health = "0.9.2"
 trybuild = "1.0"
 url = "2.5.0"
 vergen = "8.3.1"
+
+[workspace.dependencies.solana-svm]
+git = "https://github.com/magicblock-labs/magicblock-svm.git"
+rev = "11bbaf2"
+features = ["dev-context-only-utils"]
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "176540a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "f454d4a" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "11bbaf2" }

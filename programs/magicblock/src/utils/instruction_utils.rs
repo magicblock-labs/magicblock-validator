@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use magicblock_magic_program_api::{
     args::ScheduleTaskArgs,
@@ -110,13 +113,17 @@ impl InstructionUtils {
         validator_authority: &Pubkey,
         scheduled_commit_id: u64,
     ) -> Instruction {
+        static COMMIT_SENT_BUMP: AtomicU64 = AtomicU64::new(0);
         let account_metas = vec![
             AccountMeta::new_readonly(*magic_block_program, false),
             AccountMeta::new_readonly(*validator_authority, true),
         ];
         Instruction::new_with_bincode(
             *magic_block_program,
-            &MagicBlockInstruction::ScheduledCommitSent(scheduled_commit_id),
+            &MagicBlockInstruction::ScheduledCommitSent((
+                scheduled_commit_id,
+                COMMIT_SENT_BUMP.fetch_add(1, Ordering::SeqCst),
+            )),
             account_metas,
         )
     }
@@ -173,6 +180,7 @@ impl InstructionUtils {
                         .data
                         .map(set_account_mod_data),
                     rent_epoch: account_modification.rent_epoch,
+                    delegated: account_modification.delegated,
                 };
             account_mods.insert(
                 account_modification.pubkey,
@@ -274,6 +282,33 @@ impl InstructionUtils {
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::ProcessTasks,
+            account_metas,
+        )
+    }
+
+    // -----------------
+    // Executable Check
+    // -----------------
+    pub fn disable_executable_check_instruction(
+        authority: &Pubkey,
+    ) -> Instruction {
+        let account_metas = vec![AccountMeta::new(*authority, true)];
+
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::DisableExecutableCheck,
+            account_metas,
+        )
+    }
+
+    pub fn enable_executable_check_instruction(
+        authority: &Pubkey,
+    ) -> Instruction {
+        let account_metas = vec![AccountMeta::new(*authority, true)];
+
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::EnableExecutableCheck,
             account_metas,
         )
     }

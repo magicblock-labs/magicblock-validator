@@ -2,18 +2,9 @@ use std::mem;
 
 use magicblock_magic_program_api::MAGIC_CONTEXT_SIZE;
 use serde::{Deserialize, Serialize};
-use solana_sdk::{
-    account::{AccountSharedData, ReadableAccount},
-    pubkey::Pubkey,
-};
+use solana_sdk::account::{AccountSharedData, ReadableAccount};
 
 use crate::magic_scheduled_base_intent::ScheduledBaseIntent;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FeePayerAccount {
-    pub pubkey: Pubkey,
-    pub delegated_pda: Pubkey,
-}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MagicContext {

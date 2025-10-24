@@ -1,11 +1,10 @@
 use std::{
     collections::VecDeque,
     ffi::OsStr,
-    fs,
-    fs::File,
-    io,
-    io::Write,
+    fs::{self, File},
+    io::{self, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use log::{info, warn};
@@ -13,7 +12,9 @@ use memmap2::MmapMut;
 use parking_lot::{Mutex, RwLockWriteGuard};
 use reflink::reflink;
 
-use crate::{error::AccountsDbError, log_err, storage::ADB_FILE, AdbResult};
+use crate::{
+    error::AccountsDbError, log_err, storage::ADB_FILE, AccountsDbResult,
+};
 
 #[cfg_attr(test, derive(Debug))]
 pub struct SnapshotEngine {
@@ -34,12 +35,12 @@ impl SnapshotEngine {
     pub(crate) fn new(
         dbpath: PathBuf,
         max_count: usize,
-    ) -> AdbResult<Box<Self>> {
+    ) -> AccountsDbResult<Arc<Self>> {
         let is_cow_supported = Self::supports_cow(&dbpath)
             .inspect_err(log_err!("cow support check"))?;
         let snapshots = Self::read_snapshots(&dbpath, max_count)?.into();
 
-        Ok(Box::new(Self {
+        Ok(Arc::new(Self {
             dbpath,
             is_cow_supported,
             snapshots,
@@ -54,7 +55,7 @@ impl SnapshotEngine {
         slot: u64,
         mmap: &[u8],
         lock: RwLockWriteGuard<()>,
-    ) -> AdbResult<()> {
+    ) -> AccountsDbResult<()> {
         let slot = SnapSlot(slot);
         // this lock is always free, as we take StWLock higher up in the call stack and
         // only one thread can take snapshots, namely the one that advances the slot
@@ -80,18 +81,6 @@ impl SnapshotEngine {
         Ok(())
     }
 
-    /// Provides read-only access to the internal snapshots queue.
-    ///
-    /// Executes the given closure `f` with an immutable reference to the snapshots [`VecDeque`].
-    /// This guarantees thread-safe access while preventing modification of the underlying data.
-    pub(crate) fn with_snapshots<F, R>(&self, f: F) -> R
-    where
-        F: Fn(&VecDeque<PathBuf>) -> R,
-    {
-        let snapshots = self.snapshots.lock();
-        f(&snapshots)
-    }
-
     /// Try to rollback to snapshot which is the most recent one before given slot
     ///
     /// NOTE: In case of success, this deletes the primary
@@ -99,7 +88,7 @@ impl SnapshotEngine {
     pub(crate) fn try_switch_to_snapshot(
         &self,
         mut slot: u64,
-    ) -> AdbResult<u64> {
+    ) -> AccountsDbResult<u64> {
         let mut spath =
             SnapSlot(slot).as_path(Self::snapshots_dir(&self.dbpath));
         let mut snapshots = self.snapshots.lock(); // free lock
@@ -242,10 +231,6 @@ impl SnapSlot {
     fn as_path(&self, ppath: &Path) -> PathBuf {
         // enforce strict alphanumeric ordering by introducing extra padding
         ppath.join(format!("snapshot-{:0>12}", self.0))
-    }
-
-    pub(crate) fn slot(&self) -> u64 {
-        self.0
     }
 }
 

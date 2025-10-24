@@ -1,0 +1,25 @@
+[package]
+name = "program-mini"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "program_mini"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+solana-program = { workspace = true }
+solana-sdk-ids = { workspace = true }
+solana-system-interface = { workspace = true, features = ["bincode"] }
+
+[dev-dependencies]
+solana-program-test = { workspace = true }
+solana-sdk = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+
+[features]
+no-entrypoint = []
+custom-heap = []
+custom-panic = []
+cpi = ["no-entrypoint"]
+default = []

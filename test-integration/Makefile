@@ -1,8 +1,9 @@
+# Makefile for building and testing Solana programs and test suitesk
 DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 DEPLOY_DIR := $(DIR)target/deploy
 ROOT_DEPLOY_DIR := $(DIR)../target/deploy
 
-RUST_LOG ?= 'warn,geyser_plugin=warn,magicblock=trace,rpc=trace,bank=trace,banking_stage=warn,solana_geyser_plugin_manager=warn,solana_svm=warn,test_tools=trace,schedulecommit_test=trace,' \
+RUST_LOG ?= 'warn,geyser_plugin=warn,magicblock=trace,magicblock_chainlink::remote_account_provider::chain_pubsub_actor=debug,rpc=trace,bank=trace,banking_stage=warn,solana_geyser_plugin_manager=warn,solana_svm=warn,test_tools=trace,schedulecommit_test=trace,'
 
 FLEXI_COUNTER_DIR := $(DIR)programs/flexi-counter
 SCHEDULECOMMIT_DIR := $(DIR)programs/schedulecommit
@@ -26,12 +27,15 @@ list:
 list-programs:
 	@echo $(PROGRAMS_SO)
 
+programs: $(PROGRAMS_SO)
+
 test: $(PROGRAMS_SO)
+	$(MAKE) chainlink-prep-programs -C ./test-chainlink && \
 	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \
 	cargo run --package test-runner --bin run-tests
 
-test-force-mb: $(PROGRAMS_SO) test-ledger-restore
+test-force-mb: $(PROGRAMS_SO)
 	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
 	cargo run --package test-runner --bin run-tests
@@ -40,34 +44,44 @@ test-schedulecommit:
 	RUN_TESTS=schedulecommit \
 	$(MAKE) test
 setup-schedulecommit-devnet:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedulecommit \
 	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-schedulecommit-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=schedulecommit \
+	SETUP_ONLY=ephem \
 	$(MAKE) test
 setup-schedulecommit-both:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedulecommit \
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-issues-frequent-commits:
-	RUN_TESTS=issues_frequent_commits \
+test-chainlink:
+	RUN_TESTS=chainlink \
 	$(MAKE) test
-setup-issues-frequent-commits-devnet:
-	RUN_TESTS=issues_frequent_commits \
+setup-chainlink-devnet:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=chainlink \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
-setup-issues-frequent-commits-both:
-	RUN_TESTS=issues_frequent_commits \
-	SETUP_ONLY=both \
-	$(MAKE) test
-
 test-cloning:
 	RUN_TESTS=cloning \
 	$(MAKE) test
 setup-cloning-devnet:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=cloning \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-cloning-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=cloning \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-cloning-both:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=cloning \
 	SETUP_ONLY=both \
 	$(MAKE) test
@@ -76,6 +90,7 @@ test-restore-ledger:
 	RUN_TESTS=restore_ledger \
 	$(MAKE) test
 setup-restore-ledger-devnet:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=restore_ledger \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
@@ -84,10 +99,17 @@ test-magicblock-api:
 	RUN_TESTS=magicblock_api \
 	$(MAKE) test
 setup-magicblock-api-devnet:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=magicblock_api \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-magicblock-api-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=magicblock_api \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-magicblock-api-both:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=magicblock_api \
 	SETUP_ONLY=both \
 	$(MAKE) test
@@ -96,6 +118,7 @@ test-table-mania:
 	RUN_TESTS=table_mania \
 	$(MAKE) test
 setup-table-mania-devnet:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=table_mania \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
@@ -104,6 +127,7 @@ test-committor:
 	RUN_TESTS=committor \
 	$(MAKE) test
 setup-committor-devnet:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=committor \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
@@ -111,15 +135,27 @@ setup-committor-devnet:
 test-pubsub:
 	RUN_TESTS=pubsub \
 	$(MAKE) test
+setup-pubsub-devnet:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=pubsub \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
 setup-pubsub-ephem:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=pubsub \
 	SETUP_ONLY=ephem \
+	$(MAKE) test
+setup-pubsub-both:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=pubsub \
+	SETUP_ONLY=both \
 	$(MAKE) test
 
 test-config:
 	RUN_TESTS=config \
 	$(MAKE) test
 setup-config-devnet:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=config \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
@@ -128,14 +164,21 @@ test-schedule-intents:
 	RUN_TESTS=schedule_intents \
 	$(MAKE) test
 setup-schedule-intents-devnet:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedule_intents \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
+setup-schedule-intents-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=schedule_intents \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
 setup-schedule-intents-both:
+	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedule_intents \
 	SETUP_ONLY=both \
 	$(MAKE) test
-	
+
 test-task-scheduler:
 	RUN_TESTS=task-scheduler \
 	$(MAKE) test
@@ -145,13 +188,17 @@ setup-task-scheduler-devnet:
 	$(MAKE) test
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
-	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
+	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml \
+		--sbf-out-dir $(DEPLOY_DIR)
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
-	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml
+	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml \
+		--sbf-out-dir $(DEPLOY_DIR)
 $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
-	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml
+	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml \
+		--sbf-out-dir $(DEPLOY_DIR)
 $(COMMITTOR_PROGRAM_SO): $(COMMITTOR_PROGRAM_SRC)
-	cargo build-sbf --manifest-path $(COMMITTOR_PROGRAM_DIR)/Cargo.toml
+	cargo build-sbf --manifest-path $(COMMITTOR_PROGRAM_DIR)/Cargo.toml \
+	--sbf-out-dir $(ROOT_DEPLOY_DIR)/
 
 deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 	solana program deploy \
@@ -169,4 +216,45 @@ ci-fmt:
 ci-lint:
 	cargo clippy --all-targets -- -D warnings
 
-.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config test-task-scheduler deploy-flexi-counter list ci-fmt ci-lint
+.PHONY: \
+	ci-fmt \
+	ci-lint \
+	deploy-flexi-counter \
+	fmt \
+	list \
+	list-programs \
+	programs \
+	setup-chainlink-devnet \
+	setup-cloning-both \
+	setup-cloning-devnet \
+	setup-cloning-ephem \
+	setup-committor-devnet \
+	setup-config-devnet \
+	setup-magicblock-api-both \
+	setup-magicblock-api-devnet \
+	setup-magicblock-api-ephem \
+	setup-pubsub-both \
+	setup-pubsub-devnet \
+	setup-pubsub-ephem \
+	setup-restore-ledger-devnet \
+	setup-schedule-intents-both \
+	setup-schedule-intents-devnet \
+	setup-schedule-intents-ephem \
+	setup-schedulecommit-both \
+	setup-schedulecommit-devnet \
+	setup-schedulecommit-ephem \
+	setup-table-mania-devnet \
+	setup-task-scheduler-devnet \
+	test \
+	test-chainlink \
+	test-cloning \
+	test-committor \
+	test-config \
+	test-force-mb \
+	test-magicblock-api \
+	test-pubsub \
+	test-restore-ledger \
+	test-schedule-intents \
+	test-schedulecommit \
+	test-table-mania \
+	test-task-scheduler

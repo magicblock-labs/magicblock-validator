@@ -10,6 +10,7 @@ use std::{
 
 use bincode::{deserialize, serialize};
 use log::*;
+use magicblock_core::link::blocks::BlockHash;
 use rocksdb::{Direction as IteratorDirection, FlushOptions};
 use solana_measure::measure::Measure;
 use solana_sdk::{
@@ -29,8 +30,7 @@ use solana_transaction_status::{
 use crate::{
     conversions::transaction,
     database::{
-        columns as cf,
-        columns::{Column, ColumnName, DIRTY_COUNT},
+        columns::{self as cf, Column, ColumnName, DIRTY_COUNT},
         db::Database,
         iterator::IteratorMode,
         ledger_column::{try_increase_entry_counter, LedgerColumn},
@@ -40,6 +40,7 @@ use crate::{
     errors::{LedgerError, LedgerResult},
     metrics::LedgerRpcApiMetrics,
     store::utils::adjust_ulimit_nofile,
+    LatestBlock,
 };
 
 #[derive(Default, Debug)]
@@ -68,6 +69,7 @@ pub struct Ledger {
 
     lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
+    latest_block: LatestBlock,
 }
 
 impl fmt::Display for Ledger {
@@ -143,6 +145,7 @@ impl Ledger {
 
         measure.stop();
         info!("Opening ledger done; {measure}");
+        let latest_block = LatestBlock::default();
 
         let ledger = Ledger {
             ledger_path: ledger_path.to_path_buf(),
@@ -163,7 +166,11 @@ impl Ledger {
 
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             rpc_api_metrics: LedgerRpcApiMetrics::default(),
+            latest_block,
         };
+        let (slot, blockhash) = ledger.get_max_blockhash()?;
+        let time = ledger.get_block_time(slot)?.unwrap_or_default();
+        ledger.latest_block.store(slot, blockhash, time);
 
         Ok(ledger)
     }
@@ -319,6 +326,7 @@ impl Ledger {
 
         self.blockhash_cf.put(slot, &blockhash)?;
         self.blockhash_cf.try_increase_entry_counter(1);
+        self.latest_block.store(slot, blockhash, timestamp);
         Ok(())
     }
 
@@ -1309,6 +1317,15 @@ impl Ledger {
 
         Ok(())
     }
+
+    /// Cached latest block data
+    pub fn latest_block(&self) -> &LatestBlock {
+        &self.latest_block
+    }
+
+    pub fn latest_blockhash(&self) -> BlockHash {
+        self.latest_block.load().blockhash
+    }
 }
 
 // -----------------
@@ -1332,7 +1349,6 @@ mod tests {
         VersionedTransactionWithStatusMeta,
     };
     use tempfile::{Builder, TempDir};
-    use test_tools_core::init_logger;
 
     use super::*;
 
@@ -1496,8 +1512,6 @@ mod tests {
 
     #[test]
     fn test_persist_transaction_status() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1561,8 +1575,6 @@ mod tests {
 
     #[test]
     fn test_get_transaction_status_by_signature() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1642,8 +1654,6 @@ mod tests {
 
     #[test]
     fn test_get_complete_transaction_by_signature() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1727,8 +1737,6 @@ mod tests {
 
     #[test]
     fn test_find_address_signatures_no_intra_slot_limits() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2081,8 +2089,6 @@ mod tests {
 
     #[test]
     fn test_find_address_signatures_intra_slot_limits() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2328,8 +2334,6 @@ mod tests {
 
     #[test]
     fn test_get_confirmed_signatures_with_memos() {
-        init_logger!();
-
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2432,7 +2436,6 @@ mod tests {
 
     #[test]
     fn test_truncate_slots() {
-        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 

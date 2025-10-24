@@ -3,13 +3,13 @@ use std::net::{IpAddr, Ipv4Addr};
 use isocountry::CountryCode;
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, AccountsDbConfig, AllowedProgram,
-    BlockSize, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
-    LifecycleMode, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
-    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, TaskSchedulerConfig,
+    BlockSize, CommitStrategyConfig, EphemeralConfig, LedgerConfig,
+    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
+    MetricsConfig, MetricsServiceConfig, PrepareLookupTables, ProgramConfig,
+    RemoteCluster, RemoteConfig, RpcConfig, TaskSchedulerConfig,
     ValidatorConfig,
 };
-use solana_sdk::pubkey;
+use solana_pubkey::pubkey;
 use url::Url;
 
 #[test]
@@ -105,7 +105,6 @@ fn test_local_dev_with_programs_toml() {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 7799,
-                max_ws_connections: 16384
             },
             validator: ValidatorConfig {
                 millis_per_slot: 14,
@@ -113,10 +112,6 @@ fn test_local_dev_with_programs_toml() {
             },
             ledger: LedgerConfig {
                 ..Default::default()
-            },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                port: 11_000
             },
             metrics: MetricsConfig {
                 enabled: true,
@@ -254,11 +249,6 @@ fn test_everything_defined() {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 7799,
-                max_ws_connections: 1000,
-            },
-            geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                port: 11_000
             },
             validator: ValidatorConfig {
                 sigverify: true,
@@ -320,7 +310,6 @@ path = "/tmp/program.so"
 "#;
 
     let res = toml::from_str::<EphemeralConfig>(toml);
-    eprintln!("{:?}", res);
     assert!(res.is_err());
 }
 

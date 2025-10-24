@@ -1,35 +1,28 @@
 use std::{path::Path, process::Child};
 
-use cleanass::{assert, assert_eq};
+use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, validator::cleanup, IntegrationTestContext,
+    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
 use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
+    rent::Rent,
     signature::{Keypair, Signer},
-    system_instruction,
-    transaction::Transaction,
 };
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    airdrop_and_delegate_accounts, setup_offline_validator,
+    setup_validator_with_local_remote, transfer_lamports,
+    wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;
 
 #[test]
-fn restore_ledger_with_multiple_dependent_transactions_same_slot() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+fn test_restore_ledger_with_multiple_dependent_transactions_same_slot() {
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
-    let keypairs = vec![
-        Keypair::new(),
-        Keypair::new(),
-        Keypair::new(),
-        Keypair::new(),
-        Keypair::new(),
-    ];
-
-    let (mut validator, _) = write(&ledger_path, &keypairs, false);
+    let (mut validator, _, keypairs) = write(&ledger_path, false);
     validator.kill().unwrap();
 
     let mut validator = read(&ledger_path, &keypairs);
@@ -37,18 +30,10 @@ fn restore_ledger_with_multiple_dependent_transactions_same_slot() {
 }
 
 #[test]
-fn restore_ledger_with_multiple_dependent_transactions_separate_slot() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+fn test_restore_ledger_with_multiple_dependent_transactions_separate_slot() {
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
-    let keypairs = vec![
-        Keypair::new(),
-        Keypair::new(),
-        Keypair::new(),
-        Keypair::new(),
-        Keypair::new(),
-    ];
-
-    let (mut validator, _) = write(&ledger_path, &keypairs, true);
+    let (mut validator, _, keypairs) = write(&ledger_path, true);
     validator.kill().unwrap();
 
     let mut validator = read(&ledger_path, &keypairs);
@@ -57,61 +42,41 @@ fn restore_ledger_with_multiple_dependent_transactions_separate_slot() {
 
 fn write(
     ledger_path: &Path,
-    keypairs: &[Keypair],
     separate_slot: bool,
-) -> (Child, u64) {
-    fn transfer(
-        validator: &mut Child,
-        ctx: &IntegrationTestContext,
-        from: &Keypair,
-        to: &Keypair,
-        amount: u64,
-    ) {
-        let ix =
-            system_instruction::transfer(&from.pubkey(), &to.pubkey(), amount);
-        let mut tx = Transaction::new_with_payer(&[ix], Some(&from.pubkey()));
-        let signers = &[from];
-        let (_, confirmed) = expect!(
-            ctx.send_and_confirm_transaction_ephem(&mut tx, signers),
-            validator
-        );
-        assert!(confirmed, cleanup(validator));
-    }
-
-    let (_, mut validator, ctx) = setup_offline_validator(
+) -> (Child, u64, Vec<Keypair>) {
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
-        Some(SLOT_MS),
-        LedgerResumeStrategy::Reset {
-            slot: 0,
-            keep_accounts: false,
-        },
-        false,
+        true,
+        true,
+        &Default::default(),
     );
 
     let mut slot = 1;
     expect!(ctx.wait_for_slot_ephem(slot), validator);
 
     // We are executing 5 transactions which fail if they execute in the wrong order
-    // since the sender account is always created in the transaction right before the
-    // transaction where it sends lamports
+    // since the sender account is transferred lamports to in the transaction right before the
+    // transaction where it sends lamports to the next account.
+    // The transfers are such that the account would not have enough lamports to send if the
+    // transactions were to execute out of order.
 
-    // 1. Airdrop 5 SOL to first account
-    expect!(
-        ctx.airdrop_ephem(&keypairs[0].pubkey(), 5 * LAMPORTS_PER_SOL),
-        validator
-    );
+    // 1. Airdrop 5 SOL to first account and only rent exempt the rest
+    let mut lamports = vec![Rent::default().minimum_balance(0); 5];
+    lamports[0] += 5 * LAMPORTS_PER_SOL;
+    let keypairs =
+        airdrop_and_delegate_accounts(&ctx, &mut validator, &lamports);
 
     // 2. Transfer 4 SOL from first account to second account
     if separate_slot {
         slot += 1;
         expect!(ctx.wait_for_slot_ephem(slot), validator);
     }
-    transfer(
-        &mut validator,
+    transfer_lamports(
         &ctx,
+        &mut validator,
         &keypairs[0],
-        &keypairs[1],
+        &keypairs[1].pubkey(),
         4 * LAMPORTS_PER_SOL,
     );
 
@@ -120,11 +85,11 @@ fn write(
         slot += 1;
         expect!(ctx.wait_for_slot_ephem(slot), validator);
     }
-    transfer(
-        &mut validator,
+    transfer_lamports(
         &ctx,
+        &mut validator,
         &keypairs[1],
-        &keypairs[2],
+        &keypairs[2].pubkey(),
         3 * LAMPORTS_PER_SOL,
     );
 
@@ -133,11 +98,11 @@ fn write(
         slot += 1;
         expect!(ctx.wait_for_slot_ephem(slot), validator);
     }
-    transfer(
-        &mut validator,
+    transfer_lamports(
         &ctx,
+        &mut validator,
         &keypairs[2],
-        &keypairs[3],
+        &keypairs[3].pubkey(),
         2 * LAMPORTS_PER_SOL,
     );
 
@@ -146,17 +111,17 @@ fn write(
         slot += 1;
         expect!(ctx.wait_for_slot_ephem(slot), validator);
     }
-    transfer(
-        &mut validator,
+    transfer_lamports(
         &ctx,
+        &mut validator,
         &keypairs[3],
-        &keypairs[4],
+        &keypairs[4].pubkey(),
         LAMPORTS_PER_SOL,
     );
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
-    (validator, slot)
+    (validator, slot, keypairs)
 }
 
 fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
@@ -178,7 +143,11 @@ fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
         // with exactly 1 SOL.
         // In the future we need to adapt this to allow for a range, i.e.
         // 0.9 SOL <= lamports <= 1 SOL
-        assert_eq!(acc.lamports, LAMPORTS_PER_SOL, cleanup(&mut validator));
+        assert_eq!(
+            acc.lamports,
+            Rent::default().minimum_balance(0) + LAMPORTS_PER_SOL,
+            cleanup(&mut validator)
+        );
     }
     validator
 }

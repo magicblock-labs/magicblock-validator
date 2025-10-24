@@ -15,7 +15,7 @@ pub fn process_commit_action_handler(
 ) -> ProgramResult {
     msg!("CommitActionHandler");
 
-    let [_, escrow_account, delegated_account, destination_account, system_program] =
+    let [delegated_account, destination_account, system_program, _, escrow_account] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -50,7 +50,7 @@ pub fn process_undelegate_action_handler(
 ) -> ProgramResult {
     msg!("UndelegateActionHandler");
 
-    let [_, escrow_account, undelegated_counter, destination_account, system_program] =
+    let [undelegated_counter, destination_account, system_program, _, escrow_account] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);

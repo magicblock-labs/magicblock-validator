@@ -5,9 +5,28 @@ use solana_rpc_client_api::config::{
     RpcTransactionLogsConfig, RpcTransactionLogsFilter,
 };
 use solana_sdk::signer::Signer;
-use test_pubsub::PubSubEnv;
+use test_pubsub::{drain_stream, PubSubEnv};
 
-#[tokio::test]
+// We may get other updates before the one we're waiting for
+// i.e. when an account is cloned
+macro_rules! wait_for_update_with_sig {
+    ($rx:expr, $sig:expr) => {{
+        loop {
+            let update =
+                tokio::time::timeout(Duration::from_millis(100), $rx.next())
+                    .await
+                    .expect("timeout waiting for txn log update")
+                    .expect(
+                        "failed to receive signature update after tranfer txn",
+                    );
+            if update.value.signature == $sig {
+                break update;
+            }
+        }
+    }};
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_logs_subscribe_all() {
     const TRANSFER_AMOUNT: u64 = 10_000;
     let env = PubSubEnv::new().await;
@@ -21,14 +40,13 @@ async fn test_logs_subscribe_all() {
         .await
         .expect("failed to subscribe to txn logs");
     for _ in 0..5 {
-        let signature = env.transfer(TRANSFER_AMOUNT).await.to_string();
+        let signature = env.transfer(TRANSFER_AMOUNT);
 
-        let update = rx
-            .next()
-            .await
-            .expect("failed to receive signature update after tranfer txn");
+        let update = wait_for_update_with_sig!(rx, signature.to_string());
+
         assert_eq!(
-            update.value.signature, signature,
+            update.value.signature,
+            signature.to_string(),
             "should have received executed transaction log"
         );
         assert!(update.value.err.is_none());
@@ -36,6 +54,7 @@ async fn test_logs_subscribe_all() {
         tokio::time::sleep(Duration::from_millis(100)).await
     }
 
+    drain_stream!(&mut rx);
     cancel().await;
     assert_eq!(
         rx.next().await,
@@ -44,7 +63,7 @@ async fn test_logs_subscribe_all() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_logs_subscribe_mentions() {
     const TRANSFER_AMOUNT: u64 = 10_000;
     let env = PubSubEnv::new().await;
@@ -71,21 +90,21 @@ async fn test_logs_subscribe_mentions() {
         )
         .await
         .expect("failed to subscribe to txn logs for account 2");
-    let sinature = env.transfer(TRANSFER_AMOUNT).await.to_string();
+    let signature = env.transfer(TRANSFER_AMOUNT);
     for rx in [&mut rx1, &mut rx2] {
-        let update = rx
-            .next()
-            .await
-            .expect("failed to receive signature update after tranfer txn");
+        let update = wait_for_update_with_sig!(rx, signature.to_string());
         assert_eq!(
-            update.value.signature, sinature,
+            update.value.signature,
+            signature.to_string(),
             "should have received executed transaction log"
         );
         assert!(update.value.err.is_none());
         assert!(!update.value.logs.is_empty());
     }
 
+    drain_stream!(&mut rx1);
     cancel1().await;
+    drain_stream!(&mut rx2);
     cancel2().await;
     assert_eq!(
         rx1.next().await,

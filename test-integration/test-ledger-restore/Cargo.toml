@@ -7,13 +7,18 @@ edition.workspace = true
 anyhow = { workspace = true }
 cleanass = { workspace = true }
 integration-test-tools = { workspace = true }
+log = { workspace = true }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 magicblock-accounts-db = { workspace = true }
 magicblock-config = { workspace = true }
+magicblock-delegation-program = { workspace = true, features = [
+  "no-entrypoint",
+] }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }
 tempfile = { workspace = true }
+test-kit = { workspace = true }
 
 [lints.clippy]
 zombie_processes = "allow"

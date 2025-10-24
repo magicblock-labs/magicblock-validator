@@ -1,17 +1,15 @@
 use std::path::Path;
 
-use magicblock_bank::bank::Bank;
-use magicblock_magic_program_api::{
-    self, MAGIC_CONTEXT_PUBKEY, TASK_CONTEXT_PUBKEY,
-};
+use magicblock_accounts_db::AccountsDb;
+use magicblock_core::traits::AccountsBank;
+use magicblock_magic_program_api as magic_program;
+use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
 use magicblock_program::{MagicContext, TaskContext};
 use solana_sdk::{
-    account::{Account, WritableAccount},
-    clock::Epoch,
+    account::{AccountSharedData, WritableAccount},
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
-    system_program,
 };
 
 use crate::{
@@ -19,37 +17,38 @@ use crate::{
     ledger::{read_faucet_keypair_from_ledger, write_faucet_keypair_to_ledger},
 };
 
-pub(crate) fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
-    fund_account_with_data(bank, pubkey, lamports, vec![]);
+pub(crate) fn fund_account(
+    accountsdb: &AccountsDb,
+    pubkey: &Pubkey,
+    lamports: u64,
+) {
+    fund_account_with_data(accountsdb, pubkey, lamports, 0);
 }
 
 pub(crate) fn fund_account_with_data(
-    bank: &Bank,
+    accountsdb: &AccountsDb,
     pubkey: &Pubkey,
     lamports: u64,
-    data: Vec<u8>,
+    size: usize,
 ) {
-    if let Some(mut acc) = bank.get_account(pubkey) {
+    let account = if let Some(mut acc) = accountsdb.get_account(pubkey) {
         acc.set_lamports(lamports);
-        acc.set_data(data);
-        bank.store_account(*pubkey, acc);
+        acc.set_data(vec![0; size]);
+        acc
     } else {
-        bank.store_account(
-            *pubkey,
-            Account {
-                lamports,
-                data,
-                owner: system_program::id(),
-                executable: false,
-                rent_epoch: Epoch::MAX,
-            }
-            .into(),
-        );
-    }
+        AccountSharedData::new(lamports, size, &Default::default())
+    };
+    accountsdb.insert_account(pubkey, &account);
 }
 
-pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
-    fund_account(bank, validator_id, u64::MAX / 2);
+pub(crate) fn init_validator_identity(
+    accountsdb: &AccountsDb,
+    validator_id: &Pubkey,
+) {
+    fund_account(accountsdb, validator_id, u64::MAX / 2);
+    let mut authority = accountsdb.get_account(validator_id).unwrap();
+    authority.as_borrowed_mut().unwrap().set_privileged(true);
+    accountsdb.insert_account(validator_id, &authority);
 }
 
 /// Funds the faucet account.
@@ -57,7 +56,7 @@ pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
 /// existing ledger and an error is raised if it is not found.
 /// Otherwise, a new faucet keypair will be created and saved to the ledger.
 pub(crate) fn funded_faucet(
-    bank: &Bank,
+    accountsdb: &AccountsDb,
     ledger_path: &Path,
 ) -> ApiResult<Keypair> {
     let faucet_keypair = match read_faucet_keypair_from_ledger(ledger_path) {
@@ -69,24 +68,36 @@ pub(crate) fn funded_faucet(
         }
     };
 
-    fund_account(bank, &faucet_keypair.pubkey(), u64::MAX / 2);
+    fund_account(accountsdb, &faucet_keypair.pubkey(), u64::MAX / 2);
     Ok(faucet_keypair)
 }
 
-pub(crate) fn fund_magic_context(bank: &Bank) {
+pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
     fund_account_with_data(
-        bank,
-        &MAGIC_CONTEXT_PUBKEY,
+        accountsdb,
+        &magic_program::MAGIC_CONTEXT_PUBKEY,
         u64::MAX,
-        MagicContext::ZERO.to_vec(),
+        MagicContext::SIZE,
     );
+    let mut magic_context = accountsdb
+        .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+        .unwrap();
+    magic_context.set_delegated(true);
+    accountsdb
+        .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
 }
 
-pub(crate) fn fund_task_context(bank: &Bank) {
+pub(crate) fn fund_task_context(accountsdb: &AccountsDb) {
     fund_account_with_data(
-        bank,
+        accountsdb,
         &TASK_CONTEXT_PUBKEY,
         u64::MAX,
-        TaskContext::ZERO.to_vec(),
+        TaskContext::SIZE,
     );
+    let mut task_context = accountsdb
+        .get_account(&magic_program::TASK_CONTEXT_PUBKEY)
+        .unwrap();
+    task_context.set_delegated(true);
+    accountsdb
+        .insert_account(&magic_program::TASK_CONTEXT_PUBKEY, &task_context);
 }

@@ -1,0 +1,29 @@
+[package]
+name = "test-kit"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+guinea = { workspace = true }
+magicblock-accounts-db = { workspace = true }
+magicblock-core = { workspace = true }
+magicblock-ledger = { workspace = true }
+magicblock-processor = { workspace = true }
+
+solana-account = { workspace = true }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
+solana-program = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-signature = { workspace = true }
+solana-signer = { workspace = true }
+solana-transaction = { workspace = true }
+solana-transaction-status-client-types = { workspace = true }
+
+env_logger = { workspace = true }
+log = { workspace = true }
+tempfile = { workspace = true }

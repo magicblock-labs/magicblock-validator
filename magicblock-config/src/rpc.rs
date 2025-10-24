@@ -23,9 +23,17 @@ pub struct RpcConfig {
     #[arg(help = "The port the RPC will listen on.")]
     #[serde(default = "default_port")]
     pub port: u16,
-    #[arg(help = "The max number of WebSocket connections to accept.")]
-    #[serde(default = "default_max_ws_connections")]
-    pub max_ws_connections: usize,
+}
+
+impl RpcConfig {
+    pub fn merge(&mut self, other: RpcConfig) {
+        if self.addr == default_addr() && other.addr != default_addr() {
+            self.addr = other.addr;
+        }
+        if self.port == default_port() && other.port != default_port() {
+            self.port = other.port;
+        }
+    }
 }
 
 impl Default for RpcConfig {
@@ -33,7 +41,6 @@ impl Default for RpcConfig {
         Self {
             addr: default_addr(),
             port: default_port(),
-            max_ws_connections: default_max_ws_connections(),
         }
     }
 }
@@ -77,14 +84,8 @@ fn default_port() -> u16 {
     8899
 }
 
-fn default_max_ws_connections() -> usize {
-    16384
-}
-
 #[cfg(test)]
 mod tests {
-    use magicblock_config_helpers::Merge;
-
     use super::*;
 
     #[test]
@@ -92,7 +93,6 @@ mod tests {
         let mut config = RpcConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
             port: 9090,
-            max_ws_connections: 8008,
         };
         let original_config = config.clone();
         let other = RpcConfig::default();
@@ -108,7 +108,6 @@ mod tests {
         let other = RpcConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
             port: 9090,
-            max_ws_connections: 8008,
         };
 
         config.merge(other.clone());
@@ -121,13 +120,11 @@ mod tests {
         let mut config = RpcConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 1, 127)),
             port: 9091,
-            max_ws_connections: 8009,
         };
         let original_config = config.clone();
         let other = RpcConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
             port: 9090,
-            max_ws_connections: 8008,
         };
 
         config.merge(other);

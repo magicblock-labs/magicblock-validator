@@ -4,73 +4,87 @@ use std::{
 };
 
 use async_trait::async_trait;
-use conjunto_transwise::AccountChainSnapshot;
 use log::{debug, error, info, warn};
-use magicblock_account_cloner::{AccountClonerOutput, CloneOutputMap};
-use magicblock_bank::bank::Bank;
+use magicblock_account_cloner::ChainlinkCloner;
+use magicblock_accounts_db::AccountsDb;
+use magicblock_chainlink::{
+    remote_account_provider::{
+        chain_pubsub_client::ChainPubsubClientImpl,
+        chain_rpc_client::ChainRpcClientImpl,
+    },
+    submux::SubMuxClient,
+    Chainlink,
+};
 use magicblock_committor_service::{
     intent_execution_manager::{
         BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
     },
     intent_executor::ExecutionOutput,
     types::{ScheduledBaseIntentWrapper, TriggerType},
-    BaseIntentCommittor,
+    BaseIntentCommittor, CommittorService,
 };
-use magicblock_processor::execute_transaction::execute_legacy_transaction;
+use magicblock_core::{
+    link::transactions::TransactionSchedulerHandle, traits::AccountsBank,
+};
 use magicblock_program::{
-    magic_scheduled_base_intent::{CommittedAccount, ScheduledBaseIntent},
-    register_scheduled_commit_sent, FeePayerAccount, SentCommit,
-    TransactionScheduler,
+    magic_scheduled_base_intent::ScheduledBaseIntent,
+    register_scheduled_commit_sent, SentCommit, TransactionScheduler,
 };
-use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     hash::Hash, pubkey::Pubkey, signature::Signature, transaction::Transaction,
 };
-use tokio::sync::{broadcast, oneshot};
+use tokio::{
+    sync::{broadcast, oneshot},
+    task,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     errors::ScheduledCommitsProcessorResult, ScheduledCommitsProcessor,
 };
 
-const POISONED_RWLOCK_MSG: &str =
-    "RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned";
 const POISONED_MUTEX_MSG: &str =
     "Mutex of RemoteScheduledCommitsProcessor.intents_meta_map is poisoned";
 
-pub struct ScheduledCommitsProcessorImpl<C: BaseIntentCommittor> {
-    bank: Arc<Bank>,
-    committor: Arc<C>,
+pub type ChainlinkImpl = Chainlink<
+    ChainRpcClientImpl,
+    SubMuxClient<ChainPubsubClientImpl>,
+    AccountsDb,
+    ChainlinkCloner,
+>;
+
+pub struct ScheduledCommitsProcessorImpl {
+    accounts_bank: Arc<AccountsDb>,
+    committor: Arc<CommittorService>,
+    chainlink: Arc<ChainlinkImpl>,
     cancellation_token: CancellationToken,
     intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-    cloned_accounts: CloneOutputMap,
     transaction_scheduler: TransactionScheduler,
 }
 
-impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
+impl ScheduledCommitsProcessorImpl {
     pub fn new(
-        bank: Arc<Bank>,
-        cloned_accounts: CloneOutputMap,
-        committor: Arc<C>,
-        transaction_status_sender: TransactionStatusSender,
+        accounts_bank: Arc<AccountsDb>,
+        committor: Arc<CommittorService>,
+        chainlink: Arc<ChainlinkImpl>,
+        internal_transaction_scheduler: TransactionSchedulerHandle,
     ) -> Self {
         let result_subscriber = committor.subscribe_for_results();
         let intents_meta_map = Arc::new(Mutex::default());
         let cancellation_token = CancellationToken::new();
         tokio::spawn(Self::result_processor(
-            bank.clone(),
             result_subscriber,
             cancellation_token.clone(),
             intents_meta_map.clone(),
-            transaction_status_sender,
+            internal_transaction_scheduler.clone(),
         ));
 
         Self {
-            bank,
+            accounts_bank,
             committor,
+            chainlink,
             cancellation_token,
             intents_meta_map,
-            cloned_accounts,
             transaction_scheduler: TransactionScheduler::default(),
         }
     }
@@ -78,115 +92,95 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
     fn preprocess_intent(
         &self,
         mut base_intent: ScheduledBaseIntent,
-    ) -> (
-        ScheduledBaseIntentWrapper,
-        Vec<Pubkey>,
-        HashSet<FeePayerAccount>,
-    ) {
+    ) -> (ScheduledBaseIntentWrapper, Vec<Pubkey>, Vec<Pubkey>) {
+        let is_undelegate = base_intent.is_undelegate();
         let Some(committed_accounts) = base_intent.get_committed_accounts_mut()
         else {
             let intent = ScheduledBaseIntentWrapper {
                 inner: base_intent,
                 trigger_type: TriggerType::OnChain,
             };
-            return (intent, vec![], HashSet::new());
+            return (intent, vec![], vec![]);
         };
 
-        struct Processor<'a> {
-            excluded_pubkeys: HashSet<Pubkey>,
-            feepayers: HashSet<FeePayerAccount>,
-            bank: &'a Bank,
-        }
-
-        impl Processor<'_> {
-            /// Handles case when committed account is feepayer
-            /// Returns `true` if account should be retained, `false` otherwise
-            fn process_feepayer(
-                &mut self,
-                account: &mut CommittedAccount,
-            ) -> bool {
-                let pubkey = account.pubkey;
-                let ephemeral_pubkey =
-                    AccountChainSnapshot::ephemeral_balance_pda(&pubkey);
-                self.feepayers.insert(FeePayerAccount {
-                    pubkey,
-                    delegated_pda: ephemeral_pubkey,
-                });
-
-                // We commit escrow, its data kept under FeePayer's address
-                if let Some(account_data) = self.bank.get_account(&pubkey) {
-                    account.pubkey = ephemeral_pubkey;
-                    account.account = account_data.into();
-                    true
-                } else {
-                    // TODO(edwin): shouldn't be possible.. Should be a panic
-                    error!(
-                        "Scheduled commit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
+        let mut excluded_pubkeys = vec![];
+        let mut pubkeys_being_undelegated = vec![];
+        // Retains only account that are valid to be committed (all delegated ones)
+        committed_accounts.retain_mut(|account| {
+            let pubkey = account.pubkey;
+            let acc = self.accounts_bank.get_account(&pubkey);
+            match acc {
+                Some(acc) => {
+                    if acc.delegated() {
+                        if is_undelegate {
+                            pubkeys_being_undelegated.push(pubkey);
+                        }
+                        true
+                    } else {
+                        excluded_pubkeys.push(pubkey);
+                        false
+                    }
+                }
+                None => {
+                    warn!(
+                        "Account {} not found in AccountsDb, skipping from commit",
                         pubkey
                     );
-                    self.excluded_pubkeys.insert(pubkey);
                     false
                 }
             }
-        }
-
-        let mut processor = Processor {
-            excluded_pubkeys: HashSet::new(),
-            feepayers: HashSet::new(),
-            bank: &self.bank,
-        };
-
-        // Retains onlu account that are valid to be commited
-        committed_accounts.retain_mut(|account| {
-            let pubkey = account.pubkey;
-            let cloned_accounts =
-                self.cloned_accounts.read().expect(POISONED_RWLOCK_MSG);
-            let account_chain_snapshot = match cloned_accounts.get(&pubkey) {
-                Some(AccountClonerOutput::Cloned {
-                    account_chain_snapshot,
-                    ..
-                }) => account_chain_snapshot,
-                Some(AccountClonerOutput::Unclonable { .. }) => {
-                    error!("Unclonable account as part of commit");
-                    return false;
-                }
-                None => {
-                    error!("Account snapshot is absent during commit!");
-                    return false;
-                }
-            };
-
-            if account_chain_snapshot.chain_state.is_feepayer() {
-                // Feepayer case, should actually always return true
-                processor.process_feepayer(account)
-            } else if account_chain_snapshot.chain_state.is_undelegated() {
-                // Can be safely excluded
-                processor.excluded_pubkeys.insert(account.pubkey);
-                false
-            } else {
-                // Means delegated so we keep it
-                true
-            }
         });
 
-        let feepayers = processor.feepayers;
-        let excluded_pubkeys = processor.excluded_pubkeys.into_iter().collect();
         let intent = ScheduledBaseIntentWrapper {
             inner: base_intent,
             trigger_type: TriggerType::OnChain,
         };
 
-        (intent, excluded_pubkeys, feepayers)
+        (intent, excluded_pubkeys, pubkeys_being_undelegated)
+    }
+
+    async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
+        let mut join_set = task::JoinSet::new();
+        for pubkey in pubkeys.into_iter() {
+            let chainlink = self.chainlink.clone();
+            join_set.spawn(async move {
+                (pubkey, chainlink.undelegation_requested(pubkey).await)
+            });
+        }
+        let sub_errors = join_set
+            .join_all()
+            .await
+            .into_iter()
+            .filter_map(|(pubkey, inner_result)| {
+                if let Err(err) = inner_result {
+                    Some(format!(
+                        "Subscribing to account {} failed: {}",
+                        pubkey, err
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if !sub_errors.is_empty() {
+            // Instead of aborting the entire commit we log an error here, however
+            // this means that the undelegated accounts stay in a problematic state
+            // in the validator and are not synced from chain.
+            // We could implement a retry mechanism inside of chainlink in the future.
+            error!(
+                "Failed to subscribe to accounts being undelegated: {:?}",
+                sub_errors
+            );
+        }
     }
 
     async fn result_processor(
-        bank: Arc<Bank>,
         result_subscriber: oneshot::Receiver<
             broadcast::Receiver<BroadcastedIntentExecutionResult>,
         >,
         cancellation_token: CancellationToken,
         intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-        transaction_status_sender: TransactionStatusSender,
+        internal_transaction_scheduler: TransactionSchedulerHandle,
     ) {
         const SUBSCRIPTION_ERR_MSG: &str =
             "Failed to get subscription of results of BaseIntents execution";
@@ -251,8 +245,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
                 Ok(value) => {
                     Self::process_intent_result(
                         intent_id,
-                        &bank,
-                        &transaction_status_sender,
+                        &internal_transaction_scheduler,
                         value,
                         intent_meta,
                     )
@@ -264,8 +257,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
                             warn!("Empty intent was scheduled!");
                             Self::process_empty_intent(
                                 intent_id,
-                                &bank,
-                                &transaction_status_sender,
+                                &internal_transaction_scheduler,
                                 intent_meta
                             ).await;
                         }
@@ -280,8 +272,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
 
     async fn process_intent_result(
         intent_id: u64,
-        bank: &Arc<Bank>,
-        transaction_status_sender: &TransactionStatusSender,
+        internal_transaction_scheduler: &TransactionSchedulerHandle,
         execution_outcome: ExecutionOutputWrapper,
         mut intent_meta: ScheduledBaseIntentMeta,
     ) {
@@ -297,12 +288,9 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
         let sent_commit =
             Self::build_sent_commit(intent_id, chain_signatures, intent_meta);
         register_scheduled_commit_sent(sent_commit);
-        match execute_legacy_transaction(
-            intent_sent_transaction,
-            bank,
-            Some(transaction_status_sender),
-        )
-        .await
+        match internal_transaction_scheduler
+            .execute(intent_sent_transaction)
+            .await
         {
             Ok(signature) => debug!(
                 "Signaled sent commit with internal signature: {:?}",
@@ -316,8 +304,7 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
 
     async fn process_empty_intent(
         intent_id: u64,
-        bank: &Arc<Bank>,
-        transaction_status_sender: &TransactionStatusSender,
+        internal_transaction_scheduler: &TransactionSchedulerHandle,
         mut intent_meta: ScheduledBaseIntentMeta,
     ) {
         let intent_sent_transaction =
@@ -325,12 +312,9 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
         let sent_commit =
             Self::build_sent_commit(intent_id, vec![], intent_meta);
         register_scheduled_commit_sent(sent_commit);
-        match execute_legacy_transaction(
-            intent_sent_transaction,
-            bank,
-            Some(transaction_status_sender),
-        )
-        .await
+        match internal_transaction_scheduler
+            .execute(intent_sent_transaction)
+            .await
         {
             Ok(signature) => debug!(
                 "Signaled sent commit with internal signature: {:?}",
@@ -355,16 +339,13 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
             chain_signatures,
             included_pubkeys: intent_meta.included_pubkeys,
             excluded_pubkeys: intent_meta.excluded_pubkeys,
-            feepayers: intent_meta.feepayers,
             requested_undelegation: intent_meta.requested_undelegation,
         }
     }
 }
 
 #[async_trait]
-impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
-    for ScheduledCommitsProcessorImpl<C>
-{
+impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
     async fn process(&self) -> ScheduledCommitsProcessorResult<()> {
         let scheduled_base_intent =
             self.transaction_scheduler.take_scheduled_actions();
@@ -378,26 +359,31 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessor
             .map(|intent| self.preprocess_intent(intent));
 
         // Add metas for intent we schedule
-        let intents = {
+        let (intents, pubkeys_being_undelegated) = {
             let mut intent_metas =
                 self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
+            let mut pubkeys_being_undelegated = HashSet::new();
 
-            intents
-                .map(|(intent, excluded_pubkeys, feepayers)| {
+            let intents = intents
+                .map(|(intent, excluded_pubkeys, undelegated)| {
                     intent_metas.insert(
                         intent.id,
-                        ScheduledBaseIntentMeta::new(
-                            &intent,
-                            excluded_pubkeys,
-                            feepayers,
-                        ),
+                        ScheduledBaseIntentMeta::new(&intent, excluded_pubkeys),
                     );
+                    pubkeys_being_undelegated.extend(undelegated);
 
                     intent
                 })
-                .collect()
+                .collect::<Vec<_>>();
+
+            (
+                intents,
+                pubkeys_being_undelegated.into_iter().collect::<Vec<_>>(),
+            )
         };
 
+        self.process_undelegation_requests(pubkeys_being_undelegated)
+            .await;
         self.committor.schedule_base_intent(intents).await??;
         Ok(())
     }
@@ -421,7 +407,6 @@ struct ScheduledBaseIntentMeta {
     payer: Pubkey,
     included_pubkeys: Vec<Pubkey>,
     excluded_pubkeys: Vec<Pubkey>,
-    feepayers: HashSet<FeePayerAccount>,
     intent_sent_transaction: Transaction,
     requested_undelegation: bool,
 }
@@ -430,7 +415,6 @@ impl ScheduledBaseIntentMeta {
     fn new(
         intent: &ScheduledBaseIntent,
         excluded_pubkeys: Vec<Pubkey>,
-        feepayers: HashSet<FeePayerAccount>,
     ) -> Self {
         Self {
             slot: intent.slot,
@@ -440,7 +424,6 @@ impl ScheduledBaseIntentMeta {
                 .get_committed_pubkeys()
                 .unwrap_or_default(),
             excluded_pubkeys,
-            feepayers,
             intent_sent_transaction: intent.action_sent_transaction.clone(),
             requested_undelegation: intent.is_undelegate(),
         }

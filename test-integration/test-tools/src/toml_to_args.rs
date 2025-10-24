@@ -40,6 +40,7 @@ impl Default for Rpc {
 struct Program {
     id: String,
     path: String,
+    auth: Option<String>,
 }
 
 fn parse_config(config_path: &PathBuf) -> Config {
@@ -97,7 +98,11 @@ pub fn config_to_args(
                 );
 
                 if program_loader == ProgramLoader::UpgradeableProgram {
-                    args.push("none".to_string());
+                    if let Some(auth) = program.auth {
+                        args.push(auth);
+                    } else {
+                        args.push("none".to_string());
+                    }
                 }
             }
         }

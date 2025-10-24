@@ -1,0 +1,25 @@
+[package]
+name = "test-chainlink"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bincode = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+magicblock-chainlink = { workspace = true }
+magicblock-delegation-program = { workspace = true }
+program-mini = { workspace = true, features = ["no-entrypoint"] }
+program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
+solana-account = { workspace = true }
+solana-loader-v2-interface = { workspace = true, features = ["serde"] }
+solana-loader-v3-interface = { workspace = true, features = ["serde"] }
+solana-loader-v4-interface = { workspace = true, features = ["serde"] }
+solana-pubkey = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+solana-sdk-ids = { workspace = true }
+solana-system-interface = { workspace = true }
+integration-test-tools = { workspace = true }
+tokio = { workspace = true, features = ["full"] }

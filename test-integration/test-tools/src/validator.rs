@@ -7,7 +7,10 @@ use std::{
     time::Duration,
 };
 
-use magicblock_config::{EphemeralConfig, ProgramConfig};
+use magicblock_config::{
+    EphemeralConfig, MetricsConfig, ProgramConfig, RpcConfig,
+};
+use random_port::{PortPicker, Protocol};
 use tempfile::TempDir;
 
 use crate::{
@@ -51,10 +54,12 @@ pub fn start_magic_block_validator_with_config(
     if release {
         command.arg("--release");
     }
+    let rust_log_style =
+        std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
         .arg("--")
         .arg(config_path)
-        .env("RUST_LOG_STYLE", log_suffix)
+        .env("RUST_LOG_STYLE", rust_log_style)
         .env("VALIDATOR_KEYPAIR", keypair_base58.clone())
         .current_dir(root_dir);
 
@@ -88,40 +93,42 @@ pub fn start_test_validator_with_config(
     let accounts = [
         (
             loaded_accounts.validator_authority().to_string(),
-            "validator-authority.json",
+            "validator-authority.json".to_string(),
         ),
         (
             loaded_accounts.luzid_authority().to_string(),
-            "luzid-authority.json",
+            "luzid-authority.json".to_string(),
         ),
         (
             loaded_accounts.validator_fees_vault().to_string(),
-            "validator-fees-vault.json",
+            "validator-fees-vault.json".to_string(),
         ),
         (
             loaded_accounts.protocol_fees_vault().to_string(),
-            "protocol-fees-vault.json",
+            "protocol-fees-vault.json".to_string(),
         ),
         (
             "9yXjZTevvMp1XgZSZEaziPRgFiXtAQChpnP2oX9eCpvt".to_string(),
-            "non-delegated-cloneable-account1.json",
+            "non-delegated-cloneable-account1.json".to_string(),
         ),
         (
             "BHBuATGifAD4JbRpM5nVdyhKzPgv3p2CxLEHAqwBzAj5".to_string(),
-            "non-delegated-cloneable-account2.json",
+            "non-delegated-cloneable-account2.json".to_string(),
         ),
         (
             "2o48ieM95rmHqMWC5B3tTX4DL7cLm4m1Kuwjay3keQSv".to_string(),
-            "non-delegated-cloneable-account3.json",
+            "non-delegated-cloneable-account3.json".to_string(),
         ),
         (
             "2EmfL3MqL3YHABudGNmajjCpR13NNEn9Y4LWxbDm6SwR".to_string(),
-            "non-delegated-cloneable-account4.json",
+            "non-delegated-cloneable-account4.json".to_string(),
         ),
     ];
+    let resolved_extra_accounts =
+        loaded_accounts.extra_accounts(workspace_dir, &accounts_dir);
+    let accounts = accounts.iter().chain(&resolved_extra_accounts);
 
     let account_args = accounts
-        .iter()
         .flat_map(|(account, file)| {
             let account_path = accounts_dir.join(file).canonicalize().unwrap();
             vec![
@@ -139,10 +146,12 @@ pub fn start_test_validator_with_config(
         script.push_str(&format!(" \\\n  {}", arg));
     }
     let mut command = process::Command::new("solana-test-validator");
+    let rust_log_style =
+        std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
         .args(args)
         .env("RUST_LOG", "solana=warn")
-        .env("RUST_LOG_STYLE", log_suffix)
+        .env("RUST_LOG_STYLE", rust_log_style)
         .current_dir(root_dir);
 
     eprintln!("Starting test validator with {:?}", command);
@@ -178,12 +187,39 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
 
 pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 
+fn resolve_port() -> u16 {
+    std::env::var("EPHEM_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or_else(|| {
+            PortPicker::new()
+                .random(true)
+                .protocol(Protocol::Tcp)
+                .pick()
+                .unwrap()
+        })
+}
+
 /// Stringifies the config and writes it to a temporary config file.
+/// Sets the RPC port to a random available port to allow multiple tests to
+/// run in parallel.
 /// Then uses that config to start the validator.
 pub fn start_magicblock_validator_with_config_struct(
     config: EphemeralConfig,
     loaded_chain_accounts: &LoadedAccounts,
-) -> (TempDir, Option<process::Child>) {
+) -> (TempDir, Option<process::Child>, u16) {
+    let port = resolve_port();
+    let config = EphemeralConfig {
+        rpc: RpcConfig {
+            port,
+            ..config.rpc.clone()
+        },
+        metrics: MetricsConfig {
+            enabled: false,
+            ..config.metrics.clone()
+        },
+        ..config.clone()
+    };
     let workspace_dir = resolve_workspace_dir();
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
     let release = std::env::var("RELEASE").is_ok();
@@ -209,6 +245,7 @@ pub fn start_magicblock_validator_with_config_struct(
             loaded_chain_accounts,
             release,
         ),
+        port,
     )
 }
 
@@ -217,7 +254,20 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
     loaded_chain_accounts: &LoadedAccounts,
     default_tmpdir: TempDir,
     temp_dir: PathBuf,
-) -> (TempDir, Option<process::Child>) {
+) -> (TempDir, Option<process::Child>, u16) {
+    let port = resolve_port();
+    let config = EphemeralConfig {
+        rpc: RpcConfig {
+            port,
+            ..config.rpc.clone()
+        },
+        metrics: MetricsConfig {
+            enabled: false,
+            ..config.metrics.clone()
+        },
+        ..config.clone()
+    };
+
     let workspace_dir = resolve_workspace_dir();
     let release = std::env::var("RELEASE").is_ok();
     let config_path = temp_dir.join("config.toml");
@@ -242,6 +292,7 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
             loaded_chain_accounts,
             release,
         ),
+        port,
     )
 }
 

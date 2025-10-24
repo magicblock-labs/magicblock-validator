@@ -18,17 +18,17 @@ solana-pubkey = { workspace = true }
 solana-account = { workspace = true }
 
 # synchronization
-parking_lot = "0.12"
+parking_lot = { workspace = true }
 
 # misc
-const_format = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 log = { workspace = true }
-tempfile = { workspace = true }
 magicblock-config = { workspace = true }
+magicblock-core = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 env_logger = "0.11"
 
 [features]

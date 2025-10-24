@@ -4,5 +4,13 @@ version.workspace = true
 edition.workspace = true
 
 [dev-dependencies]
+program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
+program-mini = { workspace = true, features = ["no-entrypoint"] }
 integration-test-tools = { workspace = true }
+log = { workspace = true }
+test-chainlink = { workspace = true }
+solana-loader-v4-interface = { workspace = true, features = ["serde"] }
 solana-sdk = { workspace = true }
+spl-memo-interface = { workspace = true }
+test-kit = { workspace = true }
+tokio = { workspace = true, features = ["full"] }

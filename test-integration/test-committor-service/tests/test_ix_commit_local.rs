@@ -25,7 +25,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, hash::Hash, signature::Keypair,
     signer::Signer, transaction::Transaction,
 };
-use test_tools_core::init_logger;
+use test_kit::init_logger;
 use tokio::task::JoinSet;
 use utils::transactions::tx_logs_contain;
 
