@@ -1132,7 +1132,11 @@ where
                 )
                 .await
                 // SAFETY: we always get two results here
-                .map(|mut accs| (accs.remove(0), accs.remove(0)))
+                .map(|mut accs| {
+                    let acc_last = accs.pop().unwrap();
+                    let acc_first = accs.pop().unwrap();
+                    (acc_first, acc_last)
+                })
                 .map_err(ChainlinkError::from)
                 .and_then(|(acc, deleg)| {
                     use RemoteAccount::*;
