@@ -41,6 +41,7 @@ pub mod chain_laser_client;
 pub(crate) mod chain_pubsub_actor;
 pub mod chain_pubsub_client;
 pub mod chain_rpc_client;
+pub mod chain_updates_client;
 pub mod config;
 pub mod errors;
 mod lru_cache;
@@ -48,7 +49,6 @@ pub mod program_account;
 pub mod pubsub_common;
 mod remote_account;
 
-pub use chain_pubsub_actor::SubscriptionUpdate;
 use magicblock_metrics::{
     metrics,
     metrics::{
@@ -62,7 +62,10 @@ pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{
     errors::ChainlinkResult,
-    remote_account_provider::pubsub_common::SubscriptionUpdate,
+    remote_account_provider::{
+        chain_updates_client::ChainUpdatesClient,
+        pubsub_common::SubscriptionUpdate,
+    },
     submux::SubMuxClient,
 };
 
@@ -144,6 +147,28 @@ pub struct Endpoint {
     pub pubsub_url: String,
 }
 
+impl Endpoint {
+    pub fn new(rpc_url: String, pubsub_url: String) -> Self {
+        Self {
+            rpc_url,
+            pubsub_url,
+        }
+    }
+
+    pub fn separate_pubsub_url_and_api_key(&self) -> (String, Option<String>) {
+        let (pubsub_url, pubsub_api_key) = self
+            .pubsub_url
+            .split_once("?api-key=")
+            .unwrap_or((&self.pubsub_url, ""));
+        let api_key = if !pubsub_api_key.is_empty() {
+            Some(pubsub_api_key.to_string())
+        } else {
+            None
+        };
+        (pubsub_url.to_string(), api_key)
+    }
+}
+
 impl
     RemoteAccountProvider<
         ChainRpcClientImpl,
@@ -159,7 +184,7 @@ impl
         Option<
             RemoteAccountProvider<
                 ChainRpcClientImpl,
-                SubMuxClient<ChainPubsubClientImpl>,
+                SubMuxClient<ChainUpdatesClient>,
             >,
         >,
     > {
@@ -171,7 +196,7 @@ impl
             Ok(Some(
                 RemoteAccountProvider::<
                     ChainRpcClientImpl,
-                    SubMuxClient<ChainPubsubClientImpl>,
+                    SubMuxClient<ChainUpdatesClient>,
                 >::try_new_from_urls(
                     endpoints,
                     commitment,
@@ -346,7 +371,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) -> RemoteAccountProviderResult<
         RemoteAccountProvider<
             ChainRpcClientImpl,
-            SubMuxClient<ChainPubsubClientImpl>,
+            SubMuxClient<ChainUpdatesClient>,
         >,
     > {
         if endpoints.is_empty() {
@@ -364,17 +389,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         };
 
         // Build pubsub clients and wrap them into a SubMuxClient
-        let mut pubsubs: Vec<(Arc<ChainPubsubClientImpl>, mpsc::Receiver<()>)> =
+        let mut pubsubs: Vec<Arc<ChainUpdatesClient>> =
             Vec::with_capacity(endpoints.len());
         for ep in endpoints {
-            let (abort_tx, abort_rx) = mpsc::channel(1);
-            let client = ChainPubsubClientImpl::try_new_from_url(
-                ep.pubsub_url.as_str(),
-                abort_tx,
-                commitment,
-            )
-            .await?;
-            pubsubs.push((Arc::new(client), abort_rx));
+            let client =
+                ChainUpdatesClient::try_new_from_endpoint(ep, commitment)
+                    .await?;
+            pubsubs.push(Arc::new(client));
         }
 
         let subscribed_accounts = Arc::new(AccountsLruCache::new({
@@ -390,14 +411,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         RemoteAccountProvider::<
             ChainRpcClientImpl,
-            SubMuxClient<ChainPubsubClientImpl>,
-        >::new(
-            rpc_client,
-            submux,
-            subscription_forwarder,
-            config,
-            subscribed_accounts,
-        )
+            SubMuxClient<ChainUpdatesClient>,
+        >::new(rpc_client, submux, subscription_forwarder, config)
         .await
     }
 

@@ -24,8 +24,8 @@ use crate::{
     config::ChainlinkConfig,
     fetch_cloner::FetchAndCloneResult,
     remote_account_provider::{
-        ChainPubsubClient, ChainPubsubClientImpl, ChainRpcClient,
-        ChainRpcClientImpl, Endpoint, RemoteAccountProvider,
+        chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
+        ChainRpcClient, ChainRpcClientImpl, Endpoint, RemoteAccountProvider,
     },
     submux::SubMuxClient,
 };
@@ -104,12 +104,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         config: ChainlinkConfig,
         auto_airdrop_lamports: u64,
     ) -> ChainlinkResult<
-        Chainlink<
-            ChainRpcClientImpl,
-            SubMuxClient<ChainPubsubClientImpl>,
-            V,
-            C,
-        >,
+        Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>,
     > {
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
