@@ -975,7 +975,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                             response.context.slot,
                             RemoteAccountUpdateSource::Fetch,
                         ),
-                        None if mark_empty_if_not_found.contains(&pubkey) => {
+                        None if mark_empty_if_not_found.contains(pubkey) => {
                             RemoteAccount::from_fresh_account(
                                 Account {
                                     lamports: 0,

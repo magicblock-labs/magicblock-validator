@@ -41,7 +41,7 @@ fn payer_keypair() -> Keypair {
 #[test]
 fn test_restore_ledger_different_accounts_multiple_times() {
     init_logger!();
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer_readonly = payer_keypair();
 
     let (mut validator, _, payer_main_lamports, payer_main) =

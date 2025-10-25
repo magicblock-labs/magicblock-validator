@@ -31,7 +31,7 @@ const COUNTER: &str = "Counter of Payer";
 #[test]
 fn test_restore_ledger_containing_delegated_and_committed_account() {
     init_logger!();
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _, payer) = write(&ledger_path);
     validator.kill().unwrap();

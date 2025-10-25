@@ -15,7 +15,7 @@ pub struct Chunks {
     bits: Vec<u8>,
     /// The tracking capacity which is
     /// ```rust
-    /// let capacity = bits.len() * BIT_FIELD_SIZE
+    /// let capacity = bits.len() * BITS_PER_BYTE
     /// ```
     /// The amount of tracked chunks could be a bit smaller as it might only use
     /// part of the last bit in [Chunks::bits].

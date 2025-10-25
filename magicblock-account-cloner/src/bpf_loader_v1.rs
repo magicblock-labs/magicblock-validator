@@ -1,5 +1,5 @@
 use magicblock_chainlink::{
-    cloner::errors::{ClonerError, ClonerResult},
+    cloner::errors::ClonerResult,
     remote_account_provider::program_account::LoadedProgram,
 };
 use magicblock_magic_program_api::instruction::AccountModification;
@@ -14,9 +14,12 @@ pub struct BpfUpgradableProgramModifications {
     pub program_data_modification: AccountModification,
 }
 
-fn create_loader_data(loaded_program: &LoadedProgram) -> ClonerResult<Vec<u8>> {
+fn create_loader_data(
+    loaded_program: &LoadedProgram,
+    deploy_slot: u64,
+) -> ClonerResult<Vec<u8>> {
     let loader_state = UpgradeableLoaderState::ProgramData {
-        slot: 10,
+        slot: deploy_slot,
         upgrade_authority_address: Some(loaded_program.authority),
     };
     let mut loader_data = bincode::serialize(&loader_state)?;
@@ -24,9 +27,11 @@ fn create_loader_data(loaded_program: &LoadedProgram) -> ClonerResult<Vec<u8>> {
     Ok(loader_data)
 }
 
-impl TryFrom<&LoadedProgram> for BpfUpgradableProgramModifications {
-    type Error = ClonerError;
-    fn try_from(loaded_program: &LoadedProgram) -> Result<Self, Self::Error> {
+impl BpfUpgradableProgramModifications {
+    pub fn try_from(
+        loaded_program: &LoadedProgram,
+        deploy_slot: u64,
+    ) -> ClonerResult<Self> {
         let (program_data_address, _) = Pubkey::find_program_address(
             &[loaded_program.program_id.as_ref()],
             &bpf_loader_upgradeable::id(),
@@ -34,7 +39,7 @@ impl TryFrom<&LoadedProgram> for BpfUpgradableProgramModifications {
 
         // 1. Create and store the ProgramData account (which holds the program data).
         let program_data_modification = {
-            let loader_data = create_loader_data(loaded_program)?;
+            let loader_data = create_loader_data(loaded_program, deploy_slot)?;
             AccountModification {
                 pubkey: program_data_address,
                 lamports: Some(

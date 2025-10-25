@@ -143,7 +143,6 @@ impl BaseTask for ArgsTask {
                     action.escrow_authority,
                     account_metas,
                     CallHandlerArgs {
-                        context: value.context,
                         data: action.data_per_program.data.clone(),
                         escrow_index: action.data_per_program.escrow_index,
                     },
@@ -242,12 +241,12 @@ impl BaseTask for ArgsTask {
     }
 
     fn is_compressed(&self) -> bool {
-        match &self.task_type {
+        matches!(
+            &self.task_type,
             ArgsTaskType::CompressedCommit(_)
-            | ArgsTaskType::CompressedFinalize(_)
-            | ArgsTaskType::CompressedUndelegate(_) => true,
-            _ => false,
-        }
+                | ArgsTaskType::CompressedFinalize(_)
+                | ArgsTaskType::CompressedUndelegate(_)
+        )
     }
 
     fn set_compressed_data(&mut self, compressed_data: CompressedData) {

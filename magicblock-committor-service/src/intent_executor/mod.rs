@@ -170,7 +170,7 @@ where
             &self.task_info_fetcher,
             &base_intent,
             persister,
-            &photon_client,
+            photon_client,
         )
         .await?;
 
@@ -197,7 +197,7 @@ where
         let finalize_tasks = TaskBuilderImpl::finalize_tasks(
             &self.task_info_fetcher,
             &base_intent,
-            &photon_client,
+            photon_client,
         )
         .await?;
 
@@ -342,6 +342,7 @@ where
             .task_info_fetcher
             .fetch_next_commit_ids(
                 committed_pubkeys,
+                // TODO(dode): Handle cases where some tasks are compressed and some are not
                 strategy
                     .optimized_tasks
                     .iter()

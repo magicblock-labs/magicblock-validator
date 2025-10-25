@@ -357,7 +357,7 @@ mod tests {
                 owner,
                 executable: false,
                 data,
-                rent_epoch: 0,
+                rent_epoch: u64::MAX,
             } => {
                 assert_eq!(lamports, AUTHORITY_BALANCE - 100);
                 assert_eq!(owner, system_program::id());
@@ -375,7 +375,7 @@ mod tests {
                 owner: owner_key,
                 executable: true,
                 data,
-                rent_epoch: 88,
+                rent_epoch: u64::MAX,
             } => {
                 assert_eq!(data, modification.data.unwrap());
                 assert_eq!(owner_key, modification.owner.unwrap());
@@ -437,7 +437,7 @@ mod tests {
                 owner,
                 executable: false,
                 data,
-                rent_epoch: 0,
+                rent_epoch: u64::MAX,
             } => {
                 assert_eq!(lamports, AUTHORITY_BALANCE - 400);
                 assert_eq!(owner, system_program::id());
@@ -453,7 +453,7 @@ mod tests {
                 owner: _,
                 executable: false,
                 data,
-                rent_epoch: 0,
+                rent_epoch: u64::MAX,
             } => {
                 assert!(data.is_empty());
             }
@@ -467,7 +467,7 @@ mod tests {
                 owner: _,
                 executable: false,
                 data,
-                rent_epoch: 0,
+                rent_epoch: u64::MAX,
             } => {
                 assert!(data.is_empty());
             }
@@ -510,7 +510,6 @@ mod tests {
             AccountModification {
                 pubkey: mod_key3,
                 lamports: Some(3000),
-                rent_epoch: Some(90),
                 ..Default::default()
             },
             AccountModification {
@@ -518,7 +517,6 @@ mod tests {
                 lamports: Some(100),
                 executable: Some(true),
                 data: Some(vec![16, 17, 18, 19, 20]),
-                rent_epoch: Some(91),
                 delegated: Some(true),
                 ..Default::default()
             },
@@ -550,7 +548,7 @@ mod tests {
                 owner,
                 executable: false,
                 data,
-                rent_epoch: 0,
+                rent_epoch: u64::MAX,
             } => {
                 assert_eq!(lamports, AUTHORITY_BALANCE - 3300);
                 assert_eq!(owner, system_program::id());
@@ -567,7 +565,7 @@ mod tests {
                 owner: _,
                 executable: false,
                 data,
-                rent_epoch: 0,
+                rent_epoch: u64::MAX,
             } => {
                 assert_eq!(data, vec![1, 2, 3, 4, 5]);
             }
@@ -582,7 +580,7 @@ mod tests {
                 owner,
                 executable: false,
                 data,
-                rent_epoch: 0,
+                rent_epoch: u64::MAX,
             } => {
                 assert_eq!(owner, mod_2_owner);
                 assert!(data.is_empty());
@@ -598,7 +596,7 @@ mod tests {
                 owner: _,
                 executable: false,
                 data,
-                rent_epoch: 90,
+                rent_epoch: u64::MAX,
             } => {
                 assert!(data.is_empty());
             }
@@ -613,7 +611,7 @@ mod tests {
                 owner: _,
                 executable: true,
                 data,
-                rent_epoch: 91,
+                rent_epoch: u64::MAX,
             } => {
                 assert_eq!(data, vec![16, 17, 18, 19, 20]);
             }

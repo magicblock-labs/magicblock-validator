@@ -29,8 +29,6 @@ pub enum ResolvedAccount {
 }
 
 impl ResolvedAccount {
-    /// Resolves the account and sets the compressed flag if it is
-    /// a [ResolvedAccount::Compressed].
     pub fn resolved_account_shared_data(
         &self,
         bank: &impl AccountsBank,

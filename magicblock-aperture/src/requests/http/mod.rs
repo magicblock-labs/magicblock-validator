@@ -33,6 +33,16 @@ pub(crate) enum Data {
     MultiChunk(Vec<u8>),
 }
 
+impl Data {
+    fn len(&self) -> usize {
+        match self {
+            Self::Empty => 0,
+            Self::SingleChunk(b) => b.len(),
+            Self::MultiChunk(b) => b.len(),
+        }
+    }
+}
+
 /// Deserializes the raw request body bytes into a structured `JsonHttpRequest`.
 pub(crate) fn parse_body(body: Data) -> RpcResult<JsonHttpRequest> {
     let body_bytes = match &body {
@@ -49,6 +59,7 @@ pub(crate) fn parse_body(body: Data) -> RpcResult<JsonHttpRequest> {
 pub(crate) async fn extract_bytes(
     request: Request<Incoming>,
 ) -> RpcResult<Data> {
+    const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MiB
     let mut body = request.into_body();
     let mut data = Data::Empty;
 
@@ -70,6 +81,11 @@ pub(crate) async fn extract_bytes(
             Data::MultiChunk(buffer) => {
                 buffer.extend_from_slice(&chunk);
             }
+        }
+        if data.len() > MAX_BODY_SIZE {
+            return Err(RpcError::invalid_request(
+                "request body exceed 1MiB limit",
+            ));
         }
     }
     Ok(data)
@@ -228,7 +244,7 @@ mod prelude {
 // These constants define the data layout of a standard SPL Token account.
 const SPL_MINT_OFFSET: usize = 0;
 const SPL_OWNER_OFFSET: usize = 32;
-const SPL_DECIMALS_OFFSET: usize = 40;
+const MINT_DECIMALS_OFFSET: usize = 44;
 const SPL_TOKEN_AMOUNT_OFFSET: usize = 64;
 const SPL_DELEGATE_OFFSET: usize = 76;
 

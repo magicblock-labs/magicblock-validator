@@ -338,7 +338,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
         let rent_reimbursements = Self::fetch_metadata_with_retries(
             &self.rpc_client,
-            &pubkeys,
+            pubkeys,
             NUM_FETCH_RETRIES,
         )
         .await?

@@ -356,20 +356,6 @@ macro_rules! min_max_with_deviation_percent {
     }};
 }
 
-#[macro_export]
-macro_rules! assert_data_has_size {
-    ($data:expr, $size:expr) => {{
-        let actual_size = $data.len();
-        let (min, max) = $crate::min_max_with_deviation_percent($size, 5.0);
-        assert!(
-            actual_size >= min && actual_size <= max,
-            "Expected data to have size around {}, got {}",
-            $size,
-            actual_size
-        );
-    }};
-}
-
 #[allow(unused)]
 fn min_max_with_deviation_percent(size: usize, percent: f64) -> (usize, usize) {
     // Program size may vary a bit

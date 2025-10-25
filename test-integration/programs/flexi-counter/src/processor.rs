@@ -1,13 +1,9 @@
 mod call_handler;
 mod schedule_intent;
-mod schedule_redelegation_intent;
 
 use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::{
-    consts::{
-        EXTERNAL_CALL_HANDLER_DISCRIMINATOR, EXTERNAL_UNDELEGATE_DISCRIMINATOR,
-        MAGIC_PROGRAM_ID,
-    },
+    consts::{EXTERNAL_UNDELEGATE_DISCRIMINATOR, MAGIC_PROGRAM_ID},
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
@@ -36,9 +32,10 @@ use crate::{
         MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
     },
     processor::{
-        call_handler::process_call_handler,
+        call_handler::{
+            process_commit_action_handler, process_undelegate_action_handler,
+        },
         schedule_intent::process_create_intent,
-        schedule_redelegation_intent::process_create_redelegation_intent,
     },
     state::FlexiCounter,
     utils::assert_keys_equal,
@@ -55,10 +52,6 @@ pub fn process(
 
         if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
             return process_undelegate_request(accounts, data);
-        }
-
-        if disc == EXTERNAL_CALL_HANDLER_DISCRIMINATOR {
-            return process_call_handler(accounts, data);
         }
     }
 
@@ -92,9 +85,13 @@ pub fn process(
             is_undelegate,
             compute_units,
         ),
-        CreateRedelegationIntent => {
-            process_create_redelegation_intent(accounts)
+        CommitActionHandler { amount } => {
+            process_commit_action_handler(accounts, amount)
         }
+        UndelegateActionHandler {
+            amount,
+            counter_diff,
+        } => process_undelegate_action_handler(accounts, amount, counter_diff),
         Schedule(args) => process_schedule_task(accounts, args),
         Cancel(args) => process_cancel_task(accounts, args),
     }?;

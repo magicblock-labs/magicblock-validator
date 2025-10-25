@@ -20,7 +20,7 @@ const SLOT_MS: u64 = 150;
 
 #[test]
 fn test_restore_ledger_with_multiple_dependent_transactions_same_slot() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _, keypairs) = write(&ledger_path, false);
     validator.kill().unwrap();
@@ -31,7 +31,7 @@ fn test_restore_ledger_with_multiple_dependent_transactions_same_slot() {
 
 #[test]
 fn test_restore_ledger_with_multiple_dependent_transactions_separate_slot() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _, keypairs) = write(&ledger_path, true);
     validator.kill().unwrap();

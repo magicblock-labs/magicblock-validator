@@ -5,7 +5,7 @@ use solana_transaction_error::TransactionError;
 
 pub(crate) const TRANSACTION_SIMULATION: i16 = -32002;
 pub(crate) const TRANSACTION_VERIFICATION: i16 = -32003;
-pub(crate) const BLOCK_NOT_FOUND: i16 = 32009;
+pub(crate) const BLOCK_NOT_FOUND: i16 = -32009;
 pub(crate) const INVALID_REQUEST: i16 = -32600;
 pub(crate) const INVALID_PARAMS: i16 = -32602;
 pub(crate) const INTERNAL_ERROR: i16 = -32603;

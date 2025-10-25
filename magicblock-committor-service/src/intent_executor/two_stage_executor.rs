@@ -90,7 +90,7 @@ where
             }
         };
 
-        junk.push(last_commit_strategy.clone());
+        junk.push(last_commit_strategy);
         let commit_signature = commit_result.map_err(|err| {
             IntentExecutorError::from_strategy_execution_error(
                 err,
@@ -143,7 +143,7 @@ where
             }
         };
 
-        junk.push(last_finalize_strategy.clone());
+        junk.push(last_finalize_strategy);
         let finalize_signature = finalize_result.map_err(|err| {
             IntentExecutorError::from_strategy_execution_error(
                 err,

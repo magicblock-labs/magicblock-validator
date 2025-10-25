@@ -78,7 +78,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
     async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        mut tx_strategy: &mut TransactionStrategy,
+        tx_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
         photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> PreparatorResult<VersionedMessage> {
@@ -101,7 +101,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .delivery_preparator
             .prepare_for_delivery(
                 authority,
-                &mut tx_strategy,
+                tx_strategy,
                 intent_persister,
                 photon_client,
             )

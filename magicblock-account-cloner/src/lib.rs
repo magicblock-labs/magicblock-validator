@@ -26,7 +26,6 @@ use magicblock_magic_program_api::instruction::AccountModification;
 use magicblock_program::{
     instruction_utils::InstructionUtils, validator::validator_authority,
 };
-use magicblock_rpc_client::MagicblockRpcClient;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     hash::Hash,
@@ -42,6 +41,7 @@ use crate::bpf_loader_v1::BpfUpgradableProgramModifications;
 
 mod account_cloner;
 mod bpf_loader_v1;
+mod util;
 
 pub use account_cloner::*;
 
@@ -125,8 +125,15 @@ impl ChainlinkCloner {
 
                 // BPF Loader (non-upgradeable) cannot be loaded via newer loaders,
                 // thus we just copy the account as is. It won't be upgradeable.
+                // For these programs, we use a slot that's earlier than the current slot to simulate
+                // that the program was deployed earlier and is ready to be used.
+                let deploy_slot =
+                    self.accounts_db.slot().saturating_sub(5).max(1);
                 let modifications =
-                    BpfUpgradableProgramModifications::try_from(&program)?;
+                    BpfUpgradableProgramModifications::try_from(
+                        &program,
+                        deploy_slot,
+                    )?;
                 let mod_ix =
                     InstructionUtils::modify_accounts_instruction(vec![
                         modifications.program_id_modification,
@@ -234,10 +241,11 @@ impl ChainlinkCloner {
     fn maybe_prepare_lookup_tables(&self, pubkey: Pubkey, owner: Pubkey) {
         // Allow the committer service to reserve pubkeys in lookup tables
         // that could be needed when we commit this account
-        if let Some(committor) = self.changeset_committor.clone() {
+        if let Some(committor) = self.changeset_committor.as_ref() {
             if self.clone_config.prepare_lookup_tables
                 == PrepareLookupTables::Always
             {
+                let committor = committor.clone();
                 tokio::spawn(async move {
                     match Self::map_committor_request_result(
                         committor.reserve_pubkeys_for_committee(pubkey, owner),
@@ -280,21 +288,9 @@ impl ChainlinkCloner {
                                 format!("{:?}", table_mania_err),
                             ));
                         };
-                        let (logs, cus) = if let Ok(Ok(transaction)) =
-                            committor.get_transaction(&sig).await
-                        {
-                            let cus =
-                                MagicblockRpcClient::get_cus_from_transaction(
-                                    &transaction,
-                                );
-                            let logs =
-                                MagicblockRpcClient::get_logs_from_transaction(
-                                    &transaction,
-                                );
-                            (logs, cus)
-                        } else {
-                            (None, None)
-                        };
+                        let (logs, cus) =
+                            crate::util::get_tx_diagnostics(&sig, committor)
+                                .await;
 
                         let cus_str = cus
                             .map(|cus| format!("{:?}", cus))

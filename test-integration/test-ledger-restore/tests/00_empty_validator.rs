@@ -13,7 +13,7 @@ use test_ledger_restore::{
 
 #[test]
 fn test_restore_ledger_empty_validator() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _) = write(&ledger_path);
     validator.kill().unwrap();

@@ -22,7 +22,7 @@ impl HttpDispatcher {
 
         Ok(ResponsePayload::encode_no_context(
             &request.id,
-            block.block_time.unwrap_or_default(),
+            block.block_time,
         ))
     }
 }

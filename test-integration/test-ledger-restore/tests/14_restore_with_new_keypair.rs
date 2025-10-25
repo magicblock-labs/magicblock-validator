@@ -25,7 +25,7 @@ const MEMO_PROGRAM_PK: Pubkey = Pubkey::new_from_array([
 
 #[test]
 fn test_restore_ledger_with_new_validator_authority() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     // Write a transaction that clones the memo program
     let (mut validator, _) = write(&ledger_path);

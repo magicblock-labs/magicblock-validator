@@ -38,8 +38,6 @@ impl JsonRpcServer {
 
         // initialize HTTP and Websocket servers
         let websocket = {
-            let mut addr = addr;
-            addr.set_port(config.port + 1);
             let cancel = cancel.clone();
             WebsocketServer::new(ws, &state, cancel).await?
         };
@@ -47,12 +45,12 @@ impl JsonRpcServer {
         Ok(Self { http, websocket })
     }
 
-    /// Run JSON-RPC server indefinetely, until cancel token is used to signal shut down
+    /// Run JSON-RPC server indefinitely, until cancel token is used to signal shut down
     pub async fn run(self) {
-        tokio::select! {
-            _ = self.http.run() => {}
-            _ = self.websocket.run() => {}
-        }
+        tokio::join! {
+            self.http.run(),
+            self.websocket.run()
+        };
     }
 }
 

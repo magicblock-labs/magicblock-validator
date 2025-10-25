@@ -1,4 +1,3 @@
-use dlp::args::Context;
 use dyn_clone::DynClone;
 use magicblock_committor_program::{
     instruction_builder::{
@@ -155,7 +154,6 @@ pub struct CompressedFinalizeTask {
 
 #[derive(Clone)]
 pub struct BaseActionTask {
-    pub context: Context,
     pub action: BaseAction,
 }
 
@@ -395,7 +393,6 @@ mod serialization_safety_test {
 
         // Test BaseAction variant
         let base_action: ArgsTask = ArgsTaskType::BaseAction(BaseActionTask {
-            context: Context::Undelegate,
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
                 escrow_authority: Pubkey::new_unique(),
@@ -471,6 +468,9 @@ mod serialization_safety_test {
         };
         assert_serializable(&preparation_task.init_instruction(&authority));
         for ix in preparation_task.realloc_instructions(&authority) {
+            assert_serializable(&ix);
+        }
+        for ix in preparation_task.write_instructions(&authority) {
             assert_serializable(&ix);
         }
     }

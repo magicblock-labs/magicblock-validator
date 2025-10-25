@@ -26,7 +26,7 @@ use test_ledger_restore::{
 fn test_restore_ledger_with_two_airdrops_with_account_flush_in_between() {
     init_logger!();
 
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, slot, keypair) = write(&ledger_path);
     validator.kill().unwrap();

@@ -1,6 +1,5 @@
 //! A workaround crate used while the validator is incompatible with solana 2.3
 //! TODO: remove this once the validator is compatible with solana 2.3
-mod common;
 #[rustfmt::skip]
 #[path = "generated/mod.rs"]
 mod generated_original;
@@ -18,9 +17,6 @@ pub mod generated_impl {
 
         pub use super::super::generated_original::{
             accounts::CompressedDelegationRecord, types::*,
-        };
-        pub use crate::common::{
-            OptionalCompressedAccountMeta, OptionalPackedAddressTreeInfo,
         };
     }
 }

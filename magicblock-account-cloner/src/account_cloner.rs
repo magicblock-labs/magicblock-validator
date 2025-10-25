@@ -4,7 +4,6 @@ use magicblock_committor_service::{
     error::{CommittorServiceError, CommittorServiceResult},
     BaseIntentCommittor,
 };
-use magicblock_rpc_client::MagicblockRpcClient;
 use thiserror::Error;
 use tokio::sync::oneshot;
 
@@ -42,20 +41,11 @@ pub async fn map_committor_request_result<T, CC: BaseIntentCommittor>(
                             format!("{:?}", table_mania_err),
                         ));
                     };
-                    let (logs, cus) = if let Ok(Ok(transaction)) =
-                        intent_committor.get_transaction(&sig).await
-                    {
-                        let cus = MagicblockRpcClient::get_cus_from_transaction(
-                            &transaction,
-                        );
-                        let logs =
-                            MagicblockRpcClient::get_logs_from_transaction(
-                                &transaction,
-                            );
-                        (logs, cus)
-                    } else {
-                        (None, None)
-                    };
+                    let (logs, cus) = crate::util::get_tx_diagnostics(
+                        &sig,
+                        &intent_committor,
+                    )
+                    .await;
 
                     let cus_str = cus
                         .map(|cus| format!("{:?}", cus))

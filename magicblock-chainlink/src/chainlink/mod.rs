@@ -31,6 +31,8 @@ pub mod fetch_cloner;
 
 pub use blacklisted_accounts::*;
 
+type ArcFetchCloner<T, U, V, C, P> = Arc<FetchCloner<T, U, V, C, P>>;
+
 // -----------------
 // Chainlink
 // -----------------
@@ -42,7 +44,7 @@ pub struct Chainlink<
     P: PhotonClient,
 > {
     accounts_bank: Arc<V>,
-    fetch_cloner: Option<FetchCloner<T, U, V, C, P>>,
+    fetch_cloner: Option<ArcFetchCloner<T, U, V, C, P>>,
     /// The subscription to events for each account that is removed from
     /// the accounts tracked by the provider.
     /// In that case we also remove it from the bank since it is no longer
@@ -64,7 +66,7 @@ impl<
 {
     pub fn try_new(
         accounts_bank: &Arc<V>,
-        fetch_cloner: Option<FetchCloner<T, U, V, C, P>>,
+        fetch_cloner: Option<ArcFetchCloner<T, U, V, C, P>>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
     ) -> ChainlinkResult<Self> {
@@ -329,7 +331,7 @@ impl<
         Ok(())
     }
 
-    pub fn fetch_cloner(&self) -> Option<&FetchCloner<T, U, V, C, P>> {
+    pub fn fetch_cloner(&self) -> Option<&ArcFetchCloner<T, U, V, C, P>> {
         self.fetch_cloner.as_ref()
     }
 

@@ -84,7 +84,7 @@ impl AccountsDb {
     /// Insert account with given pubkey into the database
     /// Note: this method removes zero lamport account from database
     pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
-        // NOTE: we don't check fro non-zero lamports since we allow to store zero-lamport accounts
+        // NOTE: we don't check for non-zero lamports since we allow to store zero-lamport accounts
         // for the following two cases:
         // - when we clone a compressed account we reflect the exact lamports it has which maybe
         //   zero since compressed accounts don't need to be rent-exempt
@@ -247,18 +247,18 @@ impl AccountsDb {
         let this = self.clone();
         // Since `set_slot` is usually invoked in async context, we don't want to
         // ever block it. Here we move the whole lock acquisition and snapshotting
-        // to a seperate thread, considering that snapshot taking is extremely rare
+        // to a separate thread, considering that snapshot taking is extremely rare
         // operation, the overhead should be negligible
         std::thread::spawn(move || {
             // acquire the lock, effectively stopping the world, nothing should be able
             // to modify underlying accounts database while this lock is active
-            let lock = this.synchronizer.write();
+            let locked = this.synchronizer.write();
             // flush everything before taking the snapshot, in order to ensure consistent state
             this.flush();
 
             let used_storage = this.storage.utilized_mmap();
             if let Err(err) =
-                this.snapshot_engine.snapshot(slot, used_storage, lock)
+                this.snapshot_engine.snapshot(slot, used_storage, locked)
             {
                 warn!(
                     "failed to take snapshot at {}, slot {slot}: {err}",
@@ -401,9 +401,9 @@ pub struct AccountsReader<'db> {
     storage: &'db AccountsStorage,
 }
 
-/// SAFETY:
-/// AccountsReader is not only used to get readable access to the
-/// underlying database, and never outlives the the backing storage
+// SAFETY:
+// AccountsReader is only ever used to get readable access to the
+// underlying database, and never outlives the the backing storage
 unsafe impl Send for AccountsReader<'_> {}
 unsafe impl Sync for AccountsReader<'_> {}
 

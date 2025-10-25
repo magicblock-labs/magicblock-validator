@@ -116,7 +116,7 @@ impl DeliveryPreparator {
                 );
 
                 // Initialize buffer account. Init + reallocs
-                self.initialize_buffer_account(authority, &buffer_info)
+                self.initialize_buffer_account(authority, buffer_info)
                     .await?;
 
                 // Persist initialization success
@@ -129,7 +129,7 @@ impl DeliveryPreparator {
                 );
 
                 // Writing chunks with some retries
-                self.write_buffer_with_retries(authority, &buffer_info, 5)
+                self.write_buffer_with_retries(authority, buffer_info, 5)
                     .await?;
                 // Persist that buffer account initiated successfully
                 let update_status =
@@ -166,7 +166,7 @@ impl DeliveryPreparator {
                 let mut retries = 10;
                 let compressed_data = loop {
                     let compressed_data =
-                        get_compressed_data(&delegated_account, &photon_client)
+                        get_compressed_data(&delegated_account, photon_client)
                             .await?;
 
                     if compressed_data.hash != original_hash || retries == 0 {

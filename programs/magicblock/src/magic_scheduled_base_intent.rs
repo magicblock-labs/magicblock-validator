@@ -106,11 +106,11 @@ impl ScheduledBaseIntent {
     }
 
     pub fn is_compressed(&self) -> bool {
-        match &self.base_intent {
+        matches!(
+            &self.base_intent,
             MagicBaseIntent::CompressedCommit(_)
-            | MagicBaseIntent::CompressedCommitAndUndelegate(_) => true,
-            _ => false,
-        }
+                | MagicBaseIntent::CompressedCommitAndUndelegate(_)
+        )
     }
 }
 

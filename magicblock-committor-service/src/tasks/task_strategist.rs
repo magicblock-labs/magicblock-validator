@@ -250,7 +250,6 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 
 #[cfg(test)]
 mod tests {
-    use dlp::args::Context;
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, CommittedAccount, ProgramArgs,
     };
@@ -284,7 +283,6 @@ mod tests {
     // Helper to create a Base action task
     fn create_test_base_action_task(len: usize) -> ArgsTask {
         ArgsTask::new(ArgsTaskType::BaseAction(BaseActionTask {
-            context: Context::Commit,
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
                 escrow_authority: Pubkey::new_unique(),

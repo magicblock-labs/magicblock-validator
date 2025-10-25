@@ -143,10 +143,10 @@ where
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
-    ) -> Self {
+    ) -> Arc<Self> {
         let blacklisted_accounts =
             blacklisted_accounts(&validator_pubkey, &faucet_pubkey);
-        let me = Self {
+        let me = Arc::new(Self {
             remote_account_provider: remote_account_provider.clone(),
             accounts_bank: accounts_bank.clone(),
             cloner: cloner.clone(),
@@ -154,9 +154,10 @@ where
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
-        };
+        });
 
-        me.start_subscription_listener(subscription_updates_rx);
+        me.clone()
+            .start_subscription_listener(subscription_updates_rx);
 
         me
     }
@@ -168,15 +169,9 @@ where
 
     /// Start listening to subscription updates
     pub fn start_subscription_listener(
-        &self,
+        self: Arc<Self>,
         mut subscription_updates: mpsc::Receiver<ForwardedSubscriptionUpdate>,
     ) {
-        let cloner = self.cloner.clone();
-        let bank = self.accounts_bank.clone();
-        let remote_account_provider = self.remote_account_provider.clone();
-        let fetch_count = self.fetch_count.clone();
-        let validator_pubkey = self.validator_pubkey;
-
         tokio::spawn(async move {
             while let Some(update) = subscription_updates.recv().await {
                 trace!("FetchCloner received subscription update for {} at slot {}",
@@ -187,22 +182,38 @@ where
                 // on a separate task so the fetches of delegation records can happen in
                 // parallel
                 let resolved_account =
-                    Self::resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
-                        update,
-                        &bank,
-                        &remote_account_provider,
-                        &fetch_count,
-                        validator_pubkey,
-                    )
+                    self.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(update)
                     .await;
                 if let Some(account) = resolved_account {
+                    // Ensure that the subscription update isn't out of order, i.e. we don't already
+                    // hold a newer version of the account in our bank
+                    let out_of_order_slot = self
+                        .accounts_bank
+                        .get_account(&pubkey)
+                        .and_then(|in_bank| {
+                            if in_bank.remote_slot() >= account.remote_slot() {
+                                Some(in_bank.remote_slot())
+                            } else {
+                                None
+                            }
+                        });
+                    if let Some(in_bank_slot) = out_of_order_slot {
+                        warn!(
+                            "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
+                            account.remote_slot()
+                        );
+                        continue;
+                    }
+
                     // Once we clone an account that is delegated to us we no longer need
                     // to receive updates for it from chain
                     // The subscription will be turned back on once the committor service schedules
                     // a commit for it that includes undelegation
                     if account.delegated() {
-                        if let Err(err) =
-                            remote_account_provider.unsubscribe(&pubkey).await
+                        if let Err(err) = self
+                            .remote_account_provider
+                            .unsubscribe(&pubkey)
+                            .await
                         {
                             error!(
                                 "Failed to unsubscribe from delegated account {pubkey}: {err}"
@@ -210,17 +221,10 @@ where
                         }
                     }
                     if account.executable() {
-                        Self::handle_executable_sub_update(
-                            &remote_account_provider,
-                            &bank,
-                            &fetch_count,
-                            &cloner,
-                            pubkey,
-                            account,
-                        )
-                        .await;
+                        self.handle_executable_sub_update(pubkey, account)
+                            .await;
                     } else if let Err(err) =
-                        cloner.clone_account(pubkey, account).await
+                        self.cloner.clone_account(pubkey, account).await
                     {
                         error!(
                             "Failed to clone account {pubkey} into bank: {err}"
@@ -232,10 +236,7 @@ where
     }
 
     async fn handle_executable_sub_update(
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
-        accounts_bank: &Arc<V>,
-        fetch_count: &Arc<AtomicU64>,
-        cloner: &Arc<C>,
+        &self,
         pubkey: Pubkey,
         account: AccountSharedData,
     ) {
@@ -253,9 +254,7 @@ where
             .eq(&LOADER_V3)
         {
             match Self::task_to_fetch_with_program_data(
-                remote_account_provider,
-                accounts_bank,
-                fetch_count.clone(),
+                self,
                 pubkey,
                 account.remote_slot(),
             )
@@ -296,17 +295,14 @@ where
                 return;
             }
         };
-        if let Err(err) = cloner.clone_program(loaded_program).await {
+        if let Err(err) = self.cloner.clone_program(loaded_program).await {
             error!("Failed to clone account {pubkey} into bank: {err}");
         }
     }
 
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
+        &self,
         update: ForwardedSubscriptionUpdate,
-        bank: &Arc<V>,
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
-        fetch_count: &Arc<AtomicU64>,
-        validator_pubkey: Pubkey,
     ) -> Option<AccountSharedData> {
         let ForwardedSubscriptionUpdate { pubkey, account } = update;
         let owned_by_delegation_program =
@@ -322,18 +318,17 @@ where
                     delegation_record_pda_from_delegated_account(&pubkey);
 
                 // Check existing subscriptions before fetching
-                let was_delegation_record_subscribed = remote_account_provider
+                let was_delegation_record_subscribed = self
+                    .remote_account_provider
                     .is_watching(&delegation_record_pubkey);
 
-                match Self::task_to_fetch_with_companion(
-                    bank.clone(),
-                    remote_account_provider,
-                    fetch_count.clone(),
-                    pubkey,
-                    delegation_record_pubkey,
-                    account.remote_slot(),
-                )
-                .await
+                match self
+                    .task_to_fetch_with_companion(
+                        pubkey,
+                        delegation_record_pubkey,
+                        account.remote_slot(),
+                    )
+                    .await
                 {
                     Ok(Ok(AccountWithCompanion {
                         pubkey,
@@ -381,7 +376,7 @@ where
                                 }
                                 let is_delegated_to_us = delegation_record
                                     .authority
-                                    .eq(&validator_pubkey) ||
+                                    .eq(&self.validator_pubkey) ||
                                     // TODO(thlorenz): @ once the delegation program supports
                                     // delegating to specific authority we need to remove the below
                                     delegation_record.authority.eq(&Pubkey::default());
@@ -410,7 +405,7 @@ where
 
                         if !subs_to_remove.is_empty() {
                             cancel_subs(
-                                remote_account_provider,
+                                &self.remote_account_provider,
                                 CancelStrategy::All(subs_to_remove),
                             )
                             .await;
@@ -436,7 +431,8 @@ where
                         Ok(delegation_record) => Some(delegation_record),
                         Err(_err) => {
                             info!("Failed to parse compressed delegation record for {pubkey} directly from the data. Fetching from photon instead.");
-                            if let Some(acc) = remote_account_provider
+                            if let Some(acc) = self
+                                .remote_account_provider
                                 .try_get(pubkey)
                                 .await
                                 .map(|acc| acc.fresh_account())
@@ -464,7 +460,7 @@ where
                     account.set_lamports(delegation_record.lamports);
 
                     let is_delegated_to_us =
-                        delegation_record.authority.eq(&validator_pubkey);
+                        delegation_record.authority.eq(&self.validator_pubkey);
                     account.set_delegated(is_delegated_to_us);
 
                     Some(account)
@@ -536,99 +532,80 @@ where
 
         trace!("Fetched {accs:?}");
 
-        fn process_fresh_account(
-            pubkey: Pubkey,
-            account_shared_data: AccountSharedData,
-            plain: &mut Vec<(Pubkey, AccountSharedData)>,
-            owned_by_deleg: &mut Vec<(Pubkey, AccountSharedData, u64)>,
-            owned_by_deleg_compressed: &mut Vec<(
-                Pubkey,
-                AccountSharedData,
-                u64,
-            )>,
-            programs: &mut Vec<(Pubkey, AccountSharedData, u64)>,
-        ) {
-            let slot = account_shared_data.remote_slot();
-            if account_shared_data.owner().eq(&dlp::id()) {
-                owned_by_deleg.push((pubkey, account_shared_data, slot));
-            } else if account_shared_data
-                .owner()
-                .eq(&compressed_delegation_client::id())
-            {
-                owned_by_deleg_compressed.push((
-                    pubkey,
-                    account_shared_data,
-                    slot,
-                ));
-            } else if account_shared_data.executable() {
-                // We don't clone native loader programs.
-                // They should not pass the blacklist in the first place,
-                // but in case a new native program is introduced we don't want
-                // to fail
-                if !account_shared_data
-                    .owner()
-                    .eq(&solana_sdk::native_loader::id())
-                {
-                    programs.push((pubkey, account_shared_data, slot));
-                } else {
-                    warn!(
-                        "Not cloning native loader program account: {pubkey} (should have been blacklisted)",
-                    );
-                }
-            } else {
-                plain.push((pubkey, account_shared_data));
-            }
-        }
-
-        let (
-            not_found,
-            in_bank,
-            plain,
-            owned_by_deleg,
-            owned_by_deleg_compressed,
-            programs,
-        ) = accs.into_iter().zip(pubkeys).fold(
-            (vec![], vec![], vec![], vec![], vec![], vec![]),
-            |(
-                mut not_found,
-                mut in_bank,
-                mut plain,
-                mut owned_by_deleg,
-                mut owned_by_deleg_compressed,
-                mut programs,
-            ),
-             (acc, &pubkey)| {
-                use RemoteAccount::*;
-                match acc {
-                    NotFound(slot) => not_found.push((pubkey, slot)),
-                    Found(remote_account_state) => {
-                        match remote_account_state.account {
-                            ResolvedAccount::Fresh(account_shared_data) => {
-                                process_fresh_account(
-                                    pubkey,
-                                    account_shared_data,
-                                    &mut plain,
-                                    &mut owned_by_deleg,
-                                    &mut owned_by_deleg_compressed,
-                                    &mut programs,
-                                )
-                            }
-                            ResolvedAccount::Bank(pubkey) => {
-                                in_bank.push(pubkey);
-                            }
-                        };
+        let (not_found, in_bank, plain, owned_by_deleg, owned_by_deleg_compressed, programs) =
+            accs.into_iter().zip(pubkeys).fold(
+                (vec![], vec![], vec![], vec![], vec![], vec![]),
+                |(
+                    mut not_found,
+                    mut in_bank,
+                    mut plain,
+                    mut owned_by_deleg,
+                    mut owned_by_deleg_compressed,
+                    mut programs,
+                ),
+                 (acc, &pubkey)| {
+                    use RemoteAccount::*;
+                    match acc {
+                        NotFound(slot) => not_found.push((pubkey, slot)),
+                        Found(remote_account_state) => {
+                            match remote_account_state.account {
+                                ResolvedAccount::Fresh(account_shared_data) => {
+                                    let slot =
+                                        account_shared_data.remote_slot();
+                                    if account_shared_data
+                                        .owner()
+                                        .eq(&dlp::id())
+                                    {
+                                        owned_by_deleg.push((
+                                            pubkey,
+                                            account_shared_data,
+                                            slot,
+                                        ));
+                                    } else if account_shared_data
+                                    .owner()
+                                    .eq(&compressed_delegation_client::id())
+                                {
+                                    owned_by_deleg_compressed.push((
+                                        pubkey,
+                                        account_shared_data,
+                                        slot,
+                                    ));
+                                } else if account_shared_data.executable() {
+                                        // We don't clone native loader programs.
+                                        // They should not pass the blacklist in the first place,
+                                        // but in case a new native program is introduced we don't want
+                                        // to fail
+                                        if !account_shared_data
+                                            .owner()
+                                            .eq(&solana_sdk::native_loader::id(
+                                            ))
+                                        {
+                                            programs.push((
+                                                pubkey,
+                                                account_shared_data,
+                                                slot,
+                                            ));
+                                        } else {
+                                            warn!(
+                                                "Not cloning native loader program account: {pubkey} (should have been blacklisted)",
+                                            );
+                                        }
+                                    } else {
+                                        plain.push((
+                                            pubkey,
+                                            account_shared_data,
+                                        ));
+                                    }
+                                }
+                                ResolvedAccount::Bank(pubkey) => {
+                                    in_bank.push(pubkey);
+                                }
+                            };
+                        }
                     }
-                }
-                (
-                    not_found,
-                    in_bank,
-                    plain,
-                    owned_by_deleg,
-                    owned_by_deleg_compressed,
-                    programs,
-                )
-            },
-        );
+                    (not_found, in_bank, plain, owned_by_deleg, owned_by_deleg_compressed, programs)
+                },
+            );
 
         if log::log_enabled!(log::Level::Trace) {
             let not_found = not_found
@@ -670,7 +647,7 @@ where
         // For accounts we couldn't find we cannot do anything. We will let code depending
         // on them to be in the bank fail on its own
         if !not_found.is_empty() {
-            warn!(
+            debug!(
                 "Could not find accounts on chain: {:?}",
                 not_found
                     .iter()
@@ -716,8 +693,6 @@ where
             };
             fetch_with_delegation_record_join_set.spawn(
                 self.task_to_fetch_with_delegation_record(
-                    &self.remote_account_provider,
-                    self.fetch_count.clone(),
                     *pubkey,
                     effective_slot,
                 ),
@@ -773,13 +748,15 @@ where
                 Vec::with_capacity(accounts_fully_resolved.len());
             let mut accounts_to_clone = plain;
             accounts_to_clone.extend(
-                owned_by_deleg_compressed.into_iter().map(
+                owned_by_deleg_compressed.into_iter().filter_map(
                     |(pubkey, mut account, _)| {
-                        let delegation_record =
+                        let Ok(delegation_record) =
                             CompressedDelegationRecord::try_from_slice(
                                 account.data(),
-                            )
-                            .expect("Failed to deserialize delegation record");
+                            ) else {
+                                error!("Failed to deserialize compressed delegation record for {pubkey}");
+                                return None;
+                            };
 
                         if delegation_record
                             .authority
@@ -791,7 +768,7 @@ where
                         }
                         account.set_data(delegation_record.data);
                         account.set_owner(delegation_record.owner);
-                        (pubkey, account)
+                        Some((pubkey, account))
                     },
                 ),
             );
@@ -873,10 +850,7 @@ where
                     *account_slot
                 };
                 fetch_with_program_data_join_set.spawn(
-                    Self::task_to_fetch_with_program_data(
-                        &self.remote_account_provider,
-                        &self.accounts_bank,
-                        self.fetch_count.clone(),
+                    self.task_to_fetch_with_program_data(
                         *pubkey,
                         effective_slot,
                     ),
@@ -1158,18 +1132,12 @@ where
 
     fn task_to_fetch_with_delegation_record(
         &self,
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
-        fetch_count: Arc<AtomicU64>,
         pubkey: Pubkey,
         slot: u64,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
-        let bank = self.accounts_bank.clone();
         let delegation_record_pubkey =
             delegation_record_pda_from_delegated_account(&pubkey);
-        Self::task_to_fetch_with_companion(
-            bank,
-            remote_account_provider,
-            fetch_count,
+        self.task_to_fetch_with_companion(
             pubkey,
             delegation_record_pubkey,
             slot,
@@ -1177,34 +1145,24 @@ where
     }
 
     fn task_to_fetch_with_program_data(
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
-        accounts_bank: &Arc<V>,
-        fetch_count: Arc<AtomicU64>,
+        &self,
         pubkey: Pubkey,
         slot: u64,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
-        let bank = accounts_bank.clone();
         let program_data_pubkey =
             get_loaderv3_get_program_data_address(&pubkey);
-        Self::task_to_fetch_with_companion(
-            bank,
-            remote_account_provider,
-            fetch_count,
-            pubkey,
-            program_data_pubkey,
-            slot,
-        )
+        self.task_to_fetch_with_companion(pubkey, program_data_pubkey, slot)
     }
 
     fn task_to_fetch_with_companion(
-        bank: Arc<V>,
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
-        fetch_count: Arc<AtomicU64>,
+        &self,
         pubkey: Pubkey,
         delegation_record_pubkey: Pubkey,
         slot: u64,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
-        let provider = remote_account_provider.clone();
+        let provider = self.remote_account_provider.clone();
+        let bank = self.accounts_bank.clone();
+        let fetch_count = self.fetch_count.clone();
         task::spawn(async move {
             trace!("Fetching account {pubkey} with delegation record {delegation_record_pubkey} at slot {slot}");
 
@@ -1221,7 +1179,11 @@ where
                 )
                 .await
                 // SAFETY: we always get two results here
-                .map(|mut accs| (accs.remove(0), accs.remove(0)))
+                .map(|mut accs| {
+                    let acc_last = accs.pop().unwrap();
+                    let acc_first = accs.pop().unwrap();
+                    (acc_first, acc_last)
+                })
                 .map_err(ChainlinkError::from)
                 .and_then(|(acc, deleg)| {
                     use RemoteAccount::*;
@@ -1519,6 +1481,19 @@ mod tests {
         },
     };
 
+    type TestFetchClonerResult = (
+        Arc<
+            FetchCloner<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                AccountsBankStub,
+                ClonerStub,
+                PhotonClientMock,
+            >,
+        >,
+        mpsc::Sender<ForwardedSubscriptionUpdate>,
+    );
+
     macro_rules! _cloned_account {
         ($bank:expr,
          $account_pubkey:expr,
@@ -1579,12 +1554,14 @@ mod tests {
         rpc_client: crate::testing::rpc_client_mock::ChainRpcClientMock,
         #[allow(unused)]
         forward_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
-        fetch_cloner: FetchCloner<
-            ChainRpcClientMock,
-            ChainPubsubClientMock,
-            AccountsBankStub,
-            ClonerStub,
-            PhotonClientMock,
+        fetch_cloner: Arc<
+            FetchCloner<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                AccountsBankStub,
+                ClonerStub,
+                PhotonClientMock,
+            >,
         >,
         #[allow(unused)]
         subscription_tx: mpsc::Sender<ForwardedSubscriptionUpdate>,
@@ -1662,16 +1639,7 @@ mod tests {
         bank: &Arc<AccountsBankStub>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
-    ) -> (
-        FetchCloner<
-            ChainRpcClientMock,
-            ChainPubsubClientMock,
-            AccountsBankStub,
-            ClonerStub,
-            PhotonClientMock,
-        >,
-        mpsc::Sender<ForwardedSubscriptionUpdate>,
-    ) {
+    ) -> TestFetchClonerResult {
         let (subscription_tx, subscription_rx) = mpsc::channel(100);
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
         let fetch_cloner = FetchCloner::new(

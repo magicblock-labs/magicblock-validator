@@ -39,7 +39,7 @@ fn payer_keypair() -> Keypair {
 
 #[test]
 fn test_restore_ledger_committed_and_updated_account() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer);

@@ -125,7 +125,7 @@ macro_rules! assert_counter_states {
 #[test]
 fn test_restore_ledger_using_readonly() {
     init_logger!();
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer_main = payer_keypair();
     let payer_readonly = payer_keypair();
 
