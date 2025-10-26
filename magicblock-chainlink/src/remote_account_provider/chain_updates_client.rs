@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use log::*;
 use solana_pubkey::Pubkey;
 use solana_sdk::commitment_config::CommitmentConfig;
 
@@ -27,6 +28,10 @@ impl ChainUpdatesClient {
                     format!("Helius laser endpoint: {}", endpoint.pubsub_url),
                 ));
             };
+            debug!(
+                "Initializing Helius Laser client for endpoint: {}",
+                endpoint.pubsub_url
+            );
             ChainUpdatesClient::Laser(
                 ChainLaserClientImpl::new_from_url(
                     &url,
@@ -36,6 +41,10 @@ impl ChainUpdatesClient {
                 .await?,
             )
         } else {
+            debug!(
+                "Initializing WebSocket client for endpoint: {}",
+                endpoint.pubsub_url
+            );
             ChainUpdatesClient::WebSocket(
                 ChainPubsubClientImpl::try_new_from_url(
                     &endpoint.pubsub_url,
