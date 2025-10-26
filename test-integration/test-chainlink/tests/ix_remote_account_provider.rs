@@ -1,10 +1,9 @@
 use log::{debug, info};
 use magicblock_chainlink::{
     remote_account_provider::{
-        chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
-        config::RemoteAccountProviderConfig, Endpoint,
-        ForwardedSubscriptionUpdate, RemoteAccountProvider,
+        chain_updates_client::ChainUpdatesClient,
+        config::RemoteAccountProviderConfig, Endpoint, RemoteAccountProvider,
         RemoteAccountUpdateSource,
     },
     submux::SubMuxClient,
@@ -23,36 +22,24 @@ use solana_rpc_client_api::{
 use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::sync::mpsc;
 
-async fn init_remote_account_provider() -> (
-    RemoteAccountProvider<
-        ChainRpcClientImpl,
-        SubMuxClient<ChainPubsubClientImpl>,
-    >,
-    mpsc::Receiver<ForwardedSubscriptionUpdate>,
-) {
-    let (fwd_tx, fwd_rx) = mpsc::channel(100);
+async fn init_remote_account_provider(
+) -> RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
+{
+    let (fwd_tx, _fwd_rx) = mpsc::channel(100);
     let endpoints = [Endpoint {
         rpc_url: RPC_URL.to_string(),
         pubsub_url: PUBSUB_URL.to_string(),
     }];
-    (
-        RemoteAccountProvider::<
-            ChainRpcClientImpl,
-            SubMuxClient<ChainPubsubClientImpl>,
-        >::try_new_from_urls(
-            &endpoints,
-            CommitmentConfig::confirmed(),
-            fwd_tx,
-            &RemoteAccountProviderConfig::try_new_with_metrics(
-                1000,
-                LifecycleMode::Ephemeral,
-                false,
-            )
-            .unwrap(),
-        )
-        .await
-        .unwrap(),
-        fwd_rx,
+    RemoteAccountProvider::<
+        ChainRpcClientImpl,
+        SubMuxClient<ChainUpdatesClient>,
+    >::try_new_from_urls(
+        &endpoints,
+        CommitmentConfig::confirmed(),
+        fwd_tx,
+        &RemoteAccountProviderConfig::default_with_lifecycle_mode(
+            LifecycleMode::Ephemeral,
+        ),
     )
 }
 

@@ -2047,37 +2047,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-name = "helius-laserstream"
-version = "0.1.2"
-source = "git+https://github.com/magicblock-labs/laserstream-sdk?branch=v0.2.2-magicblock#c3e42c5424d317093ce3ce3652d0c9c998f52eba"
-dependencies = [
-  "async-stream",
-  "bs58",
-  "chrono",
-  "futures 0.3.31",
-  "futures-channel",
-  "futures-util",
-  "prost 0.12.6",
-  "prost-types 0.12.6",
-  "rand 0.8.5",
-  "reqwest",
-  "serde",
-  "serde_json",
-  "sha2 0.10.9",
-  "thiserror 1.0.69",
-  "tokio",
-  "tokio-stream",
-  "tonic 0.12.3",
-  "tonic-build 0.10.2",
-  "tracing",
-  "tracing-subscriber",
-  "url 2.5.4",
-  "uuid",
-  "yellowstone-grpc-client",
-  "yellowstone-grpc-proto",
-]
-
-[[package]]
 name = "hermit-abi"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"

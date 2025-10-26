@@ -1,8 +1,8 @@
 use magicblock_chainlink::{
-    remote_account_provider::SubscriptionUpdate,
+    remote_account_provider::pubsub_common::SubscriptionUpdate,
     testing::{
         chain_pubsub::{
-            reconnect, setup_actor_and_client, subscribe, unsubscribe,
+            recycle, setup_actor_and_client, shutdown, subscribe, unsubscribe,
         },
         utils::{airdrop, init_logger, random_pubkey},
     },
@@ -109,7 +109,7 @@ async fn ixtest_recycle_connections() {
     .await;
 
     // Cleanup
-    actor.shutdown().await;
+    shutdown(&actor).await;
 }
 
 #[tokio::test]
@@ -182,5 +182,5 @@ async fn ixtest_recycle_connections_multiple_accounts() {
     expect_no_update_for(&mut updates_rx, unsub_pk, 1500).await;
 
     // Cleanup
-    actor.shutdown().await;
+    shutdown(&actor).await;
 }
