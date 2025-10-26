@@ -31,7 +31,7 @@ impl ChainLaserClientImpl {
             updates: Arc::new(Mutex::new(Some(updates))),
             messages,
         };
-        actor.run().await;
+        tokio::spawn(actor.run());
         Ok(client)
     }
 
