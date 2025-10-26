@@ -12,7 +12,12 @@ env_logger = "0.11"
 futures = "0.3"
 helius-laserstream = { path = "../../laserstream-sdk/rust" }
 log = "0.4"
+solana-client = "2.1.8"
 solana-rpc-client = "2.1.8"
 solana-sdk = "2.1.8"
 tokio = { version = "1", features = ["full"] }
 yellowstone-grpc-proto = "7.0.0"
+
+[[workspace.bin]]
+name = "helius-laser"
+path = "helius-laser/src/main.rs"

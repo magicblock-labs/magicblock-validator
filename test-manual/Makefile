@@ -1,3 +1,11 @@
+DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
+fmt:
+	cargo +nightly fmt -- --config-path $(DIR)rustfmt-nightly.toml
+
+list:
+	@LC_ALL=C $(MAKE) -pRrq -f $(firstword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/(^|\n)# Files(\n|$$)/,/(^|\n)# Finished Make data base/ {if ($$1 !~ "^[#.]") {print $$1}}' | sort | egrep -v -e '^[^[:alnum:]]' -e '^$@$$'
+
 manual-test-laser:
 	@echo "Preparing for laser test..."
 	@if [ -z "$$HELIUS_API_KEY" ]; then \

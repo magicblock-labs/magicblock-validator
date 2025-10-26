@@ -1,15 +1,99 @@
-use anyhow::{Context, Result};
-use log::*;
-use solana_rpc_client::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::CommitmentConfig, native_token::LAMPORTS_PER_SOL,
-    signature::Keypair, signer::Signer, system_instruction::transfer,
-    transaction::Transaction,
-};
 use std::{env, time::Duration};
 
-const TRANSFER_AMOUNT: u64 = LAMPORTS_PER_SOL / 100;
-const SECOND_TRANSFER_AMOUNT: u64 = LAMPORTS_PER_SOL / 200; // Smaller amount for second transfer
+use anyhow::{Context, Result};
+use log::*;
+use solana_client::rpc_config::{
+    RpcSendTransactionConfig, RpcTransactionConfig,
+};
+use solana_rpc_client::rpc_client::RpcClient;
+use solana_sdk::{
+    account::Account,
+    commitment_config::CommitmentConfig,
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    signature::{read_keypair_file, Keypair},
+    signer::Signer,
+    system_instruction::transfer,
+    transaction::Transaction,
+};
+
+const TRANSFER_AMOUNT: u64 = LAMPORTS_PER_SOL / 1_000;
+const SECOND_TRANSFER_AMOUNT: u64 = LAMPORTS_PER_SOL / 2_000;
+
+fn get_keypairs() -> Result<(Keypair, Keypair)> {
+    let keypair_path = env::var("KEYPAIR_PATH")
+        .context("KEYPAIR_PATH environment variable not set")?;
+    info!("Loading keypair from {}", keypair_path);
+    let from_keypair = read_keypair_file(&keypair_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read keypair file: {}", e))?;
+
+    let to_keypair = Keypair::new();
+    Ok((from_keypair, to_keypair))
+}
+
+fn perform_transfer(
+    rpc_client: &RpcClient,
+    from_keypair: &Keypair,
+    to_pubkey: &Pubkey,
+    amount: u64,
+) -> Result<solana_sdk::signature::Signature> {
+    let from_pubkey = from_keypair.pubkey();
+    let (recent_blockhash, _) = rpc_client
+        .get_latest_blockhash_with_commitment(rpc_client.commitment())?;
+    let transaction = Transaction::new_signed_with_payer(
+        &[transfer(&from_pubkey, to_pubkey, amount)],
+        Some(&from_pubkey),
+        &[from_keypair],
+        recent_blockhash,
+    );
+
+    let signature = rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &transaction,
+            rpc_client.commitment(),
+            RpcSendTransactionConfig {
+                skip_preflight: false,
+                preflight_commitment: Some(rpc_client.commitment().commitment),
+                ..Default::default()
+            },
+        )?;
+    Ok(signature)
+}
+
+fn check_balances(
+    rpc_client: &RpcClient,
+    local_rpc_client: &RpcClient,
+    from_pubkey: &Pubkey,
+    to_pubkey: &Pubkey,
+) -> Result<(u64, u64, u64, u64)> {
+    let from_balance = rpc_client.get_balance(&from_pubkey)?;
+    let to_balance = rpc_client.get_balance(&to_pubkey)?;
+    let local_from_balance = local_rpc_client.get_balance(&from_pubkey)?;
+    let local_to_balance = local_rpc_client.get_balance(&to_pubkey)?;
+
+    info!(
+        "Current balances:
+remote from: {} lamports, to: {} lamports
+local  from: {} lamports, to: {} lamports",
+        from_balance, to_balance, local_from_balance, local_to_balance
+    );
+
+    assert_eq!(
+        from_balance, local_from_balance,
+        "From account balances should match between remote and local"
+    );
+    assert_eq!(
+        to_balance, local_to_balance,
+        "To account balances should match between remote and local"
+    );
+
+    Ok((
+        from_balance,
+        local_from_balance,
+        to_balance,
+        local_to_balance,
+    ))
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -21,105 +105,90 @@ async fn main() -> Result<()> {
     let rpc_endpoint =
         format!("https://devnet.helius-rpc.com/?api-key={}", helius_api_key);
 
-    info!("Connecting to Helius devnet");
-    let rpc_client = RpcClient::new(rpc_endpoint);
+    info!("Connecting to Helius devnet and localhost:8899");
+    let remote_rpc_client = RpcClient::new_with_commitment(
+        rpc_endpoint,
+        CommitmentConfig::confirmed(),
+    );
+    let local_rpc_client = RpcClient::new_with_commitment(
+        "http://127.0.0.1:8899",
+        CommitmentConfig::confirmed(),
+    );
 
-    let keypair_path = env::var("KEYPAIR_PATH")
-        .context("KEYPAIR_PATH environment variable not set")?;
-    info!("Loading keypair from {}", keypair_path);
-    let from_keypair = solana_sdk::signature::read_keypair_file(&keypair_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read keypair file: {}", e))?;
+    let (from_keypair, to_keypair) = get_keypairs()?;
     let from_pubkey = from_keypair.pubkey();
-
-    let to_keypair = Keypair::new();
     let to_pubkey = to_keypair.pubkey();
 
     info!("From account: {}", from_pubkey);
-    info!("To account: {}", to_pubkey);
+    info!("To account:   {}", to_pubkey);
 
+    // 1. Transfer to init the to account on devnet
     info!("Performing first transfer of {} lamports", TRANSFER_AMOUNT);
-    let recent_blockhash = rpc_client.get_latest_blockhash()?;
-    let transaction = Transaction::new_signed_with_payer(
-        &[transfer(&from_pubkey, &to_pubkey, TRANSFER_AMOUNT)],
-        Some(&from_pubkey),
-        &[&from_keypair],
-        recent_blockhash,
-    );
+    let sig = perform_transfer(
+        &remote_rpc_client,
+        &from_keypair,
+        &to_pubkey,
+        TRANSFER_AMOUNT,
+    )?;
+    info!("First transfer successful: {}", sig);
 
-    let signature = rpc_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &transaction,
-            CommitmentConfig::confirmed(),
-            Default::default(),
-        )?;
-    info!("First transfer successful: {}", signature);
+    info!("Fetching accounts from local validator...");
+    request_account_infos(&local_rpc_client, &from_pubkey, &to_pubkey).await?;
 
-    // Clone accounts to validator
-    info!("Cloning accounts to local validator...");
-    clone_accounts_to_validator(&rpc_client, &from_pubkey, &to_pubkey).await?;
+    check_balances(
+        &remote_rpc_client,
+        &local_rpc_client,
+        &from_pubkey,
+        &to_pubkey,
+    )?;
 
-    // Wait for accounts to be cloned and subscribed
-    info!("Waiting for validator to clone accounts...");
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    // Second transfer to test validator updates
+    // 2. Transfer again to test validator updates
     info!(
         "Performing second transfer of {} lamports to test validator updates",
         SECOND_TRANSFER_AMOUNT
     );
-    let recent_blockhash = rpc_client.get_latest_blockhash()?;
-    let transaction2 = Transaction::new_signed_with_payer(
-        &[transfer(&from_pubkey, &to_pubkey, SECOND_TRANSFER_AMOUNT)],
-        Some(&from_pubkey),
-        &[&from_keypair],
-        recent_blockhash,
-    );
+    let sig = perform_transfer(
+        &remote_rpc_client,
+        &from_keypair,
+        &to_pubkey,
+        SECOND_TRANSFER_AMOUNT,
+    )?;
+    info!("Second transfer successful: {}", sig);
 
-    let signature2 = rpc_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &transaction2,
-            CommitmentConfig::confirmed(),
-            Default::default(),
+    let (_from_balance, _local_from_balance, to_balance, _local_to_balance) =
+        check_balances(
+            &remote_rpc_client,
+            &local_rpc_client,
+            &from_pubkey,
+            &to_pubkey,
         )?;
-    info!("Second transfer successful: {}", signature2);
 
-    // Wait for validator to process updates
-    info!("Waiting for validator to process second transfer...");
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
-    // Check account balances to calculate return amount
-    let from_balance = rpc_client.get_balance(&from_pubkey)?;
-    let to_balance = rpc_client.get_balance(&to_pubkey)?;
-
-    info!(
-        "Current balances - from: {} lamports, to: {} lamports",
-        from_balance, to_balance
-    );
-
-    // Calculate amount to transfer back (all but enough for fees)
-    let fee_estimate = 5000; // Conservative fee estimate
-    let return_amount = to_balance.saturating_sub(fee_estimate);
+    // 3. Final transfer back to from account to close to account and check that
+    //    we get the closed account update
+    let tx = remote_rpc_client.get_transaction_with_config(
+        &sig,
+        RpcTransactionConfig {
+            commitment: Some(CommitmentConfig::confirmed()),
+            ..Default::default()
+        },
+    )?;
+    let fee = tx.transaction.meta.unwrap().fee;
+    let return_amount = to_balance.saturating_sub(fee);
 
     if return_amount > 0 {
         info!(
-            "Performing final transfer back of {} lamports to close account",
-            return_amount
-        );
-        let recent_blockhash = rpc_client.get_latest_blockhash()?;
-        let transaction3 = Transaction::new_signed_with_payer(
-            &[transfer(&to_pubkey, &from_pubkey, return_amount)],
-            Some(&to_pubkey),
-            &[&to_keypair],
-            recent_blockhash,
-        );
+            "Performing final transfer back of {} lamports to close account assuming fee from last tx: {} lamports",
+            return_amount,
+            fee
 
-        let signature3 = rpc_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &transaction3,
-                CommitmentConfig::confirmed(),
-                Default::default(),
-            )?;
-        info!("Final transfer successful: {}", signature3);
+        );
+        let sig = perform_transfer(
+            &remote_rpc_client,
+            &to_keypair,
+            &from_pubkey,
+            return_amount,
+        )?;
+        info!("Final transfer successful: {}", sig);
 
         // Wait for final update
         info!("Waiting for final account update...");
@@ -133,19 +202,21 @@ async fn main() -> Result<()> {
         "Comparing account states between Helius devnet and local validator..."
     );
 
-    // Create RPC client for local validator
-    let local_rpc_client = RpcClient::new("http://localhost:8899");
-
     // Compare both accounts
     compare_account_states(
-        &rpc_client,
+        &remote_rpc_client,
         &local_rpc_client,
         &from_pubkey,
         "from",
     )
     .await?;
-    compare_account_states(&rpc_client, &local_rpc_client, &to_pubkey, "to")
-        .await?;
+    compare_account_states(
+        &remote_rpc_client,
+        &local_rpc_client,
+        &to_pubkey,
+        "to",
+    )
+    .await?;
 
     info!("✓ All account state comparisons passed!");
     info!("✓ Test completed! Validator successfully cloned and tracks account states from Helius devnet.");
@@ -153,18 +224,18 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn clone_accounts_to_validator(
+async fn request_account_infos(
     rpc_client: &RpcClient,
     from_pubkey: &solana_sdk::pubkey::Pubkey,
     to_pubkey: &solana_sdk::pubkey::Pubkey,
 ) -> Result<()> {
-    info!("Fetching account info for cloning...");
+    info!("Fetching account infos...");
 
     // Get account info for from_pubkey
     match rpc_client.get_account(from_pubkey) {
         Ok(account) => {
             info!(
-                "From account cloned successfully - lamports: {}, owner: {}",
+                "From account fetched successfully - lamports: {}, owner: {}",
                 account.lamports, account.owner
             );
         }
@@ -177,7 +248,7 @@ async fn clone_accounts_to_validator(
     match rpc_client.get_account(to_pubkey) {
         Ok(account) => {
             info!(
-                "To account cloned successfully - lamports: {}, owner: {}",
+                "To account fetched successfully - lamports: {}, owner: {}",
                 account.lamports, account.owner
             );
         }
@@ -205,6 +276,15 @@ async fn compare_account_states(
             assert_eq!(helius, local, "{} account state should match between Helius and local validator", account_name);
             info!("✓ {} account states match", account_name);
         }
+        (Err(_helius_err), Ok(local)) => {
+            // Our validator keeps empty accounts until they are evicted
+            let helius = Account {
+                rent_epoch: local.rent_epoch,
+                ..Default::default()
+            };
+            assert_eq!(helius, local, "{} account state should match between Helius and local validator", account_name);
+            info!("✓ {} account states match", account_name);
+        }
         (Err(helius_err), Err(local_err)) => {
             info!("Both RPCs returned errors for {} account - Helius: {}, Local: {}", account_name, helius_err, local_err);
         }
@@ -212,12 +292,6 @@ async fn compare_account_states(
             panic!(
                 "Helius has {} account but local validator doesn't: {}",
                 account_name, local_err
-            );
-        }
-        (Err(helius_err), Ok(_)) => {
-            panic!(
-                "Local validator has {} account but Helius doesn't: {}",
-                account_name, helius_err
             );
         }
     }
