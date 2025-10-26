@@ -199,11 +199,11 @@ impl BaseTask for ArgsTask {
     fn compute_units(&self) -> u32 {
         match &self.task_type {
             ArgsTaskType::Commit(_) => 70_000,
-            ArgsTaskType::CompressedCommit(_) => 250_000,
-            ArgsTaskType::BaseAction(task) => task.action.compute_units,
             ArgsTaskType::Undelegate(_) => 70_000,
-            ArgsTaskType::CompressedUndelegate(_) => 250_000,
+            ArgsTaskType::BaseAction(task) => task.action.compute_units,
             ArgsTaskType::Finalize(_) => 70_000,
+            ArgsTaskType::CompressedCommit(_) => 250_000,
+            ArgsTaskType::CompressedUndelegate(_) => 250_000,
             ArgsTaskType::CompressedFinalize(_) => 250_000,
         }
     }
