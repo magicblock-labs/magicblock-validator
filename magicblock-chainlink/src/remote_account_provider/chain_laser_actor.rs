@@ -20,8 +20,7 @@ use crate::remote_account_provider::{
         ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
         SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
-    RemoteAccountProviderError, RemoteAccountProviderResult,
-    SubscriptionUpdate,
+    RemoteAccountProviderResult, SubscriptionUpdate,
 };
 
 type LaserResult = Result<SubscribeUpdate, LaserstreamError>;
