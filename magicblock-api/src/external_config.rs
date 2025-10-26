@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use magicblock_accounts::{AccountsConfig, RemoteCluster};
+use magicblock_chainlink::remote_account_provider::chain_laser_client::is_helius_laser_url;
 use magicblock_config::{errors::ConfigResult, RemoteConfig};
 use solana_sdk::pubkey::Pubkey;
 
@@ -59,19 +60,29 @@ pub fn remote_cluster_from_remote(
                 .map(|ws_urls| ws_urls.iter().map(|x| x.to_string()).collect())
                 .unwrap_or_else(|| {
                     let mut ws_url = rpc_url.clone();
-                    ws_url
-                        .set_scheme(if rpc_url.scheme() == "https" {
-                            "wss"
-                        } else {
-                            "ws"
-                        })
-                        .expect("valid scheme");
-                    if let Some(port) = ws_url.port() {
+                    // We only multiplex if the ws urls are actually websockets and only
+                    // then do we adjust the protocol.
+                    // We do not need to do this if we subscribe via GRPC, i.e. helius
+                    // laser which is more stable.
+                    let is_grpc = is_grpc_url(&ws_url.to_string());
+                    if !is_grpc {
                         ws_url
-                            .set_port(Some(port + 1))
-                            .expect("valid url with port");
+                            .set_scheme(if rpc_url.scheme() == "https" {
+                                "wss"
+                            } else {
+                                "ws"
+                            })
+                            .expect("valid scheme");
+                        if let Some(port) = ws_url.port() {
+                            ws_url
+                                .set_port(Some(port + 1))
+                                .expect("valid url with port");
+                        }
                     }
-                    vec![ws_url.to_string(); WS_MULTIPLEX_COUNT]
+                    vec![
+                        ws_url.to_string();
+                        if is_grpc { 1 } else { WS_MULTIPLEX_COUNT }
+                    ]
                 });
             (rpc_url.to_string(), ws_urls)
         }
@@ -88,10 +99,14 @@ pub fn remote_cluster_from_remote(
                 .first()
                 .expect("at least one ws url must be set for CustomWithWs")
                 .to_string();
-            let ws_urls = vec![ws_url; 3];
+            let is_grpc = is_grpc_url(&ws_url.to_string());
+            let ws_urls =
+                vec![ws_url; if is_grpc { 1 } else { WS_MULTIPLEX_COUNT }];
             (rpc_url, ws_urls)
         }
         CustomWithMultipleWs => {
+            // NOTE: we assume that if multple ws urls are provided the user wants
+            //       to multiplex no matter if any is a GRPC based pubsub.
             let rpc_url = remote_config
                 .url
                 .as_ref()
@@ -137,4 +152,8 @@ fn allowed_program_ids_from_allowed_programs(
     } else {
         None
     }
+}
+
+fn is_grpc_url(url: &str) -> bool {
+    is_helius_laser_url(url)
 }
