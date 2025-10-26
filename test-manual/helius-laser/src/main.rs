@@ -105,13 +105,13 @@ async fn main() -> Result<()> {
     let rpc_endpoint =
         format!("https://devnet.helius-rpc.com/?api-key={}", helius_api_key);
 
-    info!("Connecting to Helius devnet and localhost:8899");
+    info!("Connecting to Helius devnet and localhost:9988");
     let remote_rpc_client = RpcClient::new_with_commitment(
         rpc_endpoint,
         CommitmentConfig::confirmed(),
     );
     let local_rpc_client = RpcClient::new_with_commitment(
-        "http://127.0.0.1:8899",
+        "http://127.0.0.1:9988",
         CommitmentConfig::confirmed(),
     );
 
