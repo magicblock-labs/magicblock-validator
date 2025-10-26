@@ -1,0 +1,12 @@
+[package]
+name = "helius-laser"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-sdk = { workspace = true }
+tokio = { workspace = true }
