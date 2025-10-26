@@ -64,7 +64,7 @@ pub fn remote_cluster_from_remote(
                     // then do we adjust the protocol.
                     // We do not need to do this if we subscribe via GRPC, i.e. helius
                     // laser which is more stable.
-                    let is_grpc = is_grpc_url(&ws_url.to_string());
+                    let is_grpc = is_grpc_url(ws_url.as_ref());
                     if !is_grpc {
                         ws_url
                             .set_scheme(if rpc_url.scheme() == "https" {
