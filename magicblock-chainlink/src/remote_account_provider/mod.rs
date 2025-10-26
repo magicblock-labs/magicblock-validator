@@ -958,6 +958,18 @@ impl
     }
 }
 
+impl
+    RemoteAccountProvider<
+        ChainRpcClientImpl,
+        SubMuxClient<ChainUpdatesClient>,
+    >
+{
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn rpc_client(&self) -> &RpcClient {
+        &self.rpc_client.rpc_client
+    }
+}
+
 fn all_slots_match(accs: &[RemoteAccount]) -> bool {
     if accs.is_empty() {
         return true;

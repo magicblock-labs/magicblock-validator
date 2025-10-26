@@ -2,8 +2,8 @@ use log::{debug, info};
 use magicblock_chainlink::{
     config::LifecycleMode,
     remote_account_provider::{
-        chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
+        chain_updates_client::ChainUpdatesClient,
         config::RemoteAccountProviderConfig, Endpoint, RemoteAccountProvider,
         RemoteAccountUpdateSource,
     },
@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 
 async fn init_remote_account_provider() -> RemoteAccountProvider<
     ChainRpcClientImpl,
-    SubMuxClient<ChainPubsubClientImpl>,
+    SubMuxClient<ChainUpdatesClient>,
 > {
     let (fwd_tx, _fwd_rx) = mpsc::channel(100);
     let endpoints = [Endpoint {
@@ -32,7 +32,7 @@ async fn init_remote_account_provider() -> RemoteAccountProvider<
     }];
     RemoteAccountProvider::<
         ChainRpcClientImpl,
-        SubMuxClient<ChainPubsubClientImpl>,
+        SubMuxClient<ChainUpdatesClient>,
     >::try_new_from_urls(
         &endpoints,
         CommitmentConfig::confirmed(),

@@ -6,7 +6,7 @@ use std::{
 use magicblock_chainlink::{
     remote_account_provider::{
         chain_pubsub_client::{ChainPubsubClient, ChainPubsubClientImpl},
-        SubscriptionUpdate,
+        pubsub_common::SubscriptionUpdate,
     },
     testing::{
         init_logger,
@@ -37,8 +37,7 @@ fn updates_to_lamports(updates: &[SubscriptionUpdate]) -> Vec<u64> {
     updates
         .iter()
         .map(|update| {
-            let res = &update.rpc_response;
-            res.value.lamports
+            update.account.as_ref().map(|acc| acc.lamports).unwrap_or(0)
         })
         .collect()
 }
@@ -92,18 +91,18 @@ async fn ixtest_chain_pubsub_client_clock() {
             break;
         }
     }
-    client.shutdown().await;
+    let _ = client.shutdown().await;
 
     assert_eq!(received_updates.len(), ITER);
 
     let mut last_slot = None;
     for update in received_updates {
-        let clock_data = update.rpc_response.value.data.decode().unwrap();
-        let clock_value = bincode::deserialize::<Clock>(&clock_data).unwrap();
-        // We show as part of this test that the context slot always matches
+        let account = update.account.expect("clock account should be present");
+        let clock_value = bincode::deserialize::<Clock>(&account.data).unwrap();
+        // We show as part of this test that the update slot always matches
         // the clock slot which allows us to save on parsing in production since
-        // we can just use the context slot instead of parsing the clock data.
-        assert_eq!(update.rpc_response.context.slot, clock_value.slot);
+        // we can just use the update slot instead of parsing the clock data.
+        assert_eq!(update.slot, clock_value.slot);
         if let Some(last_slot) = last_slot {
             assert!(clock_value.slot > last_slot);
         } else {
