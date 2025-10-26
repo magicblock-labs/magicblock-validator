@@ -1,0 +1,18 @@
+[workspace]
+members = ["helius-laser"]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+
+[workspace.dependencies]
+anyhow = "1.0"
+env_logger = "0.11"
+futures = "0.3"
+helius-laserstream = { path = "../../laserstream-sdk/rust" }
+log = "0.4"
+solana-rpc-client = "2.1.8"
+solana-sdk = "2.1.8"
+tokio = { version = "1", features = ["full"] }
+yellowstone-grpc-proto = "7.0.0"
