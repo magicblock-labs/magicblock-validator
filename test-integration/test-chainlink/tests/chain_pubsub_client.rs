@@ -38,7 +38,7 @@ async fn setup() -> (ChainPubsubClientImpl, mpsc::Receiver<SubscriptionUpdate>)
 fn updates_to_lamports(updates: &[SubscriptionUpdate]) -> Vec<u64> {
     updates
         .iter()
-        .map(|update| update.account.map_or(0, |acc| acc.lamports))
+        .map(|update| update.account.as_ref().map_or(0, |acc| acc.lamports))
         .collect()
 }
 
