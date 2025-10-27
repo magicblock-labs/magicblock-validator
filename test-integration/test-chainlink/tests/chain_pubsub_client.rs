@@ -39,7 +39,7 @@ fn updates_to_lamports(updates: &[SubscriptionUpdate]) -> Vec<u64> {
     updates
         .iter()
         .map(|update| {
-            update.account.as_ref().map(|acc| acc.lamports).unwrap_or(0)
+            update.account.map_or(0, |acc| acc.lamports)
         })
         .collect()
 }
