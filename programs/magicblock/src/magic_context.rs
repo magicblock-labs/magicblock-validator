@@ -7,7 +7,6 @@ use solana_sdk::account::{AccountSharedData, ReadableAccount};
 use crate::magic_scheduled_base_intent::ScheduledBaseIntent;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-#[repr(C)]
 pub struct MagicContext {
     pub intent_id: u64,
     pub scheduled_base_intents: Vec<ScheduledBaseIntent>,
