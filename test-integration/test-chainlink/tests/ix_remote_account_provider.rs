@@ -21,10 +21,9 @@ use solana_rpc_client_api::{
 use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::sync::mpsc;
 
-async fn init_remote_account_provider() -> RemoteAccountProvider<
-    ChainRpcClientImpl,
-    SubMuxClient<ChainUpdatesClient>,
-> {
+async fn init_remote_account_provider(
+) -> RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
+{
     let (fwd_tx, _fwd_rx) = mpsc::channel(100);
     let endpoints = [Endpoint {
         rpc_url: RPC_URL.to_string(),
