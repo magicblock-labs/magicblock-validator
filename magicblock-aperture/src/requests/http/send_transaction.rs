@@ -1,4 +1,4 @@
-use log::warn;
+use log::{trace, warn};
 use magicblock_metrics::metrics::{
     TRANSACTION_PROCESSING_TIME, TRANSACTION_SKIP_PREFLIGHT,
 };
@@ -45,7 +45,9 @@ impl HttpDispatcher {
         if config.skip_preflight {
             TRANSACTION_SKIP_PREFLIGHT.inc();
             self.transactions_scheduler.schedule(transaction).await?;
+            trace!("Scheduling transaction {signature}");
         } else {
+            trace!("Executing transaction {signature}");
             self.transactions_scheduler.execute(transaction).await?;
         }
 

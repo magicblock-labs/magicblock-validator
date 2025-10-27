@@ -123,6 +123,7 @@ impl HttpDispatcher {
         &self,
         pubkeys: &[Pubkey],
     ) -> Vec<Option<AccountSharedData>> {
+        trace!("Ensuring accounts {pubkeys:?}");
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["multi-account"])
             .start_timer();
@@ -133,7 +134,7 @@ impl HttpDispatcher {
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the accounts fails
                 // Log the error and return whatever is in the accounts db
-                error!("Failed to ensure accounts: {e}");
+                warn!("Failed to ensure accounts: {e}");
             });
         pubkeys
             .iter()

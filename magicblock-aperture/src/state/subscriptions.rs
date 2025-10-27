@@ -106,7 +106,7 @@ impl SubscriptionsDb {
             .await
             .or_insert_with(|| UpdateSubscribers(vec![]))
             .add_subscriber(chan, encoder.clone());
-        let metric = SubMetricGuard::new("account");
+        let metric = SubMetricGuard::new("account-subscribe");
         // Create a cleanup future that will be executed when the handle is dropped.
         let accounts = self.accounts.clone();
         let callback = async move {
@@ -148,7 +148,7 @@ impl SubscriptionsDb {
             .add_subscriber(chan, encoder.clone());
 
         let programs = self.programs.clone();
-        let metric = SubMetricGuard::new("program");
+        let metric = SubMetricGuard::new("program-subscribe");
         let callback = async move {
             let Some(mut entry) = programs.get_async(&pubkey).await else {
                 return;
@@ -216,7 +216,7 @@ impl SubscriptionsDb {
         let id = self.logs.write().add_subscriber(chan, encoder.clone());
 
         let logs = self.logs.clone();
-        let metric = SubMetricGuard::new("logs");
+        let metric = SubMetricGuard::new("logs-subscribe");
         let callback = async move {
             logs.write().remove_subscriber(conid, &encoder);
             drop(metric)
@@ -245,7 +245,7 @@ impl SubscriptionsDb {
         let id = subscriber.id;
 
         let slot = self.slot.clone();
-        let metric = SubMetricGuard::new("slot");
+        let metric = SubMetricGuard::new("slot-subscribe");
         let callback = async move {
             slot.write().txs.remove(&conid);
             drop(metric)

@@ -152,7 +152,7 @@ lazy_static::lazy_static! {
     ).unwrap();
 
     pub static ref TRANSACTION_SKIP_PREFLIGHT: IntCounter = IntCounter::new(
-        "transaction_skip_preflight", "Count of transactions with/without preflight check",
+        "transaction_skip_preflight", "Count of transactions that skipped the preflight check",
     ).unwrap();
 
     pub static ref RPC_REQUESTS_COUNT: IntCounterVec = IntCounterVec::new(

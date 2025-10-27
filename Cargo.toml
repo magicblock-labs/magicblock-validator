@@ -91,7 +91,7 @@ jsonrpc-pubsub = "18.0.0"
 jsonrpc-ws-server = "18.0.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
-log = "0.4.20"
+log = { version = "0.4.20", features = ["release_max_level_info"] }
 lru = "0.16.0"
 macrotest = "1"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
