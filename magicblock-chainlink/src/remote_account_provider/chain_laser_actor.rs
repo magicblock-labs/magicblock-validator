@@ -44,9 +44,6 @@ pub struct ChainLaserActor {
     commitment: CommitmentLevel,
 }
 
-unsafe impl Send for ChainLaserActor {}
-unsafe impl Sync for ChainLaserActor {}
-
 impl ChainLaserActor {
     pub fn new_from_url(
         pubsub_url: &str,
@@ -195,7 +192,7 @@ impl ChainLaserActor {
     }
 
     /// Handles an update from one of the account data streams.
-    async fn handle_account_update(&self, (pubkey, result): LaserStreamUpdate) {
+    async fn handle_account_update(&mut self, (pubkey, result): LaserStreamUpdate) {
         match result {
             Ok(SubscribeUpdate {
                 update_oneof: Some(UpdateOneof::Account(acc)),
