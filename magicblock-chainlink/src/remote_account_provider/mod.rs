@@ -16,6 +16,7 @@ use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
+use futures_util::future;
 use log::*;
 use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
@@ -289,14 +290,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         };
 
         // Build pubsub clients and wrap them into a SubMuxClient
-        let mut pubsubs: Vec<Arc<ChainUpdatesClient>> =
-            Vec::with_capacity(endpoints.len());
-        for ep in endpoints {
-            let client =
-                ChainUpdatesClient::try_new_from_endpoint(ep, commitment)
-                    .await?;
-            pubsubs.push(Arc::new(client));
-        }
+        let tasks = endpoints.iter().map(|ep| {
+            ChainUpdatesClient::try_new_from_endpoint(ep, commitment)
+        });
+        let clients = future::try_join_all(tasks).await?;
+        let pubsubs = clients.into_iter().map(Arc::new).collect();
         let submux = SubMuxClient::new(pubsubs, None);
 
         RemoteAccountProvider::<
@@ -959,10 +957,7 @@ impl
 }
 
 impl
-    RemoteAccountProvider<
-        ChainRpcClientImpl,
-        SubMuxClient<ChainUpdatesClient>,
-    >
+    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
 {
     #[cfg(any(test, feature = "dev-context"))]
     pub fn rpc_client(&self) -> &RpcClient {
