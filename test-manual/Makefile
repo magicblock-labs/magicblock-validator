@@ -63,3 +63,5 @@ manual-test-laser:
 		kill $$(cat /tmp/validator.pid) 2>/dev/null || true; \
 		rm /tmp/validator.pid /tmp/validator.log ; \
 	fi
+
+.PHONY: fmt list manual-test-laser
