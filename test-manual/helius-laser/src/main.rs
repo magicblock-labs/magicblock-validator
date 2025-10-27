@@ -133,7 +133,7 @@ async fn main() -> Result<()> {
     info!("First transfer successful: {}", sig);
 
     info!("Fetching accounts from local validator...");
-    request_account_infos(&local_rpc_client, &from_pubkey, &to_pubkey).await?;
+    request_account_infos(&local_rpc_client, &from_pubkey, &to_pubkey)?;
 
     check_balances(
         &remote_rpc_client,
@@ -224,7 +224,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn request_account_infos(
+fn request_account_infos(
     rpc_client: &RpcClient,
     from_pubkey: &solana_sdk::pubkey::Pubkey,
     to_pubkey: &solana_sdk::pubkey::Pubkey,
