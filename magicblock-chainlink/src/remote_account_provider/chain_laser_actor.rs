@@ -38,7 +38,7 @@ pub struct ChainLaserActor {
     /// Receives subscribe/unsubscribe messages to this actor
     messages_receiver: mpsc::Receiver<ChainPubsubActorMessage>,
     /// Sends updates for any account subscription that is received via
-    /// the [Self::pubsub_client]
+    /// the Laser client subscription mechanism
     subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
     /// The commitment level to use for subscriptions
     commitment: CommitmentLevel,
