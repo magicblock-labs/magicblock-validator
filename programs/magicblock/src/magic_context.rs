@@ -7,6 +7,7 @@ use solana_sdk::account::{AccountSharedData, ReadableAccount};
 use crate::magic_scheduled_base_intent::ScheduledBaseIntent;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
+#[repr(C)]
 pub struct MagicContext {
     pub intent_id: u64,
     pub scheduled_base_intents: Vec<ScheduledBaseIntent>,
@@ -50,7 +51,7 @@ impl MagicContext {
         // The first 8 bytes contain the length of the vec
         // This works even if the length is actually stored as a u32
         // since we zero out the entire context whenever we update the vec
-        !is_zeroed(&data[0..8])
+        !is_zeroed(&data[8..16])
     }
 }
 
