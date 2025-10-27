@@ -49,17 +49,13 @@ manual-test-laser:
 	done
 	@echo
 	@echo "## Running laser test..."
-	KEYPAIR_PATH=$(KEYPAIR_PATH) \
-		RUST_LOG=info \
-		cargo run  --bin helius-laser
-	@echo
-	@if [ $$? -ne 0 ]; then \
-		echo "## Laser test failed, showing validator logs"; \
-		cat /tmp/validator.log || true; \
-		echo "⛔ TEST FAILED"; \
-	else \
-		echo "✅ TEST PASSED"; \
-	fi
+	@KEYPAIR_PATH=$(KEYPAIR_PATH) RUST_LOG=info \
+		cargo run --bin helius-laser || { \
+			echo "## Laser test failed, showing validator logs"; \
+			cat /tmp/validator.log || true; \
+			echo "⛔ TEST FAILED"; \
+		}
+	@echo "✅ TEST PASSED"
 	@echo
 	@if [ -f /tmp/validator.pid ]; then \
 		echo "## Shutting down validator"; \
