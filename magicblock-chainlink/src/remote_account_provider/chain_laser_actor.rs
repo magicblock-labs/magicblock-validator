@@ -103,14 +103,28 @@ impl ChainLaserActor {
     pub async fn run(mut self) {
         loop {
             tokio::select! {
-                Some(msg) = self.messages_receiver.recv() => {
-                    let is_shutdown = self.handle_msg(msg);
-                    if is_shutdown {
-                        break;
+                msg = self.messages_receiver.recv() => {
+                    match msg {
+                        Some(msg) => {
+                            let is_shutdown = self.handle_msg(msg);
+                            if is_shutdown {
+                                break;
+                            }
+                        }
+                        None => {
+                            if self.subscriptions.is_empty() {
+                                break;
+                            }
+                        }
                     }
                 }
-                Some(update) = self.subscriptions.next(), if !self.subscriptions.is_empty() => {
-                    self.handle_account_update(update).await;
+                update = self.subscriptions.next(), if !self.subscriptions.is_empty() => {
+                    match update {
+                        Some(update) => {
+                            self.handle_account_update(update).await;
+                        }
+                        None => break,
+                    }
                 },
             }
         }
