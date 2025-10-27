@@ -38,8 +38,8 @@ fn payer_keypair() -> Keypair {
 // except that we removed the intermediate checks.
 
 #[test]
-fn restore_ledger_committed_and_updated_account() {
-    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+fn test_restore_ledger_committed_and_updated_account() {
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer);
@@ -82,10 +82,10 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
 
     // Increment counter in ephemeral and commit it
     {
-        wait_for_ledger_persist(&mut validator);
+        wait_for_ledger_persist(&ctx, &mut validator);
 
         let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 4, false);
-        let sig = confirm_tx_with_payer_ephem(ix, payer, &mut validator);
+        let sig = confirm_tx_with_payer_ephem(ix, payer, &ctx, &mut validator);
 
         let res = ctx
             .fetch_schedule_commit_result::<FlexiCounter>(sig)
@@ -128,11 +128,12 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
         confirm_tx_with_payer_ephem(
             create_mul_ix(payer.pubkey(), 2),
             payer,
+            &ctx,
             &mut validator,
         );
 
         let counter_ephem =
-            fetch_counter_ephem(&payer.pubkey(), &mut validator);
+            fetch_counter_ephem(&ctx, &payer.pubkey(), &mut validator);
         let counter_chain =
             fetch_counter_chain(&payer.pubkey(), &mut validator);
         assert_eq!(
@@ -158,7 +159,7 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
 
     assert_counter_commits_on_chain(&ctx, &mut validator, &payer.pubkey(), 3);
 
-    let slot = wait_for_ledger_persist(&mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
     (validator, slot)
 }
 
@@ -176,7 +177,7 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
 
     wait_for_cloned_accounts_hydration();
 
-    let counter_ephem = fetch_counter_ephem(payer, &mut validator);
+    let counter_ephem = fetch_counter_ephem(&ctx, payer, &mut validator);
     let counter_chain = fetch_counter_chain(payer, &mut validator);
     assert_eq!(
         counter_ephem,
@@ -199,8 +200,8 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
 
     // Ensure we can use the counter as before and increase its count
     let ix = create_add_ix(payer_kp.pubkey(), 3);
-    confirm_tx_with_payer_ephem(ix, payer_kp, &mut validator);
-    let counter = fetch_counter_ephem(payer, &mut validator);
+    confirm_tx_with_payer_ephem(ix, payer_kp, &ctx, &mut validator);
+    let counter = fetch_counter_ephem(&ctx, payer, &mut validator);
     assert_eq!(
         counter,
         FlexiCounter {

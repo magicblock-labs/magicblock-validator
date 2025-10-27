@@ -1,6 +1,6 @@
 {
   "name": "@magicblock-labs/ephemeral-validator",
-  "version": "0.1.7",
+  "version": "0.2.3",
   "description": "MagicBlock Ephemeral Validator",
   "homepage": "https://github.com/magicblock-labs/ephemeral-validator#readme",
   "bugs": {
@@ -12,13 +12,14 @@
   },
   "license": "Business Source License 1.1",
   "bin": {
-    "ephemeral-validator": "ephemeralValidator.js"
+    "ephemeral-validator": "ephemeralValidator.js",
+    "mb-test-validator": "mbTestValidator.js"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check ",
     "lint:fix": "node_modules/.bin/prettier */*.js \"*/**/*{.js,.ts}\" -w",
-    "build": "tsc",
+    "build": "tsc && bash scripts/fetch-local-dumps.sh",
     "dev": "yarn build && node lib/index.js"
   },
   "devDependencies": {
@@ -27,11 +28,11 @@
     "typescript": "^4.9.4"
   },
   "optionalDependencies": {
-    "@magicblock-labs/ephemeral-validator-darwin-arm64": "0.1.7",
-    "@magicblock-labs/ephemeral-validator-darwin-x64": "0.1.7",
-    "@magicblock-labs/ephemeral-validator-linux-arm64": "0.1.7",
-    "@magicblock-labs/ephemeral-validator-linux-x64": "0.1.7",
-    "@magicblock-labs/ephemeral-validator-windows-x64": "0.1.7"
+    "@magicblock-labs/ephemeral-validator-darwin-arm64": "0.2.3",
+    "@magicblock-labs/ephemeral-validator-darwin-x64": "0.2.3",
+    "@magicblock-labs/ephemeral-validator-linux-arm64": "0.2.3",
+    "@magicblock-labs/ephemeral-validator-linux-x64": "0.2.3",
+    "@magicblock-labs/ephemeral-validator-windows-x64": "0.2.3"
   },
   "publishConfig": {
     "access": "public"

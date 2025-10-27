@@ -17,9 +17,9 @@ use magicblock_aperture::{
     JsonRpcServer,
 };
 use magicblock_config::RpcConfig;
-use magicblock_core::link::accounts::LockedAccount;
-use magicblock_core::traits::AccountsBank;
-use magicblock_core::Slot;
+use magicblock_core::{
+    link::accounts::LockedAccount, traits::AccountsBank, Slot,
+};
 use magicblock_ledger::LatestBlock;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_keypair::Keypair;
@@ -55,9 +55,16 @@ pub struct RpcTestEnv {
     pub block: LatestBlock,
 }
 
-fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
-    ChainlinkImpl::try_new(accounts_db, None)
-        .expect("Failed to create Chainlink")
+fn chainlink(accounts_db: &Arc<AccountsDb>) -> Arc<ChainlinkImpl> {
+    Arc::new(
+        ChainlinkImpl::try_new(
+            accounts_db,
+            None,
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        )
+        .expect("Failed to create Chainlink"),
+    )
 }
 
 impl RpcTestEnv {
@@ -84,7 +91,7 @@ impl RpcTestEnv {
         // Try to find a free port, this is handy when using nextest
         // where each test needs to run in a separate process.
         let (server, config) = loop {
-            let port: u16 = rand::random_range(7000..u16::MAX);
+            let port: u16 = rand::random_range(7000..u16::MAX - 1);
             let node_context = NodeContext {
                 identity: execution.payer.pubkey(),
                 faucet: Some(faucet.insecure_clone()),
@@ -158,7 +165,7 @@ impl RpcTestEnv {
         const OWNER_OFFSET: usize = 32;
         const AMOUNT_OFFSET: usize = 64;
         const DELEGATE_OFFSET: usize = 76;
-        const MINT_DECIMALS_OFFSET: usize = 40;
+        const MINT_DECIMALS_OFFSET: usize = 44;
         const MINT_DATA_LEN: usize = 88;
         const TOKEN_ACCOUNT_DATA_LEN: usize = 165;
 

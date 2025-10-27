@@ -1,5 +1,12 @@
 use hyper::body::Bytes;
 use json::Serialize;
+use magicblock_core::{
+    link::{
+        accounts::LockedAccount,
+        transactions::{TransactionResult, TransactionStatus},
+    },
+    Slot,
+};
 use solana_account::ReadableAccount;
 use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
 use solana_pubkey::Pubkey;
@@ -10,19 +17,17 @@ use crate::{
     state::subscriptions::SubscriptionID,
     utils::{AccountWithPubkey, ProgramFilters},
 };
-use magicblock_core::{
-    link::{
-        accounts::LockedAccount,
-        transactions::{TransactionResult, TransactionStatus},
-    },
-    Slot,
-};
 
 /// An abstraction trait over types which specialize in turning various
 /// websocket notification payload types into sequence of bytes
 pub(crate) trait Encoder: Ord + Eq + Clone {
     type Data;
-    fn encode(&self, slot: u64, data: &Self::Data, id: u64) -> Option<Bytes>;
+    fn encode(
+        &self,
+        slot: Slot,
+        data: &Self::Data,
+        id: SubscriptionID,
+    ) -> Option<Bytes>;
 }
 
 /// A `accountSubscribe` payload encoder
@@ -85,8 +90,15 @@ impl Encoder for AccountEncoder {
 impl Encoder for ProgramAccountEncoder {
     type Data = LockedAccount;
 
-    fn encode(&self, slot: Slot, data: &Self::Data, id: u64) -> Option<Bytes> {
-        self.filters.matches(data.account.data()).then_some(())?;
+    fn encode(
+        &self,
+        slot: Slot,
+        data: &Self::Data,
+        id: SubscriptionID,
+    ) -> Option<Bytes> {
+        data.read_locked(|_, acc| {
+            self.filters.matches(acc.data()).then_some(())
+        })?;
         let value = AccountWithPubkey::new(data, (&self.encoder).into(), None);
         let method = "programNotification";
         NotificationPayload::encode(value, slot, method, id)

@@ -3,14 +3,17 @@
 use log::*;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_rpc_client_api::client_error::Result as ClientResult;
-use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::instruction::Instruction;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::pubkey;
-use solana_sdk::signature::{Keypair, Signature};
-use solana_sdk::signer::Signer;
-use solana_sdk::transaction::Transaction;
+use solana_rpc_client_api::{
+    client_error::Result as ClientResult, config::RpcSendTransactionConfig,
+};
+use solana_sdk::{
+    instruction::Instruction,
+    native_token::LAMPORTS_PER_SOL,
+    pubkey,
+    signature::{Keypair, Signature},
+    signer::Signer,
+    transaction::Transaction,
+};
 
 /// The memo v1 program is predeployed with the v1 loader
 /// (BPFLoader1111111111111111111111111111111111)
@@ -249,7 +252,6 @@ pub mod memo {
 
 #[allow(unused)]
 pub mod mini {
-    use super::send_instructions;
     use program_mini::{common::IdlType, sdk};
     use solana_pubkey::Pubkey;
     use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -257,6 +259,8 @@ pub mod mini {
         signature::{Keypair, Signature},
         signer::Signer,
     };
+
+    use super::send_instructions;
 
     // -----------------
     // Binaries
@@ -541,22 +545,24 @@ pub mod mini {
 
 #[allow(unused)]
 pub mod deploy {
-    use super::{airdrop_sol, send_instructions, CHUNK_SIZE};
-    use crate::programs::{mini, try_send_instructions};
+    use std::{fs, path::PathBuf, process::Command, sync::Arc};
+
     use log::*;
     use solana_loader_v4_interface::instruction::LoaderV4Instruction as LoaderInstructionV4;
     use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-    use solana_sdk::instruction::{AccountMeta, Instruction};
-    use solana_sdk::native_token::LAMPORTS_PER_SOL;
-    use solana_sdk::signature::Keypair;
-    use solana_sdk::signer::Signer;
+    use solana_sdk::{
+        instruction::{AccountMeta, Instruction},
+        loader_v4, loader_v4_instruction,
+        native_token::LAMPORTS_PER_SOL,
+        signature::Keypair,
+        signer::Signer,
+    };
     use solana_system_interface::instruction as system_instruction;
-    use std::fs;
-    use std::path::PathBuf;
-    use std::process::Command;
-    use std::sync::Arc;
 
-    pub fn compile_mini(keypair: &Keypair) -> Vec<u8> {
+    use super::{airdrop_sol, send_instructions, CHUNK_SIZE};
+    use crate::programs::{mini, try_send_instructions};
+
+    pub fn compile_mini(keypair: &Keypair, suffix: Option<&str>) -> Vec<u8> {
         let workspace_root_path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
         let program_root_path =
@@ -565,7 +571,11 @@ pub mod deploy {
 
         // Build the program and read the binary, ensuring cleanup happens
         // Run cargo build-sbf to compile the program
-        let output = Command::new("cargo")
+        let mut cmd = Command::new("cargo");
+        if let Some(suffix) = suffix {
+            cmd.env("LOG_MSG_SUFFIX", suffix);
+        }
+        let output = cmd
             .env("MINI_PROGRAM_ID", &program_id)
             .args([
                 "build-sbf",
@@ -608,22 +618,35 @@ pub mod deploy {
             solana_sdk::pubkey!("LoaderV411111111111111111111111111111111111");
 
         // 1. Set program length to initialize and allocate space
-        let create_program_account_instruction =
-            system_instruction::create_account(
-                &auth_kp.pubkey(),
-                &program_kp.pubkey(),
-                10 * LAMPORTS_PER_SOL,
-                0,
-                &loader_program_id,
-            );
-        let signature = send_instructions(
-            &rpc_client,
-            &[create_program_account_instruction],
-            &[auth_kp, program_kp],
-            "deploy_loader_v4::create_program_account_instruction",
-        )
-        .await;
-        debug!("Created program account: {signature}");
+        if rpc_client.get_account(&program_kp.pubkey()).await.is_err() {
+            let create_program_account_instruction =
+                system_instruction::create_account(
+                    &auth_kp.pubkey(),
+                    &program_kp.pubkey(),
+                    10 * LAMPORTS_PER_SOL,
+                    0,
+                    &loader_program_id,
+                );
+            let signature = send_instructions(
+                &rpc_client,
+                &[create_program_account_instruction],
+                &[auth_kp, program_kp],
+                "deploy_loader_v4::create_program_account_instruction",
+            )
+            .await;
+            debug!("Created program account: {signature}");
+        } else {
+            let retract_instruction =
+                loader_v4::retract(&program_kp.pubkey(), &auth_kp.pubkey());
+            let signature = send_instructions(
+                &rpc_client,
+                &[retract_instruction],
+                &[auth_kp],
+                "deploy_loader_v4::create_program_account_instruction",
+            )
+            .await;
+            debug!("Retracted program account: {signature}");
+        }
 
         let set_length_instruction = {
             let loader_instruction = LoaderInstructionV4::SetProgramLength {
@@ -654,47 +677,59 @@ pub mod deploy {
         debug!("Initialized length: {signature}");
 
         // 2. Write program data
-        let mut joinset = tokio::task::JoinSet::new();
-        for (idx, chunk) in program_data.chunks(CHUNK_SIZE).enumerate() {
-            let chunk = chunk.to_vec();
-            let offset = (idx * CHUNK_SIZE) as u32;
-            let program_pubkey = program_kp.pubkey();
-            let auth_kp = auth_kp.insecure_clone();
-            let auth_pubkey = auth_kp.pubkey();
-            let rpc_client = rpc_client.clone();
+        use futures::stream::{self, StreamExt};
 
-            joinset.spawn(async move {
-                let chunk_size = chunk.len();
-                // Create Write instruction to write program data in chunks
-                let loader_instruction = LoaderInstructionV4::Write {
-                    offset,
-                    bytes: chunk,
-                };
+        const MAX_CONCURRENCY: usize = 100;
 
-                let instruction = Instruction {
-                    program_id: loader_program_id,
-                    accounts: vec![
-                        // [writable] The program account to write to
-                        AccountMeta::new(program_pubkey, false),
-                        // [signer] The authority of the program
-                        AccountMeta::new_readonly(auth_pubkey, true),
-                    ],
-                    data: bincode::serialize(&loader_instruction)
-                        .expect("Failed to serialize Write instruction"),
-                };
+        let tasks =
+            program_data
+                .chunks(CHUNK_SIZE)
+                .enumerate()
+                .map(|(idx, chunk)| {
+                    let chunk = chunk.to_vec();
+                    let offset = (idx * CHUNK_SIZE) as u32;
+                    let program_pubkey = program_kp.pubkey();
+                    let auth_kp = auth_kp.insecure_clone();
+                    let auth_pubkey = auth_kp.pubkey();
+                    let rpc_client = rpc_client.clone();
 
-                let signature = send_instructions(
-                    &rpc_client,
-                    &[instruction],
-                    &[&auth_kp],
-                    "deploy_loader_v4::write_instruction",
-                )
-                .await;
-                trace!("Wrote chunk {idx} of size {chunk_size}: {signature}");
-                signature
-            });
-        }
-        let _signatures = joinset.join_all().await;
+                    async move {
+                        let chunk_size = chunk.len();
+                        let loader_instruction = LoaderInstructionV4::Write {
+                            offset,
+                            bytes: chunk,
+                        };
+
+                        let instruction = Instruction {
+                            program_id: loader_program_id,
+                            accounts: vec![
+                                AccountMeta::new(program_pubkey, false),
+                                AccountMeta::new_readonly(auth_pubkey, true),
+                            ],
+                            data: bincode::serialize(&loader_instruction)
+                                .expect(
+                                    "Failed to serialize Write instruction",
+                                ),
+                        };
+
+                        let signature = send_instructions(
+                            &rpc_client,
+                            &[instruction],
+                            &[&auth_kp],
+                            "deploy_loader_v4::write_instruction",
+                        )
+                        .await;
+                        trace!(
+                        "Wrote chunk {idx} of size {chunk_size}: {signature}"
+                    );
+                        signature
+                    }
+                });
+
+        let results: Vec<_> = stream::iter(tasks)
+            .buffer_unordered(MAX_CONCURRENCY)
+            .collect()
+            .await;
 
         // 3. Deploy the program to make it executable
         let deploy_instruction = {
@@ -752,7 +787,10 @@ pub mod deploy {
 // -----------------
 #[allow(unused)]
 pub mod not_working {
+    use std::sync::Arc;
+
     use log::*;
+    use magicblock_chainlink::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
     use solana_loader_v2_interface::LoaderInstruction as LoaderInstructionV2;
     use solana_loader_v3_interface::instruction::UpgradeableLoaderInstruction as LoaderInstructionV3;
     use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -764,9 +802,6 @@ pub mod not_working {
         transaction::Transaction,
     };
     use solana_system_interface::instruction as system_instruction;
-    use std::sync::Arc;
-
-    use magicblock_chainlink::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
 
     use super::{airdrop_sol, send_transaction, CHUNK_SIZE};
     pub async fn deploy_loader_v1(

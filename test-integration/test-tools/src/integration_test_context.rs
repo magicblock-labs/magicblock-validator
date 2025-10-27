@@ -8,8 +8,7 @@ use solana_rpc_client::{
     rpc_client::{GetConfirmedSignaturesForAddress2Config, RpcClient},
 };
 use solana_rpc_client_api::{
-    client_error,
-    client_error::{Error as ClientError, ErrorKind as ClientErrorKind},
+    client_error::{self, Error as ClientError, ErrorKind as ClientErrorKind},
     config::{RpcSendTransactionConfig, RpcTransactionConfig},
 };
 #[allow(unused_imports)]
@@ -20,7 +19,6 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
     instruction::Instruction,
-    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     rent::Rent,
     signature::{Keypair, Signature},
@@ -28,10 +26,18 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_transaction_status::{
-    EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
+    EncodedConfirmedBlock, EncodedConfirmedTransactionWithStatusMeta,
+    UiTransactionEncoding,
 };
 
-use crate::dlp_interface;
+use crate::{
+    dlp_interface,
+    transactions::{
+        confirm_transaction, send_and_confirm_instructions_with_payer,
+        send_and_confirm_transaction, send_instructions_with_payer,
+        send_transaction,
+    },
+};
 
 const URL_CHAIN: &str = "http://localhost:7799";
 const WS_URL_CHAIN: &str = "ws://localhost:7800";
@@ -68,47 +74,49 @@ pub struct IntegrationTestContext {
     pub chain_client: Option<RpcClient>,
     pub ephem_client: Option<RpcClient>,
     pub ephem_validator_identity: Option<Pubkey>,
-    pub chain_blockhash: Option<Hash>,
-    pub ephem_blockhash: Option<Hash>,
 }
 
 impl IntegrationTestContext {
     pub fn try_new_ephem_only() -> Result<Self> {
+        color_backtrace::install();
+
         let commitment = CommitmentConfig::confirmed();
         let ephem_client = RpcClient::new_with_commitment(
             Self::url_ephem().to_string(),
             commitment,
         );
         let validator_identity = ephem_client.get_identity()?;
-        let ephem_blockhash = ephem_client.get_latest_blockhash()?;
         Ok(Self {
             commitment,
             chain_client: None,
             ephem_client: Some(ephem_client),
             ephem_validator_identity: Some(validator_identity),
-            chain_blockhash: None,
-            ephem_blockhash: Some(ephem_blockhash),
         })
     }
 
     pub fn try_new_chain_only() -> Result<Self> {
+        color_backtrace::install();
+
         let commitment = CommitmentConfig::confirmed();
         let chain_client = RpcClient::new_with_commitment(
             Self::url_chain().to_string(),
             commitment,
         );
-        let chain_blockhash = chain_client.get_latest_blockhash()?;
         Ok(Self {
             commitment,
             chain_client: Some(chain_client),
             ephem_client: None,
             ephem_validator_identity: None,
-            chain_blockhash: Some(chain_blockhash),
-            ephem_blockhash: None,
         })
     }
 
     pub fn try_new() -> Result<Self> {
+        Self::try_new_with_ephem_port(8899)
+    }
+
+    pub fn try_new_with_ephem_port(port: u16) -> Result<Self> {
+        color_backtrace::install();
+
         let commitment = CommitmentConfig::confirmed();
 
         let chain_client = RpcClient::new_with_commitment(
@@ -116,20 +124,16 @@ impl IntegrationTestContext {
             commitment,
         );
         let ephem_client = RpcClient::new_with_commitment(
-            Self::url_ephem().to_string(),
+            Self::url_local_ephem_at_port(port).to_string(),
             commitment,
         );
         let validator_identity = ephem_client.get_identity()?;
-        let chain_blockhash = chain_client.get_latest_blockhash()?;
-        let ephem_blockhash = ephem_client.get_latest_blockhash()?;
 
         Ok(Self {
             commitment,
             chain_client: Some(chain_client),
             ephem_client: Some(ephem_client),
             ephem_validator_identity: Some(validator_identity),
-            chain_blockhash: Some(chain_blockhash),
-            ephem_blockhash: Some(ephem_blockhash),
         })
     }
 
@@ -246,6 +250,15 @@ impl IntegrationTestContext {
             return Err(anyhow::anyhow!("Chain client not available"));
         };
         Ok(chain_client)
+    }
+
+    pub fn try_chain_client_async(
+        &self,
+    ) -> anyhow::Result<nonblocking::rpc_client::RpcClient> {
+        let Some(chain_client) = self.chain_client.as_ref() else {
+            return Err(anyhow::anyhow!("Chain client not available"));
+        };
+        Ok(async_rpc_client(chain_client))
     }
 
     pub fn try_ephem_client(&self) -> anyhow::Result<&RpcClient> {
@@ -491,7 +504,7 @@ impl IntegrationTestContext {
     }
     /// Airdrop lamports to the payer on-chain account and
     /// then top up the ephemeral fee balance with half of that
-    pub async fn airdrop_chain_escrowed(
+    pub fn airdrop_chain_escrowed(
         &self,
         payer: &Keypair,
         lamports: u64,
@@ -506,26 +519,23 @@ impl IntegrationTestContext {
         );
 
         // 2. Top up the ephemeral fee balance account from the payer
-        let rpc_client = async_rpc_client(self.try_chain_client()?);
-        let topup_sol = (lamports / 2) / LAMPORTS_PER_SOL;
+        let topup_lamports = lamports / 2;
 
-        let (escrow_sig, ephemeral_balance_pda, deleg_record) =
-            dlp_interface::top_up_ephemeral_fee_balance(
-                &rpc_client,
-                payer,
-                payer.pubkey(),
-                topup_sol,
-                self.ephem_validator_identity,
-            )
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to airdrop escrowed chain account from '{}'",
-                    payer.pubkey()
-                )
-            })?;
+        let ixs = dlp_interface::create_topup_ixs(
+            payer.pubkey(),
+            payer.pubkey(),
+            topup_lamports,
+            self.ephem_validator_identity,
+        );
+        let (escrow_sig, confirmed) =
+            self.send_and_confirm_instructions_with_payer_chain(&ixs, payer)?;
+        assert!(confirmed, "Failed to confirm escrow airdrop");
+
+        let (ephemeral_balance_pda, deleg_record) =
+            dlp_interface::escrow_pdas(&payer.pubkey());
+
         let escrow_lamports =
-            topup_sol * LAMPORTS_PER_SOL + Rent::default().minimum_balance(0);
+            topup_lamports + Rent::default().minimum_balance(0);
         Ok((
             airdrop_sig,
             escrow_sig,
@@ -533,6 +543,67 @@ impl IntegrationTestContext {
             deleg_record,
             escrow_lamports,
         ))
+    }
+
+    /// Airdrop lamports to the payer on-chain account and
+    /// then delegates it as on-curve
+    pub fn airdrop_chain_and_delegate(
+        &self,
+        payer_chain: &Keypair,
+        payer_ephem: &Keypair,
+        lamports: u64,
+    ) -> anyhow::Result<(Signature, Signature)> {
+        // 1. Airdrop funds to the payer we will clone into the ephem
+        let payer_ephem_airdrop_sig =
+            self.airdrop_chain(&payer_ephem.pubkey(), lamports)?;
+        debug!(
+            "Airdropped {} lamports to ephem payer {} ({})",
+            lamports,
+            payer_ephem.pubkey(),
+            payer_ephem_airdrop_sig
+        );
+
+        // 2.Delegate the ephem payer
+        let delegated_already = self
+            .fetch_chain_account_owner(payer_ephem.pubkey())
+            .map(|owner| owner.eq(&dlp::id()))
+            .unwrap_or(false);
+        let deleg_sig = if !delegated_already {
+            let (deleg_sig, confirmed) =
+                self.delegate_account(payer_chain, payer_ephem)?;
+
+            assert!(confirmed, "Failed to confirm airdrop delegation");
+            debug!("Delegated payer {}", payer_ephem.pubkey());
+            deleg_sig
+        } else {
+            debug!(
+                "Ephem payer {} already delegated, skipping",
+                payer_ephem.pubkey()
+            );
+            Signature::default()
+        };
+
+        Ok((payer_ephem_airdrop_sig, deleg_sig))
+    }
+
+    pub fn delegate_account(
+        &self,
+        payer_chain: &Keypair,
+        payer_ephem: &Keypair,
+    ) -> anyhow::Result<(Signature, bool)> {
+        let ixs = dlp_interface::create_delegate_ixs(
+            // We change the owner of the ephem account, thus cannot use it as payer
+            payer_chain.pubkey(),
+            payer_ephem.pubkey(),
+            self.ephem_validator_identity,
+        );
+        let mut tx =
+            Transaction::new_with_payer(&ixs, Some(&payer_chain.pubkey()));
+        let (deleg_sig, confirmed) = self.send_and_confirm_transaction_chain(
+            &mut tx,
+            &[payer_chain, payer_ephem],
+        )?;
+        Ok((deleg_sig, confirmed))
     }
 
     pub fn airdrop(
@@ -546,7 +617,7 @@ impl IntegrationTestContext {
         )?;
 
         let succeeded =
-            Self::confirm_transaction(&sig, rpc_client, commitment_config)
+            confirm_transaction(&sig, rpc_client, commitment_config, None)
                 .with_context(|| {
                     format!(
                         "Failed to confirm airdrop chain account '{:?}'",
@@ -598,71 +669,33 @@ impl IntegrationTestContext {
     pub fn confirm_transaction_chain(
         &self,
         sig: &Signature,
+        tx: Option<&Transaction>,
     ) -> Result<bool, client_error::Error> {
-        Self::confirm_transaction(
+        confirm_transaction(
             sig,
             self.try_chain_client().map_err(|err| client_error::Error {
                 request: None,
                 kind: client_error::ErrorKind::Custom(err.to_string()),
             })?,
             self.commitment,
+            tx,
         )
     }
 
     pub fn confirm_transaction_ephem(
         &self,
         sig: &Signature,
+        tx: Option<&Transaction>,
     ) -> Result<bool, client_error::Error> {
-        Self::confirm_transaction(
+        confirm_transaction(
             sig,
             self.try_ephem_client().map_err(|err| client_error::Error {
                 request: None,
                 kind: client_error::ErrorKind::Custom(err.to_string()),
             })?,
             self.commitment,
+            tx,
         )
-    }
-
-    pub fn confirm_transaction(
-        sig: &Signature,
-        rpc_client: &RpcClient,
-        commitment_config: CommitmentConfig,
-    ) -> Result<bool, client_error::Error> {
-        // Allow RPC failures to persist for up to 1 sec
-        const MAX_FAILURES: u64 = 5;
-        const MILLIS_UNTIL_RETRY: u64 = 200;
-        let mut failure_count = 0;
-
-        // Allow transactions to take up to 40 seconds to confirm
-        const MAX_UNCONFIRMED_COUNT: u64 = 40;
-        const MILLIS_UNTIL_RECONFIRM: u64 = 500;
-        let mut unconfirmed_count = 0;
-
-        loop {
-            match rpc_client
-                .confirm_transaction_with_commitment(sig, commitment_config)
-            {
-                Ok(res) if res.value => {
-                    return Ok(res.value);
-                }
-                Ok(_) => {
-                    unconfirmed_count += 1;
-                    if unconfirmed_count >= MAX_UNCONFIRMED_COUNT {
-                        return Ok(false);
-                    } else {
-                        sleep(Duration::from_millis(MILLIS_UNTIL_RECONFIRM));
-                    }
-                }
-                Err(err) => {
-                    failure_count += 1;
-                    if failure_count >= MAX_FAILURES {
-                        return Err(err);
-                    } else {
-                        sleep(Duration::from_millis(MILLIS_UNTIL_RETRY));
-                    }
-                }
-            }
-        }
     }
 
     pub fn send_transaction_ephem(
@@ -670,13 +703,30 @@ impl IntegrationTestContext {
         tx: &mut Transaction,
         signers: &[&Keypair],
     ) -> Result<Signature, client_error::Error> {
-        Self::send_transaction(
+        send_transaction(
             self.try_ephem_client().map_err(|err| client_error::Error {
                 request: None,
                 kind: client_error::ErrorKind::Custom(err.to_string()),
             })?,
             tx,
             signers,
+            true,
+        )
+    }
+
+    pub fn send_transaction_ephem_with_preflight(
+        &self,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+    ) -> Result<Signature, client_error::Error> {
+        send_transaction(
+            self.try_ephem_client().map_err(|err| client_error::Error {
+                request: None,
+                kind: client_error::ErrorKind::Custom(err.to_string()),
+            })?,
+            tx,
+            signers,
+            false,
         )
     }
 
@@ -685,28 +735,14 @@ impl IntegrationTestContext {
         tx: &mut Transaction,
         signers: &[&Keypair],
     ) -> Result<Signature, client_error::Error> {
-        Self::send_transaction(
+        send_transaction(
             self.try_chain_client().map_err(|err| client_error::Error {
                 request: None,
                 kind: client_error::ErrorKind::Custom(err.to_string()),
             })?,
             tx,
             signers,
-        )
-    }
-
-    pub fn send_instructions_with_payer_ephem(
-        &self,
-        ixs: &[Instruction],
-        payer: &Keypair,
-    ) -> Result<Signature, client_error::Error> {
-        Self::send_instructions_with_payer(
-            self.try_ephem_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
-            })?,
-            ixs,
-            payer,
+            true,
         )
     }
 
@@ -714,8 +750,8 @@ impl IntegrationTestContext {
         &self,
         ixs: &[Instruction],
         payer: &Keypair,
-    ) -> Result<Signature, client_error::Error> {
-        Self::send_instructions_with_payer(
+    ) -> Result<(Signature, Transaction), client_error::Error> {
+        send_instructions_with_payer(
             self.try_chain_client().map_err(|err| client_error::Error {
                 request: None,
                 kind: client_error::ErrorKind::Custom(err.to_string()),
@@ -731,7 +767,7 @@ impl IntegrationTestContext {
         signers: &[&Keypair],
     ) -> Result<(Signature, bool), anyhow::Error> {
         self.try_ephem_client().and_then(|ephem_client| {
-            Self::send_and_confirm_transaction(
+            send_and_confirm_transaction(
                 ephem_client,
                 tx,
                 signers,
@@ -752,7 +788,7 @@ impl IntegrationTestContext {
         signers: &[&Keypair],
     ) -> Result<(Signature, bool), anyhow::Error> {
         self.try_chain_client().and_then(|chain_client| {
-            Self::send_and_confirm_transaction(
+            send_and_confirm_transaction(
                 chain_client,
                 tx,
                 signers,
@@ -773,11 +809,12 @@ impl IntegrationTestContext {
         payer: &Keypair,
     ) -> Result<(Signature, bool), anyhow::Error> {
         self.try_ephem_client().and_then(|ephem_client| {
-            self.send_and_confirm_instructions_with_payer(
+            send_and_confirm_instructions_with_payer(
                 ephem_client,
                 ixs,
                 payer,
                 self.commitment,
+                "ephemeral",
             )
             .with_context(|| {
                 format!(
@@ -794,11 +831,12 @@ impl IntegrationTestContext {
         payer: &Keypair,
     ) -> Result<(Signature, bool), anyhow::Error> {
         self.try_chain_client().and_then(|chain_client| {
-            self.send_and_confirm_instructions_with_payer(
+            send_and_confirm_instructions_with_payer(
                 chain_client,
                 ixs,
                 payer,
                 self.commitment,
+                "chain",
             )
             .with_context(|| {
                 format!(
@@ -823,6 +861,10 @@ impl IntegrationTestContext {
                 ..Default::default()
             },
         )?;
+        rpc_client.confirm_transaction_with_commitment(
+            &sig,
+            CommitmentConfig::confirmed(),
+        )?;
         Ok(sig)
     }
 
@@ -844,7 +886,7 @@ impl IntegrationTestContext {
         commitment: CommitmentConfig,
     ) -> Result<(Signature, bool), client_error::Error> {
         let sig = Self::send_transaction(rpc_client, tx, signers)?;
-        Self::confirm_transaction(&sig, rpc_client, commitment)
+        confirm_transaction(&sig, rpc_client, commitment, Some(tx))
             .map(|confirmed| (sig, confirmed))
     }
 
@@ -855,14 +897,9 @@ impl IntegrationTestContext {
         payer: &Keypair,
         commitment: CommitmentConfig,
     ) -> Result<(Signature, bool), client_error::Error> {
-        debug!(
-            "Sending transaction {} instructions, payer: {}",
-            payer.pubkey(),
-            ixs.len()
-        );
         let sig = Self::send_instructions_with_payer(rpc_client, ixs, payer)?;
         debug!("Confirming transaction with signature: {}", sig);
-        Self::confirm_transaction(&sig, rpc_client, commitment)
+        confirm_transaction(&sig, rpc_client, commitment, None)
             .map(|confirmed| (sig, confirmed))
             .inspect_err(|_| {
                 self.dump_ephemeral_logs(sig);
@@ -985,6 +1022,12 @@ impl IntegrationTestContext {
         self.try_chain_client().and_then(Self::wait_for_next_slot)
     }
 
+    pub fn wait_for_delta_slot_chain(&self, delta: Slot) -> Result<Slot> {
+        self.try_chain_client().and_then(|chain_client| {
+            Self::wait_for_delta_slot(chain_client, delta)
+        })
+    }
+
     fn wait_for_next_slot(rpc_client: &RpcClient) -> Result<Slot> {
         let initial_slot = rpc_client.get_slot()?;
         Self::wait_until_slot(rpc_client, initial_slot + 1)
@@ -1033,11 +1076,71 @@ impl IntegrationTestContext {
         Ok(blockhashes)
     }
 
+    pub fn try_get_latest_blockhash_ephem(&self) -> Result<Hash> {
+        self.try_ephem_client().and_then(Self::get_latest_blockhash)
+    }
+
+    pub fn try_get_latest_blockhash_chain(&self) -> Result<Hash> {
+        self.try_chain_client().and_then(Self::get_latest_blockhash)
+    }
+
+    fn get_latest_blockhash(rpc_client: &RpcClient) -> Result<Hash> {
+        rpc_client
+            .get_latest_blockhash()
+            .map_err(|e| anyhow::anyhow!("Failed to get blockhash{}", e))
+    }
+
+    // -----------------
+    // Block
+    // -----------------
+    pub fn try_get_block_ephem(
+        &self,
+        slot: Slot,
+    ) -> Result<EncodedConfirmedBlock> {
+        self.try_ephem_client()
+            .and_then(|ephem_client| Self::get_block(ephem_client, slot))
+    }
+    pub fn try_get_block_chain(
+        &self,
+        slot: Slot,
+    ) -> Result<EncodedConfirmedBlock> {
+        self.try_chain_client()
+            .and_then(|chain_client| Self::get_block(chain_client, slot))
+    }
+    fn get_block(
+        rpc_client: &RpcClient,
+        slot: Slot,
+    ) -> Result<EncodedConfirmedBlock> {
+        rpc_client
+            .get_block(slot)
+            .map_err(|e| anyhow::anyhow!("Failed to get block: {}", e))
+    }
+
+    // -----------------
+    // Blocktime
+    // -----------------
+    pub fn try_get_block_time_ephem(&self, slot: Slot) -> Result<i64> {
+        self.try_ephem_client()
+            .and_then(|ephem_client| Self::get_block_time(ephem_client, slot))
+    }
+    pub fn try_get_block_time_chain(&self, slot: Slot) -> Result<i64> {
+        self.try_chain_client()
+            .and_then(|chain_client| Self::get_block_time(chain_client, slot))
+    }
+    fn get_block_time(rpc_client: &RpcClient, slot: Slot) -> Result<i64> {
+        rpc_client
+            .get_block_time(slot)
+            .map_err(|e| anyhow::anyhow!("Failed to get blocktime: {}", e))
+    }
+
     // -----------------
     // RPC Clients
     // -----------------
     pub fn url_ephem() -> &'static str {
         URL_EPHEM
+    }
+    pub fn url_local_ephem_at_port(port: u16) -> String {
+        format!("http://localhost:{}", port)
     }
     pub fn url_chain() -> &'static str {
         URL_CHAIN

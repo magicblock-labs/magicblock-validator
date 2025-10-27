@@ -1,18 +1,16 @@
+use std::{collections::HashSet, fmt, sync::Arc};
+
 use log::*;
 use scc::HashMap;
-use solana_rpc_client_api::response::Response as RpcResponse;
-use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::sysvar::clock;
-use std::collections::HashSet;
-use std::fmt;
-use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
-use tokio_stream::StreamExt;
-
 use solana_account_decoder_client_types::{UiAccount, UiAccountEncoding};
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
-use solana_rpc_client_api::config::RpcAccountInfoConfig;
+use solana_rpc_client_api::{
+    config::RpcAccountInfoConfig, response::Response as RpcResponse,
+};
+use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
+use tokio::sync::{mpsc, oneshot};
+use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use super::errors::{RemoteAccountProviderError, RemoteAccountProviderResult};
@@ -324,7 +322,7 @@ impl ChainPubsubActor {
                                 error!("Failed to send {pubkey} subscription update: {err:?}");
                             });
                         } else {
-                            warn!("Subscription for {pubkey} ended by update stream");
+                            debug!("Subscription for {pubkey} ended by update stream");
                             break;
                         }
                     }

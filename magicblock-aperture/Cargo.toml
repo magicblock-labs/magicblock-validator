@@ -12,7 +12,7 @@ edition.workspace = true
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["server", "http2", "http1"] }
 hyper-util = { workspace = true, features = ["server", "http2", "http1"] }
-fastwebsockets = { version = "0.10", features = ["upgrade"] }
+fastwebsockets = { workspace = true, features = ["upgrade"] }
 
 # runtime
 futures = { workspace = true }

@@ -1,5 +1,3 @@
-use log::*;
-use scc::{hash_map::Entry, HashMap};
 use std::{
     cmp,
     collections::{HashSet, VecDeque},
@@ -8,6 +6,8 @@ use std::{
 };
 
 use async_trait::async_trait;
+use log::*;
+use scc::{hash_map::Entry, HashMap};
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 
@@ -560,12 +560,14 @@ impl<T: ChainPubsubClient> ChainPubsubClient for SubMuxClient<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock;
-    use crate::testing::init_logger;
-    use crate::testing::utils::sleep_ms;
     use solana_account::Account;
     use tokio::sync::mpsc;
+
+    use super::*;
+    use crate::{
+        remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
+        testing::{init_logger, utils::sleep_ms},
+    };
 
     fn account_with_lamports(lamports: u64) -> Account {
         Account {

@@ -36,7 +36,7 @@ pub(crate) struct HttpDispatcher {
     /// Chainlink provides synchronization of on-chain accounts and
     /// fetches accounts used in a specific transaction as well as those
     /// required when getting account info, etc.
-    pub(crate) chainlink: ChainlinkImpl,
+    pub(crate) chainlink: Arc<ChainlinkImpl>,
     /// A handle to the transaction signatures cache.
     pub(crate) transactions: TransactionsCache,
     /// A handle to the recent blocks cache.

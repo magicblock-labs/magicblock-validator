@@ -1,3 +1,4 @@
+use solana_transaction_error::TransactionError;
 use solana_transaction_status::{
     TransactionConfirmationStatus, TransactionStatus,
 };
@@ -28,13 +29,10 @@ impl HttpDispatcher {
             // Level 1: Check the hot in-memory cache first.
             if let Some(Some(cached_status)) = self.transactions.get(&signature)
             {
-                statuses.push(Some(TransactionStatus {
-                    slot: cached_status.slot,
-                    status: cached_status.result.clone(),
-                    confirmations: None, // This validator does not track confirmations.
-                    err: None, // `status` field contains the error; `err` is deprecated.
-                    confirmation_status: DEFAULT_CONFIRMATION_STATUS,
-                }));
+                statuses.push(Some(build_transaction_status(
+                    cached_status.slot,
+                    cached_status.result.clone(),
+                )));
                 continue;
             }
 
@@ -42,13 +40,8 @@ impl HttpDispatcher {
             let ledger_status =
                 self.ledger.get_transaction_status(signature, Slot::MAX)?;
             if let Some((slot, meta)) = ledger_status {
-                statuses.push(Some(TransactionStatus {
-                    slot,
-                    status: meta.status,
-                    confirmations: None,
-                    err: None,
-                    confirmation_status: DEFAULT_CONFIRMATION_STATUS,
-                }));
+                let status = build_transaction_status(slot, meta.status);
+                statuses.push(Some(status));
             } else {
                 // The signature was not found in the cache or the ledger.
                 statuses.push(None);
@@ -57,5 +50,18 @@ impl HttpDispatcher {
 
         let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, statuses, slot))
+    }
+}
+
+fn build_transaction_status(
+    slot: Slot,
+    status: Result<(), TransactionError>,
+) -> TransactionStatus {
+    TransactionStatus {
+        slot,
+        status: status.clone(),
+        confirmations: None,
+        err: status.err(),
+        confirmation_status: DEFAULT_CONFIRMATION_STATUS,
     }
 }

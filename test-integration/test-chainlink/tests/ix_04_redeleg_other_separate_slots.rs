@@ -8,7 +8,6 @@
 // and mark it ignored until the necessary on-chain instruction is available.
 
 use magicblock_chainlink::testing::init_logger;
-
 use test_chainlink::ixtest_context::IxtestContext;
 
 #[tokio::test]

@@ -1,13 +1,14 @@
 use std::process::Child;
 
 use integration_test_tools::{
-    expect,
+    dlp_interface, expect,
     loaded_accounts::LoadedAccounts,
     validator::{
         resolve_programs, start_magicblock_validator_with_config_struct,
     },
     IntegrationTestContext,
 };
+use log::*;
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, EphemeralConfig, LedgerConfig,
     LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
@@ -18,7 +19,7 @@ use program_flexi_counter::instruction::{
 };
 use solana_sdk::{
     address_lookup_table, native_token::LAMPORTS_PER_SOL, signature::Keypair,
-    signer::Signer,
+    signer::Signer, transaction::Transaction,
 };
 use tempfile::TempDir;
 
@@ -67,7 +68,7 @@ pub fn start_validator_with_clone_config(
         ..Default::default()
     };
 
-    let (default_tmpdir, Some(mut validator)) =
+    let (default_tmpdir, Some(mut validator), port) =
         start_magicblock_validator_with_config_struct(
             config,
             loaded_chain_accounts,
@@ -76,15 +77,17 @@ pub fn start_validator_with_clone_config(
         panic!("validator should set up correctly");
     };
 
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let ctx = expect!(
+        IntegrationTestContext::try_new_with_ephem_port(port),
+        validator
+    );
     (default_tmpdir, validator, ctx)
 }
 
 /// Wait for the validator to start up properly
-pub fn wait_for_startup(validator: &mut Child) {
-    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
-    // Wait for at least one slot to advance to ensure the validator is running
-    expect!(ctx.wait_for_next_slot_ephem(), validator);
+pub fn wait_for_startup(ctx: &IntegrationTestContext, validator: &mut Child) {
+    // Wait for the validator to advance a few slots
+    expect!(ctx.wait_for_delta_slot_ephem(20), validator);
 }
 
 /// Create an account on chain, delegate it, and send a transaction to ephemeral validator to trigger cloning
@@ -92,33 +95,79 @@ pub fn delegate_and_clone(
     ctx: &IntegrationTestContext,
     validator: &mut Child,
 ) -> Keypair {
-    let payer = Keypair::new();
+    let payer_chain = Keypair::new();
+    let payer_ephem = Keypair::new();
 
     // 1. Airdrop to payer on chain
     expect!(
-        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL),
+        ctx.airdrop_chain(&payer_chain.pubkey(), LAMPORTS_PER_SOL),
         validator
     );
+    debug!(
+        "✅ Airdropped 1 SOL to payer account on chain: {}",
+        payer_chain.pubkey()
+    );
 
-    // 2. Create and send init counter instruction on chain and delegate it
-    let init_ix = create_init_ix(payer.pubkey(), "TEST_COUNTER".to_string());
-    let delegate_ix = create_delegate_ix(payer.pubkey());
+    // 2. Airdrop to payer used to pay transactions in the ephemeral validator
+    ctx.airdrop_chain(&payer_ephem.pubkey(), LAMPORTS_PER_SOL)
+        .unwrap();
+    debug!(
+        "✅ Airdropped 1 SOL to payer account on chain: {}",
+        payer_ephem.pubkey()
+    );
+
+    // 3. Create and send init counter instruction on chain and delegate it
+    let init_ix =
+        create_init_ix(payer_ephem.pubkey(), "TEST_COUNTER".to_string());
+    let delegate_ix = create_delegate_ix(payer_ephem.pubkey());
     expect!(
         ctx.send_and_confirm_instructions_with_payer_chain(
             &[init_ix, delegate_ix],
-            &payer
+            &payer_ephem
         ),
         validator
     );
-
-    // 3. Send a transaction to ephemeral validator to trigger cloning
-    let add_ix = create_add_ix(payer.pubkey(), 1);
-    expect!(
-        ctx.send_and_confirm_instructions_with_payer_ephem(&[add_ix], &payer),
-        validator
+    debug!(
+        "✅ Initialized and delegated counter account to payer account on chain: {}",
+        payer_ephem.pubkey()
     );
 
-    payer
+    // 4. Delegate payer so we can use it in ephemeral
+    let ixs = dlp_interface::create_delegate_ixs(
+        payer_chain.pubkey(),
+        payer_ephem.pubkey(),
+        ctx.ephem_validator_identity,
+    );
+    let mut tx = Transaction::new_with_payer(&ixs, Some(&payer_chain.pubkey()));
+    let (sig, confirmed) = expect!(
+        ctx.send_and_confirm_transaction_chain(
+            &mut tx,
+            &[&payer_chain, &payer_ephem]
+        ),
+        validator
+    );
+    assert!(confirmed);
+    debug!(
+        "✅ Delegated payer account {} to ephemeral validator with sig {}",
+        payer_chain.pubkey(),
+        sig
+    );
+
+    // 5. Send a transaction to ephemeral validator to trigger cloning
+    let add_ix = create_add_ix(payer_ephem.pubkey(), 1);
+    expect!(
+        ctx.send_and_confirm_instructions_with_payer_ephem(
+            &[add_ix],
+            &payer_ephem
+        ),
+        validator
+    );
+    debug!(
+        "✅ Sent add instruction to ephemeral validator to trigger cloning for payer account on chain: {}",
+        payer_chain.pubkey()
+    );
+
+    payer_ephem
 }
 
 pub fn count_lookup_table_transactions_on_chain(

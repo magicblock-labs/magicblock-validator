@@ -11,6 +11,7 @@ use magicblock_config::{
 use solana_sdk::{signature::Keypair, signer::Signer, system_instruction};
 use test_kit::init_logger;
 
+#[ignore = "Auto airdrop is not generally supported at this point, we will add this back as needed"]
 #[test]
 fn test_auto_airdrop_feepayer_balance_after_tx() {
     init_logger!();
@@ -45,7 +46,7 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
     };
 
     // Start the validator
-    let (_tmpdir, Some(mut validator)) =
+    let (_tmpdir, Some(mut validator), port) =
         start_magicblock_validator_with_config_struct(
             config,
             &LoadedAccounts::with_delegation_program_test_authority(),
@@ -55,7 +56,10 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
     };
 
     // Create context and wait for the ephem validator to start producing slots
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let ctx = expect!(
+        IntegrationTestContext::try_new_with_ephem_port(port),
+        validator
+    );
     expect!(ctx.wait_for_next_slot_ephem(), validator);
 
     // Create a brand new fee payer with zero balance on chain

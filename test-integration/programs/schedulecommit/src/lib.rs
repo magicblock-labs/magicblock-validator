@@ -52,10 +52,14 @@ pub struct ScheduleCommitCpiArgs {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub enum ScheduleCommitInstruction {
+    /// - **0.**   `[WRITE, SIGNER]` Payer funding the initialization
+    /// - **1.**   `[SIGNER]`        Player requesting initialization
+    /// - **2.**   `[WRITE]`         Account for which initialization is requested
+    /// - **3.**   `[]`              System program
     Init,
 
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting delegation
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting and funcding the delegation
     /// - **1.**   `[WRITE]`         Account for which delegation is requested
     /// - **2.**   `[]`              Delegate account owner program
     /// - **3.**   `[WRITE]`         Buffer account
@@ -66,7 +70,7 @@ pub enum ScheduleCommitInstruction {
     DelegateCpi(DelegateCpiArgs),
 
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+    /// - **0.**   `[WRITE, SIGNER]` Payer funding the commit
     /// - **1**    `[]`              MagicContext (used to record scheduled commit)
     /// - **2**    `[]`              MagicBlock Program (used to schedule commit)
     /// - **3..n** `[]`              PDA accounts to be committed
@@ -88,7 +92,7 @@ pub enum ScheduleCommitInstruction {
     /// This instruction can only run on the ephemeral after the account was
     /// delegated or on chain while it is undelegated.
     /// # Account references:
-    /// - **0.** `[WRITE]` Account to increase count
+    /// - **0.** `[WRITE]` PDA Account to increase count of
     IncreaseCount,
     // This is invoked by the delegation program when we request to undelegate
     // accounts.
@@ -172,22 +176,34 @@ fn process_init<'a>(
     msg!("Init account");
     let account_info_iter = &mut accounts.iter();
     let payer_info = next_account_info(account_info_iter)?;
+    let player_info = next_account_info(account_info_iter)?;
     let pda_info = next_account_info(account_info_iter)?;
 
-    assert_is_signer(payer_info, "payer")?;
+    assert_is_signer(player_info, "payer")?;
 
-    let (pda, bump) = pda_and_bump(payer_info.key);
+    let (pda, bump) = pda_and_bump(player_info.key);
     let bump_arr = [bump];
-    let seeds = pda_seeds_with_bump(payer_info.key, &bump_arr);
-    let seeds_no_bump = pda_seeds(payer_info.key);
-    msg!("payer:    {}", payer_info.key);
-    msg!("pda:      {}", pda);
+    let seeds = pda_seeds_with_bump(player_info.key, &bump_arr);
+    let seeds_no_bump = pda_seeds(player_info.key);
+    msg!(
+        "payer:    {} | {} | {}",
+        payer_info.key,
+        payer_info.owner,
+        payer_info.lamports()
+    );
+    msg!(
+        "player:   {} | {} | {}",
+        player_info.key,
+        player_info.owner,
+        player_info.lamports()
+    );
+    msg!("pda:      {} | {}", pda, pda_info.owner);
     msg!("seeds:    {:?}", seeds);
     msg!("seedsnb:  {:?}", seeds_no_bump);
     assert_keys_equal(pda_info.key, &pda, || {
         format!(
             "PDA for the account ('{}') and for payer ('{}') is incorrect",
-            pda_info.key, payer_info.key
+            pda_info.key, player_info.key
         )
     })?;
     allocate_account_and_assign_owner(AllocateAndAssignAccountArgs {
@@ -198,12 +214,21 @@ fn process_init<'a>(
         size: MainAccount::SIZE,
     })?;
 
+    msg!(
+        "pda_info: {} | {} | {} | len: {}",
+        pda_info.key,
+        pda_info.owner,
+        pda_info.lamports(),
+        pda_info.data_len()
+    );
+
     let account = MainAccount {
-        player: *payer_info.key,
+        player: *player_info.key,
         count: 0,
     };
 
-    account.serialize(&mut &mut pda_info.try_borrow_mut_data()?.as_mut())?;
+    let mut acc_data = pda_info.try_borrow_mut_data()?;
+    account.serialize(&mut &mut acc_data.as_mut())?;
 
     Ok(())
 }
@@ -332,13 +357,20 @@ fn process_increase_count(accounts: &[AccountInfo]) -> ProgramResult {
     // NOTE: we don't check if the player owning the PDA is signer here for simplicity
     let accounts_iter = &mut accounts.iter();
     let account = next_account_info(accounts_iter)?;
+    msg!("Counter account key {}", account.key);
     let mut main_account = {
         let main_account_data = account.try_borrow_data()?;
         MainAccount::try_from_slice(&main_account_data)?
     };
+    msg!("Owner: {}", account.owner);
+    msg!("Counter account {:#?}", main_account);
     main_account.count += 1;
-    main_account
-        .serialize(&mut &mut account.try_borrow_mut_data()?.as_mut())?;
+    msg!("Increased count {:#?}", main_account);
+    let mut mut_data = account.try_borrow_mut_data()?;
+    let mut as_mut: &mut [u8] = mut_data.as_mut();
+    msg!("Mutating buffer of len: {}", as_mut.len());
+    main_account.serialize(&mut as_mut)?;
+    msg!("Serialized counter");
     Ok(())
 }
 

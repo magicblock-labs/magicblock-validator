@@ -1,14 +1,18 @@
-use magicblock_chainlink::remote_account_provider::SubscriptionUpdate;
-use magicblock_chainlink::testing::chain_pubsub::{
-    recycle, setup_actor_and_client, subscribe, unsubscribe,
-};
-use magicblock_chainlink::testing::utils::{
-    airdrop, init_logger, random_pubkey,
+use magicblock_chainlink::{
+    remote_account_provider::SubscriptionUpdate,
+    testing::{
+        chain_pubsub::{
+            recycle, setup_actor_and_client, subscribe, unsubscribe,
+        },
+        utils::{airdrop, init_logger, random_pubkey},
+    },
 };
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use tokio::sync::mpsc;
-use tokio::time::{timeout, Duration, Instant};
+use tokio::{
+    sync::mpsc,
+    time::{timeout, Duration, Instant},
+};
 
 async fn expect_update_for(
     updates: &mut mpsc::Receiver<SubscriptionUpdate>,

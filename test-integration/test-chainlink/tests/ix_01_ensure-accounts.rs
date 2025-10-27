@@ -16,7 +16,7 @@ async fn ixtest_write_non_existing_account() {
 
     let pubkey = random_pubkey();
     let pubkeys = [pubkey];
-    let res = ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+    let res = ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
     debug!("res: {res:?}");
 
     assert_not_found!(res, &pubkeys);
@@ -37,7 +37,7 @@ async fn ixtest_write_existing_account_undelegated() {
     ctx.init_counter(&counter_auth).await;
 
     let pubkeys = [counter_auth.pubkey()];
-    let res = ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+    let res = ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
     debug!("res: {res:?}");
 
     assert_cloned_as_undelegated!(ctx.cloner, &pubkeys);
@@ -63,7 +63,7 @@ async fn ixtest_write_existing_account_valid_delegation_record() {
     let deleg_record_pubkey = ctx.delegation_record_pubkey(&counter_pda);
     let pubkeys = [counter_pda];
 
-    let res = ctx.chainlink.ensure_accounts(&pubkeys).await.unwrap();
+    let res = ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
     debug!("res: {res:?}");
 
     let account = ctx.cloner.get_account(&counter_pda).unwrap();

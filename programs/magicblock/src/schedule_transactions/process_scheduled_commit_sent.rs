@@ -14,7 +14,6 @@ use solana_sdk::{
 use crate::{
     errors::custom_error_codes,
     utils::accounts::get_instruction_pubkey_with_idx, validator,
-    FeePayerAccount,
 };
 
 #[derive(Default, Debug, Clone)]
@@ -26,7 +25,6 @@ pub struct SentCommit {
     pub chain_signatures: Vec<Signature>,
     pub included_pubkeys: Vec<Pubkey>,
     pub excluded_pubkeys: Vec<Pubkey>,
-    pub feepayers: HashSet<FeePayerAccount>,
     pub requested_undelegation: bool,
 }
 
@@ -41,7 +39,6 @@ struct SentCommitPrintable {
     chain_signatures: Vec<String>,
     included_pubkeys: String,
     excluded_pubkeys: String,
-    feepayers: String,
     requested_undelegation: bool,
 }
 
@@ -67,12 +64,6 @@ impl From<SentCommit> for SentCommitPrintable {
                 .excluded_pubkeys
                 .iter()
                 .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join(", "),
-            feepayers: commit
-                .feepayers
-                .iter()
-                .map(|fp| format!("{}:{}", fp.pubkey, fp.delegated_pda))
                 .collect::<Vec<_>>()
                 .join(", "),
             requested_undelegation: commit.requested_undelegation,
@@ -206,11 +197,6 @@ pub fn process_scheduled_commit_sent(
         "ScheduledCommitSent excluded: [{}]",
         commit.excluded_pubkeys
     );
-    ic_msg!(
-        invoke_context,
-        "ScheduledCommitSent fee payers: [{}]",
-        commit.feepayers,
-    );
     for (idx, sig) in commit.chain_signatures.iter().enumerate() {
         ic_msg!(
             invoke_context,
@@ -258,7 +244,6 @@ mod tests {
             chain_signatures: vec![sig],
             included_pubkeys: vec![acc],
             excluded_pubkeys: Default::default(),
-            feepayers: Default::default(),
             requested_undelegation: false,
         }
     }

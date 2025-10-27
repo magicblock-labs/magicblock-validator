@@ -1,9 +1,9 @@
-use log::*;
-use scc::HashCache;
-use solana_sdk::sysvar;
 use std::collections::HashSet;
 
+use log::*;
+use scc::HashCache;
 use solana_pubkey::Pubkey;
+use solana_sdk::sysvar;
 
 /// A simple wrapper around [lru::LruCache].
 /// When an account is evicted from the cache due to a new one being added,

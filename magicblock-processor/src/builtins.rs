@@ -45,6 +45,11 @@ pub static BUILTINS: &[BuiltinPrototype] = &[
         entrypoint: solana_bpf_loader_program::Entrypoint::vm,
     },
     BuiltinPrototype {
+        program_id: solana_sdk_ids::loader_v4::id(),
+        name: "solana_loader_v4_program",
+        entrypoint: solana_loader_v4_program::Entrypoint::vm,
+    },
+    BuiltinPrototype {
         program_id: magicblock_program::id(),
         name: "magicblock_program",
         entrypoint: magicblock_processor::Entrypoint::vm,

@@ -10,6 +10,7 @@ program-schedulecommit-security = { workspace = true, features = [
 ] }
 schedulecommit-client = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock_magic_program_api = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 integration-test-tools = { workspace = true }

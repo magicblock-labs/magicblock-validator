@@ -7,7 +7,10 @@ use std::{
     time::Duration,
 };
 
-use magicblock_config::{EphemeralConfig, ProgramConfig};
+use magicblock_config::{
+    EphemeralConfig, MetricsConfig, ProgramConfig, RpcConfig,
+};
+use random_port::{PortPicker, Protocol};
 use tempfile::TempDir;
 
 use crate::{
@@ -51,10 +54,12 @@ pub fn start_magic_block_validator_with_config(
     if release {
         command.arg("--release");
     }
+    let rust_log_style =
+        std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
         .arg("--")
         .arg(config_path)
-        .env("RUST_LOG_STYLE", log_suffix)
+        .env("RUST_LOG_STYLE", rust_log_style)
         .env("VALIDATOR_KEYPAIR", keypair_base58.clone())
         .current_dir(root_dir);
 
@@ -141,10 +146,12 @@ pub fn start_test_validator_with_config(
         script.push_str(&format!(" \\\n  {}", arg));
     }
     let mut command = process::Command::new("solana-test-validator");
+    let rust_log_style =
+        std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
         .args(args)
         .env("RUST_LOG", "solana=warn")
-        .env("RUST_LOG_STYLE", log_suffix)
+        .env("RUST_LOG_STYLE", rust_log_style)
         .current_dir(root_dir);
 
     eprintln!("Starting test validator with {:?}", command);
@@ -180,12 +187,39 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
 
 pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 
+fn resolve_port() -> u16 {
+    std::env::var("EPHEM_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or_else(|| {
+            PortPicker::new()
+                .random(true)
+                .protocol(Protocol::Tcp)
+                .pick()
+                .unwrap()
+        })
+}
+
 /// Stringifies the config and writes it to a temporary config file.
+/// Sets the RPC port to a random available port to allow multiple tests to
+/// run in parallel.
 /// Then uses that config to start the validator.
 pub fn start_magicblock_validator_with_config_struct(
     config: EphemeralConfig,
     loaded_chain_accounts: &LoadedAccounts,
-) -> (TempDir, Option<process::Child>) {
+) -> (TempDir, Option<process::Child>, u16) {
+    let port = resolve_port();
+    let config = EphemeralConfig {
+        rpc: RpcConfig {
+            port,
+            ..config.rpc.clone()
+        },
+        metrics: MetricsConfig {
+            enabled: false,
+            ..config.metrics.clone()
+        },
+        ..config.clone()
+    };
     let workspace_dir = resolve_workspace_dir();
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
     let release = std::env::var("RELEASE").is_ok();
@@ -211,6 +245,54 @@ pub fn start_magicblock_validator_with_config_struct(
             loaded_chain_accounts,
             release,
         ),
+        port,
+    )
+}
+
+pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
+    config: EphemeralConfig,
+    loaded_chain_accounts: &LoadedAccounts,
+    default_tmpdir: TempDir,
+    temp_dir: PathBuf,
+) -> (TempDir, Option<process::Child>, u16) {
+    let port = resolve_port();
+    let config = EphemeralConfig {
+        rpc: RpcConfig {
+            port,
+            ..config.rpc.clone()
+        },
+        metrics: MetricsConfig {
+            enabled: false,
+            ..config.metrics.clone()
+        },
+        ..config.clone()
+    };
+
+    let workspace_dir = resolve_workspace_dir();
+    let release = std::env::var("RELEASE").is_ok();
+    let config_path = temp_dir.join("config.toml");
+    let config_toml = config.to_string();
+    fs::write(&config_path, config_toml).unwrap();
+
+    let root_dir = Path::new(&workspace_dir)
+        .join("..")
+        .canonicalize()
+        .unwrap()
+        .to_path_buf();
+    let paths = TestRunnerPaths {
+        config_path,
+        root_dir,
+        workspace_dir,
+    };
+    (
+        default_tmpdir,
+        start_magic_block_validator_with_config(
+            &paths,
+            "TEST",
+            loaded_chain_accounts,
+            release,
+        ),
+        port,
     )
 }
 

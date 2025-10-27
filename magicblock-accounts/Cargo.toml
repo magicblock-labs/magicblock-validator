@@ -9,23 +9,19 @@ edition.workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
-conjunto-transwise = { workspace = true }
 magicblock-delegation-program = { workspace = true }
 futures-util = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 
-magicblock-account-fetcher = { workspace = true }
 magicblock-account-cloner = { workspace = true }
-magicblock-account-dumper = { workspace = true }
-magicblock-account-updates = { workspace = true }
-magicblock-accounts-api = { workspace = true }
 magicblock-accounts-db = { workspace = true }
+magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
-magicblock-mutator = { workspace = true }
 magicblock-processor = { workspace = true }
 magicblock-program = { workspace = true }
 

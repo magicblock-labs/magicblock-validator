@@ -36,10 +36,11 @@ pub fn process_instruction(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use sdk::MiniSdk;
     use solana_program_test::*;
     use solana_sdk::{signature::Signer, transaction::Transaction};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_counter_init_and_increment() {

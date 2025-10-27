@@ -1,9 +1,9 @@
 DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-CARGO_TEST=nextest run
+CARGO_TEST=nextest run --no-fail-fast -j8
 CARGO_TEST_NOCAP=nextest run --nocapture
-$(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST=test))
-$(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST_NOCAP=test -- --nocapture))
+$(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST=test --no-fail-fast))
+$(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST_NOCAP=test --no-fail-fast -- --nocapture))
 
 test:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST) && \

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_core::magic_program::args::MagicBaseIntentArgs;
+use magicblock_magic_program_api::args::MagicBaseIntentArgs;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
@@ -9,13 +9,15 @@ use solana_sdk::{
 };
 
 use crate::{
-    magic_scheduled_base_intent::{ConstructionContext, ScheduledBaseIntent},
-    schedule_transactions::{
-        check_magic_context_id,
-        schedule_base_intent_processor::change_owner_for_undelegated_accounts,
+    magic_scheduled_base_intent::{
+        CommitType, ConstructionContext, ScheduledBaseIntent,
     },
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+    schedule_transactions::check_magic_context_id,
+    utils::{
+        account_actions::set_account_owner_to_delegation_program,
+        accounts::{
+            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+        },
     },
     MagicContext,
 };
@@ -117,15 +119,34 @@ pub(crate) fn process_schedule_base_intent(
         transaction_context,
         invoke_context,
     );
+
+    let undelegated_accounts_ref =
+        if let MagicBaseIntentArgs::CommitAndUndelegate(ref value) = args {
+            Some(CommitType::extract_commit_accounts(
+                value.committed_accounts_indices(),
+                construction_context.transaction_context,
+            )?)
+        } else {
+            None
+        };
+
     let scheduled_intent = ScheduledBaseIntent::try_new(
-        &args,
+        args,
         intent_id,
         clock.slot,
         payer_pubkey,
         &construction_context,
     )?;
 
-    change_owner_for_undelegated_accounts(&construction_context, &args)?;
+    if let Some(undelegated_accounts_ref) = undelegated_accounts_ref {
+        // Change owner to dlp
+        // Once account is undelegated we need to make it immutable in our validator.
+        undelegated_accounts_ref
+            .into_iter()
+            .for_each(|(_, account_ref)| {
+                set_account_owner_to_delegation_program(account_ref);
+            });
+    }
 
     let action_sent_signature =
         scheduled_intent.action_sent_transaction.signatures[0];

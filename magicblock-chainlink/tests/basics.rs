@@ -5,8 +5,9 @@ use magicblock_chainlink::{
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_sdk::clock::Slot;
-use utils::accounts::account_shared_with_owner_and_slot;
-use utils::test_context::TestContext;
+use utils::{
+    accounts::account_shared_with_owner_and_slot, test_context::TestContext,
+};
 mod utils;
 
 async fn setup(slot: Slot) -> TestContext {
@@ -43,12 +44,12 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
     assert_eq!(chainlink.fetch_count().unwrap(), 0);
 
     // 1. Read account first time which fetches it from chain
-    chainlink.ensure_accounts(&[pubkey]).await.unwrap();
+    chainlink.ensure_accounts(&[pubkey], None).await.unwrap();
     assert_cloned_as_undelegated!(cloner, &[pubkey], slot, owner);
     assert_eq!(chainlink.fetch_count().unwrap(), 1);
 
     // 2. Read account again which gets it from bank (without fetching again)
-    chainlink.ensure_accounts(&[pubkey]).await.unwrap();
+    chainlink.ensure_accounts(&[pubkey], None).await.unwrap();
     assert_cloned_as_undelegated!(cloner, &[pubkey], slot, owner);
     assert_eq!(chainlink.fetch_count().unwrap(), 1);
 }
@@ -84,7 +85,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
     assert_eq!(chainlink.fetch_count().unwrap(), 0);
 
     // 1. Ensure account first time which fetches it from chain
-    chainlink.ensure_accounts(&[pubkey]).await.unwrap();
+    chainlink.ensure_accounts(&[pubkey], None).await.unwrap();
     assert_cloned_as_delegated!(cloner, &[pubkey], slot, owner);
 
     // We fetch the account once then realize it is owned by the delegation record.
@@ -92,7 +93,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
     assert_eq!(chainlink.fetch_count().unwrap(), 3);
 
     // 2. Ensure account again which gets it from bank (without fetching again)
-    chainlink.ensure_accounts(&[pubkey]).await.unwrap();
+    chainlink.ensure_accounts(&[pubkey], None).await.unwrap();
     assert_cloned_as_delegated!(cloner, &[pubkey], slot, owner);
     // Since the account is already in the bank, we don't fetch it again
     assert_eq!(chainlink.fetch_count().unwrap(), 3);

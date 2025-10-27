@@ -2,12 +2,11 @@ use solana_rpc_client_api::config::{
     RpcAccountInfoConfig, RpcTokenAccountsFilter,
 };
 
+use super::prelude::*;
 use crate::{
     requests::http::{SPL_DELEGATE_OFFSET, SPL_MINT_OFFSET, TOKEN_PROGRAM_ID},
     utils::{ProgramFilter, ProgramFilters},
 };
-
-use super::prelude::*;
 
 impl HttpDispatcher {
     /// Handles the `getTokenAccountsByDelegate` RPC request.
@@ -34,12 +33,13 @@ impl HttpDispatcher {
         // Build the primary filter based on either the mint or program ID.
         match filter {
             RpcTokenAccountsFilter::Mint(pubkey) => {
-                let bytes = bs58::decode(pubkey)
-                    .into_vec()
+                let mut buffer = [0; 32];
+                bs58::decode(pubkey)
+                    .onto(&mut buffer)
                     .map_err(RpcError::parse_error)?;
                 let filter = ProgramFilter::MemCmp {
                     offset: SPL_MINT_OFFSET,
-                    bytes,
+                    bytes: buffer.to_vec(),
                 };
                 filters.push(filter);
             }

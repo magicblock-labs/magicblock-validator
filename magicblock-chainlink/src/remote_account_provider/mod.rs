@@ -1,9 +1,3 @@
-use config::RemoteAccountProviderConfig;
-use lru_cache::AccountsLruCache;
-use parking_lot::Mutex;
-use scc::{hash_map::Entry, HashMap};
-#[cfg(any(test, feature = "dev-context"))]
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -16,15 +10,21 @@ pub(crate) use chain_pubsub_client::{
     ChainPubsubClient, ChainPubsubClientImpl,
 };
 pub(crate) use chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl};
+use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 use log::*;
+use lru_cache::AccountsLruCache;
+use parking_lot::Mutex;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
+use scc::{hash_map::Entry, HashMap};
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_pubkey::Pubkey;
+#[cfg(any(test, feature = "dev-context"))]
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig,
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
@@ -46,7 +46,6 @@ pub mod program_account;
 mod remote_account;
 
 pub use chain_pubsub_actor::SubscriptionUpdate;
-
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{errors::ChainlinkResult, submux::SubMuxClient};
@@ -213,7 +212,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         let updates = me.pubsub_client.take_updates();
         me.listen_for_account_updates(updates)?;
-        let clock_remote_account = me.try_get(clock::ID, false).await?;
+        let clock_remote_account = me.try_get(clock::ID).await?;
         match clock_remote_account {
             RemoteAccount::NotFound(_) => {
                 Err(RemoteAccountProviderError::ClockAccountCouldNotBeResolved(
@@ -396,9 +395,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub async fn try_get(
         &self,
         pubkey: Pubkey,
-        force_refetch: bool,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey], force_refetch)
+        self.try_get_multi(&[pubkey], None)
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
@@ -414,7 +412,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
-        let remote_accounts = self.try_get_multi(pubkeys, false).await?;
+        let remote_accounts = self.try_get_multi(pubkeys, None).await?;
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
             config.as_ref().and_then(|c| c.min_context_slot),
@@ -432,18 +430,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         };
         if refetch {
             if log::log_enabled!(log::Level::Trace) {
-                let pubkeys = pubkeys
-                    .iter()
-                    .map(|pk| pk.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 trace!(
                     "Triggering re-fetch for accounts [{}] at slot {}",
-                    pubkeys,
+                    pubkeys_str(pubkeys),
                     self.chain_slot()
                 );
             }
-            self.fetch(pubkeys.to_vec(), self.chain_slot());
+            self.fetch(pubkeys.to_vec(), None, self.chain_slot());
         }
 
         // 3. Wait for the slots to match
@@ -463,7 +456,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     pubkey_slots
                 );
             }
-            let remote_accounts = self.try_get_multi(pubkeys, true).await?;
+            let remote_accounts = self.try_get_multi(pubkeys, None).await?;
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
                 config.min_context_slot,
@@ -474,19 +467,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             retries += 1;
             if retries == config.max_retries {
-                let pubkeys = pubkeys
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 let remote_accounts =
                     remote_accounts.into_iter().map(|a| a.slot()).collect();
                 match slots_match_result {
+                    // SAFETY: Match case is already handled and returns
                     Match => unreachable!("we would have returned above"),
                     Mismatch => {
                         return Err(
                             RemoteAccountProviderError::SlotsDidNotMatch(
-                                pubkeys,
+                                pubkeys_str(pubkeys),
                                 remote_accounts,
                             ),
                         );
@@ -494,7 +483,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     MatchButBelowMinContextSlot(slot) => {
                         return Err(
                             RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
-                            pubkeys,
+                            pubkeys_str(pubkeys),
                             remote_accounts,
                             slot)
                         );
@@ -516,19 +505,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub async fn try_get_multi(
         &self,
         pubkeys: &[Pubkey],
-        _force_refetch: bool, // No longer needed since we don't cache
+        mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
             return Ok(vec![]);
         }
 
         if log_enabled!(log::Level::Debug) {
-            let pubkeys_str = pubkeys
-                .iter()
-                .map(|pk| pk.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            debug!("Fetching accounts: [{pubkeys_str}]");
+            debug!("Fetching accounts: [{}]", pubkeys_str(pubkeys));
         }
 
         // Create channels for potential subscription updates to override fetch results
@@ -555,7 +539,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // Start the fetch
         let min_context_slot = fetch_start_slot;
-        self.fetch(pubkeys.to_vec(), min_context_slot);
+        self.fetch(pubkeys.to_vec(), mark_empty_if_not_found, min_context_slot);
 
         // Wait for all accounts to resolve (either from fetch or subscription override)
         let mut resolved_accounts = vec![];
@@ -733,9 +717,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(())
     }
 
-    fn fetch(&self, pubkeys: Vec<Pubkey>, min_context_slot: u64) {
+    /// Tries to fetch the given accounts from RPC.
+    /// NOTE: if we get an RPC error we just log it and give up since there is no
+    ///       obvious way how to handle this even if we were to bubble the error up.
+    /// Any action that depends on those accounts to be there will fail.
+    /// NOTE: this is not used during subscription updates since we receive the data
+    ///       as part of that update, thus we won't have stale data issues.
+    fn fetch(
+        &self,
+        pubkeys: Vec<Pubkey>,
+        mark_empty_if_not_found: Option<&[Pubkey]>,
+        min_context_slot: u64,
+    ) {
         const MAX_RETRIES: u64 = 10;
-        let mut remaining_retries: u64 = 10;
+        let mut remaining_retries: u64 = MAX_RETRIES;
         macro_rules! retry {
             ($msg:expr) => {
                 trace!($msg);
@@ -752,16 +747,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let rpc_client = self.rpc_client.clone();
         let fetching_accounts = self.fetching_accounts.clone();
         let commitment = self.rpc_client.commitment();
+        let mark_empty_if_not_found =
+            mark_empty_if_not_found.unwrap_or(&[]).to_vec();
         tokio::spawn(async move {
             use RemoteAccount::*;
 
             if log_enabled!(log::Level::Debug) {
-                let pubkeys = pubkeys
-                    .iter()
-                    .map(|pk| pk.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                debug!("Fetch({pubkeys})");
+                debug!("Fetch ({})", pubkeys_str(&pubkeys));
             }
 
             let response = loop {
@@ -821,23 +813,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                             message,
                                             data,
                                         };
-                                        // TODO: we need to signal something bad happened
-                                        error!("RpcError fetching account: {err:?}");
+                                        error!(
+                                            "RpcError fetching accounts {}: {err:?}", pubkeys_str(&pubkeys)
+                                        );
                                         return;
                                     }
                                 }
                                 err => {
-                                    // TODO: we need to signal something bad happened
                                     error!(
-                                        "RpcError fetching accounts: {err:?}"
+                                        "RpcError fetching accounts {}: {err:?}", pubkeys_str(&pubkeys)
                                     );
                                     return;
                                 }
                             }
                         }
                         _ => {
-                            // TODO: we need to signal something bad happened
-                            error!("Error fetching account: {err:?}");
+                            error!(
+                                "RpcError fetching accounts {}: {err:?}",
+                                pubkeys_str(&pubkeys)
+                            );
                             return;
                         }
                     },
@@ -847,15 +841,28 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             // TODO: should we retry if not or respond with an error?
             assert!(response.context.slot >= min_context_slot);
 
-            let remote_accounts: Vec<RemoteAccount> = response
-                .value
-                .into_iter()
-                .map(|acc| match acc {
+            let remote_accounts: Vec<RemoteAccount> = pubkeys
+                .iter()
+                .zip(response.value)
+                .map(|(pubkey, acc)| match acc {
                     Some(value) => RemoteAccount::from_fresh_account(
                         value,
                         response.context.slot,
                         RemoteAccountUpdateSource::Fetch,
                     ),
+                    None if mark_empty_if_not_found.contains(pubkey) => {
+                        RemoteAccount::from_fresh_account(
+                            Account {
+                                lamports: 0,
+                                data: vec![],
+                                owner: Pubkey::default(),
+                                executable: false,
+                                rent_epoch: 0,
+                            },
+                            response.context.slot,
+                            RemoteAccountUpdateSource::Fetch,
+                        )
+                    }
                     None => NotFound(response.context.slot),
                 })
                 .collect();
@@ -961,8 +968,19 @@ fn account_slots(accs: &[RemoteAccount]) -> Vec<u64> {
     accs.iter().map(|acc| acc.slot()).collect()
 }
 
+fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
+    pubkeys
+        .iter()
+        .map(|pk| pk.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[cfg(test)]
 mod test {
+    use solana_system_interface::program as system_program;
+
+    use super::{chain_pubsub_client::mock::ChainPubsubClientMock, *};
     use crate::{
         config::LifecycleMode,
         testing::{
@@ -973,9 +991,6 @@ mod test {
             utils::random_pubkey,
         },
     };
-    use solana_system_interface::program as system_program;
-
-    use super::{chain_pubsub_client::mock::ChainPubsubClientMock, *};
 
     #[tokio::test]
     async fn test_get_non_existing_account() {
@@ -1000,10 +1015,8 @@ mod test {
         };
 
         let pubkey = random_pubkey();
-        let remote_account = remote_account_provider
-            .try_get(pubkey, false)
-            .await
-            .unwrap();
+        let remote_account =
+            remote_account_provider.try_get(pubkey).await.unwrap();
         assert!(!remote_account.is_found());
     }
 
@@ -1048,10 +1061,8 @@ mod test {
             )
         };
 
-        let remote_account = remote_account_provider
-            .try_get(pubkey, false)
-            .await
-            .unwrap();
+        let remote_account =
+            remote_account_provider.try_get(pubkey).await.unwrap();
         let AccountAtSlot { account, slot } =
             rpc_client.get_account_at_slot(&pubkey).unwrap();
         assert_eq!(
@@ -1350,7 +1361,7 @@ mod test {
 
         // Add three accounts (up to limit)
         for pk in pubkeys {
-            provider.try_get(*pk, false).await.unwrap();
+            provider.try_get(*pk).await.unwrap();
         }
 
         // No evictions should occur
@@ -1385,7 +1396,7 @@ mod test {
         // --- Phase 1: Fill cache partially ---
         // No evictions should happen at this point.
         for pk in pubkeys.iter().take(CAPACITY / 2) {
-            provider.try_get(*pk, false).await.unwrap();
+            provider.try_get(*pk).await.unwrap();
         }
         assert!(
             removed_rx.try_recv().is_err(),
@@ -1395,7 +1406,7 @@ mod test {
         // --- Phase 2: Overflow the cache ---
         // Add the remaining items, which will exceed capacity and trigger evictions.
         for pk in pubkeys.iter().skip(CAPACITY / 2) {
-            provider.try_get(*pk, false).await.unwrap();
+            provider.try_get(*pk).await.unwrap();
         }
 
         // --- Phase 3: Verify eviction count ---
@@ -1406,7 +1417,6 @@ mod test {
             "Expected an eviction count equal to the number of items added beyond capacity"
         );
     }
-
     /// Verifies that a continuous stream of insertions that overflows the cache
     /// results in the correct number of eviction notifications.
     #[tokio::test]
@@ -1425,7 +1435,7 @@ mod test {
         // 1. Iterate through all generated keys, adding them to the cache.
         // On each insertion, immediately poll the channel to count evictions.
         for pk in pubkeys.iter() {
-            provider.try_get(*pk, false).await.unwrap();
+            provider.try_get(*pk).await.unwrap();
             removed_accounts += removed_rx.try_recv().is_ok() as usize;
         }
 

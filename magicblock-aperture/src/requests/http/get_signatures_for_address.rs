@@ -1,4 +1,3 @@
-use json::Deserialize;
 use solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature;
 use solana_transaction_status::TransactionConfirmationStatus;
 
@@ -18,7 +17,7 @@ impl HttpDispatcher {
     ) -> HandlerResult {
         /// A helper struct for deserializing the optional configuration
         /// object for the `getSignaturesForAddress` request.
-        #[derive(Deserialize, Default)]
+        #[derive(serde::Deserialize, Default)]
         #[serde(rename_all = "camelCase")]
         struct Config {
             until: Option<SerdeSignature>,
@@ -31,13 +30,17 @@ impl HttpDispatcher {
         let address = some_or_err!(address);
         let config = config.unwrap_or_default();
 
+        let limit = config
+            .limit
+            .unwrap_or(DEFAULT_SIGNATURES_LIMIT)
+            .min(DEFAULT_SIGNATURES_LIMIT);
         let signatures_result =
             self.ledger.get_confirmed_signatures_for_address(
                 address,
                 Slot::MAX,
                 config.before.map(Into::into),
                 config.until.map(Into::into),
-                config.limit.unwrap_or(DEFAULT_SIGNATURES_LIMIT),
+                limit,
             )?;
 
         let signatures = signatures_result

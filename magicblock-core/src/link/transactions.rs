@@ -15,9 +15,8 @@ use tokio::sync::{
     oneshot,
 };
 
-use crate::Slot;
-
 use super::blocks::BlockHash;
+use crate::Slot;
 
 /// The receiver end of the multi-producer, multi-consumer
 /// channel for communicating final transaction statuses.

@@ -1,16 +1,18 @@
-use log::*;
-use parking_lot::Mutex;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use log::*;
+use parking_lot::Mutex;
 use solana_pubkey::Pubkey;
 use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::sync::{mpsc, oneshot};
 
-use super::chain_pubsub_actor::{
-    ChainPubsubActor, ChainPubsubActorMessage, SubscriptionUpdate,
+use super::{
+    chain_pubsub_actor::{
+        ChainPubsubActor, ChainPubsubActorMessage, SubscriptionUpdate,
+    },
+    errors::RemoteAccountProviderResult,
 };
-use super::errors::RemoteAccountProviderResult;
 
 // -----------------
 // Trait
@@ -139,6 +141,11 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 // -----------------
 #[cfg(any(test, feature = "dev-context"))]
 pub mod mock {
+    use std::sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    };
+
     use log::*;
     use scc::HashSet;
     use solana_account::Account;
@@ -149,10 +156,6 @@ pub mod mock {
     use solana_sdk::clock::Slot;
 
     use super::*;
-    use std::sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex,
-    };
 
     #[derive(Clone)]
     pub struct ChainPubsubClientMock {

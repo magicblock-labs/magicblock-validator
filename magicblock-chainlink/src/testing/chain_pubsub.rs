@@ -1,4 +1,3 @@
-use crate::testing::utils::RPC_URL;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
@@ -9,7 +8,7 @@ use crate::{
         chain_pubsub_actor::{ChainPubsubActor, ChainPubsubActorMessage},
         SubscriptionUpdate,
     },
-    testing::utils::PUBSUB_URL,
+    testing::utils::{PUBSUB_URL, RPC_URL},
 };
 
 pub async fn setup_actor_and_client() -> (

@@ -89,10 +89,15 @@ async fn test_get_supply() {
     let supply_info =
         env.rpc.supply().await.expect("get_supply request failed");
 
-    assert_eq!(supply_info.value.total, 0, "total supply should be 0");
     assert_eq!(
-        supply_info.value.circulating, 0,
-        "circulating supply should be 0"
+        supply_info.value.total,
+        u64::MAX,
+        "total supply should be u64::MAX"
+    );
+    assert_eq!(
+        supply_info.value.circulating,
+        u64::MAX / 2,
+        "circulating supply should be u64::MAX / 2"
     );
     assert!(
         supply_info.value.non_circulating_accounts.is_empty(),
@@ -167,7 +172,11 @@ async fn test_get_epoch_schedule() {
         .await
         .expect("get_epoch_schedule request failed");
 
-    assert_eq!(schedule.slots_per_epoch, 0, "slots_per_epoch should be 0");
+    assert_eq!(
+        schedule.slots_per_epoch,
+        u64::MAX,
+        "slots_per_epoch should be u64::MAX"
+    );
     assert!(schedule.warmup, "warmup should be true");
 }
 

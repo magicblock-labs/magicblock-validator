@@ -1,14 +1,24 @@
 use std::collections::HashSet;
 
-use magicblock_accounts::{AccountsConfig, Cluster, LifecycleMode};
-use magicblock_config::errors::ConfigResult;
-use solana_sdk::{genesis_config::ClusterType, pubkey::Pubkey};
+use magicblock_accounts::{AccountsConfig, RemoteCluster};
+use magicblock_config::{errors::ConfigResult, RemoteConfig};
+use solana_sdk::pubkey::Pubkey;
+
+const TESTNET_URL: &str = "https://api.testnet.solana.com";
+const MAINNET_URL: &str = "https://api.mainnet-beta.solana.com";
+const DEVNET_URL: &str = "https://api.devnet.solana.com";
+const DEVELOPMENT_URL: &str = "http://127.0.0.1:8899";
+
+const WS_MAINNET: &str = "wss://api.mainnet-beta.solana.com/";
+const WS_TESTNET: &str = "wss://api.testnet.solana.com/";
+const WS_DEVNET: &str = "wss://api.devnet.solana.com/";
+const WS_DEVELOPMENT: &str = "ws://localhost:8900";
 
 pub(crate) fn try_convert_accounts_config(
     conf: &magicblock_config::AccountsConfig,
 ) -> ConfigResult<AccountsConfig> {
     Ok(AccountsConfig {
-        remote_cluster: cluster_from_remote(&conf.remote),
+        remote_cluster: remote_cluster_from_remote(&conf.remote),
         lifecycle: lifecycle_mode_from_lifecycle_mode(&conf.lifecycle),
         commit_compute_unit_price: conf.commit.compute_unit_price,
         allowed_program_ids: allowed_program_ids_from_allowed_programs(
@@ -16,54 +26,102 @@ pub(crate) fn try_convert_accounts_config(
         ),
     })
 }
-pub(crate) fn cluster_from_remote(
-    remote: &magicblock_config::RemoteConfig,
-) -> Cluster {
+pub fn remote_cluster_from_remote(
+    remote_config: &RemoteConfig,
+) -> RemoteCluster {
+    const WS_MULTIPLEX_COUNT: usize = 3;
     use magicblock_config::RemoteCluster::*;
-
-    match remote.cluster {
-        Devnet => Cluster::Known(ClusterType::Devnet),
-        Mainnet => Cluster::Known(ClusterType::MainnetBeta),
-        Testnet => Cluster::Known(ClusterType::Testnet),
-        Development => Cluster::Known(ClusterType::Development),
-        Custom => Cluster::Custom(
-            remote.url.clone().expect("Custom remote must have a url"),
+    let (url, ws_url) = match remote_config.cluster {
+        Devnet => (
+            DEVNET_URL.to_string(),
+            vec![WS_DEVNET.to_string(); WS_MULTIPLEX_COUNT],
         ),
-        CustomWithWs => Cluster::CustomWithWs(
-            remote
+        Mainnet => (
+            MAINNET_URL.to_string(),
+            vec![WS_MAINNET.to_string(); WS_MULTIPLEX_COUNT],
+        ),
+        Testnet => (
+            TESTNET_URL.to_string(),
+            vec![WS_TESTNET.to_string(); WS_MULTIPLEX_COUNT],
+        ),
+        Development => (
+            DEVELOPMENT_URL.to_string(),
+            vec![WS_DEVELOPMENT.to_string(); 2],
+        ),
+        Custom => {
+            let rpc_url = remote_config
                 .url
-                .clone()
-                .expect("CustomWithWs remote must have a url"),
-            remote
+                .as_ref()
+                .expect("rpc url must be set for Custom cluster");
+            let ws_urls = remote_config
                 .ws_url
-                .clone()
-                .expect("CustomWithWs remote must have a ws_url")
+                .as_ref()
+                .map(|ws_urls| ws_urls.iter().map(|x| x.to_string()).collect())
+                .unwrap_or_else(|| {
+                    let mut ws_url = rpc_url.clone();
+                    ws_url
+                        .set_scheme(if rpc_url.scheme() == "https" {
+                            "wss"
+                        } else {
+                            "ws"
+                        })
+                        .expect("valid scheme");
+                    if let Some(port) = ws_url.port() {
+                        ws_url
+                            .set_port(Some(port + 1))
+                            .expect("valid url with port");
+                    }
+                    vec![ws_url.to_string(); WS_MULTIPLEX_COUNT]
+                });
+            (rpc_url.to_string(), ws_urls)
+        }
+        CustomWithWs => {
+            let rpc_url = remote_config
+                .url
+                .as_ref()
+                .expect("rpc url must be set for CustomWithMultipleWs")
+                .to_string();
+            let ws_url = remote_config
+                .ws_url
+                .as_ref()
+                .expect("ws urls must be set for CustomWithMultipleWs")
                 .first()
-                .expect("CustomWithWs remote must have at least one ws_url")
-                .clone(),
-        ),
-        CustomWithMultipleWs => Cluster::CustomWithMultipleWs {
-            http: remote
+                .expect("at least one ws url must be set for CustomWithWs")
+                .to_string();
+            let ws_urls = vec![ws_url; 3];
+            (rpc_url, ws_urls)
+        }
+        CustomWithMultipleWs => {
+            let rpc_url = remote_config
                 .url
-                .clone()
-                .expect("CustomWithMultipleWs remote must have a url"),
-            ws: remote
+                .as_ref()
+                .expect("rpc url must be set for CustomWithMultipleWs")
+                .to_string();
+            let ws_urls = remote_config
                 .ws_url
-                .clone()
-                .expect("CustomWithMultipleWs remote must have a ws_url"),
-        },
+                .as_ref()
+                .expect("ws urls must be set for CustomWithMultipleWs")
+                .iter()
+                .map(|x| x.to_string())
+                .collect();
+            (rpc_url, ws_urls)
+        }
+    };
+    RemoteCluster {
+        url,
+        ws_urls: ws_url,
     }
 }
 
 fn lifecycle_mode_from_lifecycle_mode(
     clone: &magicblock_config::LifecycleMode,
-) -> LifecycleMode {
+) -> magicblock_accounts::LifecycleMode {
     use magicblock_config::LifecycleMode::*;
     match clone {
-        ProgramsReplica => LifecycleMode::ProgramsReplica,
-        Replica => LifecycleMode::Replica,
-        Ephemeral => LifecycleMode::Ephemeral,
-        Offline => LifecycleMode::Offline,
+        ProgramsReplica => magicblock_accounts::LifecycleMode::ProgramsReplica,
+        Replica => magicblock_accounts::LifecycleMode::Replica,
+        Ephemeral => magicblock_accounts::LifecycleMode::Ephemeral,
+        Offline => magicblock_accounts::LifecycleMode::Offline,
     }
 }
 
