@@ -105,7 +105,7 @@ pub fn remote_cluster_from_remote(
             (rpc_url, ws_urls)
         }
         CustomWithMultipleWs => {
-            // NOTE: we assume that if multple ws urls are provided the user wants
+            // NOTE: we assume that if multiple ws urls are provided the user wants
             //       to multiplex no matter if any is a GRPC based pubsub.
             let rpc_url = remote_config
                 .url
