@@ -162,6 +162,12 @@ impl ChainLaserActor {
     ) {
         if self.subscriptions.contains_key(&pubkey) {
             warn!("Already subscribed to account {}", pubkey);
+            sub_response.send(Ok(())).unwrap_or_else(|_| {
+                warn!(
+                    "Failed to send already subscribed response for account {}",
+                    pubkey
+                )
+            });
             return;
         }
         let stream = self.create_account_stream(pubkey);
