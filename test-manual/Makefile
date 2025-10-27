@@ -23,14 +23,17 @@ manual-test-laser:
 	@echo "Airdropping 1 SOL to $(PUBKEY)..."
 	@solana airdrop 1 $(PUBKEY) --url devnet || true
 	@echo
-	@echo "## Creating validator config..."
-	@echo "[accounts]" > /tmp/mb-test-laser.toml
-	@echo "remote.url = \"https://devnet.helius-rpc.com/?api-key=$(HELIUS_API_KEY)\"" >> /tmp/mb-test-laser.toml
-	@echo "remote.ws-url = [\"https://laserstream-devnet-ewr.helius-rpc.com?api-key=$(HELIUS_API_KEY)\"]" >> /tmp/mb-test-laser.toml
-	@echo "" >> /tmp/mb-test-laser.toml
-	@echo "[rpc]" >> /tmp/mb-test-laser.toml
-	@echo "addr = \"0.0.0.0\"" >> /tmp/mb-test-laser.toml
-	@echo "port = 9988" >> /tmp/mb-test-laser.toml
+	@echo "## Creating validator config (0600) ..."
+	@install -m 600 /dev/null /tmp/mb-test-laser.toml
+	@{ \
+		echo "[accounts]"; \
+		echo "remote.url = \"https://devnet.helius-rpc.com/?api-key=$(HELIUS_API_KEY)\""; \
+		echo "remote.ws-url = [\"https://laserstream-devnet-ewr.helius-rpc.com?api-key=$(HELIUS_API_KEY)\"]"; \
+		echo; \
+		echo "[rpc]"; \
+		echo "addr = \"0.0.0.0\""; \
+		echo "port = 9988"; \
+	} >> /tmp/mb-test-laser.toml
 	@echo
 	@echo "## Starting validator in background..."
 	RUST_LOG=warn,magicblock=info,magicblock_chainlink=debug,magicblock_accounts=debug \
@@ -61,7 +64,7 @@ manual-test-laser:
 	@if [ -f /tmp/validator.pid ]; then \
 		echo "## Shutting down validator"; \
 		kill $$(cat /tmp/validator.pid) 2>/dev/null || true; \
-		rm /tmp/validator.pid /tmp/validator.log ; \
+		rm /tmp/validator.pid /tmp/validator.log /tmp/mb-test-laser.toml ; \
 	fi
 
 .PHONY: fmt list manual-test-laser
