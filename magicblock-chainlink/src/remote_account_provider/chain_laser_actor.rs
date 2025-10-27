@@ -20,7 +20,8 @@ use crate::remote_account_provider::{
         ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
         SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
-    RemoteAccountProviderResult, SubscriptionUpdate,
+    RemoteAccountProviderError, RemoteAccountProviderResult,
+    SubscriptionUpdate,
 };
 
 type LaserResult = Result<SubscribeUpdate, LaserstreamError>;
@@ -185,12 +186,31 @@ impl ChainLaserActor {
         pubkey: &Pubkey,
         unsub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
-        if self.subscriptions.remove(pubkey).is_some() {
-            trace!("Unsubscribed from account {}", pubkey);
+        match self.subscriptions.remove(pubkey) {
+            Some(_) => {
+                trace!("Unsubscribed from account {}", pubkey);
+                unsub_response.send(Ok(())).unwrap_or_else(|_| {
+                    warn!(
+                        "Failed to send unsubscribe response for account {}",
+                        pubkey
+                    )
+                });
+            }
+            None => {
+                unsub_response
+                    .send(Err(
+                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                            pubkey.to_string(),
+                        ),
+                    ))
+                    .unwrap_or_else(|_| {
+                        warn!(
+                            "Failed to send unsubscribe response for account {}",
+                            pubkey
+                        )
+                    });
+            }
         }
-        unsub_response.send(Ok(())).unwrap_or_else(|_| {
-            warn!("Failed to send unsubscribe response for account {}", pubkey)
-        });
     }
 
     /// Helper to create a dedicated stream for a single account.
