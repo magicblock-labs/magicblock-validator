@@ -141,8 +141,11 @@ impl ChainLaserActor {
                 self.remove_sub(&pubkey, response);
                 false
             }
-            RecycleConnections { .. } => {
+            RecycleConnections { response } => {
                 // No-op for laserstream
+                response.send(Ok(())).unwrap_or_else(|_| {
+                    warn!("Failed to send recycle connections response")
+                });
                 false
             }
             Shutdown { response } => {
