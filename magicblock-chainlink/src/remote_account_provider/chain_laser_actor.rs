@@ -146,12 +146,12 @@ impl ChainLaserActor {
         pubkey: Pubkey,
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
-        let stream = self.create_account_stream(pubkey);
         if self.subscriptions.contains_key(&pubkey) {
             warn!("Already subscribed to account {}", pubkey);
-        } else {
-            self.subscriptions.insert(pubkey, Box::pin(stream));
+            return;
         }
+        let stream = self.create_account_stream(pubkey);
+        self.subscriptions.insert(pubkey, Box::pin(stream));
         sub_response.send(Ok(())).unwrap_or_else(|_| {
             warn!("Failed to send subscribe response for account {}", pubkey)
         });
