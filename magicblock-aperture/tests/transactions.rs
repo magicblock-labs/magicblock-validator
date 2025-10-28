@@ -398,6 +398,7 @@ async fn test_get_signatures_for_address_pagination() {
     let env = RpcTestEnv::new().await;
     let mut signatures = Vec::new();
     for _ in 0..5 {
+        env.advance_slots(1);
         signatures.push(env.execute_transaction().await);
     }
 
