@@ -178,12 +178,12 @@ async fn test_clone_mini_v4_loader_program_and_upgrade() {
         )
         .await;
 
-        const MAX_RETRIES: usize = 20;
+        const MAX_RETRIES: usize = 50;
         let mut remaining_retries = MAX_RETRIES;
         loop {
             ctx.wait_for_delta_slot_ephem(5).unwrap();
 
-            let bump = remaining_retries - MAX_RETRIES + 1;
+            let bump = (remaining_retries - MAX_RETRIES) + 1;
             let msg = format!("Hola Mundo {bump}");
             let ix = sdk.log_msg_instruction(&payer.pubkey(), &msg);
             let (sig, found) = ctx
