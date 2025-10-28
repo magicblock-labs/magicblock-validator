@@ -611,6 +611,7 @@ where
         tasks: &[Box<dyn BaseTask>],
     ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
     {
+        /// Error mappers
         struct IntentErrorMapper;
         impl SendErrorMapper<InternalError> for IntentErrorMapper {
             type ExecutionError = TransactionStrategyExecutionError;
@@ -625,7 +626,6 @@ where
                 ControlFlow::Break(())
             }
         }
-
         struct IntentTransactionErrorMapper<'a> {
             tasks: &'a [Box<dyn BaseTask>],
         }
@@ -637,11 +637,12 @@ where
                 signature: Option<Signature>,
             ) -> Result<Self::ExecutionError, TransactionError> {
                 TransactionStrategyExecutionError::try_from_transaction_error(
-                    error, signature, self.tasks
+                    error, signature, self.tasks,
                 )
             }
         }
 
+        /// Retry attempt
         let default_error_mapper = DefaultErrorMapper::new(
             IntentErrorMapper,
             IntentTransactionErrorMapper { tasks },
@@ -649,7 +650,6 @@ where
         let attempt = || async {
             self.send_prepared_message(prepared_message.clone()).await
         };
-
         send_transaction_with_retries(attempt, default_error_mapper).await
     }
 }

@@ -1,24 +1,14 @@
 use std::{
-    error::Error, future::Future, marker::PhantomData, ops::ControlFlow,
-    time::Duration,
+    future::Future, marker::PhantomData, ops::ControlFlow, time::Duration,
 };
 
 use log::error;
-use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::client_error::ErrorKind;
 use solana_sdk::signature::Signature;
 use solana_transaction_error::TransactionError;
 use tokio::time::{sleep, Instant};
 
-use crate::{
-    MagicBlockRpcClientError, MagicBlockSendTransactionOutcome,
-    MagicblockRpcClient,
-};
-
-// pub trait SendFutureBuilder {
-//     type Output: Future;
-//     fn build(&self) -> Self::Output;
-// }
+use crate::{MagicBlockRpcClientError, MagicBlockSendTransactionOutcome};
 
 pub trait SendErrorMapper<E> {
     type ExecutionError;

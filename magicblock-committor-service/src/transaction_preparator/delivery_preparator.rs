@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, ops::ControlFlow, time::Duration};
 
 use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all, try_join_all};
@@ -7,21 +7,25 @@ use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
 };
 use magicblock_rpc_client::{
+    utils::{
+        send_transaction_with_retries, DefaultErrorMapper, SendErrorMapper,
+        TransactionErrorMapper,
+    },
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
-    MagicblockRpcClient,
+    MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
 use magicblock_table_mania::{error::TableManiaError, TableMania};
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
-    instruction::Instruction,
+    instruction::{Instruction, InstructionError},
     message::{
         v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
     },
-    signature::Keypair,
+    signature::{Keypair, Signature},
     signer::{Signer, SignerError},
-    transaction::VersionedTransaction,
+    transaction::{TransactionError, VersionedTransaction},
 };
 use tokio::time::sleep;
 
@@ -188,47 +192,26 @@ impl DeliveryPreparator {
         &self,
         authority: &Keypair,
         preparation_task: &PreparationTask,
-        max_retries: usize,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
         let chunks_pda = preparation_task.chunks_pda(&authority_pubkey);
         let write_instructions =
             preparation_task.write_instructions(&authority_pubkey);
 
-        let mut last_error = InternalError::ZeroRetriesRequestedError;
-        for _ in 0..max_retries {
-            let chunks = match self.rpc_client.get_account(&chunks_pda).await {
-                Ok(Some(account)) => Chunks::try_from_slice(account.data())?,
-                Ok(None) => {
-                    error!(
-                        "Chunks PDA does not exist for writing. pda: {}",
-                        chunks_pda
-                    );
-                    return Err(InternalError::ChunksPDAMissingError(
-                        chunks_pda,
-                    ));
-                }
-                Err(err) => {
-                    error!("Failed to fetch chunks PDA: {:?}", err);
-                    last_error = err.into();
-                    sleep(Duration::from_millis(100)).await;
-                    continue;
-                }
-            };
+        let chunks = if let Some(account) =
+            self.rpc_client.get_account(&chunks_pda).await?
+        {
+            Ok(Chunks::try_from_slice(account.data())?)
+        } else {
+            error!(
+                "Chunks PDA does not exist for writing. pda: {}",
+                chunks_pda
+            );
+            Err(InternalError::ChunksPDAMissingError(chunks_pda))
+        }?;
 
-            match self
-                .write_missing_chunks(authority, &chunks, &write_instructions)
-                .await
-            {
-                Ok(()) => return Ok(()),
-                Err(err) => {
-                    error!("Error on write missing chunks attempt: {:?}", err);
-                    last_error = err
-                }
-            }
-        }
-
-        Err(last_error)
+        self.write_missing_chunks(authority, &chunks, &write_instructions)
+            .await
     }
 
     /// Extract & write missing chunks asynchronously
@@ -266,32 +249,63 @@ impl DeliveryPreparator {
         instructions: &[Instruction],
         authority: &Keypair,
         max_retries: usize,
-    ) -> DeliveryPreparatorResult<(), InternalError> {
-        // 1, send
-        // 2, map errors to known set
-        // 3. decide flow on mapped errors
-        // 4. break or retry
+    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
+        /// Error mappers
+        struct BufferErrorMapper;
+        impl SendErrorMapper<TransactionSendError> for BufferErrorMapper {
+            type ExecutionError = BufferExecutionError;
+            fn map(&self, error: TransactionSendError) -> Self::ExecutionError {
+                error.into()
+            }
 
-        let mut last_error = InternalError::ZeroRetriesRequestedError;
-        for _ in 0..max_retries {
-            match self.try_send_ixs(instructions, authority).await {
-                Ok(()) => return Ok(()),
-                Err(err) => {
-                    println!("Failed attempt to send tx: {:?}", err);
-                    last_error = err;
+            fn decide_flow(_: &Self::ExecutionError) -> ControlFlow<()> {
+                // If we're here:
+                // We break from retry on all parsed errors
+                // We break on rpc error since we couldn't parse it
+                ControlFlow::Break(())
+            }
+        }
+        struct IntentTransactionErrorMapper;
+        impl TransactionErrorMapper for IntentTransactionErrorMapper {
+            type ExecutionError = BufferExecutionError;
+            fn try_map(
+                &self,
+                error: TransactionError,
+                signature: Option<Signature>,
+            ) -> Result<Self::ExecutionError, TransactionError> {
+                match error {
+                    err @ TransactionError::InstructionError(
+                        _,
+                        InstructionError::AccountAlreadyInitialized,
+                    ) => Ok(
+                        BufferExecutionError::AccountAlreadyInitializedError(
+                            err, signature,
+                        ),
+                    ),
+                    err => Err(err),
                 }
             }
-            sleep(Duration::from_millis(200)).await;
         }
 
-        Err(last_error)
+        let default_error_mapper = DefaultErrorMapper::new(
+            BufferErrorMapper,
+            IntentTransactionErrorMapper,
+        );
+        let attempt =
+            || async { self.try_send_ixs(instructions, authority).await };
+
+        send_transaction_with_retries(attempt, default_error_mapper).await?;
+        Ok(())
     }
 
     async fn try_send_ixs(
         &self,
         instructions: &[Instruction],
         authority: &Keypair,
-    ) -> DeliveryPreparatorResult<(), InternalError> {
+    ) -> DeliveryPreparatorResult<
+        MagicBlockSendTransactionOutcome,
+        TransactionSendError,
+    > {
         let latest_block_hash = self.rpc_client.get_latest_blockhash().await?;
         let message = Message::try_compile(
             &authority.pubkey(),
@@ -304,13 +318,14 @@ impl DeliveryPreparator {
             &[authority],
         )?;
 
-        self.rpc_client
+        let outcome = self
+            .rpc_client
             .send_transaction(
                 &transaction,
                 &MagicBlockSendTransactionConfig::ensure_committed(),
             )
             .await?;
-        Ok(())
+        Ok(outcome)
     }
 
     /// Prepares ALTs for pubkeys participating in tx
@@ -395,12 +410,64 @@ impl DeliveryPreparator {
         join_all(close_futs)
             .await
             .into_iter()
+            .map(|res| res.map_err(InternalError::from))
             .inspect(|res| {
                 if let Err(err) = res {
                     error!("Failed to cleanup buffers: {}", err);
                 }
             })
             .collect::<Result<(), _>>()
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum TransactionSendError {
+    #[error("CompileError: {0}")]
+    CompileError(#[from] CompileError),
+    #[error("SignerError: {0}")]
+    SignerError(#[from] SignerError),
+    #[error("MagicBlockRpcClientError: {0}")]
+    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+}
+
+impl TryInto<MagicBlockRpcClientError> for TransactionSendError {
+    type Error = TransactionSendError;
+    fn try_into(self) -> Result<MagicBlockRpcClientError, Self::Error> {
+        match self {
+            Self::MagicBlockRpcClientError(rpc_err) => Ok(rpc_err),
+            err => Err(err),
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum BufferExecutionError {
+    #[error("AccountAlreadyInitializedError: {0}")]
+    AccountAlreadyInitializedError(
+        #[source] TransactionError,
+        Option<Signature>,
+    ),
+    #[error("TransactionSendError: {0}")]
+    TransactionSendError(#[from] TransactionSendError),
+}
+
+impl<'a> TryInto<&'a MagicBlockRpcClientError> for &'a BufferExecutionError {
+    type Error = &'a BufferExecutionError;
+    fn try_into(self) -> Result<&'a MagicBlockRpcClientError, Self::Error> {
+        match self {
+            BufferExecutionError::TransactionSendError(
+                TransactionSendError::MagicBlockRpcClientError(rpc_err),
+            ) => Ok(rpc_err),
+            err => Err(err),
+        }
+    }
+}
+
+impl From<MagicBlockRpcClientError> for BufferExecutionError {
+    fn from(value: MagicBlockRpcClientError) -> Self {
+        Self::TransactionSendError(
+            TransactionSendError::MagicBlockRpcClientError(value),
+        )
     }
 }
 
@@ -414,12 +481,10 @@ pub enum InternalError {
     BorshError(#[from] std::io::Error),
     #[error("TableManiaError: {0}")]
     TableManiaError(#[from] TableManiaError),
-    #[error("TransactionCreationError: {0}")]
-    TransactionCreationError(#[from] CompileError),
-    #[error("TransactionSigningError: {0}")]
-    TransactionSigningError(#[from] SignerError),
-    #[error("FailedToPrepareBufferError: {0}")]
-    FailedToPrepareBufferError(#[from] MagicBlockRpcClientError),
+    #[error("MagicBlockRpcClientError: {0}")]
+    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+    #[error("BufferExecutionError: {0}")]
+    BufferExecutionError(#[from] BufferExecutionError),
     #[error("BaseTaskError: {0}")]
     BaseTaskError(#[from] BaseTaskError),
 }
