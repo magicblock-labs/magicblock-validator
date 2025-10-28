@@ -14,7 +14,10 @@ use magicblock_program::{
     validator::validator_authority,
 };
 use magicblock_rpc_client::{
-    utils::{SendErrorMapper, TransactionErrorMapper},
+    utils::{
+        send_transaction_with_retries, DefaultErrorMapper, SendErrorMapper,
+        TransactionErrorMapper,
+    },
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
@@ -26,7 +29,7 @@ use solana_sdk::{
     transaction::{TransactionError, VersionedTransaction},
 };
 use tokio::time::{sleep, Instant};
-use magicblock_rpc_client::utils::{send_transaction_with_retries, DefaultErrorMapper};
+
 use crate::{
     intent_executor::{
         error::{
@@ -502,9 +505,9 @@ where
 
                 return;
             }
-            Err(IntentExecutorError::CommitIDError(_))
-            | Err(IntentExecutorError::ActionsError(_))
-            | Err(IntentExecutorError::CpiLimitError(_)) => None,
+            Err(IntentExecutorError::CommitIDError(_, _))
+            | Err(IntentExecutorError::ActionsError(_, _))
+            | Err(IntentExecutorError::CpiLimitError(_, _)) => None,
             Err(IntentExecutorError::EmptyIntentError)
             | Err(IntentExecutorError::FailedToFitError)
             | Err(IntentExecutorError::TaskBuilderError(_))
@@ -602,7 +605,7 @@ where
         Ok(execution_result)
     }
 
-    async fn retry_kek(
+    async fn execute_message_with_retries(
         &self,
         prepared_message: VersionedMessage,
         tasks: &[Box<dyn BaseTask>],
@@ -626,186 +629,28 @@ where
         struct IntentTransactionErrorMapper<'a> {
             tasks: &'a [Box<dyn BaseTask>],
         }
-        impl TransactionErrorMapper for IntentTransactionErrorMapper {
+        impl<'a> TransactionErrorMapper for IntentTransactionErrorMapper<'a> {
             type ExecutionError = TransactionStrategyExecutionError;
             fn try_map(
                 &self,
                 error: TransactionError,
                 signature: Option<Signature>,
             ) -> Result<Self::ExecutionError, TransactionError> {
-                TransactionStrategyExecutionError::try_from_transaction_error(error, signature)
+                TransactionStrategyExecutionError::try_from_transaction_error(
+                    error, signature, self.tasks
+                )
             }
         }
 
         let default_error_mapper = DefaultErrorMapper::new(
             IntentErrorMapper,
-            IntentTransactionErrorMapper {
-                tasks
-            }
+            IntentTransactionErrorMapper { tasks },
         );
         let attempt = || async {
             self.send_prepared_message(prepared_message.clone()).await
         };
-        send_transaction_with_retries(attempt, default_error_mapper);
-        todo!()
-    }
 
-    /// Attempts and retries to execute strategy and parses errors
-    async fn execute_message_with_retries(
-        &self,
-        prepared_message: VersionedMessage,
-        tasks: &[Box<dyn BaseTask>],
-    ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
-    {
-        const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
-        const MIN_RETRIES: usize = 3;
-
-        const SLEEP: Duration = Duration::from_millis(500);
-
-        let decide_flow_rpc_error =
-            |err: solana_rpc_client_api::client_error::Error,
-             map: fn(
-                solana_rpc_client_api::client_error::Error,
-            ) -> MagicBlockRpcClientError|
-             -> ControlFlow<
-                TransactionStrategyExecutionError,
-                TransactionStrategyExecutionError,
-            > {
-                let map_helper =
-                    |request, kind| -> TransactionStrategyExecutionError {
-                        TransactionStrategyExecutionError::InternalError(
-                            InternalError::MagicBlockRpcClientError(map(
-                                solana_rpc_client_api::client_error::Error {
-                                    request,
-                                    kind,
-                                },
-                            )),
-                        )
-                    };
-
-                match err.kind {
-                    ErrorKind::TransactionError(transaction_err) => {
-                        // Map transaction error to a known set, otherwise maps to internal error
-                        // We're returning immediately to recover
-                        let error = TransactionStrategyExecutionError::from_transaction_error(transaction_err, tasks, |transaction_err| -> MagicBlockRpcClientError {
-                            map(
-                                solana_rpc_client_api::client_error::Error {
-                                    request: err.request,
-                                    kind: ErrorKind::TransactionError(transaction_err),
-                                })
-                        });
-
-                        ControlFlow::Break(error)
-                    }
-                    err_kind @ ErrorKind::Io(_) => {
-                        // Attempting retry
-                        ControlFlow::Continue(map_helper(err.request, err_kind))
-                    }
-                    err_kind @ (ErrorKind::Reqwest(_)
-                    | ErrorKind::Middleware(_)
-                    | ErrorKind::RpcError(_)
-                    | ErrorKind::SerdeJson(_)
-                    | ErrorKind::SigningError(_)
-                    | ErrorKind::Custom(_)) => {
-                        // Can't handle - propagate
-                        ControlFlow::Break(map_helper(err.request, err_kind))
-                    }
-                }
-            };
-
-        // Initialize with a default error to avoid uninitialized variable issues
-        let mut last_err = TransactionStrategyExecutionError::InternalError(
-            InternalError::MagicBlockRpcClientError(
-                MagicBlockRpcClientError::RpcClientError(
-                    solana_rpc_client_api::client_error::Error {
-                        request: None,
-                        kind: ErrorKind::Custom(
-                            "Uninitialized error fallback".to_string(),
-                        ),
-                    },
-                ),
-            ),
-        );
-
-        let start = Instant::now();
-        let mut i = 0;
-        // Ensures that we will retry at least MIN_RETRIES times
-        // or will retry at least for RETRY_FOR
-        // This is needed because DEFAULT_MAX_TIME_TO_PROCESSED is 50 sec
-        while start.elapsed() < RETRY_FOR || i < MIN_RETRIES {
-            i += 1;
-
-            let result =
-                self.send_prepared_message(prepared_message.clone()).await;
-            let flow = match result {
-                Ok(result) => {
-                    return match result.into_result() {
-                        Ok(value) =>  Ok(value),
-                        Err(err) => {
-                            // Since err is TransactionError we return from here right away
-                            // It's wether some known reason like: ActionError/CommitIdError or something else
-                            // We can't recover here so we propagate
-                            let err = TransactionStrategyExecutionError::from_transaction_error(err, tasks, |err: TransactionError| {
-                                MagicBlockRpcClientError::SendTransaction(err.into())
-                            });
-                            Err(err)
-                        }
-                    }
-                }
-                Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::SentTransactionError(err, signature)))
-                => {
-                    // TransactionError can be mapped to known set of error
-                    // We return right away to retry recovery, because this can't be fixed with retries
-                    ControlFlow::Break(TransactionStrategyExecutionError::from_transaction_error(err, tasks, |err| {
-                        MagicBlockRpcClientError::SentTransactionError(err, signature)
-                    }))
-                }
-                Err(err @ InternalError::SignerError(_)) => {
-                    // Can't handle SignerError in any way
-                    // propagate lower
-                    ControlFlow::Break(TransactionStrategyExecutionError::InternalError(err))
-                }
-                Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::RpcClientError(err))) => {
-                    decide_flow_rpc_error(err, MagicBlockRpcClientError::RpcClientError)
-                }
-                Err(InternalError::MagicBlockRpcClientError(MagicBlockRpcClientError::SendTransaction(err)))
-                => {
-                    decide_flow_rpc_error(err, MagicBlockRpcClientError::SendTransaction)
-                }
-                Err(InternalError::MagicBlockRpcClientError(err @ MagicBlockRpcClientError::GetLatestBlockhash(_))) => {
-                    // we're retrying in that case
-                    ControlFlow::Continue(TransactionStrategyExecutionError::InternalError(err.into()))
-                }
-                Err(InternalError::MagicBlockRpcClientError(err @ MagicBlockRpcClientError::GetSlot(_))) => {
-                    // Unexpected error, returning right away
-                    error!("MagicBlockRpcClientError::GetSlot during send transaction");
-                    ControlFlow::Break(TransactionStrategyExecutionError::InternalError(err.into()))
-                }
-                Err(InternalError::MagicBlockRpcClientError(err @ MagicBlockRpcClientError::LookupTableDeserialize(_))) => {
-                    // Unexpected error, returning right away
-                    error!("MagicBlockRpcClientError::LookupTableDeserialize during send transaction");
-                    ControlFlow::Break(TransactionStrategyExecutionError::InternalError(err.into()))
-                }
-                Err(err @ InternalError::MagicBlockRpcClientError(
-                    MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(..)
-                    | MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(..)
-                )) => {
-                    // if there's still time left we can retry sending tx
-                    // Since [`DEFAULT_MAX_TIME_TO_PROCESSED`] is large we skip sleep as well
-                    last_err = err.into();
-                    continue;
-                }
-            };
-
-            match flow {
-                ControlFlow::Continue(new_err) => last_err = new_err,
-                ControlFlow::Break(err) => return Err(err),
-            }
-
-            sleep(SLEEP).await
-        }
-
-        Err(last_err)
+        send_transaction_with_retries(attempt, default_error_mapper).await
     }
 }
 

@@ -22,6 +22,16 @@ pub enum InternalError {
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
 }
 
+impl TryInto<MagicBlockRpcClientError> for InternalError {
+    type Error = InternalError;
+    fn try_into(self) -> Result<MagicBlockRpcClientError, Self::Error> {
+        match self {
+            InternalError::MagicBlockRpcClientError(err) => Ok(err),
+            err => Err(err),
+        }
+    }
+}
+
 impl InternalError {
     pub fn signature(&self) -> Option<Signature> {
         match self {
@@ -35,11 +45,11 @@ impl InternalError {
 pub enum IntentExecutorError {
     #[error("EmptyIntentError")]
     EmptyIntentError,
-    #[error("User supplied actions are ill-formed: {0}. {1}")]
+    #[error("User supplied actions are ill-formed: {0}. {:?}", .1)]
     ActionsError(#[source] TransactionError, Option<Signature>),
-    #[error("Accounts committed with an invalid Commit id: {0}. {1}")]
+    #[error("Accounts committed with an invalid Commit id: {0}. {:?}", .1)]
     CommitIDError(#[source] TransactionError, Option<Signature>),
-    #[error("Max instruction trace length exceeded: {0}. {1}")]
+    #[error("Max instruction trace length exceeded: {0}. {:?}", .1)]
     CpiLimitError(#[source] TransactionError, Option<Signature>),
     #[error("Failed to fit in single TX")]
     FailedToFitError,
@@ -69,7 +79,7 @@ pub enum IntentExecutorError {
 
 impl IntentExecutorError {
     pub fn is_cpi_limit_error(&self) -> bool {
-        matches!(self, IntentExecutorError::CpiLimitError(_))
+        matches!(self, IntentExecutorError::CpiLimitError(_, _))
     }
 
     pub fn from_strategy_execution_error<F>(
@@ -80,15 +90,17 @@ impl IntentExecutorError {
         F: FnOnce(InternalError) -> IntentExecutorError,
     {
         match error {
-            TransactionStrategyExecutionError::ActionsError(err) => {
-                IntentExecutorError::ActionsError(err)
+            TransactionStrategyExecutionError::ActionsError(err, signature) => {
+                IntentExecutorError::ActionsError(err, signature)
             }
-            TransactionStrategyExecutionError::CpiLimitError(err) => {
-                IntentExecutorError::CpiLimitError(err)
-            }
-            TransactionStrategyExecutionError::CommitIDError(err) => {
-                IntentExecutorError::CommitIDError(err)
-            }
+            TransactionStrategyExecutionError::CpiLimitError(
+                err,
+                signature,
+            ) => IntentExecutorError::CpiLimitError(err, signature),
+            TransactionStrategyExecutionError::CommitIDError(
+                err,
+                signature,
+            ) => IntentExecutorError::CommitIDError(err, signature),
             TransactionStrategyExecutionError::InternalError(err) => {
                 converter(err)
             }
@@ -99,14 +111,34 @@ impl IntentExecutorError {
 /// Those are the errors that may occur during Commit/Finalize stages on Base layer
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionStrategyExecutionError {
-    #[error("User supplied actions are ill-formed: {0}. {1}")]
+    #[error("User supplied actions are ill-formed: {0}. {:?}", .1)]
     ActionsError(#[source] TransactionError, Option<Signature>),
-    #[error("Accounts committed with an invalid Commit id: {0}. {1}")]
+    #[error("Accounts committed with an invalid Commit id: {0}. {:?}", .1)]
     CommitIDError(#[source] TransactionError, Option<Signature>),
-    #[error("Max instruction trace length exceeded: {0}. {1}")]
+    #[error("Max instruction trace length exceeded: {0}. {:?}", .1)]
     CpiLimitError(#[source] TransactionError, Option<Signature>),
     #[error("InternalError: {0}")]
     InternalError(#[from] InternalError),
+}
+
+impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
+    fn from(value: MagicBlockRpcClientError) -> Self {
+        Self::InternalError(InternalError::MagicBlockRpcClientError(value))
+    }
+}
+
+impl<'a> TryInto<&'a MagicBlockRpcClientError>
+    for &'a TransactionStrategyExecutionError
+{
+    type Error = &'a TransactionStrategyExecutionError;
+    fn try_into(self) -> Result<&'a MagicBlockRpcClientError, Self::Error> {
+        match self {
+            TransactionStrategyExecutionError::InternalError(
+                InternalError::MagicBlockRpcClientError(rpc_err),
+            ) => Ok(rpc_err),
+            other => Err(other),
+        }
+    }
 }
 
 impl TransactionStrategyExecutionError {
