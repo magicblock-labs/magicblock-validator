@@ -75,6 +75,11 @@ impl DeliveryPreparator {
         res1.into_iter()
             .collect::<Result<Vec<_>, _>>()
             .map_err(Error::FailedToPrepareBufferAccounts)?;
+        // TODO(edwin): introduce stream
+        // 1. on ready el-t
+        // 2. check if error, otherwise everythimg is ok
+        // 3. If error is AccountAlreadyInitialized go to 4, otherwise propagate
+        // 4. Overwrite already existing buffer
 
         let lookup_tables = res2.map_err(Error::FailedToCreateALTError)?;
         Ok(lookup_tables)
@@ -262,6 +267,11 @@ impl DeliveryPreparator {
         authority: &Keypair,
         max_retries: usize,
     ) -> DeliveryPreparatorResult<(), InternalError> {
+        // 1, send
+        // 2, map errors to known set
+        // 3. decide flow on mapped errors
+        // 4. break or retry
+
         let mut last_error = InternalError::ZeroRetriesRequestedError;
         for _ in 0..max_retries {
             match self.try_send_ixs(instructions, authority).await {

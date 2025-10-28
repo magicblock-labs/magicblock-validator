@@ -4,7 +4,7 @@ pub mod single_stage_executor;
 pub mod task_info_fetcher;
 pub mod two_stage_executor;
 
-use std::{ops::ControlFlow, sync::Arc, time::Duration};
+use std::{future::Future, ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures_util::future::try_join_all;
@@ -14,6 +14,7 @@ use magicblock_program::{
     validator::validator_authority,
 };
 use magicblock_rpc_client::{
+    utils::{SendErrorMapper, TransactionErrorMapper},
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
@@ -25,7 +26,7 @@ use solana_sdk::{
     transaction::{TransactionError, VersionedTransaction},
 };
 use tokio::time::{sleep, Instant};
-
+use magicblock_rpc_client::utils::{send_transaction_with_retries, DefaultErrorMapper};
 use crate::{
     intent_executor::{
         error::{
@@ -429,7 +430,7 @@ where
     }
 
     /// Shared helper for sending transactions
-    async fn send_prepared_message(
+    pub(crate) async fn send_prepared_message(
         &self,
         mut prepared_message: VersionedMessage,
     ) -> IntentExecutorResult<MagicBlockSendTransactionOutcome, InternalError>
@@ -599,6 +600,54 @@ where
             .await;
 
         Ok(execution_result)
+    }
+
+    async fn retry_kek(
+        &self,
+        prepared_message: VersionedMessage,
+        tasks: &[Box<dyn BaseTask>],
+    ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
+    {
+        struct IntentErrorMapper;
+        impl SendErrorMapper<InternalError> for IntentErrorMapper {
+            type ExecutionError = TransactionStrategyExecutionError;
+            fn map(&self, error: InternalError) -> Self::ExecutionError {
+                error.into()
+            }
+
+            fn decide_flow(_: &Self::ExecutionError) -> ControlFlow<()> {
+                // If we're here:
+                // We break from retry on all parsed errors
+                // We break on rpc error since we couldn't parse it
+                ControlFlow::Break(())
+            }
+        }
+
+        struct IntentTransactionErrorMapper<'a> {
+            tasks: &'a [Box<dyn BaseTask>],
+        }
+        impl TransactionErrorMapper for IntentTransactionErrorMapper {
+            type ExecutionError = TransactionStrategyExecutionError;
+            fn try_map(
+                &self,
+                error: TransactionError,
+                signature: Option<Signature>,
+            ) -> Result<Self::ExecutionError, TransactionError> {
+                TransactionStrategyExecutionError::try_from_transaction_error(error, signature)
+            }
+        }
+
+        let default_error_mapper = DefaultErrorMapper::new(
+            IntentErrorMapper,
+            IntentTransactionErrorMapper {
+                tasks
+            }
+        );
+        let attempt = || async {
+            self.send_prepared_message(prepared_message.clone()).await
+        };
+        send_transaction_with_retries(attempt, default_error_mapper);
+        todo!()
     }
 
     /// Attempts and retries to execute strategy and parses errors

@@ -1,3 +1,5 @@
+pub mod utils;
+
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -199,6 +201,18 @@ impl MagicBlockSendTransactionOutcome {
     pub fn into_result(self) -> Result<Signature, TransactionError> {
         if let Some(err) = self.confirmed_err.or(self.processed_err) {
             Err(err)
+        } else {
+            Ok(self.signature)
+        }
+    }
+
+    // TODO(edwin)
+    pub fn into_result_2(self) -> Result<Signature, MagicBlockRpcClientError> {
+        if let Some(err) = self.confirmed_err.or(self.processed_err) {
+            Err(MagicBlockRpcClientError::SentTransactionError(
+                err,
+                self.signature,
+            ))
         } else {
             Ok(self.signature)
         }
