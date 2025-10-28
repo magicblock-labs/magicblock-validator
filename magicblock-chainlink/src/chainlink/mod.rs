@@ -5,7 +5,7 @@ use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
 use log::*;
 use magicblock_core::traits::AccountsBank;
-use solana_account::AccountSharedData;
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     commitment_config::CommitmentConfig, transaction::SanitizedTransaction,
@@ -147,7 +147,11 @@ impl<
         let blacklisted_accounts =
             blacklisted_accounts(&self.validator_id, &self.faucet_id);
         let removed = self.accounts_bank.remove_where(|pubkey, account| {
-            !account.delegated() && !blacklisted_accounts.contains(pubkey)
+            (!account.delegated()
+                // This fixes the edge-case of accounts that were in the process of
+                // being undelegated but never completed while the validator was running
+                || account.owner().eq(&dlp::id()))
+                && !blacklisted_accounts.contains(pubkey)
         });
 
         debug!("Removed {removed} non-delegated accounts");
