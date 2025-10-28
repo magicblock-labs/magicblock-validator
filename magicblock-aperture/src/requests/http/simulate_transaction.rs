@@ -39,7 +39,7 @@ impl HttpDispatcher {
             config.sig_verify,
             config.replace_recent_blockhash,
         ).inspect_err(|err| {
-            error!(
+            debug!(
                 "Failed to prepare transaction to simulate: {transaction_str} ({err})"
             )
         })?;
