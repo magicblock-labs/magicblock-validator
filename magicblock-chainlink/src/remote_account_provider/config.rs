@@ -3,7 +3,7 @@ use crate::config::LifecycleMode;
 
 // TODO(thlorenz): make configurable
 // Tracked: https://github.com/magicblock-labs/magicblock-validator/issues/577
-pub const DEFAULT_SUBSCRIBED_ACCOUNTS_LRU_CAPACITY: usize = 10_000;
+pub const DEFAULT_SUBSCRIBED_ACCOUNTS_LRU_CAPACITY: usize = 7_000;
 
 #[derive(Debug, Clone)]
 pub struct RemoteAccountProviderConfig {
