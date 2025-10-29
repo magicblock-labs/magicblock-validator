@@ -331,7 +331,7 @@ impl DeliveryPreparator {
             || async { self.try_send_ixs(instructions, authority).await };
 
         send_transaction_with_retries(attempt, default_error_mapper, |i, _| {
-            return i >= max_retries;
+            i >= max_retries
         })
         .await?;
         Ok(())

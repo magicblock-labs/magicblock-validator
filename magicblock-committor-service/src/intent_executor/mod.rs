@@ -629,7 +629,7 @@ where
         struct IntentTransactionErrorMapper<'a> {
             tasks: &'a [Box<dyn BaseTask>],
         }
-        impl<'a> TransactionErrorMapper for IntentTransactionErrorMapper<'a> {
+        impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
             type ExecutionError = TransactionStrategyExecutionError;
             fn try_map(
                 &self,
@@ -655,7 +655,7 @@ where
         send_transaction_with_retries(
             attempt,
             default_error_mapper,
-            |i, elapsed| return !(elapsed < RETRY_FOR || i < MIN_RETRIES),
+            |i, elapsed| !(elapsed < RETRY_FOR || i < MIN_RETRIES),
         )
         .await
     }

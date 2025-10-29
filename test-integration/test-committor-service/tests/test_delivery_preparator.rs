@@ -249,7 +249,8 @@ async fn test_already_initialized_error_handled() {
 
     // Imitate commit to the non deleted buffer using different length
     // Keep same task with commit id, swap data
-    let data = generate_random_bytes(task.committed_account.account.data.len() - 2);
+    let data =
+        generate_random_bytes(task.committed_account.account.data.len() - 2);
     task.committed_account.account.data = data.clone();
     let buffer_task = BufferTaskType::Commit(task);
     let mut strategy = TransactionStrategy {

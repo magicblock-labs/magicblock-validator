@@ -198,16 +198,7 @@ impl MagicBlockSendTransactionOutcome {
         self.confirmed_err.or(self.processed_err)
     }
 
-    pub fn into_result(self) -> Result<Signature, TransactionError> {
-        if let Some(err) = self.confirmed_err.or(self.processed_err) {
-            Err(err)
-        } else {
-            Ok(self.signature)
-        }
-    }
-
-    // TODO(edwin)
-    pub fn into_result_2(self) -> Result<Signature, MagicBlockRpcClientError> {
+    pub fn into_result(self) -> Result<Signature, MagicBlockRpcClientError> {
         if let Some(err) = self.confirmed_err.or(self.processed_err) {
             Err(MagicBlockRpcClientError::SentTransactionError(
                 err,

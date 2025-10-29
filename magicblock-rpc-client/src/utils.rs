@@ -46,7 +46,7 @@ where
 
         let result = make_send_fut().await;
         let err = match result {
-            Ok(outcome) => match outcome.into_result_2() {
+            Ok(outcome) => match outcome.into_result() {
                 Ok(signature) => return Ok(signature),
                 Err(rpc_err) => E1::from(rpc_err),
             },
