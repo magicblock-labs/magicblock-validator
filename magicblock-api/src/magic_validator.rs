@@ -39,7 +39,8 @@ use magicblock_config::{
 };
 use magicblock_core::{
     link::{
-        blocks::BlockUpdateTx, link, transactions::TransactionSchedulerHandle,
+        accounts::AccountUpdateRx, blocks::BlockUpdateTx, link,
+        transactions::TransactionSchedulerHandle,
     },
     Slot,
 };
@@ -135,6 +136,7 @@ pub struct MagicValidator {
     chainlink: Arc<ChainlinkImpl>,
     rpc_handle: JoinHandle<()>,
     identity: Pubkey,
+    account_update: AccountUpdateRx,
     transaction_scheduler: TransactionSchedulerHandle,
     block_udpate_tx: BlockUpdateTx,
     _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
@@ -338,6 +340,7 @@ impl MagicValidator {
             claim_fees_task: ClaimFeesTask::new(),
             rpc_handle,
             identity: validator_pubkey,
+            account_update: dispatch.account_update,
             transaction_scheduler: dispatch.transaction_scheduler,
             block_udpate_tx: validator_channels.block_update,
             task_scheduler_handle: None,
@@ -666,6 +669,7 @@ impl MagicValidator {
             &self.config.task_scheduler,
             self.accountsdb.clone(),
             self.transaction_scheduler.clone(),
+            self.account_update.clone(),
             self.ledger.latest_block().clone(),
             self.token.clone(),
         )?;

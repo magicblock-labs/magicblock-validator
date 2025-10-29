@@ -11,7 +11,10 @@ use futures_util::StreamExt;
 use log::*;
 use magicblock_config::TaskSchedulerConfig;
 use magicblock_core::{
-    link::transactions::TransactionSchedulerHandle, traits::AccountsBank,
+    link::{
+        accounts::AccountUpdateRx, transactions::TransactionSchedulerHandle,
+    },
+    traits::AccountsBank,
 };
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
@@ -45,10 +48,10 @@ pub struct TaskSchedulerService<T: AccountsBank> {
     bank: Arc<T>,
     /// Used to send transactions for execution
     tx_scheduler: TransactionSchedulerHandle,
+    /// Used to send account updates to the validator
+    account_update: AccountUpdateRx,
     /// Provides latest blockhash for signing transactions
     block: LatestBlock,
-    /// Interval at which the task scheduler will check for requests in the context
-    tick_interval: Duration,
     /// Queue of tasks to execute
     task_queue: DelayQueue<DbTask>,
     /// Map of task IDs to their corresponding keys in the task queue
@@ -65,6 +68,7 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
         config: &TaskSchedulerConfig,
         bank: Arc<T>,
         tx_scheduler: TransactionSchedulerHandle,
+        account_update: AccountUpdateRx,
         block: LatestBlock,
         token: CancellationToken,
     ) -> Result<
@@ -92,8 +96,8 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
             db,
             bank,
             tx_scheduler,
+            account_update,
             block,
-            tick_interval: Duration::from_millis(config.millis_per_tick),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
             tx_counter: AtomicU64::default(),
@@ -265,7 +269,6 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
         mut self,
         token: CancellationToken,
     ) -> TaskSchedulerResult<()> {
-        let mut interval = tokio::time::interval(self.tick_interval);
         loop {
             select! {
                 Some(task) = self.task_queue.next() => {
@@ -279,10 +282,10 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
                         self.db.insert_failed_task(task.id, format!("{:?}", e))?;
                     }
                 }
-                _ = interval.tick() => {
-                    // HACK: we deserialize the context on every tick avoid using geyser. This will be fixed once the channel to the transaction executor is implemented.
-                    // Performance should not be too bad because the context should be small.
-                    // https://github.com/magicblock-labs/magicblock-validator/issues/523
+                Ok(update) = self.account_update.recv_async() => {
+                    if update.account.pubkey != TASK_CONTEXT_PUBKEY {
+                        continue;
+                    }
 
                     // Process any existing requests from the context
                     let Some(context_account) = self.bank.get_account(&TASK_CONTEXT_PUBKEY) else {

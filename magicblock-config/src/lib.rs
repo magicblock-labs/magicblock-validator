@@ -268,10 +268,7 @@ mod tests {
                     port: 9090,
                 },
             },
-            task_scheduler: TaskSchedulerConfig {
-                reset: true,
-                millis_per_tick: 1000,
-            },
+            task_scheduler: TaskSchedulerConfig { reset: true },
         };
         let original_config = config.clone();
         let other = EphemeralConfig::default();
@@ -356,10 +353,7 @@ mod tests {
                     port: 9090,
                 },
             },
-            task_scheduler: TaskSchedulerConfig {
-                reset: true,
-                millis_per_tick: 1000,
-            },
+            task_scheduler: TaskSchedulerConfig { reset: true },
         };
 
         config.merge(other.clone());
@@ -441,10 +435,7 @@ mod tests {
                     port: 9090,
                 },
             },
-            task_scheduler: TaskSchedulerConfig {
-                reset: true,
-                millis_per_tick: 2000,
-            },
+            task_scheduler: TaskSchedulerConfig { reset: true },
         };
         let original_config = config.clone();
         let other = EphemeralConfig {
@@ -519,10 +510,7 @@ mod tests {
                     port: 9090,
                 },
             },
-            task_scheduler: TaskSchedulerConfig {
-                reset: true,
-                millis_per_tick: 1000,
-            },
+            task_scheduler: TaskSchedulerConfig { reset: true },
         };
 
         config.merge(other);
