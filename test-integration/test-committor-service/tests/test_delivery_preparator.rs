@@ -205,3 +205,84 @@ async fn test_lookup_tables() {
         assert!(!alt_account.data.is_empty(), "ALT account should have data");
     }
 }
+
+#[tokio::test]
+async fn test_already_initialized_error_handled() {
+    let fixture = TestFixture::new().await;
+    let preparator = fixture.create_delivery_preparator();
+
+    let data = generate_random_bytes(10 * 1024);
+    let mut task = create_commit_task(&data);
+    let buffer_task = BufferTaskType::Commit(task.clone());
+    let mut strategy = TransactionStrategy {
+        optimized_tasks: vec![Box::new(BufferTask::new_preparation_required(
+            buffer_task,
+        ))],
+        lookup_tables_keys: vec![],
+    };
+
+    // Test preparation
+    let result = preparator
+        .prepare_for_delivery(
+            &fixture.authority,
+            &mut strategy,
+            &None::<IntentPersisterImpl>,
+        )
+        .await;
+    assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
+
+    // Verify the buffer account was created and initialized
+    let PreparationState::Cleanup(cleanup_task) =
+        strategy.optimized_tasks[0].preparation_state()
+    else {
+        panic!("unexpected PreparationState");
+    };
+    // Check buffer account exists
+    let buffer_pda = cleanup_task.buffer_pda(&fixture.authority.pubkey());
+    let account = fixture
+        .rpc_client
+        .get_account(&buffer_pda)
+        .await
+        .unwrap()
+        .expect("Buffer account should exist");
+    assert_eq!(account.data.as_slice(), data, "Unexpected account data");
+
+    // Imitate commit to the non deleted buffer using different length
+    // Keep same task with commit id, swap data
+    let data = generate_random_bytes(task.committed_account.account.data.len() - 2);
+    task.committed_account.account.data = data.clone();
+    let buffer_task = BufferTaskType::Commit(task);
+    let mut strategy = TransactionStrategy {
+        optimized_tasks: vec![Box::new(BufferTask::new_preparation_required(
+            buffer_task,
+        ))],
+        lookup_tables_keys: vec![],
+    };
+
+    // Test preparation
+    let result = preparator
+        .prepare_for_delivery(
+            &fixture.authority,
+            &mut strategy,
+            &None::<IntentPersisterImpl>,
+        )
+        .await;
+    assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
+
+    // Verify the buffer account was created and initialized
+    let PreparationState::Cleanup(cleanup_task) =
+        strategy.optimized_tasks[0].preparation_state()
+    else {
+        panic!("unexpected PreparationState");
+    };
+
+    // Check buffer account exists
+    let buffer_pda = cleanup_task.buffer_pda(&fixture.authority.pubkey());
+    let account = fixture
+        .rpc_client
+        .get_account(&buffer_pda)
+        .await
+        .unwrap()
+        .expect("Buffer account should exist");
+    assert_eq!(account.data.as_slice(), data, "Unexpected account data");
+}

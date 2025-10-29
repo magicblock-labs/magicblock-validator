@@ -66,27 +66,8 @@ impl DeliveryPreparator {
         persister: &Option<P>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures =
-            strategy.optimized_tasks.iter_mut().map(|task| async move {
-                let res = self
-                    .prepare_task(authority, task.as_mut(), persister)
-                    .await;
-                match res {
-                    Err(InternalError::BufferExecutionError(
-                        BufferExecutionError::AccountAlreadyInitializedError(
-                            err,
-                            signature,
-                        ),
-                    )) => {
-                        info!(
-                            "Buffer was already initialized prior: {}. {:?}",
-                            err, signature
-                        );
-                        self.cleanup(authority, &[task.clone()], &[]).await?;
-                        self.prepare_task(authority, task.as_mut(), persister)
-                            .await
-                    }
-                    res => res,
-                }
+            strategy.optimized_tasks.iter_mut().map(|task| {
+                self.prepare_task_handling_errors(authority, task, persister)
             });
 
         let task_preparations = join_all(preparation_futures);
@@ -152,6 +133,46 @@ impl DeliveryPreparator {
         let cleanup_task = preparation_task.cleanup_task();
         task.switch_preparation_state(PreparationState::Cleanup(cleanup_task))?;
         Ok(())
+    }
+
+    /// Runs `prepare_task` and, if the buffer was already initialized,
+    /// performs cleanup and retries once.
+    pub async fn prepare_task_handling_errors<P: IntentPersister>(
+        &self,
+        authority: &Keypair,
+        task: &mut Box<dyn BaseTask>,
+        persister: &Option<P>,
+    ) -> Result<(), InternalError> {
+        let res = self.prepare_task(authority, task.as_mut(), persister).await;
+        match res {
+            Err(InternalError::BufferExecutionError(
+                BufferExecutionError::AccountAlreadyInitializedError(
+                    err,
+                    signature,
+                ),
+            )) => {
+                info!(
+                    "Buffer was already initialized prior: {}. {:?}",
+                    err, signature
+                );
+            }
+            // Return in any other case
+            res => return res,
+        }
+
+        // Prepare cleanup task
+        let mut cleanup_task = task.clone();
+        let PreparationState::Required(preparation_task) =
+            cleanup_task.preparation_state()
+        else {
+            return Ok(());
+        };
+        cleanup_task.switch_preparation_state(PreparationState::Cleanup(
+            preparation_task.cleanup_task(),
+        ))?;
+
+        self.cleanup(authority, &[cleanup_task], &[]).await?;
+        self.prepare_task(authority, task.as_mut(), persister).await
     }
 
     /// Initializes buffer account for future writes
