@@ -13,7 +13,9 @@
   "license": "Business Source License 1.1",
   "bin": {
     "ephemeral-validator": "ephemeralValidator.js",
-    "mb-test-validator": "mbTestValidator.js"
+    "mb-test-validator": "mbTestValidator.js",
+    "rpc-router": "rpcRouter.js",
+    "vrf-oracle": "vrfOracle.js"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -32,7 +34,15 @@
     "@magicblock-labs/ephemeral-validator-darwin-x64": "0.3.1",
     "@magicblock-labs/ephemeral-validator-linux-arm64": "0.3.1",
     "@magicblock-labs/ephemeral-validator-linux-x64": "0.3.1",
-    "@magicblock-labs/ephemeral-validator-windows-x64": "0.3.1"
+    "@magicblock-labs/ephemeral-validator-windows-x64": "0.3.1",
+    "@magicblock-labs/vrf-oracle-linux-x64": "0.2.0",
+    "@magicblock-labs/vrf-oracle-linux-arm64": "0.2.0",
+    "@magicblock-labs/vrf-oracle-darwin-x64": "0.2.0",
+    "@magicblock-labs/vrf-oracle-darwin-arm64": "0.2.0",
+    "@magicblock-labs/rpc-router-linux-x64": "0.0.1",
+    "@magicblock-labs/rpc-router-linux-arm64": "0.0.1",
+    "@magicblock-labs/rpc-router-darwin-x64": "0.0.1",
+    "@magicblock-labs/rpc-router-darwin-arm64": "0.0.1"
   },
   "publishConfig": {
     "access": "public"
