@@ -4,7 +4,7 @@ pub mod single_stage_executor;
 pub mod task_info_fetcher;
 pub mod two_stage_executor;
 
-use std::{future::Future, ops::ControlFlow, sync::Arc, time::Duration};
+use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures_util::future::try_join_all;
@@ -18,17 +18,15 @@ use magicblock_rpc_client::{
         send_transaction_with_retries, DefaultErrorMapper, SendErrorMapper,
         TransactionErrorMapper,
     },
-    MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
-    MagicBlockSendTransactionOutcome, MagicblockRpcClient,
+    MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
+    MagicblockRpcClient,
 };
 use solana_pubkey::Pubkey;
-use solana_rpc_client_api::client_error::ErrorKind;
 use solana_sdk::{
     message::VersionedMessage,
     signature::{Keypair, Signature, Signer, SignerError},
     transaction::{TransactionError, VersionedTransaction},
 };
-use tokio::time::{sleep, Instant};
 
 use crate::{
     intent_executor::{
@@ -433,7 +431,7 @@ where
     }
 
     /// Shared helper for sending transactions
-    pub(crate) async fn send_prepared_message(
+    async fn send_prepared_message(
         &self,
         mut prepared_message: VersionedMessage,
     ) -> IntentExecutorResult<MagicBlockSendTransactionOutcome, InternalError>
@@ -619,7 +617,9 @@ where
                 error.into()
             }
 
-            fn decide_flow(_: &Self::ExecutionError) -> ControlFlow<()> {
+            fn decide_flow(
+                _: &Self::ExecutionError,
+            ) -> ControlFlow<(), Duration> {
                 // If we're here:
                 // We break from retry on all parsed errors
                 // We break on rpc error since we couldn't parse it
@@ -641,8 +641,10 @@ where
                 )
             }
         }
+        const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
+        const MIN_RETRIES: usize = 3;
 
-        /// Retry attempt
+        // Send with retries
         let default_error_mapper = DefaultErrorMapper::new(
             IntentErrorMapper,
             IntentTransactionErrorMapper { tasks },
@@ -650,7 +652,12 @@ where
         let attempt = || async {
             self.send_prepared_message(prepared_message.clone()).await
         };
-        send_transaction_with_retries(attempt, default_error_mapper).await
+        send_transaction_with_retries(
+            attempt,
+            default_error_mapper,
+            |i, elapsed| return !(elapsed < RETRY_FOR || i < MIN_RETRIES),
+        )
+        .await
     }
 }
 

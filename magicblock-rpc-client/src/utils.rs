@@ -13,7 +13,9 @@ use crate::{MagicBlockRpcClientError, MagicBlockSendTransactionOutcome};
 pub trait SendErrorMapper<E> {
     type ExecutionError;
     fn map(&self, error: E) -> Self::ExecutionError;
-    fn decide_flow(mapped_error: &Self::ExecutionError) -> ControlFlow<()>;
+    fn decide_flow(
+        mapped_error: &Self::ExecutionError,
+    ) -> ControlFlow<(), Duration>;
 }
 
 pub trait TransactionErrorMapper {
@@ -25,20 +27,17 @@ pub trait TransactionErrorMapper {
     ) -> Result<Self::ExecutionError, TransactionError>;
 }
 
-pub async fn send_transaction_with_retries<S, Fut, M, E1, E2>(
-    make_send_fut: S,
+pub async fn send_transaction_with_retries<F, Fut, M, E1, E2>(
+    make_send_fut: F,
     send_result_mapper: M,
+    stop_predicate: impl Fn(usize, Duration) -> bool,
 ) -> Result<Signature, E2>
 where
-    S: Fn() -> Fut,
+    F: Fn() -> Fut,
     Fut: Future<Output = Result<MagicBlockSendTransactionOutcome, E1>>,
     M: SendErrorMapper<E1, ExecutionError = E2>,
     E1: From<MagicBlockRpcClientError>,
 {
-    const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
-    const MIN_RETRIES: usize = 3;
-    const SLEEP: Duration = Duration::from_millis(500);
-
     let start = Instant::now();
     let mut i = 0;
 
@@ -54,16 +53,16 @@ where
             Err(err) => err,
         };
         let mapped_error = send_result_mapper.map(err);
-        match M::decide_flow(&mapped_error) {
-            ControlFlow::Continue(()) => {}
+        let sleep_duration = match M::decide_flow(&mapped_error) {
+            ControlFlow::Continue(value) => value,
             ControlFlow::Break(()) => return Err(mapped_error),
-        }
+        };
 
-        if !(start.elapsed() < RETRY_FOR || i < MIN_RETRIES) {
+        if stop_predicate(i, start.elapsed()) {
             return Err(mapped_error);
         }
 
-        sleep(SLEEP).await
+        sleep(sleep_duration).await
     }
 }
 
@@ -96,7 +95,9 @@ where
         }
     }
 
-    fn decide_flow(mapped_error: &Self::ExecutionError) -> ControlFlow<()> {
+    fn decide_flow(
+        mapped_error: &Self::ExecutionError,
+    ) -> ControlFlow<(), Duration> {
         match mapped_error.try_into() {
             Ok(err) => Self::decide_rpc_error_flow(err),
             Err(mapped_error) => M::decide_flow(mapped_error),
@@ -195,21 +196,17 @@ where
 
     fn decide_rpc_error_flow(
         error: &MagicBlockRpcClientError,
-    ) -> ControlFlow<()> {
+    ) -> ControlFlow<(), Duration> {
         match error {
             MagicBlockRpcClientError::RpcClientError(err)
-            | MagicBlockRpcClientError::SendTransaction(err) => {
+            | MagicBlockRpcClientError::SendTransaction(err)
+            | MagicBlockRpcClientError::GetLatestBlockhash(err)=> {
                 Self::decide_rpc_native_flow(err)
-            }
-            MagicBlockRpcClientError::GetLatestBlockhash(_) => {
-                // retry
-                // TODO: ControlFlow::Continue(Duration::from_secs(val))
-                ControlFlow::Continue(())
             }
             MagicBlockRpcClientError::GetSlot(_)
             | MagicBlockRpcClientError::LookupTableDeserialize(_)
             | MagicBlockRpcClientError::SentTransactionError(_, _)=> {
-                // This wasn't mapped to any user defined error - breal
+                // This wasn't mapped to any user defined error - break
                 // Unexpected error - break
                 ControlFlow::Break(())
             }
@@ -219,18 +216,19 @@ where
             ) => {
                 // if there's still time left we can retry sending tx
                 // Since [`DEFAULT_MAX_TIME_TO_PROCESSED`] is large we skip sleep as well
-                // TODO: ControlFlow::Continue(Duration::from_secs(0))
-                ControlFlow::Continue(())
+                ControlFlow::Continue(Duration::ZERO)
             },
         }
     }
 
     fn decide_rpc_native_flow(
         err: &solana_rpc_client_api::client_error::Error,
-    ) -> ControlFlow<()> {
+    ) -> ControlFlow<(), Duration> {
         match err.kind {
             // Retry IO errors
-            ErrorKind::Io(_) => ControlFlow::Continue(()),
+            ErrorKind::Io(_) => {
+                ControlFlow::Continue(Duration::from_millis(500))
+            }
             _ => {
                 // Can't handle - propagate
                 ControlFlow::Break(())

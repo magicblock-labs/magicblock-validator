@@ -143,77 +143,7 @@ impl<'a> TryInto<&'a MagicBlockRpcClientError>
 
 impl TransactionStrategyExecutionError {
     /// Convert [`TransactionError`] into known errors that can be handled
-    /// [`TransactionStrategyExecutionError`]
-    pub fn from_transaction_error(
-        err: TransactionError,
-        tasks: &[Box<dyn BaseTask>],
-        map: impl FnOnce(TransactionError) -> MagicBlockRpcClientError,
-    ) -> Self {
-        // There's always 2 budget instructions in front
-        const OFFSET: u8 = 2;
-        const NONCE_OUT_OF_ORDER: u32 =
-            dlp::error::DlpError::NonceOutOfOrder as u32;
-
-        match err {
-            // Filter CommitIdError by custom error code
-            transaction_err @ TransactionError::InstructionError(
-                _,
-                InstructionError::Custom(NONCE_OUT_OF_ORDER),
-            ) => TransactionStrategyExecutionError::CommitIDError(
-                transaction_err,
-                None,
-            ),
-            // Some tx may use too much CPIs and we can handle it in certain cases
-            transaction_err @ TransactionError::InstructionError(
-                _,
-                InstructionError::MaxInstructionTraceLengthExceeded,
-            ) => TransactionStrategyExecutionError::CpiLimitError(
-                transaction_err,
-                None,
-            ),
-            // Filter ActionError, we can attempt recovery by stripping away actions
-            transaction_err @ TransactionError::InstructionError(index, _) => {
-                let Some(action_index) = index.checked_sub(OFFSET) else {
-                    return TransactionStrategyExecutionError::InternalError(
-                        InternalError::MagicBlockRpcClientError(map(
-                            transaction_err,
-                        )),
-                    );
-                };
-
-                // If index corresponds to an Action -> ActionsError; otherwise -> InternalError.
-                if matches!(
-                    tasks
-                        .get(action_index as usize)
-                        .map(|task| task.task_type()),
-                    Some(TaskType::Action)
-                ) {
-                    TransactionStrategyExecutionError::ActionsError(
-                        transaction_err,
-                        None,
-                    )
-                } else {
-                    TransactionStrategyExecutionError::InternalError(
-                        InternalError::MagicBlockRpcClientError(map(
-                            transaction_err,
-                        )),
-                    )
-                }
-            }
-            // This means transaction failed to other reasons that we don't handle - propagate
-            err => {
-                error!(
-                    "Message execution failed and we can not handle it: {}",
-                    err
-                );
-                TransactionStrategyExecutionError::InternalError(
-                    InternalError::MagicBlockRpcClientError(map(err)),
-                )
-            }
-        }
-    }
-
-    /// Convert [`TransactionError`] into known errors that can be handled
+    /// Otherwise return original [`TransactionError`]
     /// [`TransactionStrategyExecutionError`]
     pub fn try_from_transaction_error(
         err: TransactionError,

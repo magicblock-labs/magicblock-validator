@@ -2,7 +2,7 @@ use std::{collections::HashSet, ops::ControlFlow, time::Duration};
 
 use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all, try_join_all};
-use log::error;
+use log::{error, info};
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
 };
@@ -27,7 +27,6 @@ use solana_sdk::{
     signer::{Signer, SignerError},
     transaction::{TransactionError, VersionedTransaction},
 };
-use tokio::time::sleep;
 
 use crate::{
     persist::{CommitStatus, IntentPersister},
@@ -66,10 +65,29 @@ impl DeliveryPreparator {
         strategy: &mut TransactionStrategy,
         persister: &Option<P>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
-        let preparation_futures = strategy
-            .optimized_tasks
-            .iter_mut()
-            .map(|task| self.prepare_task(authority, task.as_mut(), persister));
+        let preparation_futures =
+            strategy.optimized_tasks.iter_mut().map(|task| async move {
+                let res = self
+                    .prepare_task(authority, task.as_mut(), persister)
+                    .await;
+                match res {
+                    Err(InternalError::BufferExecutionError(
+                        BufferExecutionError::AccountAlreadyInitializedError(
+                            err,
+                            signature,
+                        ),
+                    )) => {
+                        info!(
+                            "Buffer was already initialized prior: {}. {:?}",
+                            err, signature
+                        );
+                        self.cleanup(authority, &[task.clone()], &[]).await?;
+                        self.prepare_task(authority, task.as_mut(), persister)
+                            .await
+                    }
+                    res => res,
+                }
+            });
 
         let task_preparations = join_all(preparation_futures);
         let alts_preparations =
@@ -79,13 +97,8 @@ impl DeliveryPreparator {
         res1.into_iter()
             .collect::<Result<Vec<_>, _>>()
             .map_err(Error::FailedToPrepareBufferAccounts)?;
-        // TODO(edwin): introduce stream
-        // 1. on ready el-t
-        // 2. check if error, otherwise everythimg is ok
-        // 3. If error is AccountAlreadyInitialized go to 4, otherwise propagate
-        // 4. Overwrite already existing buffer
-
         let lookup_tables = res2.map_err(Error::FailedToCreateALTError)?;
+
         Ok(lookup_tables)
     }
 
@@ -125,7 +138,7 @@ impl DeliveryPreparator {
         );
 
         // Writing chunks with some retries
-        self.write_buffer_with_retries(authority, preparation_task, 5)
+        self.write_buffer_with_retries(authority, preparation_task)
             .await?;
         // Persist that buffer account initiated successfully
         let update_status = CommitStatus::BufferAndChunkFullyInitialized;
@@ -147,7 +160,7 @@ impl DeliveryPreparator {
         &self,
         authority: &Keypair,
         preparation_task: &PreparationTask,
-    ) -> DeliveryPreparatorResult<(), InternalError> {
+    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         let authority_pubkey = authority.pubkey();
         let init_instruction =
             preparation_task.init_instruction(&authority_pubkey);
@@ -258,7 +271,9 @@ impl DeliveryPreparator {
                 error.into()
             }
 
-            fn decide_flow(_: &Self::ExecutionError) -> ControlFlow<()> {
+            fn decide_flow(
+                _: &Self::ExecutionError,
+            ) -> ControlFlow<(), Duration> {
                 // If we're here:
                 // We break from retry on all parsed errors
                 // We break on rpc error since we couldn't parse it
@@ -294,7 +309,10 @@ impl DeliveryPreparator {
         let attempt =
             || async { self.try_send_ixs(instructions, authority).await };
 
-        send_transaction_with_retries(attempt, default_error_mapper).await?;
+        send_transaction_with_retries(attempt, default_error_mapper, |i, _| {
+            return i >= max_retries;
+        })
+        .await?;
         Ok(())
     }
 
