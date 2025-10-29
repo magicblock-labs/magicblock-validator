@@ -98,7 +98,6 @@ async fn ixtest_get_existing_account_for_valid_slot() {
 
     let pubkey = random_pubkey();
     let rpc_client = remote_account_provider.rpc_client();
-    airdrop(rpc_client, &pubkey, 1_000_000).await;
 
     {
         // Fetching immediately does not return the account yet
@@ -107,6 +106,12 @@ async fn ixtest_get_existing_account_for_valid_slot() {
         assert!(!remote_account.is_found());
     }
 
+    // Fetching account after airdrop will add it to validator and create subscription
+    airdrop(rpc_client, &pubkey, 1_000_000).await;
+    sleep_ms(500).await;
+
+    // Airdrop again and wait for subscription update to be processed
+    airdrop(rpc_client, &pubkey, 1_000_000).await;
     info!("Waiting for subscription update...");
     sleep_ms(1_500).await;
 
@@ -117,6 +122,7 @@ async fn ixtest_get_existing_account_for_valid_slot() {
             remote_account_provider.try_get(pubkey).await.unwrap();
         assert!(remote_account.is_found());
         assert!(remote_account.slot() >= cs);
+        assert_eq!(remote_account.fresh_lamports().unwrap(), 2_000_000);
     }
 }
 
