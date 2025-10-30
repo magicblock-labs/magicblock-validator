@@ -3,7 +3,7 @@ use std::{
         atomic::{AtomicU32, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use fastwebsockets::{
@@ -15,7 +15,7 @@ use json::Value;
 use log::debug;
 use tokio::{
     sync::mpsc::{self, Receiver},
-    time,
+    time::{self, Instant},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -95,8 +95,10 @@ impl ConnectionHandler {
     /// The loop terminates upon any I/O error, an inactivity timeout, or a shutdown signal.
     pub(super) async fn run(mut self) {
         const MAX_INACTIVE_INTERVAL: Duration = Duration::from_secs(60);
+        const PING_PERIOD: Duration = Duration::from_secs(30);
         let mut last_activity = Instant::now();
-        let mut ping = time::interval(Duration::from_secs(30));
+        let next_ping = time::sleep_until(Instant::now() + PING_PERIOD);
+        tokio::pin!(next_ping);
 
         loop {
             tokio::select! {
@@ -105,7 +107,11 @@ impl ConnectionHandler {
 
                 // 1. Handle an incoming frame from the client's WebSocket.
                 Ok(frame) = self.ws.read_frame() => {
+                    // Record inbound client activity
                     last_activity = Instant::now();
+                    // Reschedule the next ping
+                    next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
+
                     if frame.opcode != OpCode::Text {
                         continue;
                     }
@@ -115,7 +121,7 @@ impl ConnectionHandler {
                     let mut request = match parsed {
                         Ok(r) => r,
                         Err(error) => {
-                            self.report_failure(None, error).await;
+                            let _ = self.report_failure(None, error).await;
                             continue;
                         }
                     };
@@ -130,8 +136,8 @@ impl ConnectionHandler {
                     if !success { break };
                 }
 
-                // 2. Handle the periodic keep-alive timer.
-                _ = ping.tick() => {
+                // 2. Handle the periodic keep-alive timer (scheduled relative to last activity).
+                _ = &mut next_ping => {
                     // If the connection has been idle for too long, close it.
                     if last_activity.elapsed() > MAX_INACTIVE_INTERVAL {
                         let frame = Frame::close(
@@ -146,6 +152,8 @@ impl ConnectionHandler {
                     if self.ws.write_frame(frame).await.is_err() {
                         break;
                     };
+                    // Schedule the next ping
+                    next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
                 }
 
                 // 3. Handle a new subscription notification from the server backend.
