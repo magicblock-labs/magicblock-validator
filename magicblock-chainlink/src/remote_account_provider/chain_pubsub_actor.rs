@@ -278,19 +278,18 @@ impl ChainPubsubActor {
     ) {
         trace!("Adding subscription for {pubkey} with commitment {commitment_config:?}");
 
-        let config = RpcAccountInfoConfig {
-            commitment: Some(commitment_config),
-            encoding: Some(UiAccountEncoding::Base64Zstd),
-            ..Default::default()
-        };
-
         let cancellation_token = CancellationToken::new();
 
         let mut sub_joinset = subscription_watchers.lock().unwrap();
         sub_joinset.spawn(async move {
+            let config = RpcAccountInfoConfig {
+                commitment: Some(commitment_config),
+                encoding: Some(UiAccountEncoding::Base64Zstd),
+                ..Default::default()
+            };
             // Attempt to subscribe to the account
-            let (mut update_stream, unsubscribe) = match pubsub_client
-                .account_subscribe(&pubkey, Some(config))
+            let (mut update_stream, mut unsubscribe) = match pubsub_client
+                .account_subscribe(&pubkey, Some(config.clone()))
                 .await {
                 Ok(res) => res,
                 Err(err) => {
@@ -330,7 +329,32 @@ impl ChainPubsubActor {
                             });
                         } else {
                             debug!("Subscription for {pubkey} ended by update stream");
-                            break;
+
+                            // NOTE: the order of unsub/sub does not matter as we're already
+                            //       disconnected
+                            //       However since we're running multiple of these pubsub actors for
+                            //       redundancy, we won't miss any updates on the submux level
+
+                            // 1. Clean up the old subscription
+                            subs.lock().unwrap().remove(&pubkey);
+                            unsubscribe().await;
+
+                            // 2. Attempt to resubscribe immediately
+                            match pubsub_client.account_subscribe(&pubkey, Some(config.clone())).await {
+                                Ok((new_update_stream, new_unsubscribe)) => {
+                                    update_stream = new_update_stream;
+                                    unsubscribe = new_unsubscribe;
+                                    // Re-add to subscriptions map
+                                    subs.lock().unwrap().insert(pubkey, AccountSubscription {
+                                        cancellation_token: cancellation_token.clone(),
+                                    });
+                                    // Continue the loop with the new stream
+                                }
+                                Err(err) => {
+                                    error!("Failed to resubscribe to {pubkey} after stream ended: {err:?}");
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
