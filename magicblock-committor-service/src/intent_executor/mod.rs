@@ -642,7 +642,7 @@ where
             }
         }
         const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
-        const MIN_RETRIES: usize = 3;
+        const MIN_ATTEMPTS: usize = 3;
 
         // Send with retries
         let default_error_mapper = DefaultErrorMapper::new(
@@ -655,7 +655,7 @@ where
         send_transaction_with_retries(
             attempt,
             default_error_mapper,
-            |i, elapsed| !(elapsed < RETRY_FOR || i < MIN_RETRIES),
+            |i, elapsed| !(elapsed < RETRY_FOR || i < MIN_ATTEMPTS),
         )
         .await
     }

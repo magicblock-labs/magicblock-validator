@@ -161,17 +161,20 @@ impl DeliveryPreparator {
         }
 
         // Prepare cleanup task
-        let mut cleanup_task = task.clone();
         let PreparationState::Required(preparation_task) =
-            cleanup_task.preparation_state()
+            task.preparation_state().clone()
         else {
             return Ok(());
         };
-        cleanup_task.switch_preparation_state(PreparationState::Cleanup(
+        task.switch_preparation_state(PreparationState::Cleanup(
             preparation_task.cleanup_task(),
         ))?;
+        self.cleanup(authority, std::slice::from_ref(task), &[])
+            .await?;
+        task.switch_preparation_state(PreparationState::Required(
+            preparation_task,
+        ))?;
 
-        self.cleanup(authority, &[cleanup_task], &[]).await?;
         self.prepare_task(authority, task.as_mut(), persister).await
     }
 
@@ -221,7 +224,6 @@ impl DeliveryPreparator {
         Ok(())
     }
 
-    /// Based on Chunks state, try MAX_RETRIES to fill buffer
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
@@ -282,7 +284,7 @@ impl DeliveryPreparator {
         &self,
         instructions: &[Instruction],
         authority: &Keypair,
-        max_retries: usize,
+        max_attempts: usize,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         /// Error mappers
         struct BufferErrorMapper;
@@ -331,7 +333,7 @@ impl DeliveryPreparator {
             || async { self.try_send_ixs(instructions, authority).await };
 
         send_transaction_with_retries(attempt, default_error_mapper, |i, _| {
-            i >= max_retries
+            i >= max_attempts
         })
         .await?;
         Ok(())

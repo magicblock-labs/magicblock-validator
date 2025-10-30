@@ -27,16 +27,31 @@ pub trait TransactionErrorMapper {
     ) -> Result<Self::ExecutionError, TransactionError>;
 }
 
-pub async fn send_transaction_with_retries<F, Fut, M, E1, E2>(
+/// Sends a Solana transaction repeatedly until it succeeds, a stop condition is met,
+/// or an unrecoverable error occurs.
+///
+/// This function encapsulates retry logic for sending a transaction asynchronously.
+/// It retries according to the retry strategy defined by the [`SendErrorMapper`] and
+/// the user-provided `stop_predicate` predicate.
+///
+/// # Type Parameters
+///
+/// - `Map`: A type implementing [`SendErrorMapper`] that maps lower-level send errors
+///   (`SendErr`) to higher-level execution errors (`ExecErr`), and determines whether
+///   to retry or stop based on the mapped error.
+/// - `Stop`: A predicate function used to determine when to give up retrying.
+/// - `SendError`: The error type returned by the Solana RPC client or a similar transport layer.
+/// - `ExecErr`: The unified execution error type returned to the caller with mapped errors
+pub async fn send_transaction_with_retries<F, Fut, Map, SendErr, ExecErr>(
     make_send_fut: F,
-    send_result_mapper: M,
+    send_result_mapper: Map,
     stop_predicate: impl Fn(usize, Duration) -> bool,
-) -> Result<Signature, E2>
+) -> Result<Signature, ExecErr>
 where
     F: Fn() -> Fut,
-    Fut: Future<Output = Result<MagicBlockSendTransactionOutcome, E1>>,
-    M: SendErrorMapper<E1, ExecutionError = E2>,
-    E1: From<MagicBlockRpcClientError>,
+    Fut: Future<Output = Result<MagicBlockSendTransactionOutcome, SendErr>>,
+    Map: SendErrorMapper<SendErr, ExecutionError = ExecErr>,
+    SendErr: From<MagicBlockRpcClientError>,
 {
     let start = Instant::now();
     let mut i = 0;
@@ -48,12 +63,12 @@ where
         let err = match result {
             Ok(outcome) => match outcome.into_result() {
                 Ok(signature) => return Ok(signature),
-                Err(rpc_err) => E1::from(rpc_err),
+                Err(rpc_err) => SendErr::from(rpc_err),
             },
             Err(err) => err,
         };
         let mapped_error = send_result_mapper.map(err);
-        let sleep_duration = match M::decide_flow(&mapped_error) {
+        let sleep_duration = match Map::decide_flow(&mapped_error) {
             ControlFlow::Continue(value) => value,
             ControlFlow::Break(()) => return Err(mapped_error),
         };
@@ -66,29 +81,36 @@ where
     }
 }
 
-// E - Error after sending
-// EM - Error mapped
-pub struct DefaultErrorMapper<M, TM, E, EM>
+/// A convenience [`SendErrorMapper`] implementation that combines generic user-defined
+/// error mapping logic with built-in handling of common Solana RPC and transaction errors.
+///
+/// `DefaultErrorMapper` acts as a *composite mapper*, delegating to:
+/// - A user-supplied inner [`SendErrorMapper`] (`inner_map`), which defines custom error mappings.
+/// - A [`TransactionErrorMapper`] (`transaction_error_mapper`), which handles
+///   conversion of Solana [`TransactionError`]s into higher-level domain errors.
+pub struct DefaultErrorMapper<Map, TxMap, SendErr, ExecErr>
 where
-    M: SendErrorMapper<E, ExecutionError = EM>,
-    TM: TransactionErrorMapper<ExecutionError = EM>,
+    Map: SendErrorMapper<SendErr, ExecutionError = ExecErr>,
+    TxMap: TransactionErrorMapper<ExecutionError = ExecErr>,
 {
-    pub inner_map: M,
-    pub transaction_error_mapper: TM,
-    _phantom_data: PhantomData<E>,
+    pub inner_map: Map,
+    pub transaction_error_mapper: TxMap,
+    _phantom_data: PhantomData<SendErr>,
 }
 
-impl<M, TM, E, EM> SendErrorMapper<E> for DefaultErrorMapper<M, TM, E, EM>
+impl<Map, TxMap, SendErr, ExecErr> SendErrorMapper<SendErr>
+    for DefaultErrorMapper<Map, TxMap, SendErr, ExecErr>
 where
-    E: TryInto<MagicBlockRpcClientError, Error = E>,
-    EM: From<MagicBlockRpcClientError>,
-    M: SendErrorMapper<E, ExecutionError = EM>,
-    TM: TransactionErrorMapper<ExecutionError = EM>,
-    for<'a> &'a EM: TryInto<&'a MagicBlockRpcClientError, Error = &'a EM>,
+    SendErr: TryInto<MagicBlockRpcClientError, Error = SendErr>,
+    ExecErr: From<MagicBlockRpcClientError>,
+    Map: SendErrorMapper<SendErr, ExecutionError = ExecErr>,
+    TxMap: TransactionErrorMapper<ExecutionError = ExecErr>,
+    for<'a> &'a ExecErr:
+        TryInto<&'a MagicBlockRpcClientError, Error = &'a ExecErr>,
 {
-    type ExecutionError = EM;
+    type ExecutionError = ExecErr;
 
-    fn map(&self, error: E) -> Self::ExecutionError {
+    fn map(&self, error: SendErr) -> Self::ExecutionError {
         match error.try_into() {
             Ok(err) => self.map_magicblock_client_error(err),
             Err(err) => self.inner_map.map(err),
@@ -100,18 +122,19 @@ where
     ) -> ControlFlow<(), Duration> {
         match mapped_error.try_into() {
             Ok(err) => Self::decide_rpc_error_flow(err),
-            Err(mapped_error) => M::decide_flow(mapped_error),
+            Err(mapped_error) => Map::decide_flow(mapped_error),
         }
     }
 }
 
-impl<M, TM, E, EM> DefaultErrorMapper<M, TM, E, EM>
+impl<Map, TxMap, SendErr, ExecErr>
+    DefaultErrorMapper<Map, TxMap, SendErr, ExecErr>
 where
-    M: SendErrorMapper<E, ExecutionError = EM>,
-    TM: TransactionErrorMapper<ExecutionError = EM>,
-    EM: From<MagicBlockRpcClientError>,
+    Map: SendErrorMapper<SendErr, ExecutionError = ExecErr>,
+    TxMap: TransactionErrorMapper<ExecutionError = ExecErr>,
+    ExecErr: From<MagicBlockRpcClientError>,
 {
-    pub fn new(inner_map: M, transaction_error_mapper: TM) -> Self {
+    pub fn new(inner_map: Map, transaction_error_mapper: TxMap) -> Self {
         Self {
             inner_map,
             transaction_error_mapper,
@@ -122,7 +145,7 @@ where
     fn map_magicblock_client_error(
         &self,
         error: MagicBlockRpcClientError,
-    ) -> EM {
+    ) -> ExecErr {
         match error {
             MagicBlockRpcClientError::SentTransactionError(
                 transaction_err,
@@ -168,7 +191,7 @@ where
     fn try_map_client_error(
         &self,
         err: solana_rpc_client_api::client_error::Error,
-    ) -> Result<EM, solana_rpc_client_api::client_error::Error> {
+    ) -> Result<ExecErr, solana_rpc_client_api::client_error::Error> {
         match err.kind {
             ErrorKind::TransactionError(transaction_err) => self
                 .transaction_error_mapper
