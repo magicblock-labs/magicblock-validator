@@ -33,7 +33,7 @@ use solana_rpc_client_api::{
 use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
 use tokio::{
     sync::{mpsc, oneshot},
-    task::{self, JoinSet},
+    task,
 };
 
 pub(crate) mod chain_pubsub_actor;
@@ -596,56 +596,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .join(", ");
             debug!("Subscribing to accounts: {pubkeys}");
         }
-        let subscription_results = {
-            let mut set = JoinSet::new();
-            for (pubkey, _) in subscribe_and_fetch.iter() {
-                let pc = self.pubsub_client.clone();
-                let pubkey = *pubkey;
-                set.spawn(async move { pc.subscribe(pubkey).await });
-            }
-            set
+        for (pubkey, _) in subscribe_and_fetch.iter() {
+            // Register the subscription for the pubkey (handles LRU cache and eviction first)
+            self.register_subscription(pubkey).await?;
         }
-        .join_all()
-        .await;
-
-        let (new_subs, errs) = subscription_results
-            .into_iter()
-            .enumerate()
-            .fold((vec![], vec![]), |(mut new_subs, mut errs), (idx, res)| {
-                match res {
-                    Ok(_) => {
-                        if let Some((pubkey, _)) = subscribe_and_fetch.get(idx)
-                        {
-                            new_subs.push(pubkey);
-                        }
-                    }
-                    Err(err) => errs.push((idx, err)),
-                }
-                (new_subs, errs)
-            });
-
-        if errs.is_empty() {
-            for pubkey in new_subs {
-                // Register the subscription for the pubkey
-                self.register_subscription(pubkey).await?;
-            }
-            Ok(())
-        } else {
-            Err(RemoteAccountProviderError::AccountSubscriptionsFailed(
-                errs.iter()
-                    .map(|(idx, err)| {
-                        let pubkey = subscribe_and_fetch
-                            .get(*idx)
-                            .map(|(pk, _)| pk.to_string())
-                            .unwrap_or_else(|| {
-                                "BUG: could not match pubkey".to_string()
-                            });
-                        format!("{pubkey}: {err:?}")
-                    })
-                    .collect::<Vec<_>>()
-                    .join(",\n"),
-            ))
-        }
+        Ok(())
     }
 
     /// Registers a new subscription for the given pubkey.
@@ -664,6 +619,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             // 2. Inform upstream so it can remove it from the store
             self.send_removal_update(evicted).await?;
         }
+
+        // 3. Subscribe to the new account (only after successful eviction handling)
+        self.pubsub_client.subscribe(*pubkey).await?;
+
         Ok(())
     }
 
@@ -699,9 +658,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(());
         }
 
-        self.subscribed_accounts.add(*pubkey);
-        self.pubsub_client.subscribe(*pubkey).await?;
-
+        self.register_subscription(pubkey).await?;
         Ok(())
     }
 
