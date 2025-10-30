@@ -3,7 +3,7 @@ use std::{
         atomic::{AtomicU32, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use fastwebsockets::{
@@ -15,7 +15,7 @@ use json::Value;
 use log::debug;
 use tokio::{
     sync::mpsc::{self, Receiver},
-    time,
+    time::{self, Instant},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -95,9 +95,9 @@ impl ConnectionHandler {
     /// The loop terminates upon any I/O error, an inactivity timeout, or a shutdown signal.
     pub(super) async fn run(mut self) {
         const MAX_INACTIVE_INTERVAL: Duration = Duration::from_secs(60);
+        const PING_PERIOD: Duration = Duration::from_secs(30);
         let mut last_activity = Instant::now();
-        let ping_period = Duration::from_secs(30);
-        let next_ping = time::sleep_until(time::Instant::now() + ping_period);
+        let next_ping = time::sleep_until(Instant::now() + PING_PERIOD);
         tokio::pin!(next_ping);
 
         loop {
@@ -107,9 +107,10 @@ impl ConnectionHandler {
 
                 // 1. Handle an incoming frame from the client's WebSocket.
                 Ok(frame) = self.ws.read_frame() => {
-                    // Record inbound client activity and push ping into the future
+                    // Record inbound client activity
                     last_activity = Instant::now();
-                    next_ping.as_mut().reset(time::Instant::now() + ping_period);
+                    // Reschedule the next ping
+                    next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
 
                     if frame.opcode != OpCode::Text {
                         continue;
@@ -122,7 +123,6 @@ impl ConnectionHandler {
                         Err(error) => {
                             // Even on error, we attempted to respond; keep pings scheduled after this activity
                             let _ = self.report_failure(None, error).await;
-                            next_ping.as_mut().reset(time::Instant::now() + ping_period);
                             continue;
                         }
                     };
@@ -132,9 +132,6 @@ impl ConnectionHandler {
                         Ok(r) => self.report_success(r).await,
                         Err(e) => self.report_failure(Some(&request.id), e).await,
                     };
-
-                    // After sending a response (success or error), schedule the next ping in the future
-                    next_ping.as_mut().reset(time::Instant::now() + ping_period);
 
                     // If we fail to send the response, terminate the connection.
                     if !success { break };
@@ -156,8 +153,8 @@ impl ConnectionHandler {
                     if self.ws.write_frame(frame).await.is_err() {
                         break;
                     };
-                    // Schedule the next ping after ping_period from now.
-                    next_ping.as_mut().reset(time::Instant::now() + ping_period);
+                    // Schedule the next ping
+                    next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
                 }
 
                 // 3. Handle a new subscription notification from the server backend.
