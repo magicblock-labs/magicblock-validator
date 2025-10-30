@@ -165,8 +165,6 @@ impl ConnectionHandler {
                     if self.send(update.as_ref()).await.is_err() {
                         break;
                     }
-                    // Outbound server activity: push the next ping into the future
-                    next_ping.as_mut().reset(time::Instant::now() + ping_period);
                 }
 
                 // 4. Handle the global server shutdown signal.
