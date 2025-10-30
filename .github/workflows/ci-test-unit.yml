@@ -1,10 +1,14 @@
+name: Run CI - Unit Tests
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [master, dev]
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-
-name: Run CI - Unit Tests
 
 jobs:
   run_make_ci_test:
