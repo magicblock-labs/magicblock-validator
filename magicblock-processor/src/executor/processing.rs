@@ -1,5 +1,3 @@
-use std::sync::atomic::Ordering;
-
 use log::error;
 use magicblock_core::link::{
     accounts::{AccountWithSlot, LockedAccount},
@@ -215,7 +213,6 @@ impl super::TransactionExecutor {
             self.processor.slot,
             txn,
             meta,
-            self.index.fetch_add(1, Ordering::Relaxed),
         ) {
             error!("failed to commit transaction to the ledger: {error}");
             return;
@@ -244,7 +241,6 @@ impl super::TransactionExecutor {
             self.processor.slot,
             txn,
             meta,
-            self.index.fetch_add(1, Ordering::Relaxed),
         ) {
             error!("failed to commit transaction to the ledger: {error}");
         }

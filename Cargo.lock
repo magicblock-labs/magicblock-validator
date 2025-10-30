@@ -3811,6 +3811,7 @@ dependencies = [
  "num_cpus",
  "prost 0.11.9",
  "rocksdb",
+ "scc",
  "serde",
  "solana-account-decoder",
  "solana-measure",
