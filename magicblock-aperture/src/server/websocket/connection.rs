@@ -96,7 +96,9 @@ impl ConnectionHandler {
     pub(super) async fn run(mut self) {
         const MAX_INACTIVE_INTERVAL: Duration = Duration::from_secs(60);
         let mut last_activity = Instant::now();
-        let mut ping = time::interval(Duration::from_secs(30));
+        let ping_period = Duration::from_secs(30);
+        let next_ping = time::sleep_until(time::Instant::now() + ping_period);
+        tokio::pin!(next_ping);
 
         loop {
             tokio::select! {
@@ -105,7 +107,10 @@ impl ConnectionHandler {
 
                 // 1. Handle an incoming frame from the client's WebSocket.
                 Ok(frame) = self.ws.read_frame() => {
+                    // Record inbound client activity and push ping into the future
                     last_activity = Instant::now();
+                    next_ping.as_mut().reset(time::Instant::now() + ping_period);
+
                     if frame.opcode != OpCode::Text {
                         continue;
                     }
@@ -115,7 +120,9 @@ impl ConnectionHandler {
                     let mut request = match parsed {
                         Ok(r) => r,
                         Err(error) => {
-                            self.report_failure(None, error).await;
+                            // Even on error, we attempted to respond; keep pings scheduled after this activity
+                            let _ = self.report_failure(None, error).await;
+                            next_ping.as_mut().reset(time::Instant::now() + ping_period);
                             continue;
                         }
                     };
@@ -126,12 +133,15 @@ impl ConnectionHandler {
                         Err(e) => self.report_failure(Some(&request.id), e).await,
                     };
 
+                    // After sending a response (success or error), schedule the next ping in the future
+                    next_ping.as_mut().reset(time::Instant::now() + ping_period);
+
                     // If we fail to send the response, terminate the connection.
                     if !success { break };
                 }
 
-                // 2. Handle the periodic keep-alive timer.
-                _ = ping.tick() => {
+                // 2. Handle the periodic keep-alive timer (scheduled relative to last activity).
+                _ = &mut next_ping => {
                     // If the connection has been idle for too long, close it.
                     if last_activity.elapsed() > MAX_INACTIVE_INTERVAL {
                         let frame = Frame::close(
@@ -146,6 +156,8 @@ impl ConnectionHandler {
                     if self.ws.write_frame(frame).await.is_err() {
                         break;
                     };
+                    // Schedule the next ping after ping_period from now.
+                    next_ping.as_mut().reset(time::Instant::now() + ping_period);
                 }
 
                 // 3. Handle a new subscription notification from the server backend.
@@ -153,6 +165,8 @@ impl ConnectionHandler {
                     if self.send(update.as_ref()).await.is_err() {
                         break;
                     }
+                    // Outbound server activity: push the next ping into the future
+                    next_ping.as_mut().reset(time::Instant::now() + ping_period);
                 }
 
                 // 4. Handle the global server shutdown signal.
