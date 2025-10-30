@@ -121,7 +121,6 @@ impl ConnectionHandler {
                     let mut request = match parsed {
                         Ok(r) => r,
                         Err(error) => {
-                            // Even on error, we attempted to respond; keep pings scheduled after this activity
                             let _ = self.report_failure(None, error).await;
                             continue;
                         }
