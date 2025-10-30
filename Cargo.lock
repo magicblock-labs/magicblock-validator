@@ -3861,6 +3861,7 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-program",
  "parking_lot 0.12.4",
+ "rustc-hash 2.1.1",
  "solana-account",
  "solana-address-lookup-table-program",
  "solana-bpf-loader-program",
@@ -3868,6 +3869,7 @@ dependencies = [
  "solana-feature-set",
  "solana-fee",
  "solana-fee-structure",
+ "solana-keypair",
  "solana-loader-v4-program",
  "solana-program",
  "solana-program-runtime",
@@ -3975,6 +3977,7 @@ dependencies = [
  "magicblock-api",
  "magicblock-config",
  "magicblock-version",
+ "num_cpus",
  "solana-sdk",
  "tokio",
 ]
