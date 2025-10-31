@@ -17,7 +17,7 @@ jobs:
     name: Build Project
     steps:
       - name: Checkout this magicblock-validator
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: magicblock-validator
 
@@ -61,7 +61,7 @@ jobs:
     name: Integration Tests - Batch ${{ strategy.job-index }}
     steps:
       - name: Checkout this magicblock-validator
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: magicblock-validator
 
