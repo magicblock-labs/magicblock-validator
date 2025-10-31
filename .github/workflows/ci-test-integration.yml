@@ -23,7 +23,7 @@ jobs:
           - "table_mania,committor,pubsub"
           - "config,schedule_intents,task-scheduler"
       fail-fast: false
-    name: Integration Tests - Batch ${{ strategy.job-index + 1 }}
+    name: Integration Tests - Batch ${{ strategy.job-index }}
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v2
