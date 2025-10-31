@@ -1499,9 +1499,12 @@ mod tests {
                 rpc_client,
                 pubsub_client,
                 forward_tx,
-                &RemoteAccountProviderConfig::default_with_lifecycle_mode(
+                &RemoteAccountProviderConfig::try_new_with_metrics(
+                    1000,
                     LifecycleMode::Ephemeral,
-                ),
+                    false,
+                )
+                .unwrap(),
             )
             .await
             .unwrap(),

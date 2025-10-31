@@ -37,9 +37,11 @@ async fn init_remote_account_provider() -> RemoteAccountProvider<
         &endpoints,
         CommitmentConfig::confirmed(),
         fwd_tx,
-        &RemoteAccountProviderConfig::default_with_lifecycle_mode(
+        &RemoteAccountProviderConfig::try_new_with_metrics(
+            1000,
             LifecycleMode::Ephemeral,
-        ),
+            false,
+        ).unwrap(),
     )
     .await
     .unwrap()

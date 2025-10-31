@@ -67,14 +67,18 @@ impl TestContext {
         let faucet_pubkey = Pubkey::new_unique();
         let (fetch_cloner, remote_account_provider) = {
             let (tx, rx) = tokio::sync::mpsc::channel(100);
+            let config = RemoteAccountProviderConfig::try_new_with_metrics(
+                1000, // subscribed_accounts_lru_capacity
+                lifecycle_mode,
+                false, // disable subscription metrics
+            )
+            .unwrap();
             let remote_account_provider =
                 RemoteAccountProvider::try_from_clients_and_mode(
                     rpc_client.clone(),
                     pubsub_client.clone(),
                     tx,
-                    &RemoteAccountProviderConfig::default_with_lifecycle_mode(
-                        lifecycle_mode,
-                    ),
+                    &config,
                 )
                 .await;
 

@@ -3646,6 +3646,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-magic-program-api",
+ "magicblock-metrics",
  "serde_json",
  "solana-account",
  "solana-account-decoder",

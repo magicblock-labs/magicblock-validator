@@ -102,11 +102,6 @@ lazy_static::lazy_static! {
         "monitored_accounts", "number of undelegated accounts, being monitored via websocket",
     ).unwrap();
 
-    static ref SUBSCRIPTIONS_COUNT_GAUGE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("subscriptions_count", "number of active account subscriptions"),
-        &["shard"],
-    ).unwrap();
-
     static ref EVICTED_ACCOUNTS_COUNT: IntGauge = IntGauge::new(
         "evicted_accounts", "number of accounts forcefully removed from monitored list and database",
     ).unwrap();
@@ -218,7 +213,6 @@ pub(crate) fn register() {
         register!(ACCOUNTS_COUNT_GAUGE);
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
-        register!(SUBSCRIPTIONS_COUNT_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
@@ -239,12 +233,6 @@ pub fn inc_slot() {
 
 pub fn set_cached_clone_outputs_count(count: usize) {
     CACHED_CLONE_OUTPUTS_COUNT.set(count as i64);
-}
-
-pub fn set_subscriptions_count(count: usize, shard: &str) {
-    SUBSCRIPTIONS_COUNT_GAUGE
-        .with_label_values(&[shard])
-        .set(count as i64);
 }
 
 pub fn set_ledger_size(size: u64) {
@@ -307,7 +295,7 @@ pub fn ensure_accounts_end(timer: HistogramTimer) {
     timer.stop_and_record();
 }
 
-pub fn adjust_monitored_accounts_count(count: usize) {
+pub fn set_monitored_accounts_count(count: usize) {
     MONITORED_ACCOUNTS_GAUGE.set(count as i64);
 }
 pub fn inc_evicted_accounts_count() {

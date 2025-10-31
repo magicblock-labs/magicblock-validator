@@ -11,9 +11,10 @@ async fn setup(
     pubkeys_len: usize,
 ) -> (IxtestContext, Vec<solana_pubkey::Pubkey>) {
     let config = {
-        let rap_config = RemoteAccountProviderConfig::try_new(
+        let rap_config = RemoteAccountProviderConfig::try_new_with_metrics(
             subscribed_accounts_lru_capacity,
             LifecycleMode::Ephemeral,
+            false,
         )
         .unwrap();
         ChainlinkConfig::new(rap_config)

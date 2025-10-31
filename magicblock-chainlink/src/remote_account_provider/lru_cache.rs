@@ -113,6 +113,14 @@ impl AccountsLruCache {
             false
         }
     }
+
+    pub fn len(&self) -> usize {
+        let subs = self
+            .subscribed_accounts
+            .lock()
+            .expect("subscribed_accounts lock poisoned");
+        subs.len()
+    }
 }
 
 #[cfg(test)]
