@@ -239,6 +239,7 @@ pub(crate) fn register() {
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
         register!(COMMITTOR_EXECUTORS_BUSY_COUNT);
+        register!(COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM);
         register!(ENSURE_ACCOUNTS_TIME);
         register!(RPC_REQUEST_HANDLING_TIME);
         register!(TRANSACTION_PROCESSING_TIME);
