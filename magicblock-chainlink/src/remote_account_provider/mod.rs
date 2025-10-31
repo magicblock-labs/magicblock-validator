@@ -191,8 +191,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     }
 
     /// Creates a background task that periodically updates the active subscriptions gauge
-    fn start_active_subscriptions_updater(
+    fn start_active_subscriptions_updater<PubsubClient: ChainPubsubClient>(
         subscribed_accounts: Arc<AccountsLruCache>,
+        pubsub_client: Arc<PubsubClient>,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(
@@ -200,9 +201,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             ));
             loop {
                 interval.tick().await;
-                let count = subscribed_accounts.len();
-                debug!("Updating active subscriptions: count={}", count);
-                set_monitored_accounts_count(count);
+                let lru_count = subscribed_accounts.len();
+                let pubsub_count = pubsub_client.subscription_count().await;
+
+                if lru_count != pubsub_count {
+                    warn!(
+                        "Subscription counts LRU cache={} pubsub client={} don't match",
+                        lru_count, pubsub_count
+                    );
+                }
+
+                debug!("Updating active subscriptions: count={}", lru_count);
+                set_monitored_accounts_count(lru_count);
             }
         })
     }
@@ -230,6 +240,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             if config.enable_subscription_metrics() {
                 Some(Self::start_active_subscriptions_updater(
                     subscribed_accounts.clone(),
+                    Arc::new(pubsub_client.clone()),
                 ))
             } else {
                 None
