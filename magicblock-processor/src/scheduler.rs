@@ -1,4 +1,4 @@
-use std::sync::{atomic::AtomicUsize, Arc, RwLock};
+use std::sync::{Arc, RwLock};
 
 use log::info;
 use magicblock_core::link::transactions::{
@@ -35,8 +35,6 @@ pub struct TransactionScheduler {
     program_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     /// A handle to the globally shared state of the latest block.
     latest_block: LatestBlock,
-    /// A shared atomic counter for ordering transactions within a single slot.
-    index: Arc<AtomicUsize>,
 }
 
 impl TransactionScheduler {
@@ -47,7 +45,6 @@ impl TransactionScheduler {
     /// 2.  Creates a pool of `TransactionExecutor` workers, each with its own dedicated channel.
     /// 3.  Spawns each worker in its own OS thread for maximum isolation and performance.
     pub fn new(workers: u8, state: TransactionSchedulerState) -> Self {
-        let index = Arc::new(AtomicUsize::new(0));
         let mut executors = Vec::with_capacity(workers as usize);
 
         // Create the back-channel for workers to signal their readiness.
@@ -65,7 +62,6 @@ impl TransactionScheduler {
                 &state,
                 transactions_rx,
                 ready_tx.clone(),
-                index.clone(),
                 program_cache.clone(),
             );
             executor.populate_builtins();
@@ -78,7 +74,6 @@ impl TransactionScheduler {
             executors,
             latest_block: state.ledger.latest_block().clone(),
             program_cache,
-            index,
         }
     }
 
@@ -146,8 +141,6 @@ impl TransactionScheduler {
 
     /// Updates the scheduler's state when a new slot begins.
     fn transition_to_new_slot(&self) {
-        // Reset the intra-slot transaction index to zero.
-        self.index.store(0, std::sync::atomic::Ordering::Relaxed);
         // Re-root the shared program cache to the new slot.
         self.program_cache.write().unwrap().latest_root_slot =
             self.latest_block.load().slot;
