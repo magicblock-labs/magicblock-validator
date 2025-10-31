@@ -112,7 +112,7 @@ impl ConnectionHandler {
                     // Reschedule the next ping
                     next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
 
-                    if frame.opcode != OpCode::Text {
+                    if frame.opcode != OpCode::Text && frame.opcode != OpCode::Binary {
                         continue;
                     }
 
