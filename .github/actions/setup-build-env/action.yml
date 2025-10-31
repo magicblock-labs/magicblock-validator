@@ -14,9 +14,6 @@ inputs:
   build_cache_key_name:
     description: "Build cache key"
     required: true
-  cache_restore_keys:
-    description: "Cache restore keys for fallback"
-    required: false
 
 runs:
   using: "composite"
@@ -38,7 +35,6 @@ runs:
   - uses: Swatinem/rust-cache@v2
     with:
       shared-key: ${{ inputs.build_cache_key_name }}
-      restore-keys: ${{ inputs.cache_restore_keys }}
       workspaces: |
         magicblock-validator -> target
         magicblock-validator/test-integration -> target
