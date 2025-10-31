@@ -18,10 +18,11 @@ jobs:
       matrix:
         batch_tests:
           - "schedulecommit"
-          - "chainlink,cloning"
-          - "restore_ledger,magicblock_api"
-          - "table_mania,committor,pubsub"
-          - "config,schedule_intents,task-scheduler"
+          - "chainlink"
+          - "cloning,restore_ledger"
+          - "magicblock_api,config"
+          - "table_mania,committor"
+          - "pubsub,schedule_intents,task-scheduler"
       fail-fast: false
     name: Integration Tests - Batch ${{ strategy.job-index }}
     steps:
