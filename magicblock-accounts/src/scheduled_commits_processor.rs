@@ -270,7 +270,10 @@ impl<C: BaseIntentCommittor> ScheduledCommitsProcessorImpl<C> {
                             ).await;
                         }
                         _ => {
-                            error!("Failed to commit: {:?}", err);
+                            error!(
+                                "Failed to commit in slot: {}, blockhash: {}. {:?}",
+                                intent_meta.slot, intent_meta.blockhash, err
+                            );
                         }
                     }
                 }

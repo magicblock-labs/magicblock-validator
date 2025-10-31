@@ -110,7 +110,7 @@ impl BaseTask for BufferTask {
 
     fn compute_units(&self) -> u32 {
         match self.task_type {
-            BufferTaskType::Commit(_) => 65_000,
+            BufferTaskType::Commit(_) => 70_000,
         }
     }
 
