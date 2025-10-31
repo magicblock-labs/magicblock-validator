@@ -9,6 +9,7 @@ use std::{ops::ControlFlow, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use futures_util::future::try_join_all;
 use log::{error, trace, warn};
+use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     validator::validator_authority,
@@ -66,6 +67,18 @@ pub enum ExecutionOutput {
         /// Finalize stage signature
         finalize_signature: Signature,
     },
+}
+
+impl metrics::LabelValue for ExecutionOutput {
+    fn value(&self) -> &str {
+        match self {
+            Self::SingleStage(_) => "single_stage_succeeded",
+            Self::TwoStage {
+                commit_signature: _,
+                finalize_signature: _,
+            } => "two_stage_succeeded",
+        }
+    }
 }
 
 #[async_trait]
