@@ -276,6 +276,10 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         }
         Ok(())
     }
+
+    async fn subscription_count(&self) -> usize {
+        self.actor.subscription_count()
+    }
 }
 
 // -----------------

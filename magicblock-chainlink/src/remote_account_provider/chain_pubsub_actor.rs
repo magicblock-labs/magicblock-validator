@@ -202,6 +202,10 @@ impl ChainPubsubActor {
         subs.keys().copied().collect()
     }
 
+    pub fn subscription_count(&self) -> usize {
+        self.subscriptions.lock().unwrap().len()
+    }
+
     pub async fn send_msg(
         &self,
         msg: ChainPubsubActorMessage,
