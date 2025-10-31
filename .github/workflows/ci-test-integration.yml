@@ -11,43 +11,8 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
-  build:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: extra-large
-    name: Build Project
-    steps:
-      - name: Checkout this magicblock-validator
-        uses: actions/checkout@v5
-        with:
-          path: magicblock-validator
-
-      - uses: ./magicblock-validator/.github/actions/setup-build-env
-        with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-v000"
-          rust_toolchain_release: "1.84.1"
-          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: ./magicblock-validator/.github/actions/setup-solana
-
-      - name: Build project and test programs
-        run: |
-          cargo build --locked
-          make -C test-integration programs
-        shell: bash
-        working-directory: magicblock-validator
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifacts
-          path: |
-            magicblock-validator/target/
-            magicblock-validator/test-integration/target/
-          retention-days: 1
-
   run_integration_tests:
-    needs: build
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: extra-large
     strategy:
       matrix:
@@ -74,17 +39,12 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-artifacts
-          path: .
-
-      - name: Run integration tests - ${{ matrix.batch_tests }}
+      - name: Build and run integration tests - ${{ matrix.batch_tests }}
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
           sudo sysctl fs.inotify.max_user_instances=1280
           sudo sysctl fs.inotify.max_user_watches=655360
+          cargo build --locked
           make ci-test-integration
         shell: bash
         working-directory: magicblock-validator
