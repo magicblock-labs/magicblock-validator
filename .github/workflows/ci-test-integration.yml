@@ -12,12 +12,12 @@ on:
 
 jobs:
   build:
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: extra-large
     name: Build Project
     steps:
       - name: Checkout this magicblock-validator
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           path: magicblock-validator
 
@@ -38,7 +38,7 @@ jobs:
         working-directory: magicblock-validator
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
           path: |
@@ -61,7 +61,7 @@ jobs:
     name: Integration Tests - Batch ${{ strategy.job-index }}
     steps:
       - name: Checkout this magicblock-validator
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           path: magicblock-validator
 
@@ -75,7 +75,7 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build-artifacts
           path: .
