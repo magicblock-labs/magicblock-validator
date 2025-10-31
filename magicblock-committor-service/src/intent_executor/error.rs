@@ -1,4 +1,5 @@
 use log::error;
+use magicblock_metrics::metrics;
 use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_sdk::{
     instruction::InstructionError,
@@ -92,6 +93,17 @@ impl IntentExecutorError {
             TransactionStrategyExecutionError::InternalError(err) => {
                 converter(err)
             }
+        }
+    }
+}
+
+impl metrics::LabelValue for IntentExecutorError {
+    fn value(&self) -> &str {
+        match self {
+            IntentExecutorError::ActionsError(_) => "actions_failed",
+            IntentExecutorError::CpiLimitError(_) => "cpi_limit_failed",
+            IntentExecutorError::CommitIDError(_) => "commit_nonce_failed",
+            _ => "failed",
         }
     }
 }
