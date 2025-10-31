@@ -98,7 +98,7 @@ light-compressed-account = { git = "https://github.com/magicblock-labs/light-pro
 light-hasher = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
 light-sdk = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
 light-sdk-types = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
-log = "0.4.20"
+log = { version = "0.4.20", features = ["release_max_level_info"] }
 lru = "0.16.0"
 macrotest = "1"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
