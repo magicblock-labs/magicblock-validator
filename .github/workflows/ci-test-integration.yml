@@ -11,8 +11,43 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
-  run_make_ci_test:
+  build:
     if: github.event.pull_request.draft == false
+    runs-on: extra-large
+    name: Build Project
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v2
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-integration-v000"
+          rust_toolchain_release: "1.84.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Build project and test programs
+        run: |
+          cargo build --locked
+          make -C test-integration programs
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: |
+            magicblock-validator/target/
+            magicblock-validator/test-integration/target/
+          retention-days: 1
+
+  run_integration_tests:
+    needs: build
     runs-on: extra-large
     strategy:
       matrix:
@@ -38,6 +73,12 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-artifacts
+          path: .
 
       - name: Run integration tests - ${{ matrix.batch_tests }}
         run: |
