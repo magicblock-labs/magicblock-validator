@@ -14,6 +14,16 @@ jobs:
   run_make_ci_test:
     if: github.event.pull_request.draft == false
     runs-on: extra-large
+    strategy:
+      matrix:
+        batch_tests:
+          - "schedulecommit"
+          - "chainlink,cloning"
+          - "restore_ledger,magicblock_api"
+          - "table_mania,committor,pubsub"
+          - "config,schedule_intents,task-scheduler"
+      fail-fast: false
+    name: Integration Tests - Batch ${{ strategy.job-index + 1 }}
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v2
@@ -29,7 +39,7 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
-      - name: Run integration tests
+      - name: Run integration tests - ${{ matrix.batch_tests }}
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
           sudo sysctl fs.inotify.max_user_instances=1280
@@ -37,3 +47,5 @@ jobs:
           make ci-test-integration
         shell: bash
         working-directory: magicblock-validator
+        env:
+          RUN_TESTS: ${{ matrix.batch_tests }}
