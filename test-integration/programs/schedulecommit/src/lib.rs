@@ -399,7 +399,7 @@ fn process_update_order_book<'a>(
     accounts: &'a [AccountInfo<'a>],
     updates: BookUpdate,
 ) -> entrypoint::ProgramResult {
-    msg!("Init account");
+    msg!("Update orderbook");
     let account_info_iter = &mut accounts.iter();
     let payer_info = next_account_info(account_info_iter)?;
     let order_book_account = next_account_info(account_info_iter)?;
@@ -423,25 +423,10 @@ pub fn process_schedulecommit_for_orderbook(
 
     let [payer, order_book_account, magic_context, magic_program] = accounts
     else {
-        return Err(ProgramError::MissingRequiredSignature);
+        return Err(ProgramError::NotEnoughAccountKeys);
     };
 
-    // IMPORTANT: it seems the scoping matters to avoid following error:
-    //  -  TransactionError(InstructionError(0, AccountBorrowFailed))
-    //  - Program 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY failed: instruction tries to borrow reference for an account which is already borrowed
-    {
-        // let mut book_raw = order_book_account.try_borrow_mut_data()?;
-        // let mut order_book = OrderBook::new(&mut book_raw);
-
-        // order_book.add_bids(&[OrderLevel {
-        //     price: 90000,
-        //     size: 10,
-        // }]);
-        // order_book.add_asks(&[OrderLevel {
-        //     price: 125000,
-        //     size: 16,
-        // }]);
-    }
+    assert_is_signer(payer, "payer")?;
 
     commit_diff_and_undelegate_accounts(
         payer,

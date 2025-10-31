@@ -69,6 +69,7 @@ program-schedulecommit-security = { path = "programs/schedulecommit-security" }
 rand = "0.8.5"
 random-port = "0.1.1"
 rayon = "1.10.0"
+rkyv = "0.7.45"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
@@ -87,6 +88,7 @@ solana-sdk-ids = { version = "2.2" }
 solana-system-interface = "1.0"
 solana-transaction-status = "2.2"
 spl-memo-interface = "1.0"
+static_assertions = "1.1.0"
 teepee = "0.0.1"
 tempfile = "3.10.1"
 test-chainlink = { path = "./test-chainlink" }

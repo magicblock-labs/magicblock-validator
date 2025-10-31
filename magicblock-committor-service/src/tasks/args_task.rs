@@ -87,7 +87,7 @@ impl BaseTask for ArgsTask {
                 {
                     Ok(account) => account,
                     Err(e) => {
-                        log::warn!("Fallback to commit_state and send full-bytes, as rpc failed to fetch the delegated-account from base chain: {}", e);
+                        log::warn!("Fallback to commit_state and send full-bytes, as rpc failed to fetch the delegated-account from base chain, commmit_id: {} , error: {}", value.commit_id, e);
                         let args = CommitStateArgs {
                             nonce: value.commit_id,
                             lamports: value.committed_account.account.lamports,
@@ -109,10 +109,10 @@ impl BaseTask for ArgsTask {
                     diff: compute_diff(
                         account.data(),
                         value.committed_account.account.data(),
-                    ),
+                    )
+                    .to_vec(),
                     allow_undelegation: value.allow_undelegation,
                 };
-                log::warn!("DIFF computed: {:?}", args.diff);
                 dlp::instruction_builder::commit_diff(
                     *validator,
                     value.committed_account.pubkey,
@@ -168,9 +168,8 @@ impl BaseTask for ArgsTask {
                     BufferTaskType::Commit(value),
                 )))
             }
-            ArgsTaskType::CommitDiff(_) => {
-                panic!("ArgsTaskType::CommitDiff not handled")
-            }
+            // TODO (snawaz): discuss this with reviewers
+            ArgsTaskType::CommitDiff(_) => Err(self),
             ArgsTaskType::BaseAction(_)
             | ArgsTaskType::Finalize(_)
             | ArgsTaskType::Undelegate(_) => Err(self),
@@ -227,9 +226,8 @@ impl BaseTask for ArgsTask {
     }
 
     fn reset_commit_id(&mut self, commit_id: u64) {
-        // TODO (snawaz): handle CommitDiff as well?
+        // TODO (snawaz): handle CommitDiff as well? what is it about?
         let ArgsTaskType::Commit(commit_task) = &mut self.task_type else {
-            log::error!("reset_commit_id");
             return;
         };
 

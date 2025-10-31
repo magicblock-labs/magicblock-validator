@@ -1,6 +1,10 @@
-use std::slice;
+use std::{
+    mem::{align_of, size_of},
+    slice,
+};
 
 use borsh::{BorshDeserialize, BorshSerialize};
+use static_assertions::const_assert;
 
 #[repr(C)]
 #[derive(
@@ -11,17 +15,23 @@ pub struct OrderLevel {
     pub size: u64,
 }
 
+const_assert!(align_of::<OrderLevel>() == align_of::<u64>());
+const_assert!(size_of::<OrderLevel>() == 16);
+
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Default)]
 pub struct BookUpdate {
     pub bids: Vec<OrderLevel>,
     pub asks: Vec<OrderLevel>,
 }
 
-#[repr(C, align(4))]
+#[repr(C)]
 pub struct OrderBookHeader {
     pub bids_len: u32,
     pub asks_len: u32,
 }
+
+const_assert!(align_of::<OrderBookHeader>() == align_of::<u32>());
+const_assert!(size_of::<OrderBookHeader>() == 8);
 
 const ORDER_LEVEL_SIZE: usize = std::mem::size_of::<OrderLevel>();
 const HEADER_SIZE: usize = std::mem::size_of::<OrderBookHeader>();
@@ -45,6 +55,16 @@ impl borsh::de::BorshDeserialize for OrderBookOwned {
     fn deserialize(buf: &mut &[u8]) -> Result<Self, borsh::io::Error> {
         let (book_bytes, rest) = buf.split_at(buf.len());
         *buf = rest; // rest is actually empty
+
+        // I make a copy so that I can get mutable bytes in the unsafe block below.
+        // I could take mutable bytes from &[u8] as well and unsafe block will not
+        // stop me, but that would break aliasing rules and therefore would invoke UB.
+        // It's a test code, so copying should be OK.
+        let book_bytes = {
+            let mut aligned = rkyv::AlignedVec::with_capacity(book_bytes.len());
+            aligned.extend_from_slice(book_bytes);
+            aligned
+        };
 
         Ok(Self::from(&OrderBook::new(unsafe {
             slice::from_raw_parts_mut(
@@ -84,6 +104,17 @@ impl<'a> OrderBook<'a> {
     //
     pub fn new(data: &'a mut [u8]) -> Self {
         let (header_bytes, levels_bytes) = data.split_at_mut(HEADER_SIZE);
+
+        assert!(
+            header_bytes
+                .as_ptr()
+                .align_offset(align_of::<OrderBookHeader>())
+                == 0
+                && levels_bytes.as_ptr().align_offset(align_of::<OrderLevel>())
+                    == 0,
+            "data is not properly aligned for OrderBook to be constructed"
+        );
+
         Self {
             header: unsafe {
                 &mut *(header_bytes.as_ptr() as *mut OrderBookHeader)

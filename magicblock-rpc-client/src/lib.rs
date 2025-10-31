@@ -427,7 +427,6 @@ impl MagicblockRpcClient {
             .await?;
 
         if let Err(err) = processed_status {
-            error!("> ERROR: {:?}", err);
             return Err(MagicBlockRpcClientError::SentTransactionError(
                 err, sig,
             ));
