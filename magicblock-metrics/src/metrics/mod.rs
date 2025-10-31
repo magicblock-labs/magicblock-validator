@@ -194,7 +194,7 @@ lazy_static::lazy_static! {
     static ref COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM: HistogramVec = HistogramVec::new(
         HistogramOpts::new(
             "committor_intent_execution_time_histogram",
-            "Time in ms spent on intent execution"
+            "Time in seconds spent on intent execution"
         )
         .buckets(
             MILLIS_1_9.iter()
