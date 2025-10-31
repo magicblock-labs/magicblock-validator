@@ -25,7 +25,6 @@ pub fn setup() -> Ledger {
 pub fn write_dummy_transaction(
     ledger: &Ledger,
     slot: Slot,
-    transaction_slot_index: usize,
 ) -> (Hash, Signature) {
     let from = Keypair::new();
     let to = Pubkey::new_unique();
@@ -41,13 +40,7 @@ pub fn write_dummy_transaction(
     let status = TransactionStatusMeta::default();
     let message_hash = *transaction.message_hash();
     ledger
-        .write_transaction(
-            signature,
-            slot,
-            transaction,
-            status,
-            transaction_slot_index,
-        )
+        .write_transaction(signature, slot, transaction, status)
         .expect("failed to write dummy transaction");
 
     (message_hash, signature)

@@ -3,7 +3,7 @@ use std::{
     fmt, fs,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicI64, Ordering},
+        atomic::{AtomicI64, AtomicU32, Ordering},
         Arc, RwLock,
     },
 };
@@ -12,6 +12,7 @@ use bincode::{deserialize, serialize};
 use log::*;
 use magicblock_core::link::blocks::BlockHash;
 use rocksdb::{Direction as IteratorDirection, FlushOptions};
+use scc::HashCache;
 use solana_measure::measure::Measure;
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
@@ -70,6 +71,7 @@ pub struct Ledger {
     lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
     latest_block: LatestBlock,
+    block_txn_indexes: HashCache<Slot, AtomicU32>,
 }
 
 impl fmt::Display for Ledger {
@@ -167,6 +169,7 @@ impl Ledger {
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             rpc_api_metrics: LedgerRpcApiMetrics::default(),
             latest_block,
+            block_txn_indexes: HashCache::default(),
         };
         let (slot, blockhash) = ledger.get_max_blockhash()?;
         let time = ledger.get_block_time(slot)?.unwrap_or_default();
@@ -327,6 +330,7 @@ impl Ledger {
         self.blockhash_cf.put(slot, &blockhash)?;
         self.blockhash_cf.try_increase_entry_counter(1);
         self.latest_block.store(slot, blockhash, timestamp);
+        let _ = self.block_txn_indexes.put(slot, AtomicU32::new(0));
         Ok(())
     }
 
@@ -500,31 +504,28 @@ impl Ledger {
         // oldest_slot: the slot where we should stop searching downwards inclusive
         // lower_slot: is the slot from which we should include transactions with higher
         //             tx_index than the lower_limit_signature
-        let (found_lower, include_lower, oldest_slot, lower_slot) =
+        let (found_lower, include_lower, lower_slot) =
             match lower_limit_signature {
                 Some(sig) => {
                     let res = self.get_transaction_status(sig, u64::MAX)?;
                     // let res = self.get_transaction_status(sig, highest_slot)?;
                     match res {
                         Some((slot, _meta)) => {
-                            // Ignore all transactions that happened at the same, or lower slot as the signature
-                            let end = slot.saturating_add(1);
-
                             // 1. Lower limit slot > highest slot -> don't include it
                             // 2. Lower limit slot <= highest slot  -> include it
                             let include_slot = slot <= highest_slot;
-                            (true, include_slot, end, slot)
+                            (true, include_slot, slot)
                         }
-                        None => (false, false, 0, 0),
+                        None => (false, false, 0),
                     }
                 }
-                None => (false, false, 0, 0),
+                None => (false, false, 0),
             };
         #[cfg(test)]
         debug!(
-            "lower: {:?}, upper: {:?} (found, include, newest/oldest slot, slot)",
+            "lower: {:?}, upper: {:?} (found, include, (newest slot), slot)",
+            (found_lower, include_lower, lower_slot),
             (found_upper, include_upper, newest_slot, upper_slot),
-            (found_lower, include_lower, oldest_slot, lower_slot)
         );
 
         // 3. Find all matching (slot, signature) pairs sorted newest to oldest
@@ -534,8 +535,8 @@ impl Ledger {
 
             // The newest signatures are inside the slot that contains the upper
             // limit signature if it was provided.
-            // We include the ones with lower tx_index than that signature.
-            let mut passed_signature = false;
+            // We include the ones with lower tx_index than that signature
+            // (if any for that account).
             if found_upper && include_upper {
                 // SAFETY: found_upper cannot be true if this is None
                 let upper_signature = upper_limit_signature.unwrap();
@@ -546,30 +547,49 @@ impl Ledger {
                         (upper_slot, u32::MAX),
                         IteratorDirection::Reverse,
                     ));
-                for ((tx_slot, _tx_idx), tx_signature) in index_iterator {
-                    // Bail out if we reached the max number of signatures to collect
-                    if matching.len() >= limit {
-                        break;
-                    }
+                let mut transaction_index = None;
+                for ((tx_slot, tx_idx), tx_signature) in index_iterator {
                     if tx_slot != upper_slot {
                         break;
                     }
 
                     let tx_signature = Signature::try_from(&*tx_signature)?;
                     if tx_signature == upper_signature {
-                        passed_signature = true;
-                        continue;
+                        transaction_index.replace(tx_idx);
+                        break;
                     }
+                }
+                if let Some(index) = transaction_index {
+                    let index_iterator = self
+                        .address_signatures_cf
+                        .iter_current_index_filtered(IteratorMode::From(
+                            // The reverse range is not inclusive of the start_slot itself it seems
+                            (pubkey, upper_slot, index, upper_signature),
+                            IteratorDirection::Reverse,
+                        ));
 
-                    if passed_signature {
-                        #[cfg(test)]
-                        debug!(
-                            "upper - signature: {}, slot: {}+{}",
-                            crate::store::utils::short_signature(&tx_signature),
-                            tx_slot,
-                            _tx_idx,
-                        );
-                        matching.push((tx_slot, tx_signature));
+                    for ((address, tx_slot, _tx_idx, signature), _) in
+                        index_iterator
+                    {
+                        if signature == upper_signature {
+                            continue;
+                        }
+                        // Bail out if we reached the max number of signatures to collect
+                        if matching.len() >= limit {
+                            break;
+                        }
+
+                        // Bail out if we reached the iterator space that doesn't match the address
+                        if address != pubkey {
+                            break;
+                        }
+
+                        // Bail out once we reached the lower end of the upper range
+                        if tx_slot != upper_slot {
+                            break;
+                        }
+
+                        matching.push((tx_slot, signature));
                     }
                 }
             }
@@ -581,11 +601,11 @@ impl Ledger {
             // signatures to match the `limit` or run out of signatures entirely.
 
             // Don't run this if the upper/lower limits already cover all slots
-            if newest_slot >= oldest_slot {
+            if newest_slot > lower_slot {
                 #[cfg(test)]
                 debug!(
-                    "Reverse searching ({}, {} -> {}, {})",
-                    pubkey, newest_slot, oldest_slot, 0,
+                    "Reverse searching ({}, {} -> {})",
+                    pubkey, newest_slot, 0,
                 );
                 let index_iterator = self
                     .address_signatures_cf
@@ -609,7 +629,7 @@ impl Ledger {
                     }
 
                     // Bail out once we reached the lower end of the range for matching addresses
-                    if tx_slot < oldest_slot {
+                    if tx_slot <= lower_slot {
                         break;
                     }
 
@@ -628,12 +648,12 @@ impl Ledger {
 
                     #[cfg(test)]
                     debug!(
-                    "in between - signature: {}, slot: {} > {}, address: {}",
-                    crate::store::utils::short_signature(&signature),
-                    tx_slot,
-                    newest_slot,
-                    address
-                );
+                        "in between - signature: {}, slot: {} > {}, address: {}",
+                        crate::store::utils::short_signature(&signature),
+                        tx_slot,
+                        newest_slot,
+                        address
+                    );
                     matching.push((tx_slot, signature));
                 }
             }
@@ -650,27 +670,51 @@ impl Ledger {
                         (lower_slot, u32::MAX),
                         IteratorDirection::Reverse,
                     ));
+                let mut transaction_index = None;
                 for ((tx_slot, tx_idx), tx_signature) in index_iterator {
-                    // Bail out if we reached the max number of signatures to collect
-                    if matching.len() >= limit {
-                        break;
-                    }
                     if tx_slot != lower_slot {
                         break;
                     }
 
                     let tx_signature = Signature::try_from(&*tx_signature)?;
                     if tx_signature == lower_signature {
+                        transaction_index.replace(tx_idx);
                         break;
                     }
+                }
+                if let Some(index) = transaction_index {
+                    let index_iterator = self
+                        .address_signatures_cf
+                        .iter_current_index_filtered(IteratorMode::From(
+                            (
+                                pubkey,
+                                lower_slot,
+                                u32::MAX,
+                                Signature::default(),
+                            ),
+                            IteratorDirection::Reverse,
+                        ));
+                    for ((address, tx_slot, tx_idx, signature), _) in
+                        index_iterator
+                    {
+                        // Bail out if we reached the max number of signatures to collect
+                        if matching.len() >= limit {
+                            break;
+                        }
+                        if tx_slot < lower_slot {
+                            break;
+                        }
 
-                    debug!(
-                        "lower - signature: {}, slot: {}+{}",
-                        crate::store::utils::short_signature(&tx_signature),
-                        tx_slot,
-                        tx_idx,
-                    );
-                    matching.push((tx_slot, tx_signature));
+                        // Bail out if we reached the iterator space that doesn't match the address
+                        if address != pubkey {
+                            break;
+                        }
+                        if tx_idx <= index {
+                            break;
+                        }
+
+                        matching.push((tx_slot, signature));
+                    }
                 }
             }
 
@@ -815,7 +859,6 @@ impl Ledger {
         slot: Slot,
         transaction: SanitizedTransaction,
         status: TransactionStatusMeta,
-        transaction_slot_index: usize,
     ) -> LedgerResult<()> {
         let tx_account_locks = transaction.get_account_locks_unchecked();
 
@@ -826,7 +869,6 @@ impl Ledger {
             tx_account_locks.writable,
             tx_account_locks.readonly,
             status,
-            transaction_slot_index,
         )?;
 
         // 2. Write Transaction
@@ -948,10 +990,13 @@ impl Ledger {
         writable_keys: Vec<&Pubkey>,
         readonly_keys: Vec<&Pubkey>,
         status: TransactionStatusMeta,
-        transaction_slot_index: usize,
     ) -> LedgerResult<()> {
-        let transaction_slot_index = u32::try_from(transaction_slot_index)
-            .map_err(|_| LedgerError::TransactionIndexOverflow)?;
+        let transaction_slot_index = self
+            .block_txn_indexes
+            .entry(slot)
+            .or_default()
+            .1
+            .fetch_add(1, Ordering::Relaxed);
 
         for address in writable_keys {
             self.address_signatures_cf.put(
@@ -1535,7 +1580,6 @@ mod tests {
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
                     meta.clone(),
-                    0,
                 )
                 .is_ok());
 
@@ -1560,7 +1604,6 @@ mod tests {
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
                     meta.clone(),
-                    0,
                 )
                 .is_ok());
 
@@ -1597,7 +1640,6 @@ mod tests {
                 keys_as_ref!(writable_keys),
                 keys_as_ref!(readonly_keys),
                 status_uno.clone(),
-                0
             )
             .is_ok());
 
@@ -1627,7 +1669,6 @@ mod tests {
                 keys_as_ref!(writable_keys),
                 keys_as_ref!(readonly_keys),
                 status_dos.clone(),
-                0,
             )
             .is_ok());
 
@@ -1693,7 +1734,6 @@ mod tests {
                 slot_uno,
                 sanitized_uno.clone(),
                 tx_uno.tx_with_meta.get_status_meta().unwrap(),
-                0,
             )
             .is_ok());
         assert!(store
@@ -1720,7 +1760,6 @@ mod tests {
                 slot_dos,
                 sanitized_dos.clone(),
                 tx_dos.tx_with_meta.get_status_meta().unwrap(),
-                0
             )
             .is_ok());
         assert!(store
@@ -1742,6 +1781,10 @@ mod tests {
 
         // 1. Add some transaction statuses
         let (signature_uno, slot_uno) = (Signature::new_unique(), 10);
+        store
+            .write_block(slot_uno, 0, BlockHash::new_unique())
+            .unwrap();
+
         let (read_uno, write_uno) = {
             let (meta, writable_keys, readonly_keys) =
                 create_transaction_status_meta(5);
@@ -1754,13 +1797,15 @@ mod tests {
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
                     meta.clone(),
-                    0,
                 )
                 .is_ok());
             (read_uno, write_uno)
         };
 
         let (signature_dos, slot_dos) = (Signature::new_unique(), 20);
+        store
+            .write_block(slot_dos, 0, BlockHash::new_unique())
+            .unwrap();
         let signature_dos_2 = Signature::new_unique();
         let (read_dos, write_dos) = {
             let (meta, mut writable_keys, mut readonly_keys) =
@@ -1776,7 +1821,6 @@ mod tests {
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
                     meta.clone(),
-                    0,
                 )
                 .is_ok());
 
@@ -1794,7 +1838,6 @@ mod tests {
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
                     meta.clone(),
-                    1,
                 )
                 .is_ok());
 
@@ -1802,6 +1845,9 @@ mod tests {
         };
 
         let (signature_tres, slot_tres) = (Signature::new_unique(), 30);
+        store
+            .write_block(slot_tres, 0, BlockHash::new_unique())
+            .unwrap();
         let (_read_tres, _write_tres) = {
             let (meta, mut writable_keys, mut readonly_keys) =
                 create_transaction_status_meta(5);
@@ -1819,13 +1865,15 @@ mod tests {
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
                     meta.clone(),
-                    0,
                 )
                 .is_ok());
             (read_tres, write_tres)
         };
 
         let (signature_cuatro, slot_cuatro) = (Signature::new_unique(), 31);
+        store
+            .write_block(slot_cuatro, 0, BlockHash::new_unique())
+            .unwrap();
         let (read_cuatro, _write_cuatro) = {
             let (meta, writable_keys, readonly_keys) =
                 create_transaction_status_meta(5);
@@ -1838,13 +1886,15 @@ mod tests {
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
                     meta.clone(),
-                    0,
                 )
                 .is_ok());
             (read_cuatro, write_cuatro)
         };
 
         let (signature_cinco, slot_cinco) = (Signature::new_unique(), 31);
+        store
+            .write_block(slot_cinco, 0, BlockHash::new_unique())
+            .unwrap();
         let (_read_cinco, _write_cinco) = {
             let (meta, writable_keys, readonly_keys) =
                 create_transaction_status_meta(5);
@@ -1857,13 +1907,15 @@ mod tests {
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
                     meta.clone(),
-                    0,
                 )
                 .is_ok());
             (read_cinco, write_cinco)
         };
 
         let (signature_seis, slot_seis) = (Signature::new_unique(), 32);
+        store
+            .write_block(slot_seis, 0, BlockHash::new_unique())
+            .unwrap();
         let (_read_seis, _write_seis) = {
             let (meta, mut writable_keys, mut readonly_keys) =
                 create_transaction_status_meta(5);
@@ -1878,7 +1930,6 @@ mod tests {
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
                     meta.clone(),
-                    0,
                 )
                 .is_ok());
             (read_seis, write_seis)
@@ -2040,18 +2091,14 @@ mod tests {
 
             assert_eq!(
                 extract(res.infos.clone()),
-                vec![
-                    (slot_seis, signature_seis),
-                    (slot_tres, signature_tres),
-                    (slot_dos, signature_dos_2),
-                ]
+                vec![(slot_seis, signature_seis), (slot_tres, signature_tres),]
             );
         }
         // Before/Until configured
         {
             let res = store
                 .get_confirmed_signatures_for_address(
-                    read_uno,
+                    read_dos,
                     slot_seis,
                     Some(signature_cuatro),
                     Some(signature_dos),
@@ -2082,7 +2129,7 @@ mod tests {
 
             assert_eq!(
                 extract(res.infos.clone()),
-                vec![(slot_dos, signature_dos), (slot_uno, signature_uno),]
+                vec![(slot_dos, signature_dos), (slot_uno, signature_uno)]
             );
         }
     }
@@ -2112,11 +2159,13 @@ mod tests {
         let sig8 = Signature::new_unique();
 
         let mut current_slot = 0;
-        let mut tx_idx = 0;
         let read_uno = {
             let (meta, writable_keys, readonly_keys) =
                 create_transaction_status_meta(5);
             let read_uno = readonly_keys[0];
+            assert!(store.write_block(slot1, 1, Hash::new_unique()).is_ok());
+            assert!(store.write_block(slot2, 2, Hash::new_unique()).is_ok());
+            assert!(store.write_block(slot3, 3, Hash::new_unique()).is_ok());
             for (slot, signature) in &[
                 (slot1, sig1),
                 (slot1, sig2),
@@ -2129,7 +2178,6 @@ mod tests {
             ] {
                 if *slot != current_slot {
                     current_slot = *slot;
-                    tx_idx = 0;
                 }
                 assert!(store
                     .write_transaction_status(
@@ -2138,15 +2186,10 @@ mod tests {
                         keys_as_ref!(writable_keys.clone()),
                         keys_as_ref!(readonly_keys.clone()),
                         meta.clone(),
-                        tx_idx
                     )
                     .is_ok());
-                tx_idx += 1;
             }
 
-            assert!(store.write_block(slot1, 1, Hash::new_unique()).is_ok());
-            assert!(store.write_block(slot2, 2, Hash::new_unique()).is_ok());
-            assert!(store.write_block(slot3, 3, Hash::new_unique()).is_ok());
             read_uno
         };
 
@@ -2353,7 +2396,6 @@ mod tests {
                     slot_uno,
                     sanitized_uno.clone(),
                     tx_uno.tx_with_meta.get_status_meta().unwrap(),
-                    0,
                 )
                 .is_ok());
 
@@ -2377,7 +2419,6 @@ mod tests {
                     slot_dos,
                     sanitized_dos.clone(),
                     tx_dos.tx_with_meta.get_status_meta().unwrap(),
-                    0,
                 )
                 .is_ok());
             assert!(store
@@ -2461,7 +2502,6 @@ mod tests {
                     *slot,
                     sanitized.clone(),
                     tx.tx_with_meta.get_status_meta().unwrap(),
-                    0,
                 )
                 .unwrap();
             store.write_block(*slot, 100, Hash::new_unique()).unwrap();
