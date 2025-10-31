@@ -104,7 +104,7 @@ pub fn create_genesis_config_with_leader_ex(
     // causes discrepancy between cached stakes accounts in bank and
     // accounts-db which in particular will break snapshots test.
     let native_mint_account =
-        solana_sdk::account::AccountSharedData::from(Account {
+        solana_account::AccountSharedData::from(Account {
             owner: solana_inline_spl::token::id(),
             data: solana_inline_spl::token::native_mint::ACCOUNT_DATA.to_vec(),
             lamports: sol_to_lamports(1.),

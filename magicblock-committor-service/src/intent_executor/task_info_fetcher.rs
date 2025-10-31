@@ -1,5 +1,8 @@
 use std::{
-    collections::HashMap, num::NonZeroUsize, sync::Mutex, time::Duration,
+    collections::HashMap,
+    num::NonZeroUsize,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -52,14 +55,14 @@ pub enum ResetType<'a> {
 
 pub struct CacheTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
-    photon_client: PhotonIndexer,
+    photon_client: Arc<PhotonIndexer>,
     cache: Mutex<LruCache<Pubkey, u64>>,
 }
 
 impl CacheTaskInfoFetcher {
     pub fn new(
         rpc_client: MagicblockRpcClient,
-        photon_client: PhotonIndexer,
+        photon_client: Arc<PhotonIndexer>,
     ) -> Self {
         const CACHE_SIZE: NonZeroUsize =
             unsafe { NonZeroUsize::new_unchecked(1000) };

@@ -188,7 +188,7 @@ fn get_parent_program_id(
     transaction_context: &TransactionContext,
     _: &mut InvokeContext,
 ) -> Result<Option<Pubkey>, InstructionError> {
-    use solana_sdk::account::ReadableAccount;
+    use solana_account::ReadableAccount;
 
     use crate::utils::accounts::get_instruction_account_with_idx;
 

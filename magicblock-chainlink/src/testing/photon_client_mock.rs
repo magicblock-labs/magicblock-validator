@@ -5,6 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use magicblock_core::compression::derive_cda_from_pda;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_sdk::clock::Slot;
@@ -22,15 +23,23 @@ pub struct PhotonClientMock {
 }
 
 impl PhotonClientMock {
+    pub fn new() -> Self {
+        Self {
+            accounts: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
     pub fn add_account(&self, pubkey: Pubkey, account: Account, slot: Slot) {
+        let cda = derive_cda_from_pda(&pubkey);
         let mut accounts = self.accounts.lock().unwrap();
-        accounts.insert(pubkey, AccountAtSlot { account, slot });
+        accounts.insert(cda, AccountAtSlot { account, slot });
     }
 
     pub fn add_acounts(&self, new_accounts: HashMap<Pubkey, AccountAtSlot>) {
         let mut accounts = self.accounts.lock().unwrap();
         for (pubkey, account_at_slot) in new_accounts {
-            accounts.insert(pubkey, account_at_slot);
+            let cda = derive_cda_from_pda(&pubkey);
+            accounts.insert(cda, account_at_slot);
         }
     }
 }
@@ -42,8 +51,9 @@ impl PhotonClient for PhotonClientMock {
         pubkey: &Pubkey,
         min_context_slot: Option<Slot>,
     ) -> RemoteAccountProviderResult<Option<(Account, Slot)>> {
+        let cda = derive_cda_from_pda(pubkey);
         let accounts = self.accounts.lock().unwrap();
-        if let Some(account_at_slot) = accounts.get(pubkey) {
+        if let Some(account_at_slot) = accounts.get(&cda) {
             if let Some(min_slot) = min_context_slot {
                 if account_at_slot.slot < min_slot {
                     return Ok(None);

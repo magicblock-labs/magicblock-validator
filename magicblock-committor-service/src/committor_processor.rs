@@ -51,8 +51,10 @@ impl CommittorProcessor {
         let magic_block_rpc_client = MagicblockRpcClient::new(rpc_client);
 
         // TODO(dode): Get photon url and api key from config
-        let photon_client =
-            PhotonIndexer::new(String::from("http://localhost:8784"), None);
+        let photon_client = Arc::new(PhotonIndexer::new(
+            String::from("http://localhost:8784"),
+            None,
+        ));
 
         // Create TableMania
         let gc_config = GarbageCollectorConfig::default();

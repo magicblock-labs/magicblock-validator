@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+use borsh::BorshSerialize;
+use compressed_delegation_client::CompressedDelegationRecord;
 use magicblock_chainlink::testing::accounts::account_shared_with_owner;
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
@@ -15,6 +17,33 @@ pub fn account_shared_with_owner_and_slot(
     let mut acc = account_shared_with_owner(acc, owner);
     acc.set_remote_slot(slot);
     acc
+}
+
+pub fn compressed_account_shared_with_owner_and_slot(
+    pda: Pubkey,
+    authority: Pubkey,
+    owner: Pubkey,
+    slot: u64,
+) -> AccountSharedData {
+    let delegation_record_bytes = CompressedDelegationRecord {
+        pda,
+        authority,
+        last_update_nonce: 0,
+        is_undelegatable: false,
+        owner,
+        delegation_slot: slot,
+        lamports: 1000,
+        data: vec![],
+    }
+    .try_to_vec()
+    .unwrap();
+    let mut acc = Account::new(
+        0,
+        delegation_record_bytes.len(),
+        &compressed_delegation_client::ID,
+    );
+    acc.data = delegation_record_bytes;
+    AccountSharedData::from(acc)
 }
 
 #[derive(Debug, Clone)]

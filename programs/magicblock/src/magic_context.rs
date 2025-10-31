@@ -2,7 +2,7 @@ use std::mem;
 
 use magicblock_magic_program_api::MAGIC_CONTEXT_SIZE;
 use serde::{Deserialize, Serialize};
-use solana_sdk::account::{AccountSharedData, ReadableAccount};
+use solana_account::{AccountSharedData, ReadableAccount};
 
 use crate::magic_scheduled_base_intent::ScheduledBaseIntent;
 
