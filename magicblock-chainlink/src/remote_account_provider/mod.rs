@@ -51,7 +51,7 @@ pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{errors::ChainlinkResult, submux::SubMuxClient};
 
-const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
+const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 5_000;
 
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
 type FetchingAccounts =
@@ -98,7 +98,7 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     subscription_forwarder: Arc<mpsc::Sender<ForwardedSubscriptionUpdate>>,
 
     /// Task that periodically updates the active subscriptions gauge
-    _active_subscriptions_updater: Option<task::JoinHandle<()>>,
+    _active_subscriptions_task_handle: Option<task::JoinHandle<()>>,
 }
 
 // -----------------
@@ -246,7 +246,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
-            _active_subscriptions_updater: active_subscriptions_updater,
+            _active_subscriptions_task_handle: active_subscriptions_updater,
         };
 
         let updates = me.pubsub_client.take_updates();

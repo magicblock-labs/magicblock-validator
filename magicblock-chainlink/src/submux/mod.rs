@@ -563,6 +563,17 @@ impl<T: ChainPubsubClient> ChainPubsubClient for SubMuxClient<T> {
         self.start_forwarders();
         out_rx
     }
+
+    async fn subscription_count(&self) -> usize {
+        let mut max_count = 0;
+        for client in &self.clients {
+            let count = client.subscription_count().await;
+            if count > max_count {
+                max_count = count;
+            }
+        }
+        max_count
+    }
 }
 
 #[cfg(test)]

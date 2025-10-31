@@ -30,6 +30,8 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     async fn recycle_connections(&self);
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate>;
+
+    async fn subscription_count(&self) -> usize;
 }
 
 // -----------------
@@ -133,6 +135,10 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
             .await?;
 
         rx.await?
+    }
+
+    async fn subscription_count(&self) -> usize {
+        self.actor.subscription_count()
     }
 }
 
@@ -259,5 +265,9 @@ pub mod mock {
         }
 
         async fn shutdown(&self) {}
+
+        async fn subscription_count(&self) -> usize {
+            self.subscribed_pubkeys.lock().unwrap().len()
+        }
     }
 }

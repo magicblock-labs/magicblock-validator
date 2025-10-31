@@ -158,6 +158,10 @@ impl ChainPubsubActor {
         // subs.join_all().await;
     }
 
+    pub fn subscription_count(&self) -> usize {
+        self.subscriptions.lock().unwrap().len()
+    }
+
     pub async fn send_msg(
         &self,
         msg: ChainPubsubActorMessage,
