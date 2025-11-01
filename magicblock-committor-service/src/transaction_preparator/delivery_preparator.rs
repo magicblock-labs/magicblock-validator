@@ -8,7 +8,8 @@ use magicblock_committor_program::{
 };
 use magicblock_rpc_client::{
     utils::{
-        send_transaction_with_retries, DefaultErrorMapper, SendErrorMapper,
+        decide_rpc_error_flow, map_magicblock_client_error,
+        send_transaction_with_retries, SendErrorMapper,
         TransactionErrorMapper,
     },
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
@@ -287,22 +288,6 @@ impl DeliveryPreparator {
         max_attempts: usize,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         /// Error mappers
-        struct BufferErrorMapper;
-        impl SendErrorMapper<TransactionSendError> for BufferErrorMapper {
-            type ExecutionError = BufferExecutionError;
-            fn map(&self, error: TransactionSendError) -> Self::ExecutionError {
-                error.into()
-            }
-
-            fn decide_flow(
-                _: &Self::ExecutionError,
-            ) -> ControlFlow<(), Duration> {
-                // If we're here:
-                // We break from retry on all parsed errors
-                // We break on rpc error since we couldn't parse it
-                ControlFlow::Break(())
-            }
-        }
         struct IntentTransactionErrorMapper;
         impl TransactionErrorMapper for IntentTransactionErrorMapper {
             type ExecutionError = BufferExecutionError;
@@ -325,10 +310,42 @@ impl DeliveryPreparator {
             }
         }
 
-        let default_error_mapper = DefaultErrorMapper::new(
-            BufferErrorMapper,
-            IntentTransactionErrorMapper,
-        );
+        struct BufferErrorMapper<TxMap> {
+            transaction_error_mapper: TxMap,
+        }
+        impl<TxMap> SendErrorMapper<TransactionSendError> for BufferErrorMapper<TxMap>
+        where
+            TxMap:
+                TransactionErrorMapper<ExecutionError = BufferExecutionError>,
+        {
+            type ExecutionError = BufferExecutionError;
+            fn map(&self, error: TransactionSendError) -> Self::ExecutionError {
+                match error {
+                    TransactionSendError::MagicBlockRpcClientError(err) => {
+                        map_magicblock_client_error(
+                            &self.transaction_error_mapper,
+                            err,
+                        )
+                    }
+                    err => BufferExecutionError::TransactionSendError(err),
+                }
+            }
+
+            fn decide_flow(
+                err: &Self::ExecutionError,
+            ) -> ControlFlow<(), Duration> {
+                match err {
+                    BufferExecutionError::TransactionSendError(
+                        TransactionSendError::MagicBlockRpcClientError(err),
+                    ) => decide_rpc_error_flow(err),
+                    _ => ControlFlow::Break(()),
+                }
+            }
+        }
+
+        let default_error_mapper = BufferErrorMapper {
+            transaction_error_mapper: IntentTransactionErrorMapper,
+        };
         let attempt =
             || async { self.try_send_ixs(instructions, authority).await };
 

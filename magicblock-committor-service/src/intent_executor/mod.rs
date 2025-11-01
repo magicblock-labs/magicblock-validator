@@ -15,8 +15,8 @@ use magicblock_program::{
 };
 use magicblock_rpc_client::{
     utils::{
-        send_transaction_with_retries, DefaultErrorMapper, SendErrorMapper,
-        TransactionErrorMapper,
+        decide_rpc_error_flow, map_magicblock_client_error,
+        send_transaction_with_retries, SendErrorMapper, TransactionErrorMapper,
     },
     MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
     MagicblockRpcClient,
@@ -610,22 +610,6 @@ where
     ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
     {
         /// Error mappers
-        struct IntentErrorMapper;
-        impl SendErrorMapper<InternalError> for IntentErrorMapper {
-            type ExecutionError = TransactionStrategyExecutionError;
-            fn map(&self, error: InternalError) -> Self::ExecutionError {
-                error.into()
-            }
-
-            fn decide_flow(
-                _: &Self::ExecutionError,
-            ) -> ControlFlow<(), Duration> {
-                // If we're here:
-                // We break from retry on all parsed errors
-                // We break on rpc error since we couldn't parse it
-                ControlFlow::Break(())
-            }
-        }
         struct IntentTransactionErrorMapper<'a> {
             tasks: &'a [Box<dyn BaseTask>],
         }
@@ -641,20 +625,56 @@ where
                 )
             }
         }
+
+        struct IntentErrorMapper<TxMap> {
+            transaction_error_mapper: TxMap,
+        }
+        impl<TxMap> SendErrorMapper<InternalError> for IntentErrorMapper<TxMap>
+        where
+            TxMap: TransactionErrorMapper<
+                ExecutionError = TransactionStrategyExecutionError,
+            >,
+        {
+            type ExecutionError = TransactionStrategyExecutionError;
+            fn map(&self, error: InternalError) -> Self::ExecutionError {
+                match error {
+                    InternalError::MagicBlockRpcClientError(err) => {
+                        map_magicblock_client_error(
+                            &self.transaction_error_mapper,
+                            err,
+                        )
+                    }
+                    err => {
+                        TransactionStrategyExecutionError::InternalError(err)
+                    }
+                }
+            }
+
+            fn decide_flow(
+                err: &Self::ExecutionError,
+            ) -> ControlFlow<(), Duration> {
+                match err {
+                    TransactionStrategyExecutionError::InternalError(
+                        InternalError::MagicBlockRpcClientError(err),
+                    ) => decide_rpc_error_flow(err),
+                    _ => ControlFlow::Break(()),
+                }
+            }
+        }
+
         const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
         const MIN_ATTEMPTS: usize = 3;
 
         // Send with retries
-        let default_error_mapper = DefaultErrorMapper::new(
-            IntentErrorMapper,
-            IntentTransactionErrorMapper { tasks },
-        );
+        let send_error_mapper = IntentErrorMapper {
+            transaction_error_mapper: IntentTransactionErrorMapper { tasks },
+        };
         let attempt = || async {
             self.send_prepared_message(prepared_message.clone()).await
         };
         send_transaction_with_retries(
             attempt,
-            default_error_mapper,
+            send_error_mapper,
             |i, elapsed| !(elapsed < RETRY_FOR || i < MIN_ATTEMPTS),
         )
         .await
