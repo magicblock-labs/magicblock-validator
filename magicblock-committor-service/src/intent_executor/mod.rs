@@ -27,8 +27,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_sdk::{
     message::VersionedMessage,
-    signature::{Keypair, Signature, Signer},
-    signer::SignerError,
+    signature::{Keypair, Signature, Signer, SignerError},
     transaction::VersionedTransaction,
 };
 
