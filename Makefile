@@ -52,8 +52,7 @@ ci-test-unit:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP)
 
 ci-test-integration:
-	cargo build --locked && \
-	$(MAKE) -C $(DIR)/test-integration test
+	RUN_TESTS=$(RUN_TESTS) $(MAKE) -C $(DIR)/test-integration test
 
 ## NOTE: We're getting the following error in github CI when trying to use
 #  nightly Rust. Until that is fixed we have to use stable to verify format.
