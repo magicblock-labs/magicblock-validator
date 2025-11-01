@@ -70,8 +70,17 @@ where
     }
 }
 
+/// Maps Solana `TransactionError`s into a domain-specific execution error.
 pub trait TransactionErrorMapper {
     type ExecutionError;
+
+    /// Attempt to map a `TransactionError` into `Self::ExecutionError`.
+    ///
+    /// * `error` — The raw `TransactionError` produced by Solana.
+    /// * `signature` — tx signature
+    ///
+    /// Return `Ok(mapped)` if you recognize and handle the error.
+    /// Return `Err(original_error)` to indicate "not handled" so the caller can fall back.
     fn try_map(
         &self,
         error: TransactionError,
@@ -79,6 +88,8 @@ pub trait TransactionErrorMapper {
     ) -> Result<Self::ExecutionError, TransactionError>;
 }
 
+/// Convert a `MagicBlockRpcClientError` into the caller’s execution error type using
+/// a user-provided [`TransactionErrorMapper`], with safe fallbacks.
 pub fn map_magicblock_client_error<TxMap, ExecErr>(
     transaction_error_mapper: &TxMap,
     error: MagicBlockRpcClientError,
