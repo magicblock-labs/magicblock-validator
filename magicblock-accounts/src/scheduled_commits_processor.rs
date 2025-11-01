@@ -343,6 +343,7 @@ impl ScheduledCommitsProcessorImpl {
             included_pubkeys: intent_meta.included_pubkeys,
             excluded_pubkeys: intent_meta.excluded_pubkeys,
             requested_undelegation: intent_meta.requested_undelegation,
+            commit_diff: intent_meta.commit_diff,
         }
     }
 }
@@ -412,6 +413,7 @@ struct ScheduledBaseIntentMeta {
     excluded_pubkeys: Vec<Pubkey>,
     intent_sent_transaction: Transaction,
     requested_undelegation: bool,
+    commit_diff: bool,
 }
 
 impl ScheduledBaseIntentMeta {
@@ -429,6 +431,7 @@ impl ScheduledBaseIntentMeta {
             excluded_pubkeys,
             intent_sent_transaction: intent.action_sent_transaction.clone(),
             requested_undelegation: intent.is_undelegate(),
+            commit_diff: intent.is_commit_diff(),
         }
     }
 }

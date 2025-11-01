@@ -1,46 +1,46 @@
 use integration_test_tools::run_test;
 use log::*;
-use program_schedulecommit::api::schedule_commit_cpi_instruction;
+use program_schedulecommit::api::schedule_commit_with_payer_cpi_instruction;
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{signer::Signer, transaction::Transaction};
-use test_kit::init_logger;
+use test_tools_core::init_logger;
 use utils::{
-    assert_one_committee_synchronized_count,
-    assert_one_committee_was_committed,
     assert_two_committees_synchronized_count,
     assert_two_committees_were_committed,
     get_context_with_delegated_committees,
 };
+
+use crate::utils::{
+    assert_feepayer_was_committed,
+    get_context_with_delegated_committees_without_payer_escrow,
+};
+
 mod utils;
 
-// NOTE: This and all other schedule commit tests depend on the following accounts
-//       loaded in the mainnet cluster, i.e. the solana-test-validator:
-//
-//  validator:                tEsT3eV6RFCWs1BZ7AXTzasHqTtMnMLCB2tjQ42TDXD
-//  protocol fees vault:      7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg
-//  validator fees vault:     DUH8h7rYjdTPYyBUEGAUwZv9ffz5wiM45GdYWYzogXjp
-//  delegation program:       DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh
-//  committor program:        ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq
-
 #[test]
-fn test_committing_one_account() {
+fn test_committing_fee_payer_without_escrowing_lamports() {
+    // NOTE: this test requires the following config
+    //   [validator]
+    //   base_fees = 1000
+    // see ../../../configs/schedulecommit-conf-fees.ephem.toml
     run_test!({
-        let ctx =
-            get_context_with_delegated_committees(1, b"magic_schedule_commit");
+        let ctx = get_context_with_delegated_committees_without_payer_escrow(
+            2,
+            b"magic_schedule_commit",
+        );
 
         let ScheduleCommitTestContextFields {
-            payer_ephem: payer,
+            payer,
             committees,
             commitment,
             ephem_client,
+            ephem_blockhash,
             ..
         } = ctx.fields();
 
-        debug!("Context initialized: {ctx}");
-
-        let ix = schedule_commit_cpi_instruction(
+        let ix = schedule_commit_with_payer_cpi_instruction(
             payer.pubkey(),
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
@@ -51,16 +51,14 @@ fn test_committing_one_account() {
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         );
 
-        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
             Some(&payer.pubkey()),
             &[&payer],
-            ephem_blockhash,
+            *ephem_blockhash,
         );
 
         let sig = tx.get_signature();
-        debug!("Submitting tx to commit committee {sig}",);
         let res = ephem_client
             .send_and_confirm_transaction_with_spinner_and_config(
                 &tx,
@@ -72,27 +70,31 @@ fn test_committing_one_account() {
             );
         info!("{} '{:?}'", sig, res);
 
-        let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, *sig);
-        assert_one_committee_was_committed(&ctx, &res, true);
-        assert_one_committee_synchronized_count(&ctx, &res, 1);
+        assert!(res.is_err());
+        assert!(res
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("DoesNotHaveEscrowAccount"));
     });
 }
 
 #[test]
-fn test_committing_two_accounts() {
+fn test_committing_fee_payer_escrowing_lamports() {
     run_test!({
         let ctx =
             get_context_with_delegated_committees(2, b"magic_schedule_commit");
 
         let ScheduleCommitTestContextFields {
-            payer_ephem: payer,
+            payer,
             committees,
             commitment,
             ephem_client,
+            ephem_blockhash,
             ..
         } = ctx.fields();
 
-        let ix = schedule_commit_cpi_instruction(
+        let ix = schedule_commit_with_payer_cpi_instruction(
             payer.pubkey(),
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
@@ -103,12 +105,11 @@ fn test_committing_two_accounts() {
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         );
 
-        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
             Some(&payer.pubkey()),
             &[&payer],
-            ephem_blockhash,
+            *ephem_blockhash,
         );
 
         let sig = tx.get_signature();
@@ -122,9 +123,13 @@ fn test_committing_two_accounts() {
                 },
             );
         info!("{} '{:?}'", sig, res);
+        assert!(res.is_ok());
 
         let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, *sig);
         assert_two_committees_were_committed(&ctx, &res, true);
         assert_two_committees_synchronized_count(&ctx, &res, 1);
+
+        // The fee payer should have been committed
+        assert_feepayer_was_committed(&ctx, &res, true);
     });
 }
