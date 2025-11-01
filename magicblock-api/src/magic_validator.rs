@@ -23,8 +23,8 @@ use magicblock_aperture::{
 use magicblock_chainlink::{
     config::ChainlinkConfig,
     remote_account_provider::{
-        chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
+        chain_updates_client::ChainUpdatesClient,
     },
     submux::SubMuxClient,
     Chainlink,
@@ -98,7 +98,7 @@ use crate::{
 
 type ChainlinkImpl = Chainlink<
     ChainRpcClientImpl,
-    SubMuxClient<ChainPubsubClientImpl>,
+    SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
     ChainlinkCloner,
 >;
@@ -392,9 +392,8 @@ impl MagicValidator {
         let endpoints = remote_cluster
             .ws_urls
             .iter()
-            .map(|pubsub_url| Endpoint {
-                rpc_url: rpc_url.clone(),
-                pubsub_url: pubsub_url.clone(),
+            .map(|pubsub_url| {
+                Endpoint::new(rpc_url.clone(), pubsub_url.to_string())
             })
             .collect::<Vec<_>>();
 
