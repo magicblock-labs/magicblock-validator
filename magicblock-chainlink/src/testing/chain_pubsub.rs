@@ -53,14 +53,3 @@ pub async fn unsubscribe(actor: &ChainPubsubActor, pubkey: Pubkey) {
         .expect("unsubscribe ack channel dropped")
         .expect("unsubscribe failed");
 }
-
-pub async fn recycle(actor: &ChainPubsubActor) {
-    let (tx, rx) = oneshot::channel();
-    actor
-        .send_msg(ChainPubsubActorMessage::RecycleConnections { response: tx })
-        .await
-        .expect("failed to send RecycleConnections message");
-    rx.await
-        .expect("recycle ack channel dropped")
-        .expect("recycle failed");
-}
