@@ -1,6 +1,4 @@
-use std::{
-    future::Future, marker::PhantomData, ops::ControlFlow, time::Duration,
-};
+use std::{future::Future, ops::ControlFlow, time::Duration};
 
 use log::error;
 use solana_rpc_client_api::client_error::ErrorKind;

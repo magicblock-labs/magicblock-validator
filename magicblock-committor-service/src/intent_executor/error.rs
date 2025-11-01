@@ -1,5 +1,7 @@
 use log::error;
-use magicblock_rpc_client::MagicBlockRpcClientError;
+use magicblock_rpc_client::{
+    utils::TransactionErrorMapper, MagicBlockRpcClientError,
+};
 use solana_sdk::{
     instruction::InstructionError,
     signature::{Signature, SignerError},
@@ -20,16 +22,6 @@ pub enum InternalError {
     SignerError(#[from] SignerError),
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
-}
-
-impl TryInto<MagicBlockRpcClientError> for InternalError {
-    type Error = InternalError;
-    fn try_into(self) -> Result<MagicBlockRpcClientError, Self::Error> {
-        match self {
-            InternalError::MagicBlockRpcClientError(err) => Ok(err),
-            err => Err(err),
-        }
-    }
 }
 
 impl InternalError {
@@ -127,20 +119,6 @@ impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
     }
 }
 
-impl<'a> TryInto<&'a MagicBlockRpcClientError>
-    for &'a TransactionStrategyExecutionError
-{
-    type Error = &'a TransactionStrategyExecutionError;
-    fn try_into(self) -> Result<&'a MagicBlockRpcClientError, Self::Error> {
-        match self {
-            TransactionStrategyExecutionError::InternalError(
-                InternalError::MagicBlockRpcClientError(rpc_err),
-            ) => Ok(rpc_err),
-            other => Err(other),
-        }
-    }
-}
-
 impl TransactionStrategyExecutionError {
     /// Convert [`TransactionError`] into known errors that can be handled
     /// Otherwise return original [`TransactionError`]
@@ -202,6 +180,22 @@ impl TransactionStrategyExecutionError {
                 Err(err)
             }
         }
+    }
+}
+
+pub(crate) struct IntentTransactionErrorMapper<'a> {
+    pub tasks: &'a [Box<dyn BaseTask>],
+}
+impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
+    type ExecutionError = TransactionStrategyExecutionError;
+    fn try_map(
+        &self,
+        error: TransactionError,
+        signature: Option<Signature>,
+    ) -> Result<Self::ExecutionError, TransactionError> {
+        TransactionStrategyExecutionError::try_from_transaction_error(
+            error, signature, self.tasks,
+        )
     }
 }
 

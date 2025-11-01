@@ -25,13 +25,14 @@ use solana_pubkey::Pubkey;
 use solana_sdk::{
     message::VersionedMessage,
     signature::{Keypair, Signature, Signer, SignerError},
-    transaction::{TransactionError, VersionedTransaction},
+    transaction::VersionedTransaction,
 };
 
 use crate::{
     intent_executor::{
         error::{
-            IntentExecutorError, IntentExecutorResult, InternalError,
+            IntentExecutorError, IntentExecutorResult,
+            IntentTransactionErrorMapper, InternalError,
             TransactionStrategyExecutionError,
         },
         single_stage_executor::SingleStageExecutor,
@@ -609,23 +610,6 @@ where
         tasks: &[Box<dyn BaseTask>],
     ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
     {
-        /// Error mappers
-        struct IntentTransactionErrorMapper<'a> {
-            tasks: &'a [Box<dyn BaseTask>],
-        }
-        impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
-            type ExecutionError = TransactionStrategyExecutionError;
-            fn try_map(
-                &self,
-                error: TransactionError,
-                signature: Option<Signature>,
-            ) -> Result<Self::ExecutionError, TransactionError> {
-                TransactionStrategyExecutionError::try_from_transaction_error(
-                    error, signature, self.tasks,
-                )
-            }
-        }
-
         struct IntentErrorMapper<TxMap> {
             transaction_error_mapper: TxMap,
         }

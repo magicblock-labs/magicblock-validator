@@ -9,8 +9,7 @@ use magicblock_committor_program::{
 use magicblock_rpc_client::{
     utils::{
         decide_rpc_error_flow, map_magicblock_client_error,
-        send_transaction_with_retries, SendErrorMapper,
-        TransactionErrorMapper,
+        send_transaction_with_retries, SendErrorMapper, TransactionErrorMapper,
     },
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
@@ -488,16 +487,6 @@ pub enum TransactionSendError {
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
 }
 
-impl TryInto<MagicBlockRpcClientError> for TransactionSendError {
-    type Error = TransactionSendError;
-    fn try_into(self) -> Result<MagicBlockRpcClientError, Self::Error> {
-        match self {
-            Self::MagicBlockRpcClientError(rpc_err) => Ok(rpc_err),
-            err => Err(err),
-        }
-    }
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum BufferExecutionError {
     #[error("AccountAlreadyInitializedError: {0}")]
@@ -507,18 +496,6 @@ pub enum BufferExecutionError {
     ),
     #[error("TransactionSendError: {0}")]
     TransactionSendError(#[from] TransactionSendError),
-}
-
-impl<'a> TryInto<&'a MagicBlockRpcClientError> for &'a BufferExecutionError {
-    type Error = &'a BufferExecutionError;
-    fn try_into(self) -> Result<&'a MagicBlockRpcClientError, Self::Error> {
-        match self {
-            BufferExecutionError::TransactionSendError(
-                TransactionSendError::MagicBlockRpcClientError(rpc_err),
-            ) => Ok(rpc_err),
-            err => Err(err),
-        }
-    }
 }
 
 impl From<MagicBlockRpcClientError> for BufferExecutionError {
