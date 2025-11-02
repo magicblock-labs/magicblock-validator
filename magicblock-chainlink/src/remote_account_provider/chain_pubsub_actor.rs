@@ -255,7 +255,10 @@ impl ChainPubsubActor {
                 response,
             } => {
                 if let Some(AccountSubscription { cancellation_token }) =
-                    subscriptions.lock().unwrap().remove(&pubkey)
+                    subscriptions
+                        .lock()
+                        .expect("subcriptions lock poisoned")
+                        .get(&pubkey)
                 {
                     cancellation_token.cancel();
                     let _ = response.send(Ok(()));
@@ -333,8 +336,9 @@ impl ChainPubsubActor {
             loop {
                 tokio::select! {
                     _ = cancellation_token.cancelled() => {
-                        debug!("Subscription for {pubkey} was cancelled");
                         unsubscribe().await;
+                        subs.lock().expect("subscriptions lock poisoned").remove(&pubkey);
+                        debug!("Subscription for {pubkey} was cancelled");
                         break;
                     }
                     update = update_stream.next() => {
