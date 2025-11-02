@@ -125,6 +125,14 @@ impl AccountsLruCache {
     pub fn never_evicted_accounts(&self) -> Vec<Pubkey> {
         self.accounts_to_never_evict.iter().cloned().collect()
     }
+
+    pub fn pubkeys(&self) -> Vec<Pubkey> {
+        let subs = self
+            .subscribed_accounts
+            .lock()
+            .expect("subscribed_accounts lock poisoned");
+        subs.iter().map(|(k, _)| *k).collect()
+    }
 }
 
 #[cfg(test)]

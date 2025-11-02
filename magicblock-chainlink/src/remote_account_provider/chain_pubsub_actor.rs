@@ -164,12 +164,20 @@ impl ChainPubsubActor {
             .lock()
             .expect("subscriptions lock poisoned");
         if filter.is_empty() {
-            return subs.len();
+            subs.len()
         } else {
             subs.keys()
                 .filter(|pubkey| !filter.contains(pubkey))
                 .count()
         }
+    }
+
+    pub fn subscriptions(&self) -> Vec<Pubkey> {
+        let subs = self
+            .subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned");
+        subs.keys().copied().collect()
     }
 
     pub async fn send_msg(

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -212,6 +212,34 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         "User account subscription counts LRU cache={} pubsub client={} don't match",
                         lru_count, pubsub_without_never_evict
                     );
+                    if log::log_enabled!(log::Level::Debug) {
+                        // Log all pubsub subscriptions for debugging
+                        let all_pubsub_subs = pubsub_client.subscriptions();
+                        trace!(
+                            "All pubsub subscriptions: {:?}",
+                            all_pubsub_subs
+                        );
+
+                        // Find extra keys in pubsub that are not in LRU cache
+                        let lru_pubkeys = subscribed_accounts.pubkeys();
+                        let pubsub_subs_without_never_evict: HashSet<_> =
+                            all_pubsub_subs
+                                .into_iter()
+                                .filter(|pk| !never_evicted.contains(pk))
+                                .collect();
+                        let lru_pubkeys_set: HashSet<_> =
+                            lru_pubkeys.into_iter().collect();
+
+                        let extra_in_pubsub: Vec<_> =
+                            pubsub_subs_without_never_evict
+                                .difference(&lru_pubkeys_set)
+                                .cloned()
+                                .collect();
+
+                        if !extra_in_pubsub.is_empty() {
+                            debug!("Extra pubkeys in pubsub client not in LRU cache: {:?}", extra_in_pubsub);
+                        }
+                    }
                 }
 
                 debug!("Updating active subscriptions: count={}", pubsub_total);

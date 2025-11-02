@@ -581,6 +581,14 @@ impl<T: ChainPubsubClient> ChainPubsubClient for SubMuxClient<T> {
         }
         (max_total, max_filtered)
     }
+
+    fn subscriptions(&self) -> Vec<Pubkey> {
+        let mut all_subs = HashSet::new();
+        for client in &self.clients {
+            all_subs.extend(client.subscriptions());
+        }
+        all_subs.into_iter().collect()
+    }
 }
 
 #[cfg(test)]

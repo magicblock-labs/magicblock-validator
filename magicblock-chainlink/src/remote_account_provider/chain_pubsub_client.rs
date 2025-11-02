@@ -39,6 +39,8 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         &self,
         exclude: Option<&[Pubkey]>,
     ) -> (usize, usize);
+
+    fn subscriptions(&self) -> Vec<Pubkey>;
 }
 
 // -----------------
@@ -155,6 +157,10 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
             total
         };
         (total, filtered)
+    }
+
+    fn subscriptions(&self) -> Vec<Pubkey> {
+        self.actor.subscriptions()
     }
 }
 
@@ -297,6 +303,11 @@ pub mod mock {
                 .filter(|pubkey| !exclude.contains(pubkey))
                 .count();
             (total, filtered)
+        }
+
+        fn subscriptions(&self) -> Vec<Pubkey> {
+            let subs = self.subscribed_pubkeys.lock().unwrap();
+            subs.iter().copied().collect()
         }
     }
 }
