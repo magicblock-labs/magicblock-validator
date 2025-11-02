@@ -9,7 +9,10 @@ use dlp::{
 use log::warn;
 use lru::LruCache;
 use magicblock_metrics::metrics;
-use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
+use magicblock_rpc_client::{
+    MagicBlockRpcClientError, MagicBlockRpcClientResult, MagicblockRpcClient,
+};
+use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 
@@ -36,6 +39,13 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
 
     /// Resets cache for some or all accounts
     fn reset(&self, reset_type: ResetType);
+
+    async fn get_base_account(
+        &self,
+        _pubkey: &Pubkey,
+    ) -> MagicBlockRpcClientResult<Option<Account>> {
+        Ok(None) // AccountNotFound
+    }
 }
 
 pub enum ResetType<'a> {
@@ -263,6 +273,13 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
             }
         }
     }
+
+    async fn get_base_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> MagicBlockRpcClientResult<Option<Account>> {
+        self.rpc_client.get_account(pubkey).await
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -292,3 +309,37 @@ impl TaskInfoFetcherError {
 }
 
 pub type TaskInfoFetcherResult<T, E = TaskInfoFetcherError> = Result<T, E>;
+
+#[cfg(any(test, feature = "dev-context-only-utils"))]
+pub struct NullTaskInfoFetcher;
+
+#[cfg(any(test, feature = "dev-context-only-utils"))]
+#[async_trait]
+impl TaskInfoFetcher for NullTaskInfoFetcher {
+    async fn fetch_next_commit_ids(
+        &self,
+        _pubkeys: &[Pubkey],
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        Ok(Default::default())
+    }
+
+    async fn fetch_rent_reimbursements(
+        &self,
+        _pubkeys: &[Pubkey],
+    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+        Ok(Default::default())
+    }
+
+    fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
+        None
+    }
+
+    fn reset(&self, _: ResetType) {}
+
+    async fn get_base_account(
+        &self,
+        _pubkey: &Pubkey,
+    ) -> MagicBlockRpcClientResult<Option<Account>> {
+        Ok(None) // AccountNotFound
+    }
+}

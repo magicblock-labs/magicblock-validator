@@ -6,10 +6,7 @@ use ephemeral_rollups_sdk::{
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
-    ephem::{
-        commit_accounts, commit_and_undelegate_accounts,
-        commit_diff_and_undelegate_accounts,
-    },
+    ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
 use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 use solana_program::{
@@ -42,7 +39,6 @@ mod utils;
 
 pub const FAIL_UNDELEGATION_COUNT: u64 = u64::MAX - 1;
 use order_book::*;
-
 pub use order_book::{BookUpdate, OrderBookOwned, OrderLevel};
 
 declare_id!("9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY");
@@ -62,6 +58,7 @@ pub struct DelegateCpiArgs {
 pub struct DelegateOrderBookArgs {
     commit_frequency_ms: u32,
     book_manager: Pubkey,
+    validator: Option<Pubkey>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -418,7 +415,7 @@ pub fn process_delegate_order_book(
         &seeds_no_bump,
         DelegateConfig {
             commit_frequency_ms: args.commit_frequency_ms,
-            ..DelegateConfig::default()
+            validator: args.validator,
         },
     )?;
 
@@ -461,7 +458,7 @@ pub fn process_schedulecommit_for_orderbook(
 
     assert_is_signer(payer, "payer")?;
 
-    commit_diff_and_undelegate_accounts(
+    commit_and_undelegate_accounts(
         payer,
         vec![order_book_account],
         magic_context,
@@ -577,7 +574,7 @@ pub fn process_schedulecommit_cpi(
     );
 
     if args.undelegate {
-        commit_diff_and_undelegate_accounts(
+        commit_and_undelegate_accounts(
             payer,
             committees,
             magic_context,

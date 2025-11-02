@@ -231,6 +231,7 @@ fn init_and_delegate_player(
         payer.pubkey(),
         validator,
         player.pubkey(),
+        b"magic_schedule_commit",
     );
 
     // Send transaction

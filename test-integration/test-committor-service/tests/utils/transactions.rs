@@ -120,7 +120,17 @@ pub async fn tx_logs_contain(
         .log_messages
         .clone()
         .unwrap_or_else(Vec::new);
-    logs.iter().any(|log| log.contains(needle))
+    logs.iter().any(|log| {
+        // Lots of existing tests pass "CommitState" as needle argument to this function, but since now CommitTask
+        // could invoke CommitState or CommitDiff depending on the size of the account, we also look for "CommitDiff"
+        // in the logs when needle == CommitState. It's easier to make this little adjustment here than computing
+        // the decision and passing either CommitState or CommitDiff from the tests themselves.
+        if needle == "CommitState" {
+            log.contains(needle) || log.contains("CommitDiff")
+        } else {
+            log.contains(needle)
+        }
+    })
 }
 
 /// This needs to be run for each test that required a new counter to be delegated

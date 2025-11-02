@@ -314,7 +314,6 @@ impl ScheduledCommitsProcessorImpl {
             requested_undelegation: intent_meta.requested_undelegation,
             error_message,
             patched_errors,
-            commit_diff: intent_meta.commit_diff,
         }
     }
 }
@@ -383,7 +382,6 @@ struct ScheduledBaseIntentMeta {
     included_pubkeys: Vec<Pubkey>,
     intent_sent_transaction: Transaction,
     requested_undelegation: bool,
-    commit_diff: bool,
 }
 
 impl ScheduledBaseIntentMeta {
@@ -397,7 +395,6 @@ impl ScheduledBaseIntentMeta {
                 .unwrap_or_default(),
             intent_sent_transaction: intent.action_sent_transaction.clone(),
             requested_undelegation: intent.is_undelegate(),
-            commit_diff: intent.is_commit_diff(),
         }
     }
 }

@@ -303,7 +303,7 @@ fn test_committing_and_undelegating_huge_order_book_account() {
                 Rng,
             };
             let rng_seed = OsRng.next_u64();
-            println!("Use {rng_seed} as seed to random generator");
+            println!("Important: use {rng_seed} as seed to regenerate the random inputs in case of test failure");
             let mut random = StdRng::seed_from_u64(rng_seed);
             let mut update = BookUpdate::default();
             update.bids.extend((0..random.gen_range(5..10)).map(|_| {

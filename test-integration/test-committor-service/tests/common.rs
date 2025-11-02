@@ -10,7 +10,8 @@ use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
-            ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+            NullTaskInfoFetcher, ResetType, TaskInfoFetcher,
+            TaskInfoFetcherResult,
         },
         IntentExecutorImpl,
     },
@@ -21,7 +22,7 @@ use magicblock_committor_service::{
     ComputeBudgetConfig,
 };
 use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
-use magicblock_rpc_client::MagicblockRpcClient;
+use magicblock_rpc_client::{MagicBlockRpcClientResult, MagicblockRpcClient};
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -104,17 +105,22 @@ impl TestFixture {
     ) -> IntentExecutorImpl<TransactionPreparatorImpl, MockTaskInfoFetcher>
     {
         let transaction_preparator = self.create_transaction_preparator();
-        let task_info_fetcher = Arc::new(MockTaskInfoFetcher);
 
         IntentExecutorImpl::new(
             self.rpc_client.clone(),
             transaction_preparator,
-            task_info_fetcher,
+            self.create_task_info_fetcher(),
         )
+    }
+
+    #[allow(dead_code)]
+    pub fn create_task_info_fetcher(&self) -> Arc<MockTaskInfoFetcher> {
+        Arc::new(MockTaskInfoFetcher(self.rpc_client.clone()))
     }
 }
 
-pub struct MockTaskInfoFetcher;
+pub struct MockTaskInfoFetcher(MagicblockRpcClient);
+
 #[async_trait]
 impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_next_commit_ids(
@@ -136,6 +142,13 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     }
 
     fn reset(&self, _: ResetType) {}
+
+    async fn get_base_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> MagicBlockRpcClientResult<Option<Account>> {
+        self.0.get_account(pubkey).await
+    }
 }
 
 #[allow(dead_code)]
@@ -147,12 +160,12 @@ pub fn generate_random_bytes(length: usize) -> Vec<u8> {
 }
 
 #[allow(dead_code)]
-pub fn create_commit_task(data: &[u8]) -> CommitTask {
+pub async fn create_commit_task(data: &[u8]) -> CommitTask {
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
-    CommitTask {
-        commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
-        allow_undelegation: false,
-        committed_account: CommittedAccount {
+    CommitTask::new(
+        COMMIT_ID.fetch_add(1, Ordering::Relaxed),
+        false,
+        CommittedAccount {
             pubkey: Pubkey::new_unique(),
             account: Account {
                 lamports: 1000,
@@ -162,7 +175,9 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
                 rent_epoch: 0,
             },
         },
-    }
+        &Arc::new(NullTaskInfoFetcher),
+    )
+    .await
 }
 
 #[allow(dead_code)]

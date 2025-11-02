@@ -37,7 +37,7 @@ cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
 futures = "0.3.31"
-ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/rust/sdk"}
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "2d0f16b" }
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"
@@ -57,7 +57,9 @@ magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
-magicblock-delegation-program = { path="../../delegation-program", features = ["no-entrypoint"] }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "e8d03936", features = [
+  "no-entrypoint",
+] }
 magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }

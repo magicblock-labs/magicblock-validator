@@ -26,10 +26,9 @@ where
     fn visit_args_task(&mut self, task: &ArgsTask) {
         match self.context {
             PersistorContext::PersistStrategy { uses_lookup_tables } => {
-                let commit_task = match &task.task_type {
-                    ArgsTaskType::Commit(commit_task) => commit_task,
-                    ArgsTaskType::CommitDiff(commit_task) => commit_task,
-                    _ => return,
+                let ArgsTaskType::Commit(ref commit_task) = task.task_type
+                else {
+                    return;
                 };
 
                 let commit_strategy = if uses_lookup_tables {

@@ -2909,6 +2909,7 @@ dependencies = [
  "log",
  "lru",
  "magicblock-committor-program",
+ "magicblock-config",
  "magicblock-delegation-program",
  "magicblock-metrics",
  "magicblock-program",

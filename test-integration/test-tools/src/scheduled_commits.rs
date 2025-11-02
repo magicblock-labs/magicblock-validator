@@ -231,7 +231,7 @@ impl IntegrationTestContext {
         }
 
         for sig in sigs.iter() {
-            self.dump_chain_logs(sig.clone());
+            self.dump_chain_logs(*sig);
         }
 
         Ok(ScheduledCommitResult {

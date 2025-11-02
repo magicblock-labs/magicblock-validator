@@ -34,7 +34,6 @@ pub struct SentCommit {
     pub requested_undelegation: bool,
     pub error_message: Option<String>,
     pub patched_errors: Vec<String>,
-    pub commit_diff: bool,
 }
 
 /// This is a printable version of the SentCommit struct.
@@ -51,7 +50,6 @@ struct SentCommitPrintable {
     requested_undelegation: bool,
     error_message: Option<String>,
     patched_errors: Vec<String>,
-    commit_diff: bool,
 }
 
 impl From<SentCommit> for SentCommitPrintable {
@@ -81,7 +79,6 @@ impl From<SentCommit> for SentCommitPrintable {
             requested_undelegation: commit.requested_undelegation,
             error_message: commit.error_message,
             patched_errors: commit.patched_errors,
-            commit_diff: commit.commit_diff,
         }
     }
 }
@@ -224,9 +221,6 @@ pub fn process_scheduled_commit_sent(
     if commit.requested_undelegation {
         ic_msg!(invoke_context, "ScheduledCommitSent requested undelegation",);
     }
-    if commit.commit_diff {
-        ic_msg!(invoke_context, "ScheduledCommitSent requested commit_diff",);
-    }
 
     for (idx, error) in commit.patched_errors.iter().enumerate() {
         ic_msg!(
@@ -281,7 +275,6 @@ mod tests {
             requested_undelegation: false,
             error_message: None,
             patched_errors: vec![],
-            commit_diff: false,
         }
     }
 

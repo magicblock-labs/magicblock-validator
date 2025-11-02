@@ -103,7 +103,6 @@ pub enum MagicBlockInstruction {
 
     /// Noop instruction
     Noop(u64),
-    ScheduleCommitDiffAndUndelegate,
 }
 
 impl MagicBlockInstruction {
