@@ -26,7 +26,6 @@ pub struct SentCommit {
     pub included_pubkeys: Vec<Pubkey>,
     pub excluded_pubkeys: Vec<Pubkey>,
     pub requested_undelegation: bool,
-    pub commit_diff: bool,
 }
 
 /// This is a printable version of the SentCommit struct.
@@ -41,7 +40,6 @@ struct SentCommitPrintable {
     included_pubkeys: String,
     excluded_pubkeys: String,
     requested_undelegation: bool,
-    commit_diff: bool,
 }
 
 impl From<SentCommit> for SentCommitPrintable {
@@ -69,7 +67,6 @@ impl From<SentCommit> for SentCommitPrintable {
                 .collect::<Vec<_>>()
                 .join(", "),
             requested_undelegation: commit.requested_undelegation,
-            commit_diff: commit.commit_diff,
         }
     }
 }
@@ -212,9 +209,6 @@ pub fn process_scheduled_commit_sent(
     if commit.requested_undelegation {
         ic_msg!(invoke_context, "ScheduledCommitSent requested undelegation",);
     }
-    if commit.commit_diff {
-        ic_msg!(invoke_context, "ScheduledCommitSent requested commit_diff",);
-    }
 
     Ok(())
 }
@@ -251,7 +245,6 @@ mod tests {
             included_pubkeys: vec![acc],
             excluded_pubkeys: Default::default(),
             requested_undelegation: false,
-            commit_diff: false,
         }
     }
 

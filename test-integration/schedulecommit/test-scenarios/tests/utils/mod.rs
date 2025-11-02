@@ -42,9 +42,9 @@ pub fn assert_one_committee_was_committed<T>(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<T>,
     is_single_stage: bool,
-) 
-where
-    T: std::fmt::Debug + borsh::BorshDeserialize + PartialEq + Eq {
+) where
+    T: std::fmt::Debug + borsh::BorshDeserialize + PartialEq + Eq,
+{
     let pda = ctx.committees[0].1;
 
     assert_eq!(res.included.len(), 1, "includes 1 pda");

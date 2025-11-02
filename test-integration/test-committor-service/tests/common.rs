@@ -14,7 +14,7 @@ use magicblock_committor_service::{
         },
         IntentExecutorImpl,
     },
-    tasks::CommitTask,
+    tasks::{account_fetcher::AccountFetcher, CommitTask},
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
@@ -147,12 +147,12 @@ pub fn generate_random_bytes(length: usize) -> Vec<u8> {
 }
 
 #[allow(dead_code)]
-pub fn create_commit_task(data: &[u8]) -> CommitTask {
+pub async fn create_commit_task(data: &[u8]) -> CommitTask {
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
-    CommitTask {
-        commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
-        allow_undelegation: false,
-        committed_account: CommittedAccount {
+    CommitTask::new(
+        COMMIT_ID.fetch_add(1, Ordering::Relaxed),
+        false,
+        CommittedAccount {
             pubkey: Pubkey::new_unique(),
             account: Account {
                 lamports: 1000,
@@ -162,7 +162,9 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
                 rent_epoch: 0,
             },
         },
-    }
+        AccountFetcher::new(),
+    )
+    .await
 }
 
 #[allow(dead_code)]

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures_util::future::join_all;
 use log::error;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
@@ -8,6 +9,7 @@ use magicblock_program::magic_scheduled_base_intent::{
 };
 use solana_pubkey::Pubkey;
 
+use super::account_fetcher::AccountFetcher;
 use crate::{
     intent_executor::task_info_fetcher::{
         TaskInfoFetcher, TaskInfoFetcherError,
@@ -47,29 +49,25 @@ impl TasksBuilder for TaskBuilderImpl {
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
-        let (accounts, allow_undelegation, commit_diff) =
-            match &base_intent.base_intent {
-                MagicBaseIntent::BaseActions(actions) => {
-                    let tasks = actions
-                        .iter()
-                        .map(|el| {
-                            let task = BaseActionTask { action: el.clone() };
-                            let task =
-                                ArgsTask::new(ArgsTaskType::BaseAction(task));
-                            Box::new(task) as Box<dyn BaseTask>
-                        })
-                        .collect();
-                    return Ok(tasks);
-                }
-                MagicBaseIntent::Commit(t) => {
-                    (t.get_committed_accounts(), false, t.is_commit_diff())
-                }
-                MagicBaseIntent::CommitAndUndelegate(t) => (
-                    t.commit_action.get_committed_accounts(),
-                    true,
-                    t.commit_action.is_commit_diff(),
-                ),
-            };
+        let (accounts, allow_undelegation) = match &base_intent.base_intent {
+            MagicBaseIntent::BaseActions(actions) => {
+                let tasks = actions
+                    .iter()
+                    .map(|el| {
+                        let task = BaseActionTask { action: el.clone() };
+                        let task =
+                            ArgsTask::new(ArgsTaskType::BaseAction(task));
+                        Box::new(task) as Box<dyn BaseTask>
+                    })
+                    .collect();
+
+                return Ok(tasks);
+            }
+            MagicBaseIntent::Commit(t) => (t.get_committed_accounts(), false),
+            MagicBaseIntent::CommitAndUndelegate(t) => {
+                (t.commit_action.get_committed_accounts(), true)
+            }
+        };
 
         let committed_pubkeys = accounts
             .iter()
@@ -89,24 +87,19 @@ impl TasksBuilder for TaskBuilderImpl {
                 }
             });
 
-        let tasks = accounts
+        let tasks = join_all(accounts
             .iter()
-            .map(|account| {
+            .map(|account| async {
                 let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                let task = CommitTask {
+                let task = ArgsTaskType::Commit(CommitTask::new(
                     commit_id,
                     allow_undelegation,
-                    committed_account: account.clone(),
-                };
-                let task = if commit_diff {
-                    ArgsTaskType::CommitDiff(task)
-                } else {
-                    ArgsTaskType::Commit(task)
-                };
+                    account.clone(),
+                    AccountFetcher::new(),
+                ).await);
 
                 Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
-            })
-            .collect();
+            })).await;
 
         Ok(tasks)
     }
@@ -141,9 +134,6 @@ impl TasksBuilder for TaskBuilderImpl {
         fn process_commit(commit: &CommitType) -> Vec<Box<dyn BaseTask>> {
             match commit {
                 CommitType::Standalone(accounts) => {
-                    accounts.iter().map(finalize_task).collect()
-                }
-                CommitType::StandaloneDiff(accounts) => {
                     accounts.iter().map(finalize_task).collect()
                 }
                 CommitType::WithBaseActions {

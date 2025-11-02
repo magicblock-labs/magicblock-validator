@@ -204,7 +204,7 @@ impl<'a> OrderBook<'a> {
     ) -> &'a mut [OrderLevel] {
         slice::from_raw_parts_mut(
             self.levels.add(self.capacity - asks_len),
-            asks_len as usize,
+            asks_len,
         )
     }
 

@@ -113,7 +113,7 @@ impl ScheduleCommitTestContext {
                 )
                 .unwrap();
                 let (pda, _bump) = Pubkey::find_program_address(
-                    &[user_seed, &payer_ephem.pubkey().as_ref()],
+                    &[user_seed, payer_ephem.pubkey().as_ref()],
                     &program_schedulecommit::ID,
                 );
                 (payer_ephem, pda)
@@ -167,40 +167,48 @@ impl ScheduleCommitTestContext {
             ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
             ComputeBudgetInstruction::set_compute_unit_price(10_000),
         ];
-        if self.user_seed == b"magic_schedule_commit" {
-            ixs.extend(self.committees.iter().map(|(player, committee)| {
-                init_account_instruction(
-                    self.payer_chain.pubkey(),
-                    player.pubkey(),
-                    *committee,
-                )
-            }));
-        } else {
-            ixs.extend(self.committees.iter().map(
-                |(book_manager, committee)| {
-                    init_order_book_instruction(
-                        self.payer_chain.pubkey(),
-                        book_manager.pubkey(),
-                        *committee,
-                    )
-                },
-            ));
+        match self.user_seed.as_slice() {
+            b"magic_schedule_commit" => {
+                ixs.extend(self.committees.iter().map(
+                    |(player, committee)| {
+                        init_account_instruction(
+                            self.payer_chain.pubkey(),
+                            player.pubkey(),
+                            *committee,
+                        )
+                    },
+                ));
+            }
+            b"order_book" => {
+                ixs.extend(self.committees.iter().map(
+                    |(book_manager, committee)| {
+                        init_order_book_instruction(
+                            self.payer_chain.pubkey(),
+                            book_manager.pubkey(),
+                            *committee,
+                        )
+                    },
+                ));
 
-            //// TODO (snawaz): currently the size of delegatable-account cannot be
-            //// more than 10K, else delegation will fail. So Let's revisit this when
-            //// we relax the limit on the account size, then we can use larger
-            //// account, say even 10 MB, and execute CommitDiff.
-            //
-            // ixs.extend(self.committees.iter().flat_map(
-            //     |(payer, committee)| {
-            //         [grow_order_book_instruction(
-            //             payer.pubkey(),
-            //             *committee,
-            //             10 * 1024
-            //         )]
-            //     },
-            // ));
-        }
+                //// TODO (snawaz): currently the size of delegatable-account cannot be
+                //// more than 10K, else delegation will fail. So Let's revisit this when
+                //// we relax the limit on the account size, then we can use larger
+                //// account, say even 10 MB, and execute CommitDiff.
+                //
+                // ixs.extend(self.committees.iter().flat_map(
+                //     |(payer, committee)| {
+                //         [grow_order_book_instruction(
+                //             payer.pubkey(),
+                //             *committee,
+                //             10 * 1024
+                //         )]
+                //     },
+                // ));
+            }
+            _ => {
+                return Err(anyhow::anyhow!("Unsupported user_seed: {:?} ; expected b\"magic_schedule_commit\" or b\"order_book\"", self.user_seed));
+            }
+        };
 
         let mut signers = self
             .committees
