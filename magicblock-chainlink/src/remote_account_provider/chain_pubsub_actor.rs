@@ -301,6 +301,16 @@ impl ChainPubsubActor {
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         commitment_config: CommitmentConfig,
     ) {
+        if subs
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .contains_key(&pubkey)
+        {
+            trace!("Subscription for {pubkey} already exists, ignoring add_sub request");
+            let _ = sub_response.send(Ok(()));
+            return;
+        }
+
         trace!("Adding subscription for {pubkey} with commitment {commitment_config:?}");
 
         let cancellation_token = CancellationToken::new();
