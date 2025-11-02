@@ -305,6 +305,22 @@ impl ChainPubsubActor {
 
         let cancellation_token = CancellationToken::new();
 
+        // Insert into subscriptions HashMap immediately to prevent race condition
+        // with unsubscribe operations
+        // Assuming that messages to this actor are processed in the order they are sent
+        // then this eliminates the possibility of an unsubscribe being processed before
+        // the sub's cancellation token was added to the map
+        {
+            let mut subs_lock =
+                subs.lock().expect("subscriptions lock poisoned");
+            subs_lock.insert(
+                pubkey,
+                AccountSubscription {
+                    cancellation_token: cancellation_token.clone(),
+                },
+            );
+        }
+
         let mut sub_joinset = subscription_watchers.lock().unwrap();
         sub_joinset.spawn(async move {
             let config = RpcAccountInfoConfig {
@@ -318,17 +334,14 @@ impl ChainPubsubActor {
                 .await {
                 Ok(res) => res,
                 Err(err) => {
+                    // RPC failed - remove from subscriptions and notify failure
+                    subs.lock().expect("subscriptions lock poisoned").remove(&pubkey);
                     let _ = sub_response.send(Err(err.into()));
                     return;
                 }
             };
 
-            // Then track the subscription and confirm to the requester that the
-            // subscription was made
-            subs.lock().unwrap().insert(pubkey, AccountSubscription {
-                cancellation_token: cancellation_token.clone(),
-            });
-
+            // RPC succeeded - confirm to the requester that the subscription was made
             let _ = sub_response.send(Ok(()));
 
             // Now keep listening for updates and relay them to the
@@ -343,7 +356,7 @@ impl ChainPubsubActor {
                         if let Some(rpc_response) = update {
                             if log_enabled!(log::Level::Trace) && (!pubkey.eq(&clock::ID) ||
                                rpc_response.context.slot % CLOCK_LOG_SLOT_FREQ == 0) {
-                                    trace!("Received update for {pubkey}: {rpc_response:?}");
+                                trace!("Received update for {pubkey}: {rpc_response:?}");
                             }
                             let _ = subscription_updates_sender.send(SubscriptionUpdate {
                                 pubkey,
