@@ -1,16 +1,16 @@
 use std::collections::HashSet;
 
+use magicblock_magic_program_api::args::{CancelTaskRequest, TaskRequest};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
 
 use crate::{
     schedule_task::utils::check_task_context_id,
-    task_context::{CancelTaskRequest, TaskContext},
+    task_context::TaskContext,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
-    TaskRequest,
 };
 
 pub(crate) fn process_cancel_task(

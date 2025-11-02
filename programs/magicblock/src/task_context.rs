@@ -1,6 +1,9 @@
 use std::cell::RefCell;
 
-use magicblock_magic_program_api::TASK_CONTEXT_SIZE;
+use magicblock_magic_program_api::{
+    args::{ScheduleTaskRequest, TaskRequest},
+    TASK_CONTEXT_SIZE,
+};
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
@@ -9,34 +12,6 @@ use solana_sdk::{
 };
 
 pub const MIN_EXECUTION_INTERVAL: u64 = 10;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum TaskRequest {
-    Schedule(ScheduleTaskRequest),
-    Cancel(CancelTaskRequest),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ScheduleTaskRequest {
-    /// Unique identifier for this task
-    pub id: u64,
-    /// Unsigned instructions to execute when triggered
-    pub instructions: Vec<Instruction>,
-    /// Authority that can modify or cancel this task
-    pub authority: Pubkey,
-    /// How frequently the task should be executed, in milliseconds
-    pub execution_interval_millis: u64,
-    /// Number of times this task will be executed
-    pub iterations: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CancelTaskRequest {
-    /// Unique identifier for the task to cancel
-    pub task_id: u64,
-    /// Authority that can cancel this task
-    pub authority: Pubkey,
-}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct TaskContext {

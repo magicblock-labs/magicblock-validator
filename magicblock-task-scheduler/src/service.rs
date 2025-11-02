@@ -15,10 +15,10 @@ use magicblock_core::{
 };
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
+    args::{CancelTaskRequest, ScheduleTaskRequest, TaskRequest},
     instruction_utils::InstructionUtils,
     validator::{validator_authority, validator_authority_id},
-    CancelTaskRequest, CrankTask, ScheduleTaskRequest, TaskContext,
-    TaskRequest, TASK_CONTEXT_PUBKEY,
+    CrankTask, TaskContext, TASK_CONTEXT_PUBKEY,
 };
 use solana_sdk::{
     account::ReadableAccount, instruction::Instruction, message::Message,

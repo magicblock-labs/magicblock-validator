@@ -284,6 +284,7 @@ impl MagicValidator {
             txn_to_process_rx: validator_channels.transaction_to_process,
             account_update_tx: validator_channels.account_update,
             environment: build_svm_env(&accountsdb, latest_block.blockhash, 0),
+            tasks_tx: validator_channels.tasks_service,
         };
         txn_scheduler_state
             .load_upgradeable_programs(&programs_to_load(&config.programs))

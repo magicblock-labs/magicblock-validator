@@ -1,18 +1,19 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::args::ScheduleTaskArgs;
+use magicblock_magic_program_api::args::{
+    ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest,
+};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
 
 use crate::{
     schedule_task::utils::check_task_context_id,
-    task_context::{ScheduleTaskRequest, TaskContext, MIN_EXECUTION_INTERVAL},
+    task_context::{TaskContext, MIN_EXECUTION_INTERVAL},
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
     validator::validator_authority_id,
-    TaskRequest,
 };
 
 pub(crate) fn process_schedule_task(

@@ -3861,6 +3861,7 @@ dependencies = [
  "magicblock-accounts-db",
  "magicblock-core",
  "magicblock-ledger",
+ "magicblock-magic-program-api",
  "magicblock-metrics",
  "magicblock-program",
  "parking_lot 0.12.4",

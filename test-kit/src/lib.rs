@@ -121,6 +121,7 @@ impl ExecutionTestEnv {
             account_update_tx: validator_channels.account_update,
             transaction_status_tx: validator_channels.transaction_status,
             txn_to_process_rx: validator_channels.transaction_to_process,
+            tasks_tx: validator_channels.tasks_service,
             environment,
         };
 

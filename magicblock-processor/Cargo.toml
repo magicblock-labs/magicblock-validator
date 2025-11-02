@@ -18,6 +18,7 @@ magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
 
 solana-account = { workspace = true }
 solana-bpf-loader-program = { workspace = true }
