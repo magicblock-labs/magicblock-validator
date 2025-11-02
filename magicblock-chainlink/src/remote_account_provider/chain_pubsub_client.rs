@@ -277,8 +277,17 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         Ok(())
     }
 
-    async fn subscription_count(&self) -> usize {
-        self.actor.subscription_count()
+    async fn subscription_count(
+        &self,
+        exclude: Option<&[Pubkey]>,
+    ) -> (usize, usize) {
+        let total = self.actor.subscription_count(&[]);
+        let filtered = if let Some(exclude) = exclude {
+            self.actor.subscription_count(exclude)
+        } else {
+            total
+        };
+        (total, filtered)
     }
 }
 

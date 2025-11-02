@@ -202,8 +202,18 @@ impl ChainPubsubActor {
         subs.keys().copied().collect()
     }
 
-    pub fn subscription_count(&self) -> usize {
-        self.subscriptions.lock().unwrap().len()
+    pub fn subscription_count(&self, filter: &[Pubkey]) -> usize {
+        let subs = self
+            .subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned");
+        if filter.is_empty() {
+            return subs.len();
+        } else {
+            subs.keys()
+                .filter(|pubkey| !filter.contains(pubkey))
+                .count()
+        }
     }
 
     pub async fn send_msg(
