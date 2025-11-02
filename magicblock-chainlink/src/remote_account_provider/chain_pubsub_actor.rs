@@ -331,7 +331,9 @@ impl ChainPubsubActor {
             );
         }
 
-        let mut sub_joinset = subscription_watchers.lock().unwrap();
+        let mut sub_joinset = subscription_watchers
+            .lock()
+            .expect("subscription_watchers lock poisoned");
         sub_joinset.spawn(async move {
             let config = RpcAccountInfoConfig {
                 commitment: Some(commitment_config),
@@ -359,7 +361,7 @@ impl ChainPubsubActor {
             loop {
                 tokio::select! {
                     _ = cancellation_token.cancelled() => {
-                        debug!("Subscription for {pubkey} was cancelled");
+                        trace!("Subscription for {pubkey} was cancelled");
                         break;
                     }
                     update = update_stream.next() => {

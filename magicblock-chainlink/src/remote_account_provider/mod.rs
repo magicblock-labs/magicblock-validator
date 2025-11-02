@@ -602,8 +602,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(vec![]);
         }
 
-        if log_enabled!(log::Level::Debug) {
-            debug!("Fetching accounts: [{}]", pubkeys_str(pubkeys));
+        if log_enabled!(log::Level::Trace) {
+            trace!("Fetching accounts: [{}]", pubkeys_str(pubkeys));
         }
 
         // Create channels for potential subscription updates to override fetch results
@@ -678,7 +678,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .map(|(pk, _)| pk.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            debug!("Subscribing to accounts: {pubkeys}");
+            trace!("Subscribing to accounts: {pubkeys}");
         }
         for (pubkey, _) in subscribe_and_fetch.iter() {
             // Register the subscription for the pubkey (handles LRU cache and eviction first)
@@ -812,8 +812,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         tokio::spawn(async move {
             use RemoteAccount::*;
 
-            if log_enabled!(log::Level::Debug) {
-                debug!("Fetch ({})", pubkeys_str(&pubkeys));
+            if log_enabled!(log::Level::Trace) {
+                trace!("Fetch ({})", pubkeys_str(&pubkeys));
             }
 
             let response = loop {
