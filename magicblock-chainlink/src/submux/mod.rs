@@ -564,15 +564,22 @@ impl<T: ChainPubsubClient> ChainPubsubClient for SubMuxClient<T> {
         out_rx
     }
 
-    async fn subscription_count(&self) -> usize {
-        let mut max_count = 0;
+    async fn subscription_count(
+        &self,
+        exclude: Option<&[Pubkey]>,
+    ) -> (usize, usize) {
+        let mut max_total = 0;
+        let mut max_filtered = 0;
         for client in &self.clients {
-            let count = client.subscription_count().await;
-            if count > max_count {
-                max_count = count;
+            let (total, filtered) = client.subscription_count(exclude).await;
+            if total > max_total {
+                max_total = total;
+            }
+            if filtered > max_filtered {
+                max_filtered = filtered;
             }
         }
-        max_count
+        (max_total, max_filtered)
     }
 }
 

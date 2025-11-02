@@ -121,6 +121,10 @@ impl AccountsLruCache {
             .expect("subscribed_accounts lock poisoned");
         subs.len()
     }
+
+    pub fn never_evicted_accounts(&self) -> Vec<Pubkey> {
+        self.accounts_to_never_evict.iter().cloned().collect()
+    }
 }
 
 #[cfg(test)]
@@ -244,5 +248,15 @@ mod tests {
 
             assert_eq!(evicted, Some(expected_evicted));
         }
+    }
+
+    #[test]
+    fn test_never_evicted_accounts() {
+        let capacity = NonZeroUsize::new(3).unwrap();
+        let cache = AccountsLruCache::new(capacity);
+
+        let never_evicted = cache.never_evicted_accounts();
+        // Should contain at least the clock sysvar
+        assert!(never_evicted.contains(&sysvar::clock::id()));
     }
 }

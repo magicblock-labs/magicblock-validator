@@ -31,7 +31,14 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate>;
 
-    async fn subscription_count(&self) -> usize;
+    /// Provides the total number of subscriptions and the number of
+    /// subscriptions when excludig pubkeys in `exclude`.
+    /// - `exclude`: Optional slice of pubkeys to exclude from the count.
+    /// Returns a tuple of (total subscriptions, filtered subscriptions).
+    async fn subscription_count(
+        &self,
+        exclude: Option<&[Pubkey]>,
+    ) -> (usize, usize);
 }
 
 // -----------------
@@ -137,8 +144,17 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
         rx.await?
     }
 
-    async fn subscription_count(&self) -> usize {
-        self.actor.subscription_count()
+    async fn subscription_count(
+        &self,
+        exclude: Option<&[Pubkey]>,
+    ) -> (usize, usize) {
+        let total = self.actor.subscription_count(&[]);
+        let filtered = if let Some(exclude) = exclude {
+            self.actor.subscription_count(exclude)
+        } else {
+            total
+        };
+        (total, filtered)
     }
 }
 
@@ -266,8 +282,21 @@ pub mod mock {
 
         async fn shutdown(&self) {}
 
-        async fn subscription_count(&self) -> usize {
-            self.subscribed_pubkeys.lock().unwrap().len()
+        async fn subscription_count(
+            &self,
+            exclude: Option<&[Pubkey]>,
+        ) -> (usize, usize) {
+            let pubkeys: Vec<Pubkey> = {
+                let subs = self.subscribed_pubkeys.lock().unwrap();
+                subs.iter().cloned().collect()
+            };
+            let total = pubkeys.len();
+            let exclude = exclude.unwrap_or_default();
+            let filtered = pubkeys
+                .iter()
+                .filter(|pubkey| !exclude.contains(pubkey))
+                .count();
+            (total, filtered)
         }
     }
 }

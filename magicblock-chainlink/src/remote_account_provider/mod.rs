@@ -199,19 +199,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let mut interval = time::interval(Duration::from_millis(
                 ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS,
             ));
+            let never_evicted = subscribed_accounts.never_evicted_accounts();
             loop {
                 interval.tick().await;
                 let lru_count = subscribed_accounts.len();
-                let pubsub_count = pubsub_client.subscription_count().await;
+                let (pubsub_total, pubsub_without_never_evict) = pubsub_client
+                    .subscription_count(Some(&never_evicted))
+                    .await;
 
-                if lru_count != pubsub_count {
+                if lru_count != pubsub_without_never_evict {
                     warn!(
-                        "Subscription counts LRU cache={} pubsub client={} don't match",
-                        lru_count, pubsub_count
+                        "User account subscription counts LRU cache={} pubsub client={} don't match",
+                        lru_count, pubsub_without_never_evict
                     );
                 }
 
-                debug!("Updating active subscriptions: count={}", lru_count);
+                debug!("Updating active subscriptions: count={}", pubsub_total);
                 set_monitored_accounts_count(lru_count);
             }
         })
@@ -659,8 +662,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         if let Some(evicted) = self.subscribed_accounts.add(*pubkey) {
             trace!("Evicting {pubkey}");
 
-            // 1. Unsubscribe from the account
-            self.unsubscribe(&evicted).await?;
+            // 1. Unsubscribe from the account directly (LRU has already removed it)
+            self.pubsub_client.unsubscribe(evicted).await?;
 
             // 2. Inform upstream so it can remove it from the store
             self.send_removal_update(evicted).await?;
@@ -713,10 +716,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        // Only maintain subscriptions if we were actually subscribed
         if self.subscribed_accounts.remove(pubkey) {
             self.pubsub_client.unsubscribe(*pubkey).await?;
             self.send_removal_update(*pubkey).await?;
+        } else {
+            warn!(
+                "Tried to unsubscribe from account {} that was not subscribed",
+                pubkey
+            );
         }
 
         Ok(())
