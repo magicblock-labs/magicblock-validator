@@ -1,3 +1,7 @@
+use dlp::{
+    args::{CommitDiffArgs, CommitStateArgs},
+    compute_diff,
+};
 use dyn_clone::DynClone;
 use magicblock_committor_program::{
     instruction_builder::{
@@ -13,11 +17,17 @@ use magicblock_committor_program::{
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
+use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
-use solana_sdk::instruction::Instruction;
+use solana_rpc_client::rpc_client::RpcClient;
+use solana_sdk::{
+    commitment_config::CommitmentConfig, instruction::Instruction,
+};
 use thiserror::Error;
 
-use crate::tasks::visitor::Visitor;
+use crate::{
+    config::ChainConfig, tasks::visitor::Visitor, ComputeBudgetConfig,
+};
 
 pub mod args_task;
 pub mod buffer_task;
@@ -104,6 +114,68 @@ pub struct CommitTask {
     pub commit_id: u64,
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
+}
+
+impl CommitTask {
+    const COMMIT_STATE_SIZE_THRESHOLD: usize = 200;
+
+    pub fn is_commit_diff(&self) -> bool {
+        self.committed_account.account.data.len()
+            > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
+    }
+
+    pub fn create_commit_state_ix(&self, validator: &Pubkey) -> Instruction {
+        let args = CommitStateArgs {
+            nonce: self.commit_id,
+            lamports: self.committed_account.account.lamports,
+            data: self.committed_account.account.data.clone(),
+            allow_undelegation: self.allow_undelegation,
+        };
+        dlp::instruction_builder::commit_state(
+            *validator,
+            self.committed_account.pubkey,
+            self.committed_account.account.owner,
+            args,
+        )
+    }
+    pub fn create_commit_diff_ix(&self, validator: &Pubkey) -> Instruction {
+        let chain_config =
+            ChainConfig::local(ComputeBudgetConfig::new(1_000_000));
+
+        let rpc_client = RpcClient::new_with_commitment(
+            chain_config.rpc_uri.to_string(),
+            CommitmentConfig {
+                commitment: chain_config.commitment,
+            },
+        );
+
+        let account = match rpc_client
+            .get_account(&self.committed_account.pubkey)
+        {
+            Ok(account) => account,
+            Err(e) => {
+                log::warn!("Fallback to commit_state and send full-bytes, as rpc failed to fetch the delegated-account from base chain, commmit_id: {} , error: {}", self.commit_id, e);
+                return self.create_commit_state_ix(validator);
+            }
+        };
+
+        let args = CommitDiffArgs {
+            nonce: self.commit_id,
+            lamports: self.committed_account.account.lamports,
+            diff: compute_diff(
+                account.data(),
+                self.committed_account.account.data(),
+            )
+            .to_vec(),
+            allow_undelegation: self.allow_undelegation,
+        };
+        dlp::instruction_builder::commit_diff(
+            *validator,
+            self.committed_account.pubkey,
+            self.committed_account.account.owner,
+            args,
+        )
+    }
 }
 
 #[derive(Clone)]

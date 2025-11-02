@@ -1,26 +1,14 @@
-use dlp::{
-    args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs},
-    compute_diff,
-};
-use solana_account::ReadableAccount;
+use dlp::args::CallHandlerArgs;
 use solana_pubkey::Pubkey;
-use solana_rpc_client::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    instruction::{AccountMeta, Instruction},
-};
+use solana_sdk::instruction::{AccountMeta, Instruction};
 
 #[cfg(test)]
 use crate::tasks::TaskStrategy;
-use crate::{
-    config::ChainConfig,
-    tasks::{
-        buffer_task::{BufferTask, BufferTaskType},
-        visitor::Visitor,
-        BaseActionTask, BaseTask, BaseTaskError, BaseTaskResult, CommitTask,
-        FinalizeTask, PreparationState, TaskType, UndelegateTask,
-    },
-    ComputeBudgetConfig,
+use crate::tasks::{
+    buffer_task::{BufferTask, BufferTaskType},
+    visitor::Visitor,
+    BaseActionTask, BaseTask, BaseTaskError, BaseTaskResult, CommitTask,
+    FinalizeTask, PreparationState, TaskType, UndelegateTask,
 };
 
 /// Task that will be executed on Base layer via arguments
@@ -57,68 +45,12 @@ impl BaseTask for ArgsTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.task_type {
             ArgsTaskType::Commit(value) => {
-                let args = CommitStateArgs {
-                    nonce: value.commit_id,
-                    lamports: value.committed_account.account.lamports,
-                    data: value.committed_account.account.data.clone(),
-                    allow_undelegation: value.allow_undelegation,
-                };
-                dlp::instruction_builder::commit_state(
-                    *validator,
-                    value.committed_account.pubkey,
-                    value.committed_account.account.owner,
-                    args,
-                )
+                if value.is_commit_diff() {
+                    value.create_commit_diff_ix(validator)
+                } else {
+                    value.create_commit_state_ix(validator)
+                }
             }
-            // ArgsTaskType::CommitDiff(value) => {
-            //     let chain_config =
-            //         ChainConfig::local(ComputeBudgetConfig::new(1_000_000));
-
-            //     let rpc_client = RpcClient::new_with_commitment(
-            //         chain_config.rpc_uri.to_string(),
-            //         CommitmentConfig {
-            //             commitment: chain_config.commitment,
-            //         },
-            //     );
-
-            //     let account = match rpc_client
-            //         .get_account(&value.committed_account.pubkey)
-            //     {
-            //         Ok(account) => account,
-            //         Err(e) => {
-            //             log::warn!("Fallback to commit_state and send full-bytes, as rpc failed to fetch the delegated-account from base chain, commmit_id: {} , error: {}", value.commit_id, e);
-            //             let args = CommitStateArgs {
-            //                 nonce: value.commit_id,
-            //                 lamports: value.committed_account.account.lamports,
-            //                 data: value.committed_account.account.data.clone(),
-            //                 allow_undelegation: value.allow_undelegation,
-            //             };
-            //             return dlp::instruction_builder::commit_state(
-            //                 *validator,
-            //                 value.committed_account.pubkey,
-            //                 value.committed_account.account.owner,
-            //                 args,
-            //             );
-            //         }
-            //     };
-
-            //     let args = CommitDiffArgs {
-            //         nonce: value.commit_id,
-            //         lamports: value.committed_account.account.lamports,
-            //         diff: compute_diff(
-            //             account.data(),
-            //             value.committed_account.account.data(),
-            //         )
-            //         .to_vec(),
-            //         allow_undelegation: value.allow_undelegation,
-            //     };
-            //     dlp::instruction_builder::commit_diff(
-            //         *validator,
-            //         value.committed_account.pubkey,
-            //         value.committed_account.account.owner,
-            //         args,
-            //     )
-            // }
             ArgsTaskType::Finalize(value) => {
                 dlp::instruction_builder::finalize(
                     *validator,
@@ -162,6 +94,10 @@ impl BaseTask for ArgsTask {
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
         match self.task_type {
+            ArgsTaskType::Commit(ref value) if value.is_commit_diff() => {
+                // We do not currently support executing CommitDiff as BufferTask
+                Err(self)
+            }
             ArgsTaskType::Commit(value) => {
                 Ok(Box::new(BufferTask::new_preparation_required(
                     BufferTaskType::Commit(value),

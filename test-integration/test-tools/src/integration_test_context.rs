@@ -154,8 +154,8 @@ impl IntegrationTestContext {
         rpc_client: Option<&RpcClient>,
         label: &str,
     ) -> Option<Vec<String>> {
-        let rpc_client =
-            rpc_client.expect("rpc_client for [{}] does not exist");
+        let rpc_client = rpc_client
+            .expect(&format!("rpc_client for [{label}] does not exist"));
 
         // Try this up to 50 times since devnet here returns the version response instead of
         // the EncodedConfirmedTransactionWithStatusMeta at times
