@@ -744,14 +744,27 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        if self.subscribed_accounts.remove(pubkey) {
-            self.pubsub_client.unsubscribe(*pubkey).await?;
-            self.send_removal_update(*pubkey).await?;
-        } else {
+        if !self.subscribed_accounts.contains(pubkey) {
             warn!(
                 "Tried to unsubscribe from account {} that was not subscribed",
                 pubkey
             );
+            return Ok(());
+        }
+
+        match self.pubsub_client.unsubscribe(*pubkey).await {
+            Ok(()) => {
+                // Only remove from LRU cache after successful pubsub unsubscribe
+                self.subscribed_accounts.remove(pubkey);
+                self.send_removal_update(*pubkey).await?;
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to unsubscribe from pubsub for {pubkey}: {err:?}"
+                );
+                // Don't remove from LRU cache if pubsub unsubscribe failed
+                // This ensures LRU cache and pubsub client stay in sync
+            }
         }
 
         Ok(())
