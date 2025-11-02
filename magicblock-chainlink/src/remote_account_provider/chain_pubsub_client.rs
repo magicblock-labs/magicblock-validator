@@ -289,6 +289,10 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         };
         (total, filtered)
     }
+
+    fn subscriptions(&self) -> Vec<Pubkey> {
+        self.actor.subscriptions()
+    }
 }
 
 // -----------------
