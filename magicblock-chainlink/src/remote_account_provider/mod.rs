@@ -86,7 +86,7 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     received_updates_count: Arc<AtomicU64>,
 
     /// Tracks which accounts are currently subscribed to
-    subscribed_accounts: Arc<AccountsLruCache>,
+    lrucache_subscribed_accounts: Arc<AccountsLruCache>,
 
     /// Channel to notify when an account is removed from the cache and thus no
     /// longer being watched
@@ -200,6 +200,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS,
             ));
             let never_evicted = subscribed_accounts.never_evicted_accounts();
+
             loop {
                 interval.tick().await;
                 let lru_count = subscribed_accounts.len();
@@ -207,6 +208,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     .subscription_count(Some(&never_evicted))
                     .await;
 
+                let all_pubsub_subs = if log::log_enabled!(log::Level::Debug) {
+                    pubsub_client.subscriptions()
+                } else {
+                    vec![]
+                };
                 if lru_count != pubsub_without_never_evict {
                     warn!(
                         "User account subscription counts LRU cache={} pubsub client={} don't match",
@@ -214,7 +220,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     );
                     if log::log_enabled!(log::Level::Debug) {
                         // Log all pubsub subscriptions for debugging
-                        let all_pubsub_subs = pubsub_client.subscriptions();
                         trace!(
                             "All pubsub subscriptions: {:?}",
                             all_pubsub_subs
@@ -224,8 +229,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         let lru_pubkeys = subscribed_accounts.pubkeys();
                         let pubsub_subs_without_never_evict: HashSet<_> =
                             all_pubsub_subs
-                                .into_iter()
+                                .iter()
                                 .filter(|pk| !never_evicted.contains(pk))
+                                .copied()
                                 .collect();
                         let lru_pubkeys_set: HashSet<_> =
                             lru_pubkeys.into_iter().collect();
@@ -243,6 +249,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 }
 
                 debug!("Updating active subscriptions: count={}", pubsub_total);
+                trace!("All subscriptions: {}", pubkeys_str(&all_pubsub_subs));
                 set_monitored_accounts_count(lru_count);
             }
         })
@@ -284,7 +291,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             chain_slot: Arc::<AtomicU64>::default(),
             last_update_slot: Arc::<AtomicU64>::default(),
             received_updates_count: Arc::<AtomicU64>::default(),
-            subscribed_accounts: subscribed_accounts.clone(),
+            lrucache_subscribed_accounts: subscribed_accounts.clone(),
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
@@ -354,7 +361,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     }
 
     pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {
-        self.subscribed_accounts.promote_multi(pubkeys);
+        self.lrucache_subscribed_accounts.promote_multi(pubkeys);
     }
 
     pub fn try_get_removed_account_rx(
@@ -687,7 +694,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) -> RemoteAccountProviderResult<()> {
         // If an account is evicted then we need to unsubscribe from it first
         // and then inform upstream that we are no longer tracking it
-        if let Some(evicted) = self.subscribed_accounts.add(*pubkey) {
+        if let Some(evicted) = self.lrucache_subscribed_accounts.add(*pubkey) {
             trace!("Evicting {pubkey}");
 
             // 1. Unsubscribe from the account directly (LRU has already removed it)
@@ -717,7 +724,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// This does not consider accounts like the clock sysvar that are watched as
     /// part of the provider's internal logic.
     pub fn is_watching(&self, pubkey: &Pubkey) -> bool {
-        self.subscribed_accounts.contains(pubkey)
+        self.lrucache_subscribed_accounts.contains(pubkey)
     }
 
     /// Check if an account is currently pending (being fetched)
@@ -744,9 +751,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        if !self.subscribed_accounts.contains(pubkey) {
+        if !self.lrucache_subscribed_accounts.contains(pubkey) {
             warn!(
-                "Tried to unsubscribe from account {} that was not subscribed",
+                "Tried to unsubscribe from account {} that was not subscribed in the LRU cache",
                 pubkey
             );
             return Ok(());
@@ -755,7 +762,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         match self.pubsub_client.unsubscribe(*pubkey).await {
             Ok(()) => {
                 // Only remove from LRU cache after successful pubsub unsubscribe
-                self.subscribed_accounts.remove(pubkey);
+                self.lrucache_subscribed_accounts.remove(pubkey);
                 self.send_removal_update(*pubkey).await?;
             }
             Err(err) => {
