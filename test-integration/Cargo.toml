@@ -97,6 +97,8 @@ test-ledger-restore = { path = "./test-ledger-restore" }
 test-kit = { path = "../test-kit" }
 tokio = "1.0"
 toml = "0.8.13"
+ureq = "2.9.6"
+url = "2.5.0"
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency
