@@ -12,7 +12,9 @@ use crate::{
     requests::{JsonRpcWsMethod, JsonWsRequest},
     state::{
         signatures::SignaturesExpirer,
-        subscriptions::{CleanUp, SubscriptionID, SubscriptionsDb},
+        subscriptions::{
+            CleanUp, SubscriptionHandle, SubscriptionID, SubscriptionsDb,
+        },
         transactions::TransactionsCache,
     },
     RpcResult,
@@ -122,6 +124,15 @@ impl WsDispatcher {
         // Dropping the value triggers the unsubscription logic.
         let success = self.unsubs.remove(&id).is_some();
         Ok(SubResult::Unsub(success))
+    }
+
+    /// Register the unsubscription callback for the new subscription on this connection
+    pub(crate) fn register_unsub(&mut self, handle: SubscriptionHandle) {
+        let cleanup = self.unsubs.insert(handle.id, handle.cleanup);
+        // If we have a duplicate subscription, just forget the previous cleanup callback
+        if let Some(mut callback) = cleanup {
+            callback.0.take();
+        }
     }
 }
 

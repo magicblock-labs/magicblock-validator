@@ -49,14 +49,14 @@ impl Body for JsonBody {
 }
 
 /// A single, server-side filter for `getProgramAccounts`.
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Debug)]
 pub(crate) enum ProgramFilter {
     DataSize(usize),
     MemCmp { offset: usize, bytes: Vec<u8> },
 }
 
 /// A collection of server-side filters for `getProgramAccounts`.
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Default)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Default, Debug)]
 pub(crate) struct ProgramFilters(Vec<ProgramFilter>);
 
 impl ProgramFilter {
