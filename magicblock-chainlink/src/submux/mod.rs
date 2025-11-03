@@ -564,6 +564,9 @@ impl<T: ChainPubsubClient> ChainPubsubClient for SubMuxClient<T> {
         out_rx
     }
 
+    /// Gets the maximum subscription count across all inner clients.
+    /// NOTE: one of the clients could be recycling connections and thus
+    /// temporarily have fewer subscriptions
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
@@ -582,6 +585,9 @@ impl<T: ChainPubsubClient> ChainPubsubClient for SubMuxClient<T> {
         (max_total, max_filtered)
     }
 
+    /// Gets the union of all subscriptions across all inner clients.
+    /// Unless one is recycling connections, this should be identical to
+    /// getting it from a single inner client.
     fn subscriptions(&self) -> Vec<Pubkey> {
         let mut all_subs = HashSet::new();
         for client in &self.clients {
