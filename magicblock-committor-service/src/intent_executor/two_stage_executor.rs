@@ -165,19 +165,19 @@ where
         committed_pubkeys: &[Pubkey],
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
         match err {
-            TransactionStrategyExecutionError::CommitIDError(_) => {
+            TransactionStrategyExecutionError::CommitIDError(_, _) => {
                 let to_cleanup = self
                     .handle_commit_id_error(committed_pubkeys, commit_strategy)
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            TransactionStrategyExecutionError::ActionsError(_) => {
+            TransactionStrategyExecutionError::ActionsError(_, _) => {
                 // Unexpected in Two Stage commit
                 // That would mean that Two Stage executes Standalone commit
                 error!("Unexpected error in Two stage commit flow: {}", err);
                 Ok(ControlFlow::Break(()))
             }
-            TransactionStrategyExecutionError::CpiLimitError(_) => {
+            TransactionStrategyExecutionError::CpiLimitError(_, _) => {
                 // Can't be handled
                 error!("Commit tasks exceeded CpiLimitError: {}", err);
                 Ok(ControlFlow::Break(()))
@@ -202,18 +202,18 @@ where
         finalize_strategy: &mut TransactionStrategy,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
         match err {
-            TransactionStrategyExecutionError::CommitIDError(_) => {
+            TransactionStrategyExecutionError::CommitIDError(_, _) => {
                 // Unexpected error in Two Stage commit
                 error!("Unexpected error in Two stage commit flow: {}", err);
                 Ok(ControlFlow::Break(()))
             }
-            TransactionStrategyExecutionError::ActionsError(_) => {
+            TransactionStrategyExecutionError::ActionsError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let to_cleanup = self.handle_actions_error(finalize_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            TransactionStrategyExecutionError::CpiLimitError(_) => {
+            TransactionStrategyExecutionError::CpiLimitError(_, _) => {
                 // Can't be handled
                 warn!("Finalization tasks exceeded CpiLimitError: {}", err);
                 Ok(ControlFlow::Break(()))

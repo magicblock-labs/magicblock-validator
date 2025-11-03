@@ -152,9 +152,9 @@ async fn test_commit_id_error_parsing() {
     let err = execution_result.unwrap_err();
     assert!(matches!(
         err,
-        TransactionStrategyExecutionError::CommitIDError(_)
+        TransactionStrategyExecutionError::CommitIDError(_, _)
     ));
-    assert_eq!(err.to_string(), EXPECTED_ERR_MSG.to_string(),);
+    assert!(err.to_string().contains(EXPECTED_ERR_MSG));
 }
 
 #[tokio::test]
@@ -211,9 +211,9 @@ async fn test_action_error_parsing() {
     let execution_err = execution_result.unwrap_err();
     assert!(matches!(
         execution_err,
-        TransactionStrategyExecutionError::ActionsError(_)
+        TransactionStrategyExecutionError::ActionsError(_, _)
     ));
-    assert_eq!(execution_err.to_string(), EXPECTED_ERR_MSG.to_string());
+    assert!(execution_err.to_string().contains(EXPECTED_ERR_MSG));
 }
 
 #[tokio::test]
@@ -269,9 +269,9 @@ async fn test_cpi_limits_error_parsing() {
     let execution_err = execution_result.unwrap_err();
     assert!(matches!(
         execution_err,
-        TransactionStrategyExecutionError::CpiLimitError(_)
+        TransactionStrategyExecutionError::CpiLimitError(_, _)
     ));
-    assert_eq!(execution_err.to_string(), EXPECTED_ERR_MSG.to_string());
+    assert!(execution_err.to_string().contains(EXPECTED_ERR_MSG));
 }
 
 #[tokio::test]

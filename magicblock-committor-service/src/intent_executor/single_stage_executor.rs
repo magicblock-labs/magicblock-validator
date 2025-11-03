@@ -99,7 +99,7 @@ where
         if i < RECURSION_CEILING
             && matches!(
                 execution_err,
-                TransactionStrategyExecutionError::CpiLimitError(_)
+                TransactionStrategyExecutionError::CpiLimitError(_, _)
             )
             && committed_pubkeys.is_some()
         {
@@ -157,14 +157,14 @@ where
         };
 
         match err {
-            TransactionStrategyExecutionError::ActionsError(_) => {
+            TransactionStrategyExecutionError::ActionsError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let to_cleanup =
                     self.handle_actions_error(transaction_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            TransactionStrategyExecutionError::CommitIDError(_) => {
+            TransactionStrategyExecutionError::CommitIDError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let to_cleanup = self
@@ -175,7 +175,7 @@ where
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            TransactionStrategyExecutionError::CpiLimitError(_) => {
+            TransactionStrategyExecutionError::CpiLimitError(_, _) => {
                 // Can't be handled in scope of single stage execution
                 // We signal flow break
                 Ok(ControlFlow::Break(()))
