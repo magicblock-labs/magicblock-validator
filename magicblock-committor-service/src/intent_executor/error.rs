@@ -104,9 +104,9 @@ impl IntentExecutorError {
 impl metrics::LabelValue for IntentExecutorError {
     fn value(&self) -> &str {
         match self {
-            IntentExecutorError::ActionsError(_) => "actions_failed",
-            IntentExecutorError::CpiLimitError(_) => "cpi_limit_failed",
-            IntentExecutorError::CommitIDError(_) => "commit_nonce_failed",
+            IntentExecutorError::ActionsError(_, _) => "actions_failed",
+            IntentExecutorError::CpiLimitError(_, _) => "cpi_limit_failed",
+            IntentExecutorError::CommitIDError(_, _) => "commit_nonce_failed",
             _ => "failed",
         }
     }
