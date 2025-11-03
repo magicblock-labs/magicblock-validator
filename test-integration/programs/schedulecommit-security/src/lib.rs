@@ -1,5 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use ephemeral_rollups_sdk::ephem::{create_schedule_commit_ix, CommitPolicy};
+use ephemeral_rollups_sdk::ephem::create_schedule_commit_ix;
 use program_schedulecommit::{
     api::schedule_commit_cpi_instruction, process_schedulecommit_cpi,
     ProcessSchedulecommitCpiArgs,
@@ -146,7 +146,6 @@ fn process_sibling_schedule_cpis(
             magic_context,
             magic_program,
             false,
-            CommitPolicy::UseFullBytes,
         );
         invoke(
             &direct_ix,

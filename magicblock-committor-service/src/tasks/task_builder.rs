@@ -89,11 +89,11 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .map(|account| {
                 let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                let task = ArgsTaskType::Commit(CommitTask {
+                let task = ArgsTaskType::Commit(CommitTask::new(
                     commit_id,
                     allow_undelegation,
-                    committed_account: account.clone(),
-                });
+                    account.clone(),
+                ));
 
                 Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
             })

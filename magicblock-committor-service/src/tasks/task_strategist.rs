@@ -95,6 +95,7 @@ impl TaskStrategist {
                 lookup_tables_keys,
             })
         } else {
+            println!("snawaz: inside build_strategy");
             Err(TaskStrategistError::FailedToFitError)
         }
     }
@@ -165,7 +166,10 @@ impl TaskStrategist {
                 &[],
             ) {
                 Ok(tx) => Ok(serialize_and_encode_base64(&tx).len()),
-                Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
+                Err(TaskStrategistError::FailedToFitError) => {
+                    println!("snawaz: inside optimize_strategy");
+                    Ok(usize::MAX)
+                }
                 Err(TaskStrategistError::SignerError(err)) => Err(err),
             }
         };
@@ -264,10 +268,10 @@ mod tests {
 
     // Helper to create a simple commit task
     fn create_test_commit_task(commit_id: u64, data_size: usize) -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::Commit(CommitTask {
+        ArgsTask::new(ArgsTaskType::Commit(CommitTask::new(
             commit_id,
-            allow_undelegation: false,
-            committed_account: CommittedAccount {
+            false,
+            CommittedAccount {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
                     lamports: 1000,
@@ -277,7 +281,7 @@ mod tests {
                     rent_epoch: 0,
                 },
             },
-        }))
+        )))
     }
 
     // Helper to create a Base action task

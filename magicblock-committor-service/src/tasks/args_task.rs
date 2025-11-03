@@ -44,13 +44,7 @@ impl ArgsTask {
 impl BaseTask for ArgsTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.task_type {
-            ArgsTaskType::Commit(value) => {
-                if value.is_commit_diff() {
-                    value.create_commit_diff_ix(validator)
-                } else {
-                    value.create_commit_state_ix(validator)
-                }
-            }
+            ArgsTaskType::Commit(value) => value.create_commit_ix(validator),
             ArgsTaskType::Finalize(value) => {
                 dlp::instruction_builder::finalize(
                     *validator,

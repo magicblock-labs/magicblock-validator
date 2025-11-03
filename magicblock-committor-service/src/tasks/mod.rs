@@ -17,7 +17,7 @@ use magicblock_committor_program::{
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
-use solana_account::ReadableAccount;
+use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
@@ -114,31 +114,17 @@ pub struct CommitTask {
     pub commit_id: u64,
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
+    fetched_account: Option<Account>,
 }
 
 impl CommitTask {
     const COMMIT_STATE_SIZE_THRESHOLD: usize = 200;
 
-    pub fn is_commit_diff(&self) -> bool {
-        self.committed_account.account.data.len()
-            > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
-    }
-
-    pub fn create_commit_state_ix(&self, validator: &Pubkey) -> Instruction {
-        let args = CommitStateArgs {
-            nonce: self.commit_id,
-            lamports: self.committed_account.account.lamports,
-            data: self.committed_account.account.data.clone(),
-            allow_undelegation: self.allow_undelegation,
-        };
-        dlp::instruction_builder::commit_state(
-            *validator,
-            self.committed_account.pubkey,
-            self.committed_account.account.owner,
-            args,
-        )
-    }
-    pub fn create_commit_diff_ix(&self, validator: &Pubkey) -> Instruction {
+    pub fn new(
+        commit_id: u64,
+        allow_undelegation: bool,
+        committed_account: CommittedAccount,
+    ) -> Self {
         let chain_config =
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000));
 
@@ -149,26 +135,72 @@ impl CommitTask {
             },
         );
 
-        let account = match rpc_client
-            .get_account(&self.committed_account.pubkey)
+        let fetched_account = if committed_account.account.data.len()
+            > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
         {
-            Ok(account) => account,
-            Err(e) => {
-                log::warn!("Fallback to commit_state and send full-bytes, as rpc failed to fetch the delegated-account from base chain, commmit_id: {} , error: {}", self.commit_id, e);
-                return self.create_commit_state_ix(validator);
-            }
+            rpc_client.get_account(&committed_account.pubkey).ok()
+        } else {
+            None
         };
 
+        Self {
+            commit_id,
+            allow_undelegation,
+            committed_account,
+            fetched_account,
+        }
+    }
+
+    // TODO (snawaz): it is infinitely bad implementation
+    // as it's making a network call, but we'll fix it soon once
+    // we start using caching and fetched accounts.
+    pub fn is_commit_diff(&self) -> bool {
+        self.committed_account.account.data.len()
+            > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
+            && self.fetched_account.is_some()
+    }
+
+    pub fn create_commit_ix(&self, validator: &Pubkey) -> Instruction {
+        if let Some(fetched_account) = self.fetched_account.as_ref() {
+            self.create_commit_diff_ix(validator, fetched_account)
+        } else {
+            self.create_commit_state_ix(validator)
+        }
+    }
+
+    fn create_commit_state_ix(&self, validator: &Pubkey) -> Instruction {
+        let args = CommitStateArgs {
+            nonce: self.commit_id,
+            lamports: self.committed_account.account.lamports,
+            data: self.committed_account.account.data.clone(),
+            allow_undelegation: self.allow_undelegation,
+        };
+        println!("create_commit_state_ix, data: {}", args.data.len());
+        dlp::instruction_builder::commit_state(
+            *validator,
+            self.committed_account.pubkey,
+            self.committed_account.account.owner,
+            args,
+        )
+    }
+
+    fn create_commit_diff_ix(
+        &self,
+        validator: &Pubkey,
+        fetched_account: &Account,
+    ) -> Instruction {
         let args = CommitDiffArgs {
             nonce: self.commit_id,
             lamports: self.committed_account.account.lamports,
             diff: compute_diff(
-                account.data(),
+                fetched_account.data(),
                 self.committed_account.account.data(),
             )
             .to_vec(),
             allow_undelegation: self.allow_undelegation,
         };
+        println!("create_commit_diff_ix, diff: {}", args.diff.len());
+
         dlp::instruction_builder::commit_diff(
             *validator,
             self.committed_account.pubkey,
@@ -382,10 +414,10 @@ mod serialization_safety_test {
         let validator = Pubkey::new_unique();
 
         // Test Commit variant
-        let commit_task: ArgsTask = ArgsTaskType::Commit(CommitTask {
-            commit_id: 123,
-            allow_undelegation: true,
-            committed_account: CommittedAccount {
+        let commit_task: ArgsTask = ArgsTaskType::Commit(CommitTask::new(
+            123,
+            true,
+            CommittedAccount {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
                     lamports: 1000,
@@ -395,7 +427,7 @@ mod serialization_safety_test {
                     rent_epoch: 0,
                 },
             },
-        })
+        ))
         .into();
         assert_serializable(&commit_task.instruction(&validator));
 
@@ -442,10 +474,10 @@ mod serialization_safety_test {
         let validator = Pubkey::new_unique();
 
         let buffer_task = BufferTask::new_preparation_required(
-            BufferTaskType::Commit(CommitTask {
-                commit_id: 456,
-                allow_undelegation: false,
-                committed_account: CommittedAccount {
+            BufferTaskType::Commit(CommitTask::new(
+                456,
+                false,
+                CommittedAccount {
                     pubkey: Pubkey::new_unique(),
                     account: Account {
                         lamports: 2000,
@@ -455,7 +487,7 @@ mod serialization_safety_test {
                         rent_epoch: 0,
                     },
                 },
-            }),
+            )),
         );
         assert_serializable(&buffer_task.instruction(&validator));
     }
@@ -467,10 +499,10 @@ mod serialization_safety_test {
 
         // Test BufferTask preparation
         let buffer_task = BufferTask::new_preparation_required(
-            BufferTaskType::Commit(CommitTask {
-                commit_id: 789,
-                allow_undelegation: true,
-                committed_account: CommittedAccount {
+            BufferTaskType::Commit(CommitTask::new(
+                789,
+                true,
+                CommittedAccount {
                     pubkey: Pubkey::new_unique(),
                     account: Account {
                         lamports: 3000,
@@ -480,7 +512,7 @@ mod serialization_safety_test {
                         rent_epoch: 0,
                     },
                 },
-            }),
+            )),
         );
 
         let PreparationState::Required(preparation_task) =
