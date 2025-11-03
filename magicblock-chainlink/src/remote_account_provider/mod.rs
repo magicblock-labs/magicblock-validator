@@ -248,9 +248,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                 }
 
-                debug!("Updating active subscriptions: count={}", pubsub_total);
+                info!("Updating active subscriptions: count={}", pubsub_total);
                 trace!("All subscriptions: {}", pubkeys_str(&all_pubsub_subs));
-                set_monitored_accounts_count(lru_count);
+                set_monitored_accounts_count(pubsub_total);
             }
         })
     }
