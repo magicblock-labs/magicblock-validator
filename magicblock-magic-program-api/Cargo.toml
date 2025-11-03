@@ -11,4 +11,4 @@ edition.workspace = true
 [dependencies]
 solana-program = ">0"
 bincode = ">0"
-serde = ">0"
+serde = { version = ">0", features = ["derive"] }
