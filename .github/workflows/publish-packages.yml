@@ -1,4 +1,4 @@
-name: Publish ephemeral validator packages
+name: Publish ephemeral validator packages and crates
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -214,3 +214,19 @@ jobs:
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: cargo publish
+        working-directory: magicblock-magic-program-api/
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${DRY_RUN}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+
+          if [ "${DRY_RUN}" = "true" ]; then
+            NO_VERIFY_FLAG="--no-verify"
+          fi      
+          cargo publish $DRY_RUN_FLAG --manifest-path=./Cargo.toml --token $CRATES_TOKEN $NO_VERIFY_FLAG
+        env:
+          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
+          DRY_RUN: ${{ env.DRY_RUN }}
