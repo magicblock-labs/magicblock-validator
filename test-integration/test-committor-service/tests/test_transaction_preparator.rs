@@ -35,11 +35,11 @@ async fn test_prepare_commit_tx_with_single_account() {
     let committed_account = create_committed_account(&account_data);
 
     let tasks = vec![
-        Box::new(ArgsTask::new(ArgsTaskType::Commit(CommitTask {
-            commit_id: 1,
-            committed_account: committed_account.clone(),
-            allow_undelegation: true,
-        }))) as Box<dyn BaseTask>,
+        Box::new(ArgsTask::new(ArgsTaskType::Commit(CommitTask::new(
+            1,
+            true,
+            committed_account.clone(),
+        )))) as Box<dyn BaseTask>,
         Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
         }))),
@@ -89,21 +89,18 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     let account2_data = generate_random_bytes(12);
     let committed_account2 = create_committed_account(&account2_data);
 
-    let buffer_commit_task = BufferTask::new_preparation_required(
-        BufferTaskType::Commit(CommitTask {
-            commit_id: 1,
-            committed_account: committed_account2.clone(),
-            allow_undelegation: true,
-        }),
-    );
+    let buffer_commit_task =
+        BufferTask::new_preparation_required(BufferTaskType::Commit(
+            CommitTask::new(1, true, committed_account2.clone()),
+        ));
     // Create test data
     let tasks = vec![
         // account 1
-        Box::new(ArgsTask::new(ArgsTaskType::Commit(CommitTask {
-            commit_id: 1,
-            committed_account: committed_account1.clone(),
-            allow_undelegation: true,
-        }))) as Box<dyn BaseTask>,
+        Box::new(ArgsTask::new(ArgsTaskType::Commit(CommitTask::new(
+            1,
+            true,
+            committed_account1.clone(),
+        )))) as Box<dyn BaseTask>,
         // account 2
         Box::new(buffer_commit_task),
         // finalize account 1
@@ -186,13 +183,10 @@ async fn test_prepare_commit_tx_with_base_actions() {
         }],
     };
 
-    let buffer_commit_task = BufferTask::new_preparation_required(
-        BufferTaskType::Commit(CommitTask {
-            commit_id: 1,
-            committed_account: committed_account.clone(),
-            allow_undelegation: true,
-        }),
-    );
+    let buffer_commit_task =
+        BufferTask::new_preparation_required(BufferTaskType::Commit(
+            CommitTask::new(1, true, committed_account.clone()),
+        ));
     let tasks = vec![
         // commit account
         Box::new(buffer_commit_task.clone()) as Box<dyn BaseTask>,

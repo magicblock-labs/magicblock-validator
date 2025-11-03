@@ -113,7 +113,7 @@ impl ScheduleCommitTestContext {
                 )
                 .unwrap();
                 let (pda, _bump) = Pubkey::find_program_address(
-                    &[user_seed, &payer_ephem.pubkey().as_ref()],
+                    &[user_seed, payer_ephem.pubkey().as_ref()],
                     &program_schedulecommit::ID,
                 );
                 (payer_ephem, pda)
