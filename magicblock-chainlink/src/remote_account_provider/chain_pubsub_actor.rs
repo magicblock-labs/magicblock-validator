@@ -7,7 +7,6 @@ use std::{
 use log::*;
 use solana_account_decoder_client_types::{UiAccount, UiAccountEncoding};
 use solana_pubkey::Pubkey;
-use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::{
     config::RpcAccountInfoConfig, response::Response as RpcResponse,
 };
@@ -16,10 +15,14 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
-use super::errors::{RemoteAccountProviderError, RemoteAccountProviderResult};
+use super::{
+    chain_pubsub_client::PubSubConnection,
+    errors::{RemoteAccountProviderError, RemoteAccountProviderResult},
+};
 
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
+const MAX_SUBSCRIBE_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone)]
 pub struct PubsubClientConfig {
@@ -65,16 +68,16 @@ struct AccountSubscription {
 pub struct ChainPubsubActor {
     /// Configuration used to create the pubsub client
     pubsub_client_config: PubsubClientConfig,
-    /// Underlying pubsub client to connect to the chain
-    pubsub_client: Arc<PubsubClient>,
+    /// Underlying pubsub connection to connect to the chain
+    pubsub_connection: Arc<PubSubConnection>,
     /// Sends subscribe/unsubscribe messages to this actor
     messages_sender: mpsc::Sender<ChainPubsubActorMessage>,
     /// Map of subscriptions we are holding
     subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
     /// Sends updates for any account subscription that is received via
-    /// the [Self::pubsub_client]
+    /// the [Self::pubsub_connection]
     subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
-    /// The tasks that watch subscriptions via the [Self::pubsub_client] and
+    /// The tasks that watch subscriptions via the [Self::pubsub_connection] and
     /// channel them into the [Self::subscription_updates_sender]
     subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
     /// The token to use to cancel all subscriptions and shut down the
@@ -90,9 +93,6 @@ pub enum ChainPubsubActorMessage {
     },
     AccountUnsubscribe {
         pubkey: Pubkey,
-        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-    },
-    RecycleConnections {
         response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     },
 }
@@ -114,9 +114,8 @@ impl ChainPubsubActor {
         pubsub_client_config: PubsubClientConfig,
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
-        let pubsub_client = Arc::new(
-            PubsubClient::new(pubsub_client_config.pubsub_url.as_str()).await?,
-        );
+        let url = pubsub_client_config.pubsub_url.clone();
+        let pubsub_connection = Arc::new(PubSubConnection::new(url).await?);
 
         let (subscription_updates_sender, subscription_updates_receiver) =
             mpsc::channel(SUBSCRIPTION_UPDATE_CHANNEL_SIZE);
@@ -127,7 +126,7 @@ impl ChainPubsubActor {
         let shutdown_token = CancellationToken::new();
         let me = Self {
             pubsub_client_config,
-            pubsub_client,
+            pubsub_connection,
             messages_sender,
             subscriptions: Default::default(),
             subscription_updates_sender,
@@ -202,15 +201,15 @@ impl ChainPubsubActor {
         let pubsub_client_config = self.pubsub_client_config.clone();
         let subscription_updates_sender =
             self.subscription_updates_sender.clone();
-        let mut pubsub_client = self.pubsub_client.clone();
+        let pubsub_connection = self.pubsub_connection.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     msg = messages_receiver.recv() => {
                         if let Some(msg) = msg {
-                            pubsub_client = Self::handle_msg(
+                            Self::handle_msg(
                                 subs.clone(),
-                                pubsub_client.clone(),
+                                pubsub_connection.clone(),
                                 subscription_watchers.clone(),
                                 subscription_updates_sender.clone(),
                                 pubsub_client_config.clone(),
@@ -230,12 +229,12 @@ impl ChainPubsubActor {
 
     async fn handle_msg(
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-        pubsub_client: Arc<PubsubClient>,
+        pubsub_connection: Arc<PubSubConnection>,
         subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         pubsub_client_config: PubsubClientConfig,
         msg: ChainPubsubActorMessage,
-    ) -> Arc<PubsubClient> {
+    ) {
         match msg {
             ChainPubsubActorMessage::AccountSubscribe { pubkey, response } => {
                 let commitment_config = pubsub_client_config.commitment_config;
@@ -243,12 +242,11 @@ impl ChainPubsubActor {
                     pubkey,
                     response,
                     subscriptions,
-                    pubsub_client.clone(),
+                    pubsub_connection,
                     subscription_watchers,
                     subscription_updates_sender,
                     commitment_config,
                 );
-                pubsub_client
             }
             ChainPubsubActorMessage::AccountUnsubscribe {
                 pubkey,
@@ -263,30 +261,10 @@ impl ChainPubsubActor {
                     cancellation_token.cancel();
                     let _ = response.send(Ok(()));
                 } else {
-                    let _  = response
+                    let _ = response
                         .send(Err(RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
                             pubkey.to_string(),
                         )));
-                }
-                pubsub_client
-            }
-            ChainPubsubActorMessage::RecycleConnections { response } => {
-                match Self::recycle_connections(
-                    subscriptions,
-                    subscription_watchers,
-                    subscription_updates_sender,
-                    pubsub_client_config,
-                )
-                .await
-                {
-                    Ok(new_client) => {
-                        let _ = response.send(Ok(()));
-                        new_client
-                    }
-                    Err(err) => {
-                        let _ = response.send(Err(err));
-                        pubsub_client
-                    }
                 }
             }
         }
@@ -296,7 +274,7 @@ impl ChainPubsubActor {
         pubkey: Pubkey,
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
         subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-        pubsub_client: Arc<PubsubClient>,
+        pubsub_connection: Arc<PubSubConnection>,
         subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         commitment_config: CommitmentConfig,
@@ -334,6 +312,7 @@ impl ChainPubsubActor {
         let mut sub_joinset = subscription_watchers
             .lock()
             .expect("subscription_watchers lock poisoned");
+        let subscription_watchers = subscription_watchers.clone();
         sub_joinset.spawn(async move {
             let config = RpcAccountInfoConfig {
                 commitment: Some(commitment_config),
@@ -341,14 +320,33 @@ impl ChainPubsubActor {
                 ..Default::default()
             };
             // Attempt to subscribe to the account
-            let (mut update_stream, unsubscribe) = match pubsub_client
-                .account_subscribe(&pubkey, Some(config.clone()))
-                .await {
-                Ok(res) => res,
-                Err(err) => {
-                    // RPC failed - remove from subscriptions and notify failure
+            let mut attempts = 1;
+            let (mut update_stream, unsubscribe) = loop {
+                let res = pubsub_connection.account_subscribe(&pubkey, config.clone());
+                match res.await {
+                    Ok(res) => break res,
+                    Err(err) => {
+                        if attempts == MAX_SUBSCRIBE_ATTEMPTS {
+                            // At this point we just give up and report to caller
+                            subs.lock().expect("subscriptions lock poisoned").remove(&pubkey);
+                            let _ = sub_response.send(Err(err.into()));
+                            return;
+                        }
+                        attempts += 1;
+                    }
+                }
+                // When the subscription attempt failed but we did not yet run out of retries
+                // attempt to recreate the connection with all of its subscriptions
+                let res = Self::recycle_connection(
+                    pubsub_connection.clone(),
+                    subs.clone(),
+                    subscription_watchers.clone(),
+                    subscription_updates_sender.clone(),
+                    commitment_config,
+                );
+                if let Err(err) = res.await {
                     subs.lock().expect("subscriptions lock poisoned").remove(&pubkey);
-                    let _ = sub_response.send(Err(err.into()));
+                    let _ = sub_response.send(Err(err));
                     return;
                 }
             };
@@ -390,31 +388,27 @@ impl ChainPubsubActor {
         });
     }
 
-    async fn recycle_connections(
+    async fn recycle_connection(
+        pubsub_connection: Arc<PubSubConnection>,
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
-        pubsub_client_config: PubsubClientConfig,
-    ) -> RemoteAccountProviderResult<Arc<PubsubClient>> {
+        commitment: CommitmentConfig,
+    ) -> RemoteAccountProviderResult<()> {
         debug!("RecycleConnections: starting recycle process");
 
-        // 1. Recreate the pubsub client, in case that fails leave the old one in place
-        //    as this is the best we can do
+        // 1. Recreate the pubsub connection, in case that fails leave it be, as there's not much that can be done about it, next subscription attempt will try to reconnect again
         debug!(
-            "RecycleConnections: creating new PubsubClient for {}",
-            pubsub_client_config.pubsub_url
+            "RecycleConnections: creating ws connection for {}",
+            pubsub_connection.url()
         );
-        let new_client = match PubsubClient::new(
-            pubsub_client_config.pubsub_url.as_str(),
-        )
-        .await
-        {
-            Ok(c) => Arc::new(c),
-            Err(err) => {
-                error!("RecycleConnections: failed to create new PubsubClient: {err:?}");
-                return Err(err.into());
-            }
-        };
+
+        if let Err(err) = pubsub_connection.reconnect().await {
+            error!(
+                "RecycleConnections: failed to create ws connection: {err:?}"
+            );
+            return Err(err.into());
+        }
 
         // Cancel all current subscriptions and collect pubkeys to re-subscribe later
         let drained = {
@@ -448,22 +442,21 @@ impl ChainPubsubActor {
             "RecycleConnections: re-subscribing to {} accounts",
             to_resubscribe.len()
         );
-        let commitment_config = pubsub_client_config.commitment_config;
         for pk in to_resubscribe {
             let (tx, _rx) = oneshot::channel();
             Self::add_sub(
                 pk,
                 tx,
                 subscriptions.clone(),
-                new_client.clone(),
+                pubsub_connection.clone(),
                 subscription_watchers.clone(),
                 subscription_updates_sender.clone(),
-                commitment_config,
+                commitment,
             );
         }
 
         debug!("RecycleConnections: completed");
 
-        Ok(new_client)
+        Ok(())
     }
 }

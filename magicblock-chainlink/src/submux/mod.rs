@@ -18,7 +18,6 @@ use crate::remote_account_provider::{
 const SUBMUX_OUT_CHANNEL_SIZE: usize = 5_000;
 const DEDUP_WINDOW_MILLIS: u64 = 2_000;
 const DEBOUNCE_INTERVAL_MILLIS: u64 = 2_000;
-const DEFAULT_RECYCLE_INTERVAL_MILLIS: u64 = 3_600_000;
 
 mod debounce_state;
 pub use self::debounce_state::DebounceState;
@@ -128,20 +127,6 @@ pub struct SubMuxClient<T: ChainPubsubClient> {
     never_debounce: HashSet<Pubkey>,
 }
 
-/// Configuration for SubMuxClient
-#[derive(Debug, Clone, Default)]
-pub struct SubMuxClientConfig {
-    /// The deduplication window in milliseconds.
-    pub dedupe_window_millis: Option<u64>,
-    /// The debounce interval in milliseconds.
-    pub debounce_interval_millis: Option<u64>,
-    /// The debounce detection window in milliseconds.
-    pub debounce_detection_window_millis: Option<u64>,
-    /// Interval (millis) at which to recycle inner client connections.
-    /// If None, defaults to DEFAULT_RECYCLE_INTERVAL_MILLIS.
-    pub recycle_interval_millis: Option<u64>,
-}
-
 // Parameters for the long-running forwarder loop, grouped to avoid
 // clippy::too_many_arguments and to keep spawn sites concise.
 struct ForwarderParams {
@@ -172,13 +157,12 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
         clients: Vec<Arc<T>>,
         config: DebounceConfig,
     ) -> Self {
-        Self::new_with_configs(clients, config, SubMuxClientConfig::default())
+        Self::new_with_config(clients, config)
     }
 
-    pub fn new_with_configs(
+    pub fn new_with_config(
         clients: Vec<Arc<T>>,
         config: DebounceConfig,
-        mux_config: SubMuxClientConfig,
     ) -> Self {
         let (out_tx, out_rx) = mpsc::channel(SUBMUX_OUT_CHANNEL_SIZE);
         let dedup_cache = Arc::new(Mutex::new(HashMap::new()));
@@ -212,7 +196,6 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
         // Spawn background tasks
         me.spawn_dedup_pruner();
         me.spawn_debounce_flusher();
-        me.maybe_spawn_connection_recycler(mux_config.recycle_interval_millis);
         me
     }
 
@@ -273,34 +256,6 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
                 for update in to_forward {
                     let _ = out_tx.send(update).await;
                 }
-            }
-        });
-    }
-
-    fn maybe_spawn_connection_recycler(
-        &self,
-        recycle_interval_millis: Option<u64>,
-    ) {
-        // Disabled when the interval is explicitly Some(0)
-        if recycle_interval_millis == Some(0) {
-            return;
-        }
-        let recycle_clients = self.clients.clone();
-        let interval = Duration::from_millis(
-            recycle_interval_millis.unwrap_or(DEFAULT_RECYCLE_INTERVAL_MILLIS),
-        );
-        tokio::spawn(async move {
-            let mut idx: usize = 0;
-            loop {
-                tokio::time::sleep(interval).await;
-                if recycle_clients.is_empty() {
-                    continue;
-                }
-                let len = recycle_clients.len();
-                let i = idx % len;
-                idx = (idx + 1) % len;
-                let client = recycle_clients[i].clone();
-                client.recycle_connections().await;
             }
         });
     }
@@ -516,14 +471,6 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
 
 #[async_trait]
 impl<T: ChainPubsubClient> ChainPubsubClient for SubMuxClient<T> {
-    async fn recycle_connections(&self) {
-        // This recycles all inner clients which may not always make
-        // sense. Thus we don't expect this call on the Multiplexer itself.
-        for client in &self.clients {
-            client.recycle_connections().await;
-        }
-    }
-
     async fn subscribe(
         &self,
         pubkey: Pubkey,
@@ -1167,65 +1114,6 @@ mod tests {
             let received = drain_slots(&mut mux_rx, 800).await;
             assert_eq!(received.len(), 10, "no updates should be debounced");
         }
-
-        mux.shutdown().await;
-    }
-
-    // -----------------
-    // Connection recycling
-    // -----------------
-    async fn setup_recycling(
-        interval_millis: Option<u64>,
-    ) -> (
-        SubMuxClient<ChainPubsubClientMock>,
-        Arc<ChainPubsubClientMock>,
-        Arc<ChainPubsubClientMock>,
-        Arc<ChainPubsubClientMock>,
-    ) {
-        init_logger();
-        let (tx1, rx1) = mpsc::channel(1);
-        let (tx2, rx2) = mpsc::channel(1);
-        let (tx3, rx3) = mpsc::channel(1);
-        let c1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
-        let c2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
-        let c3 = Arc::new(ChainPubsubClientMock::new(tx3, rx3));
-
-        let mux: SubMuxClient<ChainPubsubClientMock> =
-            SubMuxClient::new_with_configs(
-                vec![c1.clone(), c2.clone(), c3.clone()],
-                DebounceConfig::default(),
-                SubMuxClientConfig {
-                    recycle_interval_millis: interval_millis,
-                    ..SubMuxClientConfig::default()
-                },
-            );
-
-        (mux, c1, c2, c3)
-    }
-    #[tokio::test]
-    async fn test_connection_recycling_enabled() {
-        let (mux, c1, c2, c3) = setup_recycling(Some(50)).await;
-
-        // allow 4 intervals (at ~50ms each) -> calls: c1,c2,c3,c1
-        tokio::time::sleep(Duration::from_millis(220)).await;
-
-        assert_eq!(c1.recycle_calls(), 2);
-        assert_eq!(c2.recycle_calls(), 1);
-        assert_eq!(c3.recycle_calls(), 1);
-
-        mux.shutdown().await;
-    }
-
-    #[tokio::test]
-    async fn test_connection_recycling_disabled() {
-        let (mux, c1, c2, c3) = setup_recycling(Some(0)).await;
-
-        // wait enough time to ensure it would have recycled if enabled
-        tokio::time::sleep(Duration::from_millis(220)).await;
-
-        assert_eq!(c1.recycle_calls(), 0);
-        assert_eq!(c2.recycle_calls(), 0);
-        assert_eq!(c3.recycle_calls(), 0);
 
         mux.shutdown().await;
     }

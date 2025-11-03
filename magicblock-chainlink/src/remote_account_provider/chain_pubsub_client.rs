@@ -1,10 +1,24 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    mem,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
+use futures_util::{future::BoxFuture, stream::BoxStream};
 use log::*;
+use solana_account_decoder::UiAccount;
 use solana_pubkey::Pubkey;
+use solana_pubsub_client::nonblocking::pubsub_client::{
+    PubsubClient, PubsubClientResult,
+};
+use solana_rpc_client_api::{config::RpcAccountInfoConfig, response::Response};
 use solana_sdk::commitment_config::CommitmentConfig;
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot, Mutex as AsyncMutex},
+    time,
+};
 
 use super::{
     chain_pubsub_actor::{
@@ -12,6 +26,90 @@ use super::{
     },
     errors::RemoteAccountProviderResult,
 };
+
+type UnsubscribeFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
+type SubscribeResult = PubsubClientResult<(
+    BoxStream<'static, Response<UiAccount>>,
+    UnsubscribeFn,
+)>;
+
+const MAX_RECONNECT_ATTEMPTS: usize = 5;
+const RECONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(500);
+
+pub struct PubSubConnection {
+    client: ArcSwap<PubsubClient>,
+    url: String,
+    reconnect_guard: AsyncMutex<()>,
+}
+
+impl PubSubConnection {
+    pub async fn new(url: String) -> RemoteAccountProviderResult<Self> {
+        let client = Arc::new(PubsubClient::new(&url).await?).into();
+        let reconnect_guard = AsyncMutex::new(());
+        Ok(Self {
+            client,
+            url,
+            reconnect_guard,
+        })
+    }
+
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    pub async fn account_subscribe(
+        &self,
+        pubkey: &Pubkey,
+        config: RpcAccountInfoConfig,
+    ) -> SubscribeResult {
+        let client = self.client.load();
+        let config = Some(config.clone());
+        let (stream, unsub) = client.account_subscribe(pubkey, config).await?;
+        // SAFETY:
+        // the returned stream depends on the used client, which is only ever dropped
+        // if the connection has been terminated, at which point the stream is useless
+        // and will be discarded as well, thus it's safe lifetime extension to 'static
+        let stream = unsafe {
+            mem::transmute::<
+                BoxStream<'_, Response<UiAccount>>,
+                BoxStream<'static, Response<UiAccount>>,
+            >(stream)
+        };
+        Ok((stream, unsub))
+    }
+
+    pub async fn reconnect(&self) -> PubsubClientResult<()> {
+        // Prevents multiple reconnect attempts running concurrently
+        let _guard = match self.reconnect_guard.try_lock() {
+            Ok(g) => g,
+            // Reconnect is already in progress
+            Err(_) => {
+                // Wait a bit and return to retry subscription
+                time::sleep(RECONNECT_ATTEMPT_DELAY).await;
+                return Ok(());
+            }
+        };
+        let mut attempt = 1;
+        let client = loop {
+            match PubsubClient::new(&self.url).await {
+                Ok(c) => break Arc::new(c),
+                Err(error) => {
+                    warn!(
+                        "failed to reconnect to ws endpoint at {} {error}",
+                        self.url
+                    );
+                    if attempt == MAX_RECONNECT_ATTEMPTS {
+                        return Err(error);
+                    }
+                    attempt += 1;
+                    time::sleep(RECONNECT_ATTEMPT_DELAY).await;
+                }
+            }
+        };
+        self.client.store(client);
+        Ok(())
+    }
+}
 
 // -----------------
 // Trait
@@ -27,7 +125,6 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()>;
     async fn shutdown(&self);
-    async fn recycle_connections(&self);
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate>;
 
@@ -70,38 +167,6 @@ impl ChainPubsubClientImpl {
 impl ChainPubsubClient for ChainPubsubClientImpl {
     async fn shutdown(&self) {
         self.actor.shutdown().await;
-    }
-
-    async fn recycle_connections(&self) {
-        // Fire a recycle request to the actor and await the acknowledgement.
-        // If recycle fails there is nothing the caller could do, so we log an error instead
-        let (tx, rx) = oneshot::channel();
-        if let Err(err) = self
-            .actor
-            .send_msg(ChainPubsubActorMessage::RecycleConnections {
-                response: tx,
-            })
-            .await
-        {
-            error!(
-                "ChainPubsubClientImpl::recycle_connections: failed to send RecycleConnections: {err:?}"
-            );
-            return;
-        }
-        let res = match rx.await {
-            Ok(r) => r,
-            Err(err) => {
-                error!(
-                    "ChainPubsubClientImpl::recycle_connections: actor dropped recycle ack: {err:?}"
-                );
-                return;
-            }
-        };
-        if let Err(err) = res {
-            error!(
-                "ChainPubsubClientImpl::recycle_connections: recycle failed: {err:?}"
-            );
-        }
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
@@ -169,13 +234,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 // -----------------
 #[cfg(any(test, feature = "dev-context"))]
 pub mod mock {
-    use std::{
-        collections::HashSet,
-        sync::{
-            atomic::{AtomicU64, Ordering},
-            Mutex,
-        },
-    };
+    use std::{collections::HashSet, sync::Mutex};
 
     use log::*;
     use solana_account::Account;
@@ -192,7 +251,6 @@ pub mod mock {
         updates_sndr: mpsc::Sender<SubscriptionUpdate>,
         updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
         subscribed_pubkeys: Arc<Mutex<HashSet<Pubkey>>>,
-        recycle_calls: Arc<AtomicU64>,
     }
 
     impl ChainPubsubClientMock {
@@ -204,12 +262,7 @@ pub mod mock {
                 updates_sndr,
                 updates_rcvr: Arc::new(Mutex::new(Some(updates_rcvr))),
                 subscribed_pubkeys: Arc::new(Mutex::new(HashSet::new())),
-                recycle_calls: Arc::new(AtomicU64::new(0)),
             }
-        }
-
-        pub fn recycle_calls(&self) -> u64 {
-            self.recycle_calls.load(Ordering::SeqCst)
         }
 
         async fn send(&self, update: SubscriptionUpdate) {
@@ -253,10 +306,6 @@ pub mod mock {
 
     #[async_trait]
     impl ChainPubsubClient for ChainPubsubClientMock {
-        async fn recycle_connections(&self) {
-            self.recycle_calls.fetch_add(1, Ordering::SeqCst);
-        }
-
         fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
             // SAFETY: This can only be None if `take_updates` is called more
             // than once (double take). That would indicate a logic bug in the

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+arc-swap = "1.7"
 async-trait = { workspace = true }
 bincode = { workspace = true }
 env_logger = { workspace = true }
