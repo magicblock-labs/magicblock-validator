@@ -28,6 +28,7 @@ use super::{
 
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
+const MAX_SUBSCRIBE_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone)]
 pub struct PubsubClientConfig {
