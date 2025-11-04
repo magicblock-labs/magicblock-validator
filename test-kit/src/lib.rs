@@ -80,7 +80,7 @@ impl ExecutionTestEnv {
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
     pub fn new() -> Self {
-        Self::new_with_fee(Self::BASE_FEE, false)
+        Self::new_with_config(Self::BASE_FEE, 1, false)
     }
 
     /// Creates a new, fully initialized validator test environment with given base fee
@@ -91,7 +91,11 @@ impl ExecutionTestEnv {
     /// 3.  Spawns a `TransactionScheduler` with one worker thread.
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
-    pub fn new_with_fee(fee: u64, defer_startup: bool) -> Self {
+    pub fn new_with_config(
+        fee: u64,
+        executors: u32,
+        defer_startup: bool,
+    ) -> Self {
         init_logger!();
         let dir =
             tempfile::tempdir().expect("creating temp dir for validator state");
@@ -136,7 +140,7 @@ impl ExecutionTestEnv {
             .expect("failed to load test programs into test env");
 
         // Start/Defer the transaction processing backend.
-        let scheduler = TransactionScheduler::new(1, scheduler_state);
+        let scheduler = TransactionScheduler::new(executors, scheduler_state);
         if defer_startup {
             this.scheduler.replace(scheduler);
         } else {
