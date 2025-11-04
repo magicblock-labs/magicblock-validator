@@ -1,5 +1,0 @@
-error: Merge can only be derived for structs with named fields
- --> tests/fixtures/fail_merge_unnamed.rs:4:18
-  |
-4 | struct TestConfig(u64, String);
-  |                  ^^^^^^^^^^^^^
