@@ -19,8 +19,8 @@ use magicblock_rpc_client::{
         decide_rpc_error_flow, map_magicblock_client_error,
         send_transaction_with_retries, SendErrorMapper, TransactionErrorMapper,
     },
-    MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
-    MagicblockRpcClient,
+    MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
+    MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
 use solana_pubkey::Pubkey;
 use solana_sdk::{
@@ -676,6 +676,59 @@ where
         )
         .await
     }
+
+    async fn intent_metrics(
+        rpc_client: MagicblockRpcClient,
+        execution_outcome: ExecutionOutput,
+    ) {
+        use solana_transaction_status_client_types::EncodedTransactionWithStatusMeta;
+        fn extract_cu(tx: EncodedTransactionWithStatusMeta) -> Option<u64> {
+            let cu = tx.meta?.compute_units_consumed;
+            cu.into()
+        }
+
+        let cu_metrics = || async {
+            match execution_outcome {
+                ExecutionOutput::SingleStage(signature) => {
+                    let tx =
+                        rpc_client.get_transaction(&signature, None).await?;
+                    Ok::<_, MagicBlockRpcClientError>(extract_cu(
+                        tx.transaction,
+                    ))
+                }
+                ExecutionOutput::TwoStage {
+                    commit_signature,
+                    finalize_signature,
+                } => {
+                    let commit_tx = rpc_client
+                        .get_transaction(&commit_signature, None)
+                        .await?;
+                    let finalize_tx = rpc_client
+                        .get_transaction(&finalize_signature, None)
+                        .await?;
+                    let commit_cu = extract_cu(commit_tx.transaction);
+                    let finalize_cu = extract_cu(finalize_tx.transaction);
+                    let (Some(commit_cu), Some(finalize_cu)) =
+                        (commit_cu, finalize_cu)
+                    else {
+                        return Ok(None);
+                    };
+                    Ok(Some(commit_cu + finalize_cu))
+                }
+            }
+        };
+
+        match cu_metrics().await {
+            Ok(Some(cu)) => metrics::set_commmittor_intent_cu_usage(
+                i64::try_from(cu).unwrap_or(i64::MAX),
+            ),
+            Err(err) => warn!(
+                "Failed to fetch CUs for intent: {:?}. {:?}",
+                err, execution_outcome
+            ),
+            _ => {}
+        }
+    }
 }
 
 #[async_trait]
@@ -705,8 +758,12 @@ where
             // Write result of intent into Persister
             Self::persist_result(&persister, &result, message_id, &pubkeys);
         }
-
-        result
+        result.inspect(|output| {
+            tokio::spawn(Self::intent_metrics(
+                self.rpc_client.clone(),
+                *output,
+            ));
+        })
     }
 }
 

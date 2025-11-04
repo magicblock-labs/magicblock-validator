@@ -184,7 +184,7 @@ lazy_static::lazy_static! {
 
     static ref COMMITTOR_FAILED_INTENTS_COUNT: IntCounterVec = IntCounterVec::new(
         Opts::new("committor_failed_intents_count", "Number of failed to be executed intents"),
-        &["error_kind"]
+        &["intent_kind", "error_kind"]
     ).unwrap();
 
     static ref COMMITTOR_EXECUTORS_BUSY_COUNT: IntGauge = IntGauge::new(
@@ -203,6 +203,10 @@ lazy_static::lazy_static! {
             .chain(SECONDS_1_9.iter()).cloned().collect(),
         ),
         &["intent_kind", "outcome_kind"],
+    ).unwrap();
+
+    static ref COMMITTOR_INTENT_CU_USAGE: IntGauge = IntGauge::new(
+        "committor_intent_cu_usage", "Compute units used for Intent"
     ).unwrap();
 }
 
@@ -335,9 +339,12 @@ pub fn set_committor_intents_backlog_count(value: i64) {
     COMMITTOR_INTENTS_BACKLOG_COUNT.set(value)
 }
 
-pub fn inc_committor_failed_intents_count(error_kind: &impl LabelValue) {
+pub fn inc_committor_failed_intents_count(
+    intent_kind: &impl LabelValue,
+    error_kind: &impl LabelValue,
+) {
     COMMITTOR_FAILED_INTENTS_COUNT
-        .with_label_values(&[error_kind.value()])
+        .with_label_values(&[intent_kind.value(), error_kind.value()])
         .inc()
 }
 
@@ -353,4 +360,8 @@ pub fn observe_committor_intent_execution_time_histogram(
     COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM
         .with_label_values(&[kind.value(), outcome.value()])
         .observe(seconds);
+}
+
+pub fn set_commmittor_intent_cu_usage(value: i64) {
+    COMMITTOR_INTENT_CU_USAGE.set(value)
 }

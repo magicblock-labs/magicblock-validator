@@ -1,6 +1,6 @@
 use std::{
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
@@ -257,32 +257,7 @@ where
             });
 
         // Metrics
-        {
-            let intent_execution_secs = instant.elapsed().as_secs_f64();
-            metrics::observe_committor_intent_execution_time_histogram(
-                intent_execution_secs,
-                &intent,
-                &result,
-            );
-            if intent_execution_secs >= 2.0 {
-                info!(
-                    "Intent took too long to execute: {}s. {}",
-                    intent_execution_secs,
-                    result
-                        .as_ref()
-                        .map(|_| "succeeded".to_string())
-                        .unwrap_or_else(|err| format!("{err:?}"))
-                );
-            } else {
-                trace!(
-                    "Seconds took to execute intent: {}",
-                    intent_execution_secs
-                );
-            }
-            if let Err(ref err) = result {
-                metrics::inc_committor_failed_intents_count(err);
-            }
-        }
+        Self::execution_metrics(instant.elapsed(), &intent, &result);
 
         let result = result
             .map(|output| ExecutionOutputWrapper {
@@ -311,6 +286,45 @@ where
 
         // Free worker
         drop(execution_permit);
+    }
+
+    /// Records metrics related to intent execution
+    fn execution_metrics(
+        execution_time: Duration,
+        intent: &ScheduledBaseIntentWrapper,
+        result: &IntentExecutorResult<ExecutionOutput>,
+    ) {
+        let intent_execution_secs = execution_time.as_secs_f64();
+        metrics::observe_committor_intent_execution_time_histogram(
+            intent_execution_secs,
+            intent,
+            result,
+        );
+        if let Err(ref err) = result {
+            metrics::inc_committor_failed_intents_count(intent, err);
+        }
+
+        // Loki alerts
+        if intent_execution_secs >= 2.0 {
+            info!(
+                "Intent took too long to execute: {}s. {}",
+                intent_execution_secs,
+                result
+                    .as_ref()
+                    .map(|_| "succeeded".to_string())
+                    .unwrap_or_else(|err| format!("{err:?}"))
+            );
+        } else {
+            trace!("Seconds took to execute intent: {}", intent_execution_secs);
+        }
+
+        // Alert
+        if intent.is_undelegate() && result.is_err() {
+            warn!(
+                "Intent execution resulted in stuck accounts: {:?}",
+                intent.get_committed_pubkeys()
+            );
+        }
     }
 }
 
