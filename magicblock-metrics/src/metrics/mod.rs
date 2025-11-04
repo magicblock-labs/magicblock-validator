@@ -5,7 +5,8 @@ use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
     IntGauge, IntGaugeVec, Opts, Registry,
 };
-pub use types::{AccountClone, AccountCommit, Outcome};
+pub use types::{AccountClone, AccountCommit, LabelValue, Outcome};
+
 mod types;
 
 // -----------------
@@ -181,12 +182,31 @@ lazy_static::lazy_static! {
         "committor_intent_backlog_count", "Number of intents in backlog",
     ).unwrap();
 
-    static ref COMMITTOR_FAILED_INTENTS_COUNT: IntCounter = IntCounter::new(
-        "committor_failed_intents_count", "Number of failed to be executed intents",
+    static ref COMMITTOR_FAILED_INTENTS_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new("committor_failed_intents_count", "Number of failed to be executed intents"),
+        &["intent_kind", "error_kind"]
     ).unwrap();
 
     static ref COMMITTOR_EXECUTORS_BUSY_COUNT: IntGauge = IntGauge::new(
         "committor_executors_busy_count", "Number of busy intent executors"
+    ).unwrap();
+
+    static ref COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM: HistogramVec = HistogramVec::new(
+        HistogramOpts::new(
+            "committor_intent_execution_time_histogram",
+            "Time in seconds spent on intent execution"
+        )
+        .buckets(
+            MILLIS_1_9.iter()
+            .chain(MILLIS_10_90.iter())
+            .chain(MILLIS_100_900.iter())
+            .chain(SECONDS_1_9.iter()).cloned().collect(),
+        ),
+        &["intent_kind", "outcome_kind"],
+    ).unwrap();
+
+    static ref COMMITTOR_INTENT_CU_USAGE: IntGauge = IntGauge::new(
+        "committor_intent_cu_usage", "Compute units used for Intent"
     ).unwrap();
 }
 
@@ -223,6 +243,8 @@ pub(crate) fn register() {
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
         register!(COMMITTOR_EXECUTORS_BUSY_COUNT);
+        register!(COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM);
+        register!(COMMITTOR_INTENT_CU_USAGE);
         register!(ENSURE_ACCOUNTS_TIME);
         register!(RPC_REQUEST_HANDLING_TIME);
         register!(TRANSACTION_PROCESSING_TIME);
@@ -318,10 +340,29 @@ pub fn set_committor_intents_backlog_count(value: i64) {
     COMMITTOR_INTENTS_BACKLOG_COUNT.set(value)
 }
 
-pub fn inc_committor_failed_intents_count() {
-    COMMITTOR_FAILED_INTENTS_COUNT.inc()
+pub fn inc_committor_failed_intents_count(
+    intent_kind: &impl LabelValue,
+    error_kind: &impl LabelValue,
+) {
+    COMMITTOR_FAILED_INTENTS_COUNT
+        .with_label_values(&[intent_kind.value(), error_kind.value()])
+        .inc()
 }
 
 pub fn set_committor_executors_busy_count(value: i64) {
     COMMITTOR_EXECUTORS_BUSY_COUNT.set(value)
+}
+
+pub fn observe_committor_intent_execution_time_histogram(
+    seconds: f64,
+    kind: &impl LabelValue,
+    outcome: &impl LabelValue,
+) {
+    COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM
+        .with_label_values(&[kind.value(), outcome.value()])
+        .observe(seconds);
+}
+
+pub fn set_commmittor_intent_cu_usage(value: i64) {
+    COMMITTOR_INTENT_CU_USAGE.set(value)
 }

@@ -1,4 +1,5 @@
 use log::error;
+use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
     utils::TransactionErrorMapper, MagicBlockRpcClientError,
 };
@@ -96,6 +97,17 @@ impl IntentExecutorError {
             TransactionStrategyExecutionError::InternalError(err) => {
                 converter(err)
             }
+        }
+    }
+}
+
+impl metrics::LabelValue for IntentExecutorError {
+    fn value(&self) -> &str {
+        match self {
+            IntentExecutorError::ActionsError(_, _) => "actions_failed",
+            IntentExecutorError::CpiLimitError(_, _) => "cpi_limit_failed",
+            IntentExecutorError::CommitIDError(_, _) => "commit_nonce_failed",
+            _ => "failed",
         }
     }
 }
