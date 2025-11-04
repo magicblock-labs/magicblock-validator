@@ -132,16 +132,8 @@ impl BaseTask for ArgsTask {
                 )))
             }
             ArgsTaskType::CommitDiff(value) => {
-                // TODO (snawaz): Currently, we do not support executing CommitDiff
-                // as BufferTask, which is why we're forcing CommitDiffTask to become CommitTask
-                // before converting this task into BufferTask. Once CommitDiff is supported
-                // by BufferTask, we do not have to do this, as it's essentially a downgrade.
                 Ok(Box::new(BufferTask::new_preparation_required(
-                    BufferTaskType::Commit(CommitTask {
-                        commit_id: value.commit_id,
-                        allow_undelegation: value.allow_undelegation,
-                        committed_account: value.committed_account,
-                    }),
+                    BufferTaskType::CommitDiff(value),
                 )))
             }
             ArgsTaskType::BaseAction(_)
