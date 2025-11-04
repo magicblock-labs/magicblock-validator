@@ -6,6 +6,7 @@
 
 use std::collections::VecDeque;
 
+use log::warn;
 use magicblock_core::link::transactions::ProcessableTransaction;
 
 use super::locks::{
@@ -72,6 +73,7 @@ impl ExecutionCoordinator {
         &mut self,
         mut blocker_id: u32,
         transaction: TransactionWithId,
+        prioritize: bool,
     ) {
         // A `blocker_id` greater than `MAX_SVM_EXECUTORS` is a `TransactionId`
         // of another waiting transaction. We must resolve it to the actual executor.
@@ -82,15 +84,22 @@ impl ExecutionCoordinator {
                 .transaction_contention
                 .get(&blocker_id)
                 .copied()
-                // should never happen, but from a logical
-                // standpoint, it's not really an error
-                .unwrap_or(ExecutorId::MIN);
+                .unwrap_or_else(|| {
+                    // should never happen, but from a logical
+                    // standpoint, it's not really an error
+                    warn!("transaction to executor resolution happened on unknown TXN ID");
+                    ExecutorId::MIN
+                });
         }
 
         let queue = &mut self.blocked_transactions[blocker_id as usize];
         self.transaction_contention
             .insert(transaction.id, blocker_id);
-        queue.push_back(transaction);
+        if prioritize {
+            queue.push_front(transaction);
+        } else {
+            queue.push_back(transaction);
+        }
     }
 
     /// Checks if there are any executors ready to process a transaction.
@@ -118,7 +127,7 @@ impl ExecutionCoordinator {
     }
 
     /// Retrieves the next blocked transaction waiting for a given executor.
-    pub(super) fn get_blocked_transaction(
+    pub(super) fn next_blocked_transaction(
         &mut self,
         executor: ExecutorId,
     ) -> Option<TransactionWithId> {

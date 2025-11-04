@@ -22,6 +22,10 @@ use tokio::{
 
 use crate::executor::{SimpleForkGraph, TransactionExecutor};
 
+/// Each executor has a channel capacity of 1, as it
+/// can only process one transaction at a time.
+const EXECUTOR_QUEUE_CAPACITY: usize = 1;
+
 /// The central transaction scheduler responsible for distributing work to a
 /// pool of `TransactionExecutor` workers.
 ///
@@ -54,7 +58,7 @@ impl TransactionScheduler {
     /// 2.  Creates a pool of `TransactionExecutor` workers, each with its own dedicated channel.
     /// 3.  Spawns each worker in its own OS thread for maximum isolation and performance.
     pub fn new(executors: u32, state: TransactionSchedulerState) -> Self {
-        let count = executors.min(MAX_SVM_EXECUTORS) as usize;
+        let count = executors.max(1).min(MAX_SVM_EXECUTORS) as usize;
         let index = Arc::new(AtomicUsize::new(0));
         let mut executors = Vec::with_capacity(count);
 
@@ -65,9 +69,8 @@ impl TransactionScheduler {
         state.prepare_sysvars();
 
         for id in 0..count {
-            // Each executor has a channel capacity of 1, as it
-            // can only process one transaction at a time.
-            let (transactions_tx, transactions_rx) = channel(1);
+            let (transactions_tx, transactions_rx) =
+                channel(EXECUTOR_QUEUE_CAPACITY);
             let executor = TransactionExecutor::new(
                 id as u32,
                 &state,
@@ -115,13 +118,18 @@ impl TransactionScheduler {
     /// 2.  **New Transaction**: A new transaction arrives for processing.
     /// 3.  **New Block**: A new block is produced, triggering a slot transition.
     ///
-    /// The `biased` selection ensures that ready workers are processed first,
-    /// which helps to keep the pipeline full and maximize throughput.
+    /// The `biased` selection ensures that ready workers are processed before
+    /// the incoming transactions, which helps to keep the pipeline full and
+    /// maximize throughput.
     async fn run(mut self) {
         let mut block_produced = self.latest_block.subscribe();
         loop {
             tokio::select! {
                 biased;
+                // A new block has been produced.
+                Ok(()) = block_produced.recv() => {
+                    self.transition_to_new_slot();
+                }
                 // A worker has finished its task and is ready for more.
                 Some(executor) = self.ready_rx.recv() => {
                     self.handle_ready_executor(executor).await;
@@ -130,10 +138,6 @@ impl TransactionScheduler {
                 // only if there is at least one ready worker.
                 Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {
                     self.handle_new_transaction(txn).await;
-                }
-                // A new block has been produced.
-                _ = block_produced.recv() => {
-                    self.transition_to_new_slot();
                 }
                 // The main transaction channel has closed, indicating a system shutdown.
                 else => {
@@ -158,9 +162,9 @@ impl TransactionScheduler {
         let executor = self
             .coordinator
             .get_ready_executor()
-            .expect("unreacheable code if there're not ready executors");
+            .expect("unreachable code, if there are not any ready executors");
         let txn = TransactionWithId::new(txn);
-        self.schedule_transaction(executor, txn).await;
+        self.schedule_transaction(executor, txn, false).await;
     }
 
     /// Updates the scheduler's state when a new slot begins.
@@ -176,12 +180,18 @@ impl TransactionScheduler {
     async fn reschedule_blocked_transactions(&mut self, blocker: ExecutorId) {
         let mut executor = Some(blocker);
         while let Some(exec) = executor {
-            let txn = self.coordinator.get_blocked_transaction(blocker);
-            if let Some(txn) = txn {
-                self.schedule_transaction(exec, txn).await;
+            let txn = self.coordinator.next_blocked_transaction(blocker);
+            let scheduled = if let Some(txn) = txn {
                 executor = self.coordinator.get_ready_executor();
+                self.schedule_transaction(exec, txn, true).await
             } else {
                 self.coordinator.release_executor(exec);
+                break;
+            };
+            // If we failed to schedule, that means we have hit a locking snag,
+            // and as we disallow frontrunning for now, we just wait for the
+            // locks to be released and retry in the next scheduling cycle
+            if !scheduled {
                 break;
             }
         }
@@ -195,16 +205,18 @@ impl TransactionScheduler {
         &mut self,
         executor: ExecutorId,
         txn: TransactionWithId,
-    ) {
+        prioritize: bool,
+    ) -> bool {
         if let Err(blocker) = self.coordinator.try_acquire_locks(executor, &txn)
         {
             self.coordinator.release_executor(executor);
-            self.coordinator.queue_transaction(blocker, txn);
-            return;
+            self.coordinator.queue_transaction(blocker, txn, prioritize);
+            return false;
         }
         // It's safe to ignore the result of the send operation. If the send fails,
         // it means the executor's channel is closed, which only happens on shutdown.
         let _ = self.executors[executor as usize].send(txn.txn).await;
+        true
     }
 }
 

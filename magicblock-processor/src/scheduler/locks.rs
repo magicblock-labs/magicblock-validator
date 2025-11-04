@@ -29,10 +29,10 @@ pub(super) type TransactionContention = FxHashMap<TransactionId, ExecutorId>;
 
 /// The maximum number of concurrent executors supported by the bitmask.
 /// One bit is reserved for the write flag.
-pub(super) const MAX_SVM_EXECUTORS: u32 = ReadWriteLock::BITS - 1;
+pub(super) const MAX_SVM_EXECUTORS: u32 = ReadWriteLock::BITS - 1u32;
 
 /// The bit used to indicate a write lock is held. This is the most significant bit.
-const WRITE_BIT_MASK: u64 = 1 << (ReadWriteLock::BITS - 1);
+const WRITE_BIT_MASK: u64 = 1u64 << (ReadWriteLock::BITS - 1u32);
 
 /// A read/write lock on a single Solana account, represented by a `u64` bitmask.
 #[derive(Default, Debug)]
@@ -57,8 +57,8 @@ impl AccountLock {
             return Err(self.rw.trailing_zeros());
         }
         // Set the write lock bit and the bit for the acquiring executor.
-        self.rw = WRITE_BIT_MASK | (1 << executor);
-        self.contender = 0;
+        self.rw = WRITE_BIT_MASK | (1u64 << executor);
+        self.contender = 0u32;
         Ok(())
     }
 
@@ -77,8 +77,8 @@ impl AccountLock {
             return Err(self.rw.trailing_zeros());
         }
         // Set the bit corresponding to the executor to acquire a read lock.
-        self.rw |= 1 << executor;
-        self.contender = 0;
+        self.rw |= 1u64 << executor;
+        self.contender = 0u32;
         Ok(())
     }
 
@@ -87,7 +87,7 @@ impl AccountLock {
     pub(super) fn unlock(&mut self, executor: ExecutorId) {
         // To release the lock, we clear both the write bit and the executor's
         // read bit. This is done using a bitwise AND with the inverted mask.
-        self.rw &= !(WRITE_BIT_MASK | (1 << executor));
+        self.rw &= !(WRITE_BIT_MASK | (1u64 << executor));
     }
 
     /// Checks if the lock is marked as contended by another transaction.

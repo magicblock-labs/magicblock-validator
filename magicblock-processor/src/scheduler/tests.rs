@@ -226,13 +226,13 @@ fn test_transaction_dependency_chain() {
     let exec2 = coordinator.get_ready_executor().unwrap();
     let blocker1 = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
     assert_eq!(blocker1, exec1, "Txn2 should be blocked by exec1");
-    coordinator.queue_transaction(blocker1, txn2);
+    coordinator.queue_transaction(blocker1, txn2, false);
 
     // Txn3 needs to read B, but Txn2 (which writes to B) is already queued.
     // So, Txn3 should be blocked by Txn2's transaction ID.
     let exec3 = coordinator.get_ready_executor().unwrap();
     let blocker2 = coordinator.try_acquire_locks(exec3, &txn3).unwrap_err();
-    let blocked_txn = coordinator.get_blocked_transaction(exec1).unwrap();
+    let blocked_txn = coordinator.next_blocked_transaction(exec1).unwrap();
     assert_eq!(
         blocker2, blocked_txn.id,
         "Txn3 should be blocked by the transaction ID of Txn2"
@@ -267,7 +267,7 @@ fn test_full_executor_pool_and_reschedule() {
     // Txn3 arrives and contends with Txn1 on account A.
     let blocker = coordinator.try_acquire_locks(exec1, &txn3).unwrap_err();
     assert_eq!(blocker, exec1);
-    coordinator.queue_transaction(blocker, txn3);
+    coordinator.queue_transaction(blocker, txn3, false);
 
     // Executor 1 finishes its work and releases its locks.
     coordinator.unlock_accounts(exec1);
@@ -275,7 +275,7 @@ fn test_full_executor_pool_and_reschedule() {
 
     // Now that an executor is free, we should be able to reschedule the blocked transaction.
     let ready_exec = coordinator.get_ready_executor().unwrap();
-    let blocked_txn = coordinator.get_blocked_transaction(exec1).unwrap();
+    let blocked_txn = coordinator.next_blocked_transaction(exec1).unwrap();
     assert!(
         coordinator
             .try_acquire_locks(ready_exec, &blocked_txn)
@@ -352,9 +352,9 @@ fn test_reschedule_multiple_blocked_on_same_executor() {
     assert!(coordinator.try_acquire_locks(exec1, &txn1).is_ok());
     let exec2 = coordinator.get_ready_executor().unwrap();
     let blocker1 = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
-    coordinator.queue_transaction(blocker1, txn2);
+    coordinator.queue_transaction(blocker1, txn2, false);
     let blocker2 = coordinator.try_acquire_locks(exec2, &txn3).unwrap_err();
-    coordinator.queue_transaction(blocker2, txn3);
+    coordinator.queue_transaction(blocker2, txn3, false);
 
     // Txn1 finishes.
     coordinator.unlock_accounts(exec1);
@@ -362,7 +362,7 @@ fn test_reschedule_multiple_blocked_on_same_executor() {
 
     // The first blocked transaction (Txn2) should now be schedulable.
     let ready_exec = coordinator.get_ready_executor().unwrap();
-    let blocked_txn1 = coordinator.get_blocked_transaction(exec1).unwrap();
+    let blocked_txn1 = coordinator.next_blocked_transaction(exec1).unwrap();
     let result = coordinator.try_acquire_locks(ready_exec, &blocked_txn1);
     assert!(
         result.is_ok(),
@@ -371,7 +371,7 @@ fn test_reschedule_multiple_blocked_on_same_executor() {
 
     // The second blocked transaction (Txn3) should still be in the queue.
     assert!(
-        coordinator.get_blocked_transaction(exec1).is_some(),
+        coordinator.next_blocked_transaction(exec1).is_some(),
         "Second blocked transaction should still be queued"
     );
 }
@@ -455,11 +455,11 @@ fn test_transaction_blocked_by_queued_transaction() {
     let exec2 = coordinator.get_ready_executor().unwrap();
     let blocker1 = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
     assert_eq!(blocker1, exec1);
-    coordinator.queue_transaction(blocker1, txn2);
+    coordinator.queue_transaction(blocker1, txn2, false);
 
     // Txn3 is blocked by the already queued Txn2. The error should be the transaction ID.
     let blocker2 = coordinator.try_acquire_locks(exec2, &txn3).unwrap_err();
-    let blocked_txn = coordinator.get_blocked_transaction(exec1).unwrap();
+    let blocked_txn = coordinator.next_blocked_transaction(exec1).unwrap();
     assert_eq!(
         blocker2, blocked_txn.id,
         "Txn3 should be blocked by the ID of the queued Txn2"
