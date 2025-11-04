@@ -3613,6 +3613,7 @@ dependencies = [
 name = "magicblock-chainlink"
 version = "0.2.3"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "bincode",
  "env_logger 0.11.8",

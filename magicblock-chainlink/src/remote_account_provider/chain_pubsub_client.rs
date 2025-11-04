@@ -193,7 +193,10 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
             })
             .await?;
 
-        rx.await?
+        rx.await
+            .inspect_err(|err| {
+                warn!("ChainPubsubClientImpl::subscribe - RecvError occurred while awaiting subscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", pubkey);
+            })?
     }
 
     async fn unsubscribe(
@@ -208,7 +211,10 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
             })
             .await?;
 
-        rx.await?
+        rx.await
+            .inspect_err(|err| {
+                warn!("ChainPubsubClientImpl::unsubscribe - RecvError occurred while awaiting unsubscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", pubkey);
+            })?
     }
 
     async fn subscription_count(

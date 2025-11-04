@@ -633,7 +633,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         for (idx, (pubkey, receiver)) in
             subscription_overrides.into_iter().enumerate()
         {
-            match receiver.await {
+            match receiver
+                .await
+                .inspect_err(|err| {
+                    warn!("RemoteAccountProvider::ensure_accounts - RecvError occurred while awaiting account {pubkey} at index {idx}: {err:?}. This indicates the fetch task sender was dropped without sending a value. Context: fetch_start_slot={fetch_start_slot}, min_context_slot={min_context_slot}, total_pubkeys={}",
+                          pubkeys.len());
+                }) {
                 Ok(remote_account) => resolved_accounts.push(remote_account),
                 Err(err) => {
                     error!("Failed to resolve account {pubkey}: {err:?}");

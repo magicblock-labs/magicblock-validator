@@ -1024,9 +1024,14 @@ where
 
         // Wait for any pending requests to complete
         let mut joinset = JoinSet::new();
-        for (_, receiver) in await_pending {
+        for (pubkey, receiver) in await_pending {
             joinset.spawn(async move {
-                if let Err(err) = receiver.await {
+                if let Err(err) = receiver
+                    .await
+                    .inspect_err(|err| {
+                        warn!("FetchCloner::clone_accounts - RecvError occurred while awaiting account {}: {err:?}. This indicates the account fetch sender was dropped without sending a value.", pubkey);
+                    })
+                {
                     // The sender was dropped, likely due to an error in the other request
                     error!(
                         "Failed to receive account from pending request: {err}"
