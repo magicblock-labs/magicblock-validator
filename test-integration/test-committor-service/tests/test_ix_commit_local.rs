@@ -147,7 +147,7 @@ async fn commit_single_account(
     .await;
 }
 
-// TODO(thlorenz): once delegation program supports larger commits
+// TODO(thlorenz/snawaz): once delegation program supports larger commits
 // add 1MB and 10MB tests
 
 // -----------------
@@ -213,7 +213,9 @@ async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_20_accounts_1kb_bundle_size_2() {
     commit_20_accounts_1kb(
         2,
