@@ -61,34 +61,47 @@ fn expect_strategies(
 // -----------------
 // Single Account Commits
 // -----------------
-#[tokio::test]
+
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_single_account_100_bytes() {
     commit_single_account(100, CommitStrategy::Args, false).await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_single_account_100_bytes_and_undelegate() {
     commit_single_account(100, CommitStrategy::Args, true).await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_single_account_800_bytes() {
-    commit_single_account(800, CommitStrategy::FromBuffer, false).await;
+    commit_single_account(800, CommitStrategy::Args, false).await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_single_account_800_bytes_and_undelegate() {
-    commit_single_account(800, CommitStrategy::FromBuffer, true).await;
+    commit_single_account(800, CommitStrategy::Args, true).await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_single_account_one_kb() {
-    commit_single_account(1024, CommitStrategy::FromBuffer, false).await;
+    commit_single_account(1024, CommitStrategy::Args, false).await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_single_account_ten_kb() {
-    commit_single_account(10 * 1024, CommitStrategy::FromBuffer, false).await;
+    commit_single_account(10 * 1024, CommitStrategy::Args, false).await;
 }
 
 async fn commit_single_account(
@@ -153,19 +166,24 @@ async fn commit_single_account(
 // -----------------
 // Multiple Account Commits
 // -----------------
-#[tokio::test]
+
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_two_accounts_1kb_2kb() {
     init_logger!();
     commit_multiple_accounts(
         &[1024, 2048],
         1,
         false,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 2)]),
+        expect_strategies(&[(CommitStrategy::Args, 2)]),
     )
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_two_accounts_512kb() {
     init_logger!();
     commit_multiple_accounts(
@@ -177,7 +195,9 @@ async fn test_ix_commit_two_accounts_512kb() {
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_three_accounts_512kb() {
     init_logger!();
     commit_multiple_accounts(
@@ -189,7 +209,9 @@ async fn test_ix_commit_three_accounts_512kb() {
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_six_accounts_512kb() {
     init_logger!();
     commit_multiple_accounts(
@@ -201,14 +223,16 @@ async fn test_ix_commit_six_accounts_512kb() {
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
     init_logger!();
     commit_multiple_accounts(
         &[1024, 2 * 1024, 5 * 1024, 10 * 1024],
         1,
         false,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 4)]),
+        expect_strategies(&[(CommitStrategy::Args, 4)]),
     )
     .await;
 }
@@ -217,43 +241,46 @@ async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
 // # see the PR #575 for more context.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_20_accounts_1kb_bundle_size_2() {
-    commit_20_accounts_1kb(
-        2,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 20)]),
-    )
-    .await;
+    commit_20_accounts_1kb(2, expect_strategies(&[(CommitStrategy::Args, 20)]))
+        .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_5_accounts_1kb_bundle_size_3() {
     commit_5_accounts_1kb(
         3,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
+        expect_strategies(&[(CommitStrategy::Args, 5)]),
         false,
     )
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
     commit_5_accounts_1kb(
         3,
         expect_strategies(&[
             // Intent fits in 1 TX only with ALT, see IntentExecutorImpl::try_unite_tasks
-            (CommitStrategy::FromBufferWithLookupTable, 3),
-            (CommitStrategy::FromBuffer, 2),
+            (CommitStrategy::ArgsWithLookupTable, 3),
+            (CommitStrategy::Args, 2),
         ]),
         true,
     )
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_5_accounts_1kb_bundle_size_4() {
     commit_5_accounts_1kb(
         4,
         expect_strategies(&[
-            (CommitStrategy::FromBuffer, 1),
+            (CommitStrategy::Args, 1),
             (CommitStrategy::FromBufferWithLookupTable, 4),
         ]),
         false,
@@ -261,12 +288,14 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
     commit_5_accounts_1kb(
         4,
         expect_strategies(&[
-            (CommitStrategy::FromBuffer, 1),
+            (CommitStrategy::Args, 1),
             (CommitStrategy::FromBufferWithLookupTable, 4),
         ]),
         true,
@@ -274,26 +303,29 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_5_accounts_1kb_bundle_size_5_undelegate_all() {
     commit_5_accounts_1kb(
         5,
-        expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 5)]),
+        expect_strategies(&[(CommitStrategy::ArgsWithLookupTable, 5)]),
         true,
     )
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_20_accounts_1kb_bundle_size_3() {
-    commit_20_accounts_1kb(
-        3,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 20)]),
-    )
-    .await;
+    commit_20_accounts_1kb(3, expect_strategies(&[(CommitStrategy::Args, 20)]))
+        .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_20_accounts_1kb_bundle_size_4() {
     commit_20_accounts_1kb(
         4,
@@ -302,20 +334,24 @@ async fn test_commit_20_accounts_1kb_bundle_size_4() {
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_20_accounts_1kb_bundle_size_6() {
     commit_20_accounts_1kb(
         6,
         expect_strategies(&[
             (CommitStrategy::FromBufferWithLookupTable, 18),
             // Two accounts don't make it into the bundles of size 6
-            (CommitStrategy::FromBuffer, 2),
+            (CommitStrategy::Args, 2),
         ]),
     )
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_20_accounts_1kb_bundle_size_20() {
     commit_20_accounts_1kb(
         20,
@@ -324,7 +360,9 @@ async fn test_commit_20_accounts_1kb_bundle_size_20() {
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_8_accounts_1kb_bundle_size_8() {
     commit_8_accounts_1kb(
         8,
@@ -337,7 +375,9 @@ async fn test_commit_8_accounts_1kb_bundle_size_8() {
     .await;
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commit_20_accounts_1kb_bundle_size_8() {
     commit_20_accounts_1kb(
         8,
@@ -468,7 +508,7 @@ async fn commit_multiple_accounts(
     ix_commit_local(service, intents, expected_strategies).await;
 }
 
-// TODO(thlorenz): once delegation program supports larger commits add the following
+// TODO(thlorenz/snawaz): once delegation program supports larger commits add the following
 //                 tests
 //
 // ## Scenario 1
