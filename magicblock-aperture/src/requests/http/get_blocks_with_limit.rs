@@ -21,9 +21,8 @@ impl HttpDispatcher {
             .min(MAX_DEFAULT_BLOCKS_LIMIT);
         let end_slot = start_slot + limit;
         // Calculate the end slot, ensuring it does not exceed the latest block height.
-        let end_slot = (end_slot).min(self.blocks.block_height());
+        let end_slot = (end_slot).min(self.blocks.block_height() + 1);
 
-        // The range is exclusive of the end slot, so `(start..end)` is correct.
         let slots = (start_slot..end_slot).collect::<Vec<Slot>>();
 
         Ok(ResponsePayload::encode_no_context(&request.id, slots))

@@ -56,7 +56,7 @@ impl TransactionScheduler {
     /// 2.  Creates a pool of `TransactionExecutor` workers, each with its own dedicated channel.
     /// 3.  Spawns each worker in its own OS thread for maximum isolation and performance.
     pub fn new(executors: u32, state: TransactionSchedulerState) -> Self {
-        let count = executors.max(1).min(MAX_SVM_EXECUTORS) as usize;
+        let count = executors.clamp(1, MAX_SVM_EXECUTORS) as usize;
         let mut executors = Vec::with_capacity(count);
 
         // Create the back-channel for workers to signal their readiness.

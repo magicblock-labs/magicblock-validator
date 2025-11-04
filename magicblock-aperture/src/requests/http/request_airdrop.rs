@@ -15,13 +15,18 @@ impl HttpDispatcher {
         // Airdrops are only supported if a faucet keypair is configured.
         // Which is never the case with *ephemeral* running mode of the validator
         let Some(ref faucet) = self.context.faucet else {
-            return Err(RpcError::invalid_request("method is not supported"));
+            return Err(RpcError::invalid_request(
+                "free airdrop faucet is disabled",
+            ));
         };
 
         let (pubkey, lamports) =
             parse_params!(request.params()?, Serde32Bytes, u64);
         let pubkey = some_or_err!(pubkey);
         let lamports = some_or_err!(lamports);
+        if lamports == 0 {
+            return Err(RpcError::invalid_params("lamports must be > 0"));
+        }
 
         // Build and execute the airdrop transfer transaction.
         let txn = solana_system_transaction::transfer(

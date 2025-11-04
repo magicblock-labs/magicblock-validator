@@ -84,7 +84,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode(
             &request.id,
             Vec::<()>::new(),
-            self.blocks.get_latest().slot,
+            self.blocks.block_height(),
         ))
     }
 
@@ -103,7 +103,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode(
             &request.id,
             supply,
-            self.blocks.get_latest().slot,
+            self.blocks.block_height(),
         ))
     }
 
@@ -120,7 +120,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode(
             &request.id,
             supply,
-            self.blocks.get_latest().slot,
+            self.blocks.block_height(),
         ))
     }
 
