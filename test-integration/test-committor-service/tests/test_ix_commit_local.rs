@@ -80,28 +80,28 @@ async fn test_ix_commit_single_account_100_bytes_and_undelegate() {
 // # see the PR #575 for more context.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_single_account_800_bytes() {
-    commit_single_account(800, CommitStrategy::Args, false).await;
+    commit_single_account(800, CommitStrategy::FromBuffer, false).await;
 }
 
 // TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
 // # see the PR #575 for more context.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_single_account_800_bytes_and_undelegate() {
-    commit_single_account(800, CommitStrategy::Args, true).await;
+    commit_single_account(800, CommitStrategy::FromBuffer, true).await;
 }
 
 // TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
 // # see the PR #575 for more context.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_single_account_one_kb() {
-    commit_single_account(1024, CommitStrategy::Args, false).await;
+    commit_single_account(1024, CommitStrategy::FromBuffer, false).await;
 }
 
 // TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
 // # see the PR #575 for more context.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ix_commit_single_account_ten_kb() {
-    commit_single_account(10 * 1024, CommitStrategy::Args, false).await;
+    commit_single_account(10 * 1024, CommitStrategy::FromBuffer, false).await;
 }
 
 async fn commit_single_account(
@@ -265,7 +265,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
         3,
         expect_strategies(&[
             // Intent fits in 1 TX only with ALT, see IntentExecutorImpl::try_unite_tasks
-            (CommitStrategy::ArgsWithLookupTable, 3),
+            (CommitStrategy::FromBufferWithLookupTable, 3),
             (CommitStrategy::Args, 2),
         ]),
         true,
@@ -309,7 +309,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
 async fn test_commit_5_accounts_1kb_bundle_size_5_undelegate_all() {
     commit_5_accounts_1kb(
         5,
-        expect_strategies(&[(CommitStrategy::ArgsWithLookupTable, 5)]),
+        expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 5)]),
         true,
     )
     .await;

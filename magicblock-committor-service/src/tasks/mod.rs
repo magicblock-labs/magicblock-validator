@@ -110,6 +110,7 @@ pub struct CommitTask {
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
     base_account: Option<Account>,
+    force_commit_state: bool,
 }
 
 impl CommitTask {
@@ -152,13 +153,19 @@ impl CommitTask {
             allow_undelegation,
             committed_account,
             base_account: fetched_account,
+            force_commit_state: false,
         }
     }
 
     pub fn is_commit_diff(&self) -> bool {
-        self.committed_account.account.data.len()
-            > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
+        !self.force_commit_state
+            && self.committed_account.account.data.len()
+                > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
             && self.base_account.is_some()
+    }
+
+    pub fn force_commit_state(&mut self) {
+        self.force_commit_state = true;
     }
 
     pub fn create_commit_ix(&self, validator: &Pubkey) -> Instruction {
@@ -190,6 +197,13 @@ impl CommitTask {
         validator: &Pubkey,
         fetched_account: &Account,
     ) -> Instruction {
+        if self.force_commit_state {
+            println!(
+                "force_commit_state is true, so call create_commit_state_ix"
+            );
+            return self.create_commit_state_ix(validator);
+        }
+
         let args = CommitDiffArgs {
             nonce: self.commit_id,
             lamports: self.committed_account.account.lamports,
