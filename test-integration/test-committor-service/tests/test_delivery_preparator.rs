@@ -15,9 +15,13 @@ use crate::common::{create_commit_task, generate_random_bytes, TestFixture};
 
 mod common;
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_prepare_10kb_buffer() {
+    println!("TestFixture::new()");
     let fixture = TestFixture::new().await;
+    println!("TestFixture::new() done");
     let preparator = fixture.create_delivery_preparator();
 
     let data = generate_random_bytes(10 * 1024);
@@ -76,7 +80,9 @@ async fn test_prepare_10kb_buffer() {
     );
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_prepare_multiple_buffers() {
     let fixture = TestFixture::new().await;
     let preparator = fixture.create_delivery_preparator();
@@ -206,7 +212,9 @@ async fn test_lookup_tables() {
     }
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_already_initialized_error_handled() {
     let fixture = TestFixture::new().await;
     let preparator = fixture.create_delivery_preparator();
@@ -288,7 +296,9 @@ async fn test_already_initialized_error_handled() {
     assert_eq!(account.data.as_slice(), data, "Unexpected account data");
 }
 
-#[tokio::test]
+// TODO (snawaz): use #[tokio::test] once CommitTask::new() stops using blocking RpcClient
+// # see the PR #575 for more context.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     use borsh::BorshDeserialize;
 

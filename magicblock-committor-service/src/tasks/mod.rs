@@ -19,15 +19,10 @@ use magicblock_program::magic_scheduled_base_intent::{
 };
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
-use solana_rpc_client::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::CommitmentConfig, instruction::Instruction,
-};
+use solana_sdk::instruction::Instruction;
 use thiserror::Error;
 
-use crate::{
-    config::ChainConfig, tasks::visitor::Visitor, ComputeBudgetConfig,
-};
+use crate::tasks::visitor::Visitor;
 
 pub mod args_task;
 pub mod buffer_task;
@@ -114,7 +109,7 @@ pub struct CommitTask {
     pub commit_id: u64,
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
-    fetched_account: Option<Account>,
+    base_account: Option<Account>,
 }
 
 impl CommitTask {
@@ -125,43 +120,49 @@ impl CommitTask {
         allow_undelegation: bool,
         committed_account: CommittedAccount,
     ) -> Self {
-        let chain_config =
-            ChainConfig::local(ComputeBudgetConfig::new(1_000_000));
-
-        let rpc_client = RpcClient::new_with_commitment(
-            chain_config.rpc_uri.to_string(),
-            CommitmentConfig {
-                commitment: chain_config.commitment,
-            },
-        );
-
         let fetched_account = if committed_account.account.data.len()
             > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
         {
+            // TODO (snawaz): it is the most ugliest piece of code as it is making network call,
+            // and I'll soon fix it in a separate PR that will use caching of base-accounts.
+            use solana_rpc_client::rpc_client::RpcClient;
+            use solana_sdk::commitment_config::CommitmentConfig;
+
+            use crate::{config::ChainConfig, ComputeBudgetConfig};
+
+            let chain_config =
+                ChainConfig::local(ComputeBudgetConfig::new(1_000_000));
+
+            let rpc_client = RpcClient::new_with_commitment(
+                chain_config.rpc_uri.to_string(),
+                CommitmentConfig {
+                    commitment: chain_config.commitment,
+                },
+            );
+
             rpc_client.get_account(&committed_account.pubkey).ok()
         } else {
             None
         };
 
+        println!("fetched_account: {:#?}", fetched_account);
+
         Self {
             commit_id,
             allow_undelegation,
             committed_account,
-            fetched_account,
+            base_account: fetched_account,
         }
     }
 
-    // TODO (snawaz): it is infinitely bad implementation
-    // as it's making a network call, but we'll fix it soon once
-    // we start using caching and fetched accounts.
     pub fn is_commit_diff(&self) -> bool {
         self.committed_account.account.data.len()
             > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
-            && self.fetched_account.is_some()
+            && self.base_account.is_some()
     }
 
     pub fn create_commit_ix(&self, validator: &Pubkey) -> Instruction {
-        if let Some(fetched_account) = self.fetched_account.as_ref() {
+        if let Some(fetched_account) = self.base_account.as_ref() {
             self.create_commit_diff_ix(validator, fetched_account)
         } else {
             self.create_commit_state_ix(validator)
