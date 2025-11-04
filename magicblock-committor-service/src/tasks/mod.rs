@@ -46,7 +46,6 @@ pub enum PreparationState {
     Cleanup(CleanupTask),
 }
 
-#[cfg(test)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TaskStrategy {
     Args,

@@ -14,8 +14,9 @@ use crate::tasks::TaskStrategy;
 use crate::{
     consts::MAX_WRITE_CHUNK_SIZE,
     tasks::{
-        visitor::Visitor, BaseTask, BaseTaskError, BaseTaskResult, CommitTask,
-        PreparationState, PreparationTask, TaskType,
+        visitor::Visitor, BaseTask, BaseTaskError, BaseTaskResult,
+        CommitDiffTask, CommitTask, PreparationState, PreparationTask,
+        TaskType,
     },
 };
 
@@ -23,6 +24,7 @@ use crate::{
 #[derive(Clone)]
 pub enum BufferTaskType {
     Commit(CommitTask),
+    CommitDiff(CommitDiffTask),
     // Action in the future
 }
 
@@ -51,19 +53,37 @@ impl BufferTask {
     }
 
     fn preparation_required(task_type: &BufferTaskType) -> PreparationState {
-        let BufferTaskType::Commit(ref commit_task) = task_type;
-        let committed_data = commit_task.committed_account.account.data.clone();
-        let chunks = Chunks::from_data_length(
-            committed_data.len(),
-            MAX_WRITE_CHUNK_SIZE,
-        );
+        match task_type {
+            BufferTaskType::Commit(task) => {
+                let data = task.committed_account.account.data.clone();
+                let chunks =
+                    Chunks::from_data_length(data.len(), MAX_WRITE_CHUNK_SIZE);
 
-        PreparationState::Required(PreparationTask {
-            commit_id: commit_task.commit_id,
-            pubkey: commit_task.committed_account.pubkey,
-            committed_data,
-            chunks,
-        })
+                PreparationState::Required(PreparationTask {
+                    commit_id: task.commit_id,
+                    pubkey: task.committed_account.pubkey,
+                    committed_data: data,
+                    chunks,
+                })
+            }
+
+            BufferTaskType::CommitDiff(task) => {
+                let diff = compute_diff(
+                    &task.base_account.data,
+                    &task.committed_account.account.data,
+                )
+                .to_vec();
+                let chunks =
+                    Chunks::from_data_length(diff.len(), MAX_WRITE_CHUNK_SIZE);
+
+                PreparationState::Required(PreparationTask {
+                    commit_id: task.commit_id,
+                    pubkey: task.committed_account.pubkey,
+                    committed_data: diff,
+                    chunks,
+                })
+            }
+        }
     }
 }
 
@@ -72,34 +92,60 @@ impl From<ArgsTaskType> for BufferTaskType {
     fn from(value: ArgsTaskType) -> Self {
         match value {
             ArgsTaskType::Commit(task) => BufferTaskType::Commit(task),
-            ArgsTaskType::CommitDiff(_) => panic!("BufferTask doesn't support CommitDiff yet. Disable your tests (if any) temporarily till the next PR"),
-            _ => unimplemented!("Only commit task can be BufferTask currently. Fix your tests"),
+            ArgsTaskType::CommitDiff(task) => BufferTaskType::CommitDiff(task),
+            _ => unimplemented!(
+                "Only commit task can be BufferTask currently. Fix your tests"
+            ),
         }
     }
 }
 
 impl BaseTask for BufferTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
-        let BufferTaskType::Commit(ref value) = self.task_type;
-        let commit_id_slice = value.commit_id.to_le_bytes();
-        let (commit_buffer_pubkey, _) =
-            magicblock_committor_program::pdas::buffer_pda(
-                validator,
-                &value.committed_account.pubkey,
-                &commit_id_slice,
-            );
+        match &self.task_type {
+            BufferTaskType::Commit(task) => {
+                let commit_id_slice = task.commit_id.to_le_bytes();
+                let (commit_buffer_pubkey, _) =
+                    magicblock_committor_program::pdas::buffer_pda(
+                        validator,
+                        &task.committed_account.pubkey,
+                        &commit_id_slice,
+                    );
 
-        dlp::instruction_builder::commit_state_from_buffer(
-            *validator,
-            value.committed_account.pubkey,
-            value.committed_account.account.owner,
-            commit_buffer_pubkey,
-            CommitStateFromBufferArgs {
-                nonce: value.commit_id,
-                lamports: value.committed_account.account.lamports,
-                allow_undelegation: value.allow_undelegation,
-            },
-        )
+                dlp::instruction_builder::commit_state_from_buffer(
+                    *validator,
+                    task.committed_account.pubkey,
+                    task.committed_account.account.owner,
+                    commit_buffer_pubkey,
+                    CommitStateFromBufferArgs {
+                        nonce: task.commit_id,
+                        lamports: task.committed_account.account.lamports,
+                        allow_undelegation: task.allow_undelegation,
+                    },
+                )
+            }
+            BufferTaskType::CommitDiff(task) => {
+                let commit_id_slice = task.commit_id.to_le_bytes();
+                let (commit_buffer_pubkey, _) =
+                    magicblock_committor_program::pdas::buffer_pda(
+                        validator,
+                        &task.committed_account.pubkey,
+                        &commit_id_slice,
+                    );
+
+                dlp::instruction_builder::commit_diff_from_buffer(
+                    *validator,
+                    task.committed_account.pubkey,
+                    task.committed_account.account.owner,
+                    commit_buffer_pubkey,
+                    CommitStateFromBufferArgs {
+                        nonce: task.commit_id,
+                        lamports: task.committed_account.account.lamports,
+                        allow_undelegation: task.allow_undelegation,
+                    },
+                )
+            }
+        }
     }
 
     /// No further optimizations
@@ -128,6 +174,7 @@ impl BaseTask for BufferTask {
     fn compute_units(&self) -> u32 {
         match self.task_type {
             BufferTaskType::Commit(_) => 70_000,
+            BufferTaskType::CommitDiff(_) => 70_000,
         }
     }
 
@@ -147,6 +194,7 @@ impl BaseTask for BufferTask {
     fn task_type(&self) -> TaskType {
         match self.task_type {
             BufferTaskType::Commit(_) => TaskType::Commit,
+            BufferTaskType::CommitDiff(_) => TaskType::Commit,
         }
     }
 
@@ -156,12 +204,15 @@ impl BaseTask for BufferTask {
     }
 
     fn reset_commit_id(&mut self, commit_id: u64) {
-        let BufferTaskType::Commit(commit_task) = &mut self.task_type;
-        if commit_id == commit_task.commit_id {
-            return;
-        }
+        match &mut self.task_type {
+            BufferTaskType::Commit(task) => {
+                task.commit_id = commit_id;
+            }
+            BufferTaskType::CommitDiff(task) => {
+                task.commit_id = commit_id;
+            }
+        };
 
-        commit_task.commit_id = commit_id;
         self.preparation_state = Self::preparation_required(&self.task_type)
     }
 }
@@ -170,6 +221,7 @@ impl LabelValue for BufferTask {
     fn value(&self) -> &str {
         match self.task_type {
             BufferTaskType::Commit(_) => "buffer_commit",
+            BufferTaskType::CommitDiff(_) => "buffer_commit_diff",
         }
     }
 }
