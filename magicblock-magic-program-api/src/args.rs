@@ -137,3 +137,12 @@ pub struct CancelTaskRequest {
     /// Authority that can cancel this task
     pub authority: Pubkey,
 }
+
+impl TaskRequest {
+    pub fn id(&self) -> u64 {
+        match self {
+            Self::Schedule(request) => request.id,
+            Self::Cancel(request) => request.task_id,
+        }
+    }
+}
