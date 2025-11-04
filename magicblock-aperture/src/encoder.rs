@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use hyper::body::Bytes;
 use json::Serialize;
 use magicblock_core::{
@@ -20,7 +22,7 @@ use crate::{
 
 /// An abstraction trait over types which specialize in turning various
 /// websocket notification payload types into sequence of bytes
-pub(crate) trait Encoder: Ord + Eq + Clone {
+pub(crate) trait Encoder: Ord + Eq + Clone + Debug {
     type Data;
     fn encode(
         &self,
@@ -64,7 +66,7 @@ impl From<UiAccountEncoding> for AccountEncoder {
 }
 
 /// A `programSubscribe` payload encoder
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Debug)]
 pub struct ProgramAccountEncoder {
     pub encoder: AccountEncoder,
     pub filters: ProgramFilters,
@@ -106,7 +108,7 @@ impl Encoder for ProgramAccountEncoder {
 }
 
 /// A `signatureSubscribe` payload encoder
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Debug)]
 pub(crate) struct TransactionResultEncoder;
 
 impl Encoder for TransactionResultEncoder {
@@ -130,7 +132,7 @@ impl Encoder for TransactionResultEncoder {
 }
 
 /// A `logsSubscribe` payload encoder
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Debug)]
 pub(crate) enum TransactionLogsEncoder {
     All,
     Mentions(Pubkey),
@@ -172,7 +174,7 @@ impl Encoder for TransactionLogsEncoder {
 }
 
 /// A `slotSubscribe` payload encoder
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone)]
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Debug)]
 pub(crate) struct SlotEncoder;
 
 impl Encoder for SlotEncoder {
