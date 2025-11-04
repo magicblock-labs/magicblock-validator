@@ -267,7 +267,7 @@ async fn test_escrow_charged_for_failed_transaction() {
 #[tokio::test]
 async fn test_transaction_gasless_mode() {
     // Initialize the environment with a base fee of 0.
-    let env = ExecutionTestEnv::new_with_fee(0);
+    let env = ExecutionTestEnv::new_with_fee(0, false);
     let mut payer = env.get_payer();
     payer.set_lamports(1); // Not enough to cover standard fee
     payer.set_delegated(false); // Explicitly set the payer as NON-delegated.

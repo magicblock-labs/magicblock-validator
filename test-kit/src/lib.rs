@@ -58,6 +58,8 @@ pub struct ExecutionTestEnv {
     pub dispatch: DispatchEndpoints,
     /// The "server-side" channel endpoint for broadcasting new block updates.
     pub blocks_tx: BlockUpdateTx,
+    /// Transaction execution scheduler/backend for deferred launch
+    pub scheduler: Option<TransactionScheduler>,
 }
 
 impl Default for ExecutionTestEnv {
@@ -78,7 +80,7 @@ impl ExecutionTestEnv {
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
     pub fn new() -> Self {
-        Self::new_with_fee(Self::BASE_FEE)
+        Self::new_with_fee(Self::BASE_FEE, false)
     }
 
     /// Creates a new, fully initialized validator test environment with given base fee
@@ -89,7 +91,7 @@ impl ExecutionTestEnv {
     /// 3.  Spawns a `TransactionScheduler` with one worker thread.
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
-    pub fn new_with_fee(fee: u64) -> Self {
+    pub fn new_with_fee(fee: u64, defer_startup: bool) -> Self {
         init_logger!();
         let dir =
             tempfile::tempdir().expect("creating temp dir for validator state");
@@ -104,7 +106,7 @@ impl ExecutionTestEnv {
         let environment = build_svm_env(&accountsdb, blockhash, fee);
         let payer = Keypair::new();
 
-        let this = Self {
+        let mut this = Self {
             payer,
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
@@ -112,6 +114,7 @@ impl ExecutionTestEnv {
             dir,
             dispatch,
             blocks_tx: validator_channels.block_update,
+            scheduler: None,
         };
         this.advance_slot(); // Move to slot 1 to ensure a non-genesis state.
 
@@ -132,11 +135,22 @@ impl ExecutionTestEnv {
             )])
             .expect("failed to load test programs into test env");
 
-        // Start the transaction processing backend.
-        TransactionScheduler::new(1, scheduler_state).spawn();
+        // Start/Defer the transaction processing backend.
+        let scheduler = TransactionScheduler::new(1, scheduler_state);
+        if defer_startup {
+            this.scheduler.replace(scheduler);
+        } else {
+            scheduler.spawn();
+        }
 
         this.fund_account(this.payer.pubkey(), LAMPORTS_PER_SOL);
         this
+    }
+
+    pub fn run_scheduler(&mut self) {
+        if let Some(scheduler) = self.scheduler.take() {
+            scheduler.spawn();
+        }
     }
 
     /// Creates a new account with the specified properties.
