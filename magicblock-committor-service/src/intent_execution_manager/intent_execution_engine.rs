@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use log::{error, info, trace, warn};
@@ -242,23 +245,27 @@ where
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
+        let instant = Instant::now();
         let result = executor
             .execute(intent.inner.clone(), persister)
             .await
             .inspect_err(|err| {
                 error!(
-                    "Failed to execute BaseIntent. id: {}. {:?}",
+                    "Failed to execute BaseIntent. id: {}. {}",
                     intent.id, err
                 )
-            })
+            });
+
+        // Metrics
+        Self::execution_metrics(instant.elapsed(), &intent, &result);
+
+        let result = result
             .map(|output| ExecutionOutputWrapper {
                 id: intent.id,
                 trigger_type: intent.trigger_type,
                 output,
             })
             .map_err(|err| {
-                // Increase failed intents metric as well
-                metrics::inc_committor_failed_intents_count();
                 (intent.inner.id, intent.trigger_type, Arc::new(err))
             });
 
@@ -279,6 +286,47 @@ where
 
         // Free worker
         drop(execution_permit);
+    }
+
+    /// Records metrics related to intent execution
+    fn execution_metrics(
+        execution_time: Duration,
+        intent: &ScheduledBaseIntentWrapper,
+        result: &IntentExecutorResult<ExecutionOutput>,
+    ) {
+        const EXECUTION_TIME_THRESHOLD: f64 = 2.0;
+
+        let intent_execution_secs = execution_time.as_secs_f64();
+        metrics::observe_committor_intent_execution_time_histogram(
+            intent_execution_secs,
+            intent,
+            result,
+        );
+        if let Err(ref err) = result {
+            metrics::inc_committor_failed_intents_count(intent, err);
+        }
+
+        // Loki alerts
+        if intent_execution_secs >= EXECUTION_TIME_THRESHOLD {
+            info!(
+                "Intent took too long to execute: {}s. {}",
+                intent_execution_secs,
+                result
+                    .as_ref()
+                    .map(|_| "succeeded".to_string())
+                    .unwrap_or_else(|err| format!("{err:?}"))
+            );
+        } else {
+            trace!("Seconds took to execute intent: {}", intent_execution_secs);
+        }
+
+        // Alert
+        if intent.is_undelegate() && result.is_err() {
+            warn!(
+                "Intent execution resulted in stuck accounts: {:?}",
+                intent.get_committed_pubkeys()
+            );
+        }
     }
 }
 
