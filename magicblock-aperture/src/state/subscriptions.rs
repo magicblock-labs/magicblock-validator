@@ -285,7 +285,11 @@ pub(crate) struct UpdateSubscriber<E> {
 impl<E: Encoder> UpdateSubscribers<E> {
     /// Adds a connection to the appropriate subscriber group based on the encoder.
     /// If no group exists for the given encoder, a new one is created.
-    fn add_subscriber(&mut self, chan: WsConnectionChannel, encoder: E) -> u64 {
+    fn add_subscriber(
+        &mut self,
+        chan: WsConnectionChannel,
+        encoder: E,
+    ) -> SubscriptionID {
         match self.0.binary_search_by(|s| s.encoder.cmp(&encoder)) {
             // A subscriber group with this encoder already exists.
             Ok(index) => {
@@ -380,7 +384,7 @@ pub(crate) struct SubscriptionHandle {
 
 /// A RAII guard that executes an asynchronous cleanup task when dropped.
 pub(crate) struct CleanUp(
-    Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
+    pub(crate) Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
 );
 
 impl Drop for CleanUp {
