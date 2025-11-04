@@ -15,6 +15,7 @@ use magicblock_core::{
     },
     Slot,
 };
+use magicblock_metrics::metrics::RPC_WS_SUBSCRIPTIONS_COUNT;
 use parking_lot::RwLock;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
@@ -105,7 +106,7 @@ impl SubscriptionsDb {
             .await
             .or_insert_with(|| UpdateSubscribers(vec![]))
             .add_subscriber(chan, encoder.clone());
-
+        let metric = SubMetricGuard::new("account-subscribe");
         // Create a cleanup future that will be executed when the handle is dropped.
         let accounts = self.accounts.clone();
         let callback = async move {
@@ -116,6 +117,7 @@ impl SubscriptionsDb {
             if entry.remove_subscriber(conid, &encoder) {
                 let _ = entry.remove();
             }
+            drop(metric)
         };
         let cleanup = CleanUp(Some(Box::pin(callback)));
         SubscriptionHandle { id, cleanup }
@@ -146,6 +148,7 @@ impl SubscriptionsDb {
             .add_subscriber(chan, encoder.clone());
 
         let programs = self.programs.clone();
+        let metric = SubMetricGuard::new("program-subscribe");
         let callback = async move {
             let Some(mut entry) = programs.get_async(&pubkey).await else {
                 return;
@@ -153,6 +156,7 @@ impl SubscriptionsDb {
             if entry.remove_subscriber(conid, &encoder) {
                 let _ = entry.remove();
             }
+            drop(metric)
         };
         let cleanup = CleanUp(Some(Box::pin(callback)));
         SubscriptionHandle { id, cleanup }
@@ -212,8 +216,10 @@ impl SubscriptionsDb {
         let id = self.logs.write().add_subscriber(chan, encoder.clone());
 
         let logs = self.logs.clone();
+        let metric = SubMetricGuard::new("logs-subscribe");
         let callback = async move {
             logs.write().remove_subscriber(conid, &encoder);
+            drop(metric)
         };
         let cleanup = CleanUp(Some(Box::pin(callback)));
         SubscriptionHandle { id, cleanup }
@@ -239,8 +245,10 @@ impl SubscriptionsDb {
         let id = subscriber.id;
 
         let slot = self.slot.clone();
+        let metric = SubMetricGuard::new("slot-subscribe");
         let callback = async move {
             slot.write().txs.remove(&conid);
+            drop(metric)
         };
         let cleanup = CleanUp(Some(Box::pin(callback)));
         SubscriptionHandle { id, cleanup }
@@ -277,7 +285,11 @@ pub(crate) struct UpdateSubscriber<E> {
 impl<E: Encoder> UpdateSubscribers<E> {
     /// Adds a connection to the appropriate subscriber group based on the encoder.
     /// If no group exists for the given encoder, a new one is created.
-    fn add_subscriber(&mut self, chan: WsConnectionChannel, encoder: E) -> u64 {
+    fn add_subscriber(
+        &mut self,
+        chan: WsConnectionChannel,
+        encoder: E,
+    ) -> SubscriptionID {
         match self.0.binary_search_by(|s| s.encoder.cmp(&encoder)) {
             // A subscriber group with this encoder already exists.
             Ok(index) => {
@@ -372,7 +384,7 @@ pub(crate) struct SubscriptionHandle {
 
 /// A RAII guard that executes an asynchronous cleanup task when dropped.
 pub(crate) struct CleanUp(
-    Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
+    pub(crate) Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
 );
 
 impl Drop for CleanUp {
@@ -389,5 +401,22 @@ impl<E> Drop for UpdateSubscriber<E> {
     /// this sets its `live` flag to false.
     fn drop(&mut self) {
         self.live.store(false, Ordering::Relaxed);
+    }
+}
+
+pub(crate) struct SubMetricGuard(&'static str);
+
+impl SubMetricGuard {
+    pub(crate) fn new(name: &'static str) -> Self {
+        RPC_WS_SUBSCRIPTIONS_COUNT.with_label_values(&[name]).inc();
+        Self(name)
+    }
+}
+
+impl Drop for SubMetricGuard {
+    fn drop(&mut self) {
+        RPC_WS_SUBSCRIPTIONS_COUNT
+            .with_label_values(&[self.0])
+            .dec();
     }
 }

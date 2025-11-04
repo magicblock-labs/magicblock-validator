@@ -88,6 +88,84 @@ pub(crate) enum JsonRpcWsMethod {
     SlotUnsubscribe,
 }
 
+impl JsonRpcHttpMethod {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            JsonRpcHttpMethod::GetAccountInfo => "getAccountInfo",
+            JsonRpcHttpMethod::GetBalance => "getBalance",
+            JsonRpcHttpMethod::GetBlock => "getBlock",
+            JsonRpcHttpMethod::GetBlockCommitment => "getBlockCommitment",
+            JsonRpcHttpMethod::GetBlockHeight => "getBlockHeight",
+            JsonRpcHttpMethod::GetBlockTime => "getBlockTime",
+            JsonRpcHttpMethod::GetBlocks => "getBlocks",
+            JsonRpcHttpMethod::GetBlocksWithLimit => "getBlocksWithLimit",
+            JsonRpcHttpMethod::GetClusterNodes => "getClusterNodes",
+            JsonRpcHttpMethod::GetEpochInfo => "getEpochInfo",
+            JsonRpcHttpMethod::GetEpochSchedule => "getEpochSchedule",
+            JsonRpcHttpMethod::GetFeeForMessage => "getFeeForMessage",
+            JsonRpcHttpMethod::GetFirstAvailableBlock => {
+                "getFirstAvailableBlock"
+            }
+            JsonRpcHttpMethod::GetGenesisHash => "getGenesisHash",
+            JsonRpcHttpMethod::GetHealth => "getHealth",
+            JsonRpcHttpMethod::GetHighestSnapshotSlot => {
+                "getHighestSnapshotSlot"
+            }
+            JsonRpcHttpMethod::GetIdentity => "getIdentity",
+            JsonRpcHttpMethod::GetLargestAccounts => "getLargestAccounts",
+            JsonRpcHttpMethod::GetLatestBlockhash => "getLatestBlockhash",
+            JsonRpcHttpMethod::GetMultipleAccounts => "getMultipleAccounts",
+            JsonRpcHttpMethod::GetProgramAccounts => "getProgramAccounts",
+            JsonRpcHttpMethod::GetSignatureStatuses => "getSignatureStatuses",
+            JsonRpcHttpMethod::GetSignaturesForAddress => {
+                "getSignaturesForAddress"
+            }
+            JsonRpcHttpMethod::GetSlot => "getSlot",
+            JsonRpcHttpMethod::GetSlotLeader => "getSlotLeader",
+            JsonRpcHttpMethod::GetSlotLeaders => "getSlotLeaders",
+            JsonRpcHttpMethod::GetSupply => "getSupply",
+            JsonRpcHttpMethod::GetTokenAccountBalance => {
+                "getTokenAccountBalance"
+            }
+            JsonRpcHttpMethod::GetTokenAccountsByDelegate => {
+                "getTokenAccountsByDelegate"
+            }
+            JsonRpcHttpMethod::GetTokenAccountsByOwner => {
+                "getTokenAccountsByOwner"
+            }
+            JsonRpcHttpMethod::GetTokenLargestAccounts => {
+                "getTokenLargestAccounts"
+            }
+            JsonRpcHttpMethod::GetTokenSupply => "getTokenSupply",
+            JsonRpcHttpMethod::GetTransaction => "getTransaction",
+            JsonRpcHttpMethod::GetTransactionCount => "getTransactionCount",
+            JsonRpcHttpMethod::GetVersion => "getVersion",
+            JsonRpcHttpMethod::IsBlockhashValid => "isBlockhashValid",
+            JsonRpcHttpMethod::MinimumLedgerSlot => "minimumLedgerSlot",
+            JsonRpcHttpMethod::RequestAirdrop => "requestAirdrop",
+            JsonRpcHttpMethod::SendTransaction => "sendTransaction",
+            JsonRpcHttpMethod::SimulateTransaction => "simulateTransaction",
+        }
+    }
+}
+
+impl JsonRpcWsMethod {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            JsonRpcWsMethod::AccountSubscribe => "accountSubscribe",
+            JsonRpcWsMethod::AccountUnsubscribe => "accountUnsubscribe",
+            JsonRpcWsMethod::LogsSubscribe => "logsSubscribe",
+            JsonRpcWsMethod::LogsUnsubscribe => "logsUnsubscribe",
+            JsonRpcWsMethod::ProgramSubscribe => "programSubscribe",
+            JsonRpcWsMethod::ProgramUnsubscribe => "programUnsubscribe",
+            JsonRpcWsMethod::SignatureSubscribe => "signatureSubscribe",
+            JsonRpcWsMethod::SignatureUnsubscribe => "signatureUnsubscribe",
+            JsonRpcWsMethod::SlotSubscribe => "slotSubscribe",
+            JsonRpcWsMethod::SlotUnsubscribe => "slotUnsubscribe",
+        }
+    }
+}
+
 /// A helper macro for easily parsing positional parameters from a JSON-RPC request.
 ///
 /// This macro simplifies the process of extracting and deserializing parameters

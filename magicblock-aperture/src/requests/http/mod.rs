@@ -10,6 +10,7 @@ use log::*;
 use magicblock_core::{
     link::transactions::SanitizeableTransaction, traits::AccountsBank,
 };
+use magicblock_metrics::metrics::ENSURE_ACCOUNTS_TIME;
 use prelude::JsonBody;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -101,7 +102,9 @@ impl HttpDispatcher {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
-        debug!("Ensuring account {pubkey}");
+        let _timer = ENSURE_ACCOUNTS_TIME
+            .with_label_values(&["account"])
+            .start_timer();
         let _ = self
             .chainlink
             .ensure_accounts(&[*pubkey], None)
@@ -109,7 +112,7 @@ impl HttpDispatcher {
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the account fails
                 // Log the error and return whatever is in the accounts db
-                error!("Failed to ensure account {pubkey}: {e}");
+                warn!("Failed to ensure account {pubkey}: {e}");
             });
         self.accountsdb.get_account(pubkey)
     }
@@ -120,14 +123,10 @@ impl HttpDispatcher {
         &self,
         pubkeys: &[Pubkey],
     ) -> Vec<Option<AccountSharedData>> {
-        if log::log_enabled!(log::Level::Debug) {
-            let pubkeys = pubkeys
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ");
-            debug!("Ensuring accounts {pubkeys}");
-        }
+        trace!("Ensuring accounts {pubkeys:?}");
+        let _timer = ENSURE_ACCOUNTS_TIME
+            .with_label_values(&["multi-account"])
+            .start_timer();
         let _ = self
             .chainlink
             .ensure_accounts(pubkeys, None)
@@ -135,7 +134,7 @@ impl HttpDispatcher {
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the accounts fails
                 // Log the error and return whatever is in the accounts db
-                error!("Failed to ensure accounts: {e}");
+                warn!("Failed to ensure accounts: {e}");
             });
         pubkeys
             .iter()
@@ -195,6 +194,9 @@ impl HttpDispatcher {
         &self,
         transaction: &SanitizedTransaction,
     ) -> RpcResult<()> {
+        let _timer = ENSURE_ACCOUNTS_TIME
+            .with_label_values(&["transaction"])
+            .start_timer();
         match self
             .chainlink
             .ensure_transaction_accounts(transaction)

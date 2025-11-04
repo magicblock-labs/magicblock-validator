@@ -51,7 +51,7 @@ async fn test_truncator_not_purged_size() {
     );
 
     for i in 0..NUM_TRANSACTIONS {
-        write_dummy_transaction(&ledger, i, 0);
+        write_dummy_transaction(&ledger, i);
         ledger.write_block(i, 0, Hash::new_unique()).unwrap()
     }
     let signatures = (0..NUM_TRANSACTIONS)
@@ -80,7 +80,7 @@ async fn test_truncator_non_empty_ledger() {
     let ledger = Arc::new(setup());
     let signatures = (0..FINAL_SLOT + 20)
         .map(|i| {
-            let (_, signature) = write_dummy_transaction(&ledger, i, 0);
+            let (_, signature) = write_dummy_transaction(&ledger, i);
             ledger.write_block(i, 0, Hash::new_unique()).unwrap();
             signature
         })
@@ -121,7 +121,7 @@ async fn transaction_spammer(
     for _ in 0..num_of_iterations {
         for _ in 0..tx_per_operation {
             let slot = signatures.len() as u64;
-            let (_, signature) = write_dummy_transaction(&ledger, slot, 0);
+            let (_, signature) = write_dummy_transaction(&ledger, slot);
             ledger.write_block(slot, 0, Hash::new_unique()).unwrap();
             signatures.push(signature);
         }
@@ -177,7 +177,7 @@ async fn test_with_1gb_db() {
             break;
         }
 
-        write_dummy_transaction(&ledger, slot, 0);
+        write_dummy_transaction(&ledger, slot);
         ledger.write_block(slot, 0, Hash::new_unique()).unwrap();
         slot += 1
     }

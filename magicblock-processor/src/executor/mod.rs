@@ -1,4 +1,4 @@
-use std::sync::{atomic::AtomicUsize, Arc, RwLock};
+use std::sync::{Arc, RwLock};
 
 use log::info;
 use magicblock_accounts_db::{AccountsDb, StWLock};
@@ -55,8 +55,6 @@ pub(super) struct TransactionExecutor {
     /// A read lock held during a slot's processing to synchronize with critical global
     /// operations like `AccountsDb` snapshots.
     sync: StWLock,
-    /// An atomic counter for ordering transactions within a single slot.
-    index: Arc<AtomicUsize>,
 }
 
 impl TransactionExecutor {
@@ -103,7 +101,6 @@ impl TransactionExecutor {
             ready_tx,
             accounts_tx: state.account_update_tx.clone(),
             transaction_tx: state.transaction_status_tx.clone(),
-            index,
         };
 
         this.processor.fill_missing_sysvar_cache_entries(&this);

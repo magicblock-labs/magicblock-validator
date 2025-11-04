@@ -1,4 +1,7 @@
-use log::*;
+use log::{debug, trace};
+use magicblock_metrics::metrics::{
+    TRANSACTION_PROCESSING_TIME, TRANSACTION_SKIP_PREFLIGHT,
+};
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_transaction_error::TransactionError;
 use solana_transaction_status::UiTransactionEncoding;
@@ -15,15 +18,19 @@ impl HttpDispatcher {
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
+        let _timer = TRANSACTION_PROCESSING_TIME.start_timer();
         let (transaction_str, config) =
             parse_params!(request.params()?, String, RpcSendTransactionConfig);
+
         let transaction_str: String = some_or_err!(transaction_str);
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
         let transaction = self
             .prepare_transaction(&transaction_str, encoding, true, false)
-            .inspect_err(|err| warn!("Failed to prepare transaction: {err}"))?;
+            .inspect_err(|err| {
+                debug!("Failed to prepare transaction: {err}")
+            })?;
         let signature = *transaction.signature();
 
         // Perform a replay check and reserve the signature in the cache. This prevents
@@ -33,16 +40,16 @@ impl HttpDispatcher {
         {
             return Err(TransactionError::AlreadyProcessed.into());
         }
-        debug!("Received transaction: {signature}, ensuring accounts");
         self.ensure_transaction_accounts(&transaction).await?;
 
         // Based on the preflight flag, either execute and await the result,
         // or schedule (fire-and-forget) for background processing.
         if config.skip_preflight {
-            trace!("Scheduling transaction: {signature}");
+            TRANSACTION_SKIP_PREFLIGHT.inc();
             self.transactions_scheduler.schedule(transaction).await?;
+            trace!("Scheduling transaction {signature}");
         } else {
-            trace!("Executing transaction: {signature}");
+            trace!("Executing transaction {signature}");
             self.transactions_scheduler.execute(transaction).await?;
         }
 

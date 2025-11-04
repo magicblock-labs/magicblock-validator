@@ -397,6 +397,7 @@ async fn test_get_signatures_for_address() {
 async fn test_get_signatures_for_address_pagination() {
     let env = RpcTestEnv::new().await;
     let mut signatures = Vec::new();
+    env.advance_slots(1);
     for _ in 0..5 {
         signatures.push(env.execute_transaction().await);
     }
@@ -420,6 +421,7 @@ async fn test_get_signatures_for_address_pagination() {
     // Test `until`: Get all signatures that occurred after the 2nd transaction.
     let config_until = GetConfirmedSignaturesForAddress2Config {
         until: Some(signatures[1]), // 2nd signature
+        limit: Some(20),
         ..Default::default()
     };
     let result_until = env

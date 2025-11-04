@@ -33,16 +33,16 @@ impl HttpDispatcher {
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
         // Prepare the transaction, applying simulation-specific options.
-        let transaction = self.prepare_transaction(
-            &transaction_str,
-            encoding,
-            config.sig_verify,
-            config.replace_recent_blockhash,
-        ).inspect_err(|err| {
-            error!(
-                "Failed to prepare transaction to simulate: {transaction_str} ({err})"
+        let transaction = self
+            .prepare_transaction(
+                &transaction_str,
+                encoding,
+                config.sig_verify,
+                config.replace_recent_blockhash,
             )
-        })?;
+            .inspect_err(|err| {
+                debug!("Failed to prepare transaction to simulate: {err}")
+            })?;
         self.ensure_transaction_accounts(&transaction).await?;
 
         let replacement_blockhash = config

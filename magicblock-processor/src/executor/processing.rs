@@ -1,5 +1,3 @@
-use std::sync::atomic::Ordering;
-
 use log::error;
 use magicblock_core::link::{
     accounts::{AccountWithSlot, LockedAccount},
@@ -8,6 +6,7 @@ use magicblock_core::link::{
         TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
     },
 };
+use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
 use solana_pubkey::Pubkey;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
@@ -54,6 +53,7 @@ impl super::TransactionExecutor {
         if let Err(err) = result {
             let status = Err(err);
             self.commit_failed_transaction(txn, status.clone());
+            FAILED_TRANSACTIONS_COUNT.inc();
             tx.map(|tx| tx.send(status));
             return;
         }
@@ -215,7 +215,6 @@ impl super::TransactionExecutor {
             self.processor.slot,
             txn,
             meta,
-            self.index.fetch_add(1, Ordering::Relaxed),
         ) {
             error!("failed to commit transaction to the ledger: {error}");
             return;
@@ -244,7 +243,6 @@ impl super::TransactionExecutor {
             self.processor.slot,
             txn,
             meta,
-            self.index.fetch_add(1, Ordering::Relaxed),
         ) {
             error!("failed to commit transaction to the ledger: {error}");
         }

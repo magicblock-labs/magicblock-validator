@@ -2,8 +2,8 @@ use std::sync::Once;
 
 pub use prometheus::HistogramTimer;
 use prometheus::{
-    Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
-    Opts, Registry,
+    Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
+    IntGauge, IntGaugeVec, Opts, Registry,
 };
 pub use types::{AccountClone, AccountCommit, Outcome};
 mod types;
@@ -27,8 +27,6 @@ const MILLIS_10_90: [f64; 9] =
     [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09];
 const MILLIS_100_900: [f64; 9] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
 const SECONDS_1_9: [f64; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
-const SECONDS_10_19: [f64; 10] =
-    [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0];
 
 lazy_static::lazy_static! {
     pub (crate) static ref REGISTRY: Registry = Registry::new_custom(Some("mbv".to_string()), None).unwrap();
@@ -37,43 +35,6 @@ lazy_static::lazy_static! {
         "slot_count", "Slot Count",
     ).unwrap();
 
-    static ref TRANSACTION_VEC_COUNT: IntCounterVec = IntCounterVec::new(
-        Opts::new("transaction_count", "Transaction Count"),
-        &["outcome"],
-    ).unwrap();
-
-    static ref FEE_PAYER_VEC_COUNT: IntCounterVec = IntCounterVec::new(
-        Opts::new("fee_payer_count", "Count of transactions signed by specific fee payers"),
-        &["fee_payer", "outcome"],
-    ).unwrap();
-
-    static ref EXECUTED_UNITS_COUNT: IntCounter = IntCounter::new(
-        "executed_units_count", "Executed Units (CU) Count",
-    ).unwrap();
-
-    static ref FEE_COUNT: IntCounter = IntCounter::new(
-        "fee_count", "Fee Count",
-    ).unwrap();
-
-    static ref ACCOUNT_CLONE_VEC_COUNT: IntCounterVec = IntCounterVec::new(
-        Opts::new("account_clone_count", "Count clones performed for specific accounts"),
-        &["kind", "pubkey", "owner"],
-    ).unwrap();
-
-    static ref ACCOUNT_COMMIT_VEC_COUNT: IntCounterVec = IntCounterVec::new(
-        Opts::new("account_commit_count", "Count commits performed for specific accounts"),
-        &["kind", "pubkey", "outcome"],
-    ).unwrap();
-
-    static ref ACCOUNT_COMMIT_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
-        HistogramOpts::new("account_commit_time", "Time until each account commit transaction is confirmed on chain")
-            .buckets(
-                MILLIS_10_90.iter().chain(
-                MILLIS_100_900.iter()).chain(
-                SECONDS_1_9.iter()).chain(
-                SECONDS_10_19.iter()).cloned().collect()
-            ),
-    ).unwrap();
 
     static ref CACHED_CLONE_OUTPUTS_COUNT: IntGauge = IntGauge::new(
         "magicblock_account_cloner_cached_outputs",
@@ -132,58 +93,9 @@ lazy_static::lazy_static! {
         "accounts_count", "Number of accounts currently in the database",
     ).unwrap();
 
-    static ref INMEM_ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "inmemory_accounts_size", "Size of account states kept in RAM",
-    ).unwrap();
 
     static ref PENDING_ACCOUNT_CLONES_GAUGE: IntGauge = IntGauge::new(
         "pending_account_clones", "Total number of account clone requests still in memory",
-    ).unwrap();
-
-    static ref ACTIVE_DATA_MODS_GAUGE: IntGauge = IntGauge::new(
-        "active_data_mods", "Total number of account data modifications held in memory",
-    ).unwrap();
-
-    static ref ACTIVE_DATA_MODS_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "active_data_mods_size", "Total memory consumption by account data modifications",
-    ).unwrap();
-
-    static ref SIGVERIFY_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
-        HistogramOpts::new("sigverify_time", "Time spent in sigverify")
-            .buckets(
-                MICROS_10_90.iter().chain(
-                MICROS_100_900.iter()).chain(
-                MILLIS_1_9.iter()).cloned().collect()
-            ),
-    ).unwrap();
-
-    static ref ENSURE_ACCOUNTS_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
-        HistogramOpts::new("ensure_accounts_time", "Time spent in ensure_accounts")
-            .buckets(
-                MILLIS_1_9.iter().chain(
-                MILLIS_10_90.iter()).chain(
-                MILLIS_100_900.iter()).chain(
-                SECONDS_1_9.iter()).cloned().collect()
-            ),
-    ).unwrap();
-
-    static ref TRANSACTION_EXECUTION_TIME_HISTORY: Histogram = Histogram::with_opts(
-        HistogramOpts::new("transaction_execution_time", "Time spent in transaction execution")
-            .buckets(
-                MICROS_10_90.iter().chain(
-                MICROS_100_900.iter()).chain(
-                MILLIS_1_9.iter()).cloned().collect()
-            ),
-    ).unwrap();
-
-    static ref FLUSH_ACCOUNTS_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
-        HistogramOpts::new("flush_accounts_time", "Time spent flushing accounts to disk")
-            .buckets(
-                MILLIS_1_9.iter().chain(
-                MILLIS_10_90.iter()).chain(
-                MILLIS_100_900.iter()).chain(
-                SECONDS_1_9.iter()).cloned().collect()
-            ),
     ).unwrap();
 
     static ref MONITORED_ACCOUNTS_GAUGE: IntGauge = IntGauge::new(
@@ -197,6 +109,68 @@ lazy_static::lazy_static! {
 
     static ref EVICTED_ACCOUNTS_COUNT: IntGauge = IntGauge::new(
         "evicted_accounts", "number of accounts forcefully removed from monitored list and database",
+    ).unwrap();
+
+    // -----------------
+    // RPC/Aperture
+    // -----------------
+    pub static ref ENSURE_ACCOUNTS_TIME: HistogramVec = HistogramVec::new(
+        HistogramOpts::new("ensure_accounts_time", "Time spent in ensuring account presence")
+            .buckets(
+                MICROS_10_90.iter().chain(
+                MICROS_100_900.iter()).chain(
+                MILLIS_1_9.iter()).chain(
+                MILLIS_10_90.iter()).chain(
+                MILLIS_100_900.iter()).chain(
+                SECONDS_1_9.iter()).cloned().collect()
+            ),
+        &["kind"]
+    ).unwrap();
+
+    pub static ref TRANSACTION_PROCESSING_TIME: Histogram = Histogram::with_opts(
+        HistogramOpts::new("transaction_processing_time", "Total time spent in transaction processing")
+            .buckets(
+                MICROS_10_90.iter().chain(
+                MICROS_100_900.iter()).chain(
+                MILLIS_1_9.iter()).chain(
+                MILLIS_10_90.iter()).chain(
+                MILLIS_100_900.iter()).chain(
+                SECONDS_1_9.iter()).cloned().collect()
+            ),
+    ).unwrap();
+
+    pub static ref RPC_REQUEST_HANDLING_TIME: HistogramVec = HistogramVec::new(
+        HistogramOpts::new("rpc_request_handling_time", "Time spent in rpc request handling")
+            .buckets(
+                MICROS_10_90.iter().chain(
+                MICROS_100_900.iter()).chain(
+                MILLIS_1_9.iter()).chain(
+                MILLIS_10_90.iter()).chain(
+                MILLIS_100_900.iter()).chain(
+                SECONDS_1_9.iter()).cloned().collect()
+            ), &["name"]
+    ).unwrap();
+
+    pub static ref TRANSACTION_SKIP_PREFLIGHT: IntCounter = IntCounter::new(
+        "transaction_skip_preflight", "Count of transactions that skipped the preflight check",
+    ).unwrap();
+
+    pub static ref RPC_REQUESTS_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new("rpc_requests_count", "Count of different rpc requests"),
+        &["name"],
+    ).unwrap();
+
+    pub static ref RPC_WS_SUBSCRIPTIONS_COUNT: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("rpc_ws_subscriptions_count", "Count of active rpc websocket subscriptions"),
+        &["name"],
+    ).unwrap();
+
+
+    // -----------------
+    // Transaction Execution
+    // -----------------
+    pub static ref FAILED_TRANSACTIONS_COUNT: IntCounter = IntCounter::new(
+        "failed_transactions_count", "Total number of failed transactions"
     ).unwrap();
 
 
@@ -227,13 +201,6 @@ pub(crate) fn register() {
             };
         }
         register!(SLOT_COUNT);
-        register!(TRANSACTION_VEC_COUNT);
-        register!(FEE_PAYER_VEC_COUNT);
-        register!(EXECUTED_UNITS_COUNT);
-        register!(FEE_COUNT);
-        register!(ACCOUNT_CLONE_VEC_COUNT);
-        register!(ACCOUNT_COMMIT_VEC_COUNT);
-        register!(ACCOUNT_COMMIT_TIME_HISTOGRAM);
         register!(CACHED_CLONE_OUTPUTS_COUNT);
         register!(LEDGER_SIZE_GAUGE);
         register!(LEDGER_BLOCK_TIMES_GAUGE);
@@ -249,20 +216,20 @@ pub(crate) fn register() {
         register!(LEDGER_ACCOUNT_MOD_DATA_GAUGE);
         register!(ACCOUNTS_SIZE_GAUGE);
         register!(ACCOUNTS_COUNT_GAUGE);
-        register!(INMEM_ACCOUNTS_SIZE_GAUGE);
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
-        register!(ACTIVE_DATA_MODS_GAUGE);
-        register!(ACTIVE_DATA_MODS_SIZE_GAUGE);
-        register!(SIGVERIFY_TIME_HISTOGRAM);
-        register!(ENSURE_ACCOUNTS_TIME_HISTOGRAM);
-        register!(TRANSACTION_EXECUTION_TIME_HISTORY);
-        register!(FLUSH_ACCOUNTS_TIME_HISTOGRAM);
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(SUBSCRIPTIONS_COUNT_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
         register!(COMMITTOR_EXECUTORS_BUSY_COUNT);
+        register!(ENSURE_ACCOUNTS_TIME);
+        register!(RPC_REQUEST_HANDLING_TIME);
+        register!(TRANSACTION_PROCESSING_TIME);
+        register!(TRANSACTION_SKIP_PREFLIGHT);
+        register!(RPC_REQUESTS_COUNT);
+        register!(RPC_WS_SUBSCRIPTIONS_COUNT);
+        register!(FAILED_TRANSACTIONS_COUNT);
     });
 }
 
@@ -270,85 +237,8 @@ pub fn inc_slot() {
     SLOT_COUNT.inc();
 }
 
-pub fn inc_transaction(is_ok: bool, fee_payer: &str) {
-    let outcome = if is_ok { "success" } else { "error" };
-    TRANSACTION_VEC_COUNT.with_label_values(&[outcome]).inc();
-    FEE_PAYER_VEC_COUNT
-        .with_label_values(&[fee_payer, outcome])
-        .inc();
-}
-
-pub fn inc_executed_units(executed_units: u64) {
-    EXECUTED_UNITS_COUNT.inc_by(executed_units);
-}
-
-pub fn inc_fee(fee: u64) {
-    FEE_COUNT.inc_by(fee);
-}
-
-pub fn inc_account_clone(account_clone: AccountClone) {
-    use AccountClone::*;
-    match account_clone {
-        FeePayer {
-            pubkey,
-            balance_pda,
-        } => {
-            ACCOUNT_CLONE_VEC_COUNT
-                .with_label_values(&[
-                    "feepayer",
-                    pubkey,
-                    balance_pda.unwrap_or(""),
-                ])
-                .inc();
-        }
-        Undelegated { pubkey, owner } => {
-            ACCOUNT_CLONE_VEC_COUNT
-                .with_label_values(&["undelegated", pubkey, owner])
-                .inc();
-        }
-        Delegated { pubkey, owner } => {
-            ACCOUNT_CLONE_VEC_COUNT
-                .with_label_values(&["delegated", pubkey, owner])
-                .inc();
-        }
-        Program { pubkey } => {
-            ACCOUNT_CLONE_VEC_COUNT
-                .with_label_values(&["program", pubkey, ""])
-                .inc();
-        }
-    }
-}
-
-pub fn inc_account_commit(account_commit: AccountCommit) {
-    use AccountCommit::*;
-    match account_commit {
-        CommitOnly { pubkey, outcome } => {
-            ACCOUNT_COMMIT_VEC_COUNT
-                .with_label_values(&["commit", pubkey, outcome.as_str()])
-                .inc();
-        }
-        CommitAndUndelegate { pubkey, outcome } => {
-            ACCOUNT_COMMIT_VEC_COUNT
-                .with_label_values(&[
-                    "commit_and_undelegate",
-                    pubkey,
-                    outcome.as_str(),
-                ])
-                .inc();
-        }
-    }
-}
-
-pub fn account_commit_start() -> HistogramTimer {
-    ACCOUNT_COMMIT_TIME_HISTOGRAM.start_timer()
-}
-
 pub fn set_cached_clone_outputs_count(count: usize) {
     CACHED_CLONE_OUTPUTS_COUNT.set(count as i64);
-}
-
-pub fn account_commit_end(timer: HistogramTimer) {
-    timer.stop_and_record();
 }
 
 pub fn set_subscriptions_count(count: usize, shard: &str) {
@@ -405,18 +295,6 @@ pub fn set_ledger_account_mod_data_count(count: i64) {
     LEDGER_ACCOUNT_MOD_DATA_GAUGE.set(count);
 }
 
-pub fn set_accounts_size(size: u64) {
-    ACCOUNTS_SIZE_GAUGE.set(size as i64);
-}
-
-pub fn set_accounts_count(count: usize) {
-    ACCOUNTS_COUNT_GAUGE.set(count as i64);
-}
-
-pub fn adjust_inmemory_accounts_size(delta: i64) {
-    INMEM_ACCOUNTS_SIZE_GAUGE.add(delta);
-}
-
 pub fn inc_pending_clone_requests() {
     PENDING_ACCOUNT_CLONES_GAUGE.inc()
 }
@@ -425,34 +303,8 @@ pub fn dec_pending_clone_requests() {
     PENDING_ACCOUNT_CLONES_GAUGE.dec()
 }
 
-pub fn adjust_active_data_mods(delta: i64) {
-    ACTIVE_DATA_MODS_GAUGE.add(delta)
-}
-
-pub fn adjust_active_data_mods_size(delta: i64) {
-    ACTIVE_DATA_MODS_SIZE_GAUGE.add(delta);
-}
-
-pub fn observe_sigverify_time<T, F>(f: F) -> T
-where
-    F: FnOnce() -> T,
-{
-    SIGVERIFY_TIME_HISTOGRAM.observe_closure_duration(f)
-}
-
-pub fn ensure_accounts_start() -> HistogramTimer {
-    ENSURE_ACCOUNTS_TIME_HISTOGRAM.start_timer()
-}
-
 pub fn ensure_accounts_end(timer: HistogramTimer) {
     timer.stop_and_record();
-}
-
-pub fn observe_transaction_execution_time<T, F>(f: F) -> T
-where
-    F: FnOnce() -> T,
-{
-    TRANSACTION_EXECUTION_TIME_HISTORY.observe_closure_duration(f)
 }
 
 pub fn adjust_monitored_accounts_count(count: usize) {
@@ -472,11 +324,4 @@ pub fn inc_committor_failed_intents_count() {
 
 pub fn set_committor_executors_busy_count(value: i64) {
     COMMITTOR_EXECUTORS_BUSY_COUNT.set(value)
-}
-
-pub fn observe_flush_accounts_time<T, F>(f: F) -> T
-where
-    F: FnOnce() -> T,
-{
-    FLUSH_ACCOUNTS_TIME_HISTOGRAM.observe_closure_duration(f)
 }

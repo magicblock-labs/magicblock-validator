@@ -6,6 +6,9 @@ use magicblock_core::link::{
     transactions::TransactionSchedulerHandle, DispatchEndpoints,
 };
 use magicblock_ledger::Ledger;
+use magicblock_metrics::metrics::{
+    RPC_REQUESTS_COUNT, RPC_REQUEST_HANDLING_TIME,
+};
 
 use crate::{
     requests::{
@@ -111,6 +114,11 @@ impl HttpDispatcher {
     async fn process(&self, request: &mut JsonHttpRequest) -> HandlerResult {
         // Route the request to the correct handler based on the method name.
         use crate::requests::JsonRpcHttpMethod::*;
+        let method = request.method.as_str();
+        RPC_REQUESTS_COUNT.with_label_values(&[method]).inc();
+        let _timer = RPC_REQUEST_HANDLING_TIME
+            .with_label_values(&[method])
+            .start_timer();
         match request.method {
             GetAccountInfo => self.get_account_info(request).await,
             GetBalance => self.get_balance(request).await,
