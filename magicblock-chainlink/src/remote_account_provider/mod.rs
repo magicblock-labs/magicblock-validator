@@ -54,8 +54,9 @@ use crate::{errors::ChainlinkResult, submux::SubMuxClient};
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 5_000;
 
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
+type FetchResult = Result<RemoteAccount, RemoteAccountProviderError>;
 type FetchingAccounts =
-    Mutex<HashMap<Pubkey, (u64, Vec<oneshot::Sender<RemoteAccount>>)>>;
+    Mutex<HashMap<Pubkey, (u64, Vec<oneshot::Sender<FetchResult>>)>>;
 
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
@@ -445,7 +446,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
                                 // Resolve all pending requests with subscription data
                                 for sender in pending_requests {
-                                    let _ = sender.send(remote_account.clone());
+                                    let _ =
+                                        sender.send(Ok(remote_account.clone()));
                                 }
                                 None
                             } else {
@@ -633,16 +635,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         for (idx, (pubkey, receiver)) in
             subscription_overrides.into_iter().enumerate()
         {
-            match receiver
-                .await
-                .inspect_err(|err| {
-                    warn!("RemoteAccountProvider::ensure_accounts - RecvError occurred while awaiting account {pubkey} at index {idx}: {err:?}. This indicates the fetch task sender was dropped without sending a value. Context: fetch_start_slot={fetch_start_slot}, min_context_slot={min_context_slot}, total_pubkeys={}",
-                          pubkeys.len());
-                }) {
-                Ok(remote_account) => resolved_accounts.push(remote_account),
+            match receiver.await {
+                Ok(result) => match result {
+                    Ok(remote_account) => {
+                        resolved_accounts.push(remote_account)
+                    }
+                    Err(err) => {
+                        error!("Failed to fetch account {pubkey}: {err}");
+                        errors.push((idx, err));
+                    }
+                },
                 Err(err) => {
+                    warn!("RemoteAccountProvider::ensure_accounts - Unexpected RecvError while awaiting account {pubkey} at index {idx}: {err:?}. This should not happen with Result-based channels. Context: fetch_start_slot={fetch_start_slot}, min_context_slot={min_context_slot}, total_pubkeys={}",
+                      pubkeys.len());
                     error!("Failed to resolve account {pubkey}: {err:?}");
-                    errors.push((idx, err));
+                    errors.push((
+                        idx,
+                        RemoteAccountProviderError::RecvrError(err),
+                    ));
                 }
             }
         }
@@ -675,7 +685,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     async fn setup_subscriptions(
         &self,
-        subscribe_and_fetch: &[(Pubkey, oneshot::Receiver<RemoteAccount>)],
+        subscribe_and_fetch: &[(Pubkey, oneshot::Receiver<FetchResult>)],
     ) -> RemoteAccountProviderResult<()> {
         if log_enabled!(log::Level::Debug) {
             let pubkeys = subscribe_and_fetch
@@ -795,19 +805,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         min_context_slot: u64,
     ) {
         const MAX_RETRIES: u64 = 10;
-        let mut remaining_retries: u64 = MAX_RETRIES;
-        macro_rules! retry {
-            ($msg:expr) => {
-                trace!($msg);
-                remaining_retries -= 1;
-                if remaining_retries <= 0 {
-                    error!("Max retries {MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(400)).await;
-                continue;
-            }
-        }
 
         let rpc_client = self.rpc_client.clone();
         let fetching_accounts = self.fetching_accounts.clone();
@@ -817,10 +814,42 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         tokio::spawn(async move {
             use RemoteAccount::*;
 
+            // Helper to notify all pending requests of fetch failure
+            let notify_error = |error_msg: &str| {
+                let mut fetching = fetching_accounts.lock().unwrap();
+                error!("{error_msg}");
+                for pubkey in &pubkeys {
+                    // Remove pending requests and send error
+                    if let Some((_, requests)) = fetching.remove(pubkey) {
+                        for sender in requests {
+                            let error = RemoteAccountProviderError::AccountResolutionsFailed(
+                                format!("{}: {}", pubkey, error_msg)
+                        );
+                            let _ = sender.send(Err(error));
+                        }
+                    }
+                }
+            };
+
+            let mut remaining_retries: u64 = MAX_RETRIES;
+
             if log_enabled!(log::Level::Trace) {
                 trace!("Fetch ({})", pubkeys_str(&pubkeys));
             }
 
+            macro_rules! retry {
+                ($msg:expr) => {{
+                    trace!($msg);
+                    remaining_retries -= 1;
+                    if remaining_retries <= 0 {
+                    let err_msg = format!("Max retries {MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
+                    notify_error(&err_msg);
+                    return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    continue;
+                }};
+            }
             let response = loop {
                 // We provide the min_context slot in order to _force_ the RPC to update
                 // its account cache. Otherwise we could just keep fetching the accounts
@@ -878,25 +907,28 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                             message,
                                             data,
                                         };
-                                        error!(
+                                        let err_msg = format!(
                                             "RpcError fetching accounts {}: {err:?}", pubkeys_str(&pubkeys)
                                         );
+                                        notify_error(&err_msg);
                                         return;
                                     }
                                 }
                                 err => {
-                                    error!(
+                                    let err_msg = format!(
                                         "RpcError fetching accounts {}: {err:?}", pubkeys_str(&pubkeys)
                                     );
+                                    notify_error(&err_msg);
                                     return;
                                 }
                             }
                         }
                         _ => {
-                            error!(
+                            let err_msg = format!(
                                 "RpcError fetching accounts {}: {err:?}",
                                 pubkeys_str(&pubkeys)
                             );
+                            notify_error(&err_msg);
                             return;
                         }
                     },
@@ -966,7 +998,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
                 // Send the fetch result to all waiting requests
                 for request in requests {
-                    let _ = request.send(remote_account.clone());
+                    let _ = request.send(Ok(remote_account.clone()));
                 }
             }
         });
