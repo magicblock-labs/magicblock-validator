@@ -95,7 +95,6 @@ impl TaskStrategist {
                 lookup_tables_keys,
             })
         } else {
-            println!("snawaz: inside build_strategy");
             Err(TaskStrategistError::FailedToFitError)
         }
     }
@@ -166,10 +165,7 @@ impl TaskStrategist {
                 &[],
             ) {
                 Ok(tx) => Ok(serialize_and_encode_base64(&tx).len()),
-                Err(TaskStrategistError::FailedToFitError) => {
-                    println!("snawaz: inside optimize_strategy");
-                    Ok(usize::MAX)
-                }
+                Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
                 Err(TaskStrategistError::SignerError(err)) => Err(err),
             }
         };

@@ -166,6 +166,8 @@ impl IntegrationTestContext {
                 RpcTransactionConfig {
                     commitment: Some(self.commitment),
                     max_supported_transaction_version: if label == "chain" {
+                        // base chain cluster requires explicit v0 support,
+                        // while ephemeral uses default version handling
                         Some(0)
                     } else {
                         None

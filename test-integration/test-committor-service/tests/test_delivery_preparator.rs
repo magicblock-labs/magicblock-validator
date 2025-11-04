@@ -19,9 +19,7 @@ mod common;
 // # see the PR #575 for more context.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_prepare_10kb_buffer() {
-    println!("TestFixture::new()");
     let fixture = TestFixture::new().await;
-    println!("TestFixture::new() done");
     let preparator = fixture.create_delivery_preparator();
 
     let data = generate_random_bytes(10 * 1024);

@@ -114,6 +114,8 @@ pub struct CommitTask {
 }
 
 impl CommitTask {
+    // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD, use CommitDiff to
+    // reduce instruction size. Below this, commit is sent as CommitState.
     const COMMIT_STATE_SIZE_THRESHOLD: usize = 200;
 
     pub fn new(
@@ -124,8 +126,9 @@ impl CommitTask {
         let fetched_account = if committed_account.account.data.len()
             > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
         {
-            // TODO (snawaz): it is the most ugliest piece of code as it is making network call,
-            // and I'll soon fix it in a separate PR that will use caching of base-accounts.
+            // TODO (snawaz): it is the most ugliest piece of code as it is making
+            // network call and that too, a blocking one, and I'll soon fix it in a
+            // separate PR that will use caching of base-accounts.
             use solana_rpc_client::rpc_client::RpcClient;
             use solana_sdk::commitment_config::CommitmentConfig;
 
@@ -145,8 +148,6 @@ impl CommitTask {
         } else {
             None
         };
-
-        println!("fetched_account: {:#?}", fetched_account);
 
         Self {
             commit_id,
@@ -183,7 +184,6 @@ impl CommitTask {
             data: self.committed_account.account.data.clone(),
             allow_undelegation: self.allow_undelegation,
         };
-        println!("create_commit_state_ix, data: {}", args.data.len());
         dlp::instruction_builder::commit_state(
             *validator,
             self.committed_account.pubkey,
@@ -198,9 +198,6 @@ impl CommitTask {
         fetched_account: &Account,
     ) -> Instruction {
         if self.force_commit_state {
-            println!(
-                "force_commit_state is true, so call create_commit_state_ix"
-            );
             return self.create_commit_state_ix(validator);
         }
 
@@ -214,7 +211,6 @@ impl CommitTask {
             .to_vec(),
             allow_undelegation: self.allow_undelegation,
         };
-        println!("create_commit_diff_ix, diff: {}", args.diff.len());
 
         dlp::instruction_builder::commit_diff(
             *validator,
