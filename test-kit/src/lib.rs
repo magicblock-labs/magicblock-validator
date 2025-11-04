@@ -255,6 +255,14 @@ impl ExecutionTestEnv {
             .inspect_err(|err| error!("failed to execute transaction: {err}"))
     }
 
+    /// Submits a transaction for scheduling and returns
+    pub async fn schedule_transaction(
+        &self,
+        txn: impl SanitizeableTransaction,
+    ) {
+        self.transaction_scheduler.schedule(txn).await.unwrap();
+    }
+
     /// Submits a transaction for simulation and waits for the detailed result.
     pub async fn simulate_transaction(
         &self,
