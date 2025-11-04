@@ -32,8 +32,10 @@ impl WsDispatcher {
             .subscribe_to_account(pubkey, encoder, self.chan.clone())
             .await;
 
+        let result = SubResult::SubId(handle.id);
         // Store the cleanup handle to manage the subscription's lifecycle.
-        self.unsubs.insert(handle.id, handle.cleanup);
-        Ok(SubResult::SubId(handle.id))
+        self.register_unsub(handle);
+
+        Ok(result)
     }
 }
