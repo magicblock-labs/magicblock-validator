@@ -207,3 +207,83 @@ fn test_merge_macro_codegen_verification() {
     // Compare the implementation
     assert_merge_impl_fn(input, expected);
 }
+
+/// Verifies codegen for empty structs
+#[test]
+fn test_merge_macro_codegen_empty_struct() {
+    let input = quote! {
+        #[derive(Default)]
+        struct EmptyConfig {}
+    };
+
+    let expected = quote! {
+        impl ::magicblock_config_helpers::Merge for EmptyConfig {
+            fn merge(&mut self, other: EmptyConfig) {
+                let default = Self::default();
+            }
+        }
+    };
+
+    assert_merge_impl_fn(input, expected);
+}
+
+/// Verifies codegen for structs with only primitive fields
+#[test]
+fn test_merge_macro_codegen_only_primitives() {
+    let input = quote! {
+        #[derive(Default)]
+        struct PrimitiveConfig {
+            count: u32,
+            enabled: bool,
+            name: String,
+        }
+    };
+
+    let expected = quote! {
+        impl ::magicblock_config_helpers::Merge for PrimitiveConfig {
+            fn merge(&mut self, other: PrimitiveConfig) {
+                let default = Self::default();
+
+                if self.count == default.count {
+                    self.count = other.count;
+                }
+
+                if self.enabled == default.enabled {
+                    self.enabled = other.enabled;
+                }
+
+                if self.name == default.name {
+                    self.name = other.name;
+                }
+            }
+        }
+    };
+
+    assert_merge_impl_fn(input, expected);
+}
+
+/// Verifies codegen for structs with only nested Config fields
+#[test]
+fn test_merge_macro_codegen_only_config_fields() {
+    let input = quote! {
+        #[derive(Default)]
+        struct CompositeConfig {
+            inner: InnerConfig,
+            other: OtherConfig,
+        }
+    };
+
+    let expected = quote! {
+        impl ::magicblock_config_helpers::Merge for CompositeConfig {
+            fn merge(&mut self, other: CompositeConfig) {
+                let default = Self::default();
+
+                self.inner.merge(other.inner);
+
+                self.other.merge(other.other);
+            }
+        }
+    };
+
+    assert_merge_impl_fn(input, expected);
+}
