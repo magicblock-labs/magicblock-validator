@@ -129,7 +129,8 @@ impl WsDispatcher {
     /// Register the unsubscription callback for the new subscription on this connection
     pub(crate) fn register_unsub(&mut self, handle: SubscriptionHandle) {
         let cleanup = self.unsubs.insert(handle.id, handle.cleanup);
-        // If we have a duplicate subscription, just forget the previous cleanup callback
+        // If we have a duplicate subscription, drop the
+        // previous cleanup callback to prevent double-cleanup
         if let Some(mut callback) = cleanup {
             callback.0.take();
         }
