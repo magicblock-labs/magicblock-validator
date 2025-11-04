@@ -68,7 +68,6 @@ impl TransactionExecutor {
         state: &TransactionSchedulerState,
         rx: TransactionToProcessRx,
         ready_tx: Sender<ExecutorId>,
-        index: Arc<AtomicUsize>,
         programs_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     ) -> Self {
         let slot = state.accountsdb.slot();
