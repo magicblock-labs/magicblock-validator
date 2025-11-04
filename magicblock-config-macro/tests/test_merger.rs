@@ -107,17 +107,19 @@ fn merge_impl(code: TokenStream2) -> TokenStream2 {
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    // Validate input - panic for invalid cases 
+    // Validate input - panic for invalid cases
     let fields = match &input.data {
-        Data::Struct(data_struct) => match &data_struct.fields {
-            Fields::Named(fields_named) => &fields_named.named,
-            Fields::Unnamed(_) => {
-                panic!("Merge can only be derived for structs with named fields");
+        Data::Struct(data_struct) => {
+            match &data_struct.fields {
+                Fields::Named(fields_named) => &fields_named.named,
+                Fields::Unnamed(_) => {
+                    panic!("Merge can only be derived for structs with named fields");
+                }
+                Fields::Unit => {
+                    panic!("Merge can only be derived for structs with named fields");
+                }
             }
-            Fields::Unit => {
-                panic!("Merge can only be derived for structs with named fields");
-            }
-        },
+        }
         _ => {
             panic!("Merge can only be derived for structs");
         }
@@ -311,7 +313,9 @@ fn test_merge_macro_rejects_enum() {
 
 /// Verifies that the macro rejects tuple structs with a compile error
 #[test]
-#[should_panic(expected = "Merge can only be derived for structs with named fields")]
+#[should_panic(
+    expected = "Merge can only be derived for structs with named fields"
+)]
 fn test_merge_macro_rejects_tuple_struct() {
     let input = quote! {
         struct TupleConfig(u32, String);
@@ -323,7 +327,9 @@ fn test_merge_macro_rejects_tuple_struct() {
 
 /// Verifies that the macro rejects unit structs with a compile error
 #[test]
-#[should_panic(expected = "Merge can only be derived for structs with named fields")]
+#[should_panic(
+    expected = "Merge can only be derived for structs with named fields"
+)]
 fn test_merge_macro_rejects_unit_struct() {
     let input = quote! {
         struct UnitConfig;
