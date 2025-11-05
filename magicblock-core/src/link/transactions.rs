@@ -51,6 +51,7 @@ pub type TxnReplayResultTx = oneshot::Sender<TransactionResult>;
 /// Contains the final, committed status of an executed
 /// transaction, including its result and metadata.
 /// This is the message type that is communicated to subscribers via event processors.
+#[derive(Debug)]
 pub struct TransactionStatus {
     pub signature: Signature,
     pub slot: Slot,
@@ -76,6 +77,7 @@ pub enum TransactionProcessingMode {
 }
 
 /// The detailed outcome of a standard transaction execution.
+#[derive(Debug)]
 pub struct TransactionExecutionResult {
     pub result: TransactionResult,
     pub accounts: Box<[Pubkey]>,

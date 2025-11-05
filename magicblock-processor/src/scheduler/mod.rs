@@ -154,10 +154,9 @@ impl TransactionScheduler {
         // SAFETY:
         // This unwrap is safe due to the `if self.coordinator.is_ready()`
         // guard in the `select!` macro, which calls this method
-        let executor = self
-            .coordinator
-            .get_ready_executor()
-            .expect("unreachable code, if there are not any ready executors");
+        let executor = self.coordinator.get_ready_executor().expect(
+            "unreachable: is_ready() guard ensures an executor is available",
+        );
         let txn = TransactionWithId::new(txn);
         self.schedule_transaction(executor, txn, false).await;
     }
@@ -172,7 +171,7 @@ impl TransactionScheduler {
     /// Attempts to reschedule transactions that were blocked by the newly freed executor.
     async fn reschedule_blocked_transactions(&mut self, blocker: ExecutorId) {
         let mut executor = Some(blocker);
-        while let Some(exec) = executor {
+        while let Some(exec) = executor.take() {
             let txn = self.coordinator.next_blocked_transaction(blocker);
             let scheduled = if let Some(txn) = txn {
                 executor = self.coordinator.get_ready_executor();
@@ -187,6 +186,9 @@ impl TransactionScheduler {
             if !scheduled {
                 break;
             }
+        }
+        if let Some(executor) = executor {
+            self.coordinator.release_executor(executor);
         }
     }
 
