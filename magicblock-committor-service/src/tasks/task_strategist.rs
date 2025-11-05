@@ -171,7 +171,8 @@ impl TaskStrategist {
         persistor: &Option<P>,
     ) -> TaskStrategistResult<TransactionStrategy> {
         // Attempt optimizing tasks themselves(using buffers)
-        if Self::optimize_strategy(&mut tasks)? <= MAX_ENCODED_TRANSACTION_SIZE
+        if Self::minimize_tx_size_if_needed(&mut tasks)?
+            <= MAX_ENCODED_TRANSACTION_SIZE
         {
             // Persist tasks strategy
             if let Some(persistor) = persistor {
@@ -270,7 +271,7 @@ impl TaskStrategist {
 
     /// Optimizes set of [`TaskDeliveryStrategy`] to fit [`MAX_ENCODED_TRANSACTION_SIZE`]
     /// Returns size of tx after optimizations
-    fn optimize_strategy(
+    fn minimize_tx_size_if_needed(
         tasks: &mut [Box<dyn BaseTask>],
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
@@ -325,7 +326,7 @@ impl TaskStrategist {
                 let tmp_task = Box::new(tmp_task) as Box<dyn BaseTask>;
                 std::mem::replace(&mut tasks[index], tmp_task)
             };
-            match task.optimize() {
+            match task.minimize_tx_size() {
                 // If we can decrease:
                 // 1. Calculate new tx size & ix size
                 // 2. Insert item's data back in the heap
@@ -704,7 +705,7 @@ mod tests {
             Box::new(create_test_commit_task(3, 1000, 0)) as Box<dyn BaseTask>, // Larger task
         ];
 
-        let _ = TaskStrategist::optimize_strategy(&mut tasks);
+        let _ = TaskStrategist::minimize_tx_size_if_needed(&mut tasks);
         // The larger task should have been optimized first
         assert!(matches!(tasks[0].strategy(), TaskStrategy::Args));
         assert!(matches!(tasks[1].strategy(), TaskStrategy::Buffer));
