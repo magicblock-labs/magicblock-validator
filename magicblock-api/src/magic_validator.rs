@@ -84,8 +84,7 @@ use crate::{
         remote_cluster_from_remote, try_convert_accounts_config,
     },
     fund_account::{
-        fund_magic_context, fund_task_context, funded_faucet,
-        init_validator_identity,
+        fund_magic_context, funded_faucet, init_validator_identity,
     },
     genesis_utils::{create_genesis_config_with_leader, GenesisConfigInfo},
     ledger::{
@@ -203,7 +202,6 @@ impl MagicValidator {
 
         init_validator_identity(&accountsdb, &validator_pubkey);
         fund_magic_context(&accountsdb);
-        fund_task_context(&accountsdb);
 
         let faucet_keypair =
             funded_faucet(&accountsdb, ledger.ledger_path().as_path())?;

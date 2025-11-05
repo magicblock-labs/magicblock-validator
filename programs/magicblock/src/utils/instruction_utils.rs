@@ -213,12 +213,7 @@ impl InstructionUtils {
         args: ScheduleTaskArgs,
         accounts: &[Pubkey],
     ) -> Instruction {
-        use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
-
-        let mut account_metas = vec![
-            AccountMeta::new(*payer, true),
-            AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
-        ];
+        let mut account_metas = vec![AccountMeta::new(*payer, true)];
         for account in accounts {
             account_metas.push(AccountMeta::new_readonly(*account, true));
         }
@@ -246,42 +241,11 @@ impl InstructionUtils {
         authority: &Pubkey,
         task_id: u64,
     ) -> Instruction {
-        use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
-
-        let account_metas = vec![
-            AccountMeta::new(*authority, true),
-            AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
-        ];
+        let account_metas = vec![AccountMeta::new(*authority, true)];
 
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::CancelTask { task_id },
-            account_metas,
-        )
-    }
-
-    // -----------------
-    // Process Tasks
-    // -----------------
-    pub fn process_tasks(
-        authority: &Keypair,
-        recent_blockhash: Hash,
-    ) -> Transaction {
-        let ix = Self::process_tasks_instruction(&authority.pubkey());
-        Self::into_transaction(authority, ix, recent_blockhash)
-    }
-
-    pub fn process_tasks_instruction(authority: &Pubkey) -> Instruction {
-        use magicblock_magic_program_api::TASK_CONTEXT_PUBKEY;
-
-        let account_metas = vec![
-            AccountMeta::new(*authority, true),
-            AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
-        ];
-
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::ProcessTasks,
             account_metas,
         )
     }

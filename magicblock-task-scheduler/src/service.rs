@@ -14,7 +14,6 @@ use magicblock_ledger::LatestBlock;
 use magicblock_program::{
     args::{CancelTaskRequest, ScheduleTaskRequest, TaskRequest},
     validator::{validator_authority, validator_authority_id},
-    CrankTask,
 };
 use solana_sdk::{
     instruction::Instruction, message::Message, pubkey::Pubkey,
@@ -114,14 +113,13 @@ impl TaskSchedulerService {
         Ok(tokio::spawn(async move { self.run().await }))
     }
 
-    fn process_context_request(
+    fn process_request(
         &mut self,
         request: &TaskRequest,
     ) -> TaskSchedulerResult<TaskSchedulerResult<()>> {
         match request {
             TaskRequest::Schedule(schedule_request) => {
-                if let Err(e) = self.process_schedule_request(schedule_request)
-                {
+                if let Err(e) = self.register_task(schedule_request) {
                     self.db.insert_failed_scheduling(
                         schedule_request.id,
                         format!("{:?}", e),
@@ -151,17 +149,6 @@ impl TaskSchedulerService {
         };
 
         Ok(Ok(()))
-    }
-
-    fn process_schedule_request(
-        &mut self,
-        schedule_request: &ScheduleTaskRequest,
-    ) -> TaskSchedulerResult<()> {
-        // Convert request to task and register in database
-        let task = CrankTask::from(schedule_request);
-        self.register_task(&task)?;
-
-        Ok(())
     }
 
     fn process_cancel_request(
@@ -222,7 +209,7 @@ impl TaskSchedulerService {
 
     pub fn register_task(
         &mut self,
-        task: &CrankTask,
+        task: &ScheduleTaskRequest,
     ) -> TaskSchedulerResult<()> {
         let db_task = DbTask {
             id: task.id,
@@ -274,12 +261,12 @@ impl TaskSchedulerService {
                     }
                 }
                 Some(task) = self.scheduled_tasks.recv() => {
-                    match self.process_context_request(&task) {
+                    match self.process_request(&task) {
                         Ok(Err(e)) => {
                             warn!("Failed to process request ID={}: {e:?}", task.id());
                         }
                         Err(e) => {
-                            error!("Failed to process context requests: {}", e);
+                            error!("Failed to process request: {}", e);
                             return Err(e);
                         }
                         _ => {}
