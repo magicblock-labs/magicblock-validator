@@ -21,6 +21,7 @@ use crate::{
     instruction_utils::InstructionUtils,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+        get_writable_with_idx,
     },
 };
 
@@ -196,6 +197,9 @@ impl CommitAndUndelegate {
         args: CommitAndUndelegateArgs,
         context: &ConstructionContext<'_, '_>,
     ) -> Result<CommitAndUndelegate, InstructionError> {
+        let account_indices = args.commit_type.committed_accounts_indices();
+        Self::validate(account_indices.as_slice(), context)?;
+
         let commit_action =
             CommitType::try_from_args(args.commit_type, context)?;
         let undelegate_action =
@@ -204,6 +208,26 @@ impl CommitAndUndelegate {
         Ok(Self {
             commit_action,
             undelegate_action,
+        })
+    }
+
+    pub fn validate(
+        account_indices: &[u8],
+        context: &ConstructionContext<'_, '_>,
+    ) -> Result<(), InstructionError> {
+        account_indices.iter().copied().try_for_each(|idx| {
+            let is_writable = get_writable_with_idx(&context.transaction_context, idx as u16)?;
+            if is_writable {
+                Ok(())
+            } else {
+                let pubkey = get_instruction_pubkey_with_idx(&context.transaction_context, idx as u16)?;
+                ic_msg!(
+                    context.invoke_context,
+                    "ScheduleCommit ERR: account {} needs to be writable to be undelegated",
+                    pubkey
+                );
+                return Err(InstructionError::ReadonlyDataModified);
+            }
         })
     }
 
@@ -316,7 +340,17 @@ impl CommitType {
         context: &ConstructionContext<'_, '_>,
     ) -> Result<(), InstructionError> {
         accounts.iter().try_for_each(|(pubkey, account)| {
-            let owner = *account.borrow().owner();
+            let account_shared = account.borrow();
+            if !account_shared.delegated() {
+                ic_msg!(
+                    context.invoke_context,
+                    "ScheduleCommit ERR: account {} has needs to be delegated to current validator to be committed",
+                    pubkey
+                );
+                return Err(InstructionError::IllegalOwner)
+            }
+
+            let owner = *account_shared.owner();
             if context.parent_program_id != Some(owner) && !context.signers.contains(pubkey) {
                 match context.parent_program_id {
                     None => {
@@ -383,14 +417,7 @@ impl CommitType {
                 Self::validate_accounts(&committed_accounts_ref, context)?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
-                    .map(|el| {
-                        let mut committed_account: CommittedAccount = el.into();
-                        committed_account.account.owner = context
-                            .parent_program_id
-                            .unwrap_or(committed_account.account.owner);
-
-                        committed_account
-                    })
+                    .map(CommittedAccount::from)
                     .collect();
 
                 Ok(CommitType::Standalone(committed_accounts))
@@ -411,14 +438,7 @@ impl CommitType {
                     .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
-                    .map(|el| {
-                        let mut committed_account: CommittedAccount = el.into();
-                        committed_account.account.owner = context
-                            .parent_program_id
-                            .unwrap_or(committed_account.account.owner);
-
-                        committed_account
-                    })
+                    .map(CommittedAccount::from)
                     .collect();
 
                 Ok(CommitType::WithBaseActions {
