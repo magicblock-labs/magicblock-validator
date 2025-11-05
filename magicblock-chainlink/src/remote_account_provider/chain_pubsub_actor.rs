@@ -11,10 +11,7 @@ use solana_rpc_client_api::{
     config::RpcAccountInfoConfig, response::Response as RpcResponse,
 };
 use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
-use tokio::{
-    sync::{mpsc, oneshot, Mutex as AsyncMutex},
-    time::{timeout, Duration},
-};
+use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
@@ -80,9 +77,6 @@ pub struct ChainPubsubActor {
     /// Sends updates for any account subscription that is received via
     /// the [Self::pubsub_connection]
     subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
-    /// The tasks that watch subscriptions via the [Self::pubsub_connection] and
-    /// channel them into the [Self::subscription_updates_sender]
-    subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
     /// Lock to prevent concurrent recycle attempts
     recycle_lock: Arc<AsyncMutex<()>>,
     /// The token to use to cancel all subscriptions and shut down the
@@ -126,8 +120,7 @@ impl ChainPubsubActor {
             mpsc::channel(SUBSCRIPTION_UPDATE_CHANNEL_SIZE);
         let (messages_sender, messages_receiver) =
             mpsc::channel(MESSAGE_CHANNEL_SIZE);
-        let subscription_watchers =
-            Arc::new(Mutex::new(tokio::task::JoinSet::new()));
+
         let shutdown_token = CancellationToken::new();
         let recycle_lock = Arc::new(AsyncMutex::new(()));
         let me = Self {
@@ -136,7 +129,6 @@ impl ChainPubsubActor {
             messages_sender,
             subscriptions: Default::default(),
             subscription_updates_sender,
-            subscription_watchers,
             recycle_lock,
             shutdown_token,
         };
@@ -159,9 +151,6 @@ impl ChainPubsubActor {
             sub.cancellation_token.cancel();
         }
         self.shutdown_token.cancel();
-        // TODO:
-        // let mut subs = self.subscription_watchers.lock().unwrap();;
-        // subs.join_all().await;
     }
 
     pub fn subscription_count(&self, filter: &[Pubkey]) -> usize {
@@ -203,7 +192,6 @@ impl ChainPubsubActor {
         mut messages_receiver: mpsc::Receiver<ChainPubsubActorMessage>,
     ) {
         let subs = self.subscriptions.clone();
-        let subscription_watchers = self.subscription_watchers.clone();
         let shutdown_token = self.shutdown_token.clone();
         let pubsub_client_config = self.pubsub_client_config.clone();
         let subscription_updates_sender =
@@ -218,7 +206,6 @@ impl ChainPubsubActor {
                             Self::handle_msg(
                                 subs.clone(),
                                 pubsub_connection.clone(),
-                                subscription_watchers.clone(),
                                 subscription_updates_sender.clone(),
                                 pubsub_client_config.clone(),
                                 recycle_lock.clone(),
@@ -239,7 +226,6 @@ impl ChainPubsubActor {
     async fn handle_msg(
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         pubsub_connection: Arc<PubSubConnection>,
-        subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         pubsub_client_config: PubsubClientConfig,
         recycle_lock: Arc<AsyncMutex<()>>,
@@ -253,7 +239,6 @@ impl ChainPubsubActor {
                     response,
                     subscriptions,
                     pubsub_connection,
-                    subscription_watchers,
                     subscription_updates_sender,
                     commitment_config,
                     recycle_lock,
@@ -287,7 +272,6 @@ impl ChainPubsubActor {
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
         subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         pubsub_connection: Arc<PubSubConnection>,
-        subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         commitment_config: CommitmentConfig,
         recycle_lock: Arc<AsyncMutex<()>>,
@@ -322,11 +306,7 @@ impl ChainPubsubActor {
             );
         }
 
-        let mut sub_joinset = subscription_watchers
-            .lock()
-            .expect("subscription_watchers lock poisoned");
-        let subscription_watchers = subscription_watchers.clone();
-        sub_joinset.spawn(async move {
+        tokio::spawn(async move {
             let config = RpcAccountInfoConfig {
                 commitment: Some(commitment_config),
                 encoding: Some(UiAccountEncoding::Base64Zstd),
@@ -335,13 +315,16 @@ impl ChainPubsubActor {
             // Attempt to subscribe to the account
             let mut attempts = 1;
             let (mut update_stream, unsubscribe) = loop {
-                let res = pubsub_connection.account_subscribe(&pubkey, config.clone());
+                let res = pubsub_connection
+                    .account_subscribe(&pubkey, config.clone());
                 match res.await {
                     Ok(res) => break res,
                     Err(err) => {
                         if attempts == MAX_SUBSCRIBE_ATTEMPTS {
                             // At this point we just give up and report to caller
-                            subs.lock().expect("subscriptions lock poisoned").remove(&pubkey);
+                            subs.lock()
+                                .expect("subscriptions lock poisoned")
+                                .remove(&pubkey);
                             let _ = sub_response.send(Err(err.into()));
                             return;
                         }
@@ -352,18 +335,22 @@ impl ChainPubsubActor {
                 // attempt to recreate the connection with all of its subscriptions in the background.
                 let pubsub_connection_clone = pubsub_connection.clone();
                 let subs_clone = subs.clone();
-                let subscription_watchers_clone = subscription_watchers.clone();
-                let subscription_updates_sender_clone = subscription_updates_sender.clone();
+                let subscription_updates_sender_clone =
+                    subscription_updates_sender.clone();
                 let recycle_lock_clone = recycle_lock.clone();
                 if let Err(err) = Self::recycle_connection(
                     pubsub_connection_clone,
                     subs_clone,
-                    subscription_watchers_clone,
                     subscription_updates_sender_clone,
                     commitment_config,
                     recycle_lock_clone,
-                ).await {
-                    error!("RecycleConnections: supervisor task failed: {err:?}");
+                    Some(pubkey),
+                )
+                .await
+                {
+                    error!(
+                        "RecycleConnections: supervisor task failed: {err:?}"
+                    );
                 }
             };
 
@@ -400,17 +387,19 @@ impl ChainPubsubActor {
 
             // Clean up subscription
             unsubscribe().await;
-            subs.lock().expect("subscriptions lock poisoned").remove(&pubkey);
+            subs.lock()
+                .expect("subscriptions lock poisoned")
+                .remove(&pubkey);
         });
     }
 
     async fn recycle_connection(
         pubsub_connection: Arc<PubSubConnection>,
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-        subscription_watchers: Arc<Mutex<tokio::task::JoinSet<()>>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         commitment: CommitmentConfig,
         recycle_lock: Arc<AsyncMutex<()>>,
+        skip_pubkey: Option<Pubkey>,
     ) -> RemoteAccountProviderResult<()> {
         // Serialize recycle attempts
         let _guard = recycle_lock.lock().await;
@@ -430,44 +419,30 @@ impl ChainPubsubActor {
             return Err(err.into());
         }
 
-        // Cancel all current subscriptions and collect pubkeys to re-subscribe later
-        let drained = {
-            let mut subs_lock = subscriptions.lock().unwrap();
-            std::mem::take(&mut *subs_lock)
-        };
+        // Cancel subscriptions except skip_pubkey and collect pubkeys to re-subscribe later
+        let mut subs_lock = subscriptions.lock().unwrap();
+        let keys_to_recycle: Vec<Pubkey> = subs_lock
+            .keys()
+            .filter(|pk| skip_pubkey != Some(**pk))
+            .cloned()
+            .collect();
         debug!(
             "RecycleConnections: cancelling {} subscriptions",
-            drained.len(),
+            keys_to_recycle.len(),
         );
         let mut to_resubscribe = HashSet::new();
-        for (pk, AccountSubscription { cancellation_token }) in drained {
-            to_resubscribe.insert(pk);
-            cancellation_token.cancel();
+        for pk in &keys_to_recycle {
+            if let Some(AccountSubscription { cancellation_token }) =
+                subs_lock.remove(pk)
+            {
+                to_resubscribe.insert(*pk);
+                cancellation_token.cancel();
+            }
         }
         debug!(
             "RecycleConnections: cancelled {} subscriptions",
             to_resubscribe.len()
         );
-
-        // Abort and (asynchronously) await all watcher tasks and add fresh joinset
-        debug!("RecycleConnections: aborting watcher tasks");
-        let mut old_joinset = {
-            let mut watchers = subscription_watchers
-                .lock()
-                .expect("subscription_watchers lock poisoned");
-            std::mem::replace(&mut *watchers, tokio::task::JoinSet::new())
-        };
-        old_joinset.abort_all();
-
-        // Drain in a detached task to avoid deadlock if this function runs in a watcher task.
-        tokio::spawn(async move {
-            match timeout(Duration::from_secs(60), async {
-                while let Some(_res) = old_joinset.join_next().await {}
-            }).await {
-                Ok(_) => debug!("RecycleConnections: watcher tasks terminated"),
-                Err(_) => error!("RecycleConnections: watcher tasks drain timed out after 1 minute"),
-            }
-        });
 
         // Re-subscribe to all accounts
         debug!(
@@ -481,7 +456,6 @@ impl ChainPubsubActor {
                 tx,
                 subscriptions.clone(),
                 pubsub_connection.clone(),
-                subscription_watchers.clone(),
                 subscription_updates_sender.clone(),
                 commitment,
                 recycle_lock.clone(),
