@@ -216,17 +216,17 @@ impl CommitAndUndelegate {
         context: &ConstructionContext<'_, '_>,
     ) -> Result<(), InstructionError> {
         account_indices.iter().copied().try_for_each(|idx| {
-            let is_writable = get_writable_with_idx(&context.transaction_context, idx as u16)?;
+            let is_writable = get_writable_with_idx(context.transaction_context, idx as u16)?;
             if is_writable {
                 Ok(())
             } else {
-                let pubkey = get_instruction_pubkey_with_idx(&context.transaction_context, idx as u16)?;
+                let pubkey = get_instruction_pubkey_with_idx(context.transaction_context, idx as u16)?;
                 ic_msg!(
                     context.invoke_context,
                     "ScheduleCommit ERR: account {} needs to be writable to be undelegated",
                     pubkey
                 );
-                return Err(InstructionError::ReadonlyDataModified);
+                Err(InstructionError::ReadonlyDataModified)
             }
         })
     }
