@@ -4,18 +4,29 @@ use crate::args::TaskRequest;
 
 #[derive(Default, Debug)]
 pub struct ExecutionTlsStash {
-    pub tasks: VecDeque<TaskRequest>,
+    tasks: VecDeque<TaskRequest>,
     // TODO(bmuddha/taco-paco): intents should go in here
-    pub intents: VecDeque<()>,
+    intents: VecDeque<()>,
 }
 
 thread_local! {
-    pub static EXECUTION_TLS_STASH: RefCell<ExecutionTlsStash> = RefCell::default();
+    static EXECUTION_TLS_STASH: RefCell<ExecutionTlsStash> = RefCell::default();
 }
 
 impl ExecutionTlsStash {
-    pub fn clear(&mut self) {
-        self.tasks.clear();
-        self.intents.clear();
+    pub fn register_task(task: TaskRequest) {
+        EXECUTION_TLS_STASH
+            .with_borrow_mut(|stash| stash.tasks.push_back(task));
+    }
+
+    pub fn next_task() -> Option<TaskRequest> {
+        EXECUTION_TLS_STASH.with_borrow_mut(|stash| stash.tasks.pop_front())
+    }
+
+    pub fn clear() {
+        EXECUTION_TLS_STASH.with_borrow_mut(|stash| {
+            stash.tasks.clear();
+            stash.intents.clear();
+        })
     }
 }

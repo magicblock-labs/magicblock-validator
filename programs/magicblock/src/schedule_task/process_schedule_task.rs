@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use magicblock_magic_program_api::{
     args::{ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest},
-    tls::EXECUTION_TLS_STASH,
+    tls::ExecutionTlsStash,
 };
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -111,12 +111,7 @@ pub(crate) fn process_schedule_task(
     };
 
     // Add schedule request to execution TLS stash
-    EXECUTION_TLS_STASH.with(|stash| {
-        stash
-            .borrow_mut()
-            .tasks
-            .push_back(TaskRequest::Schedule(schedule_request));
-    });
+    ExecutionTlsStash::register_task(TaskRequest::Schedule(schedule_request));
 
     ic_msg!(
         invoke_context,

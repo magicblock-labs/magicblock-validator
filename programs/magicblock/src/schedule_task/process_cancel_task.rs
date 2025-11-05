@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use magicblock_magic_program_api::{
     args::{CancelTaskRequest, TaskRequest},
-    tls::EXECUTION_TLS_STASH,
+    tls::ExecutionTlsStash,
 };
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -40,12 +40,7 @@ pub(crate) fn process_cancel_task(
     };
 
     // Add cancel request to execution TLS stash
-    EXECUTION_TLS_STASH.with(|stash| {
-        stash
-            .borrow_mut()
-            .tasks
-            .push_back(TaskRequest::Cancel(cancel_request))
-    });
+    ExecutionTlsStash::register_task(TaskRequest::Cancel(cancel_request));
 
     ic_msg!(
         invoke_context,

@@ -7,7 +7,7 @@ use magicblock_core::link::{
     },
 };
 use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
-use magicblock_program::tls::EXECUTION_TLS_STASH;
+use magicblock_program::tls::ExecutionTlsStash;
 use solana_pubkey::Pubkey;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
@@ -83,22 +83,20 @@ impl super::TransactionExecutor {
                 // If the transaction succeeded, check for potential tasks/intents
                 // that may have been scheduled during the transaction execution
                 if result.is_ok() {
-                    EXECUTION_TLS_STASH.with(|stash| {
-                        for task in stash.borrow_mut().tasks.drain(..) {
-                            // This is a best effort send, if the tasks service has terminated
-                            // for some reason, logging is the best we can do at this point
-                            let _ = self.tasks_tx.send(task).inspect_err(|_|
-                                warn!("Scheduled tasks service has hung up and longer running")
-                            );
-                        }
-                    });
+                    while let Some(task) = ExecutionTlsStash::next_task() {
+                        // This is a best effort send, if the tasks service has terminated
+                        // for some reason, logging is the best we can do at this point
+                        let _ = self.tasks_tx.send(task).inspect_err(|_|
+                            warn!("Scheduled tasks service has hung up and longer running")
+                        );
+                    }
                 }
             }
 
             result
         });
         // Make sure that no matter what happened to the transaction we clear the stash
-        EXECUTION_TLS_STASH.with(|s| s.borrow_mut().clear());
+        ExecutionTlsStash::clear();
 
         // Send the final result back to the caller if they are waiting.
         tx.map(|tx| tx.send(result));
@@ -146,7 +144,7 @@ impl super::TransactionExecutor {
         };
         // Make sure that we clear the stash, so that simulations
         // don't interfere with actual transaction executions
-        EXECUTION_TLS_STASH.with(|s| s.borrow_mut().clear());
+        ExecutionTlsStash::clear();
         let _ = tx.send(result);
     }
 
