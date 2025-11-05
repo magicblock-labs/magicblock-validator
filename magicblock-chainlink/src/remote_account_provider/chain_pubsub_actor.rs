@@ -11,7 +11,10 @@ use solana_rpc_client_api::{
     config::RpcAccountInfoConfig, response::Response as RpcResponse,
 };
 use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
-use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
+use tokio::{
+    sync::{mpsc, oneshot, Mutex as AsyncMutex},
+    time::{sleep, Duration},
+};
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
@@ -23,6 +26,19 @@ use super::{
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
 const MAX_SUBSCRIBE_ATTEMPTS: usize = 3;
+
+/// Fibonacci backoff delay for retry attempts (in seconds)
+fn fib_backoff_seconds(attempt: usize) -> u64 {
+    match attempt {
+        1 => 0,
+        2 => 1,
+        3 => 2,
+        4 => 3,
+        5 => 5,
+        6 => 8,
+        _ => 13, // cap at 13s for higher attempts
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct PubsubClientConfig {
@@ -331,6 +347,13 @@ impl ChainPubsubActor {
                         attempts += 1;
                     }
                 }
+
+                let delay_secs = fib_backoff_seconds(attempts);
+                if delay_secs > 0 {
+                    debug!("Backing off for {delay_secs}s before next recycle attempt {attempts}");
+                    sleep(Duration::from_secs(delay_secs)).await;
+                }
+
                 // When the subscription attempt failed but we did not yet run out of retries,
                 // attempt to recreate the connection with all of its subscriptions in the background.
                 let pubsub_connection_clone = pubsub_connection.clone();
