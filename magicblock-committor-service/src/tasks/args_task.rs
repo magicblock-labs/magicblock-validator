@@ -127,7 +127,7 @@ impl BaseTask for ArgsTask {
         }
     }
 
-    fn optimize(
+    fn minimize_tx_size(
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
         match self.task_type {
