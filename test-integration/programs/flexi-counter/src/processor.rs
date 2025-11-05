@@ -479,7 +479,7 @@ fn process_cancel_task(
         vec![AccountMeta::new(*payer_info.key, true)],
     );
 
-    invoke(&ix, &[payer_info.clone(), task_context_info.clone()])?;
+    invoke(&ix, &[payer_info.clone()])?;
 
     Ok(())
 }
