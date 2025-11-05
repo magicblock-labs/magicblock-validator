@@ -28,10 +28,11 @@ use super::{
 
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
-const MAX_SUBSCRIBE_ATTEMPTS: usize = 3;
+const MAX_RECYCLE_ATTEMPTS: usize = 3;
+const SUBSCRIBE_ATTEMPTS_PER_RECYCLE: usize = 4;
 
 /// Fibonacci backoff delay for retry attempts (in seconds)
-fn fib_backoff_seconds(attempt: usize) -> u64 {
+fn fib_backoff_recycle_second(attempt: usize) -> u64 {
     match attempt {
         1 => 0,
         2 => 1,
@@ -40,6 +41,17 @@ fn fib_backoff_seconds(attempt: usize) -> u64 {
         5 => 5,
         6 => 8,
         _ => 13, // cap at 13s for higher attempts
+    }
+}
+
+fn fib_backoff_subscribe_millis(attempt: usize) -> u64 {
+    match attempt {
+        1 => 50,
+        2 => 100,
+        3 => 200,
+        4 => 300,
+        5 => 500,
+        _ => 1000,
     }
 }
 
