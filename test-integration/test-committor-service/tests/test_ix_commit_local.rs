@@ -67,37 +67,37 @@ fn expect_strategies(
 
 #[tokio::test]
 async fn test_ix_commit_single_account_100_bytes() {
-    commit_single_account(100, CommitStrategy::Args, false).await;
+    commit_single_account(100, CommitStrategy::StateArgs, false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_100_bytes_and_undelegate() {
-    commit_single_account(100, CommitStrategy::Args, true).await;
+    commit_single_account(100, CommitStrategy::StateArgs, true).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_800_bytes() {
-    commit_single_account(800, CommitStrategy::Args, false).await;
+    commit_single_account(800, CommitStrategy::StateBuffer, false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_800_bytes_and_undelegate() {
-    commit_single_account(800, CommitStrategy::Args, true).await;
+    commit_single_account(800, CommitStrategy::StateBuffer, true).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_one_kb() {
-    commit_single_account(1024, CommitStrategy::Args, false).await;
+    commit_single_account(1024, CommitStrategy::StateBuffer, false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_ten_kb() {
-    commit_single_account(10 * 1024, CommitStrategy::Args, false).await;
+    commit_single_account(10 * 1024, CommitStrategy::StateBuffer, false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_order_book_change_100_bytes() {
-    commit_book_order_account(100, CommitStrategy::Args, false).await;
+    commit_book_order_account(100, CommitStrategy::StateArgs, false).await;
 }
 
 #[tokio::test]
@@ -116,7 +116,7 @@ async fn test_ix_commit_order_book_change_673_bytes() {
 
 #[tokio::test]
 async fn test_ix_commit_order_book_change_10k_bytes() {
-    commit_book_order_account(10 * 1024, CommitStrategy::FromBuffer, false)
+    commit_book_order_account(10 * 1024, CommitStrategy::StateBuffer, false)
         .await;
 }
 
@@ -269,7 +269,7 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
         &[1024, 2048],
         1,
         false,
-        expect_strategies(&[(CommitStrategy::Args, 2)]),
+        expect_strategies(&[(CommitStrategy::StateArgs, 2)]),
     )
     .await;
 }
@@ -281,7 +281,7 @@ async fn test_ix_commit_two_accounts_512kb() {
         &[512, 512],
         1,
         false,
-        expect_strategies(&[(CommitStrategy::Args, 2)]),
+        expect_strategies(&[(CommitStrategy::StateArgs, 2)]),
     )
     .await;
 }
@@ -293,7 +293,7 @@ async fn test_ix_commit_three_accounts_512kb() {
         &[512, 512, 512],
         1,
         false,
-        expect_strategies(&[(CommitStrategy::Args, 3)]),
+        expect_strategies(&[(CommitStrategy::StateArgs, 3)]),
     )
     .await;
 }
@@ -305,7 +305,7 @@ async fn test_ix_commit_six_accounts_512kb() {
         &[512, 512, 512, 512, 512, 512],
         1,
         false,
-        expect_strategies(&[(CommitStrategy::Args, 6)]),
+        expect_strategies(&[(CommitStrategy::StateArgs, 6)]),
     )
     .await;
 }
@@ -317,22 +317,25 @@ async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
         &[1024, 2 * 1024, 5 * 1024, 10 * 1024],
         1,
         false,
-        expect_strategies(&[(CommitStrategy::Args, 4)]),
+        expect_strategies(&[(CommitStrategy::StateArgs, 4)]),
     )
     .await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_2() {
-    commit_20_accounts_1kb(2, expect_strategies(&[(CommitStrategy::Args, 20)]))
-        .await;
+    commit_20_accounts_1kb(
+        2,
+        expect_strategies(&[(CommitStrategy::StateArgs, 20)]),
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_3() {
     commit_5_accounts_1kb(
         3,
-        expect_strategies(&[(CommitStrategy::Args, 5)]),
+        expect_strategies(&[(CommitStrategy::StateArgs, 5)]),
         false,
     )
     .await;
@@ -342,7 +345,11 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
 async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
     commit_5_accounts_1kb(
         3,
-        expect_strategies(&[(CommitStrategy::Args, 5)]),
+        expect_strategies(&[
+            // Intent fits in 1 TX only with ALT, see IntentExecutorImpl::try_unite_tasks
+            (CommitStrategy::StateBufferWithLookupTable, 3),
+            (CommitStrategy::StateArgs, 2),
+        ]),
         true,
     )
     .await;
@@ -353,8 +360,8 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
     commit_5_accounts_1kb(
         4,
         expect_strategies(&[
-            (CommitStrategy::Args, 1),
-            (CommitStrategy::FromBufferWithLookupTable, 4),
+            (CommitStrategy::StateArgs, 1),
+            (CommitStrategy::StateBufferWithLookupTable, 4),
         ]),
         false,
     )
@@ -366,8 +373,8 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
     commit_5_accounts_1kb(
         4,
         expect_strategies(&[
-            (CommitStrategy::Args, 1),
-            (CommitStrategy::FromBufferWithLookupTable, 4),
+            (CommitStrategy::StateArgs, 1),
+            (CommitStrategy::StateBufferWithLookupTable, 4),
         ]),
         true,
     )
@@ -378,7 +385,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
 async fn test_commit_5_accounts_1kb_bundle_size_5_undelegate_all() {
     commit_5_accounts_1kb(
         5,
-        expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 5)]),
+        expect_strategies(&[(CommitStrategy::StateBufferWithLookupTable, 5)]),
         true,
     )
     .await;
@@ -386,15 +393,18 @@ async fn test_commit_5_accounts_1kb_bundle_size_5_undelegate_all() {
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_3() {
-    commit_20_accounts_1kb(3, expect_strategies(&[(CommitStrategy::Args, 20)]))
-        .await;
+    commit_20_accounts_1kb(
+        3,
+        expect_strategies(&[(CommitStrategy::StateArgs, 20)]),
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_4() {
     commit_20_accounts_1kb(
         4,
-        expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 20)]),
+        expect_strategies(&[(CommitStrategy::StateBufferWithLookupTable, 20)]),
     )
     .await;
 }
@@ -404,9 +414,9 @@ async fn test_commit_20_accounts_1kb_bundle_size_6() {
     commit_20_accounts_1kb(
         6,
         expect_strategies(&[
-            (CommitStrategy::FromBufferWithLookupTable, 18),
+            (CommitStrategy::StateBufferWithLookupTable, 18),
             // Two accounts don't make it into the bundles of size 6
-            (CommitStrategy::Args, 2),
+            (CommitStrategy::StateArgs, 2),
         ]),
     )
     .await;
@@ -416,7 +426,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_6() {
 async fn test_commit_20_accounts_1kb_bundle_size_20() {
     commit_20_accounts_1kb(
         20,
-        expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 20)]),
+        expect_strategies(&[(CommitStrategy::StateBufferWithLookupTable, 20)]),
     )
     .await;
 }
@@ -428,7 +438,7 @@ async fn test_commit_8_accounts_1kb_bundle_size_8() {
         expect_strategies(&[
             // Four accounts don't make it into the bundles of size 8, but
             // that bundle also needs lookup tables
-            (CommitStrategy::FromBufferWithLookupTable, 8),
+            (CommitStrategy::StateBufferWithLookupTable, 8),
         ]),
     )
     .await;
@@ -441,7 +451,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_8() {
         expect_strategies(&[
             // Four accounts don't make it into the bundles of size 8, but
             // that bundle also needs lookup tables
-            (CommitStrategy::FromBufferWithLookupTable, 20),
+            (CommitStrategy::StateBufferWithLookupTable, 20),
         ]),
     )
     .await;
