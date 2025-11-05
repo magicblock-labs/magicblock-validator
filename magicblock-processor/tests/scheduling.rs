@@ -560,8 +560,7 @@ async fn scenario_serial_transfer_chain(executors: u32) {
     );
 
     // Intermediary accounts (B, C, ...) should have net-zero change
-    for i in 1..num_txs {
-        let int_acc = &accounts[i];
+    for int_acc in accounts.iter().take(num_txs).skip(1) {
         assert_eq!(
             env.get_account(*int_acc).lamports(),
             *initial_balances.get(int_acc).unwrap(),
