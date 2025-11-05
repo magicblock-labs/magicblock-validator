@@ -1,7 +1,10 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU16, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use log::*;
@@ -110,6 +113,8 @@ pub struct ChainPubsubActor {
     /// The token to use to cancel all subscriptions and shut down the
     /// message listener, essentially shutting down whis actor
     shutdown_token: CancellationToken,
+    /// Unique client ID for this actor instance used in logs
+    client_id: u16,
 }
 
 #[derive(Debug)]
@@ -141,6 +146,8 @@ impl ChainPubsubActor {
         pubsub_client_config: PubsubClientConfig,
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
+        static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
+
         let url = pubsub_client_config.pubsub_url.clone();
         let pubsub_connection = Arc::new(PubSubConnection::new(url).await?);
 
@@ -159,6 +166,7 @@ impl ChainPubsubActor {
             subscription_updates_sender,
             recycle_lock,
             shutdown_token,
+            client_id: CLIENT_ID.fetch_add(1, Ordering::SeqCst),
         };
         me.start_worker(messages_receiver);
 
@@ -168,7 +176,10 @@ impl ChainPubsubActor {
     }
 
     pub async fn shutdown(&self) {
-        info!("Shutting down ChainPubsubActor");
+        info!(
+            "[client_id={}] Shutting down ChainPubsubActor",
+            self.client_id
+        );
         let subs = self
             .subscriptions
             .lock()
@@ -226,6 +237,7 @@ impl ChainPubsubActor {
             self.subscription_updates_sender.clone();
         let pubsub_connection = self.pubsub_connection.clone();
         let recycle_lock = self.recycle_lock.clone();
+        let client_id = self.client_id;
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -237,6 +249,7 @@ impl ChainPubsubActor {
                                 subscription_updates_sender.clone(),
                                 pubsub_client_config.clone(),
                                 recycle_lock.clone(),
+                                client_id,
                                 msg
                             ).await;
                         } else {
@@ -257,6 +270,7 @@ impl ChainPubsubActor {
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         pubsub_client_config: PubsubClientConfig,
         recycle_lock: Arc<AsyncMutex<()>>,
+        client_id: u16,
         msg: ChainPubsubActorMessage,
     ) {
         match msg {
@@ -270,6 +284,7 @@ impl ChainPubsubActor {
                     subscription_updates_sender,
                     commitment_config,
                     recycle_lock,
+                    client_id,
                 );
             }
             ChainPubsubActorMessage::AccountUnsubscribe {
@@ -303,18 +318,19 @@ impl ChainPubsubActor {
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         commitment_config: CommitmentConfig,
         recycle_lock: Arc<AsyncMutex<()>>,
+        client_id: u16,
     ) {
         if subs
             .lock()
             .expect("subscriptions lock poisoned")
             .contains_key(&pubkey)
         {
-            trace!("Subscription for {pubkey} already exists, ignoring add_sub request");
+            trace!("[client_id={client_id}] Subscription for {pubkey} already exists, ignoring add_sub request");
             let _ = sub_response.send(Ok(()));
             return;
         }
 
-        trace!("Adding subscription for {pubkey} with commitment {commitment_config:?}");
+        trace!("[client_id={client_id}] Adding subscription for {pubkey} with commitment {commitment_config:?}");
 
         let cancellation_token = CancellationToken::new();
 
@@ -367,7 +383,7 @@ impl ChainPubsubActor {
                                 let delay_millis =
                                     fib_backoff_subscribe_millis(sub_attempt);
                                 if delay_millis > 0 {
-                                    debug!("Backing off for {delay_millis}ms before subscribe attempt {sub_attempt}");
+                                    debug!("[client_id={client_id}] Backing off for {delay_millis}ms before subscribe attempt {sub_attempt}");
                                     sleep(Duration::from_millis(delay_millis))
                                         .await;
                                 }
@@ -379,7 +395,7 @@ impl ChainPubsubActor {
                 // All subscribe attempts failed, apply backoff before recycling
                 let delay_secs = fib_backoff_recycle_second(recycle_attempts);
                 if delay_secs > 0 {
-                    debug!("Backing off for {delay_secs}s before recycle attempt {recycle_attempts}");
+                    debug!("[client_id={client_id}] Backing off for {delay_secs}s before recycle attempt {recycle_attempts}");
                     sleep(Duration::from_secs(delay_secs)).await;
                 }
 
@@ -395,12 +411,13 @@ impl ChainPubsubActor {
                     subscription_updates_sender_clone,
                     commitment_config,
                     recycle_lock_clone,
+                    client_id,
                     Some(pubkey),
                 )
                 .await
                 {
                     error!(
-                        "RecycleConnections: supervisor task failed: {err:?}"
+                        "[client_id={client_id}] RecycleConnections: supervisor task failed: {err:?}"
                     );
                 }
             };
@@ -413,23 +430,23 @@ impl ChainPubsubActor {
             loop {
                 tokio::select! {
                     _ = cancellation_token.cancelled() => {
-                        trace!("Subscription for {pubkey} was cancelled");
+                        trace!("[client_id={client_id}] Subscription for {pubkey} was cancelled");
                         break;
                     }
                     update = update_stream.next() => {
                         if let Some(rpc_response) = update {
                             if log_enabled!(log::Level::Trace) && (!pubkey.eq(&clock::ID) ||
                                rpc_response.context.slot % CLOCK_LOG_SLOT_FREQ == 0) {
-                                trace!("Received update for {pubkey}: {rpc_response:?}");
+                                trace!("[client_id={client_id}] Received update for {pubkey}: {rpc_response:?}");
                             }
                             let _ = subscription_updates_sender.send(SubscriptionUpdate {
                                 pubkey,
                                 rpc_response,
                             }).await.inspect_err(|err| {
-                                error!("Failed to send {pubkey} subscription update: {err:?}");
+                                error!("[client_id={client_id}] Failed to send {pubkey} subscription update: {err:?}");
                             });
                         } else {
-                            debug!("Subscription for {pubkey} ended by update stream");
+                            debug!("[client_id={client_id}] Subscription for {pubkey} ended by update stream");
                             break;
                         }
                     }
@@ -450,22 +467,23 @@ impl ChainPubsubActor {
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         commitment: CommitmentConfig,
         recycle_lock: Arc<AsyncMutex<()>>,
+        client_id: u16,
         skip_pubkey: Option<Pubkey>,
     ) -> RemoteAccountProviderResult<()> {
         // Serialize recycle attempts
         let _guard = recycle_lock.lock().await;
 
-        debug!("RecycleConnections: starting recycle process");
+        debug!("[client_id={client_id}] RecycleConnections: starting recycle process");
 
         // Recreate the pubsub connection, in case that fails leave it be, as there's not much that can be done about it, next subscription attempt will try to reconnect again
         debug!(
-            "RecycleConnections: creating ws connection for {}",
+            "[client_id={client_id}] RecycleConnections: creating ws connection for {}",
             pubsub_connection.url()
         );
 
         if let Err(err) = pubsub_connection.reconnect().await {
             error!(
-                "RecycleConnections: failed to create ws connection: {err:?}"
+                "[client_id={client_id}] RecycleConnections: failed to create ws connection: {err:?}"
             );
             return Err(err.into());
         }
@@ -478,7 +496,7 @@ impl ChainPubsubActor {
             .cloned()
             .collect();
         debug!(
-            "RecycleConnections: cancelling {} subscriptions",
+            "[client_id={client_id}] RecycleConnections: cancelling {} subscriptions",
             keys_to_recycle.len(),
         );
         let mut to_resubscribe = HashSet::new();
@@ -491,13 +509,13 @@ impl ChainPubsubActor {
             }
         }
         debug!(
-            "RecycleConnections: cancelled {} subscriptions",
+            "[client_id={client_id}] RecycleConnections: cancelled {} subscriptions",
             to_resubscribe.len()
         );
 
         // Re-subscribe to all accounts
         debug!(
-            "RecycleConnections: re-subscribing to {} accounts",
+            "[client_id={client_id}] RecycleConnections: re-subscribing to {} accounts",
             to_resubscribe.len()
         );
         for pk in to_resubscribe {
@@ -510,10 +528,11 @@ impl ChainPubsubActor {
                 subscription_updates_sender.clone(),
                 commitment,
                 recycle_lock.clone(),
+                client_id,
             );
         }
 
-        debug!("RecycleConnections: completed");
+        debug!("[client_id={client_id}] RecycleConnections: completed");
 
         Ok(())
     }
