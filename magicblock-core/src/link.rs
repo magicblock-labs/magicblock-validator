@@ -28,7 +28,7 @@ pub struct DispatchEndpoints {
     /// Receives notifications when a new block is produced.
     pub block_update: BlockUpdateRx,
     /// Receives scheduled (crank) tasks from transactions executor.
-    pub tasks_service: ScheduledTasksRx,
+    pub tasks_service: Option<ScheduledTasksRx>,
 }
 
 /// A collection of channel endpoints for the **validator's internal core**.
@@ -73,7 +73,7 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
         transaction_status: transaction_status_rx,
         account_update: account_update_rx,
         block_update: block_update_rx,
-        tasks_service: tasks_rx,
+        tasks_service: Some(tasks_rx),
     };
 
     // Bundle the corresponding channel ends for the validator's internal core.

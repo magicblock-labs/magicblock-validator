@@ -2271,6 +2271,7 @@ name = "guinea"
 version = "0.2.3"
 dependencies = [
  "bincode",
+ "magicblock-magic-program-api 0.2.3",
  "serde",
  "solana-program",
 ]

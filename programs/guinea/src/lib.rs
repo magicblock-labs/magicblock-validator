@@ -1,13 +1,17 @@
 #![allow(unexpected_cfgs)]
 use core::slice;
 
+use magicblock_magic_program_api::{
+    args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
+};
 use serde::{Deserialize, Serialize};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     declare_id,
     entrypoint::{self, ProgramResult},
+    instruction::{AccountMeta, Instruction},
     log,
-    program::set_return_data,
+    program::{invoke, set_return_data},
     program_error::ProgramError,
     pubkey::Pubkey,
 };
@@ -20,8 +24,11 @@ pub enum GuineaInstruction {
     ComputeBalances,
     PrintSizes,
     WriteByteToData(u8),
+    Increment,
     Transfer(u64),
     Resize(usize),
+    ScheduleTask(ScheduleTaskArgs),
+    CancelTask(u64),
 }
 
 fn compute_balances(accounts: slice::Iter<AccountInfo>) {
@@ -57,6 +64,16 @@ fn write_byte_to_data(
     Ok(())
 }
 
+fn increment(accounts: slice::Iter<AccountInfo>) -> ProgramResult {
+    for a in accounts {
+        let mut data = a.try_borrow_mut_data()?;
+        let first =
+            data.first_mut().ok_or(ProgramError::AccountDataTooSmall)?;
+        *first += 1;
+    }
+    Ok(())
+}
+
 fn transfer(
     mut accounts: slice::Iter<AccountInfo>,
     lamports: u64,
@@ -80,6 +97,46 @@ fn transfer(
     Ok(())
 }
 
+fn schedule_task(
+    mut accounts: slice::Iter<AccountInfo>,
+    args: ScheduleTaskArgs,
+) -> ProgramResult {
+    let _magic_program_info = next_account_info(&mut accounts)?;
+    let payer_info = next_account_info(&mut accounts)?;
+    let counter_pda_info = next_account_info(&mut accounts)?;
+
+    let ix = Instruction::new_with_bincode(
+        magicblock_magic_program_api::ID,
+        &MagicBlockInstruction::ScheduleTask(args),
+        vec![
+            AccountMeta::new(*payer_info.key, true),
+            AccountMeta::new(*counter_pda_info.key, false),
+        ],
+    );
+
+    invoke(&ix, &[payer_info.clone(), counter_pda_info.clone()])?;
+
+    Ok(())
+}
+
+fn cancel_task(
+    mut accounts: slice::Iter<AccountInfo>,
+    task_id: u64,
+) -> ProgramResult {
+    let _magic_program_info = next_account_info(&mut accounts)?;
+    let payer_info = next_account_info(&mut accounts)?;
+
+    let ix = Instruction::new_with_bincode(
+        magicblock_magic_program_api::ID,
+        &MagicBlockInstruction::CancelTask { task_id },
+        vec![AccountMeta::new(*payer_info.key, true)],
+    );
+
+    invoke(&ix, &[payer_info.clone()])?;
+
+    Ok(())
+}
+
 fn process_instruction(
     _program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -100,8 +157,15 @@ fn process_instruction(
         GuineaInstruction::WriteByteToData(byte) => {
             write_byte_to_data(accounts, byte)?
         }
+        GuineaInstruction::Increment => increment(accounts)?,
         GuineaInstruction::Transfer(lamports) => transfer(accounts, lamports)?,
         GuineaInstruction::Resize(size) => resize_account(accounts, size)?,
+        GuineaInstruction::ScheduleTask(request) => {
+            schedule_task(accounts, request)?
+        }
+        GuineaInstruction::CancelTask(task_id) => {
+            cancel_task(accounts, task_id)?
+        }
     }
     Ok(())
 }

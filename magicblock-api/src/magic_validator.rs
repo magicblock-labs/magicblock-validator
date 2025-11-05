@@ -233,7 +233,7 @@ impl MagicValidator {
 
         let accounts_config = try_get_remote_accounts_config(&config.accounts)?;
 
-        let (dispatch, validator_channels) = link();
+        let (mut dispatch, validator_channels) = link();
 
         let committor_persist_path =
             storage_path.join("committor_service.sqlite");
@@ -333,7 +333,10 @@ impl MagicValidator {
             &task_scheduler_db_path,
             &config.task_scheduler,
             dispatch.transaction_scheduler.clone(),
-            dispatch.tasks_service,
+            dispatch
+                .tasks_service
+                .take()
+                .expect("tasks_service should be initialized"),
             ledger.latest_block().clone(),
             token.clone(),
         )?;

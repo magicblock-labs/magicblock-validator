@@ -70,7 +70,7 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::InvalidInstructionData);
     }
 
-    // Enforce minimal number of executions
+    // Enforce minimal number of instructions
     if args.instructions.is_empty() {
         ic_msg!(
             invoke_context,
