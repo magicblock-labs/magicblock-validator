@@ -25,10 +25,11 @@ use super::{
 
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
-const MAX_SUBSCRIBE_ATTEMPTS: usize = 3;
+const MAX_RECYCLE_ATTEMPTS: usize = 3;
+const SUBSCRIBE_ATTEMPTS_PER_RECYCLE: usize = 4;
 
 /// Fibonacci backoff delay for retry attempts (in seconds)
-fn fib_backoff_seconds(attempt: usize) -> u64 {
+fn fib_backoff_recycle_second(attempt: usize) -> u64 {
     match attempt {
         1 => 0,
         2 => 1,
@@ -37,6 +38,17 @@ fn fib_backoff_seconds(attempt: usize) -> u64 {
         5 => 5,
         6 => 8,
         _ => 13, // cap at 13s for higher attempts
+    }
+}
+
+fn fib_backoff_subscribe_millis(attempt: usize) -> u64 {
+    match attempt {
+        1 => 50,
+        2 => 100,
+        3 => 200,
+        4 => 300,
+        5 => 500,
+        _ => 1000,
     }
 }
 
@@ -329,33 +341,49 @@ impl ChainPubsubActor {
                 ..Default::default()
             };
             // Attempt to subscribe to the account
-            let mut attempts = 1;
-            let (mut update_stream, unsubscribe) = loop {
-                let res = pubsub_connection
-                    .account_subscribe(&pubkey, config.clone());
-                match res.await {
-                    Ok(res) => break res,
-                    Err(err) => {
-                        if attempts == MAX_SUBSCRIBE_ATTEMPTS {
-                            // At this point we just give up and report to caller
-                            subs.lock()
-                                .expect("subscriptions lock poisoned")
-                                .remove(&pubkey);
-                            let _ = sub_response.send(Err(err.into()));
-                            return;
+            let mut recycle_attempts = 0;
+            let (mut update_stream, unsubscribe) = 'outer: loop {
+                recycle_attempts += 1;
+
+                // Try subscribing multiple times with backoff before recycling
+                for sub_attempt in 1..=SUBSCRIBE_ATTEMPTS_PER_RECYCLE {
+                    let res = pubsub_connection
+                        .account_subscribe(&pubkey, config.clone());
+                    match res.await {
+                        Ok(res) => break 'outer res,
+                        Err(err) => {
+                            if sub_attempt == SUBSCRIBE_ATTEMPTS_PER_RECYCLE {
+                                // All subscribe attempts failed, will try to recycle
+                                if recycle_attempts == MAX_RECYCLE_ATTEMPTS {
+                                    // At this point we just give up and report to caller
+                                    subs.lock()
+                                        .expect("subscriptions lock poisoned")
+                                        .remove(&pubkey);
+                                    let _ = sub_response.send(Err(err.into()));
+                                    return;
+                                }
+                            } else {
+                                // Backoff before next subscribe attempt
+                                let delay_millis =
+                                    fib_backoff_subscribe_millis(sub_attempt);
+                                if delay_millis > 0 {
+                                    debug!("Backing off for {delay_millis}ms before subscribe attempt {sub_attempt}");
+                                    sleep(Duration::from_millis(delay_millis))
+                                        .await;
+                                }
+                            }
                         }
-                        attempts += 1;
                     }
                 }
 
-                let delay_secs = fib_backoff_seconds(attempts);
+                // All subscribe attempts failed, apply backoff before recycling
+                let delay_secs = fib_backoff_recycle_second(recycle_attempts);
                 if delay_secs > 0 {
-                    debug!("Backing off for {delay_secs}s before next recycle attempt {attempts}");
+                    debug!("Backing off for {delay_secs}s before recycle attempt {recycle_attempts}");
                     sleep(Duration::from_secs(delay_secs)).await;
                 }
 
-                // When the subscription attempt failed but we did not yet run out of retries,
-                // attempt to recreate the connection with all of its subscriptions in the background.
+                // Recycle the connection
                 let pubsub_connection_clone = pubsub_connection.clone();
                 let subs_clone = subs.clone();
                 let subscription_updates_sender_clone =
@@ -401,7 +429,7 @@ impl ChainPubsubActor {
                                 error!("Failed to send {pubkey} subscription update: {err:?}");
                             });
                         } else {
-                            trace!("Subscription for {pubkey} ended by update stream");
+                            debug!("Subscription for {pubkey} ended by update stream");
                             break;
                         }
                     }
