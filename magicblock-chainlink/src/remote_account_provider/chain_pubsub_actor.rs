@@ -140,6 +140,7 @@ impl ChainPubsubActor {
             mpsc::channel(MESSAGE_CHANNEL_SIZE);
 
         let shutdown_token = CancellationToken::new();
+        let recycle_lock = Arc::new(AsyncMutex::new(()));
         let me = Self {
             pubsub_client_config,
             pubsub_connection,
