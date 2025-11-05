@@ -355,18 +355,16 @@ impl ChainPubsubActor {
                 let subscription_watchers_clone = subscription_watchers.clone();
                 let subscription_updates_sender_clone = subscription_updates_sender.clone();
                 let recycle_lock_clone = recycle_lock.clone();
-                tokio::spawn(async move {
-                    if let Err(err) = Self::recycle_connection(
-                        pubsub_connection_clone,
-                        subs_clone,
-                        subscription_watchers_clone,
-                        subscription_updates_sender_clone,
-                        commitment_config,
-                        recycle_lock_clone,
-                    ).await {
-                        error!("RecycleConnections: supervisor task failed: {err:?}");
-                    }
-                });
+                if let Err(err) = Self::recycle_connection(
+                    pubsub_connection_clone,
+                    subs_clone,
+                    subscription_watchers_clone,
+                    subscription_updates_sender_clone,
+                    commitment_config,
+                    recycle_lock_clone,
+                ).await {
+                    error!("RecycleConnections: supervisor task failed: {err:?}");
+                }
             };
 
             // RPC succeeded - confirm to the requester that the subscription was made
