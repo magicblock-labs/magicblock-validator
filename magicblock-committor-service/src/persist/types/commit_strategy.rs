@@ -4,39 +4,39 @@ use crate::persist::error::CommitPersistError;
 pub enum CommitStrategy {
     /// Args without the use of a lookup table
     #[default]
-    Args,
+    StateArgs,
     /// Args with the use of a lookup table
-    ArgsWithLookupTable,
+    StateArgsWithLookupTable,
     /// Buffer and chunks which has the most overhead
-    FromBuffer,
+    StateBuffer,
     /// Buffer and chunks with the use of a lookup table
-    FromBufferWithLookupTable,
+    StateBufferWithLookupTable,
 }
 
 impl CommitStrategy {
     pub fn args(use_lookup: bool) -> Self {
         if use_lookup {
-            Self::ArgsWithLookupTable
+            Self::StateArgsWithLookupTable
         } else {
-            Self::Args
+            Self::StateArgs
         }
     }
 
     pub fn as_str(&self) -> &str {
         use CommitStrategy::*;
         match self {
-            Args => "Args",
-            ArgsWithLookupTable => "ArgsWithLookupTable",
-            FromBuffer => "FromBuffer",
-            FromBufferWithLookupTable => "FromBufferWithLookupTable",
+            StateArgs => "StateArgs",
+            StateArgsWithLookupTable => "StageArgsWithLookupTable",
+            StateBuffer => "StageBuffer",
+            StateBufferWithLookupTable => "StageBufferWithLookupTable",
         }
     }
 
     pub fn uses_lookup(&self) -> bool {
         matches!(
             self,
-            CommitStrategy::ArgsWithLookupTable
-                | CommitStrategy::FromBufferWithLookupTable
+            CommitStrategy::StateArgsWithLookupTable
+                | CommitStrategy::StateBufferWithLookupTable
         )
     }
 }
@@ -45,10 +45,12 @@ impl TryFrom<&str> for CommitStrategy {
     type Error = CommitPersistError;
     fn try_from(value: &str) -> Result<Self, CommitPersistError> {
         match value {
-            "Args" => Ok(Self::Args),
-            "ArgsWithLookupTable" => Ok(Self::ArgsWithLookupTable),
-            "FromBuffer" => Ok(Self::FromBuffer),
-            "FromBufferWithLookupTable" => Ok(Self::FromBufferWithLookupTable),
+            "StateArgs" => Ok(Self::StateArgs),
+            "StateArgsWithLookupTable" => Ok(Self::StateArgsWithLookupTable),
+            "StageBuffer" => Ok(Self::StateBuffer),
+            "StageBufferWithLookupTable" => {
+                Ok(Self::StateBufferWithLookupTable)
+            }
             _ => Err(CommitPersistError::InvalidCommitStrategy(
                 value.to_string(),
             )),
