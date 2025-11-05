@@ -30,6 +30,19 @@ use super::{
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
 const MAX_SUBSCRIBE_ATTEMPTS: usize = 3;
 
+/// Fibonacci backoff delay for retry attempts (in seconds)
+fn fib_backoff_seconds(attempt: usize) -> u64 {
+    match attempt {
+        1 => 0,
+        2 => 1,
+        3 => 2,
+        4 => 3,
+        5 => 5,
+        6 => 8,
+        _ => 13, // cap at 13s for higher attempts
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PubsubClientConfig {
     pub pubsub_url: String,
