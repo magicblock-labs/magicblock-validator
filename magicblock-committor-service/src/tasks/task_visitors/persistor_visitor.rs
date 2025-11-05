@@ -27,9 +27,9 @@ where
         match self.context {
             PersistorContext::PersistStrategy { uses_lookup_tables } => {
                 let commit_strategy = if uses_lookup_tables {
-                    CommitStrategy::ArgsWithLookupTable
+                    CommitStrategy::StateArgsWithLookupTable
                 } else {
-                    CommitStrategy::Args
+                    CommitStrategy::StateArgs
                 };
 
                 match &task.task_type {
@@ -69,9 +69,9 @@ where
         match self.context {
             PersistorContext::PersistStrategy { uses_lookup_tables } => {
                 let commit_strategy = if uses_lookup_tables {
-                    CommitStrategy::FromBufferWithLookupTable
+                    CommitStrategy::StateBufferWithLookupTable
                 } else {
-                    CommitStrategy::FromBuffer
+                    CommitStrategy::StateBuffer
                 };
 
                 match &task.task_type {
