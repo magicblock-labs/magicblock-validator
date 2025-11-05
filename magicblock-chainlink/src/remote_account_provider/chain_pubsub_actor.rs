@@ -11,8 +11,10 @@ use solana_rpc_client_api::{
     config::RpcAccountInfoConfig, response::Response as RpcResponse,
 };
 use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
-use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
-use tokio::time::{timeout, Duration};
+use tokio::{
+    sync::{mpsc, oneshot, Mutex as AsyncMutex},
+    time::{timeout, Duration},
+};
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
@@ -279,6 +281,7 @@ impl ChainPubsubActor {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn add_sub(
         pubkey: Pubkey,
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
@@ -416,7 +419,7 @@ impl ChainPubsubActor {
 
         debug!("RecycleConnections: starting recycle process");
 
-        // 1. Recreate the pubsub connection, in case that fails leave it be, as there's not much that can be done about it, next subscription attempt will try to reconnect again
+        // Recreate the pubsub connection, in case that fails leave it be, as there's not much that can be done about it, next subscription attempt will try to reconnect again
         debug!(
             "RecycleConnections: creating ws connection for {}",
             pubsub_connection.url()
