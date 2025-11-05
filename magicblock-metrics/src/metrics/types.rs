@@ -68,3 +68,20 @@ pub enum AccountCommit<'a> {
     CommitOnly { pubkey: &'a str, outcome: Outcome },
     CommitAndUndelegate { pubkey: &'a str, outcome: Outcome },
 }
+
+pub trait LabelValue {
+    fn value(&self) -> &str;
+}
+
+impl<T, E> LabelValue for Result<T, E>
+where
+    T: LabelValue,
+    E: LabelValue,
+{
+    fn value(&self) -> &str {
+        match self {
+            Ok(ok) => ok.value(),
+            Err(err) => err.value(),
+        }
+    }
+}
