@@ -430,6 +430,9 @@ impl ChainPubsubActor {
                                 abort_sender.clone(),
                                 is_connected.clone(),
                             );
+                            // Return early - abort_and_signal_connection_issue cancels all
+                            // subscriptions, triggering cleanup via the cancellation path
+                            // above. No need to run unsubscribe/cleanup here.
                             return;
                         }
                     }
