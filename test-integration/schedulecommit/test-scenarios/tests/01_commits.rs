@@ -1,19 +1,23 @@
 use integration_test_tools::{run_test, IntegrationTestContext};
 use log::*;
-use solana_program::instruction::InstructionError;
-use program_schedulecommit::api::{
-    delegate_account_cpi_instruction, init_account_instruction, pda_and_bump,
-    schedule_commit_cpi_instruction,
+use program_schedulecommit::{
+    api::{
+        delegate_account_cpi_instruction, init_account_instruction,
+        pda_and_bump, schedule_commit_cpi_instruction,
+    },
+    ScheduleCommitCpiArgs, ScheduleCommitInstruction,
 };
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
+use solana_program::instruction::InstructionError;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    signature::{Keypair, Signature},
+    signer::Signer,
+    transaction::{Transaction, TransactionError},
 };
-use solana_sdk::transaction::TransactionError;
-use program_schedulecommit::{ScheduleCommitCpiArgs, ScheduleCommitInstruction};
 use test_kit::{init_logger, AccountMeta, Instruction};
 use utils::{
     assert_one_committee_synchronized_count,
@@ -146,48 +150,33 @@ fn test_committing_account_delegated_to_another_validator() {
 
         // Init other validator
         let other_validator = Keypair::new();
-        ctx.airdrop_chain(&other_validator.pubkey(), LAMPORTS_PER_SOL).unwrap();
+        ctx.airdrop_chain(&other_validator.pubkey(), LAMPORTS_PER_SOL)
+            .unwrap();
 
         // Init payer
-        let payer= Keypair::new();
-        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL).unwrap();
+        let payer = Keypair::new();
+        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
+            .unwrap();
 
         // Init + delegate player to other validator
-        let (player, player_pda) =
-            init_and_delegate_player(&ctx, &payer, Some(other_validator.pubkey()));
+        let (player, player_pda) = init_and_delegate_player(
+            &ctx,
+            &payer,
+            Some(other_validator.pubkey()),
+        );
 
         // Schedule commit of account delegated to another validator
-        let ephem_client = ctx.ephem_client.as_ref().unwrap();
-        let ix = schedule_commit_cpi_illegal_owner(
-            payer.pubkey(),
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
-            &[player.pubkey()],
-            &[player_pda],
-            false
-        );
-
-        let blockhash = ephem_client.get_latest_blockhash().unwrap();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            blockhash
-        );
-
-        let res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            ephem_client.commitment(),
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
-        debug!("tx signature: {}", tx.get_signature());
+        let res = schedule_commit_tx(&ctx, &payer, &player, player_pda, false);
 
         // We expect IllegalOwner error since account isn't delegated to our validator
         let (_, tx_err) = extract_transaction_error(res);
-        assert_eq!(tx_err.unwrap(), TransactionError::InstructionError(0, InstructionError::IllegalOwner))
+        assert_eq!(
+            tx_err.unwrap(),
+            TransactionError::InstructionError(
+                0,
+                InstructionError::IllegalOwner
+            )
+        )
     });
 }
 
@@ -198,44 +187,23 @@ fn test_undelegating_account_delegated_to_another_validator() {
 
         // Init other validator
         let other_validator = Keypair::new();
-        ctx.airdrop_chain(&other_validator.pubkey(), LAMPORTS_PER_SOL).unwrap();
+        ctx.airdrop_chain(&other_validator.pubkey(), LAMPORTS_PER_SOL)
+            .unwrap();
 
         // Init payer
-        let payer= Keypair::new();
-        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL).unwrap();
+        let payer = Keypair::new();
+        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
+            .unwrap();
 
         // Init + delegate player to other validator
-        let (player, player_pda) =
-            init_and_delegate_player(&ctx, &payer, Some(other_validator.pubkey()));
-
-        // Schedule commit of account delegated to another validator
-        let ephem_client = ctx.ephem_client.as_ref().unwrap();
-        let ix = schedule_commit_cpi_illegal_owner(
-            payer.pubkey(),
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
-            &[player.pubkey()],
-            &[player_pda],
-            true
+        let (player, player_pda) = init_and_delegate_player(
+            &ctx,
+            &payer,
+            Some(other_validator.pubkey()),
         );
 
-        let blockhash = ephem_client.get_latest_blockhash().unwrap();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            blockhash
-        );
-
-        let res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            ephem_client.commitment(),
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
-        debug!("tx signature: {}", tx.get_signature());
+        // Schedule undelegation of account delegated to another validator
+        let res = schedule_commit_tx(&ctx, &payer, &player, player_pda, true);
 
         // We expect IllegalOwner error since account isn't delegated to our validator
         let (_, tx_err) = extract_transaction_error(res);
@@ -253,9 +221,13 @@ fn init_and_delegate_player(
     let (player_pda, _) = pda_and_bump(&player.pubkey());
 
     // Build init + delegate instructions
-    let init_ix = init_account_instruction(payer.pubkey(), player.pubkey(), player_pda);
-    let delegate_ix =
-        delegate_account_cpi_instruction(payer.pubkey(), validator, player.pubkey());
+    let init_ix =
+        init_account_instruction(payer.pubkey(), player.pubkey(), player_pda);
+    let delegate_ix = delegate_account_cpi_instruction(
+        payer.pubkey(),
+        validator,
+        player.pubkey(),
+    );
 
     // Send transaction
     let mut tx = Transaction::new_signed_with_payer(
@@ -272,15 +244,55 @@ fn init_and_delegate_player(
     (player, player_pda)
 }
 
+fn schedule_commit_tx(
+    ctx: &IntegrationTestContext,
+    payer: &Keypair,
+    player: &Keypair,
+    player_pda: Pubkey,
+    is_undelegate: bool,
+) -> solana_rpc_client_api::client_error::Result<Signature> {
+    // Build the instruction
+    let ephem_client = ctx.ephem_client.as_ref().unwrap();
+    let ix = schedule_commit_cpi_illegal_owner(
+        payer.pubkey(),
+        magicblock_magic_program_api::id(),
+        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        &[player.pubkey()],
+        &[player_pda],
+        is_undelegate,
+    );
+
+    // Build and send transaction
+    let blockhash = ephem_client.get_latest_blockhash().unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[payer],
+        blockhash,
+    );
+
+    let res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            ephem_client.commitment(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+    debug!("schedule commit tx signature: {}", tx.get_signature());
+
+    res
+}
+
 fn schedule_commit_cpi_illegal_owner(
     payer: Pubkey,
     magic_program_id: Pubkey,
     magic_context_id: Pubkey,
     players: &[Pubkey],
     committees: &[Pubkey],
-    is_undelegate: bool
+    is_undelegate: bool,
 ) -> Instruction {
-
     let program_id = program_schedulecommit::id();
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
