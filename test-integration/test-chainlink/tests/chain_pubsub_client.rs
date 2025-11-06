@@ -23,8 +23,10 @@ use tokio::{sync::mpsc, task};
 async fn setup() -> (ChainPubsubClientImpl, mpsc::Receiver<SubscriptionUpdate>)
 {
     init_logger();
+    let (tx, _) = mpsc::channel(10);
     let client = ChainPubsubClientImpl::try_new_from_url(
         PUBSUB_URL,
+        tx,
         CommitmentConfig::confirmed(),
     )
     .await

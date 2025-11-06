@@ -55,3 +55,14 @@ pub async fn unsubscribe(actor: &ChainPubsubActor, pubkey: Pubkey) {
         .expect("unsubscribe ack channel dropped")
         .expect("unsubscribe failed");
 }
+
+pub async fn reconnect(actor: &ChainPubsubActor) {
+    let (tx, rx) = oneshot::channel();
+    actor
+        .send_msg(ChainPubsubActorMessage::Reconnect { response: tx })
+        .await
+        .expect("failed to send Reconnect message");
+    rx.await
+        .expect("reconnect ack channel dropped")
+        .expect("reconnect failed");
+}
