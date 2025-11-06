@@ -171,7 +171,7 @@ impl TaskStrategist {
         persistor: &Option<P>,
     ) -> TaskStrategistResult<TransactionStrategy> {
         // Attempt optimizing tasks themselves(using buffers)
-        if Self::minimize_tx_size_if_needed(&mut tasks)?
+        if Self::try_optimize_tx_size_if_needed(&mut tasks)?
             <= MAX_ENCODED_TRANSACTION_SIZE
         {
             // Persist tasks strategy
@@ -277,9 +277,11 @@ impl TaskStrategist {
         )
     }
 
-    /// Optimizes set of [`TaskDeliveryStrategy`] to fit [`MAX_ENCODED_TRANSACTION_SIZE`]
-    /// Returns size of tx after optimizations
-    fn minimize_tx_size_if_needed(
+    /// Optimizes tasks so as to bring the transaction size within the limit [`MAX_ENCODED_TRANSACTION_SIZE`]
+    /// Returns Ok(size of tx after optimizations) else Err(SignerError).
+    /// Note that the returned size, though possibly optimized one, may still not be under
+    /// the limit MAX_ENCODED_TRANSACTION_SIZE. The caller needs to check and make decision accordingly.
+    fn try_optimize_tx_size_if_needed(
         tasks: &mut [Box<dyn BaseTask>],
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
@@ -334,7 +336,7 @@ impl TaskStrategist {
                 let tmp_task = Box::new(tmp_task) as Box<dyn BaseTask>;
                 std::mem::replace(&mut tasks[index], tmp_task)
             };
-            match task.minimize_tx_size() {
+            match task.try_optimize_tx_size() {
                 // If we can decrease:
                 // 1. Calculate new tx size & ix size
                 // 2. Insert item's data back in the heap
@@ -717,7 +719,7 @@ mod tests {
             Box::new(create_test_commit_task(3, 1000, 0)) as Box<dyn BaseTask>, // Larger task
         ];
 
-        let _ = TaskStrategist::minimize_tx_size_if_needed(&mut tasks);
+        let _ = TaskStrategist::try_optimize_tx_size_if_needed(&mut tasks);
         // The larger task should have been optimized first
         assert!(matches!(tasks[0].strategy(), TaskStrategy::Args));
         assert!(matches!(tasks[1].strategy(), TaskStrategy::Buffer));

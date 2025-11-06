@@ -149,7 +149,7 @@ impl BaseTask for BufferTask {
     }
 
     /// No further optimizations
-    fn minimize_tx_size(
+    fn try_optimize_tx_size(
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
         Err(self)

@@ -68,7 +68,7 @@ pub trait BaseTask: Send + Sync + DynClone + LabelValue {
 
     /// Optimize for transaction size so that more instructions can be buddled together in a single
     /// transaction. Return Ok(new_tx_optimized_task), else Err(self) if task cannot be optimized.
-    fn minimize_tx_size(
+    fn try_optimize_tx_size(
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>>;
 
