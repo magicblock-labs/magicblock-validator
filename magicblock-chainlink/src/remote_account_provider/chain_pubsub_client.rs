@@ -140,6 +140,18 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     fn subscriptions(&self) -> Vec<Pubkey>;
 }
 
+#[async_trait]
+pub trait ReconnectableClient {
+    /// Attempts to reconnect to the pubsub server and should be invoked when the client sent the
+    /// abort signal.
+    async fn try_reconnect(&self) -> RemoteAccountProviderResult<()>;
+    /// Re-subscribes to multiple accounts after a reconnection.
+    async fn resub_multiple(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> RemoteAccountProviderResult<()>;
+}
+
 // -----------------
 // Implementation
 // -----------------
@@ -152,10 +164,15 @@ pub struct ChainPubsubClientImpl {
 impl ChainPubsubClientImpl {
     pub async fn try_new_from_url(
         pubsub_url: &str,
+        abort_sender: mpsc::Sender<()>,
         commitment: CommitmentConfig,
     ) -> RemoteAccountProviderResult<Self> {
-        let (actor, updates) =
-            ChainPubsubActor::new_from_url(pubsub_url, commitment).await?;
+        let (actor, updates) = ChainPubsubActor::new_from_url(
+            pubsub_url,
+            abort_sender,
+            commitment,
+        )
+        .await?;
         Ok(Self {
             actor: Arc::new(actor),
             updates_rcvr: Arc::new(Mutex::new(Some(updates))),
@@ -232,6 +249,32 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
     fn subscriptions(&self) -> Vec<Pubkey> {
         self.actor.subscriptions()
+    }
+}
+
+#[async_trait]
+impl ReconnectableClient for ChainPubsubClientImpl {
+    async fn try_reconnect(&self) -> RemoteAccountProviderResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.actor
+            .send_msg(ChainPubsubActorMessage::Reconnect { response: tx })
+            .await?;
+
+        rx.await.inspect_err(|err| {
+            warn!("RecvError occurred while awaiting reconnect response: {err:?}.");
+        })?
+    }
+
+    async fn resub_multiple(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> RemoteAccountProviderResult<()> {
+        for &pubkey in pubkeys {
+            self.subscribe(pubkey).await?;
+            // Don't spam the RPC provider - for 5,000 accounts we would take 250 secs = ~4 minutes
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        Ok(())
     }
 }
 
@@ -363,6 +406,20 @@ pub mod mock {
         fn subscriptions(&self) -> Vec<Pubkey> {
             let subs = self.subscribed_pubkeys.lock().unwrap();
             subs.iter().copied().collect()
+        }
+    }
+
+    #[async_trait]
+    impl ReconnectableClient for ChainPubsubClientMock {
+        async fn try_reconnect(&self) -> RemoteAccountProviderResult<()> {
+            Ok(())
+        }
+
+        async fn resub_multiple(
+            &self,
+            _pubkeys: &[Pubkey],
+        ) -> RemoteAccountProviderResult<()> {
+            Ok(())
         }
     }
 }

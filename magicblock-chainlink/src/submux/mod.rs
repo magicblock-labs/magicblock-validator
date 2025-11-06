@@ -11,8 +11,9 @@ use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 
 use crate::remote_account_provider::{
-    chain_pubsub_client::ChainPubsubClient,
-    errors::RemoteAccountProviderResult, SubscriptionUpdate,
+    chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
+    errors::RemoteAccountProviderResult,
+    SubscriptionUpdate,
 };
 
 const SUBMUX_OUT_CHANNEL_SIZE: usize = 5_000;
@@ -96,7 +97,10 @@ pub struct DebounceConfig {
 ///   - While waiting for eligibility in Enabled state, only the latest
 ///     observed update is kept as pending so that the consumer receives
 ///     the freshest state when the interval elapses.
-pub struct SubMuxClient<T: ChainPubsubClient> {
+pub struct SubMuxClient<T>
+where
+    T: ChainPubsubClient + ReconnectableClient,
+{
     /// Underlying pubsub clients this mux controls and forwards to/from.
     clients: Vec<Arc<T>>,
     /// Aggregated outgoing channel used by forwarder tasks to deliver
@@ -139,9 +143,9 @@ struct ForwarderParams {
     allowed_count: usize,
 }
 
-impl<T: ChainPubsubClient> SubMuxClient<T> {
+impl<T: ChainPubsubClient + ReconnectableClient> SubMuxClient<T> {
     pub fn new(
-        clients: Vec<Arc<T>>,
+        clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
         dedupe_window_millis: Option<u64>,
     ) -> Self {
         Self::new_with_debounce(
@@ -154,14 +158,14 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
     }
 
     pub fn new_with_debounce(
-        clients: Vec<Arc<T>>,
+        clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
         config: DebounceConfig,
     ) -> Self {
         Self::new_with_config(clients, config)
     }
 
     pub fn new_with_config(
-        clients: Vec<Arc<T>>,
+        clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
         config: DebounceConfig,
     ) -> Self {
         let (out_tx, out_rx) = mpsc::channel(SUBMUX_OUT_CHANNEL_SIZE);
@@ -181,6 +185,8 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
         let never_debounce: HashSet<Pubkey> =
             vec![solana_sdk::sysvar::clock::ID].into_iter().collect();
 
+        let clients = Self::spawn_reconnectors(clients);
+
         let me = Self {
             clients,
             out_tx,
@@ -197,6 +203,92 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
         me.spawn_dedup_pruner();
         me.spawn_debounce_flusher();
         me
+    }
+
+    // -----------------
+    // Reconnection
+    // -----------------
+    fn spawn_reconnectors(
+        clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
+    ) -> Vec<Arc<T>> {
+        let clients_only = clients
+            .iter()
+            .map(|(c, _)| c.clone())
+            .collect::<Vec<Arc<T>>>();
+        for (client, mut abort_rx) in clients.into_iter() {
+            let clients_clone = clients_only.clone();
+            tokio::spawn(async move {
+                while abort_rx.recv().await.is_some() {
+                    debug!(
+                        "Reconnecter received abort signal, reconnecting client"
+                    );
+                    Self::reconnect_client_with_backoff(
+                        client.clone(),
+                        clients_clone.clone(),
+                    )
+                    .await;
+                }
+            });
+        }
+        clients_only
+    }
+
+    async fn reconnect_client_with_backoff(
+        client: Arc<T>,
+        all_clients: Vec<Arc<T>>,
+    ) {
+        fn fib_with_max(n: u64) -> u64 {
+            if n >= 15 {
+                return 600;
+            }
+            match n {
+                0 => 0,
+                1 => 1,
+                _ => fib_with_max(n - 1) + fib_with_max(n - 2),
+            }
+        }
+
+        const WARN_EVERY_ATTEMPTS: u64 = 10;
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            if Self::reconnect_client(client.clone(), &all_clients).await {
+                debug!(
+                    "Successfully reconnected client after {} attempts",
+                    attempt
+                );
+                break;
+            } else {
+                if attempt % WARN_EVERY_ATTEMPTS == 0 {
+                    error!("Failed to reconnect ({}) times", attempt);
+                }
+                let wait_duration = Duration::from_secs(fib_with_max(attempt));
+                tokio::time::sleep(wait_duration).await;
+                debug!("Reconnect attempt {} failed, will retry", attempt);
+            }
+        }
+    }
+
+    async fn reconnect_client(client: Arc<T>, all_clients: &[Arc<T>]) -> bool {
+        if let Err(err) = client.try_reconnect().await {
+            debug!("Failed to reconnect client: {:?}", err);
+            return false;
+        }
+        // Resubscribe all existing subscriptions sourced from still connected clients
+        // NOTE: that new subscriptions are already received now as well since the
+        // client marked itself as connected and is no longer blocking subscriptions
+        // See [ChainPubsubActor::handle_msg] and  [ChainPubsubActor::try_reconnect]
+        let subs = Self::get_subscriptions(all_clients);
+        match client.resub_multiple(&subs).await {
+            Err(err) => {
+                debug!(
+                    "Failed to resubscribe accounts after reconnect: {:?}",
+                    err
+                );
+                false
+            }
+            Ok(_) => true,
+        }
     }
 
     fn spawn_dedup_pruner(&self) {
@@ -454,6 +546,14 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
         maybe_forward_now
     }
 
+    fn get_subscriptions(clients: &[Arc<T>]) -> Vec<Pubkey> {
+        let mut all_subs = HashSet::new();
+        for client in clients {
+            all_subs.extend(client.subscriptions());
+        }
+        all_subs.into_iter().collect()
+    }
+
     fn allowed_in_debounce_window_count(&self) -> usize {
         (self.debounce_detection_window.as_millis()
             / self.debounce_interval.as_millis()) as usize
@@ -470,7 +570,10 @@ impl<T: ChainPubsubClient> SubMuxClient<T> {
 }
 
 #[async_trait]
-impl<T: ChainPubsubClient> ChainPubsubClient for SubMuxClient<T> {
+impl<T> ChainPubsubClient for SubMuxClient<T>
+where
+    T: ChainPubsubClient + ReconnectableClient,
+{
     async fn subscribe(
         &self,
         pubkey: Pubkey,
@@ -512,8 +615,8 @@ impl<T: ChainPubsubClient> ChainPubsubClient for SubMuxClient<T> {
     }
 
     /// Gets the maximum subscription count across all inner clients.
-    /// NOTE: one of the clients could be recycling connections and thus
-    /// temporarily have fewer subscriptions
+    /// NOTE: one of the clients could be reconnecting and thus
+    /// temporarily have fewer or no subscriptions
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
@@ -533,14 +636,10 @@ impl<T: ChainPubsubClient> ChainPubsubClient for SubMuxClient<T> {
     }
 
     /// Gets the union of all subscriptions across all inner clients.
-    /// Unless one is recycling connections, this should be identical to
+    /// Unless one is reconnecting, this should be identical to
     /// getting it from a single inner client.
     fn subscriptions(&self) -> Vec<Pubkey> {
-        let mut all_subs = HashSet::new();
-        for client in &self.clients {
-            all_subs.extend(client.subscriptions());
-        }
-        all_subs.into_iter().collect()
+        Self::get_subscriptions(&self.clients)
     }
 }
 
@@ -561,6 +660,34 @@ mod tests {
             ..Account::default()
         }
     }
+    fn new_submux_client(
+        clients: Vec<Arc<ChainPubsubClientMock>>,
+        dedupe_window_millis: Option<u64>,
+    ) -> SubMuxClient<ChainPubsubClientMock> {
+        let client_tuples = clients
+            .into_iter()
+            .map(|c| {
+                let (_abort_tx, abort_rx) = mpsc::channel(1);
+                (c, abort_rx)
+            })
+            .collect();
+        SubMuxClient::new(client_tuples, dedupe_window_millis)
+    }
+
+    fn new_submux_client_with_debounce(
+        clients: Vec<Arc<ChainPubsubClientMock>>,
+        config: DebounceConfig,
+    ) -> SubMuxClient<ChainPubsubClientMock> {
+        let client_tuples = clients
+            .into_iter()
+            .map(|c| {
+                let (_abort_tx, abort_rx) = mpsc::channel(1);
+                (c, abort_rx)
+            })
+            .collect();
+        SubMuxClient::new_with_debounce(client_tuples, config)
+    }
+
     // -----------------
     // Subscribe/Unsubscribe
     // -----------------
@@ -574,7 +701,7 @@ mod tests {
         let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
-        let mux: SubMuxClient<ChainPubsubClientMock> = SubMuxClient::new(
+        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client(
             vec![client1.clone(), client2.clone()],
             Some(100),
         );
@@ -627,7 +754,7 @@ mod tests {
         let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
-        let mux: SubMuxClient<ChainPubsubClientMock> = SubMuxClient::new(
+        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client(
             vec![client1.clone(), client2.clone()],
             Some(100),
         );
@@ -674,7 +801,7 @@ mod tests {
         let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
-        let mux: SubMuxClient<ChainPubsubClientMock> = SubMuxClient::new(
+        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client(
             vec![client1.clone(), client2.clone()],
             Some(100),
         );
@@ -735,7 +862,7 @@ mod tests {
         let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
-        let mux: SubMuxClient<ChainPubsubClientMock> = SubMuxClient::new(
+        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client(
             vec![client1.clone(), client2.clone()],
             Some(100),
         );
@@ -798,7 +925,7 @@ mod tests {
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
         let client3 = Arc::new(ChainPubsubClientMock::new(tx3, rx3));
 
-        let mux: SubMuxClient<ChainPubsubClientMock> = SubMuxClient::new(
+        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client(
             vec![client1.clone(), client2.clone(), client3.clone()],
             Some(100),
         );
@@ -928,7 +1055,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(10_000);
         let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
         let mux: SubMuxClient<ChainPubsubClientMock> =
-            SubMuxClient::new_with_debounce(
+            new_submux_client_with_debounce(
                 vec![client.clone()],
                 DebounceConfig {
                     dedupe_window_millis: Some(100),
@@ -986,7 +1113,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(10_000);
         let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
         let mux: SubMuxClient<ChainPubsubClientMock> =
-            SubMuxClient::new_with_debounce(
+            new_submux_client_with_debounce(
                 vec![client.clone()],
                 DebounceConfig {
                     dedupe_window_millis: Some(100),
@@ -1024,7 +1151,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(10_000);
         let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
         let mux: SubMuxClient<ChainPubsubClientMock> =
-            SubMuxClient::new_with_debounce(
+            new_submux_client_with_debounce(
                 vec![client.clone()],
                 DebounceConfig {
                     dedupe_window_millis: Some(100),
@@ -1082,7 +1209,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(10_000);
         let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
         let mux: SubMuxClient<ChainPubsubClientMock> =
-            SubMuxClient::new_with_debounce(
+            new_submux_client_with_debounce(
                 vec![client.clone()],
                 DebounceConfig {
                     dedupe_window_millis: Some(100),

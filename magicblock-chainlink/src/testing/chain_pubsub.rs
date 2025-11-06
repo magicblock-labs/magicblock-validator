@@ -16,8 +16,10 @@ pub async fn setup_actor_and_client() -> (
     mpsc::Receiver<SubscriptionUpdate>,
     RpcClient,
 ) {
+    let (tx, _) = mpsc::channel(10);
     let (actor, updates_rx) = ChainPubsubActor::new_from_url(
         PUBSUB_URL,
+        tx,
         CommitmentConfig::confirmed(),
     )
     .await
