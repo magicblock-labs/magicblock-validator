@@ -219,6 +219,9 @@ impl<T: ChainPubsubClient + ReconnectableClient> SubMuxClient<T> {
             let clients_clone = clients_only.clone();
             tokio::spawn(async move {
                 while abort_rx.recv().await.is_some() {
+                    // Drain any duplicate abort signals to coalesce reconnect attempts
+                    while abort_rx.try_recv().is_ok() {}
+
                     debug!(
                         "Reconnecter received abort signal, reconnecting client"
                     );
@@ -238,14 +241,11 @@ impl<T: ChainPubsubClient + ReconnectableClient> SubMuxClient<T> {
         all_clients: Vec<Arc<T>>,
     ) {
         fn fib_with_max(n: u64) -> u64 {
-            if n >= 15 {
-                return 600;
+            let (mut a, mut b) = (0u64, 1u64);
+            for _ in 0..n {
+                (a, b) = (b, a.saturating_add(b));
             }
-            match n {
-                0 => 0,
-                1 => 1,
-                _ => fib_with_max(n - 1) + fib_with_max(n - 2),
-            }
+            a.min(600)
         }
 
         const WARN_EVERY_ATTEMPTS: u64 = 10;
@@ -686,6 +686,25 @@ mod tests {
             })
             .collect();
         SubMuxClient::new_with_debounce(client_tuples, config)
+    }
+
+    fn new_submux_with_abort(
+        clients: Vec<Arc<ChainPubsubClientMock>>,
+        dedupe_window_millis: Option<u64>,
+    ) -> (SubMuxClient<ChainPubsubClientMock>, Vec<mpsc::Sender<()>>) {
+        let mut abort_senders = Vec::new();
+        let client_tuples = clients
+            .into_iter()
+            .map(|c| {
+                let (abort_tx, abort_rx) = mpsc::channel(4);
+                abort_senders.push(abort_tx);
+                (c, abort_rx)
+            })
+            .collect();
+        (
+            SubMuxClient::new(client_tuples, dedupe_window_millis),
+            abort_senders,
+        )
     }
 
     // -----------------
@@ -1241,6 +1260,125 @@ mod tests {
             let received = drain_slots(&mut mux_rx, 800).await;
             assert_eq!(received.len(), 10, "no updates should be debounced");
         }
+
+        mux.shutdown().await;
+    }
+
+    // -----------------
+    // Reconnection Tests
+    // -----------------
+    #[tokio::test]
+    async fn test_reconnect_on_disconnect_reestablishes_subscriptions() {
+        init_logger();
+
+        let (tx1, rx1) = mpsc::channel(10_000);
+        let (tx2, rx2) = mpsc::channel(10_000);
+        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
+        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
+
+        let (mux, aborts) = new_submux_with_abort(
+            vec![client1.clone(), client2.clone()],
+            Some(100),
+        );
+        let mut mux_rx = mux.take_updates();
+
+        let pk = Pubkey::new_unique();
+        mux.subscribe(pk).await.unwrap();
+
+        // Baseline: client1 update arrives
+        client1
+            .send_account_update(pk, 1, &account_with_lamports(111))
+            .await;
+        tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            mux_rx.recv(),
+        )
+        .await
+        .expect("got baseline update")
+        .expect("stream open");
+
+        // Simulate disconnect: client1 loses subscriptions and is "disconnected"
+        client1.simulate_disconnect();
+
+        // Trigger reconnect via abort channel
+        aborts[0].send(()).await.expect("abort send");
+
+        // Wait for reconnect to complete
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // After reconnect + resubscribe, client1's updates should be forwarded again
+        client1
+            .send_account_update(pk, 2, &account_with_lamports(222))
+            .await;
+
+        let up = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            mux_rx.recv(),
+        )
+        .await
+        .expect("expect update after reconnect")
+        .expect("stream open");
+        assert_eq!(up.pubkey, pk);
+        assert_eq!(up.rpc_response.context.slot, 2);
+
+        mux.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_reconnect_after_failed_resubscription_eventually_recovers() {
+        init_logger();
+
+        let (tx1, rx1) = mpsc::channel(10_000);
+        let (tx2, rx2) = mpsc::channel(10_000);
+        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
+        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
+
+        let (mux, aborts) = new_submux_with_abort(
+            vec![client1.clone(), client2.clone()],
+            Some(100),
+        );
+        let mut mux_rx = mux.take_updates();
+
+        let pk = Pubkey::new_unique();
+        mux.subscribe(pk).await.unwrap();
+
+        // Prepare: first resubscribe attempt will fail
+        client1.fail_next_resubscriptions(1);
+
+        // Simulate disconnect: client1 loses subs and is disconnected
+        client1.simulate_disconnect();
+
+        // Trigger reconnect; first attempt will fail resub; reconnector will retry after ~1s (fib(1)=1)
+        aborts[0].send(()).await.expect("abort send");
+
+        // Send updates until one passes after reconnection and resubscribe succeed
+        // Keep unique slots to avoid dedupe
+        let mut slot: u64 = 100;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut got = None;
+        while Instant::now() < deadline {
+            client1
+                .send_account_update(
+                    pk,
+                    slot,
+                    &account_with_lamports(1_000 + slot),
+                )
+                .await;
+            if let Ok(Some(u)) = tokio::time::timeout(
+                std::time::Duration::from_millis(200),
+                mux_rx.recv(),
+            )
+            .await
+            {
+                got = Some(u);
+                break;
+            }
+            slot += 1;
+        }
+
+        let up = got.expect("should receive update after retry reconnect");
+        assert_eq!(up.pubkey, pk);
+        assert!(up.rpc_response.context.slot >= 100);
 
         mux.shutdown().await;
     }

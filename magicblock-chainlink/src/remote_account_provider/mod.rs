@@ -342,15 +342,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         };
 
         // Build pubsub clients and wrap them into a SubMuxClient
-        let mut pubsubs: Vec<Arc<ChainPubsubClientImpl>> =
+        let mut pubsubs: Vec<(Arc<ChainPubsubClientImpl>, mpsc::Receiver<()>)> =
             Vec::with_capacity(endpoints.len());
         for ep in endpoints {
+            let (abort_tx, abort_rx) = mpsc::channel(1);
             let client = ChainPubsubClientImpl::try_new_from_url(
                 ep.pubsub_url.as_str(),
+                abort_tx,
                 commitment,
             )
             .await?;
-            pubsubs.push(Arc::new(client));
+            pubsubs.push((Arc::new(client), abort_rx));
         }
         let submux = SubMuxClient::new(pubsubs, None);
 
@@ -720,7 +722,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         // 3. Subscribe to the new account (only after successful eviction handling)
-        self.pubsub_client.subscribe(*pubkey).await?;
+        if let Err(err) = self.pubsub_client.subscribe(*pubkey).await {
+            // Rollback the LRU add since subscription failed
+            self.lrucache_subscribed_accounts.remove(pubkey);
+            return Err(err);
+        }
 
         Ok(())
     }

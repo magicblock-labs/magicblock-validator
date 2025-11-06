@@ -14,7 +14,10 @@ use solana_rpc_client_api::{
     config::RpcAccountInfoConfig, response::Response as RpcResponse,
 };
 use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::Duration,
+};
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
@@ -390,8 +393,7 @@ impl ChainPubsubActor {
                         subs.clone(),
                         abort_sender,
                         is_connected.clone(),
-                    )
-                    .await;
+                    );
 
                     return;
                 }
@@ -421,15 +423,28 @@ impl ChainPubsubActor {
                                 error!("[client_id={client_id}] Failed to send {pubkey} subscription update: {err:?}");
                             });
                         } else {
-                            debug!("[client_id={client_id}] Subscription for {pubkey} ended by update stream");
-                            break;
+                            debug!("[client_id={client_id}] Subscription for {pubkey} ended (EOF); signaling connection issue");
+                            Self::abort_and_signal_connection_issue(
+                                client_id,
+                                subs.clone(),
+                                abort_sender.clone(),
+                                is_connected.clone(),
+                            );
+                            return;
                         }
                     }
                 }
             }
 
-            // Clean up subscription
-            unsubscribe().await;
+            // Clean up subscription with timeout to prevent hanging on dead sockets
+            if tokio::time::timeout(Duration::from_secs(2), unsubscribe())
+                .await
+                .is_err()
+            {
+                warn!(
+                    "[client_id={client_id}] unsubscribe timed out for {pubkey}"
+                );
+            }
             subs.lock()
                 .expect("subscriptions lock poisoned")
                 .remove(&pubkey);
@@ -476,13 +491,19 @@ impl ChainPubsubActor {
         Ok(())
     }
 
-    async fn abort_and_signal_connection_issue(
+    fn abort_and_signal_connection_issue(
         client_id: u16,
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
     ) {
-        is_connected.store(false, Ordering::SeqCst);
+        // Only abort if we were connected; prevents duplicate aborts
+        if !is_connected.swap(false, Ordering::SeqCst) {
+            trace!(
+                "[client_id={client_id}] already disconnected, skipping abort"
+            );
+            return;
+        }
 
         debug!("[client_id={client_id}] aborting");
 
@@ -498,13 +519,14 @@ impl ChainPubsubActor {
             "[client_id={client_id}] canceled {} subscriptions",
             drained_len
         );
-        abort_sender
-            .send(())
-            .await
-            .unwrap_or_else(|err| {
+        // Use try_send to avoid blocking and naturally coalesce signals
+        let _ = abort_sender.try_send(()).inspect_err(|err| {
+            // Channel full is expected when reconnect is already in progress
+            if !matches!(err, mpsc::error::TrySendError::Full(_)) {
                 error!(
                     "[client_id={client_id}] failed to signal connection issue: {err:?}",
                 )
-            });
+            }
+        });
     }
 }
