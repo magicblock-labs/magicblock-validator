@@ -417,7 +417,14 @@ impl CommitType {
                 Self::validate_accounts(&committed_accounts_ref, context)?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
-                    .map(CommittedAccount::from)
+                    .map(|el| {
+                        let mut committed_account: CommittedAccount = el.into();
+                        committed_account.account.owner = context
+                            .parent_program_id
+                            .unwrap_or(committed_account.account.owner);
+
+                        committed_account
+                    })
                     .collect();
 
                 Ok(CommitType::Standalone(committed_accounts))
@@ -438,7 +445,14 @@ impl CommitType {
                     .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
-                    .map(CommittedAccount::from)
+                    .map(|el| {
+                        let mut committed_account: CommittedAccount = el.into();
+                        committed_account.account.owner = context
+                            .parent_program_id
+                            .unwrap_or(committed_account.account.owner);
+
+                        committed_account
+                    })
                     .collect();
 
                 Ok(CommitType::WithBaseActions {

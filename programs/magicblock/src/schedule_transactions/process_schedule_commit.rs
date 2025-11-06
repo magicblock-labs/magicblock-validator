@@ -3,8 +3,10 @@ use std::collections::HashSet;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
-    account::ReadableAccount, account_utils::StateMut,
-    instruction::InstructionError, pubkey::Pubkey,
+    account::{Account, ReadableAccount},
+    account_utils::StateMut,
+    instruction::InstructionError,
+    pubkey::Pubkey,
 };
 
 use crate::{
@@ -175,10 +177,13 @@ pub(crate) fn process_schedule_commit(
                 };
             }
 
+            let mut account: Account = acc.borrow().to_owned().into();
+            account.owner = parent_program_id.cloned().unwrap_or(account.owner);
+
             #[allow(clippy::unnecessary_literal_unwrap)]
             committed_accounts.push(CommittedAccount {
                 pubkey: *acc_pubkey,
-                account: acc.borrow().to_owned().into(),
+                account,
             });
         }
 
