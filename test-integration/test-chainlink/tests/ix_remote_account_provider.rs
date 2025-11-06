@@ -41,7 +41,8 @@ async fn init_remote_account_provider() -> RemoteAccountProvider<
             1000,
             LifecycleMode::Ephemeral,
             false,
-        ).unwrap(),
+        )
+        .unwrap(),
     )
     .await
     .unwrap()
