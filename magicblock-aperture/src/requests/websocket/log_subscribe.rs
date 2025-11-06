@@ -35,7 +35,10 @@ impl WsDispatcher {
             .subscriptions
             .subscribe_to_logs(encoder, self.chan.clone());
 
-        self.unsubs.insert(handle.id, handle.cleanup);
-        Ok(SubResult::SubId(handle.id))
+        let result = SubResult::SubId(handle.id);
+        // Store the cleanup handle to manage the subscription's lifecycle.
+        self.register_unsub(handle);
+
+        Ok(result)
     }
 }

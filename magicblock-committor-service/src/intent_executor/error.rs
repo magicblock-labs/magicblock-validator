@@ -1,5 +1,8 @@
 use log::error;
-use magicblock_rpc_client::MagicBlockRpcClientError;
+use magicblock_metrics::metrics;
+use magicblock_rpc_client::{
+    utils::TransactionErrorMapper, MagicBlockRpcClientError,
+};
 use solana_sdk::{
     instruction::InstructionError,
     signature::{Signature, SignerError},
@@ -35,12 +38,12 @@ impl InternalError {
 pub enum IntentExecutorError {
     #[error("EmptyIntentError")]
     EmptyIntentError,
-    #[error("User supplied actions are ill-formed: {0}")]
-    ActionsError(#[source] TransactionError),
-    #[error("Accounts committed with an invalid Commit id: {0}")]
-    CommitIDError(#[source] TransactionError),
-    #[error("Max instruction trace length exceeded: {0}")]
-    CpiLimitError(#[source] TransactionError),
+    #[error("User supplied actions are ill-formed: {0}. {:?}", .1)]
+    ActionsError(#[source] TransactionError, Option<Signature>),
+    #[error("Accounts committed with an invalid Commit id: {0}. {:?}", .1)]
+    CommitIDError(#[source] TransactionError, Option<Signature>),
+    #[error("Max instruction trace length exceeded: {0}. {:?}", .1)]
+    CpiLimitError(#[source] TransactionError, Option<Signature>),
     #[error("Failed to fit in single TX")]
     FailedToFitError,
     #[error("SignerError: {0}")]
@@ -69,7 +72,7 @@ pub enum IntentExecutorError {
 
 impl IntentExecutorError {
     pub fn is_cpi_limit_error(&self) -> bool {
-        matches!(self, IntentExecutorError::CpiLimitError(_))
+        matches!(self, IntentExecutorError::CpiLimitError(_, _))
     }
 
     pub fn from_strategy_execution_error<F>(
@@ -80,15 +83,17 @@ impl IntentExecutorError {
         F: FnOnce(InternalError) -> IntentExecutorError,
     {
         match error {
-            TransactionStrategyExecutionError::ActionsError(err) => {
-                IntentExecutorError::ActionsError(err)
+            TransactionStrategyExecutionError::ActionsError(err, signature) => {
+                IntentExecutorError::ActionsError(err, signature)
             }
-            TransactionStrategyExecutionError::CpiLimitError(err) => {
-                IntentExecutorError::CpiLimitError(err)
-            }
-            TransactionStrategyExecutionError::CommitIDError(err) => {
-                IntentExecutorError::CommitIDError(err)
-            }
+            TransactionStrategyExecutionError::CpiLimitError(
+                err,
+                signature,
+            ) => IntentExecutorError::CpiLimitError(err, signature),
+            TransactionStrategyExecutionError::CommitIDError(
+                err,
+                signature,
+            ) => IntentExecutorError::CommitIDError(err, signature),
             TransactionStrategyExecutionError::InternalError(err) => {
                 converter(err)
             }
@@ -96,27 +101,45 @@ impl IntentExecutorError {
     }
 }
 
+impl metrics::LabelValue for IntentExecutorError {
+    fn value(&self) -> &str {
+        match self {
+            IntentExecutorError::ActionsError(_, _) => "actions_failed",
+            IntentExecutorError::CpiLimitError(_, _) => "cpi_limit_failed",
+            IntentExecutorError::CommitIDError(_, _) => "commit_nonce_failed",
+            _ => "failed",
+        }
+    }
+}
+
 /// Those are the errors that may occur during Commit/Finalize stages on Base layer
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionStrategyExecutionError {
-    #[error("User supplied actions are ill-formed: {0}")]
-    ActionsError(#[source] TransactionError),
-    #[error("Accounts committed with an invalid Commit id: {0}")]
-    CommitIDError(#[source] TransactionError),
-    #[error("Max instruction trace length exceeded: {0}")]
-    CpiLimitError(#[source] TransactionError),
+    #[error("User supplied actions are ill-formed: {0}. {:?}", .1)]
+    ActionsError(#[source] TransactionError, Option<Signature>),
+    #[error("Accounts committed with an invalid Commit id: {0}. {:?}", .1)]
+    CommitIDError(#[source] TransactionError, Option<Signature>),
+    #[error("Max instruction trace length exceeded: {0}. {:?}", .1)]
+    CpiLimitError(#[source] TransactionError, Option<Signature>),
     #[error("InternalError: {0}")]
     InternalError(#[from] InternalError),
 }
 
+impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
+    fn from(value: MagicBlockRpcClientError) -> Self {
+        Self::InternalError(InternalError::MagicBlockRpcClientError(value))
+    }
+}
+
 impl TransactionStrategyExecutionError {
     /// Convert [`TransactionError`] into known errors that can be handled
+    /// Otherwise return original [`TransactionError`]
     /// [`TransactionStrategyExecutionError`]
-    pub fn from_transaction_error(
+    pub fn try_from_transaction_error(
         err: TransactionError,
+        signature: Option<Signature>,
         tasks: &[Box<dyn BaseTask>],
-        map: impl FnOnce(TransactionError) -> MagicBlockRpcClientError,
-    ) -> Self {
+    ) -> Result<Self, TransactionError> {
         // There's always 2 budget instructions in front
         const OFFSET: u8 = 2;
         const NONCE_OUT_OF_ORDER: u32 =
@@ -127,24 +150,22 @@ impl TransactionStrategyExecutionError {
             transaction_err @ TransactionError::InstructionError(
                 _,
                 InstructionError::Custom(NONCE_OUT_OF_ORDER),
-            ) => TransactionStrategyExecutionError::CommitIDError(
+            ) => Ok(TransactionStrategyExecutionError::CommitIDError(
                 transaction_err,
-            ),
+                signature,
+            )),
             // Some tx may use too much CPIs and we can handle it in certain cases
             transaction_err @ TransactionError::InstructionError(
                 _,
                 InstructionError::MaxInstructionTraceLengthExceeded,
-            ) => TransactionStrategyExecutionError::CpiLimitError(
+            ) => Ok(TransactionStrategyExecutionError::CpiLimitError(
                 transaction_err,
-            ),
+                signature,
+            )),
             // Filter ActionError, we can attempt recovery by stripping away actions
             transaction_err @ TransactionError::InstructionError(index, _) => {
                 let Some(action_index) = index.checked_sub(OFFSET) else {
-                    return TransactionStrategyExecutionError::InternalError(
-                        InternalError::MagicBlockRpcClientError(map(
-                            transaction_err,
-                        )),
-                    );
+                    return Err(transaction_err);
                 };
 
                 // If index corresponds to an Action -> ActionsError; otherwise -> InternalError.
@@ -154,15 +175,12 @@ impl TransactionStrategyExecutionError {
                         .map(|task| task.task_type()),
                     Some(TaskType::Action)
                 ) {
-                    TransactionStrategyExecutionError::ActionsError(
+                    Ok(TransactionStrategyExecutionError::ActionsError(
                         transaction_err,
-                    )
+                        signature,
+                    ))
                 } else {
-                    TransactionStrategyExecutionError::InternalError(
-                        InternalError::MagicBlockRpcClientError(map(
-                            transaction_err,
-                        )),
-                    )
+                    Err(transaction_err)
                 }
             }
             // This means transaction failed to other reasons that we don't handle - propagate
@@ -171,11 +189,25 @@ impl TransactionStrategyExecutionError {
                     "Message execution failed and we can not handle it: {}",
                     err
                 );
-                TransactionStrategyExecutionError::InternalError(
-                    InternalError::MagicBlockRpcClientError(map(err)),
-                )
+                Err(err)
             }
         }
+    }
+}
+
+pub(crate) struct IntentTransactionErrorMapper<'a> {
+    pub tasks: &'a [Box<dyn BaseTask>],
+}
+impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
+    type ExecutionError = TransactionStrategyExecutionError;
+    fn try_map(
+        &self,
+        error: TransactionError,
+        signature: Option<Signature>,
+    ) -> Result<Self::ExecutionError, TransactionError> {
+        TransactionStrategyExecutionError::try_from_transaction_error(
+            error, signature, self.tasks,
+        )
     }
 }
 

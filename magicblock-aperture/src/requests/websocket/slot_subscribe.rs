@@ -7,7 +7,10 @@ impl WsDispatcher {
     /// each time the validator advances to a new slot.
     pub(crate) fn slot_subscribe(&mut self) -> RpcResult<SubResult> {
         let handle = self.subscriptions.subscribe_to_slot(self.chan.clone());
-        self.unsubs.insert(handle.id, handle.cleanup);
-        Ok(SubResult::SubId(handle.id))
+        let result = SubResult::SubId(handle.id);
+        // Store the cleanup handle to manage the subscription's lifecycle.
+        self.register_unsub(handle);
+
+        Ok(result)
     }
 }
