@@ -59,7 +59,11 @@ fn prepare_transaction_with_single_committee(
             MAGIC_CONTEXT_PUBKEY,
             AccountSharedData::new(u64::MAX, MagicContext::SIZE, &crate::id()),
         );
-        map.insert(committee, AccountSharedData::new(0, 0, &program));
+
+        let mut committee_account = AccountSharedData::new(0, 0, &program);
+        committee_account.set_delegated(true);
+
+        map.insert(committee, committee_account);
         map
     };
     ensure_started_validator(&mut account_data);
@@ -84,6 +88,7 @@ struct PreparedTransactionThreeCommittees {
 fn prepare_transaction_with_three_committees(
     payer: &Keypair,
     committees: Option<(Pubkey, Pubkey, Pubkey)>,
+    is_delegated: (bool, bool, bool),
 ) -> PreparedTransactionThreeCommittees {
     let program = Pubkey::new_unique();
     let (committee_uno, committee_dos, committee_tres) =
@@ -103,9 +108,21 @@ fn prepare_transaction_with_three_committees(
             MAGIC_CONTEXT_PUBKEY,
             AccountSharedData::new(u64::MAX, MagicContext::SIZE, &crate::id()),
         );
-        map.insert(committee_uno, AccountSharedData::new(0, 0, &program));
-        map.insert(committee_dos, AccountSharedData::new(0, 0, &program));
-        map.insert(committee_tres, AccountSharedData::new(0, 0, &program));
+        {
+            let mut acc = AccountSharedData::new(0, 0, &program);
+            acc.set_delegated(is_delegated.0);
+            map.insert(committee_uno, acc);
+        }
+        {
+            let mut acc = AccountSharedData::new(0, 0, &program);
+            acc.set_delegated(is_delegated.1);
+            map.insert(committee_dos, acc);
+        }
+        {
+            let mut acc = AccountSharedData::new(0, 0, &program);
+            acc.set_delegated(is_delegated.2);
+            map.insert(committee_tres, acc);
+        }
         map
     };
     ensure_started_validator(&mut accounts_data);
@@ -439,7 +456,11 @@ mod tests {
                 mut transaction_accounts,
                 program,
                 ..
-            } = prepare_transaction_with_three_committees(&payer, None);
+            } = prepare_transaction_with_three_committees(
+                &payer,
+                None,
+                (true, true, true),
+            );
 
             let ix = InstructionUtils::schedule_commit_instruction(
                 &payer.pubkey(),
@@ -485,6 +506,7 @@ mod tests {
             } = prepare_transaction_with_three_committees(
                 &payer,
                 Some((committee_uno, committee_dos, committee_tres)),
+                (true, true, true),
             );
 
             let ix = InstructionUtils::accept_scheduled_commits_instruction();
@@ -546,7 +568,11 @@ mod tests {
                 mut transaction_accounts,
                 program,
                 ..
-            } = prepare_transaction_with_three_committees(&payer, None);
+            } = prepare_transaction_with_three_committees(
+                &payer,
+                None,
+                (true, true, true),
+            );
 
             let ix =
                 InstructionUtils::schedule_commit_and_undelegate_instruction(
@@ -594,6 +620,7 @@ mod tests {
             } = prepare_transaction_with_three_committees(
                 &payer,
                 Some((committee_uno, committee_dos, committee_tres)),
+                (true, true, true),
             );
 
             let ix = InstructionUtils::accept_scheduled_commits_instruction();
@@ -681,7 +708,11 @@ mod tests {
             mut accounts_data,
             mut transaction_accounts,
             ..
-        } = prepare_transaction_with_three_committees(&payer, None);
+        } = prepare_transaction_with_three_committees(
+            &payer,
+            None,
+            (true, true, true),
+        );
 
         let ix = instruction_from_account_metas(
             get_account_metas_for_schedule_commit(&payer.pubkey(), vec![]),
@@ -701,6 +732,88 @@ mod tests {
     }
 
     #[test]
+    fn test_schedule_commit_undelegate_with_readonly() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_undelegate_with_readonly")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+
+        // Create ScheduleCommitAndUndelegate with committee as readonly account
+        let ix = {
+            let mut account_metas = vec![
+                AccountMeta::new(payer.pubkey(), true),
+                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            ];
+            account_metas.push(AccountMeta::new_readonly(committee, true));
+            Instruction::new_with_bincode(
+                crate::id(),
+                &MagicBlockInstruction::ScheduleCommitAndUndelegate,
+                account_metas,
+            )
+        };
+
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts.clone(),
+            ix.accounts,
+            Err(InstructionError::ReadonlyDataModified),
+        );
+    }
+
+    #[test]
+    fn test_schedule_commit_with_non_delegated_account() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_with_non_delegated_account")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        // Prepare single accounts for tx, set committee as non delegated
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+        account_data
+            .get_mut(&committee)
+            .unwrap()
+            .set_delegated(false);
+
+        // Create ScheduleCommit instruction with non-delegated committee
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts.clone(),
+            ix.accounts,
+            Err(InstructionError::IllegalOwner),
+        );
+    }
+
+    #[test]
     fn test_schedule_commit_three_accounts_second_not_owned_by_program_and_not_signer(
     ) {
         init_logger!();
@@ -716,12 +829,16 @@ mod tests {
             committee_tres,
             mut transaction_accounts,
             ..
-        } = prepare_transaction_with_three_committees(&payer, None);
-
-        accounts_data.insert(
-            committee_dos,
-            AccountSharedData::new(0, 0, &Pubkey::new_unique()),
+        } = prepare_transaction_with_three_committees(
+            &payer,
+            None,
+            (true, true, true),
         );
+
+        let mut dos_shared =
+            AccountSharedData::new(0, 0, &Pubkey::new_unique());
+        dos_shared.set_delegated(true);
+        accounts_data.insert(committee_dos, dos_shared);
 
         let ix = instruction_from_account_metas(
             account_metas_last_committee_not_signer(
