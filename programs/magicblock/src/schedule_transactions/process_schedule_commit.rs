@@ -140,7 +140,7 @@ pub(crate) fn process_schedule_commit(
                 if !acc_writable {
                     ic_msg!(
                         invoke_context,
-                        "ScheduleCommit ERR: account {} needs to be writable to be undelegated",
+                        "ScheduleCommit ERR: account {} is required to be writable in order to be undelegated",
                         acc_pubkey
                     );
                     return Err(InstructionError::ReadonlyDataModified);
@@ -148,7 +148,7 @@ pub(crate) fn process_schedule_commit(
             } else if !acc.borrow().delegated() {
                 ic_msg!(
                     invoke_context,
-                    "ScheduleCommit ERR: account {} needs to be delegated to current validator to be committed",
+                    "ScheduleCommit ERR: account {} is required to be delegated to the current validator, in order to be committed",
                     acc_pubkey
                 );
                 return Err(InstructionError::IllegalOwner);

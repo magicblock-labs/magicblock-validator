@@ -779,7 +779,7 @@ mod tests {
         init_logger!();
 
         let payer =
-            Keypair::from_seed(b"schedule_commit_undelegate_with_readonly")
+            Keypair::from_seed(b"schedule_commit_with_non_delegated_account")
                 .unwrap();
         let program = Pubkey::new_unique();
         let committee = Pubkey::new_unique();
@@ -794,7 +794,7 @@ mod tests {
             .unwrap()
             .set_delegated(false);
 
-        // Create ScheduleCommitAndUndelegate with committee as readonly account
+        // Create ScheduleCommit instruction with non-delegated committee
         let ix = InstructionUtils::schedule_commit_instruction(
             &payer.pubkey(),
             vec![committee],

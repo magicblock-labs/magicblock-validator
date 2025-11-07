@@ -223,7 +223,7 @@ impl CommitAndUndelegate {
                 let pubkey = get_instruction_pubkey_with_idx(context.transaction_context, idx as u16)?;
                 ic_msg!(
                     context.invoke_context,
-                    "ScheduleCommit ERR: account {} needs to be writable to be undelegated",
+                    "ScheduleCommit ERR: account {} is required to be writable in order to be undelegated",
                     pubkey
                 );
                 Err(InstructionError::ReadonlyDataModified)
@@ -344,7 +344,7 @@ impl CommitType {
             if !account_shared.delegated() {
                 ic_msg!(
                     context.invoke_context,
-                    "ScheduleCommit ERR: account {} has needs to be delegated to current validator to be committed",
+                    "ScheduleCommit ERR: account {} is required to be delegated to the current validator, in order to be committed",
                     pubkey
                 );
                 return Err(InstructionError::IllegalOwner)
