@@ -373,7 +373,7 @@ Kept: {} delegated, {} blacklisted",
                         .join(", ")
                 })
                 .unwrap_or_default();
-            debug!("Fetching accounts: {pubkeys_str}, mark_empty_if_not_found: {mark_empty_str}");
+            trace!("Fetching accounts: {pubkeys_str}, mark_empty_if_not_found: {mark_empty_str}");
         }
         Self::promote_accounts(
             fetch_cloner,
