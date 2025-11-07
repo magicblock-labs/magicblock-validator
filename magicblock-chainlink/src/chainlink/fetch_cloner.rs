@@ -581,7 +581,7 @@ where
         // For accounts we couldn't find we cannot do anything. We will let code depending
         // on them to be in the bank fail on its own
         if !not_found.is_empty() {
-            debug!(
+            trace!(
                 "Could not find accounts on chain: {:?}",
                 not_found
                     .iter()
