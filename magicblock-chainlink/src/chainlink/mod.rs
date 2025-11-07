@@ -144,6 +144,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         let dlp_owned_not_delegated = AtomicU64::new(0);
         let blacklisted = AtomicU64::new(0);
         let remaining = AtomicU64::new(0);
+        let remaining_empty = AtomicU64::new(0);
 
         let removed = self.accounts_bank.remove_where(|pubkey, account| {
             if blacklisted_accounts.contains(pubkey) {
@@ -159,18 +160,32 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 return true;
             }
             // Non-delegated, nor DLP-owned, nor blacklisted
-            debug!("Removing non-delegated, non-DLP-owned account: {pubkey} with {} lamports", account.lamports());
+            // TODO: @@@ put on trace
+            debug!(
+                "Removing non-delegated, non-DLP-owned account: {pubkey} {:#?}",
+                account
+            );
             remaining.fetch_add(1, Ordering::Relaxed);
+            if account.lamports() == 0
+                && account.owner().ne(&solana_sdk::feature::id())
+            {
+                remaining_empty.fetch_add(1, Ordering::Relaxed);
+            }
             true
         });
 
         info!(
             "Removed {removed} accounts from bank:
 {} DLP-owned non-delegated
-{} other non-delegated non-blacklisted.
+{} non-delegated non-blacklisted, no-feature non-empty.
+{} non-delegated non-blacklisted empty
 Kept: {} delegated, {} blacklisted",
             dlp_owned_not_delegated.into_inner(),
-            remaining.into_inner(),
+            remaining.fetch_sub(
+                remaining_empty.load(Ordering::Relaxed),
+                Ordering::Relaxed
+            ),
+            remaining_empty.into_inner(),
             delegated.into_inner(),
             blacklisted.into_inner()
         );
