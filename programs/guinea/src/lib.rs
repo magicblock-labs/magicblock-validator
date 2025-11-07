@@ -101,9 +101,17 @@ fn schedule_task(
     mut accounts: slice::Iter<AccountInfo>,
     args: ScheduleTaskArgs,
 ) -> ProgramResult {
-    let _magic_program_info = next_account_info(&mut accounts)?;
+    let magic_program_info = next_account_info(&mut accounts)?;
     let payer_info = next_account_info(&mut accounts)?;
     let counter_pda_info = next_account_info(&mut accounts)?;
+
+    if magic_program_info.key != &magicblock_magic_program_api::ID {
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    if !payer_info.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
 
     let ix = Instruction::new_with_bincode(
         magicblock_magic_program_api::ID,
@@ -123,8 +131,16 @@ fn cancel_task(
     mut accounts: slice::Iter<AccountInfo>,
     task_id: u64,
 ) -> ProgramResult {
-    let _magic_program_info = next_account_info(&mut accounts)?;
+    let magic_program_info = next_account_info(&mut accounts)?;
     let payer_info = next_account_info(&mut accounts)?;
+
+    if magic_program_info.key != &magicblock_magic_program_api::ID {
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    if !payer_info.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
 
     let ix = Instruction::new_with_bincode(
         magicblock_magic_program_api::ID,
