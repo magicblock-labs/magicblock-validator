@@ -359,7 +359,7 @@ Kept: {} delegated, {} blacklisted",
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        if log::log_enabled!(log::Level::Trace) {
+        if log::log_enabled!(log::Level::Debug) {
             let pubkeys_str = pubkeys
                 .iter()
                 .map(|p| p.to_string())
@@ -373,7 +373,7 @@ Kept: {} delegated, {} blacklisted",
                         .join(", ")
                 })
                 .unwrap_or_default();
-            trace!("Fetching accounts: {pubkeys_str}, mark_empty_if_not_found: {mark_empty_str}");
+            debug!("Fetching accounts: {pubkeys_str}, mark_empty_if_not_found: {mark_empty_str}");
         }
         Self::promote_accounts(
             fetch_cloner,
