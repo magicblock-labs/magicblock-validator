@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 
 use coordinator::{ExecutionCoordinator, TransactionWithId};
 use locks::{ExecutorId, MAX_SVM_EXECUTORS};
-use log::info;
+use log::{error, info};
 use magicblock_core::link::transactions::{
     ProcessableTransaction, TransactionToProcessRx,
 };
@@ -192,6 +192,8 @@ impl TransactionScheduler {
                     break;
                 }
             }
+            // If the transaction was re-queued to another executor or successfully
+            // scheduled, then we keep draining the queue of original blocker
         }
         // If we have broken out of the loop holding some executor, release it
         if let Some(executor) = executor {
@@ -220,7 +222,9 @@ impl TransactionScheduler {
         // it means the executor's channel is closed, which only happens on shutdown.
         // NOTE: the channel will always have enough capacity, since the executor was
         // marked ready, which means that its transaction queue is currently empty.
-        let _ = self.executors[executor as usize].try_send(txn.txn);
+        let _ = self.executors[executor as usize].try_send(txn.txn).inspect_err(|e| {
+            error!("Executor {executor} has shutdown or crashed, should not be possible: {e}")
+        });
         None
     }
 }
