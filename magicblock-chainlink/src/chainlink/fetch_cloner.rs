@@ -970,7 +970,8 @@ where
                     //       This actually would point to a bug in the subscription logic.
                     // TODO(thlorenz): remove this once we are certain (by perusing logs) that this
                     //                 does not happen anymore
-                    if account_in_bank.delegated()
+                    if account_in_bank.owner().eq(&dlp::id())
+                        || account_in_bank.delegated()
                         || self.blacklisted_accounts.contains(pubkey)
                         || self.is_watching(pubkey)
                     {
