@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
@@ -136,15 +139,40 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub fn reset_accounts_bank(&self) {
         let blacklisted_accounts =
             blacklisted_accounts(&self.validator_id, &self.faucet_id);
+
+        let delegated = AtomicU64::new(0);
+        let dlp_owned_not_delegated = AtomicU64::new(0);
+        let blacklisted = AtomicU64::new(0);
+        let remaining = AtomicU64::new(0);
+
         let removed = self.accounts_bank.remove_where(|pubkey, account| {
-            (!account.delegated()
-                // This fixes the edge-case of accounts that were in the process of
-                // being undelegated but never completed while the validator was running
-                || account.owner().eq(&dlp::id()))
-                && !blacklisted_accounts.contains(pubkey)
+            if blacklisted_accounts.contains(pubkey) {
+                blacklisted.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
+            if account.delegated() {
+                delegated.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
+            if account.owner().eq(&dlp::id()) {
+                dlp_owned_not_delegated.fetch_add(1, Ordering::Relaxed);
+                return true;
+            }
+            // Non-delegated, nor DLP-owned, nor blacklisted
+            remaining.fetch_add(1, Ordering::Relaxed);
+            true
         });
 
-        debug!("Removed {removed} non-delegated accounts");
+        info!(
+            "Removed {removed} accounts from bank:
+{} DLP-owned non-delegated
+{} other non-delegated non-blacklisted.
+Kept: {} delegated, {} blacklisted",
+            dlp_owned_not_delegated.into_inner(),
+            remaining.into_inner(),
+            delegated.into_inner(),
+            blacklisted.into_inner()
+        );
     }
 
     fn subscribe_account_removals(
