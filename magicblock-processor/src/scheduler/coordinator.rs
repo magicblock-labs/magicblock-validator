@@ -6,12 +6,12 @@
 
 use std::collections::VecDeque;
 
-use log::warn;
 use magicblock_core::link::transactions::ProcessableTransaction;
+use solana_pubkey::Pubkey;
 
 use super::locks::{
-    next_transaction_id, ExecutorId, LocksCache, RcLock, TransactionContention,
-    TransactionId, MAX_SVM_EXECUTORS,
+    next_transaction_id, AccountContention, ExecutorId, LocksCache, RcLock,
+    TransactionContention, TransactionId, INIT_TRANSACTION_ID,
 };
 
 /// A queue of transactions waiting for a specific executor to release a lock.
@@ -44,6 +44,8 @@ pub(super) struct ExecutionCoordinator {
     blocked_transactions: BlockedTransactionQueues,
     /// A map tracking which executor is blocking which transaction.
     transaction_contention: TransactionContention,
+    /// A map tracking which transactions are contending for which account.
+    account_contention: AccountContention,
     /// A pool of executor IDs that are currently idle and ready for new work.
     ready_executors: Vec<ExecutorId>,
     /// A list of locks currently held by each executor.
@@ -60,6 +62,7 @@ impl ExecutionCoordinator {
             acquired_locks: (0..count).map(|_| Vec::new()).collect(),
             ready_executors: (0..count as u32).collect(),
             transaction_contention: TransactionContention::default(),
+            account_contention: AccountContention::default(),
             locks: LocksCache::default(),
         }
     }
@@ -68,51 +71,53 @@ impl ExecutionCoordinator {
     ///
     /// The `blocker_id` can be either an `ExecutorId` or a `TransactionId`.
     /// If it's a `TransactionId`, this function resolves it to the underlying
-    /// `ExecutorId` that holds the conflicting lock.
+    /// `ExecutorId` that holds the conflicting lock, and returns that executor
     pub(super) fn queue_transaction(
         &mut self,
-        mut blocker_id: u32,
+        blocker_id: TransactionId,
         transaction: TransactionWithId,
-        prioritize: bool,
-    ) {
-        // A `blocker_id` greater than `MAX_SVM_EXECUTORS` is a `TransactionId`
+    ) -> ExecutorId {
+        // A `blocker_id` greater than `INIT_TRANSACTION_ID`, it is a `TransactionId`
         // of another waiting transaction. We must resolve it to the actual executor.
-        if blocker_id >= MAX_SVM_EXECUTORS {
+        let executor = if blocker_id >= INIT_TRANSACTION_ID {
             // A `TransactionId` is only returned as a blocker if that
             // transaction is already tracked in the contention map.
-            blocker_id = self
-                .transaction_contention
+            self.transaction_contention
                 .get(&blocker_id)
                 .copied()
-                .unwrap_or_else(|| {
-                    // should never happen, but from a logical
-                    // standpoint, it's not really an error
-                    warn!("transaction to executor resolution happened on unknown TXN ID");
-                    ExecutorId::MIN
-                });
-        }
-
-        let queue = &mut self.blocked_transactions[blocker_id as usize];
-        self.transaction_contention
-            .insert(transaction.id, blocker_id);
-        if prioritize {
-            queue.push_front(transaction);
+                // SAFETY:
+                // This invariant is enforced via careful transaction scheduling
+                // flow, if the transaction is not found in the map, this indicates a
+                // hard logic error, which might lead to deadlocks, thus we terminate
+                // the scheduler here. Test coverage should catch this inconsistency.
+                .expect("unknown transaction for blocker resolution")
         } else {
-            queue.push_back(transaction);
+            blocker_id as ExecutorId
+        };
+
+        let queue = &mut self.blocked_transactions[executor as usize];
+        self.transaction_contention.insert(transaction.id, executor);
+        let index = queue.binary_search_by(|tx| tx.id.cmp(&transaction.id));
+        if let Err(index) = index {
+            queue.insert(index, transaction);
         }
+        executor
     }
 
     /// Checks if there are any executors ready to process a transaction.
+    #[inline]
     pub(super) fn is_ready(&self) -> bool {
         !self.ready_executors.is_empty()
     }
 
     /// Retrieves the ID of a ready executor, if one is available.
+    #[inline]
     pub(super) fn get_ready_executor(&mut self) -> Option<ExecutorId> {
         self.ready_executors.pop()
     }
 
     /// Returns an executor to the pool of ready executors.
+    #[inline]
     pub(super) fn release_executor(&mut self, executor: ExecutorId) {
         self.ready_executors.push(executor)
     }
@@ -143,40 +148,92 @@ impl ExecutionCoordinator {
         &mut self,
         executor: ExecutorId,
         transaction: &TransactionWithId,
-    ) -> Result<(), u32> {
+    ) -> Result<(), TransactionId> {
         let message = transaction.txn.transaction.message();
         let accounts_to_lock = message.account_keys().iter().enumerate();
         let acquired_locks = &mut self.acquired_locks[executor as usize];
 
-        for (i, &acc) in accounts_to_lock {
+        for (i, &acc) in accounts_to_lock.clone() {
             // Get or create the lock for the account.
             let lock = self.locks.entry(acc).or_default().clone();
+            // See whether there's a contention for the given account
+            // if there's one, then we need to follow the breadcrumbs
+            // (txns->executor) to find out where our transaction
+            // needs to be queued.
+            let mut result =
+                if let Some(contenders) = self.account_contention.get(&acc) {
+                    match contenders.binary_search(&transaction.id) {
+                        // If we are the first contender, then we can proceed
+                        // and try to acquire the needed account locks
+                        Ok(index) | Err(index) if index == 0 => Ok(()),
+                        // If we are not, then we need to get queued after
+                        // the transaction contending right in front of us
+                        Ok(index) | Err(index) => Err(contenders[index - 1]),
+                    }
+                } else {
+                    Ok(())
+                };
 
-            // Attempt to acquire a write or read lock.
-            let result = if message.is_writable(i) {
-                lock.borrow_mut().write(executor, transaction.id)
-            } else {
-                lock.borrow_mut().read(executor, transaction.id)
-            };
+            if result.is_ok() {
+                // Attempt to acquire a write or read lock.
+                result = if message.is_writable(i) {
+                    lock.borrow_mut().write(executor)
+                } else {
+                    lock.borrow_mut().read(executor)
+                }
+                .map_err(|e| e as TransactionId);
+            }
 
             // We couldn't lock all of the accounts, so we are bailing, but
             // first we need to set contention, and unlock successful locks
-            if result.is_err() {
+            if let Err(e) = result {
                 for lock in acquired_locks.drain(..) {
                     let mut lock = lock.borrow_mut();
-                    lock.contend(transaction.id);
                     lock.unlock(executor);
                 }
-                // for the lock that we failed to acquire, we just set the contention
-                lock.borrow_mut().contend(transaction.id);
+                for (i, &acc) in accounts_to_lock {
+                    // We only set contention for write locks,
+                    // in order to prevent writer starvation
+                    if message.is_writable(i) {
+                        self.contend_account(acc, transaction.id);
+                    }
+                }
+                return Err(e);
             }
-            result?;
 
             acquired_locks.push(lock);
         }
 
         // On success, the transaction is no longer blocking anything.
         self.transaction_contention.remove(&transaction.id);
+        for (_, acc) in accounts_to_lock {
+            self.clear_account_contention(acc, transaction.id);
+        }
         Ok(())
+    }
+
+    /// Sets the transaction contention for this account. Contenders are ordered
+    /// based on their ID, which honours the "first in, first served" policy
+    #[inline]
+    fn contend_account(&mut self, acc: Pubkey, txn: TransactionId) {
+        let contenders = self.account_contention.entry(acc).or_default();
+        if let Err(index) = contenders.binary_search(&txn) {
+            contenders.insert(index, txn);
+        }
+    }
+
+    /// Removes the given transaction from contenders list for the specified account
+    #[inline]
+    fn clear_account_contention(&mut self, acc: &Pubkey, txn: TransactionId) {
+        let Some(contenders) = self.account_contention.get_mut(acc) else {
+            return;
+        };
+        if let Ok(index) = contenders.binary_search(&txn) {
+            contenders.remove(index);
+        }
+        // Prevent unbounded growth of tracking map
+        if contenders.is_empty() {
+            self.account_contention.remove(acc);
+        }
     }
 }

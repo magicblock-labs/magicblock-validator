@@ -171,7 +171,7 @@ async fn test_escrowed_payer_success() {
         "escrow account update should have been sent"
     );
     assert!(
-        !updated_accounts.contains(&env.payer.pubkey()),
+        !updated_accounts.contains(&env.get_payer().pubkey),
         "orginal payer account update should not have been sent"
     );
     assert_eq!(

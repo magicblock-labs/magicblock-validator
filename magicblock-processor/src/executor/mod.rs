@@ -174,7 +174,8 @@ impl TransactionExecutor {
                         }
                     }
                     // Notify the scheduler that this worker is ready for another transaction.
-                    let _ = self.ready_tx.send(self.id).await;
+                    // NOTE: the channel is guarranteed to have enough capacity to push into.
+                    let _ = self.ready_tx.try_send(self.id);
                 }
                 // When a new block is produced, transition to the new slot.
                 _ = block_updated.recv() => {

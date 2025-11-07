@@ -15,8 +15,8 @@ use solana_transaction::Transaction;
 use test_kit::{ExecutionTestEnv, Signer};
 use tokio::time;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
-const STRESS_TEST_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+const STRESS_TEST_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_LAMPORTS: u64 = LAMPORTS_PER_SOL * 10;
 const TRANSFER_AMOUNT: u64 = 1000;
 const FEE: u64 = ExecutionTestEnv::BASE_FEE;
@@ -106,12 +106,13 @@ async fn assert_statuses(
 ) {
     let start = std::time::Instant::now();
 
+    let count = expected_sigs.len();
     while !expected_sigs.is_empty() {
         // Check for overall test timeout
         if start.elapsed() >= timeout {
             panic!(
-                "Timeout waiting for transaction statuses. Missing: {:?}",
-                expected_sigs
+                "Timeout waiting for transaction statuses. Expected: {count}, Missing: {}",
+                expected_sigs.len()
             );
         }
 

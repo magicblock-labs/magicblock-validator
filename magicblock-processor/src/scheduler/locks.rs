@@ -3,7 +3,7 @@
 //! This version uses a single `u64` bitmask to represent the entire lock state,
 //! including read locks, write locks, and contention, for maximum efficiency.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 use rustc_hash::FxHashMap;
 use solana_pubkey::Pubkey;
@@ -17,7 +17,12 @@ type ReadWriteLock = u64;
 pub(crate) type ExecutorId = u32;
 
 /// Unique identifier for a transaction to be scheduled.
-pub(super) type TransactionId = u32;
+///
+/// NOTE: the type is specifically set to u64, so that it
+/// will be statistically impossible to overlow it within
+/// next few millenia, given the indended use case of the
+/// type as a tagging counter for incoming transactions.
+pub(super) type TransactionId = u64;
 
 /// A shared, mutable reference to an `AccountLock`.
 pub(super) type RcLock = Rc<RefCell<AccountLock>>;
@@ -26,6 +31,8 @@ pub(super) type RcLock = Rc<RefCell<AccountLock>>;
 pub(super) type LocksCache = FxHashMap<Pubkey, RcLock>;
 /// A map from a blocked transaction to the executor that holds the conflicting lock.
 pub(super) type TransactionContention = FxHashMap<TransactionId, ExecutorId>;
+/// A map from account's pubkey to all transaction, that are contending to acquire its lock.
+pub(super) type AccountContention = FxHashMap<Pubkey, VecDeque<TransactionId>>;
 
 /// The maximum number of concurrent executors supported by the bitmask.
 /// One bit is reserved for the write flag.
@@ -33,12 +40,14 @@ pub(super) const MAX_SVM_EXECUTORS: u32 = ReadWriteLock::BITS - 1u32;
 
 /// The bit used to indicate a write lock is held. This is the most significant bit.
 const WRITE_BIT_MASK: u64 = 1u64 << (ReadWriteLock::BITS - 1u32);
+/// The starting transaction ID, follows the max possible value for ExecutorId
+pub(crate) const INIT_TRANSACTION_ID: TransactionId =
+    MAX_SVM_EXECUTORS as TransactionId;
 
 /// A read/write lock on a single Solana account, represented by a `u64` bitmask.
 #[derive(Default, Debug)]
 pub(super) struct AccountLock {
     rw: ReadWriteLock,
-    contender: TransactionId,
 }
 
 impl AccountLock {
@@ -47,9 +56,7 @@ impl AccountLock {
     pub(super) fn write(
         &mut self,
         executor: ExecutorId,
-        txn: TransactionId,
-    ) -> Result<(), u32> {
-        self.contended(txn)?;
+    ) -> Result<(), ExecutorId> {
         if self.rw != 0 {
             // If the lock is held, `trailing_zeros()` will return the index of the
             // least significant bit that is set. This corresponds to the ID of the
@@ -58,7 +65,6 @@ impl AccountLock {
         }
         // Set the write lock bit and the bit for the acquiring executor.
         self.rw = WRITE_BIT_MASK | (1u64 << executor);
-        self.contender = 0u32;
         Ok(())
     }
 
@@ -67,9 +73,7 @@ impl AccountLock {
     pub(super) fn read(
         &mut self,
         executor: ExecutorId,
-        txn: TransactionId,
-    ) -> Result<(), u32> {
-        self.contended(txn)?;
+    ) -> Result<(), ExecutorId> {
         // Check if the write lock bit is set.
         if self.rw & WRITE_BIT_MASK != 0 {
             // If a write lock is held, the conflicting executor is the one whose
@@ -78,7 +82,6 @@ impl AccountLock {
         }
         // Set the bit corresponding to the executor to acquire a read lock.
         self.rw |= 1u64 << executor;
-        self.contender = 0u32;
         Ok(())
     }
 
@@ -89,34 +92,18 @@ impl AccountLock {
         // read bit. This is done using a bitwise AND with the inverted mask.
         self.rw &= !(WRITE_BIT_MASK | (1u64 << executor));
     }
-
-    /// Checks if the lock is marked as contended by another transaction.
-    #[inline]
-    fn contended(&self, txn: TransactionId) -> Result<(), TransactionId> {
-        if self.contender != 0 && self.contender != txn {
-            return Err(self.contender);
-        }
-        Ok(())
-    }
-
-    #[inline]
-    pub(super) fn contend(&mut self, txn: TransactionId) {
-        if self.contender == 0 {
-            self.contender = txn;
-        }
-    }
 }
 
 /// Generates a new, unique transaction ID.
 pub(super) fn next_transaction_id() -> TransactionId {
-    static mut COUNTER: u32 = MAX_SVM_EXECUTORS;
+    static mut COUNTER: TransactionId = INIT_TRANSACTION_ID;
     // SAFETY: This is safe because the scheduler, which calls this function,
     // operates in a single, dedicated thread. Therefore, there are no concurrent
-    // access concerns for this static mutable variable. The u32::MAX is large
-    // enough range to statistically guarantee that no two pending transactions
-    // have the same ID.
+    // access concerns for this static mutable variable. The u64::MAX is large
+    // enough range to statistically guarantee that no two transactions created
+    // during the lifetime of the validator have the same ID.
     unsafe {
-        COUNTER = COUNTER.wrapping_add(1).max(MAX_SVM_EXECUTORS);
+        COUNTER = COUNTER.wrapping_add(1).max(INIT_TRANSACTION_ID);
         COUNTER
     }
 }

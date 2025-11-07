@@ -127,12 +127,12 @@ impl TransactionScheduler {
                 }
                 // A worker has finished its task and is ready for more.
                 Some(executor) = self.ready_rx.recv() => {
-                    self.handle_ready_executor(executor).await;
+                    self.handle_ready_executor(executor);
                 }
                 // Receive new transactions for scheduling, but
                 // only if there is at least one ready worker.
                 Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {
-                    self.handle_new_transaction(txn).await;
+                    self.handle_new_transaction(txn);
                 }
                 // The main transaction channel has closed, indicating a system shutdown.
                 else => {
@@ -144,13 +144,13 @@ impl TransactionScheduler {
     }
 
     /// Handles a notification that a worker has become ready.
-    async fn handle_ready_executor(&mut self, executor: ExecutorId) {
+    fn handle_ready_executor(&mut self, executor: ExecutorId) {
         self.coordinator.unlock_accounts(executor);
-        self.reschedule_blocked_transactions(executor).await;
+        self.reschedule_blocked_transactions(executor);
     }
 
     /// Handles a new transaction from the global queue.
-    async fn handle_new_transaction(&mut self, txn: ProcessableTransaction) {
+    fn handle_new_transaction(&mut self, txn: ProcessableTransaction) {
         // SAFETY:
         // This unwrap is safe due to the `if self.coordinator.is_ready()`
         // guard in the `select!` macro, which calls this method
@@ -158,7 +158,7 @@ impl TransactionScheduler {
             "unreachable: is_ready() guard ensures an executor is available",
         );
         let txn = TransactionWithId::new(txn);
-        self.schedule_transaction(executor, txn, false).await;
+        self.schedule_transaction(executor, txn);
     }
 
     /// Updates the scheduler's state when a new slot begins.
@@ -169,24 +169,31 @@ impl TransactionScheduler {
     }
 
     /// Attempts to reschedule transactions that were blocked by the newly freed executor.
-    async fn reschedule_blocked_transactions(&mut self, blocker: ExecutorId) {
+    fn reschedule_blocked_transactions(&mut self, blocker: ExecutorId) {
         let mut executor = Some(blocker);
         while let Some(exec) = executor.take() {
             let txn = self.coordinator.next_blocked_transaction(blocker);
-            let scheduled = if let Some(txn) = txn {
+            let blocked = if let Some(txn) = txn {
                 executor = self.coordinator.get_ready_executor();
-                self.schedule_transaction(exec, txn, true).await
+                self.schedule_transaction(exec, txn)
             } else {
                 self.coordinator.release_executor(exec);
                 break;
             };
-            // If we failed to schedule, that means we have hit a locking snag,
-            // and as we disallow frontrunning for now, we just wait for the
-            // locks to be released and retry in the next scheduling cycle
-            if !scheduled {
-                break;
+            // Here we check whether the transaction was blocked and re-queued:
+            // 1. If it was blocked by other executor (not the original blocker),
+            //    then we continue with scheduling attempts, so that either the newly
+            //    freed executor has some work to do, or its own queue is exhausted
+            // 2. The transaction is being blocked by the same original (newly freed)
+            //    executor, which means we have re-queued it into the same queue, and
+            //    we just abort all further scheduling attempts until the next cycle
+            if let Some(exec) = blocked {
+                if exec == blocker {
+                    break;
+                }
             }
         }
+        // If we have broken out of the loop holding some executor, release it
         if let Some(executor) = executor {
             self.coordinator.release_executor(executor);
         }
@@ -195,23 +202,26 @@ impl TransactionScheduler {
     /// Attempts to schedule a single transaction for execution.
     ///
     /// If the transaction's required account locks are acquired, it is sent to the
-    /// specified executor. Otherwise, it is queued and will be retried later.
-    async fn schedule_transaction(
+    /// specified executor. Otherwise, it is queued and will be retried later. The
+    /// optional return value indicates a blocking executor, which is used by caller
+    /// to make further decisions regarding further scheduling attempts.
+    fn schedule_transaction(
         &mut self,
         executor: ExecutorId,
         txn: TransactionWithId,
-        prioritize: bool,
-    ) -> bool {
-        if let Err(blocker) = self.coordinator.try_acquire_locks(executor, &txn)
-        {
+    ) -> Option<ExecutorId> {
+        let blocker = self.coordinator.try_acquire_locks(executor, &txn);
+        if let Err(blocker) = blocker {
             self.coordinator.release_executor(executor);
-            self.coordinator.queue_transaction(blocker, txn, prioritize);
-            return false;
+            let blocker = self.coordinator.queue_transaction(blocker, txn);
+            return Some(blocker);
         }
         // It's safe to ignore the result of the send operation. If the send fails,
         // it means the executor's channel is closed, which only happens on shutdown.
-        let _ = self.executors[executor as usize].send(txn.txn).await;
-        true
+        // NOTE: the channel will always have enough capacity, since the executor was
+        // marked ready, which means that its transaction queue is currently empty.
+        let _ = self.executors[executor as usize].try_send(txn.txn);
+        None
     }
 }
 

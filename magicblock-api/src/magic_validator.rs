@@ -310,6 +310,7 @@ impl MagicValidator {
             transaction_executors,
             txn_scheduler_state,
         );
+        info!("Running execution backend with {transaction_executors} threads");
         transaction_scheduler.spawn();
 
         let shared_state = SharedState::new(

@@ -1,6 +1,9 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     thread,
 };
 
@@ -44,8 +47,10 @@ use tempfile::TempDir;
 /// worker pool. It provides a high-level API for tests to manipulate the blockchain
 /// state and process transactions.
 pub struct ExecutionTestEnv {
+    /// Atomic counter to index the payers array
+    payer_index: AtomicUsize,
     /// The default keypair used for paying transaction fees and signing.
-    pub payer: Keypair,
+    pub payers: Vec<Keypair>,
     /// A handle to the accounts database, storing all account states.
     pub accountsdb: Arc<AccountsDb>,
     /// A handle to the ledger, storing all blocks and transactions.
@@ -108,10 +113,11 @@ impl ExecutionTestEnv {
         let (dispatch, validator_channels) = link();
         let blockhash = ledger.latest_block().load().blockhash;
         let environment = build_svm_env(&accountsdb, blockhash, fee);
-        let payer = Keypair::new();
+        let payers = (0..executors).map(|_| Keypair::new()).collect();
 
         let mut this = Self {
-            payer,
+            payer_index: AtomicUsize::new(0),
+            payers,
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
             transaction_scheduler: dispatch.transaction_scheduler.clone(),
@@ -147,7 +153,9 @@ impl ExecutionTestEnv {
             scheduler.spawn();
         }
 
-        this.fund_account(this.payer.pubkey(), LAMPORTS_PER_SOL);
+        for payer in this.payers.iter() {
+            this.fund_account(payer.pubkey(), LAMPORTS_PER_SOL);
+        }
         this
     }
 
@@ -240,10 +248,14 @@ impl ExecutionTestEnv {
 
     /// Builds a transaction with the given instructions, signed by the default payer.
     pub fn build_transaction(&self, ixs: &[Instruction]) -> Transaction {
+        let payer = {
+            let index = self.payer_index.fetch_add(1, Ordering::Relaxed);
+            &self.payers[index % self.payers.len()]
+        };
         Transaction::new_signed_with_payer(
             ixs,
-            Some(&self.payer.pubkey()),
-            &[&self.payer],
+            Some(&payer.pubkey()),
+            &[payer],
             self.ledger.latest_blockhash(),
         )
     }
@@ -307,7 +319,11 @@ impl ExecutionTestEnv {
     }
 
     pub fn get_payer(&self) -> CommitableAccount {
-        self.get_account(self.payer.pubkey())
+        let payer = {
+            let index = self.payer_index.load(Ordering::Relaxed);
+            &self.payers[index % self.payers.len()]
+        };
+        self.get_account(payer.pubkey())
     }
 }
 
