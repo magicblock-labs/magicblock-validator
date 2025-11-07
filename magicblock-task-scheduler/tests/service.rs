@@ -74,11 +74,17 @@ pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
     // Wait the task scheduler to receive the task
     tokio::time::sleep(Duration::from_millis(10)).await;
 
-    assert_eq!(
-        env.get_account(account.pubkey()).data().first(),
-        Some(&1),
-        "the first byte of the account data should have been modified"
-    );
+    // Wait until the task scheduler actually mutates the account (with an upper bound to avoid hangs)
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if env.get_account(account.pubkey()).data().first() == Some(&1) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("task scheduler never incremented the account within 1s");
 
     token.cancel();
     handle.await.unwrap().unwrap();
