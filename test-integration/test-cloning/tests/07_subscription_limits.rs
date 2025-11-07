@@ -68,7 +68,9 @@ async fn test_large_number_of_account_subscriptions() {
                 }
             });
         }
-        join_set.join_all().await;
+        for result in join_set.join_all().await {
+            result.expect("spawned task panicked or was cancelled");
+        }
         total_processed += chunk.len();
 
         let pubkeys = chunk.iter().map(|kp| kp.pubkey()).collect::<Vec<_>>();
