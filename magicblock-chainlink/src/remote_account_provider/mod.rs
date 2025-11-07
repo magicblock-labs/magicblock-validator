@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -618,7 +618,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let mut fetching = self.fetching_accounts.lock().unwrap();
             for &pubkey in pubkeys {
                 let (sender, receiver) = oneshot::channel();
-                fetching.insert(pubkey, (fetch_start_slot, vec![sender]));
+                match fetching.entry(pubkey) {
+                    Entry::Occupied(mut entry) => {
+                        entry.get_mut().1.push(sender);
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert((fetch_start_slot, vec![sender]));
+                    }
+                }
                 subscription_overrides.push((pubkey, receiver));
             }
         }
