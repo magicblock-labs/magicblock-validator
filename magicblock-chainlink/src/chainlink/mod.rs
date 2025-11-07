@@ -311,7 +311,15 @@ Kept: {} delegated, {} blacklisted",
                 .map(|p| p.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            trace!("Fetching accounts: {pubkeys_str}");
+            let mark_empty_str = mark_empty_if_not_found
+                .map(|keys| {
+                    keys.iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            trace!("Fetching accounts: {pubkeys_str}, mark_empty_if_not_found: {mark_empty_str}");
         }
         Self::promote_accounts(
             fetch_cloner,

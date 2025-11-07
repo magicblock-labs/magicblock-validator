@@ -648,7 +648,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                 },
                 Err(err) => {
-                    warn!("RemoteAccountProvider::ensure_accounts - Unexpected RecvError while awaiting account {pubkey} at index {idx}: {err:?}. This should not happen with Result-based channels. Context: fetch_start_slot={fetch_start_slot}, min_context_slot={min_context_slot}, total_pubkeys={}",
+                    warn!("RemoteAccountProvider::try_get_multi - Unexpected RecvError while awaiting account {pubkey} at index {idx}: {err:?}. This should not happen with Result-based channels. Context: fetch_start_slot={fetch_start_slot}, min_context_slot={min_context_slot}, total_pubkeys={}",
                       pubkeys.len());
                     error!("Failed to resolve account {pubkey}: {err:?}");
                     errors.push((
@@ -715,7 +715,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             trace!("Evicting {pubkey}");
 
             // 1. Unsubscribe from the account directly (LRU has already removed it)
-            self.pubsub_client.unsubscribe(evicted).await?;
+            self.pubsub_client.unsubscribe(evicted).await.inspect_err(|err|
+                warn!(
+                    "Failed to unsubscribe from pubsub for evicted account {evicted}: {err:?}")
+            )?;
 
             // 2. Inform upstream so it can remove it from the store
             self.send_removal_update(evicted).await?;
