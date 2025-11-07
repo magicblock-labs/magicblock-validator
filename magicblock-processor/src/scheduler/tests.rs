@@ -10,9 +10,8 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::scheduler::ExecutorId;
-
 use super::coordinator::{ExecutionCoordinator, TransactionWithId};
+use crate::scheduler::ExecutorId;
 
 // --- Test Setup ---
 
