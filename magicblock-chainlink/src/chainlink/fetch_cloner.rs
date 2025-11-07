@@ -960,24 +960,34 @@ where
                 .lock()
                 .expect("pending_requests lock poisoned");
 
-            for &pubkey in pubkeys {
-                // Check synchronously if account is in bank
-                if self.accounts_bank.get_account(&pubkey).is_some() {
-                    // Account is already in bank, we can skip it as it will be handled
-                    // by the existing fetch_and_clone_accounts logic when needed
-                    continue;
+            for pubkey in pubkeys {
+                // Check synchronously if account is in bank and subscribed when it should be
+                if let Some(account_in_bank) =
+                    self.accounts_bank.get_account(pubkey)
+                {
+                    // NOTE: we defensively correct accounts that we should have been watching but
+                    //       were not for some reason. We fetch them again in that case.
+                    //       This actually would point to a bug in the subscription logic.
+                    if account_in_bank.delegated()
+                        || self.blacklisted_accounts.contains(pubkey)
+                        || self.is_watching(pubkey)
+                    {
+                        continue;
+                    } else if !self.is_watching(pubkey) {
+                        debug!("Account {pubkey} should be watched but wasn't");
+                    }
                 }
 
                 // Check if account fetch is already pending
-                if let Some(requests) = pending.get_mut(&pubkey) {
+                if let Some(requests) = pending.get_mut(pubkey) {
                     let (sender, receiver) = oneshot::channel();
                     requests.push(sender);
-                    await_pending.push((pubkey, receiver));
+                    await_pending.push((*pubkey, receiver));
                     continue;
                 }
 
                 // Account needs to be fetched - add to fetch list
-                fetch_new.push(pubkey);
+                fetch_new.push(*pubkey);
             }
 
             // Create pending entries for accounts we need to fetch
