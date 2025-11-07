@@ -172,6 +172,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             true
         });
 
+        let non_empty = remaining.load(Ordering::Relaxed).saturating_sub(
+            remaining_empty.load(Ordering::Relaxed),
+        );
+        remaining.fetch_sub(
+            remaining_empty.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+
         info!(
             "Removed {removed} accounts from bank:
 {} DLP-owned non-delegated
@@ -179,10 +187,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 {} non-delegated non-blacklisted empty
 Kept: {} delegated, {} blacklisted",
             dlp_owned_not_delegated.into_inner(),
-            remaining.fetch_sub(
-                remaining_empty.load(Ordering::Relaxed),
-                Ordering::Relaxed
-            ),
+            non_empty,
             remaining_empty.into_inner(),
             delegated.into_inner(),
             blacklisted.into_inner()
