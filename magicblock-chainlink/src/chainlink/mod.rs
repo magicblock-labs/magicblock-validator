@@ -324,7 +324,7 @@ Kept: {} delegated, {} blacklisted",
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        if log::log_enabled!(log::Level::Debug) {
+        if log::log_enabled!(log::Level::Trace) {
             let pubkeys_str = pubkeys
                 .iter()
                 .map(|p| p.to_string())
