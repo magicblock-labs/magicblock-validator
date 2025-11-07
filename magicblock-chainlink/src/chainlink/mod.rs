@@ -175,10 +175,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         let non_empty = remaining
             .load(Ordering::Relaxed)
             .saturating_sub(remaining_empty.load(Ordering::Relaxed));
-        remaining.fetch_sub(
-            remaining_empty.load(Ordering::Relaxed),
-            Ordering::Relaxed,
-        );
 
         info!(
             "Removed {removed} accounts from bank:
