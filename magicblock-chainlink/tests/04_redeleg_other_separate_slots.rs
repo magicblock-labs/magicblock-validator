@@ -163,12 +163,8 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot_compressed() {
                 slot,
             );
         compressed_account.set_remote_slot(slot);
-        rpc_client.add_account(pubkey, acc.clone().into());
-        photon_client.add_account(
-            pubkey,
-            compressed_account.clone().into(),
-            slot,
-        );
+        rpc_client.add_account(pubkey, acc.clone());
+        photon_client.add_account(pubkey, compressed_account.into(), slot);
 
         // Transaction to read
         // Fetch account - see it's owned by DP, fetch compressed account, clone account as delegated

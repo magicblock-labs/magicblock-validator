@@ -4,8 +4,8 @@ use magicblock_chainlink::{
     remote_account_provider::{
         chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
-        config::RemoteAccountProviderConfig, Endpoint, RemoteAccountProvider,
-        RemoteAccountUpdateSource,
+        config::RemoteAccountProviderConfig, photon_client::PhotonClientImpl,
+        Endpoint, RemoteAccountProvider, RemoteAccountUpdateSource,
     },
     submux::SubMuxClient,
     testing::utils::{

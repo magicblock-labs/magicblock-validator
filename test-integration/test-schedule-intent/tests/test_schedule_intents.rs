@@ -1,4 +1,3 @@
-use dlp::pda::ephemeral_balance_pda_from_payer;
 use integration_test_tools::IntegrationTestContext;
 use log::*;
 use program_flexi_counter::{
@@ -9,8 +8,8 @@ use program_flexi_counter::{
     state::FlexiCounter,
 };
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, rent::Rent,
-    signature::Keypair, signer::Signer, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
+    signer::Signer, transaction::Transaction,
 };
 use test_kit::init_logger;
 

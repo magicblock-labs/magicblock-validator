@@ -5,11 +5,8 @@
 //! <https://github.com/codama-idl/codama>
 //!
 
-pub mod accounts;
-pub mod errors;
-pub mod instructions;
-pub mod programs;
-pub mod shared;
-pub mod types;
+use solana_pubkey::{pubkey, Pubkey};
 
-pub(crate) use programs::*;
+/// `compressed_delegation` program ID.
+pub const COMPRESSED_DELEGATION_ID: Pubkey =
+    pubkey!("DEL2rPzhFaS5qzo8XY9ZNxSzuunWueySq3p2dxJfwPbT");

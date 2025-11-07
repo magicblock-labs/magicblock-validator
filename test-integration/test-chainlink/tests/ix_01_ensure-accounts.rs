@@ -81,3 +81,34 @@ async fn ixtest_write_existing_account_valid_delegation_record() {
 
 // TODO(thlorenz): @ implement this test when we can actually delegate to a specific
 // authority: test_write_existing_account_other_authority
+
+// -----------------
+// BasicScenarios: Compressed account is initialized and already delegated to us
+// -----------------
+#[tokio::test]
+async fn ixtest_write_existing_account_compressed() {
+    init_logger();
+
+    let ctx = IxtestContext::init().await;
+
+    let counter_auth = Keypair::new();
+    ctx.init_counter(&counter_auth)
+        .await
+        .delegate_compressed_counter(&counter_auth, false)
+        .await;
+
+    let counter_pda = ctx.counter_pda(&counter_auth.pubkey());
+    let pubkeys = [counter_pda];
+
+    let res = ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    debug!("res: {res:?}");
+
+    let account = ctx.cloner.get_account(&counter_pda).unwrap();
+    assert_cloned_as_delegated!(
+        ctx.cloner,
+        &[counter_pda],
+        account.remote_slot(),
+        program_flexi_counter::id()
+    );
+    assert_not_subscribed!(ctx.chainlink, &[&counter_pda]);
+}

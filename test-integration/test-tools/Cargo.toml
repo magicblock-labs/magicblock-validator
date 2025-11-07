@@ -11,6 +11,7 @@ log = { workspace = true }
 random-port = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
+shlex = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-delegation-program = { workspace = true, features = [

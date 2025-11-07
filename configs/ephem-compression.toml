@@ -1,5 +1,5 @@
 [accounts]
-remote.url = "http://localhost:8899"
+remote.url = "http://localhost:7799"
 lifecycle = "ephemeral"
 commit = { frequency-millis = 9_000_000_000_000, compute-unit-price = 1_000_000 }
 
@@ -24,7 +24,7 @@ snapshot-frequency = 1024
 
 [rpc]
 addr = "0.0.0.0"
-port = 7799
+port = 8899
 
 [validator]
 millis-per-slot = 50

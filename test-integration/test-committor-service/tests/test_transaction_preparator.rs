@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use borsh::BorshDeserialize;
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
@@ -55,6 +58,7 @@ async fn test_prepare_commit_tx_with_single_account() {
             &fixture.authority,
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await;
 
@@ -126,6 +130,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
             &fixture.authority,
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await
         .unwrap();
@@ -218,6 +223,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
             &fixture.authority,
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await
         .unwrap();
@@ -292,6 +298,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
             &fixture.authority,
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await;
 

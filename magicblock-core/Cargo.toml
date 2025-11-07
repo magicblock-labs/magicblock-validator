@@ -9,6 +9,7 @@ edition.workspace = true
 
 [dependencies]
 bincode = { workspace = true }
+compressed-delegation-client = { workspace = true }
 flume = { workspace = true }
 light-sdk = { workspace = true }
 light-compressed-account = { workspace = true }

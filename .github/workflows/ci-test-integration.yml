@@ -25,6 +25,16 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install zk-compression CLI
+        run: |
+          npm i -g @lightprotocol/zk-compression-cli@0.27.1-alpha.2
+        shell: bash
+
       - name: Run integration tests
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576

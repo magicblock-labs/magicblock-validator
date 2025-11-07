@@ -25,9 +25,9 @@ pub fn init_account_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         program_id,
-        &ScheduleCommitInstruction::Init,
+        &borsh::to_vec(&ScheduleCommitInstruction::Init).unwrap(),
         account_metas,
     )
 }
@@ -81,9 +81,9 @@ pub fn delegate_account_cpi_instruction(
         delegate_metas.system_program,
     ];
 
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         program_id,
-        &ScheduleCommitInstruction::DelegateCpi(args),
+        &borsh::to_vec(&ScheduleCommitInstruction::DelegateCpi(args)).unwrap(),
         account_metas,
     )
 }
@@ -189,7 +189,11 @@ fn schedule_commit_cpi_instruction_impl(
         commit_payer: args.commit_payer,
     };
     let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args);
-    Instruction::new_with_borsh(program_id, &ix, account_metas)
+    Instruction::new_with_bytes(
+        program_id,
+        &borsh::to_vec(&ix).unwrap(),
+        account_metas,
+    )
 }
 
 pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
@@ -209,11 +213,14 @@ pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         program_id,
-        &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(
-            players.to_vec(),
-        ),
+        &borsh::to_vec(
+            &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(
+                players.to_vec(),
+            ),
+        )
+        .unwrap(),
         account_metas,
     )
 }
@@ -221,9 +228,9 @@ pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
 pub fn increase_count_instruction(committee: Pubkey) -> Instruction {
     let program_id = crate::id();
     let account_metas = vec![AccountMeta::new(committee, false)];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         program_id,
-        &ScheduleCommitInstruction::IncreaseCount,
+        &borsh::to_vec(&ScheduleCommitInstruction::IncreaseCount).unwrap(),
         account_metas,
     )
 }

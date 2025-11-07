@@ -73,3 +73,62 @@ async fn ixtest_undelegate_redelegate_to_us_in_same_slot() {
         );
     }
 }
+
+#[tokio::test]
+async fn ixtest_undelegate_redelegate_to_us_in_same_slot_compressed() {
+    init_logger();
+
+    let ctx = IxtestContext::init().await;
+
+    // Create and delegate a counter account to us
+    let counter_auth = Keypair::new();
+    ctx.init_counter(&counter_auth)
+        .await
+        .delegate_compressed_counter(&counter_auth, false)
+        .await;
+
+    let counter_pda = ctx.counter_pda(&counter_auth.pubkey());
+    let pubkeys = [counter_pda];
+
+    // 1. Account delegated to us - readable and writable
+    {
+        info!("1. Account delegated to us");
+
+        ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+
+        // Account should be cloned as delegated
+        let account = ctx.cloner.get_account(&counter_pda).unwrap();
+        assert_cloned_as_delegated!(
+            ctx.cloner,
+            &[counter_pda],
+            account.remote_slot(),
+            program_flexi_counter::id()
+        );
+
+        // Accounts delegated to us should not be tracked via subscription
+        assert_not_subscribed!(ctx.chainlink, &[&counter_pda]);
+    }
+
+    // 2. Account is undelegated and redelegated to us (same slot) - writes allowed again
+    {
+        info!(
+            "2. Account is undelegated and redelegated to us in the same slot"
+        );
+
+        ctx.undelegate_compressed_counter(&counter_auth, true).await;
+
+        ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+
+        // Account should still be cloned as delegated to us
+        let account = ctx.cloner.get_account(&counter_pda).unwrap();
+        assert_cloned_as_delegated!(
+            ctx.cloner,
+            &[counter_pda],
+            account.remote_slot(),
+            program_flexi_counter::id()
+        );
+
+        // Accounts delegated to us should not be tracked via subscription
+        assert_not_subscribed!(ctx.chainlink, &[&counter_pda]);
+    }
+}

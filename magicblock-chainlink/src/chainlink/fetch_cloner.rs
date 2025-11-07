@@ -445,7 +445,7 @@ where
                                     Ok(delegation_record) => {
                                         Some(delegation_record)
                                     }
-                                    Err(_err) => None,
+                                    Err(_) => None,
                                 }
                             } else {
                                 None

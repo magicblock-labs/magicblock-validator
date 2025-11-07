@@ -11,6 +11,7 @@ use std::{
 use borsh::to_vec;
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use futures::future::join_all;
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
@@ -81,8 +82,10 @@ impl TestEnv {
             .await;
 
         let transaction_preparator = fixture.create_transaction_preparator();
-        let task_info_fetcher =
-            Arc::new(CacheTaskInfoFetcher::new(fixture.rpc_client.clone()));
+        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
+            fixture.rpc_client.clone(),
+            fixture.photon_client.clone(),
+        ));
 
         let tm = &fixture.table_mania;
         let mut pre_test_tablemania_state = HashMap::new();
@@ -128,7 +131,7 @@ async fn test_commit_id_error_parsing() {
 
     // Invalidate ids before execution
     task_info_fetcher
-        .fetch_next_commit_ids(&intent.get_committed_pubkeys().unwrap())
+        .fetch_next_commit_ids(&intent.get_committed_pubkeys().unwrap(), false)
         .await
         .unwrap();
 
@@ -142,6 +145,7 @@ async fn test_commit_id_error_parsing() {
         .prepare_and_execute_strategy(
             &mut transaction_strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
@@ -201,6 +205,7 @@ async fn test_action_error_parsing() {
         .prepare_and_execute_strategy(
             &mut transaction_strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
@@ -257,6 +262,7 @@ async fn test_cpi_limits_error_parsing() {
         .prepare_and_execute_strategy(
             &mut transaction_strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
@@ -295,7 +301,7 @@ async fn test_commit_id_error_recovery() {
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_ids(&[committed_account.pubkey])
+        .fetch_next_commit_ids(&[committed_account.pubkey], false)
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -399,7 +405,7 @@ async fn test_commit_id_and_action_errors_recovery() {
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_ids(&[committed_account.pubkey])
+        .fetch_next_commit_ids(&[committed_account.pubkey], false)
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -487,6 +493,7 @@ async fn test_cpi_limits_error_recovery() {
             scheduled_intent,
             strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await;
     assert!(execution_result.is_ok(), "Intent expected to recover");
@@ -575,7 +582,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     // Force CommitIDError by invalidating the commit-nonce cache before running
     let pubkeys: Vec<_> = committed_accounts.iter().map(|c| c.pubkey).collect();
     let mut invalidated_keys = task_info_fetcher
-        .fetch_next_commit_ids(&pubkeys)
+        .fetch_next_commit_ids(&pubkeys, false)
         .await
         .unwrap();
 
@@ -593,6 +600,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
             scheduled_intent,
             strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await;
 
@@ -777,13 +785,17 @@ async fn single_flow_transaction_strategy(
         task_info_fetcher,
         intent,
         &None::<IntentPersisterImpl>,
+        &None::<Arc<PhotonIndexer>>,
     )
     .await
     .unwrap();
-    let finalize_tasks =
-        TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent)
-            .await
-            .unwrap();
+    let finalize_tasks = TaskBuilderImpl::finalize_tasks(
+        task_info_fetcher,
+        intent,
+        &None::<Arc<PhotonIndexer>>,
+    )
+    .await
+    .unwrap();
     tasks.extend(finalize_tasks);
 
     TaskStrategist::build_strategy(

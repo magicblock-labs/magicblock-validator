@@ -4,14 +4,22 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+borsh = { workspace = true }
 bincode = { workspace = true }
+compressed-delegation-client = { workspace = true }
 futures = { workspace = true }
+light-client = { workspace = true, features = ["v2"] }
+light-compressed-account = { workspace = true }
+light-hasher = { workspace = true }
+light-sdk = { workspace = true, features = ["v2"] }
 log = { workspace = true }
+magicblock-core = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-delegation-program = { workspace = true }
 program-mini = { workspace = true, features = ["no-entrypoint"] }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 solana-account = { workspace = true }
+solana-compute-budget-interface = { workspace = true }
 solana-loader-v2-interface = { workspace = true, features = ["serde"] }
 solana-loader-v3-interface = { workspace = true, features = ["serde"] }
 solana-loader-v4-interface = { workspace = true, features = ["serde"] }
@@ -21,5 +29,6 @@ solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 solana-sdk-ids = { workspace = true }
 solana-system-interface = { workspace = true }
+solana-transaction-status = { workspace = true }
 integration-test-tools = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

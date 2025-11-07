@@ -16,8 +16,10 @@ fetch = []
 
 [dependencies]
 borsh = { workspace = true }
-light-sdk = { workspace = true }
 light-compressed-account = { workspace = true }
+light-hasher = { workspace = true }
+light-sdk = { workspace = true }
+light-sdk-types = { workspace = true }
 serde = { workspace = true, optional = true }
 solana-account-info = { workspace = true }
 solana-cpi = { workspace = true }

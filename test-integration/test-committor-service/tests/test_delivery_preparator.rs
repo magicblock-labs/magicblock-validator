@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use borsh::BorshDeserialize;
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
@@ -35,6 +38,7 @@ async fn test_prepare_10kb_buffer() {
             &fixture.authority,
             &mut strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await;
 
@@ -106,6 +110,7 @@ async fn test_prepare_multiple_buffers() {
             &fixture.authority,
             &mut strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await;
 
@@ -188,6 +193,7 @@ async fn test_lookup_tables() {
             &fixture.authority,
             &mut strategy,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await;
     assert!(result.is_ok(), "Failed to prepare lookup tables");

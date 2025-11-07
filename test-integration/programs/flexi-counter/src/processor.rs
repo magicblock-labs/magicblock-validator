@@ -2,6 +2,11 @@ mod call_handler;
 mod schedule_intent;
 
 use borsh::{to_vec, BorshDeserialize};
+use compressed_delegation_client::{
+    instructions::DelegateCpiBuilder, types::DelegateArgs as DelegateArgsCpi,
+    ExternalUndelegateArgs,
+    EXTERNAL_UNDELEGATE_DISCRIMINATOR as EXTERNAL_UNDELEGATE_COMPRESSED_DISCRIMINATOR,
+};
 use ephemeral_rollups_sdk::{
     consts::{EXTERNAL_UNDELEGATE_DISCRIMINATOR, MAGIC_PROGRAM_ID},
     cpi::{
@@ -28,8 +33,8 @@ use solana_program::{
 use crate::{
     instruction::{
         create_add_error_ix, create_add_ix, create_add_unsigned_ix, CancelArgs,
-        DelegateArgs, FlexiCounterInstruction, ScheduleArgs,
-        MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
+        DelegateArgs, DelegateCompressedArgs, FlexiCounterInstruction,
+        ScheduleArgs, MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
     },
     processor::{
         call_handler::{
@@ -52,6 +57,12 @@ pub fn process(
 
         if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
             return process_undelegate_request(accounts, data);
+        } else if disc == EXTERNAL_UNDELEGATE_COMPRESSED_DISCRIMINATOR {
+            let args =
+                compressed_delegation_client::ExternalUndelegateArgs::try_from_slice(
+                    data,
+                )?;
+            return process_external_undelegate_compressed(accounts, args);
         }
     }
 
@@ -94,6 +105,10 @@ pub fn process(
         } => process_undelegate_action_handler(accounts, amount, counter_diff),
         Schedule(args) => process_schedule_task(accounts, args),
         Cancel(args) => process_cancel_task(accounts, args),
+        DelegateCompressed(args) => process_delegate_compressed(accounts, args),
+        ScheduleCommitCompressed => {
+            process_schedule_commit_compressed(accounts)
+        }
     }?;
     Ok(())
 }
@@ -490,6 +505,153 @@ fn process_cancel_task(
     );
 
     invoke(&ix, &[payer_info.clone(), task_context_info.clone()])?;
+
+    Ok(())
+}
+
+fn process_delegate_compressed(
+    accounts: &[AccountInfo],
+    args: DelegateCompressedArgs,
+) -> ProgramResult {
+    msg!("DelegateCompressed");
+
+    let [payer_info, counter_pda_info, compressed_delegation_program_info, compressed_delegation_cpi_signer_info, remaining_accounts @ ..] =
+        accounts
+    else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    let pda_seeds = FlexiCounter::seeds(payer_info.key);
+    let (counter_pda, bump) =
+        Pubkey::find_program_address(&pda_seeds, &crate::id());
+    if counter_pda_info.key.ne(&counter_pda) {
+        msg!(
+            "Invalid counter PDA {}, should be {}",
+            counter_pda_info.key,
+            counter_pda
+        );
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    // Send back excess lamports to the payer
+    let min_rent = Rent::get()?.minimum_balance(0);
+    **payer_info.try_borrow_mut_lamports()? +=
+        counter_pda_info.lamports() - min_rent;
+    **counter_pda_info.try_borrow_mut_lamports()? = min_rent;
+
+    // Remove data from the delegated account and reassign ownership
+    counter_pda_info.realloc(0, false)?;
+    counter_pda_info.assign(compressed_delegation_program_info.key);
+
+    // Cpi into delegation program
+    let bump_slice = &[bump];
+    let signer_seeds =
+        FlexiCounter::seeds_with_bump(payer_info.key, bump_slice);
+    let signer = [signer_seeds.as_ref()];
+    DelegateCpiBuilder::new(compressed_delegation_program_info)
+        .payer(payer_info)
+        .delegated_account(counter_pda_info)
+        .compressed_delegation_program(compressed_delegation_program_info)
+        .compressed_delegation_cpi_signer(compressed_delegation_cpi_signer_info)
+        .light_system_program(&remaining_accounts[0])
+        .args(DelegateArgsCpi {
+            validator: args.validator,
+            validity_proof: args.validity_proof,
+            address_tree_info: args.address_tree_info,
+            account_meta: args.account_meta,
+            lamports: Rent::get()?
+                .minimum_balance(core::mem::size_of::<FlexiCounter>()),
+            account_data: counter_pda_info.data.borrow().to_vec(),
+            pda_seeds: pda_seeds
+                .iter()
+                .map(|seed| seed.to_vec())
+                .collect::<Vec<_>>(),
+            bump,
+            output_state_tree_index: args.output_state_tree_index,
+            owner_program_id: crate::ID,
+        })
+        .add_remaining_accounts(
+            &remaining_accounts
+                .iter()
+                .map(|account| {
+                    (account, account.is_signer, account.is_writable)
+                })
+                .collect::<Vec<_>>(),
+        )
+        .invoke_signed(&signer)?;
+
+    Ok(())
+}
+
+fn process_schedule_commit_compressed(
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    msg!("ScheduleCommitCompressed");
+
+    let [payer, counter, magic_context, magic_program] = accounts else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    let (pda, _bump) = FlexiCounter::pda(payer.key);
+    assert_keys_equal(counter.key, &pda, || {
+        format!("Invalid counter PDA {}, should be {}", counter.key, pda)
+    })?;
+
+    // always ALLOW_UNDELEGATION_DATA
+    let instruction_data: [u8; 4] = [4, 0, 0, 0];
+
+    let account_metas = vec![
+        AccountMeta::new(*payer.key, true),
+        AccountMeta::new(*magic_context.key, false),
+        AccountMeta::new(*counter.key, false),
+    ];
+
+    let account_refs =
+        vec![payer.clone(), magic_context.clone(), counter.clone()];
+
+    let ix = Instruction {
+        program_id: *magic_program.key,
+        data: instruction_data.to_vec(),
+        accounts: account_metas,
+    };
+
+    invoke(&ix, &account_refs)?;
+
+    Ok(())
+}
+
+fn process_external_undelegate_compressed(
+    accounts: &[AccountInfo],
+    args: ExternalUndelegateArgs,
+) -> ProgramResult {
+    msg!("External Undelegate Compressed");
+
+    let [payer, delegated_account, _system_program] = accounts else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    let (pda, _bump) = FlexiCounter::pda(payer.key);
+    if &pda != delegated_account.key {
+        msg!("Invalid seeds: {:?} != {:?}", pda, delegated_account.key);
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    // Refund account
+    invoke(
+        &system_instruction::transfer(
+            payer.key,
+            delegated_account.key,
+            args.delegation_record.lamports - delegated_account.lamports(),
+        ),
+        &[payer.clone(), delegated_account.clone()],
+    )?;
+
+    // Reset data
+    delegated_account.realloc(args.delegation_record.data.len(), false)?;
+    delegated_account
+        .data
+        .borrow_mut()
+        .copy_from_slice(&args.delegation_record.data);
 
     Ok(())
 }

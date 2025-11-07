@@ -1,4 +1,8 @@
 use borsh::{BorshDeserialize, BorshSerialize};
+use compressed_delegation_client::{
+    types::{CompressedAccountMeta, ValidityProof},
+    PackedAddressTreeInfo,
+};
 use ephemeral_rollups_sdk::{
     consts::{MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID},
     delegate_args::{DelegateAccountMetas, DelegateAccounts},
@@ -9,7 +13,7 @@ use solana_program::{
     system_program,
 };
 
-use crate::state::FlexiCounter;
+use crate::{state::FlexiCounter, LIGHT_CPI_SIGNER};
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct DelegateArgs {
@@ -29,6 +33,24 @@ pub struct ScheduleArgs {
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct CancelArgs {
     pub task_id: u64,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct DelegateCompressedArgs {
+    /// The valid until timestamp
+    pub valid_until: i64,
+    /// The commit frequency in milliseconds
+    pub commit_frequency_ms: u32,
+    /// The validator authority that is added to the delegation record
+    pub validator: Option<Pubkey>,
+    /// The proof of the account data
+    pub validity_proof: ValidityProof,
+    /// The account meta
+    pub account_meta: Option<CompressedAccountMeta>,
+    /// The address tree info
+    pub address_tree_info: Option<PackedAddressTreeInfo>,
+    /// The output state tree index
+    pub output_state_tree_index: u8,
 }
 
 pub const MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
@@ -184,6 +206,24 @@ pub enum FlexiCounterInstruction {
     /// 1. `[signer]` The payer that created and is cancelling the task.
     /// 2. `[write]`  Task context account.
     Cancel(CancelArgs),
+
+    /// Compressed delegation of the FlexiCounter account to an ephemaral validator
+    ///
+    /// Accounts:
+    /// 0. `[signer]` The payer that is delegating the account.
+    /// 1. `[write]` The counter PDA account that will be delegated.
+    /// 2. `[]` The compressed delegation program
+    /// 3. `[]` The CPI signer of the compressed delegation program
+    DelegateCompressed(DelegateCompressedArgs),
+
+    /// Commits the compressed FlexiCounter
+    ///
+    /// Accounts:
+    /// 0. `[signer]` The payer that created the account.
+    /// 1. `[write]`  The counter PDA account that will be updated.
+    /// 2. `[]`       MagicContext (used to record scheduled commit)
+    /// 3. `[]`       MagicBlock Program (used to schedule commit)
+    ScheduleCommitCompressed,
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -194,9 +234,9 @@ pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
         AccountMeta::new(pda, false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::Init { label, bump },
+        &borsh::to_vec(&FlexiCounterInstruction::Init { label, bump }).unwrap(),
         accounts,
     )
 }
@@ -213,12 +253,13 @@ pub fn create_realloc_ix(
         AccountMeta::new(pda, false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::Realloc {
+        &borsh::to_vec(&FlexiCounterInstruction::Realloc {
             bytes,
             invocation_count,
-        },
+        })
+        .unwrap(),
         accounts,
     )
 }
@@ -230,9 +271,9 @@ pub fn create_add_ix(payer: Pubkey, count: u8) -> Instruction {
         AccountMeta::new_readonly(payer, true),
         AccountMeta::new(pda, false),
     ];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::Add { count },
+        &borsh::to_vec(&FlexiCounterInstruction::Add { count }).unwrap(),
         accounts,
     )
 }
@@ -241,9 +282,10 @@ pub fn create_add_unsigned_ix(payer: Pubkey, count: u8) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = FlexiCounter::pda(&payer);
     let accounts = vec![AccountMeta::new(pda, false)];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::AddUnsigned { count },
+        &borsh::to_vec(&FlexiCounterInstruction::AddUnsigned { count })
+            .unwrap(),
         accounts,
     )
 }
@@ -252,9 +294,9 @@ pub fn create_add_error_ix(payer: Pubkey, count: u8) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = FlexiCounter::pda(&payer);
     let accounts = vec![AccountMeta::new(pda, false)];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::AddError { count },
+        &borsh::to_vec(&FlexiCounterInstruction::AddError { count }).unwrap(),
         accounts,
     )
 }
@@ -264,9 +306,9 @@ pub fn create_mul_ix(payer: Pubkey, multiplier: u8) -> Instruction {
     let (pda, _) = FlexiCounter::pda(&payer);
     let accounts =
         vec![AccountMeta::new(payer, true), AccountMeta::new(pda, false)];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::Mul { multiplier },
+        &borsh::to_vec(&FlexiCounterInstruction::Mul { multiplier }).unwrap(),
         accounts,
     )
 }
@@ -293,9 +335,9 @@ pub fn create_delegate_ix(payer: Pubkey) -> Instruction {
         commit_frequency_ms: 1_000_000_000,
     };
 
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::Delegate(args),
+        &borsh::to_vec(&FlexiCounterInstruction::Delegate(args)).unwrap(),
         account_metas,
     )
 }
@@ -313,9 +355,13 @@ pub fn create_add_and_schedule_commit_ix(
         AccountMeta::new(MAGIC_CONTEXT_ID, false),
         AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
     ];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::AddAndScheduleCommit { count, undelegate },
+        &borsh::to_vec(&FlexiCounterInstruction::AddAndScheduleCommit {
+            count,
+            undelegate,
+        })
+        .unwrap(),
         accounts,
     )
 }
@@ -332,9 +378,9 @@ pub fn create_add_counter_ix(
         AccountMeta::new(pda_main, false),
         AccountMeta::new_readonly(pda_source, false),
     ];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::AddCounter,
+        &borsh::to_vec(&FlexiCounterInstruction::AddCounter).unwrap(),
         accounts,
     )
 }
@@ -358,15 +404,16 @@ pub fn create_intent_single_committee_ix(
         AccountMeta::new(counter, false),
     ];
 
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::CreateIntent {
+        &borsh::to_vec(&FlexiCounterInstruction::CreateIntent {
             num_committees: 1,
             // Has no effect in non-undelegate case
             counter_diffs: vec![counter_diff],
             is_undelegate,
             compute_units,
-        },
+        })
+        .unwrap(),
         accounts,
     )
 }
@@ -401,15 +448,16 @@ pub fn create_intent_ix(
     accounts.extend(payers_meta);
     accounts.extend(counter_metas);
 
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::CreateIntent {
+        &borsh::to_vec(&FlexiCounterInstruction::CreateIntent {
             num_committees: payers.len() as u8,
             // Has no effect in non-undelegate case
             counter_diffs,
             is_undelegate,
             compute_units,
-        },
+        })
+        .unwrap(),
         accounts,
     )
 }
@@ -433,15 +481,16 @@ pub fn create_schedule_task_ix(
         AccountMeta::new(task_context, false),
         AccountMeta::new(pda, false),
     ];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::Schedule(ScheduleArgs {
+        &borsh::to_vec(&FlexiCounterInstruction::Schedule(ScheduleArgs {
             task_id,
             execution_interval_millis,
             iterations,
             error,
             signer,
-        }),
+        }))
+        .unwrap(),
         accounts,
     )
 }
@@ -458,60 +507,51 @@ pub fn create_cancel_task_ix(
         AccountMeta::new(payer, true),
         AccountMeta::new(task_context, false),
     ];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::Cancel(CancelArgs { task_id }),
+        &borsh::to_vec(&FlexiCounterInstruction::Cancel(CancelArgs {
+            task_id,
+        }))
+        .unwrap(),
         accounts,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn create_schedule_task_ix(
+pub fn create_delegate_compressed_ix(
     payer: Pubkey,
-    task_context: Pubkey,
-    magic_program: Pubkey,
-    task_id: u64,
-    execution_interval_millis: u64,
-    iterations: u64,
-    error: bool,
-    signer: bool,
+    remaining_accounts: &[AccountMeta],
+    args: DelegateCompressedArgs,
 ) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = FlexiCounter::pda(&payer);
-    let accounts = vec![
-        AccountMeta::new_readonly(magic_program, false),
+    let mut accounts = vec![
         AccountMeta::new(payer, true),
-        AccountMeta::new(task_context, false),
         AccountMeta::new(pda, false),
+        AccountMeta::new_readonly(compressed_delegation_client::ID, false),
+        AccountMeta::new_readonly(LIGHT_CPI_SIGNER.cpi_signer.into(), false),
     ];
-    Instruction::new_with_borsh(
+    accounts.extend(remaining_accounts.iter().cloned());
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::Schedule(ScheduleArgs {
-            task_id,
-            execution_interval_millis,
-            iterations,
-            error,
-            signer,
-        }),
+        &borsh::to_vec(&FlexiCounterInstruction::DelegateCompressed(args))
+            .unwrap(),
         accounts,
     )
 }
 
-pub fn create_cancel_task_ix(
-    payer: Pubkey,
-    task_context: Pubkey,
-    magic_program: Pubkey,
-    task_id: u64,
-) -> Instruction {
+pub fn create_schedule_commit_compressed_ix(payer: Pubkey) -> Instruction {
     let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
     let accounts = vec![
-        AccountMeta::new_readonly(magic_program, false),
         AccountMeta::new(payer, true),
-        AccountMeta::new(task_context, false),
+        AccountMeta::new(pda, false),
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
     ];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         *program_id,
-        &FlexiCounterInstruction::Cancel(CancelArgs { task_id }),
+        &borsh::to_vec(&FlexiCounterInstruction::ScheduleCommitCompressed)
+            .unwrap(),
         accounts,
     )
 }

@@ -7,6 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
@@ -42,6 +43,8 @@ pub async fn create_test_client() -> MagicblockRpcClient {
 // Test fixture structure
 pub struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
+    #[allow(dead_code)]
+    pub photon_client: Arc<PhotonIndexer>,
     pub table_mania: TableMania,
     pub authority: Keypair,
     pub compute_budget_config: ComputeBudgetConfig,
@@ -56,6 +59,10 @@ impl TestFixture {
 
     pub async fn new_with_keypair(authority: Keypair) -> Self {
         let rpc_client = create_test_client().await;
+
+        // PhotonIndexer
+        let photon_client =
+            Arc::new(PhotonIndexer::new(rpc_client.url(), None));
 
         // TableMania
         let gc_config = GarbageCollectorConfig::default();
@@ -74,6 +81,7 @@ impl TestFixture {
         let compute_budget_config = ComputeBudgetConfig::new(1_000_000);
         Self {
             rpc_client,
+            photon_client,
             table_mania,
             authority,
             compute_budget_config,
@@ -120,6 +128,7 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
+        _compressed: bool,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
     }

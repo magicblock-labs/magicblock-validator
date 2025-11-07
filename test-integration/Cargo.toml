@@ -31,16 +31,23 @@ edition = "2021"
 anyhow = "1.0.86"
 async-trait = "0.1.77"
 bincode = "1.3.3"
-borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
+borsh = { version = "0.10.4" }
 chrono = "0.4"
 cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
+compressed-delegation-client = { path = "../compressed-delegation-client" }
 ctrlc = "3.4.7"
 ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "2d0f16b" }
 futures = "0.3.31"
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"
+light-batched-merkle-tree = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
+light-client = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
+light-compressed-account = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
+light-hasher = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
+light-sdk = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
+light-sdk-types = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
 log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
 magicblock-chainlink = { path = "../magicblock-chainlink", features = [
@@ -74,7 +81,9 @@ rayon = "1.10.0"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "a892d2a" }
+shlex = "1.3.0"
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "6bbfc69" }
+solana-compute-budget-interface = "2.2"
 solana-loader-v2-interface = "2.2"
 solana-loader-v3-interface = "4.0"
 solana-loader-v4-interface = "2.1"
@@ -104,4 +113,5 @@ toml = "0.8.13"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "f454d4a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "6bbfc69" }
+# solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "11bbaf2" }
