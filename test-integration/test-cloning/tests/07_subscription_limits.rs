@@ -32,8 +32,6 @@ async fn test_large_number_of_account_subscriptions() {
         (0..NUM_PUBKEYS).map(|_| Keypair::new()).collect();
     debug!("✅ Generated {NUM_PUBKEYS} keypairs");
 
-    // TODO: need to delegate half those instead as part of airdropping
-    // that way we can test unsub
     let rent_exempt_amount = Rent::default().minimum_balance(0);
     debug!(
         "Airdropping {rent_exempt_amount} lamports to {NUM_PUBKEYS} accounts in chunks of {AIRDROP_CHUNK_SIZE}..."
@@ -108,7 +106,7 @@ async fn test_large_number_of_account_subscriptions() {
 
     debug!("✅ Airdropped and fetched all {NUM_PUBKEYS} accounts from ephemeral RPC");
 
-    // Wait 1 second for metrics update
+    // Wait for metrics update
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     let monitored_accounts_after =
