@@ -14,6 +14,7 @@ use magicblock_committor_program::{
     },
     pdas, ChangesetChunks, Chunks,
 };
+use magicblock_config::MagicBlockConfig;
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
@@ -133,9 +134,19 @@ impl CommitTask {
             use solana_sdk::commitment_config::CommitmentConfig;
 
             use crate::{config::ChainConfig, ComputeBudgetConfig};
+            let mb_config = MagicBlockConfig::parse_config();
 
-            let chain_config =
-                ChainConfig::local(ComputeBudgetConfig::new(1_000_000));
+            let chain_config = ChainConfig {
+                rpc_uri: mb_config
+                    .config
+                    .accounts
+                    .remote
+                    .url
+                    .as_ref()
+                    .unwrap()
+                    .to_string(),
+                ..ChainConfig::mainnet(ComputeBudgetConfig::new(1_000_000))
+            };
 
             let rpc_client = RpcClient::new_with_commitment(
                 chain_config.rpc_uri.to_string(),
