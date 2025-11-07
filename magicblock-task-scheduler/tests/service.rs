@@ -3,7 +3,7 @@ use std::time::Duration;
 use guinea::GuineaInstruction;
 use magicblock_config::TaskSchedulerConfig;
 use magicblock_program::{
-    args::ScheduleTaskArgs, validator::init_validator_authority,
+    args::ScheduleTaskArgs, validator::init_validator_authority_if_needed,
 };
 use magicblock_task_scheduler::{
     errors::TaskSchedulerResult, SchedulerDatabase, TaskSchedulerService,
@@ -22,7 +22,7 @@ pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
     let account =
         env.create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID);
 
-    init_validator_authority(env.payer.insecure_clone());
+    init_validator_authority_if_needed(env.payer.insecure_clone());
 
     let token = CancellationToken::new();
     let task_scheduler_db_path = SchedulerDatabase::path(
@@ -98,7 +98,7 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
     let account =
         env.create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID);
 
-    init_validator_authority(env.payer.insecure_clone());
+    init_validator_authority_if_needed(env.payer.insecure_clone());
 
     let token = CancellationToken::new();
     let task_scheduler_db_path = SchedulerDatabase::path(
@@ -148,8 +148,22 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
         result
     );
 
-    // Wait the task scheduler to execute 10 times (+some to register the task)
-    tokio::time::sleep(Duration::from_millis(5 * interval)).await;
+    // Wait until we actually observe at least five executions
+    let executed_before_cancel =
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(value) =
+                    env.get_account(account.pubkey()).data().first()
+                {
+                    if *value >= 5 {
+                        break *value;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("task scheduler never reached five executions within 2s");
 
     // Cancel the task
     let ix = Instruction::new_with_bincode(
@@ -168,13 +182,30 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
         result
     );
 
-    // Wait the task scheduler to cancel the task and make sure it didn't execute again
+    let value_at_cancel = env
+        .get_account(account.pubkey())
+        .data()
+        .first()
+        .copied()
+        .unwrap_or_default();
+    assert!(
+        value_at_cancel >= executed_before_cancel,
+        "value regressed before cancellation"
+    );
+
+    // Ensure the scheduler stops issuing executions after cancellation
     tokio::time::sleep(Duration::from_millis(2 * interval)).await;
 
+    let value_after_cancel = env
+        .get_account(account.pubkey())
+        .data()
+        .first()
+        .copied()
+        .unwrap_or_default();
+
     assert_eq!(
-        env.get_account(account.pubkey()).data().first(),
-        Some(&5),
-        "the first byte of the account data should have been modified"
+        value_after_cancel, value_at_cancel,
+        "task scheduler kept executing after cancellation"
     );
 
     token.cancel();
