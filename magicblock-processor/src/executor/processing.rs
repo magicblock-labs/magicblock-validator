@@ -7,6 +7,7 @@ use magicblock_core::link::{
     },
 };
 use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
+use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
@@ -285,8 +286,10 @@ impl super::TransactionExecutor {
 
         for (pubkey, account) in accounts {
             // only persist account's update if it was actually modified, ignore
-            // the rest, even if an account was writeable in the transaction
-            if !account.is_dirty() {
+            // the rest, even if an account was writeable in the transaction. We
+            // also don't persist accounts that are empty, since those are managed
+            // by the chainlink, and we cannot interfere with its logic here.
+            if !account.is_dirty() || account.lamports() == 0 {
                 continue;
             }
             self.accountsdb.insert_account(pubkey, account);
