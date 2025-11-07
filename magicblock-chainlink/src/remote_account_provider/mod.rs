@@ -715,10 +715,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             trace!("Evicting {pubkey}");
 
             // 1. Unsubscribe from the account directly (LRU has already removed it)
-            self.pubsub_client.unsubscribe(evicted).await.inspect_err(|err|
+            if let Err(err) = self.pubsub_client.unsubscribe(evicted).await {
                 warn!(
-                    "Failed to unsubscribe from pubsub for evicted account {evicted}: {err:?}")
-            )?;
+                    "Failed to unsubscribe from pubsub for evicted account {evicted}: {err:?}");
+                // Rollback the LRU add since eviction failed
+                self.lrucache_subscribed_accounts.remove(pubkey);
+                return Err(err);
+            }
 
             // 2. Inform upstream so it can remove it from the store
             self.send_removal_update(evicted).await?;
