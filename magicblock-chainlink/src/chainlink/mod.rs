@@ -159,9 +159,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 dlp_owned_not_delegated.fetch_add(1, Ordering::Relaxed);
                 return true;
             }
-            // Non-delegated, nor DLP-owned, nor blacklisted
-            // TODO: @@@ put on trace
-            debug!(
+            trace!(
                 "Removing non-delegated, non-DLP-owned account: {pubkey} {:#?}",
                 account
             );

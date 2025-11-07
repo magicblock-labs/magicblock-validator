@@ -968,6 +968,8 @@ where
                     // NOTE: we defensively correct accounts that we should have been watching but
                     //       were not for some reason. We fetch them again in that case.
                     //       This actually would point to a bug in the subscription logic.
+                    // TODO(thlorenz): remove this once we are certain (by perusing logs) that this
+                    //                 does not happen anymore
                     if account_in_bank.delegated()
                         || self.blacklisted_accounts.contains(pubkey)
                         || self.is_watching(pubkey)
