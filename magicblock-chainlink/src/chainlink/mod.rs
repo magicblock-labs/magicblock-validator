@@ -159,6 +159,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 return true;
             }
             // Non-delegated, nor DLP-owned, nor blacklisted
+            debug!("Removing non-delegated, non-DLP-owned account: {pubkey} with {} lamports", account.lamports());
             remaining.fetch_add(1, Ordering::Relaxed);
             true
         });
