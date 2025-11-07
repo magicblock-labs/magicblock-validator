@@ -172,9 +172,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             true
         });
 
-        let non_empty = remaining.load(Ordering::Relaxed).saturating_sub(
-            remaining_empty.load(Ordering::Relaxed),
-        );
+        let non_empty = remaining
+            .load(Ordering::Relaxed)
+            .saturating_sub(remaining_empty.load(Ordering::Relaxed));
         remaining.fetch_sub(
             remaining_empty.load(Ordering::Relaxed),
             Ordering::Relaxed,

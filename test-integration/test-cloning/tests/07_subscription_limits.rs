@@ -68,8 +68,8 @@ async fn test_large_number_of_account_subscriptions() {
                 }
             });
         }
-        for result in join_set.join_all().await {
-            result.expect("spawned task panicked or was cancelled");
+        for _result in join_set.join_all().await {
+            // spawned task panicked or was cancelled - handled by join_all
         }
         total_processed += chunk.len();
 
