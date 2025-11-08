@@ -51,7 +51,7 @@ pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{errors::ChainlinkResult, submux::SubMuxClient};
 
-const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 5_000;
+const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
 type FetchResult = Result<RemoteAccount, RemoteAccountProviderError>;
@@ -242,9 +242,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 .difference(&lru_pubkeys_set)
                                 .cloned()
                                 .collect();
+                        let extra_in_lru: Vec<_> = lru_pubkeys_set
+                            .difference(&pubsub_subs_without_never_evict)
+                            .cloned()
+                            .collect();
 
                         if !extra_in_pubsub.is_empty() {
                             debug!("Extra pubkeys in pubsub client not in LRU cache: {:?}", extra_in_pubsub);
+                        }
+                        if !extra_in_lru.is_empty() {
+                            debug!("Extra pubkeys in LRU cache not in pubsub client: {:?}", extra_in_lru);
                         }
                     }
                 }
