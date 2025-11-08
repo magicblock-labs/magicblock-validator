@@ -58,7 +58,7 @@ pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{errors::ChainlinkResult, submux::SubMuxClient};
 
-const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 5_000;
+const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
 type FetchResult = Result<RemoteAccount, RemoteAccountProviderError>;
