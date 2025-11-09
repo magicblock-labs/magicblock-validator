@@ -1,5 +1,3 @@
-use magicblock_config::MagicBlockConfig;
-
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -15,10 +13,14 @@ pub struct AccountFetcher {
 impl AccountFetcher {
     pub fn new() -> Self {
         use crate::{config::ChainConfig, ComputeBudgetConfig};
-        let mb_config = MagicBlockConfig::parse_config();
 
+        #[cfg(feature = "dev-context-only-utils")]
+        let chain_config =
+            ChainConfig::local(ComputeBudgetConfig::new(1_000_000));
+
+        #[cfg(not(feature = "dev-context-only-utils"))]
         let chain_config = ChainConfig {
-            rpc_uri: mb_config
+            rpc_uri: magicblock_config::MagicBlockConfig::parse_config()
                 .config
                 .accounts
                 .remote
