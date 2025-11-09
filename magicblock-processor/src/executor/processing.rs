@@ -77,7 +77,8 @@ impl super::TransactionExecutor {
             // Otherwise commit the account state changes
             self.commit_accounts(feepayer, &processed, is_replay);
 
-            // Commit transaction to the ledger and schedule tasks and intents (if any)
+            // Commit transaction to the ledger and schedule tasks
+            // TODO: send intents here as well once implemented
             if !is_replay {
                 self.commit_transaction(txn, processed, balances);
                 // If the transaction succeeded, check for potential tasks/intents
