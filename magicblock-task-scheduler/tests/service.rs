@@ -6,7 +6,8 @@ use magicblock_program::{
     args::ScheduleTaskArgs, validator::init_validator_authority_if_needed,
 };
 use magicblock_task_scheduler::{
-    errors::TaskSchedulerResult, SchedulerDatabase, TaskSchedulerService,
+    errors::TaskSchedulerResult, SchedulerDatabase, TaskSchedulerError,
+    TaskSchedulerService,
 };
 use solana_account::ReadableAccount;
 use solana_program::{
@@ -14,13 +15,15 @@ use solana_program::{
     native_token::LAMPORTS_PER_SOL,
 };
 use test_kit::{ExecutionTestEnv, Signer};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-#[tokio::test]
-pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
+fn setup() -> TaskSchedulerResult<(
+    ExecutionTestEnv,
+    CancellationToken,
+    JoinHandle<Result<(), TaskSchedulerError>>,
+)> {
     let mut env = ExecutionTestEnv::new();
-    let account =
-        env.create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID);
 
     init_validator_authority_if_needed(env.payer.insecure_clone());
 
@@ -43,6 +46,16 @@ pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
         token.clone(),
     )?
     .start()?;
+
+    Ok((env, token, handle))
+}
+
+#[tokio::test]
+pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
+    let (env, token, handle) = setup()?;
+
+    let account =
+        env.create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID);
 
     // Schedule a task
     let ix = Instruction::new_with_bincode(
@@ -94,31 +107,10 @@ pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
 
 #[tokio::test]
 pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
-    let mut env = ExecutionTestEnv::new();
+    let (env, token, handle) = setup()?;
+
     let account =
         env.create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID);
-
-    init_validator_authority_if_needed(env.payer.insecure_clone());
-
-    let token = CancellationToken::new();
-    let task_scheduler_db_path = SchedulerDatabase::path(
-        env.ledger
-            .ledger_path()
-            .parent()
-            .expect("ledger_path didn't have a parent, should never happen"),
-    );
-    let handle = TaskSchedulerService::new(
-        &task_scheduler_db_path,
-        &TaskSchedulerConfig::default(),
-        env.transaction_scheduler.clone(),
-        env.dispatch
-            .tasks_service
-            .take()
-            .expect("Tasks service should be initialized"),
-        env.ledger.latest_block().clone(),
-        token.clone(),
-    )?
-    .start()?;
 
     // Schedule a task
     let interval = 100;
@@ -189,9 +181,11 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
         .copied()
         .unwrap_or_default();
     assert!(
-        value_at_cancel >= executed_before_cancel,
-        "value regressed before cancellation"
-    );
+            value_at_cancel >= executed_before_cancel,
+            "unexpected: value at cancellation ({}) < value when 5 executions were observed ({})",
+            value_at_cancel,
+            executed_before_cancel
+        );
 
     // Ensure the scheduler stops issuing executions after cancellation
     tokio::time::sleep(Duration::from_millis(2 * interval)).await;
