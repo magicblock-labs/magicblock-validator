@@ -69,7 +69,9 @@ fn increment(accounts: slice::Iter<AccountInfo>) -> ProgramResult {
         let mut data = a.try_borrow_mut_data()?;
         let first =
             data.first_mut().ok_or(ProgramError::AccountDataTooSmall)?;
-        *first += 1;
+        *first = first
+            .checked_add(1)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
     }
     Ok(())
 }
