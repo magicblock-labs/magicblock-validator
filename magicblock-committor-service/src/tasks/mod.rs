@@ -14,7 +14,6 @@ use magicblock_committor_program::{
     },
     pdas, ChangesetChunks, Chunks,
 };
-use magicblock_config::MagicBlockConfig;
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
@@ -25,6 +24,8 @@ use thiserror::Error;
 
 use crate::tasks::visitor::Visitor;
 
+use self::account_fetcher::AccountFetcher;
+
 pub mod args_task;
 pub mod buffer_task;
 pub mod task_builder;
@@ -32,6 +33,8 @@ pub mod task_strategist;
 pub(crate) mod task_visitors;
 pub mod utils;
 pub mod visitor;
+
+mod account_fetcher;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
@@ -119,43 +122,19 @@ impl CommitTask {
     // reduce instruction size. Below this, commit is sent as CommitState.
     const COMMIT_STATE_SIZE_THRESHOLD: usize = 200;
 
-    pub fn new(
+    pub async fn new(
         commit_id: u64,
         allow_undelegation: bool,
         committed_account: CommittedAccount,
+        account_fetcher: AccountFetcher,
     ) -> Self {
-        let fetched_account = if committed_account.account.data.len()
+        let base_account = if committed_account.account.data.len()
             > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
         {
-            // TODO (snawaz): it is the most ugliest piece of code as it is making
-            // network call and that too, a blocking one, and I'll soon fix it in a
-            // separate PR that will use caching of base-accounts.
-            use solana_rpc_client::rpc_client::RpcClient;
-            use solana_sdk::commitment_config::CommitmentConfig;
-
-            use crate::{config::ChainConfig, ComputeBudgetConfig};
-            let mb_config = MagicBlockConfig::parse_config();
-
-            let chain_config = ChainConfig {
-                rpc_uri: mb_config
-                    .config
-                    .accounts
-                    .remote
-                    .url
-                    .as_ref()
-                    .unwrap()
-                    .to_string(),
-                ..ChainConfig::mainnet(ComputeBudgetConfig::new(1_000_000))
-            };
-
-            let rpc_client = RpcClient::new_with_commitment(
-                chain_config.rpc_uri.to_string(),
-                CommitmentConfig {
-                    commitment: chain_config.commitment,
-                },
-            );
-
-            rpc_client.get_account(&committed_account.pubkey).ok()
+            account_fetcher
+                .fetch_account(&committed_account.pubkey)
+                .await
+                .ok()
         } else {
             None
         };
@@ -164,7 +143,7 @@ impl CommitTask {
             commit_id,
             allow_undelegation,
             committed_account,
-            base_account: fetched_account,
+            base_account,
             force_commit_state: false,
         }
     }
