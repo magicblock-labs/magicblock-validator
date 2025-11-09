@@ -24,7 +24,7 @@ use thiserror::Error;
 
 use crate::tasks::visitor::Visitor;
 
-use self::account_fetcher::AccountFetcher;
+use account_fetcher::*;
 
 pub mod args_task;
 pub mod buffer_task;
@@ -34,7 +34,7 @@ pub(crate) mod task_visitors;
 pub mod utils;
 pub mod visitor;
 
-mod account_fetcher;
+pub mod account_fetcher;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
@@ -470,51 +470,57 @@ mod serialization_safety_test {
     }
 
     // Test BufferTask variants
-    #[test]
-    fn test_buffer_task_instruction_serialization() {
+    #[tokio::test]
+    async fn test_buffer_task_instruction_serialization() {
         let validator = Pubkey::new_unique();
 
-        let buffer_task = BufferTask::new_preparation_required(
-            BufferTaskType::Commit(CommitTask::new(
-                456,
-                false,
-                CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: Account {
-                        lamports: 2000,
-                        data: vec![7, 8, 9],
-                        owner: Pubkey::new_unique(),
-                        executable: false,
-                        rent_epoch: 0,
+        let buffer_task =
+            BufferTask::new_preparation_required(BufferTaskType::Commit(
+                CommitTask::new(
+                    456,
+                    false,
+                    CommittedAccount {
+                        pubkey: Pubkey::new_unique(),
+                        account: Account {
+                            lamports: 2000,
+                            data: vec![7, 8, 9],
+                            owner: Pubkey::new_unique(),
+                            executable: false,
+                            rent_epoch: 0,
+                        },
                     },
-                },
-            )),
-        );
+                    AccountFetcher::new(),
+                )
+                .await,
+            ));
         assert_serializable(&buffer_task.instruction(&validator));
     }
 
     // Test preparation instructions
-    #[test]
-    fn test_preparation_instructions_serialization() {
+    #[tokio::test]
+    async fn test_preparation_instructions_serialization() {
         let authority = Pubkey::new_unique();
 
         // Test BufferTask preparation
-        let buffer_task = BufferTask::new_preparation_required(
-            BufferTaskType::Commit(CommitTask::new(
-                789,
-                true,
-                CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: Account {
-                        lamports: 3000,
-                        data: vec![0; 1024], // Larger data to test chunking
-                        owner: Pubkey::new_unique(),
-                        executable: false,
-                        rent_epoch: 0,
+        let buffer_task =
+            BufferTask::new_preparation_required(BufferTaskType::Commit(
+                CommitTask::new(
+                    789,
+                    true,
+                    CommittedAccount {
+                        pubkey: Pubkey::new_unique(),
+                        account: Account {
+                            lamports: 3000,
+                            data: vec![0; 1024], // Larger data to test chunking
+                            owner: Pubkey::new_unique(),
+                            executable: false,
+                            rent_epoch: 0,
+                        },
                     },
-                },
-            )),
-        );
+                    AccountFetcher::new(),
+                )
+                .await,
+            ));
 
         let PreparationState::Required(preparation_task) =
             buffer_task.preparation_state()

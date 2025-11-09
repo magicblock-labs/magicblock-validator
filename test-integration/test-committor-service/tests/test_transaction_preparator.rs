@@ -3,6 +3,7 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
+        account_fetcher::AccountFetcher,
         args_task::{ArgsTask, ArgsTaskType},
         buffer_task::{BufferTask, BufferTaskType},
         task_strategist::{TaskStrategist, TransactionStrategy},
@@ -35,11 +36,15 @@ async fn test_prepare_commit_tx_with_single_account() {
     let committed_account = create_committed_account(&account_data);
 
     let tasks = vec![
-        Box::new(ArgsTask::new(ArgsTaskType::Commit(CommitTask::new(
-            1,
-            true,
-            committed_account.clone(),
-        )))) as Box<dyn BaseTask>,
+        Box::new(ArgsTask::new(ArgsTaskType::Commit(
+            CommitTask::new(
+                1,
+                true,
+                committed_account.clone(),
+                AccountFetcher::new(),
+            )
+            .await,
+        ))) as Box<dyn BaseTask>,
         Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
         }))),
@@ -91,16 +96,26 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
 
     let buffer_commit_task =
         BufferTask::new_preparation_required(BufferTaskType::Commit(
-            CommitTask::new(1, true, committed_account2.clone()),
+            CommitTask::new(
+                1,
+                true,
+                committed_account2.clone(),
+                AccountFetcher::new(),
+            )
+            .await,
         ));
     // Create test data
     let tasks = vec![
         // account 1
-        Box::new(ArgsTask::new(ArgsTaskType::Commit(CommitTask::new(
-            1,
-            true,
-            committed_account1.clone(),
-        )))) as Box<dyn BaseTask>,
+        Box::new(ArgsTask::new(ArgsTaskType::Commit(
+            CommitTask::new(
+                1,
+                true,
+                committed_account1.clone(),
+                AccountFetcher::new(),
+            )
+            .await,
+        ))) as Box<dyn BaseTask>,
         // account 2
         Box::new(buffer_commit_task),
         // finalize account 1
@@ -185,7 +200,13 @@ async fn test_prepare_commit_tx_with_base_actions() {
 
     let buffer_commit_task =
         BufferTask::new_preparation_required(BufferTaskType::Commit(
-            CommitTask::new(1, true, committed_account.clone()),
+            CommitTask::new(
+                1,
+                true,
+                committed_account.clone(),
+                AccountFetcher::new(),
+            )
+            .await,
         ));
     let tasks = vec![
         // commit account

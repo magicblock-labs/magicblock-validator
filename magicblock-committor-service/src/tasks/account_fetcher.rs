@@ -5,6 +5,9 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 
+//
+// AccountFetcher is used by CommitTask
+//
 pub struct AccountFetcher {
     rpc_client: RpcClient,
 }
