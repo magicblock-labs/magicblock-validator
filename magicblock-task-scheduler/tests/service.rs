@@ -3,7 +3,8 @@ use std::time::Duration;
 use guinea::GuineaInstruction;
 use magicblock_config::TaskSchedulerConfig;
 use magicblock_program::{
-    args::ScheduleTaskArgs, validator::init_validator_authority_if_needed,
+    args::ScheduleTaskArgs,
+    validator::{init_validator_authority_if_needed, validator_authority_id},
 };
 use magicblock_task_scheduler::{
     errors::TaskSchedulerResult, SchedulerDatabase, TaskSchedulerError,
@@ -26,6 +27,9 @@ fn setup() -> TaskSchedulerResult<(
     let mut env = ExecutionTestEnv::new();
 
     init_validator_authority_if_needed(env.payer.insecure_clone());
+    // NOTE: validator authority is unique for all tests in this file, but the payer changes for each test
+    // Airdrop some SOL to the validator authority, which is used to pay task fees
+    env.fund_account(validator_authority_id(), LAMPORTS_PER_SOL);
 
     let token = CancellationToken::new();
     let task_scheduler_db_path = SchedulerDatabase::path(
@@ -84,9 +88,6 @@ pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
         result
     );
 
-    // Wait the task scheduler to receive the task
-    tokio::time::sleep(Duration::from_millis(10)).await;
-
     // Wait until the task scheduler actually mutates the account (with an upper bound to avoid hangs)
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
@@ -113,11 +114,12 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
         env.create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID);
 
     // Schedule a task
+    let task_id = 2;
     let interval = 100;
     let ix = Instruction::new_with_bincode(
         guinea::ID,
         &GuineaInstruction::ScheduleTask(ScheduleTaskArgs {
-            task_id: 1,
+            task_id,
             execution_interval_millis: interval,
             iterations: 100,
             instructions: vec![Instruction::new_with_bincode(
@@ -160,7 +162,7 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
     // Cancel the task
     let ix = Instruction::new_with_bincode(
         guinea::ID,
-        &GuineaInstruction::CancelTask(1),
+        &GuineaInstruction::CancelTask(task_id),
         vec![
             AccountMeta::new_readonly(magicblock_magic_program_api::ID, false),
             AccountMeta::new(env.payer.pubkey(), true),
