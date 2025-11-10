@@ -46,7 +46,11 @@ pub mod program_account;
 mod remote_account;
 
 pub use chain_pubsub_actor::SubscriptionUpdate;
-use magicblock_metrics::metrics::set_monitored_accounts_count;
+use magicblock_metrics::metrics::{
+    inc_account_fetches_failed, inc_account_fetches_found,
+    inc_account_fetches_not_found, inc_account_fetches_success,
+    set_monitored_accounts_count,
+};
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{errors::ChainlinkResult, submux::SubMuxClient};
@@ -66,6 +70,8 @@ pub struct ForwardedSubscriptionUpdate {
 unsafe impl Send for ForwardedSubscriptionUpdate {}
 unsafe impl Sync for ForwardedSubscriptionUpdate {}
 
+// Not sure why helius uses a different code for this error
+const HELIUS_CONTEXT_SLOT_NOT_REACHED: i64 = -32603;
 pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// The RPC client to fetch accounts from chain the first time we receive
     /// a request for them
@@ -844,13 +850,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let notify_error = |error_msg: &str| {
                 let mut fetching = fetching_accounts.lock().unwrap();
                 error!("{error_msg}");
+                inc_account_fetches_failed(pubkeys.len() as u64);
                 for pubkey in &pubkeys {
+                    // Update metrics
                     // Remove pending requests and send error
                     if let Some((_, requests)) = fetching.remove(pubkey) {
                         for sender in requests {
                             let error = RemoteAccountProviderError::AccountResolutionsFailed(
                                 format!("{}: {}", pubkey, error_msg)
-                        );
+                            );
                             let _ = sender.send(Err(error));
                         }
                     }
@@ -868,9 +876,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     trace!($msg);
                     remaining_retries -= 1;
                     if remaining_retries <= 0 {
-                    let err_msg = format!("Max retries {MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
-                    notify_error(&err_msg);
-                    return;
+                        let err_msg = format!("Max retries {MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
+                        notify_error(&err_msg);
+                        return;
                     }
                     tokio::time::sleep(Duration::from_millis(400)).await;
                     continue;
@@ -904,28 +912,29 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         ErrorKind::RpcError(rpc_err) => {
                             match rpc_err {
                                 RpcError::ForUser(ref rpc_user_err) => {
-                                    // When an account is not present for the desired min-context slot
-                                    // then we normally get the below handled `RpcResponseError`, but may also
-                                    // get the following error from the RPC.
+                                    // When an account is not present for the desired
+                                    // min-context slot then we normally get the below
+                                    // handled `RpcResponseError`, but may also get the
+                                    // following error from the RPC.
                                     // See test::ixtest_existing_account_for_future_slot
                                     // ```
                                     // RpcError(
                                     //   ForUser(
                                     //       "AccountNotFound: \
-                                    //        pubkey=DaeruQ4SukTQaJA5muyv51MQZok7oaCAF8fAW19mbJv5: \
+                                    // pubkey=DaeruQ4SukTQaJA5muyv51MQZok7oaCAF8fAW19mbJv5: \
                                     //        RPC response error -32016: \
                                     //        Minimum context slot has not been reached; ",
                                     //   ),
                                     // )
                                     // ```
                                     retry!("Fetching accounts failed: {rpc_user_err:?}");
-                                }
+                                 }
                                 RpcError::RpcResponseError {
                                     code,
                                     message,
                                     data,
                                 } => {
-                                    if code == JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED {
+                                    if code == JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED || code == HELIUS_CONTEXT_SLOT_NOT_REACHED {
                                         retry!("Minimum context slot {min_context_slot} not reached for {commitment:?}.");
                                     } else {
                                         let err = RpcError::RpcResponseError {
@@ -944,9 +953,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     let err_msg = format!(
                                         "RpcError fetching accounts {}: {err:?}", pubkeys_str(&pubkeys)
                                     );
-                                    notify_error(&err_msg);
-                                    return;
-                                }
+                                     notify_error(&err_msg);
+                                     return;
+                                 }
                             }
                         }
                         _ => {
@@ -964,16 +973,23 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             // TODO: should we retry if not or respond with an error?
             assert!(response.context.slot >= min_context_slot);
 
+            let mut found_count = 0u64;
+            let mut not_found_count = 0u64;
+
             let remote_accounts: Vec<RemoteAccount> = pubkeys
                 .iter()
                 .zip(response.value)
                 .map(|(pubkey, acc)| match acc {
-                    Some(value) => RemoteAccount::from_fresh_account(
-                        value,
-                        response.context.slot,
-                        RemoteAccountUpdateSource::Fetch,
-                    ),
+                    Some(value) => {
+                        found_count += 1;
+                        RemoteAccount::from_fresh_account(
+                            value,
+                            response.context.slot,
+                            RemoteAccountUpdateSource::Fetch,
+                        )
+                    }
                     None if mark_empty_if_not_found.contains(pubkey) => {
+                        found_count += 1;
                         RemoteAccount::from_fresh_account(
                             Account {
                                 lamports: 0,
@@ -986,9 +1002,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             RemoteAccountUpdateSource::Fetch,
                         )
                     }
-                    None => NotFound(response.context.slot),
+                    None => {
+                        not_found_count += 1;
+                        NotFound(response.context.slot)
+                    }
                 })
                 .collect();
+
+            // Update metrics for successful RPC fetch
+            inc_account_fetches_success(pubkeys.len() as u64);
+            inc_account_fetches_found(found_count);
+            inc_account_fetches_not_found(not_found_count);
 
             if log_enabled!(log::Level::Trace) {
                 let pubkeys = pubkeys

@@ -161,6 +161,39 @@ lazy_static::lazy_static! {
         &["name"],
     ).unwrap();
 
+    // Account fetch results from network (RPC)
+    pub static ref ACCOUNT_FETCHES_SUCCESS_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_success",
+            "Total number of successful network \
+             account fetches",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_FAILED_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_failed",
+            "Total number of failed network account fetches \
+             (RPC errors)",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_FOUND_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_found",
+            "Total number of network account fetches that \
+             found an account",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_NOT_FOUND_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_not_found",
+            "Total number of network account fetches where \
+             account was not found",
+        )
+        .unwrap();
+
 
     // -----------------
     // Transaction Execution
@@ -245,6 +278,10 @@ pub(crate) fn register() {
         register!(TRANSACTION_SKIP_PREFLIGHT);
         register!(RPC_REQUESTS_COUNT);
         register!(RPC_WS_SUBSCRIPTIONS_COUNT);
+        register!(ACCOUNT_FETCHES_SUCCESS_COUNT);
+        register!(ACCOUNT_FETCHES_FAILED_COUNT);
+        register!(ACCOUNT_FETCHES_FOUND_COUNT);
+        register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
     });
 }
@@ -353,4 +390,20 @@ pub fn observe_committor_intent_execution_time_histogram(
 
 pub fn set_commmittor_intent_cu_usage(value: i64) {
     COMMITTOR_INTENT_CU_USAGE.set(value)
+}
+
+pub fn inc_account_fetches_success(count: u64) {
+    ACCOUNT_FETCHES_SUCCESS_COUNT.inc_by(count);
+}
+
+pub fn inc_account_fetches_failed(count: u64) {
+    ACCOUNT_FETCHES_FAILED_COUNT.inc_by(count);
+}
+
+pub fn inc_account_fetches_found(count: u64) {
+    ACCOUNT_FETCHES_FOUND_COUNT.inc_by(count);
+}
+
+pub fn inc_account_fetches_not_found(count: u64) {
+    ACCOUNT_FETCHES_NOT_FOUND_COUNT.inc_by(count);
 }
