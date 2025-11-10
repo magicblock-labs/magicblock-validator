@@ -131,10 +131,17 @@ impl CommitTask {
         let base_account = if committed_account.account.data.len()
             > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
         {
-            account_fetcher
+            match account_fetcher
                 .fetch_account(&committed_account.pubkey)
                 .await
-                .ok()
+            {
+                Ok(account) => Some(account),
+                Err(e) => {
+                    log::warn!("Failed to fetch base account for commit diff, pubkey: {}, commit_id: {}, error: {}. Falling back to commit_state.",
+                        committed_account.pubkey, commit_id, e);
+                    None
+                }
+            }
         } else {
             None
         };

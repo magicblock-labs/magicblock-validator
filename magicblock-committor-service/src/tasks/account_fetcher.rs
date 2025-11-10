@@ -18,7 +18,7 @@ impl AccountFetcher {
         let chain_config =
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000));
 
-        #[cfg(not(feature = "dev-context-only-utils"))]
+        //#[cfg(not(feature = "dev-context-only-utils"))]
         let chain_config = ChainConfig {
             rpc_uri: magicblock_config::MagicBlockConfig::parse_config()
                 .config
@@ -26,8 +26,13 @@ impl AccountFetcher {
                 .remote
                 .url
                 .as_ref()
-                .unwrap()
-                .to_string(),
+                .map(|url| url.to_string())
+                .unwrap_or_else(|| {
+                    log::error!(
+                        "Remote URL not configured, falling back to mainnet"
+                    );
+                    "https://api.mainnet-beta.solana.com".to_string()
+                }),
             ..ChainConfig::mainnet(ComputeBudgetConfig::new(1_000_000))
         };
 
