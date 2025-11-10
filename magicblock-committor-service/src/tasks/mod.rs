@@ -1,3 +1,4 @@
+use account_fetcher::*;
 use dlp::{
     args::{CommitDiffArgs, CommitStateArgs},
     compute_diff,
@@ -23,8 +24,6 @@ use solana_sdk::instruction::Instruction;
 use thiserror::Error;
 
 use crate::tasks::visitor::Visitor;
-
-use account_fetcher::*;
 
 pub mod args_task;
 pub mod buffer_task;

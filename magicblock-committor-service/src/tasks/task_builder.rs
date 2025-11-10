@@ -9,6 +9,7 @@ use magicblock_program::magic_scheduled_base_intent::{
 };
 use solana_pubkey::Pubkey;
 
+use super::account_fetcher::AccountFetcher;
 use crate::{
     intent_executor::task_info_fetcher::{
         TaskInfoFetcher, TaskInfoFetcherError,
@@ -19,8 +20,6 @@ use crate::{
         BaseActionTask, BaseTask, CommitTask, FinalizeTask, UndelegateTask,
     },
 };
-
-use super::account_fetcher::AccountFetcher;
 
 #[async_trait]
 pub trait TasksBuilder {

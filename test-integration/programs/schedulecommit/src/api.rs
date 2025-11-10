@@ -136,6 +136,7 @@ pub fn delegate_account_cpi_instruction(
                 DelegateOrderBookArgs {
                     commit_frequency_ms: 1_000_000_000,
                     book_manager: player_or_book_manager,
+                    validator,
                 },
             )
         },

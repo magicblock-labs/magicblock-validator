@@ -51,6 +51,7 @@ pub struct DelegateCpiArgs {
 pub struct DelegateOrderBookArgs {
     commit_frequency_ms: u32,
     book_manager: Pubkey,
+    validator: Option<Pubkey>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -382,7 +383,7 @@ pub fn process_delegate_order_book(
         &seeds_no_bump,
         DelegateConfig {
             commit_frequency_ms: args.commit_frequency_ms,
-            ..DelegateConfig::default()
+            validator: args.validator,
         },
     )?;
 
