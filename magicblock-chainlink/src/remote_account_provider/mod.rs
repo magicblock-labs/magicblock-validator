@@ -935,7 +935,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     data,
                                 } => {
                                     if code == JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED || code == HELIUS_CONTEXT_SLOT_NOT_REACHED {
-                                        retry!("Minimum context slot {min_context_slot} not reached for {commitment:?}.");
+                                        retry!("Minimum context slot {min_context_slot} not reached for {commitment:?}. code={code}, message={message}, data={data:?}");
                                     } else {
                                         let err = RpcError::RpcResponseError {
                                             code,
