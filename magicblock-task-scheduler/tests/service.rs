@@ -19,11 +19,13 @@ use test_kit::{ExecutionTestEnv, Signer};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-fn setup() -> TaskSchedulerResult<(
+type SetupResult = TaskSchedulerResult<(
     ExecutionTestEnv,
     CancellationToken,
     JoinHandle<Result<(), TaskSchedulerError>>,
-)> {
+)>;
+
+fn setup() -> SetupResult {
     let mut env = ExecutionTestEnv::new();
 
     init_validator_authority_if_needed(env.payer.insecure_clone());
