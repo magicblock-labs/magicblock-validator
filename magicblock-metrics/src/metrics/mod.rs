@@ -38,7 +38,7 @@ lazy_static::lazy_static! {
 
 
     static ref CACHED_CLONE_OUTPUTS_COUNT: IntGauge = IntGauge::new(
-        "magicblock_account_cloner_cached_outputs",
+        "magicblock_account_cloner_cached_outputs_count",
         "Number of cloned accounts in the RemoteAccountClonerWorker"
     )
     .unwrap();
@@ -47,7 +47,7 @@ lazy_static::lazy_static! {
     // Ledger
     // -----------------
     static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "ledger_size", "Ledger size in Bytes",
+        "ledger_size_gauge", "Ledger size in Bytes",
     ).unwrap();
     static ref LEDGER_BLOCK_TIMES_GAUGE: IntGauge = IntGauge::new(
         "ledger_blocktimes_gauge", "Ledger Blocktimes Gauge",
@@ -87,24 +87,24 @@ lazy_static::lazy_static! {
     // Accounts
     // -----------------
     static ref ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "accounts_size", "Size of persisted accounts (in bytes) currently on disk",
+        "accounts_size_gauge", "Size of persisted accounts (in bytes) currently on disk",
     ).unwrap();
 
     static ref ACCOUNTS_COUNT_GAUGE: IntGauge = IntGauge::new(
-        "accounts_count", "Number of accounts currently in the database",
+        "accounts_count_gauge", "Number of accounts currently in the database",
     ).unwrap();
 
 
     static ref PENDING_ACCOUNT_CLONES_GAUGE: IntGauge = IntGauge::new(
-        "pending_account_clones", "Total number of account clone requests still in memory",
+        "pending_account_clones_gauge", "Total number of account clone requests still in memory",
     ).unwrap();
 
     static ref MONITORED_ACCOUNTS_GAUGE: IntGauge = IntGauge::new(
-        "monitored_accounts", "number of undelegated accounts, being monitored via websocket",
+        "monitored_accounts_gauge", "number of undelegated accounts, being monitored via websocket",
     ).unwrap();
 
     static ref EVICTED_ACCOUNTS_COUNT: IntGauge = IntGauge::new(
-        "evicted_accounts", "number of accounts forcefully removed from monitored list and database",
+        "evicted_accounts_count", "number of accounts forcefully removed from monitored list and database",
     ).unwrap();
 
     // -----------------
@@ -148,7 +148,7 @@ lazy_static::lazy_static! {
     ).unwrap();
 
     pub static ref TRANSACTION_SKIP_PREFLIGHT: IntCounter = IntCounter::new(
-        "transaction_skip_preflight", "Count of transactions that skipped the preflight check",
+        "transaction_skip_preflight_count", "Count of transactions that skipped the preflight check",
     ).unwrap();
 
     pub static ref RPC_REQUESTS_COUNT: IntCounterVec = IntCounterVec::new(
@@ -164,7 +164,7 @@ lazy_static::lazy_static! {
     // Account fetch results from network (RPC)
     pub static ref ACCOUNT_FETCHES_SUCCESS_COUNT: IntCounter =
         IntCounter::new(
-            "account_fetches_success",
+            "account_fetches_success_count",
             "Total number of successful network \
              account fetches",
         )
@@ -172,7 +172,7 @@ lazy_static::lazy_static! {
 
     pub static ref ACCOUNT_FETCHES_FAILED_COUNT: IntCounter =
         IntCounter::new(
-            "account_fetches_failed",
+            "account_fetches_failed_count",
             "Total number of failed network account fetches \
              (RPC errors)",
         )
@@ -180,7 +180,7 @@ lazy_static::lazy_static! {
 
     pub static ref ACCOUNT_FETCHES_FOUND_COUNT: IntCounter =
         IntCounter::new(
-            "account_fetches_found",
+            "account_fetches_found_count",
             "Total number of network account fetches that \
              found an account",
         )
@@ -188,7 +188,7 @@ lazy_static::lazy_static! {
 
     pub static ref ACCOUNT_FETCHES_NOT_FOUND_COUNT: IntCounter =
         IntCounter::new(
-            "account_fetches_not_found",
+            "account_fetches_not_found_count",
             "Total number of network account fetches where \
              account was not found",
         )
@@ -234,7 +234,7 @@ lazy_static::lazy_static! {
     ).unwrap();
 
     static ref COMMITTOR_INTENT_CU_USAGE: IntGauge = IntGauge::new(
-        "committor_intent_cu_usage", "Compute units used for Intent"
+        "committor_intent_cu_usage_gauge", "Compute units used for Intent"
     ).unwrap();
 }
 
