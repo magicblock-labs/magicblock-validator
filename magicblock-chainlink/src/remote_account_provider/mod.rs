@@ -989,7 +989,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         )
                     }
                     None if mark_empty_if_not_found.contains(pubkey) => {
-                        found_count += 1;
+                        not_found_count += 1;
                         RemoteAccount::from_fresh_account(
                             Account {
                                 lamports: 0,
