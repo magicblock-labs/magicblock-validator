@@ -88,21 +88,9 @@ impl BaseTask for ArgsTask {
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
         match self.task_type {
-            ArgsTaskType::Commit(mut value) if value.is_commit_diff() => {
-                // TODO (snawaz): Currently, we do not support executing CommitDiff
-                // as BufferTask, which is why we're forcing CommitTask to use CommitState
-                // before converting this task into BufferTask Once CommitDiff is supported
-                // by BufferTask, we do not have to force_commit_state and we can remove
-                // force_commit_state stuff, as it's essentially a downgrade.
-
-                value.force_commit_state();
-                Ok(Box::new(BufferTask::new_preparation_required(
-                    BufferTaskType::Commit(value),
-                )))
-            }
             ArgsTaskType::Commit(value) => {
                 Ok(Box::new(BufferTask::new_preparation_required(
-                    BufferTaskType::Commit(value),
+                    BufferTaskType::Commit(value.switch_to_buffer_strategy()),
                 )))
             }
             ArgsTaskType::BaseAction(_)

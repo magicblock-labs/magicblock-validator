@@ -57,8 +57,8 @@ magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "e8d03936", features = [
-  "no-entrypoint",
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "ea1f2f916268132248fe8d5de5f07d76765dd937", features = [
+ "no-entrypoint",
 ] }
 magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }

@@ -1,6 +1,6 @@
 use account_fetcher::*;
 use dlp::{
-    args::{CommitDiffArgs, CommitStateArgs},
+    args::{CommitDiffArgs, CommitStateArgs, CommitStateFromBufferArgs},
     compute_diff,
 };
 use dyn_clone::DynClone;
@@ -50,7 +50,6 @@ pub enum PreparationState {
     Cleanup(CleanupTask),
 }
 
-#[cfg(test)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TaskStrategy {
     Args,
@@ -113,7 +112,7 @@ pub struct CommitTask {
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
     base_account: Option<Account>,
-    force_commit_state: bool,
+    strategy: TaskStrategy,
 }
 
 impl CommitTask {
@@ -150,27 +149,50 @@ impl CommitTask {
             allow_undelegation,
             committed_account,
             base_account,
-            force_commit_state: false,
+            strategy: TaskStrategy::Args,
         }
     }
 
     pub fn is_commit_diff(&self) -> bool {
-        !self.force_commit_state
-            && self.committed_account.account.data.len()
-                > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
+        self.committed_account.account.data.len()
+            > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
             && self.base_account.is_some()
     }
 
-    pub fn force_commit_state(&mut self) {
-        self.force_commit_state = true;
+    pub fn switch_to_buffer_strategy(mut self) -> Self {
+        self.strategy = TaskStrategy::Buffer;
+        self
     }
 
     pub fn create_commit_ix(&self, validator: &Pubkey) -> Instruction {
-        if let Some(fetched_account) = self.base_account.as_ref() {
-            self.create_commit_diff_ix(validator, fetched_account)
-        } else {
-            self.create_commit_state_ix(validator)
+        match self.strategy {
+            TaskStrategy::Args => {
+                if let Some(base_account) = self.base_account.as_ref() {
+                    self.create_commit_diff_ix(validator, base_account)
+                } else {
+                    self.create_commit_state_ix(validator)
+                }
+            }
+            TaskStrategy::Buffer => {
+                if let Some(base_account) = self.base_account.as_ref() {
+                    self.create_commit_diff_from_buffer_ix(
+                        validator,
+                        base_account,
+                    )
+                } else {
+                    self.create_commit_state_from_buffer_ix(validator)
+                }
+            }
         }
+    }
+
+    pub fn compute_diff(&self) -> Option<dlp::rkyv::AlignedVec> {
+        self.base_account.as_ref().map(|base_account| {
+            compute_diff(
+                base_account.data(),
+                self.committed_account.account.data(),
+            )
+        })
     }
 
     fn create_commit_state_ix(&self, validator: &Pubkey) -> Instruction {
@@ -191,17 +213,13 @@ impl CommitTask {
     fn create_commit_diff_ix(
         &self,
         validator: &Pubkey,
-        fetched_account: &Account,
+        base_account: &Account,
     ) -> Instruction {
-        if self.force_commit_state {
-            return self.create_commit_state_ix(validator);
-        }
-
         let args = CommitDiffArgs {
             nonce: self.commit_id,
             lamports: self.committed_account.account.lamports,
             diff: compute_diff(
-                fetched_account.data(),
+                base_account.data(),
                 self.committed_account.account.data(),
             )
             .to_vec(),
@@ -213,6 +231,57 @@ impl CommitTask {
             self.committed_account.pubkey,
             self.committed_account.account.owner,
             args,
+        )
+    }
+
+    fn create_commit_state_from_buffer_ix(
+        &self,
+        validator: &Pubkey,
+    ) -> Instruction {
+        let commit_id_slice = self.commit_id.to_le_bytes();
+        let (commit_buffer_pubkey, _) =
+            magicblock_committor_program::pdas::buffer_pda(
+                validator,
+                &self.committed_account.pubkey,
+                &commit_id_slice,
+            );
+
+        dlp::instruction_builder::commit_state_from_buffer(
+            *validator,
+            self.committed_account.pubkey,
+            self.committed_account.account.owner,
+            commit_buffer_pubkey,
+            CommitStateFromBufferArgs {
+                nonce: self.commit_id,
+                lamports: self.committed_account.account.lamports,
+                allow_undelegation: self.allow_undelegation,
+            },
+        )
+    }
+
+    fn create_commit_diff_from_buffer_ix(
+        &self,
+        validator: &Pubkey,
+        _fetched_account: &Account,
+    ) -> Instruction {
+        let commit_id_slice = self.commit_id.to_le_bytes();
+        let (commit_buffer_pubkey, _) =
+            magicblock_committor_program::pdas::buffer_pda(
+                validator,
+                &self.committed_account.pubkey,
+                &commit_id_slice,
+            );
+
+        dlp::instruction_builder::commit_diff_from_buffer(
+            *validator,
+            self.committed_account.pubkey,
+            self.committed_account.account.owner,
+            commit_buffer_pubkey,
+            CommitStateFromBufferArgs {
+                nonce: self.commit_id,
+                lamports: self.committed_account.account.lamports,
+                allow_undelegation: self.allow_undelegation,
+            },
         )
     }
 }

@@ -1,4 +1,3 @@
-use dlp::args::CommitStateFromBufferArgs;
 use magicblock_committor_program::Chunks;
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::Instruction;
@@ -46,16 +45,18 @@ impl BufferTask {
 
     fn preparation_required(task_type: &BufferTaskType) -> PreparationState {
         let BufferTaskType::Commit(ref commit_task) = task_type;
-        let committed_data = commit_task.committed_account.account.data.clone();
-        let chunks = Chunks::from_data_length(
-            committed_data.len(),
-            MAX_WRITE_CHUNK_SIZE,
-        );
+        let state_or_diff = if let Some(diff) = commit_task.compute_diff() {
+            diff.to_vec()
+        } else {
+            commit_task.committed_account.account.data.clone()
+        };
+        let chunks =
+            Chunks::from_data_length(state_or_diff.len(), MAX_WRITE_CHUNK_SIZE);
 
         PreparationState::Required(PreparationTask {
             commit_id: commit_task.commit_id,
             pubkey: commit_task.committed_account.pubkey,
-            committed_data,
+            committed_data: state_or_diff,
             chunks,
         })
     }
@@ -64,31 +65,15 @@ impl BufferTask {
 impl BaseTask for BufferTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         let BufferTaskType::Commit(ref value) = self.task_type;
-        let commit_id_slice = value.commit_id.to_le_bytes();
-        let (commit_buffer_pubkey, _) =
-            magicblock_committor_program::pdas::buffer_pda(
-                validator,
-                &value.committed_account.pubkey,
-                &commit_id_slice,
-            );
-
-        dlp::instruction_builder::commit_state_from_buffer(
-            *validator,
-            value.committed_account.pubkey,
-            value.committed_account.account.owner,
-            commit_buffer_pubkey,
-            CommitStateFromBufferArgs {
-                nonce: value.commit_id,
-                lamports: value.committed_account.account.lamports,
-                allow_undelegation: value.allow_undelegation,
-            },
-        )
+        value.create_commit_ix(validator)
     }
 
     /// No further optimizations
     fn optimize(
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
+        // Since the buffer in BufferTask doesn't contribute to the size of
+        // transaction, there is nothing we can do here to optimize/reduce the size.
         Err(self)
     }
 
