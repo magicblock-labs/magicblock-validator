@@ -112,7 +112,7 @@ async fn metrics_service_router(
                 .unwrap_or_default(),
         );
     }
-    match (req.method(), req.uri().path()) {
+    let result = match (req.method(), req.uri().path()) {
         (&Method::GET, "/metrics") => {
             let metrics = TextEncoder::new()
                 .encode_to_string(&metrics::REGISTRY.gather())
@@ -127,7 +127,14 @@ async fn metrics_service_router(
             *not_found.status_mut() = StatusCode::NOT_FOUND;
             Ok(not_found)
         }
-    }
+    };
+    // We must consume the body fully to keep the connection alive. We
+    // iterate over all chunks and simply drop them. This prevents garbage
+    // data of previous requests from being stuck in connection buffer.
+    let mut body = req.into_body();
+    while let Some(_) = body.frame().await {}
+
+    result
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
