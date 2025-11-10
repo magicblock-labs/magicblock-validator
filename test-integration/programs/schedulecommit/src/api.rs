@@ -57,6 +57,7 @@ pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
 
 pub fn delegate_account_cpi_instruction(
     payer: Pubkey,
+    validator: Option<Pubkey>,
     player: Pubkey,
 ) -> Instruction {
     let program_id = crate::id();
@@ -65,6 +66,7 @@ pub fn delegate_account_cpi_instruction(
     let args = DelegateCpiArgs {
         valid_until: i64::MAX,
         commit_frequency_ms: 1_000_000_000,
+        validator,
         player,
     };
 
