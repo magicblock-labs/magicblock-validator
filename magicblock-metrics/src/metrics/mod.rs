@@ -82,6 +82,20 @@ lazy_static::lazy_static! {
     static ref LEDGER_ACCOUNT_MOD_DATA_GAUGE: IntGauge = IntGauge::new(
         "ledger_account_mod_data_gauge", "Ledger Account Mod Data Gauge",
     ).unwrap();
+    pub static ref LEDGER_COLUMNS_COUNT_DURATION_SECONDS: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "ledger_columns_count_duration_seconds",
+            "Time taken to compute ledger columns counts"
+        )
+        .buckets(
+            MICROS_10_90.iter().chain(
+            MICROS_100_900.iter()).chain(
+            MILLIS_1_9.iter()).chain(
+            MILLIS_10_90.iter()).chain(
+            MILLIS_100_900.iter()).chain(
+            SECONDS_1_9.iter()).cloned().collect()
+        ),
+    ).unwrap();
 
     // -----------------
     // Accounts
@@ -315,6 +329,21 @@ pub fn set_ledger_perf_samples_count(count: i64) {
 
 pub fn set_ledger_account_mod_data_count(count: i64) {
     LEDGER_ACCOUNT_MOD_DATA_GAUGE.set(count);
+}
+
+pub fn observe_columns_count_duration<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    LEDGER_COLUMNS_COUNT_DURATION_SECONDS.observe_closure_duration(f)
+}
+
+pub fn set_accounts_size(value: i64) {
+    ACCOUNTS_SIZE_GAUGE.set(value)
+}
+
+pub fn set_accounts_count(value: i64) {
+    ACCOUNTS_COUNT_GAUGE.set(value)
 }
 
 pub fn inc_pending_clone_requests() {
