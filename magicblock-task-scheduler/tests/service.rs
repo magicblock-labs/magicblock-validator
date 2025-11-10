@@ -103,7 +103,7 @@ pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
     .expect("task scheduler never incremented the account within 1s");
 
     token.cancel();
-    handle.await.unwrap().unwrap();
+    handle.await.expect("task service join handle failed")?;
 
     Ok(())
 }
@@ -207,7 +207,7 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
     );
 
     token.cancel();
-    handle.await.unwrap().unwrap();
+    handle.await.expect("task service join handle failed")?;
 
     Ok(())
 }
