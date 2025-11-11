@@ -19,6 +19,7 @@ use crate::{
         account_actions::set_account_owner_to_delegation_program,
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+            get_writable_with_idx,
         },
         instruction_utils::InstructionUtils,
     },
@@ -120,7 +121,7 @@ pub(crate) fn process_schedule_commit(
     #[cfg(test)]
     let parent_program_id = Some(&first_committee_owner);
 
-    // Assert all accounts are owned by invoking program OR are signers
+    // Assert all accounts are delegated, owned by invoking program OR are signers
     // NOTE: we don't require PDAs to be signers as in our case verifying that the
     // program owning the PDAs invoked us via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
@@ -131,6 +132,28 @@ pub(crate) fn process_schedule_commit(
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
         {
+            if opts.request_undelegation {
+                // Since we need to modify the account during undelegation, we expect it to be writable
+                // We rely on invariant "writable means delegated"
+                let acc_writable =
+                    get_writable_with_idx(transaction_context, idx as u16)?;
+                if !acc_writable {
+                    ic_msg!(
+                        invoke_context,
+                        "ScheduleCommit ERR: account {} is required to be writable in order to be undelegated",
+                        acc_pubkey
+                    );
+                    return Err(InstructionError::ReadonlyDataModified);
+                }
+            } else if !acc.borrow().delegated() {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit ERR: account {} is required to be delegated to the current validator, in order to be committed",
+                    acc_pubkey
+                );
+                return Err(InstructionError::IllegalOwner);
+            };
+
             let acc_owner = *acc.borrow().owner();
             if parent_program_id != Some(&acc_owner)
                 && !signers.contains(acc_pubkey)

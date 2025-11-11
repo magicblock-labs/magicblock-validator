@@ -222,6 +222,7 @@ impl ScheduleCommitTestContext {
         for (player, _) in &self.committees {
             let ix = delegate_account_cpi_instruction(
                 self.payer_chain.pubkey(),
+                self.ephem_validator_identity,
                 player.pubkey(),
             );
             ixs.push(ix);
