@@ -36,6 +36,7 @@ pub struct DelegateCpiArgs {
     valid_until: i64,
     commit_frequency_ms: u32,
     player: Pubkey,
+    validator: Option<Pubkey>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -266,7 +267,7 @@ pub fn process_delegate_cpi(
         &seeds_no_bump,
         DelegateConfig {
             commit_frequency_ms: args.commit_frequency_ms,
-            ..DelegateConfig::default()
+            validator: args.validator,
         },
     )?;
 
