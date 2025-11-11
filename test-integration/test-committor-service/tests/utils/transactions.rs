@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use light_client::indexer::{photon_indexer::PhotonIndexer, Indexer};
 use log::{debug, error};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -12,9 +15,13 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-use crate::utils::instructions::{
-    init_account_and_delegate_ixs, init_validator_fees_vault_ix,
-    InitAccountAndDelegateIxs,
+use crate::utils::{
+    instructions::{
+        init_account_and_delegate_compressed_ixs,
+        init_account_and_delegate_ixs, init_validator_fees_vault_ix,
+        InitAccountAndDelegateCompressedIxs, InitAccountAndDelegateIxs,
+    },
+    sleep_millis,
 };
 
 #[macro_export]
@@ -141,7 +148,7 @@ pub async fn init_and_delegate_account_on_chain(
         reallocs: realloc_ixs,
         delegate: delegate_ix,
         pda,
-        rent_excempt,
+        rent_exempt,
     } = init_account_and_delegate_ixs(counter_auth.pubkey(), bytes);
 
     let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
@@ -165,15 +172,12 @@ pub async fn init_and_delegate_account_on_chain(
     debug!("Init account: {:?}", pda);
 
     // 2. Airdrop to account for extra rent needed for reallocs
-    rpc_client
-        .request_airdrop(&pda, rent_excempt)
-        .await
-        .unwrap();
+    rpc_client.request_airdrop(&pda, rent_exempt).await.unwrap();
 
     debug!(
         "Airdropped to account: {:4} {}SOL to pay rent for {} bytes",
         pda,
-        rent_excempt as f64 / LAMPORTS_PER_SOL as f64,
+        rent_exempt as f64 / LAMPORTS_PER_SOL as f64,
         bytes
     );
 
@@ -220,6 +224,92 @@ pub async fn init_and_delegate_account_on_chain(
     let pda_acc = get_account!(rpc_client, pda, "pda");
 
     (pda, pda_acc)
+}
+
+/// This needs to be run for each test that required a new counter to be compressed delegated
+pub async fn init_and_delegate_compressed_account_on_chain(
+    counter_auth: &Keypair,
+) -> (Pubkey, [u8; 32], Account) {
+    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let photon_indexer = Arc::new(PhotonIndexer::new(
+        "http://localhost:8784".to_string(),
+        None,
+    ));
+
+    rpc_client
+        .request_airdrop(&counter_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
+        .await
+        .unwrap();
+    debug!("Airdropped to counter auth: {} SOL", 777 * LAMPORTS_PER_SOL);
+
+    let InitAccountAndDelegateCompressedIxs {
+        init: init_counter_ix,
+        delegate: delegate_ix,
+        pda,
+        address,
+    } = init_account_and_delegate_compressed_ixs(
+        counter_auth.pubkey(),
+        photon_indexer.clone(),
+    )
+    .await;
+
+    let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
+    // 1. Init account
+    rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &Transaction::new_signed_with_payer(
+                &[init_counter_ix],
+                Some(&counter_auth.pubkey()),
+                &[&counter_auth],
+                latest_block_hash,
+            ),
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to init account");
+    debug!("Init account: {:?}", pda);
+
+    let pda_acc = get_account!(rpc_client, pda, "pda");
+
+    // 2. Delegate account
+    let sig = rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &Transaction::new_signed_with_payer(
+                &[delegate_ix],
+                Some(&counter_auth.pubkey()),
+                &[&counter_auth],
+                latest_block_hash,
+            ),
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to delegate");
+    debug!("Delegated account: {:?}, signature: {}", pda, sig);
+
+    // Wait for the indexer to index the account
+    sleep_millis(500).await;
+
+    debug!(
+        "Getting compressed account: {:?}",
+        Pubkey::new_from_array(address)
+    );
+    let compressed_account = photon_indexer
+        .get_compressed_account(address, None)
+        .await
+        .expect("Failed to get compressed account")
+        .value;
+
+    eprintln!("Compressed account: {:?}", compressed_account);
+
+    (pda, compressed_account.hash, pda_acc)
 }
 
 /// This needs to be run once for all tests

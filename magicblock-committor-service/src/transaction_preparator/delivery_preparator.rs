@@ -165,12 +165,17 @@ impl DeliveryPreparator {
                 // In the case where the hash is not supposed to change, we will have to do max retry, which is bad.
                 let mut retries = 10;
                 let compressed_data = loop {
-                    let compressed_data =
+                    if let Ok(compressed_data) =
                         get_compressed_data(&delegated_account, photon_client)
-                            .await?;
+                            .await
+                    {
+                        if compressed_data.hash != original_hash {
+                            break compressed_data;
+                        }
+                    };
 
-                    if compressed_data.hash != original_hash || retries == 0 {
-                        break compressed_data;
+                    if retries == 0 {
+                        return Err(InternalError::CompressedDataNotFound);
                     }
 
                     sleep(Duration::from_millis(100)).await;
@@ -447,6 +452,8 @@ impl DeliveryPreparator {
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalError {
+    #[error("Compressed data not found")]
+    CompressedDataNotFound,
     #[error("0 retries was requested")]
     ZeroRetriesRequestedError,
     #[error("Chunks PDA does not exist for writing. pda: {0}")]

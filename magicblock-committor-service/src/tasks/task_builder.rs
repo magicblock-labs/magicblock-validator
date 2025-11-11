@@ -33,7 +33,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompressedData {
     pub hash: [u8; 32],
     pub compressed_delegation_record_bytes: Vec<u8>,
@@ -405,6 +405,7 @@ pub(crate) async fn get_compressed_data(
 ) -> Result<CompressedData, TaskBuilderError> {
     debug!("Getting compressed data for pubkey: {}", pubkey);
     let cda = derive_cda_from_pda(pubkey);
+    debug!("CDA: {:?}", cda);
     let compressed_delegation_record = photon_client
         .get_compressed_account(cda.to_bytes(), None)
         .await

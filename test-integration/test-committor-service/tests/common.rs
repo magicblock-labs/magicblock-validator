@@ -8,6 +8,8 @@ use std::{
 
 use async_trait::async_trait;
 use light_client::indexer::photon_indexer::PhotonIndexer;
+use light_compressed_account::instruction_data::compressed_proof::ValidityProof;
+use light_sdk_types::instruction::account_meta::CompressedAccountMeta;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
@@ -15,7 +17,7 @@ use magicblock_committor_service::{
         },
         IntentExecutorImpl,
     },
-    tasks::CommitTask,
+    tasks::{task_builder::CompressedData, CommitTask, CompressedCommitTask},
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
@@ -40,6 +42,12 @@ pub async fn create_test_client() -> MagicblockRpcClient {
     MagicblockRpcClient::new(Arc::new(rpc_client))
 }
 
+// Helper function to create a test PhotonIndexer
+pub fn create_test_photon_indexer() -> Arc<PhotonIndexer> {
+    let url = "http://localhost:8784".to_string();
+    Arc::new(PhotonIndexer::new(url, None))
+}
+
 // Test fixture structure
 pub struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
@@ -61,8 +69,7 @@ impl TestFixture {
         let rpc_client = create_test_client().await;
 
         // PhotonIndexer
-        let photon_client =
-            Arc::new(PhotonIndexer::new(rpc_client.url(), None));
+        let photon_client = create_test_photon_indexer();
 
         // TableMania
         let gc_config = GarbageCollectorConfig::default();
@@ -163,6 +170,36 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
         allow_undelegation: false,
         committed_account: CommittedAccount {
             pubkey: Pubkey::new_unique(),
+            account: Account {
+                lamports: 1000,
+                data: data.to_vec(),
+                owner: dlp::id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+        },
+    }
+}
+
+#[allow(dead_code)]
+pub fn create_compressed_commit_task(
+    pubkey: Pubkey,
+    hash: [u8; 32],
+    data: &[u8],
+) -> CompressedCommitTask {
+    static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
+    CompressedCommitTask {
+        commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
+        compressed_data: CompressedData {
+            hash,
+            compressed_delegation_record_bytes: vec![],
+            remaining_accounts: vec![],
+            account_meta: CompressedAccountMeta::default(),
+            proof: ValidityProof::default(),
+        },
+        allow_undelegation: false,
+        committed_account: CommittedAccount {
+            pubkey,
             account: Account {
                 lamports: 1000,
                 data: data.to_vec(),

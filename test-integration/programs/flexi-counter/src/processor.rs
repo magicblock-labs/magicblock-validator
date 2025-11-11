@@ -540,6 +540,7 @@ fn process_delegate_compressed(
     **counter_pda_info.try_borrow_mut_lamports()? = min_rent;
 
     // Remove data from the delegated account and reassign ownership
+    let account_data = counter_pda_info.data.borrow().to_vec();
     counter_pda_info.realloc(0, false)?;
     counter_pda_info.assign(compressed_delegation_program_info.key);
 
@@ -559,9 +560,8 @@ fn process_delegate_compressed(
             validity_proof: args.validity_proof,
             address_tree_info: args.address_tree_info,
             account_meta: args.account_meta,
-            lamports: Rent::get()?
-                .minimum_balance(core::mem::size_of::<FlexiCounter>()),
-            account_data: counter_pda_info.data.borrow().to_vec(),
+            lamports: Rent::get()?.minimum_balance(account_data.len()),
+            account_data,
             pda_seeds: pda_seeds
                 .iter()
                 .map(|seed| seed.to_vec())

@@ -243,7 +243,7 @@ fn run_table_mania_and_committor_tests(
 
     let start_devnet_validator = || match start_validator(
         "committor-conf.devnet.toml",
-        ValidatorCluster::Chain(None),
+        ValidatorCluster::Light,
         &loaded_chain_accounts,
     ) {
         Some(validator) => validator,

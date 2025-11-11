@@ -6,7 +6,11 @@ edition.workspace = true
 [dev-dependencies]
 async-trait = { workspace = true }
 borsh = { workspace = true }
-light-client = { workspace = true }
+compressed-delegation-client = { workspace = true }
+light-client = { workspace = true, features = ["v2"] }
+light-compressed-account = { workspace = true }
+light-sdk = { workspace = true, features = ["v2"] }
+light-sdk-types = { workspace = true, features = ["v2"] }
 log = { workspace = true }
 futures = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
@@ -15,6 +19,7 @@ magicblock-committor-program = { workspace = true, features = [
 magicblock-committor-service = { workspace = true, features = [
   "dev-context-only-utils",
 ] }
+magicblock-core = { workspace = true }
 magicblock-delegation-program = { workspace = true, features = [
   "no-entrypoint",
 ] }

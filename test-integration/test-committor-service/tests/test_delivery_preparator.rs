@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use borsh::BorshDeserialize;
+use compressed_delegation_client::CompressedDelegationRecord;
 use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
@@ -12,11 +13,22 @@ use magicblock_committor_service::{
         BaseTask, PreparationState,
     },
 };
-use solana_sdk::signer::Signer;
+use magicblock_program::validator::{
+    generate_validator_authority_if_needed, validator_authority_id,
+};
+use solana_sdk::{
+    rent::Rent, signature::Keypair, signer::Signer, sysvar::Sysvar,
+};
+use test_kit::init_logger;
 
-use crate::common::{create_commit_task, generate_random_bytes, TestFixture};
+use crate::common::{
+    create_commit_task, create_compressed_commit_task, generate_random_bytes,
+    TestFixture,
+};
+use crate::utils::transactions::init_and_delegate_compressed_account_on_chain;
 
 mod common;
+mod utils;
 
 #[tokio::test]
 async fn test_prepare_10kb_buffer() {
@@ -210,4 +222,62 @@ async fn test_lookup_tables() {
 
         assert!(!alt_account.data.is_empty(), "ALT account should have data");
     }
+}
+
+#[tokio::test]
+async fn test_prepare_compressed_commit() {
+    let fixture = TestFixture::new().await;
+    let preparator = fixture.create_delivery_preparator();
+
+    generate_validator_authority_if_needed();
+    init_logger!();
+
+    let counter_auth = Keypair::new();
+    let (pda, _hash, account) =
+        init_and_delegate_compressed_account_on_chain(&counter_auth).await;
+
+    let data = generate_random_bytes(10);
+    let mut task = Box::new(ArgsTask::new(ArgsTaskType::CompressedCommit(
+        create_compressed_commit_task(pda, Default::default(), data.as_slice()),
+    ))) as Box<dyn BaseTask>;
+    let compressed_data = task.as_ref().get_compressed_data().clone();
+
+    preparator
+        .prepare_task(
+            &fixture.authority,
+            &mut *task,
+            &None::<IntentPersisterImpl>,
+            &Some(fixture.photon_client),
+        )
+        .await
+        .expect("Failed to prepare compressed commit");
+
+    // Verify the compressed data was updated
+    let new_compressed_data = task.as_ref().get_compressed_data();
+    assert_ne!(
+        new_compressed_data, compressed_data,
+        "Compressed data size mismatch"
+    );
+
+    // Verify the delegation record is correct
+    let delegation_record = CompressedDelegationRecord::from_bytes(
+        &new_compressed_data
+            .unwrap()
+            .compressed_delegation_record_bytes,
+    )
+    .unwrap();
+    let expected = CompressedDelegationRecord {
+        authority: validator_authority_id(),
+        pda,
+        delegation_slot: delegation_record.delegation_slot,
+        lamports: Rent::default().minimum_balance(account.data.len()),
+        data: account.data,
+        last_update_nonce: 0,
+        is_undelegatable: false,
+        owner: program_flexi_counter::ID,
+    };
+    assert_eq!(
+        delegation_record, expected,
+        "Delegation record should be the same"
+    );
 }
