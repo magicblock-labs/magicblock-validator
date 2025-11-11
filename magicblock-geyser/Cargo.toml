@@ -8,3 +8,8 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+agave-geyser-plugin-interface = { workspace = true }
+json = { workspace = true }
+libloading = { workspace = true }
+solana-account = { workspace = true }
+solana-pubkey = { workspace = true }
