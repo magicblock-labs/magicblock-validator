@@ -146,7 +146,7 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
 
     // Wait until we actually observe at least five executions
     let executed_before_cancel =
-        tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::time::timeout(Duration::from_millis(10 * interval), async {
             loop {
                 if let Some(value) =
                     env.get_account(account.pubkey()).data().first()
@@ -159,7 +159,9 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
             }
         })
         .await
-        .expect("task scheduler never reached five executions within 2s");
+        .expect(
+            "task scheduler never reached five executions within 10 intervals",
+        );
 
     // Cancel the task
     let ix = Instruction::new_with_bincode(
