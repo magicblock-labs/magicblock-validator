@@ -52,6 +52,11 @@ pub struct TaskSchedulerService {
     token: CancellationToken,
 }
 
+enum ProcessingOutcome {
+    Success,
+    Recoverable(TaskSchedulerError),
+}
+
 // SAFETY: TaskSchedulerService is moved into a single Tokio task in `start()` and never cloned.
 // It runs exclusively on that task's thread. All fields (SchedulerDatabase, TransactionSchedulerHandle,
 // ScheduledTasksRx, LatestBlock, DelayQueue, HashMap, AtomicU64, CancellationToken) are Send+Sync,
@@ -120,7 +125,7 @@ impl TaskSchedulerService {
     fn process_request(
         &mut self,
         request: &TaskRequest,
-    ) -> TaskSchedulerResult<TaskSchedulerResult<()>> {
+    ) -> TaskSchedulerResult<ProcessingOutcome> {
         match request {
             TaskRequest::Schedule(schedule_request) => {
                 if let Err(e) = self.register_task(schedule_request) {
@@ -133,7 +138,7 @@ impl TaskSchedulerService {
                         schedule_request.id, e
                     );
 
-                    return Ok(Err(e));
+                    return Ok(ProcessingOutcome::Recoverable(e));
                 }
             }
             TaskRequest::Cancel(cancel_request) => {
@@ -147,12 +152,12 @@ impl TaskSchedulerService {
                         cancel_request.task_id, e
                     );
 
-                    return Ok(Err(e));
+                    return Ok(ProcessingOutcome::Recoverable(e));
                 }
             }
         };
 
-        Ok(Ok(()))
+        Ok(ProcessingOutcome::Success)
     }
 
     fn process_cancel_request(
@@ -259,14 +264,14 @@ impl TaskSchedulerService {
                 }
                 Some(task) = self.scheduled_tasks.recv() => {
                     match self.process_request(&task) {
-                        Ok(Err(e)) => {
+                        Ok(ProcessingOutcome::Success) => {}
+                        Ok(ProcessingOutcome::Recoverable(e)) => {
                             warn!("Failed to process request ID={}: {e:?}", task.id());
                         }
                         Err(e) => {
                             error!("Failed to process request: {}", e);
                             return Err(e);
                         }
-                        _ => {}
                     }
                 }
                 _ = self.token.cancelled() => {
