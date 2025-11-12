@@ -12,7 +12,7 @@ use magicblock_core::link::transactions::{
 };
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
-    args::{CancelTaskRequest, ScheduleTaskRequest, TaskRequest},
+    args::{CancelTaskRequest, TaskRequest},
     validator::{validator_authority, validator_authority_id},
 };
 use solana_sdk::{
@@ -209,18 +209,11 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    pub fn register_task(
+    pub fn register_task<'a>(
         &mut self,
-        task: &ScheduleTaskRequest,
+        task: impl Into<DbTask>,
     ) -> TaskSchedulerResult<()> {
-        let db_task = DbTask {
-            id: task.id,
-            instructions: task.instructions.clone(),
-            authority: task.authority,
-            execution_interval_millis: task.execution_interval_millis,
-            executions_left: task.iterations,
-            last_execution_millis: 0,
-        };
+        let task = task.into();
 
         // Check if the task already exists in the database
         if let Some(db_task) = self.db.get_task(task.id)? {
@@ -233,9 +226,9 @@ impl TaskSchedulerService {
             }
         }
 
-        self.db.insert_task(&db_task)?;
+        self.db.insert_task(&task)?;
         self.task_queue
-            .insert(db_task.clone(), Duration::from_millis(0));
+            .insert(task.clone(), Duration::from_millis(0));
         debug!("Registered task {} from context", task.id);
 
         Ok(())
