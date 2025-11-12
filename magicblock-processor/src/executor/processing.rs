@@ -81,9 +81,6 @@ impl super::TransactionExecutor {
                         );
                     }
                 }
-
-                // Make sure that no matter what happened to the transaction we clear the stash
-                ExecutionTlsStash::clear();
             }
             Err(_) => {
                 // If the transaction failed during the execution and the caller is waiting
@@ -95,6 +92,9 @@ impl super::TransactionExecutor {
         if !is_replay {
             self.commit_transaction(txn, processed, balances);
         }
+
+        // Make sure that no matter what happened to the transaction we clear the stash
+        ExecutionTlsStash::clear();
 
         // Send the final result back to the caller if they are waiting.
         tx.map(|tx| tx.send(result));
