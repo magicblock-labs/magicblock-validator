@@ -63,28 +63,23 @@ impl super::TransactionExecutor {
         };
 
         // The transaction has been processed, we can commit the account state changes
+        // Failed transactions still pay fees, so we need to commit the accounts even if the transaction failed
         let feepayer = *txn.fee_payer();
         self.commit_accounts(feepayer, &processed, is_replay);
 
         let result = processed.status();
-        match result {
-            Ok(_) => {
-                // If the transaction succeeded, check for potential tasks
-                // that may have been scheduled during the transaction execution
-                // TODO: send intents here as well once implemented
-                if !is_replay {
-                    while let Some(task) = ExecutionTlsStash::next_task() {
-                        // This is a best effort send, if the tasks service has terminated
-                        // for some reason, logging is the best we can do at this point
-                        let _ = self.tasks_tx.send(task).inspect_err(|_|
+        if result.is_ok() {
+            // If the transaction succeeded, check for potential tasks
+            // that may have been scheduled during the transaction execution
+            // TODO: send intents here as well once implemented
+            if !is_replay {
+                while let Some(task) = ExecutionTlsStash::next_task() {
+                    // This is a best effort send, if the tasks service has terminated
+                    // for some reason, logging is the best we can do at this point
+                    let _ = self.tasks_tx.send(task).inspect_err(|_|
                             error!("Scheduled tasks service has hung up and is no longer running")
                         );
-                    }
                 }
-            }
-            Err(_) => {
-                // If the transaction failed during the execution and the caller is waiting
-                // for the result, do not persist any changes (preflight check is true)
             }
         }
 
