@@ -88,7 +88,7 @@ impl super::TransactionExecutor {
                         // This is a best effort send, if the tasks service has terminated
                         // for some reason, logging is the best we can do at this point
                         let _ = self.tasks_tx.send(task).inspect_err(|_|
-                            warn!("Scheduled tasks service has hung up and is no longer running")
+                            error!("Scheduled tasks service has hung up and is no longer running")
                         );
                     }
                 }
