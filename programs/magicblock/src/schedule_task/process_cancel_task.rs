@@ -1,9 +1,7 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::{
-    args::{CancelTaskRequest, TaskRequest},
-    tls::ExecutionTlsStash,
-};
+use magicblock_core::tls::ExecutionTlsStash;
+use magicblock_magic_program_api::args::{CancelTaskRequest, TaskRequest};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};

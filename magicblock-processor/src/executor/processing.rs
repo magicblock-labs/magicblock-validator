@@ -6,8 +6,8 @@ use magicblock_core::link::{
         TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
     },
 };
+use magicblock_core::tls::ExecutionTlsStash;
 use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
-use magicblock_program::tls::ExecutionTlsStash;
 use solana_pubkey::Pubkey;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},

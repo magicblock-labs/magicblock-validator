@@ -1,6 +1,5 @@
 pub mod args;
 pub mod instruction;
-pub mod tls;
 
 pub use solana_program::{declare_id, pubkey, pubkey::Pubkey};
 

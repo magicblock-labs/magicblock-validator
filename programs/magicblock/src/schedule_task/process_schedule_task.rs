@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::{
-    args::{ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest},
-    tls::ExecutionTlsStash,
+use magicblock_core::tls::ExecutionTlsStash;
+use magicblock_magic_program_api::args::{
+    ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest,
 };
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;

@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::VecDeque};
 
-use crate::args::TaskRequest;
+use magicblock_magic_program_api::args::TaskRequest;
 
 #[derive(Default, Debug)]
 pub struct ExecutionTlsStash {
