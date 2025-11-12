@@ -154,14 +154,18 @@ fn merge_impl(code: TokenStream2) -> TokenStream2 {
 }
 
 /// Pretty-prints token stream for deterministic comparison
-/// Handles whitespace normalization for consistent comparisons
+/// Uses prettyplease for robust formatting that handles comments and string literals correctly
 fn pretty_print(tokens: proc_macro2::TokenStream) -> String {
     let code = tokens.to_string();
-    // Return normalized version for comparison - just split and rejoin whitespace
-    code.split_whitespace()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
+    // Parse as a Rust file and format with prettyplease for robust normalization
+    match syn::parse_file(&code) {
+        Ok(file) => prettyplease::unparse(&file),
+        // Fallback to simple normalization if parsing fails
+        Err(_) => code.split_whitespace()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 /// Helper function that compares generated merge impl with expected output
