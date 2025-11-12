@@ -106,6 +106,9 @@ impl super::TransactionExecutor {
         transaction: [SanitizedTransaction; 1],
         tx: TxnSimulationResultTx,
     ) {
+        // Defensively clear any stale data from previous calls
+        ExecutionTlsStash::clear();
+
         let (result, _) = self.process(&transaction);
         let result = match result {
             Ok(processed) => {
