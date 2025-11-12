@@ -186,7 +186,7 @@ impl ExecutionCoordinator {
                 } else {
                     lock.borrow_mut().read(executor)
                 }
-                .map_err(|e| BlockerId::Executor(e));
+                .map_err(BlockerId::Executor);
             }
 
             // We couldn't lock all of the accounts, so we are bailing, but
