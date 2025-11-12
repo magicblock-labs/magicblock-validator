@@ -209,7 +209,7 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    pub fn register_task<'a>(
+    pub fn register_task(
         &mut self,
         task: impl Into<DbTask>,
     ) -> TaskSchedulerResult<()> {
