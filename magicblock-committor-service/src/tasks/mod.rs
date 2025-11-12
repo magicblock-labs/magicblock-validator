@@ -1,4 +1,5 @@
 use dyn_clone::DynClone;
+use log::debug;
 use magicblock_committor_program::{
     instruction_builder::{
         close_buffer::{create_close_ix, CreateCloseIxArgs},
@@ -191,6 +192,13 @@ impl BufferPreparationTask {
         let chunks_account_size =
             Chunks::struct_size(self.chunks.count()) as u64;
         let buffer_account_size = self.committed_data.len() as u64;
+        debug!("Chunks: {:?}", self.chunks.count().div_ceil(8));
+        debug!("Chunks: {:?}", std::mem::size_of::<usize>());
+        debug!("Chunks: {:?}", std::mem::size_of::<u16>());
+        debug!("Chunks count: {}", self.chunks.count());
+        debug!("Chunks chunk size: {}", self.chunks.chunk_size());
+        debug!("Chunks account size: {}", chunks_account_size);
+        debug!("Buffer account size: {}", buffer_account_size);
 
         let (instruction, _, _) = create_init_ix(CreateInitIxArgs {
             authority: *authority,

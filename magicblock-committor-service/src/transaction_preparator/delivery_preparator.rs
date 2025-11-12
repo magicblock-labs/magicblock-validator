@@ -147,13 +147,6 @@ impl DeliveryPreparator {
                 ))?;
             }
             PreparationTask::Compressed => {
-                // HACK: We retry until the hash changes to be sure that the indexer has the change.
-                // This is a bad way of doing it as it assumes that the hash changes.
-                // It will break if the action is done in an isolated manner.
-                let original_hash = task
-                    .get_compressed_data()
-                    .expect("Compressed data not found")
-                    .hash;
                 let delegated_account = task
                     .delegated_account()
                     .ok_or(InternalError::DelegatedAccountNotFound)?;
@@ -161,25 +154,12 @@ impl DeliveryPreparator {
                     .as_ref()
                     .ok_or(InternalError::PhotonClientNotFound)?;
 
-                // HACK: The indexer takes some time, so we retry a few times to be sure that the hash is updated.
-                // In the case where the hash is not supposed to change, we will have to do max retry, which is bad.
-                let mut retries = 10;
-                let compressed_data = loop {
-                    if let Ok(compressed_data) =
-                        get_compressed_data(&delegated_account, photon_client)
-                            .await
-                    {
-                        if compressed_data.hash != original_hash {
-                            break compressed_data;
-                        }
-                    };
-
-                    if retries == 0 {
-                        return Err(InternalError::CompressedDataNotFound);
-                    }
-
-                    sleep(Duration::from_millis(100)).await;
-                    retries -= 1;
+                let Ok(compressed_data) =
+                    get_compressed_data(&delegated_account, photon_client)
+                        .await
+                else {
+                    error!("Failed to get compressed data");
+                    return Err(InternalError::CompressedDataNotFound);
                 };
                 task.set_compressed_data(compressed_data);
             }

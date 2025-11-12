@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use compressed_delegation_client::PackedAddressTreeInfo;
 use light_client::indexer::{
-    photon_indexer::PhotonIndexer, AddressWithTree, CompressedAccount, Indexer,
+    photon_indexer::PhotonIndexer, AddressWithTree, Indexer,
     ValidityProofWithContext,
 };
 use light_sdk::instruction::{PackedAccounts, SystemAccountMetaConfig};

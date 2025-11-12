@@ -59,7 +59,7 @@ impl Chunks {
     /// Returns how many bytes [`Chunks`] will occupy certain count
     pub fn struct_size(count: usize) -> usize {
         // bits: Vec<u8>,
-        Self::count_to_bitfield_bytes(count)
+        4 + Self::count_to_bitfield_bytes(count)
         // count: usize,
         + std::mem::size_of::<usize>()
         // chunk_size: u16,
