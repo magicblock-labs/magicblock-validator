@@ -52,6 +52,8 @@ pub struct TaskSchedulerService {
     token: CancellationToken,
 }
 
+// SAFETY: Is only ever moved into a single Tokio task/thread.
+// All its fields are themselves Send and Sync.
 unsafe impl Send for TaskSchedulerService {}
 unsafe impl Sync for TaskSchedulerService {}
 impl TaskSchedulerService {
