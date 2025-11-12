@@ -52,8 +52,10 @@ pub struct TaskSchedulerService {
     token: CancellationToken,
 }
 
-// SAFETY: Is only ever moved into a single Tokio task/thread.
-// All its fields are themselves Send and Sync.
+// SAFETY: TaskSchedulerService is moved into a single Tokio task in `start()` and never cloned.
+// It runs exclusively on that task's thread. All fields (SchedulerDatabase, TransactionSchedulerHandle,
+// ScheduledTasksRx, LatestBlock, DelayQueue, HashMap, AtomicU64, CancellationToken) are Send+Sync,
+// and the service maintains exclusive ownership throughout its lifetime.
 unsafe impl Send for TaskSchedulerService {}
 unsafe impl Sync for TaskSchedulerService {}
 impl TaskSchedulerService {
