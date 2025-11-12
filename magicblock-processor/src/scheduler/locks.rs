@@ -40,9 +40,6 @@ pub(super) const MAX_SVM_EXECUTORS: u32 = ReadWriteLock::BITS - 1u32;
 
 /// The bit used to indicate a write lock is held. This is the most significant bit.
 const WRITE_BIT_MASK: u64 = 1u64 << (ReadWriteLock::BITS - 1u32);
-/// The starting transaction ID, follows the max possible value for ExecutorId
-pub(crate) const INIT_TRANSACTION_ID: TransactionId =
-    MAX_SVM_EXECUTORS as TransactionId;
 
 /// A read/write lock on a single Solana account, represented by a `u64` bitmask.
 #[derive(Default, Debug)]
@@ -50,17 +47,27 @@ pub(super) struct AccountLock {
     rw: ReadWriteLock,
 }
 
+/// An ID of the entity that is blocking transaction execution:
+/// 1. Executor: one of the executors is holding the necessary account lock(s)
+/// 2. Transaction: some transaction has already contended necessary account
+///    lock and needs to be executed first, so we need to be queued after it.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum BlockerId {
+    Executor(ExecutorId),
+    Transaction(TransactionId),
+}
+
 impl AccountLock {
     /// Attempts to acquire a write lock. Fails if any other lock is held.
+    /// The return Err value corresponds to the exeucotor ID, holding the lock
     #[inline]
     pub(super) fn write(
         &mut self,
         executor: ExecutorId,
     ) -> Result<(), ExecutorId> {
         if self.rw != 0 {
-            // If the lock is held, `trailing_zeros()` will return the index of the
-            // least significant bit that is set. This corresponds to the ID of the
-            // executor that holds the lock.
+            // If the lock is held, `trailing_zeros()` will return
+            // the index of the least significant bit that is set.
             return Err(self.rw.trailing_zeros());
         }
         // Set the write lock bit and the bit for the acquiring executor.
@@ -69,6 +76,7 @@ impl AccountLock {
     }
 
     /// Attempts to acquire a read lock. Fails if a write lock is held.
+    /// The return Err value corresponds to the exeucotor ID, holding the lock
     #[inline]
     pub(super) fn read(
         &mut self,
@@ -96,14 +104,14 @@ impl AccountLock {
 
 /// Generates a new, unique transaction ID.
 pub(super) fn next_transaction_id() -> TransactionId {
-    static mut COUNTER: TransactionId = INIT_TRANSACTION_ID;
+    static mut COUNTER: TransactionId = 0;
     // SAFETY: This is safe because the scheduler, which calls this function,
     // operates in a single, dedicated thread. Therefore, there are no concurrent
     // access concerns for this static mutable variable. The u64::MAX is large
     // enough range to statistically guarantee that no two transactions created
     // during the lifetime of the validator have the same ID.
     unsafe {
-        COUNTER = COUNTER.wrapping_add(1).max(INIT_TRANSACTION_ID);
+        COUNTER = COUNTER.wrapping_add(1);
         COUNTER
     }
 }

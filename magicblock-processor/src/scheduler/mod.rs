@@ -187,8 +187,8 @@ impl TransactionScheduler {
             // 2. The transaction is being blocked by the same original (newly freed)
             //    executor, which means we have re-queued it into the same queue, and
             //    we just abort all further scheduling attempts until the next cycle
-            if let Some(exec) = blocked {
-                if exec == blocker {
+            if let Some(blocking_executor) = blocked {
+                if blocking_executor == blocker {
                     break;
                 }
             }
@@ -204,7 +204,8 @@ impl TransactionScheduler {
     /// Attempts to schedule a single transaction for execution.
     ///
     /// If the transaction's required account locks are acquired, it is sent to the
-    /// specified executor. Otherwise, it is queued and will be retried later. The
+    /// specified executor. Otherwise, it is queued (on the blocking executor queue)
+    /// and will be retried later (once the blocking executor reports ready). The
     /// optional return value indicates a blocking executor, which is used by caller
     /// to make further decisions regarding further scheduling attempts.
     fn schedule_transaction(
@@ -212,17 +213,17 @@ impl TransactionScheduler {
         executor: ExecutorId,
         txn: TransactionWithId,
     ) -> Option<ExecutorId> {
-        let blocker = self.coordinator.try_acquire_locks(executor, &txn);
-        if let Err(blocker) = blocker {
-            self.coordinator.release_executor(executor);
-            let blocker = self.coordinator.queue_transaction(blocker, txn);
-            return Some(blocker);
-        }
+        let txn = match self.coordinator.try_schedule(executor, txn) {
+            Ok(txn) => txn,
+            Err(blocker) => {
+                return Some(blocker);
+            }
+        };
         // It's safe to ignore the result of the send operation. If the send fails,
         // it means the executor's channel is closed, which only happens on shutdown.
         // NOTE: the channel will always have enough capacity, since the executor was
         // marked ready, which means that its transaction queue is currently empty.
-        let _ = self.executors[executor as usize].try_send(txn.txn).inspect_err(|e| {
+        let _ = self.executors[executor as usize].try_send(txn).inspect_err(|e| {
             error!("Executor {executor} has shutdown or crashed, should not be possible: {e}")
         });
         None

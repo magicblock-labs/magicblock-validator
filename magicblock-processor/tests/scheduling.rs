@@ -582,154 +582,151 @@ async fn scenario_serial_transfer_chain(executors: u32) {
 // ## Test Matrix
 // #################################################################
 
-/// Macro to generate tests for different executor counts
-macro_rules! test_scenario {
-    ($scenario_fn:ident, $test_name:ident, $executors:expr) => {
-        #[tokio::test]
-        #[allow(non_snake_case)]
-        async fn $test_name() {
-            $scenario_fn($executors).await;
-        }
-    };
+// --- Test Scenario 1: Parallel Transfers (No Conflicts) ---
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_parallel_transfers_1_executor() {
+    scenario_parallel_transfers(1).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_parallel_transfers_2_executors() {
+    scenario_parallel_transfers(2).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_parallel_transfers_4_executors() {
+    scenario_parallel_transfers(4).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_parallel_transfers_8_executors() {
+    scenario_parallel_transfers(8).await;
 }
 
-// --- Test Scenario 1: Parallel Transfers (No Conflicts) ---
-test_scenario!(
-    scenario_parallel_transfers,
-    test_parallel_transfers_1_executor,
-    1
-);
-test_scenario!(
-    scenario_parallel_transfers,
-    test_parallel_transfers_2_executors,
-    2
-);
-test_scenario!(
-    scenario_parallel_transfers,
-    test_parallel_transfers_4_executors,
-    4
-);
-test_scenario!(
-    scenario_parallel_transfers,
-    test_parallel_transfers_8_executors,
-    8
-);
-
 // --- Test Scenario 2: Conflicting Transfers (Write Lock on 1 Account) ---
-test_scenario!(
-    scenario_conflicting_transfers,
-    test_conflicting_transfers_1_executor,
-    1
-);
-test_scenario!(
-    scenario_conflicting_transfers,
-    test_conflicting_transfers_2_executors,
-    2
-);
-test_scenario!(
-    scenario_conflicting_transfers,
-    test_conflicting_transfers_4_executors,
-    4
-);
-test_scenario!(
-    scenario_conflicting_transfers,
-    test_conflicting_transfers_8_executors,
-    8
-);
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_conflicting_transfers_1_executor() {
+    scenario_conflicting_transfers(1).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_conflicting_transfers_2_executors() {
+    scenario_conflicting_transfers(2).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_conflicting_transfers_4_executors() {
+    scenario_conflicting_transfers(4).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_conflicting_transfers_8_executors() {
+    scenario_conflicting_transfers(8).await;
+}
 
 // --- Test Scenario 3: Parallel ReadOnly Txs ---
-test_scenario!(
-    scenario_readonly_parallel,
-    test_readonly_parallel_1_executor,
-    1
-);
-test_scenario!(
-    scenario_readonly_parallel,
-    test_readonly_parallel_2_executors,
-    2
-);
-test_scenario!(
-    scenario_readonly_parallel,
-    test_readonly_parallel_4_executors,
-    4
-);
-test_scenario!(
-    scenario_readonly_parallel,
-    test_readonly_parallel_8_executors,
-    8
-);
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_readonly_parallel_1_executor() {
+    scenario_readonly_parallel(1).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_readonly_parallel_2_executors() {
+    scenario_readonly_parallel(2).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_readonly_parallel_4_executors() {
+    scenario_readonly_parallel(4).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_readonly_parallel_8_executors() {
+    scenario_readonly_parallel(8).await;
+}
 
 // --- Test Scenario 4: Mixed Workload (Conflicts + Parallel) ---
-test_scenario!(scenario_mixed_workload, test_mixed_workload_1_executor, 1);
-test_scenario!(scenario_mixed_workload, test_mixed_workload_2_executors, 2);
-test_scenario!(scenario_mixed_workload, test_mixed_workload_4_executors, 4);
-test_scenario!(scenario_mixed_workload, test_mixed_workload_8_executors, 8);
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_mixed_workload_1_executor() {
+    scenario_mixed_workload(1).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_mixed_workload_2_executors() {
+    scenario_mixed_workload(2).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_mixed_workload_4_executors() {
+    scenario_mixed_workload(4).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_mixed_workload_8_executors() {
+    scenario_mixed_workload(8).await;
+}
 
 // --- Test Scenario 5: Conflicting Data Writes ---
-test_scenario!(
-    scenario_conflicting_writes,
-    test_conflicting_writes_1_executor,
-    1
-);
-test_scenario!(
-    scenario_conflicting_writes,
-    test_conflicting_writes_2_executors,
-    2
-);
-test_scenario!(
-    scenario_conflicting_writes,
-    test_conflicting_writes_4_executors,
-    4
-);
-test_scenario!(
-    scenario_conflicting_writes,
-    test_conflicting_writes_8_executors,
-    8
-);
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_conflicting_writes_1_executor() {
+    scenario_conflicting_writes(1).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_conflicting_writes_2_executors() {
+    scenario_conflicting_writes(2).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_conflicting_writes_4_executors() {
+    scenario_conflicting_writes(4).await;
+}
+#[tokio::test]
+#[allow(non_snake_case)]
+async fn test_conflicting_writes_8_executors() {
+    scenario_conflicting_writes(8).await;
+}
 
 // --- Test Scenario 6: Serial Conflicting Writes (Asserts Order) ---
-test_scenario!(
-    scenario_serial_conflicting_writes,
-    test_serial_conflicting_writes_1_executor,
-    1
-);
-test_scenario!(
-    scenario_serial_conflicting_writes,
-    test_serial_conflicting_writes_2_executors,
-    2
-);
-test_scenario!(
-    scenario_serial_conflicting_writes,
-    test_serial_conflicting_writes_4_executors,
-    4
-);
-test_scenario!(
-    scenario_serial_conflicting_writes,
-    test_serial_conflicting_writes_8_executors,
-    8
-);
+#[tokio::test]
+async fn test_serial_conflicting_writes_1_executor() {
+    scenario_serial_conflicting_writes(1).await;
+}
+#[tokio::test]
+async fn test_serial_conflicting_writes_2_executors() {
+    scenario_serial_conflicting_writes(2).await;
+}
+#[tokio::test]
+async fn test_serial_conflicting_writes_4_executors() {
+    scenario_serial_conflicting_writes(4).await;
+}
+#[tokio::test]
+async fn test_serial_conflicting_writes_8_executors() {
+    scenario_serial_conflicting_writes(8).await;
+}
 
 // --- Test Scenario 7: Serial Transfer Chain (Asserts Order) ---
-test_scenario!(
-    scenario_serial_transfer_chain,
-    test_serial_transfer_chain_1_executor,
-    1
-);
-test_scenario!(
-    scenario_serial_transfer_chain,
-    test_serial_transfer_chain_2_executors,
-    2
-);
-test_scenario!(
-    scenario_serial_transfer_chain,
-    test_serial_transfer_chain_4_executors,
-    4
-);
-test_scenario!(
-    scenario_serial_transfer_chain,
-    test_serial_transfer_chain_8_executors,
-    8
-);
+#[tokio::test]
+async fn test_serial_transfer_chain_1_executor() {
+    scenario_serial_transfer_chain(1).await;
+}
+#[tokio::test]
+async fn test_serial_transfer_chain_2_executors() {
+    scenario_serial_transfer_chain(2).await;
+}
+#[tokio::test]
+async fn test_serial_transfer_chain_4_executors() {
+    scenario_serial_transfer_chain(4).await;
+}
+#[tokio::test]
+async fn test_serial_transfer_chain_8_executors() {
+    scenario_serial_transfer_chain(8).await;
+}
 
 // --- Test Scenario 8: Large Queue Stress Test ---
 /// **Scenario 8: Large Queue Stress Test**

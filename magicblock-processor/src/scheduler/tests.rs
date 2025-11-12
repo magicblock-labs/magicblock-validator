@@ -10,8 +10,23 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use super::coordinator::{ExecutionCoordinator, TransactionWithId};
-use crate::scheduler::ExecutorId;
+use super::{
+    coordinator::{ExecutionCoordinator, TransactionWithId},
+    locks::TransactionId,
+};
+use crate::scheduler::{locks::BlockerId, ExecutorId};
+
+impl From<ExecutorId> for BlockerId {
+    fn from(value: ExecutorId) -> Self {
+        Self::Executor(value)
+    }
+}
+
+impl From<TransactionId> for BlockerId {
+    fn from(value: TransactionId) -> Self {
+        Self::Transaction(value)
+    }
+}
 
 // --- Test Setup ---
 
@@ -112,11 +127,14 @@ fn test_write_write_contention() {
     );
 
     let exec2 = coordinator.get_ready_executor().unwrap();
-    let blocker =
-        coordinator.try_acquire_locks(exec2, &txn2).unwrap_err() as ExecutorId;
+    let blocker = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
 
     // Txn2 should be blocked by the executor holding the lock (exec1).
-    assert_eq!(blocker, exec1, "Txn2 should be blocked by executor 1");
+    assert_eq!(
+        blocker,
+        exec1.into(),
+        "Txn2 should be blocked by executor 1"
+    );
 }
 
 #[test]
@@ -135,12 +153,12 @@ fn test_write_read_contention() {
     );
 
     let exec2 = coordinator.get_ready_executor().unwrap();
-    let blocker =
-        coordinator.try_acquire_locks(exec2, &txn2).unwrap_err() as ExecutorId;
+    let blocker = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
 
     // Txn2 should be blocked by exec1.
     assert_eq!(
-        blocker, exec1,
+        blocker,
+        exec1.into(),
         "Read lock (Txn2) should be blocked by write lock (Txn1)"
     );
 }
@@ -161,12 +179,12 @@ fn test_read_write_contention() {
     );
 
     let exec2 = coordinator.get_ready_executor().unwrap();
-    let blocker =
-        coordinator.try_acquire_locks(exec2, &txn2).unwrap_err() as ExecutorId;
+    let blocker = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
 
     // Txn2 should be blocked by exec1.
     assert_eq!(
-        blocker, exec1,
+        blocker,
+        exec1.into(),
         "Write lock (Txn2) should be blocked by read lock (Txn1)"
     );
 }
@@ -198,15 +216,15 @@ fn test_multiple_mixed_locks_contention() {
     let exec2 = coordinator.get_ready_executor().unwrap();
     // Txn2 should be blocked by Txn1's write lock on A.
     assert_eq!(
-        coordinator.try_acquire_locks(exec2, &txn2).unwrap_err() as ExecutorId,
-        exec1,
+        coordinator.try_acquire_locks(exec2, &txn2).unwrap_err(),
+        exec1.into(),
         "Txn2 should be blocked by Txn1 on account A"
     );
 
     // Txn3 should be blocked by Txn1's read lock on B.
     assert_eq!(
-        coordinator.try_acquire_locks(exec2, &txn3).unwrap_err() as ExecutorId,
-        exec1,
+        coordinator.try_acquire_locks(exec2, &txn3).unwrap_err(),
+        exec1.into(),
         "Txn3 should be blocked by Txn1 on account B"
     );
 }
@@ -229,10 +247,7 @@ fn test_transaction_dependency_chain() {
     // Txn2 needs to read A, so it's blocked by Txn1.
     let exec2 = coordinator.get_ready_executor().unwrap();
     let blocker1 = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
-    assert_eq!(
-        blocker1 as ExecutorId, exec1,
-        "Txn2 should be blocked by exec1"
-    );
+    assert_eq!(blocker1, exec1.into(), "Txn2 should be blocked by exec1");
     coordinator.queue_transaction(blocker1, txn2);
 
     // Txn3 needs to read B, but Txn2 (which writes to B) is already queued.
@@ -241,7 +256,8 @@ fn test_transaction_dependency_chain() {
     let blocker2 = coordinator.try_acquire_locks(exec3, &txn3).unwrap_err();
     let blocked_txn = coordinator.next_blocked_transaction(exec1).unwrap();
     assert_eq!(
-        blocker2, blocked_txn.id,
+        blocker2,
+        blocked_txn.id.into(),
         "Txn3 should be blocked by the transaction ID of Txn2"
     );
 }
@@ -273,7 +289,7 @@ fn test_full_executor_pool_and_reschedule() {
 
     // Txn3 arrives and contends with Txn1 on account A.
     let blocker = coordinator.try_acquire_locks(exec1, &txn3).unwrap_err();
-    assert_eq!(blocker as ExecutorId, exec1);
+    assert_eq!(blocker, exec1.into());
     coordinator.queue_transaction(blocker, txn3);
 
     // Executor 1 finishes its work and releases its locks.
@@ -404,7 +420,8 @@ fn test_contention_on_multiple_accounts() {
     // The coordinator should report the first detected contention.
     let blocker = coordinator.try_acquire_locks(exec3, &txn3).unwrap_err();
     assert_eq!(
-        blocker as ExecutorId, exec1,
+        blocker,
+        exec1.into(),
         "Should be blocked by the first contended account (A)"
     );
 }
@@ -461,14 +478,15 @@ fn test_transaction_blocked_by_queued_transaction() {
     // Txn2 is blocked by Txn1.
     let exec2 = coordinator.get_ready_executor().unwrap();
     let blocker1 = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
-    assert_eq!(blocker1 as ExecutorId, exec1);
+    assert_eq!(blocker1, exec1.into());
     coordinator.queue_transaction(blocker1, txn2);
 
     // Txn3 is blocked by the already queued Txn2. The error should be the transaction ID.
     let blocker2 = coordinator.try_acquire_locks(exec2, &txn3).unwrap_err();
     let blocked_txn = coordinator.next_blocked_transaction(exec1).unwrap();
     assert_eq!(
-        blocker2, blocked_txn.id,
+        blocker2,
+        blocked_txn.id.into(),
         "Txn3 should be blocked by the ID of the queued Txn2"
     );
 }

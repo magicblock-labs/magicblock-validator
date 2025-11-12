@@ -10,8 +10,8 @@ use magicblock_core::link::transactions::ProcessableTransaction;
 use solana_pubkey::Pubkey;
 
 use super::locks::{
-    next_transaction_id, AccountContention, ExecutorId, LocksCache, RcLock,
-    TransactionContention, TransactionId, INIT_TRANSACTION_ID,
+    next_transaction_id, AccountContention, BlockerId, ExecutorId, LocksCache,
+    RcLock, TransactionContention, TransactionId,
 };
 
 /// A queue of transactions waiting for a specific executor to release a lock.
@@ -74,27 +74,25 @@ impl ExecutionCoordinator {
     /// `ExecutorId` that holds the conflicting lock, and returns that executor
     pub(super) fn queue_transaction(
         &mut self,
-        blocker_id: TransactionId,
+        blocker: BlockerId,
         transaction: TransactionWithId,
     ) -> ExecutorId {
-        // A `blocker_id` greater than `INIT_TRANSACTION_ID`, it is a `TransactionId`
-        // of another waiting transaction. We must resolve it to the actual executor.
-        let executor = if blocker_id >= INIT_TRANSACTION_ID {
-            // A `TransactionId` is only returned as a blocker if that
-            // transaction is already tracked in the contention map.
-            self.transaction_contention
-                .get(&blocker_id)
-                .copied()
-                // SAFETY:
-                // This invariant is enforced via careful transaction scheduling
-                // flow, if the transaction is not found in the map, this indicates a
-                // hard logic error, which might lead to deadlocks, thus we terminate
-                // the scheduler here. Test coverage should catch this inconsistency.
-                .expect("unknown transaction for blocker resolution")
-        } else {
-            blocker_id as ExecutorId
+        let executor = match blocker {
+            BlockerId::Executor(executor) => executor,
+            BlockerId::Transaction(id) => {
+                // A `TransactionId` is only returned as a blocker if that
+                // transaction is already tracked in the contention map.
+                self.transaction_contention
+                    .get(&id)
+                    .copied()
+                    // SAFETY:
+                    // This invariant is enforced via careful transaction scheduling
+                    // flow, if the transaction is not found in the map, this indicates a
+                    // hard logic error, which might lead to deadlocks, thus we terminate
+                    // the scheduler here. Test coverage should catch this inconsistency.
+                    .expect("unknown transaction for blocker resolution")
+            }
         };
-
         let queue = &mut self.blocked_transactions[executor as usize];
         self.transaction_contention.insert(transaction.id, executor);
         let index = queue.binary_search_by(|tx| tx.id.cmp(&transaction.id));
@@ -148,7 +146,7 @@ impl ExecutionCoordinator {
         &mut self,
         executor: ExecutorId,
         transaction: &TransactionWithId,
-    ) -> Result<(), TransactionId> {
+    ) -> Result<(), BlockerId> {
         let message = transaction.txn.transaction.message();
         let accounts_to_lock = message.account_keys().iter().enumerate();
         let acquired_locks = &mut self.acquired_locks[executor as usize];
@@ -165,10 +163,17 @@ impl ExecutionCoordinator {
                     match contenders.binary_search(&transaction.id) {
                         // If we are the first contender, then we can proceed
                         // and try to acquire the needed account locks
-                        Ok(index) | Err(index) if index == 0 => Ok(()),
+                        // 1. Ok(0) => the transaction has already contended this account,
+                        //             and now it is its turn to be scheduled
+                        // 2. Err(0) => the transaction didn't contend the account, but it
+                        //              has smaller ID (was received earlier), so we don't
+                        //              block it and let it proceed with lock acquisition
+                        Ok(0) | Err(0) => Ok(()),
                         // If we are not, then we need to get queued after
                         // the transaction contending right in front of us
-                        Ok(index) | Err(index) => Err(contenders[index - 1]),
+                        Ok(index) | Err(index) => {
+                            Err(BlockerId::Transaction(contenders[index - 1]))
+                        }
                     }
                 } else {
                     Ok(())
@@ -181,7 +186,7 @@ impl ExecutionCoordinator {
                 } else {
                     lock.borrow_mut().read(executor)
                 }
-                .map_err(|e| e as TransactionId);
+                .map_err(|e| BlockerId::Executor(e));
             }
 
             // We couldn't lock all of the accounts, so we are bailing, but
@@ -210,6 +215,23 @@ impl ExecutionCoordinator {
             self.clear_account_contention(acc, transaction.id);
         }
         Ok(())
+    }
+
+    /// Tries to acquire all the necessary account locks, required for
+    /// transaction execution. If that fails, the executor ID, currently
+    /// holding one of the account locks is returned as Err.
+    pub(super) fn try_schedule(
+        &mut self,
+        executor: ExecutorId,
+        txn: TransactionWithId,
+    ) -> Result<ProcessableTransaction, ExecutorId> {
+        let blocker = self.try_acquire_locks(executor, &txn);
+        if let Err(blocker) = blocker {
+            self.release_executor(executor);
+            let blocker = self.queue_transaction(blocker, txn);
+            return Err(blocker);
+        }
+        Ok(txn.txn)
     }
 
     /// Sets the transaction contention for this account. Contenders are ordered

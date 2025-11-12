@@ -93,7 +93,7 @@ impl ExecutionTestEnv {
     /// This function sets up a complete validator stack:
     /// 1.  Creates temporary on-disk storage for the accounts database and ledger.
     /// 2.  Initializes all the communication channels between the API layer and the core.
-    /// 3.  Spawns a `TransactionScheduler` with one worker thread.
+    /// 3.  Spawns a `TransactionScheduler` with the configured number of worker threads.
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
     pub fn new_with_config(
