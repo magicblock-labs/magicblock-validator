@@ -248,6 +248,7 @@ pub(crate) fn register() {
         register!(LEDGER_TRANSACTION_MEMOS_GAUGE);
         register!(LEDGER_PERF_SAMPLES_GAUGE);
         register!(LEDGER_ACCOUNT_MOD_DATA_GAUGE);
+        register!(LEDGER_COLUMNS_COUNT_DURATION_SECONDS);
         register!(ACCOUNTS_SIZE_GAUGE);
         register!(ACCOUNTS_COUNT_GAUGE);
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
