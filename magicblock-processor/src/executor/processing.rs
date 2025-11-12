@@ -1,4 +1,4 @@
-use log::{error, warn};
+use log::error;
 use magicblock_core::link::{
     accounts::{AccountWithSlot, LockedAccount},
     transactions::{
@@ -49,41 +49,30 @@ impl super::TransactionExecutor {
         let (result, balances) = self.process(&transaction);
         let [txn] = transaction;
 
-        // Transaction failed to load, we persist it to the
-        // ledger, only for the convenience of the user
-        if let Err(err) = result {
-            let status = Err(err);
-            self.commit_failed_transaction(txn, status.clone());
-            FAILED_TRANSACTIONS_COUNT.inc();
-            tx.map(|tx| tx.send(status));
-            return;
-        }
-
-        // If the transaction failed to load entirely, then it was handled above
-        let result = result.and_then(|processed| {
-            let result = processed.status();
-
-            // If the transaction failed during the execution and the caller is waiting
-            // for the result, do not persist any changes (preflight check is true)
-            if result.is_err() && tx.is_some() {
-                // But we always commit transaction to the ledger (mostly for user convenience)
-                if !is_replay {
-                    self.commit_transaction(txn, processed, balances);
-                }
-                return result;
+        let processed = match result {
+            Ok(processed) => processed,
+            Err(err) => {
+                // Transaction failed to load, we persist it to the
+                // ledger, only for the convenience of the user
+                let status = Err(err);
+                self.commit_failed_transaction(txn, status.clone());
+                FAILED_TRANSACTIONS_COUNT.inc();
+                tx.map(|tx| tx.send(status));
+                return;
             }
+        };
 
-            let feepayer = *txn.fee_payer();
-            // Otherwise commit the account state changes
-            self.commit_accounts(feepayer, &processed, is_replay);
+        // The transaction has been processed, we can commit the account state changes
+        let feepayer = *txn.fee_payer();
+        self.commit_accounts(feepayer, &processed, is_replay);
 
-            // Commit transaction to the ledger and schedule tasks
-            // TODO: send intents here as well once implemented
-            if !is_replay {
-                self.commit_transaction(txn, processed, balances);
-                // If the transaction succeeded, check for potential tasks/intents
+        let result = processed.status();
+        match result {
+            Ok(_) => {
+                // If the transaction succeeded, check for potential tasks
                 // that may have been scheduled during the transaction execution
-                if result.is_ok() {
+                // TODO: send intents here as well once implemented
+                if !is_replay {
                     while let Some(task) = ExecutionTlsStash::next_task() {
                         // This is a best effort send, if the tasks service has terminated
                         // for some reason, logging is the best we can do at this point
@@ -92,12 +81,20 @@ impl super::TransactionExecutor {
                         );
                     }
                 }
-            }
 
-            result
-        });
-        // Make sure that no matter what happened to the transaction we clear the stash
-        ExecutionTlsStash::clear();
+                // Make sure that no matter what happened to the transaction we clear the stash
+                ExecutionTlsStash::clear();
+            }
+            Err(_) => {
+                // If the transaction failed during the execution and the caller is waiting
+                // for the result, do not persist any changes (preflight check is true)
+            }
+        }
+
+        // We always commit transaction to the ledger (mostly for user convenience)
+        if !is_replay {
+            self.commit_transaction(txn, processed, balances);
+        }
 
         // Send the final result back to the caller if they are waiting.
         tx.map(|tx| tx.send(result));
