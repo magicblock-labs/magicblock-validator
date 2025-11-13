@@ -7,6 +7,7 @@
 use std::collections::VecDeque;
 
 use magicblock_core::link::transactions::ProcessableTransaction;
+use magicblock_metrics::metrics::MAX_LOCK_CONTENTION_QUEUE_SIZE;
 use solana_pubkey::Pubkey;
 
 use super::locks::{
@@ -98,6 +99,8 @@ impl ExecutionCoordinator {
         let index = queue.binary_search_by(|tx| tx.id.cmp(&transaction.id));
         if let Err(index) = index {
             queue.insert(index, transaction);
+            let current = MAX_LOCK_CONTENTION_QUEUE_SIZE.get();
+            MAX_LOCK_CONTENTION_QUEUE_SIZE.set(current.max(queue.len() as i64));
         }
         executor
     }
