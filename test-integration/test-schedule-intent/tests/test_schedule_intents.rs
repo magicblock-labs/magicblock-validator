@@ -63,14 +63,10 @@ fn test_schedule_intent_and_undelegate() {
 
     schedule_intent(&ctx, &[&payer], Some(vec![-100]));
     // Assert that action after undelegate subtracted 100 from 101
-    assert_counters(
-        &ctx,
-        &[ExpectedCounter {
-            pda: FlexiCounter::pda(&payer.pubkey()).0,
-            expected: 1,
-        }],
-        true,
-    );
+    let pda = FlexiCounter::pda(&payer.pubkey()).0;
+    assert_counters(&ctx, &[ExpectedCounter { pda, expected: 1 }], true);
+
+    verify_undelegation_in_ephem_via_owner(&[payer.pubkey()], &ctx);
 }
 
 #[test]
@@ -128,6 +124,8 @@ fn test_schedule_intent_undelegate_delegate_back_undelegate_again() {
         }],
         true,
     );
+
+    verify_undelegation_in_ephem_via_owner(&[payer.pubkey()], &ctx);
 
     // Delegate back
     delegate_counter(&ctx, &payer);
@@ -191,6 +189,11 @@ fn test_2_payers_intent_with_undelegation() {
         true,
     );
     debug!("✅ Verified counters on base layer");
+
+    verify_undelegation_in_ephem_via_owner(
+        &payers.iter().map(|p| p.pubkey()).collect::<Vec<_>>(),
+        &ctx,
+    );
 }
 
 #[test]
@@ -236,6 +239,12 @@ fn test_1_payers_intent_with_undelegation() {
         true,
     );
     debug!("✅ Verified counters on base layer");
+
+    verify_undelegation_in_ephem_via_owner(
+        &payers.iter().map(|p| p.pubkey()).collect::<Vec<_>>(),
+        &ctx,
+    );
+    debug!("✅ Verified undelegation via account owner");
 }
 
 #[ignore = "With sdk having ShortAccountMetas instead of u8s we hit limited_deserialize here as instruction exceeds 1232 bytes"]
@@ -446,4 +455,38 @@ fn schedule_intent(
         transfer_destination_balance,
         mutiplier * payers.len() as u64 * 1_000_000
     );
+}
+
+fn verify_undelegation_in_ephem_via_owner(
+    pubkeys: &[Pubkey],
+    ctx: &IntegrationTestContext,
+) {
+    const RETRY_LIMIT: usize = 20;
+    let mut retries = 0;
+
+    loop {
+        ctx.wait_for_next_slot_ephem().unwrap();
+        let mut not_verified = vec![];
+        for pk in pubkeys.iter() {
+            let counter_pda = FlexiCounter::pda(pk).0;
+            let owner = ctx.fetch_ephem_account_owner(counter_pda).unwrap();
+            if owner == delegation_program_id() {
+                not_verified.push(*pk);
+            }
+        }
+        if not_verified.is_empty() {
+            break;
+        }
+        retries += 1;
+        if retries >= RETRY_LIMIT {
+            panic!(
+                "Failed to verify undelegation for pubkeys: {}",
+                not_verified
+                    .iter()
+                    .map(|k| k.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+    }
 }
