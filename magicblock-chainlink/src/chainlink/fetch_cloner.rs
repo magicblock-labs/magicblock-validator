@@ -215,6 +215,26 @@ where
                             );
                         }
                     }
+                    // Check if this is an undelegation completion
+                    // Conditions:
+                    // 1. In bank: delegated flag is false
+                    // 2. In bank: owner is dlp::id()
+                    // 3. In update: owner is not dlp::id()
+                    // NOTE: this check will be simpler once we have the `undelegating` flag
+                    if let Some(in_bank) =
+                        self.accounts_bank.get_account(&pubkey)
+                    {
+                        if !in_bank.delegated()
+                            && in_bank.owner().eq(&dlp::id())
+                            && !account.owner().eq(&dlp::id())
+                        {
+                            debug!(
+                                "Undelegation completed for account: {pubkey}"
+                            );
+                            magicblock_metrics::metrics::inc_undelegation_completed();
+                        }
+                    }
+
                     if account.executable() {
                         self.handle_executable_sub_update(pubkey, account)
                             .await;

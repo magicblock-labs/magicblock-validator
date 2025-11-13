@@ -364,6 +364,8 @@ Kept: {} delegated, {} blacklisted",
     ) -> ChainlinkResult<()> {
         debug!("Undelegation requested for account: {pubkey}");
 
+        magicblock_metrics::metrics::inc_undelegation_requested();
+
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(());
         };

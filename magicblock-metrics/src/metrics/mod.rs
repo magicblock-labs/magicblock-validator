@@ -194,6 +194,20 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
+    pub static ref UNDELEGATION_REQUESTED_COUNT: IntCounter =
+        IntCounter::new(
+            "undelegation_requested_count",
+            "Total number of undelegation requests received",
+        )
+        .unwrap();
+
+    pub static ref UNDELEGATION_COMPLETED_COUNT: IntCounter =
+        IntCounter::new(
+            "undelegation_completed_count",
+            "Total number of completed undelegations detected",
+        )
+        .unwrap();
+
 
     // -----------------
     // Transaction Execution
@@ -282,6 +296,8 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_FAILED_COUNT);
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
+        register!(UNDELEGATION_REQUESTED_COUNT);
+        register!(UNDELEGATION_COMPLETED_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
     });
 }
@@ -406,4 +422,12 @@ pub fn inc_account_fetches_found(count: u64) {
 
 pub fn inc_account_fetches_not_found(count: u64) {
     ACCOUNT_FETCHES_NOT_FOUND_COUNT.inc_by(count);
+}
+
+pub fn inc_undelegation_requested() {
+    UNDELEGATION_REQUESTED_COUNT.inc();
+}
+
+pub fn inc_undelegation_completed() {
+    UNDELEGATION_COMPLETED_COUNT.inc();
 }
