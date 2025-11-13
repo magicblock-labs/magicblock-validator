@@ -217,14 +217,14 @@ where
                     }
                     // Check if this is an undelegation completion
                     // Conditions:
-                    // 1. In bank: delegated flag is false
-                    // 2. In bank: owner is dlp::id()
+                    // 1. In bank: account is delegated
+                    // 2. In bank: owner is dlp::id() indicating undelegation was triggered
                     // 3. In update: owner is not dlp::id()
                     // NOTE: this check will be simpler once we have the `undelegating` flag
                     if let Some(in_bank) =
                         self.accounts_bank.get_account(&pubkey)
                     {
-                        if !in_bank.delegated()
+                        if in_bank.delegated()
                             && in_bank.owner().eq(&dlp::id())
                             && !account.owner().eq(&dlp::id())
                         {
