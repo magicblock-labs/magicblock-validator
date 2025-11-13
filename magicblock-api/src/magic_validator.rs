@@ -17,8 +17,8 @@ use magicblock_accounts::{
 };
 use magicblock_accounts_db::AccountsDb;
 use magicblock_aperture::{
+    initialize_aperture,
     state::{NodeContext, SharedState},
-    JsonRpcServer,
 };
 use magicblock_chainlink::{
     config::ChainlinkConfig,
@@ -313,7 +313,7 @@ impl MagicValidator {
             chainlink.clone(),
             config.validator.millis_per_slot,
         );
-        let rpc = JsonRpcServer::new(
+        let rpc = initialize_aperture(
             &config.rpc,
             shared_state,
             &dispatch,

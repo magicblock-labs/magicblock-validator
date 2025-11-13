@@ -3,10 +3,10 @@ use std::net::{IpAddr, Ipv4Addr};
 use isocountry::CountryCode;
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, AccountsDbConfig, AllowedProgram,
-    BlockSize, CommitStrategyConfig, EphemeralConfig, LedgerConfig,
-    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
-    MetricsConfig, MetricsServiceConfig, PrepareLookupTables, ProgramConfig,
-    RemoteCluster, RemoteConfig, RpcConfig, TaskSchedulerConfig,
+    ApertureConfig, BlockSize, CommitStrategyConfig, EphemeralConfig,
+    LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
+    LifecycleMode, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
+    ProgramConfig, RemoteCluster, RemoteConfig, TaskSchedulerConfig,
     ValidatorConfig,
 };
 use solana_pubkey::pubkey;
@@ -102,9 +102,10 @@ fn test_local_dev_with_programs_toml() {
                 path: "../demos/magic-worm/target/deploy/program_solana.so"
                     .to_string(),
             }],
-            rpc: RpcConfig {
+            rpc: ApertureConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 7799,
+                ..Default::default()
             },
             validator: ValidatorConfig {
                 millis_per_slot: 14,
@@ -246,9 +247,10 @@ fn test_everything_defined() {
                     snapshot_frequency: 60_000,
                 },
             },
-            rpc: RpcConfig {
+            rpc: ApertureConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 7799,
+                ..Default::default()
             },
             validator: ValidatorConfig {
                 sigverify: true,

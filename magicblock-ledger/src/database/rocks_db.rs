@@ -84,7 +84,7 @@ impl Rocks {
         &self,
         cf: &ColumnFamily,
         key: &[u8],
-    ) -> LedgerResult<Option<DBPinnableSlice>> {
+    ) -> LedgerResult<Option<DBPinnableSlice<'_>>> {
         let opt = self.db.get_pinned_cf(cf, key)?;
         Ok(opt)
     }
@@ -103,7 +103,7 @@ impl Rocks {
         &self,
         cf: &ColumnFamily,
         keys: Vec<&[u8]>,
-    ) -> Vec<LedgerResult<Option<DBPinnableSlice>>> {
+    ) -> Vec<LedgerResult<Option<DBPinnableSlice<'_>>>> {
         let values = self
             .db
             .batched_multi_get_cf(cf, keys, false)
@@ -163,7 +163,7 @@ impl Rocks {
         &self,
         cf: &ColumnFamily,
         iterator_mode: IteratorMode<C::Index>,
-    ) -> DBIterator
+    ) -> DBIterator<'_>
     where
         C: Column,
     {
@@ -183,7 +183,7 @@ impl Rocks {
         &self,
         cf: &ColumnFamily,
         iterator_mode: IteratorMode<Vec<u8>>,
-    ) -> DBIterator {
+    ) -> DBIterator<'_> {
         let start_key;
         let iterator_mode = match iterator_mode {
             IteratorMode::From(start_from, direction) => {
@@ -196,7 +196,7 @@ impl Rocks {
         self.db.iterator_cf(cf, iterator_mode)
     }
 
-    pub fn raw_iterator_cf(&self, cf: &ColumnFamily) -> DBRawIterator {
+    pub fn raw_iterator_cf(&self, cf: &ColumnFamily) -> DBRawIterator<'_> {
         self.db.raw_iterator_cf(cf)
     }
 

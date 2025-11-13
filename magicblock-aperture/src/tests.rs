@@ -68,7 +68,8 @@ mod event_processor {
             50,
         );
         let cancel = CancellationToken::new();
-        EventProcessor::start(&state, &env.dispatch, 1, cancel);
+        EventProcessor::start(&state, &env.dispatch, 1, cancel, &[])
+            .expect("failed to start an event processor");
         env.advance_slot();
         (state, env)
     }

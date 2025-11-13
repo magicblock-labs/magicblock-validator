@@ -6,11 +6,11 @@ use std::{
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsCloneConfig, AccountsConfig, CommitStrategyConfig, EphemeralConfig,
-    LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
-    LifecycleMode, MagicBlockConfig, MetricsConfig, MetricsServiceConfig,
-    PrepareLookupTables, ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig,
-    TaskSchedulerConfig, ValidatorConfig,
+    AccountsCloneConfig, AccountsConfig, ApertureConfig, CommitStrategyConfig,
+    EphemeralConfig, LedgerConfig, LedgerResumeStrategyConfig,
+    LedgerResumeStrategyType, LifecycleMode, MagicBlockConfig, MetricsConfig,
+    MetricsServiceConfig, PrepareLookupTables, ProgramConfig, RemoteCluster,
+    RemoteConfig, TaskSchedulerConfig, ValidatorConfig,
 };
 use solana_pubkey::pubkey;
 use url::Url;
@@ -82,9 +82,10 @@ fn test_load_local_dev_with_programs_toml() {
                     config_file_dir.parent().unwrap().to_str().unwrap()
                 )
             }],
-            rpc: RpcConfig {
+            rpc: ApertureConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 7799,
+                ..Default::default()
             },
             validator: ValidatorConfig {
                 millis_per_slot: 14,
@@ -173,9 +174,10 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                     config_file_dir.parent().unwrap().to_str().unwrap()
                 )
             }],
-            rpc: RpcConfig {
+            rpc: ApertureConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 1, 0, 1)),
                 port: 123,
+                ..Default::default()
             },
             validator: ValidatorConfig {
                 millis_per_slot: 100,

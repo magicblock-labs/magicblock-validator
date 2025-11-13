@@ -16,6 +16,7 @@ fastwebsockets = { workspace = true, features = ["upgrade"] }
 
 # runtime
 futures = { workspace = true }
+libloading = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 
@@ -37,6 +38,7 @@ magicblock-metrics = { workspace = true }
 magicblock-version = { workspace = true }
 
 # solana
+agave-geyser-plugin-interface = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-compute-budget-instruction = { workspace = true }
@@ -64,6 +66,7 @@ bs58 = { workspace = true }
 json = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 rand = "0.9"

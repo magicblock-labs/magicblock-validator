@@ -45,7 +45,7 @@ pub struct EphemeralConfig {
     pub accounts: AccountsConfig,
     #[serde(default)]
     #[command(flatten)]
-    pub rpc: RpcConfig,
+    pub rpc: ApertureConfig,
     #[serde(default)]
     #[command(flatten)]
     pub validator: ValidatorConfig,
@@ -231,9 +231,10 @@ mod tests {
                 },
                 max_monitored_accounts: 1234,
             },
-            rpc: RpcConfig {
+            rpc: ApertureConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
+                ..Default::default()
             },
             validator: ValidatorConfig {
                 millis_per_slot: 5000,
@@ -319,9 +320,10 @@ mod tests {
                 },
                 max_monitored_accounts: 1234,
             },
-            rpc: RpcConfig {
+            rpc: ApertureConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
+                ..Default::default()
             },
             validator: ValidatorConfig {
                 millis_per_slot: 5000,
@@ -404,9 +406,10 @@ mod tests {
                 },
                 max_monitored_accounts: 12346,
             },
-            rpc: RpcConfig {
+            rpc: ApertureConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(1, 0, 0, 127)),
                 port: 9091,
+                ..Default::default()
             },
             validator: ValidatorConfig {
                 millis_per_slot: 5001,
@@ -482,9 +485,10 @@ mod tests {
                 },
                 max_monitored_accounts: 1234,
             },
-            rpc: RpcConfig {
+            rpc: ApertureConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
                 port: 9090,
+                ..Default::default()
             },
             validator: ValidatorConfig {
                 millis_per_slot: 5000,
@@ -553,7 +557,7 @@ mod tests {
                 },
                 max_monitored_accounts: 2048,
             },
-            rpc: RpcConfig::default(),
+            rpc: ApertureConfig::default(),
             validator: ValidatorConfig::default(),
             ledger: LedgerConfig {
                 resume_strategy_config: LedgerResumeStrategyConfig {

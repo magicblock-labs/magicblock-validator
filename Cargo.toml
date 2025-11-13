@@ -33,7 +33,6 @@ members = [
   "tools/genx",
   "tools/keypair-base58",
   "tools/ledger-stats",
-  "magicblock-geyser",
 ]
 
 # This prevents a Travis CI error when building for Windows.

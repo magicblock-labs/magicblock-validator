@@ -16,7 +16,7 @@ use magicblock_aperture::{
     state::{ChainlinkImpl, NodeContext, SharedState},
     JsonRpcServer,
 };
-use magicblock_config::RpcConfig;
+use magicblock_config::ApertureConfig;
 use magicblock_core::{
     link::accounts::LockedAccount, traits::AccountsBank, Slot,
 };
@@ -107,7 +107,11 @@ impl RpcTestEnv {
             );
             let cancel = CancellationToken::new();
             let addr = "0.0.0.0".parse().unwrap();
-            let config = RpcConfig { addr, port };
+            let config = ApertureConfig {
+                addr,
+                port,
+                ..Default::default()
+            };
             let server =
                 JsonRpcServer::new(&config, state, &execution.dispatch, cancel)
                     .await;

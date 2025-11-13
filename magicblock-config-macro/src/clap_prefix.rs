@@ -24,6 +24,9 @@ impl VisitMut for ClapPrefix {
     fn visit_fields_mut(&mut self, fields: &mut syn::Fields) {
         if let Fields::Named(fields_named) = fields {
             for field in &mut fields_named.named {
+                if field.attrs.iter().any(|a| a.path().is_ident("clap")) {
+                    continue;
+                }
                 if let Some(ident) = &field.ident {
                     let attr_str =
                         self.attr.to_string().trim_matches('"').to_string();

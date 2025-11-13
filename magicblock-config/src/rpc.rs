@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
     Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
 )]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct RpcConfig {
+pub struct ApertureConfig {
     #[derive_env_var]
     #[arg(help = "The address the RPC will listen on.")]
     #[serde(
@@ -23,10 +23,15 @@ pub struct RpcConfig {
     #[arg(help = "The port the RPC will listen on.")]
     #[serde(default = "default_port")]
     pub port: u16,
+    #[serde(default = "default_event_processors")]
+    pub event_processors: usize,
+    #[serde(default)]
+    #[clap_from_serde_skip]
+    pub geyser_plugins: Vec<String>,
 }
 
-impl RpcConfig {
-    pub fn merge(&mut self, other: RpcConfig) {
+impl ApertureConfig {
+    pub fn merge(&mut self, other: ApertureConfig) {
         if self.addr == default_addr() && other.addr != default_addr() {
             self.addr = other.addr;
         }
@@ -36,16 +41,18 @@ impl RpcConfig {
     }
 }
 
-impl Default for RpcConfig {
+impl Default for ApertureConfig {
     fn default() -> Self {
         Self {
             addr: default_addr(),
             port: default_port(),
+            event_processors: default_event_processors(),
+            geyser_plugins: Vec::new(),
         }
     }
 }
 
-impl RpcConfig {
+impl ApertureConfig {
     pub fn socket_addr(&self) -> SocketAddr {
         SocketAddr::new(self.addr, self.port)
     }
@@ -84,18 +91,23 @@ fn default_port() -> u16 {
     8899
 }
 
+fn default_event_processors() -> usize {
+    2
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_merge_with_default() {
-        let mut config = RpcConfig {
+        let mut config = ApertureConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
             port: 9090,
+            ..Default::default()
         };
         let original_config = config.clone();
-        let other = RpcConfig::default();
+        let other = ApertureConfig::default();
 
         config.merge(other);
 
@@ -104,10 +116,11 @@ mod tests {
 
     #[test]
     fn test_merge_default_with_non_default() {
-        let mut config = RpcConfig::default();
-        let other = RpcConfig {
+        let mut config = ApertureConfig::default();
+        let other = ApertureConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
             port: 9090,
+            ..Default::default()
         };
 
         config.merge(other.clone());
@@ -117,14 +130,16 @@ mod tests {
 
     #[test]
     fn test_merge_non_default() {
-        let mut config = RpcConfig {
+        let mut config = ApertureConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 1, 127)),
             port: 9091,
+            ..Default::default()
         };
         let original_config = config.clone();
-        let other = RpcConfig {
+        let other = ApertureConfig {
             addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
             port: 9090,
+            ..Default::default()
         };
 
         config.merge(other);

@@ -1,3 +1,5 @@
+#![allow(clippy::doc_overindented_list_items)]
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};

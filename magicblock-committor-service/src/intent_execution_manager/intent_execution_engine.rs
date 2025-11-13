@@ -334,7 +334,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::{HashMap, HashSet},
+        collections::HashSet,
         sync::{
             atomic::{AtomicUsize, Ordering},
             Arc,
@@ -354,14 +354,9 @@ mod tests {
             db::{DummyDB, DB},
             intent_scheduler::create_test_intent,
         },
-        intent_executor::{
-            error::{
-                IntentExecutorError as ExecutorError, IntentExecutorResult,
-                InternalError,
-            },
-            task_info_fetcher::{
-                ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
-            },
+        intent_executor::error::{
+            IntentExecutorError as ExecutorError, IntentExecutorResult,
+            InternalError,
         },
         persist::IntentPersisterImpl,
     };
@@ -773,30 +768,5 @@ mod tests {
 
             result
         }
-    }
-
-    #[derive(Clone)]
-    pub struct MockInfoFetcher;
-    #[async_trait]
-    impl TaskInfoFetcher for MockInfoFetcher {
-        async fn fetch_next_commit_ids(
-            &self,
-            pubkeys: &[Pubkey],
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys.iter().map(|&k| (k, 1)).collect())
-        }
-
-        async fn fetch_rent_reimbursements(
-            &self,
-            pubkeys: &[Pubkey],
-        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
-        }
-
-        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
-            None
-        }
-
-        fn reset(&self, _: ResetType) {}
     }
 }
