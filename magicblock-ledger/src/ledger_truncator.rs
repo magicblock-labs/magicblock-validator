@@ -202,28 +202,36 @@ impl LedgerTrunctationWorker {
         info!(
             "LedgerTruncator: truncating slot range [{from_slot}; {to_slot}]"
         );
-        (from_slot..=to_slot)
-            .step_by(SINGLE_TRUNCATION_LIMIT)
-            .for_each(|cur_from_slot| {
-                let num_slots_to_truncate = min(
-                    to_slot - cur_from_slot + 1,
-                    SINGLE_TRUNCATION_LIMIT as u64,
-                );
-                let truncate_to_slot =
-                    cur_from_slot + num_slots_to_truncate - 1;
 
-                if let Err(err) =
-                    ledger.delete_slot_range(cur_from_slot, truncate_to_slot)
-                {
-                    warn!(
-                        "Failed to truncate slots {}-{}: {}",
-                        cur_from_slot, truncate_to_slot, err
+        let ledger_copy = ledger.clone();
+        let delete_handle = tokio::task::spawn_blocking(move || {
+            (from_slot..=to_slot)
+                .step_by(SINGLE_TRUNCATION_LIMIT)
+                .for_each(|cur_from_slot| {
+                    let num_slots_to_truncate = min(
+                        to_slot - cur_from_slot + 1,
+                        SINGLE_TRUNCATION_LIMIT as u64,
                     );
-                }
-            });
-        // Flush memtables with tombstones prior to compaction
-        if let Err(err) = ledger.flush() {
-            error!("Failed to flush ledger: {err}");
+                    let truncate_to_slot =
+                        cur_from_slot + num_slots_to_truncate - 1;
+
+                    if let Err(err) = ledger_copy
+                        .delete_slot_range(cur_from_slot, truncate_to_slot)
+                    {
+                        warn!(
+                            "Failed to truncate slots {}-{}: {}",
+                            cur_from_slot, truncate_to_slot, err
+                        );
+                    }
+                });
+
+            // Flush memtables with tombstones prior to compaction
+            if let Err(err) = ledger_copy.flush() {
+                error!("Failed to flush ledger: {err}");
+            }
+        });
+        if let Err(err) = delete_handle.await {
+            error!("Ledger delete task cancelled: {err}");
         }
 
         Self::compact_slot_range(ledger, from_slot, to_slot).await;
