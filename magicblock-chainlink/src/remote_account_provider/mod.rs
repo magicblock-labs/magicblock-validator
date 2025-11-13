@@ -719,7 +719,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
         for (pubkey, _) in subscribe_and_fetch.iter() {
             // Register the subscription for the pubkey (handles LRU cache and eviction first)
-            self.register_subscription(pubkey).await?;
+            self.subscribe(pubkey).await?;
         }
         Ok(())
     }

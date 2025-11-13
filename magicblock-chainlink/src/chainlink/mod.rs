@@ -362,7 +362,7 @@ Kept: {} delegated, {} blacklisted",
         &self,
         pubkey: Pubkey,
     ) -> ChainlinkResult<()> {
-        trace!("Undelegation requested for account: {pubkey}");
+        debug!("Undelegation requested for account: {pubkey}");
 
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(());
@@ -372,7 +372,7 @@ Kept: {} delegated, {} blacklisted",
         // once it's undelegated
         fetch_cloner.subscribe_to_account(&pubkey).await?;
 
-        trace!("Successfully subscribed to account {pubkey} for undelegation tracking");
+        debug!("Successfully subscribed to account {pubkey} for undelegation tracking");
         Ok(())
     }
 
