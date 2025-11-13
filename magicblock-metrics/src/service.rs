@@ -132,7 +132,7 @@ async fn metrics_service_router(
     // iterate over all chunks and simply drop them. This prevents garbage
     // data of previous requests from being stuck in connection buffer.
     let mut body = req.into_body();
-    while let Some(_) = body.frame().await {}
+    while (body.frame().await).is_some() {}
 
     result
 }
