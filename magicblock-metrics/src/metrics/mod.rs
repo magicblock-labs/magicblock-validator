@@ -207,14 +207,11 @@ lazy_static::lazy_static! {
 
     static ref COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM: HistogramVec = HistogramVec::new(
         HistogramOpts::new(
-            "committor_intent_execution_time_histogram",
+            "committor_intent_execution_time_histogram_v2",
             "Time in seconds spent on intent execution"
         )
         .buckets(
-            MILLIS_1_9.iter()
-            .chain(MILLIS_10_90.iter())
-            .chain(MILLIS_100_900.iter())
-            .chain(SECONDS_1_9.iter()).cloned().collect(),
+            vec![0.01, 0.1, 1.0, 3.0, 5.0, 10.0, 15.0, 20.0, 25.0]
         ),
         &["intent_kind", "outcome_kind"],
     ).unwrap();
