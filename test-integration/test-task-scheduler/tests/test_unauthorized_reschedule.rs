@@ -1,6 +1,6 @@
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
-use magicblock_program::{ID as MAGIC_PROGRAM_ID, TASK_CONTEXT_PUBKEY};
+use magicblock_program::ID as MAGIC_PROGRAM_ID;
 use magicblock_task_scheduler::{db::DbTask, SchedulerDatabase};
 use program_flexi_counter::{
     instruction::create_schedule_task_ix, state::FlexiCounter,
@@ -46,7 +46,6 @@ fn test_unauthorized_reschedule() {
             &mut Transaction::new_signed_with_payer(
                 &[create_schedule_task_ix(
                     payer.pubkey(),
-                    TASK_CONTEXT_PUBKEY,
                     MAGIC_PROGRAM_ID,
                     task_id,
                     execution_interval_millis,
@@ -82,7 +81,6 @@ fn test_unauthorized_reschedule() {
             &mut Transaction::new_signed_with_payer(
                 &[create_schedule_task_ix(
                     different_payer.pubkey(),
-                    TASK_CONTEXT_PUBKEY,
                     MAGIC_PROGRAM_ID,
                     task_id,
                     new_execution_interval_millis,

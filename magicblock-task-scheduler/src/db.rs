@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
+use magicblock_program::args::ScheduleTaskRequest;
 use rusqlite::{params, Connection};
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
 
@@ -20,6 +21,19 @@ pub struct DbTask {
     pub executions_left: u64,
     /// Timestamp of the last execution of this task in milliseconds since UNIX epoch
     pub last_execution_millis: u64,
+}
+
+impl<'a> From<&'a ScheduleTaskRequest> for DbTask {
+    fn from(task: &'a ScheduleTaskRequest) -> Self {
+        Self {
+            id: task.id,
+            instructions: task.instructions.clone(),
+            authority: task.authority,
+            execution_interval_millis: task.execution_interval_millis,
+            executions_left: task.iterations,
+            last_execution_millis: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -417,7 +417,6 @@ pub fn create_intent_ix(
 #[allow(clippy::too_many_arguments)]
 pub fn create_schedule_task_ix(
     payer: Pubkey,
-    task_context: Pubkey,
     magic_program: Pubkey,
     task_id: u64,
     execution_interval_millis: u64,
@@ -430,7 +429,6 @@ pub fn create_schedule_task_ix(
     let accounts = vec![
         AccountMeta::new_readonly(magic_program, false),
         AccountMeta::new(payer, true),
-        AccountMeta::new(task_context, false),
         AccountMeta::new(pda, false),
     ];
     Instruction::new_with_borsh(
@@ -448,7 +446,6 @@ pub fn create_schedule_task_ix(
 
 pub fn create_cancel_task_ix(
     payer: Pubkey,
-    task_context: Pubkey,
     magic_program: Pubkey,
     task_id: u64,
 ) -> Instruction {
@@ -456,7 +453,6 @@ pub fn create_cancel_task_ix(
     let accounts = vec![
         AccountMeta::new_readonly(magic_program, false),
         AccountMeta::new(payer, true),
-        AccountMeta::new(task_context, false),
     ];
     Instruction::new_with_borsh(
         *program_id,

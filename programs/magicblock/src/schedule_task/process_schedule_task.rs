@@ -1,19 +1,19 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::args::ScheduleTaskArgs;
+use magicblock_core::tls::ExecutionTlsStash;
+use magicblock_magic_program_api::args::{
+    ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest,
+};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
 
 use crate::{
-    schedule_task::utils::check_task_context_id,
-    task_context::{ScheduleTaskRequest, TaskContext, MIN_EXECUTION_INTERVAL},
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-    },
+    utils::accounts::get_instruction_pubkey_with_idx,
     validator::validator_authority_id,
-    TaskRequest,
 };
+
+const MIN_EXECUTION_INTERVAL: u64 = 10;
 
 pub(crate) fn process_schedule_task(
     signers: HashSet<Pubkey>,
@@ -21,14 +21,11 @@ pub(crate) fn process_schedule_task(
     args: ScheduleTaskArgs,
 ) -> Result<(), InstructionError> {
     const PAYER_IDX: u16 = 0;
-    const TASK_CONTEXT_IDX: u16 = PAYER_IDX + 1;
-
-    check_task_context_id(invoke_context, TASK_CONTEXT_IDX)?;
 
     let transaction_context = &invoke_context.transaction_context.clone();
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    const ACCOUNTS_START: usize = TASK_CONTEXT_IDX as usize + 1;
+    const ACCOUNTS_START: usize = PAYER_IDX as usize + 1;
 
     // Assert MagicBlock program
     ix_ctx
@@ -73,7 +70,7 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::InvalidInstructionData);
     }
 
-    // Enforce minimal number of executions
+    // Enforce minimal number of instructions
     if args.instructions.is_empty() {
         ic_msg!(
             invoke_context,
@@ -113,14 +110,8 @@ pub(crate) fn process_schedule_task(
         iterations: args.iterations,
     };
 
-    let context_acc = get_instruction_account_with_idx(
-        transaction_context,
-        TASK_CONTEXT_IDX,
-    )?;
-    TaskContext::add_request(
-        context_acc,
-        TaskRequest::Schedule(schedule_request),
-    )?;
+    // Add schedule request to execution TLS stash
+    ExecutionTlsStash::register_task(TaskRequest::Schedule(schedule_request));
 
     ic_msg!(
         invoke_context,
@@ -133,9 +124,7 @@ pub(crate) fn process_schedule_task(
 
 #[cfg(test)]
 mod test {
-    use magicblock_magic_program_api::{
-        instruction::MagicBlockInstruction, TASK_CONTEXT_PUBKEY,
-    };
+    use magicblock_magic_program_api::instruction::MagicBlockInstruction;
     use solana_sdk::{
         account::AccountSharedData,
         instruction::{AccountMeta, Instruction},
@@ -185,20 +174,10 @@ mod test {
         let pdas = (0..n_pdas)
             .map(|_| Keypair::new().pubkey())
             .collect::<Vec<_>>();
-        let mut transaction_accounts = vec![
-            (
-                payer.pubkey(),
-                AccountSharedData::new(u64::MAX, 0, &system_program::id()),
-            ),
-            (
-                TASK_CONTEXT_PUBKEY,
-                AccountSharedData::new(
-                    u64::MAX,
-                    TaskContext::SIZE,
-                    &system_program::id(),
-                ),
-            ),
-        ];
+        let mut transaction_accounts = vec![(
+            payer.pubkey(),
+            AccountSharedData::new(u64::MAX, 0, &system_program::id()),
+        )];
         transaction_accounts.extend(
             pdas.iter()
                 .map(|pda| {
@@ -323,10 +302,7 @@ mod test {
             iterations: 1,
             instructions: vec![create_simple_ix()],
         };
-        let account_metas = vec![
-            AccountMeta::new(payer.pubkey(), false),
-            AccountMeta::new(TASK_CONTEXT_PUBKEY, false),
-        ];
+        let account_metas = vec![AccountMeta::new(payer.pubkey(), false)];
         let ix = Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleTask(args),

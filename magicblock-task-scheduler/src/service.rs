@@ -1,30 +1,25 @@
 use std::{
     collections::HashMap,
     path::Path,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use futures_util::StreamExt;
 use log::*;
 use magicblock_config::TaskSchedulerConfig;
-use magicblock_core::{
-    link::transactions::TransactionSchedulerHandle, traits::AccountsBank,
+use magicblock_core::link::transactions::{
+    ScheduledTasksRx, TransactionSchedulerHandle,
 };
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
-    instruction_utils::InstructionUtils,
+    args::{CancelTaskRequest, TaskRequest},
     validator::{validator_authority, validator_authority_id},
-    CancelTaskRequest, CrankTask, ScheduleTaskRequest, TaskContext,
-    TaskRequest, TASK_CONTEXT_PUBKEY,
 };
 use solana_sdk::{
-    account::ReadableAccount, instruction::Instruction, message::Message,
-    pubkey::Pubkey, signature::Signature, transaction::Transaction,
+    instruction::Instruction, message::Message, pubkey::Pubkey,
+    signature::Signature, transaction::Transaction,
 };
-use tokio::{select, time::Duration};
+use tokio::{select, task::JoinHandle, time::Duration};
 use tokio_util::{
     sync::CancellationToken,
     time::{delay_queue::Key, DelayQueue},
@@ -38,40 +33,45 @@ use crate::{
 const NOOP_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
-pub struct TaskSchedulerService<T: AccountsBank> {
+pub struct TaskSchedulerService {
     /// Database for persisting tasks
     db: SchedulerDatabase,
-    /// Bank for executing tasks
-    bank: Arc<T>,
     /// Used to send transactions for execution
     tx_scheduler: TransactionSchedulerHandle,
+    /// Used to receive scheduled tasks from the transaction executor
+    scheduled_tasks: ScheduledTasksRx,
     /// Provides latest blockhash for signing transactions
     block: LatestBlock,
-    /// Interval at which the task scheduler will check for requests in the context
-    tick_interval: Duration,
     /// Queue of tasks to execute
     task_queue: DelayQueue<DbTask>,
     /// Map of task IDs to their corresponding keys in the task queue
     task_queue_keys: HashMap<u64, Key>,
     /// Counter used to make each transaction unique
     tx_counter: AtomicU64,
+    /// Token used to cancel the task scheduler
+    token: CancellationToken,
 }
 
-unsafe impl<T: AccountsBank> Send for TaskSchedulerService<T> {}
-unsafe impl<T: AccountsBank> Sync for TaskSchedulerService<T> {}
-impl<T: AccountsBank> TaskSchedulerService<T> {
-    pub fn start(
+enum ProcessingOutcome {
+    Success,
+    Recoverable(TaskSchedulerError),
+}
+
+// SAFETY: TaskSchedulerService is moved into a single Tokio task in `start()` and never cloned.
+// It runs exclusively on that task's thread. All fields (SchedulerDatabase, TransactionSchedulerHandle,
+// ScheduledTasksRx, LatestBlock, DelayQueue, HashMap, AtomicU64, CancellationToken) are Send+Sync,
+// and the service maintains exclusive ownership throughout its lifetime.
+unsafe impl Send for TaskSchedulerService {}
+unsafe impl Sync for TaskSchedulerService {}
+impl TaskSchedulerService {
+    pub fn new(
         path: &Path,
         config: &TaskSchedulerConfig,
-        bank: Arc<T>,
         tx_scheduler: TransactionSchedulerHandle,
+        scheduled_tasks: ScheduledTasksRx,
         block: LatestBlock,
         token: CancellationToken,
-    ) -> Result<
-        tokio::task::JoinHandle<TaskSchedulerResult<()>>,
-        TaskSchedulerError,
-    > {
-        debug!("Initializing task scheduler service");
+    ) -> Result<Self, TaskSchedulerError> {
         if config.reset {
             match std::fs::remove_file(path) {
                 Ok(_) => {}
@@ -87,83 +87,77 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
 
         // Reschedule all persisted tasks
         let db = SchedulerDatabase::new(path)?;
-        let tasks = db.get_tasks()?;
-        let mut service = Self {
+        Ok(Self {
             db,
-            bank,
             tx_scheduler,
+            scheduled_tasks,
             block,
-            tick_interval: Duration::from_millis(config.millis_per_tick),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
             tx_counter: AtomicU64::default(),
-        };
+            token,
+        })
+    }
+
+    pub fn start(
+        mut self,
+    ) -> TaskSchedulerResult<JoinHandle<TaskSchedulerResult<()>>> {
+        let tasks = self.db.get_tasks()?;
         let now = chrono::Utc::now().timestamp_millis() as u64;
-        debug!("Task scheduler started at {}", now);
+        debug!(
+            "Task scheduler starting at {} with {} tasks",
+            now,
+            tasks.len()
+        );
         for task in tasks {
             let next_execution =
                 task.last_execution_millis + task.execution_interval_millis;
             let timeout =
                 Duration::from_millis(next_execution.saturating_sub(now));
             let task_id = task.id;
-            let key = service.task_queue.insert(task, timeout);
-            service.task_queue_keys.insert(task_id, key);
+            let key = self.task_queue.insert(task, timeout);
+            self.task_queue_keys.insert(task_id, key);
         }
 
-        Ok(tokio::spawn(service.run(token)))
+        Ok(tokio::spawn(async move { self.run().await }))
     }
 
-    fn process_context_requests(
+    fn process_request(
         &mut self,
-        requests: &Vec<TaskRequest>,
-    ) -> TaskSchedulerResult<Vec<TaskSchedulerError>> {
-        let mut errors = Vec::with_capacity(requests.len());
-        for request in requests {
-            match request {
-                TaskRequest::Schedule(schedule_request) => {
-                    if let Err(e) =
-                        self.process_schedule_request(schedule_request)
-                    {
-                        self.db.insert_failed_scheduling(
-                            schedule_request.id,
-                            format!("{:?}", e),
-                        )?;
-                        error!(
-                            "Failed to process schedule request {}: {}",
-                            schedule_request.id, e
-                        );
-                        errors.push(e);
-                    }
+        request: &TaskRequest,
+    ) -> TaskSchedulerResult<ProcessingOutcome> {
+        match request {
+            TaskRequest::Schedule(schedule_request) => {
+                if let Err(e) = self.register_task(schedule_request) {
+                    self.db.insert_failed_scheduling(
+                        schedule_request.id,
+                        format!("{:?}", e),
+                    )?;
+                    error!(
+                        "Failed to process schedule request {}: {}",
+                        schedule_request.id, e
+                    );
+
+                    return Ok(ProcessingOutcome::Recoverable(e));
                 }
-                TaskRequest::Cancel(cancel_request) => {
-                    if let Err(e) = self.process_cancel_request(cancel_request)
-                    {
-                        self.db.insert_failed_scheduling(
-                            cancel_request.task_id,
-                            format!("{:?}", e),
-                        )?;
-                        error!(
-                            "Failed to process cancel request for task {}: {}",
-                            cancel_request.task_id, e
-                        );
-                        errors.push(e);
-                    }
+            }
+            TaskRequest::Cancel(cancel_request) => {
+                if let Err(e) = self.process_cancel_request(cancel_request) {
+                    self.db.insert_failed_scheduling(
+                        cancel_request.task_id,
+                        format!("{:?}", e),
+                    )?;
+                    error!(
+                        "Failed to process cancel request for task {}: {}",
+                        cancel_request.task_id, e
+                    );
+
+                    return Ok(ProcessingOutcome::Recoverable(e));
                 }
-            };
-        }
+            }
+        };
 
-        Ok(errors)
-    }
-
-    fn process_schedule_request(
-        &mut self,
-        schedule_request: &ScheduleTaskRequest,
-    ) -> TaskSchedulerResult<()> {
-        // Convert request to task and register in database
-        let task = CrankTask::from(schedule_request);
-        self.register_task(&task)?;
-
-        Ok(())
+        Ok(ProcessingOutcome::Success)
     }
 
     fn process_cancel_request(
@@ -224,16 +218,9 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
 
     pub fn register_task(
         &mut self,
-        task: &CrankTask,
+        task: impl Into<DbTask>,
     ) -> TaskSchedulerResult<()> {
-        let db_task = DbTask {
-            id: task.id,
-            instructions: task.instructions.clone(),
-            authority: task.authority,
-            execution_interval_millis: task.execution_interval_millis,
-            executions_left: task.iterations,
-            last_execution_millis: 0,
-        };
+        let task = task.into();
 
         // Check if the task already exists in the database
         if let Some(db_task) = self.db.get_task(task.id)? {
@@ -246,9 +233,9 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
             }
         }
 
-        self.db.insert_task(&db_task)?;
+        self.db.insert_task(&task)?;
         self.task_queue
-            .insert(db_task.clone(), Duration::from_millis(0));
+            .insert(task.clone(), Duration::from_millis(0));
         debug!("Registered task {} from context", task.id);
 
         Ok(())
@@ -261,11 +248,7 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
         Ok(())
     }
 
-    async fn run(
-        mut self,
-        token: CancellationToken,
-    ) -> TaskSchedulerResult<()> {
-        let mut interval = tokio::time::interval(self.tick_interval);
+    pub async fn run(&mut self) -> TaskSchedulerResult<()> {
         loop {
             select! {
                 Some(task) = self.task_queue.next() => {
@@ -279,48 +262,19 @@ impl<T: AccountsBank> TaskSchedulerService<T> {
                         self.db.insert_failed_task(task.id, format!("{:?}", e))?;
                     }
                 }
-                _ = interval.tick() => {
-                    // HACK: we deserialize the context on every tick avoid using geyser. This will be fixed once the channel to the transaction executor is implemented.
-                    // Performance should not be too bad because the context should be small.
-                    // https://github.com/magicblock-labs/magicblock-validator/issues/523
-
-                    // Process any existing requests from the context
-                    let Some(context_account) = self.bank.get_account(&TASK_CONTEXT_PUBKEY) else {
-                        error!("Task context account not found");
-                        return Err(TaskSchedulerError::TaskContextNotFound);
-                    };
-
-                    let task_context = bincode::deserialize::<TaskContext>(context_account.data()).unwrap_or_default();
-
-                    if task_context.requests.is_empty() {
-                        // Nothing to do because there are no requests in the context
-                        continue;
-                    }
-
-                    match self.process_context_requests(&task_context.requests) {
-                        Ok(errors) => {
-                            if !errors.is_empty() {
-                                warn!("Failed to process {} requests out of {}", errors.len(), task_context.requests.len());
-                            }
-
-                            // All requests were processed, reset the context
-                            if let Err(e) =  self.process_transaction(vec![
-                                InstructionUtils::process_tasks_instruction(
-                                    &validator_authority_id(),
-                                ),
-                            ]).await {
-                                error!("Failed to reset task context: {}", e);
-                                return Err(e);
-                            }
-                            debug!("Processed {} requests", task_context.requests.len());
+                Some(task) = self.scheduled_tasks.recv() => {
+                    match self.process_request(&task) {
+                        Ok(ProcessingOutcome::Success) => {}
+                        Ok(ProcessingOutcome::Recoverable(e)) => {
+                            warn!("Failed to process request ID={}: {e:?}", task.id());
                         }
                         Err(e) => {
-                            error!("Failed to process context requests: {}", e);
+                            error!("Failed to process request: {}", e);
                             return Err(e);
                         }
                     }
                 }
-                _ = token.cancelled() => {
+                _ = self.token.cancelled() => {
                     break;
                 }
             }

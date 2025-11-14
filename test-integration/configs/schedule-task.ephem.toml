@@ -17,5 +17,4 @@ port = 8899
 port = 10001
 
 [task-scheduler]
-millis-per-tick = 50
 reset = true

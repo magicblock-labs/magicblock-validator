@@ -43,10 +43,7 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
 
     let config = EphemeralConfig {
         accounts: accounts_config,
-        task_scheduler: TaskSchedulerConfig {
-            reset: true,
-            millis_per_tick: TASK_SCHEDULER_TICK_MILLIS,
-        },
+        task_scheduler: TaskSchedulerConfig { reset: true },
         validator: ValidatorConfig {
             millis_per_slot: TASK_SCHEDULER_TICK_MILLIS,
             ..Default::default()

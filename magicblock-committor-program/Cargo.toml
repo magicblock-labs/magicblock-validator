@@ -29,3 +29,5 @@ doctest = false
 [features]
 no-entrypoint = []
 default = []
+custom-heap = []
+custom-panic = []

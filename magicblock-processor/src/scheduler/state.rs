@@ -3,7 +3,9 @@ use std::sync::{Arc, OnceLock, RwLock};
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
-    transactions::{TransactionStatusTx, TransactionToProcessRx},
+    transactions::{
+        ScheduledTasksTx, TransactionStatusTx, TransactionToProcessRx,
+    },
 };
 use magicblock_ledger::Ledger;
 use solana_account::AccountSharedData;
@@ -40,6 +42,8 @@ pub struct TransactionSchedulerState {
     pub account_update_tx: AccountUpdateTx,
     /// The channel for sending final transaction statuses to downstream consumers.
     pub transaction_status_tx: TransactionStatusTx,
+    /// A channel to send scheduled (crank) tasks created by transactions.
+    pub tasks_tx: ScheduledTasksTx,
 }
 
 impl TransactionSchedulerState {
