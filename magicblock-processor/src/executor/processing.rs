@@ -10,7 +10,7 @@ use magicblock_core::{
     tls::ExecutionTlsStash,
 };
 use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
