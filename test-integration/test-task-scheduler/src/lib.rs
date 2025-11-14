@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::process::Child;
 
 use integration_test_tools::{
