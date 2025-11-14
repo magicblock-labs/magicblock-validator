@@ -66,7 +66,7 @@ log = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
-rand = "0.9"
+rand = { workspace = true }
 test-kit = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-pubsub-client = { workspace = true }

@@ -1,6 +1,5 @@
 use setup::RpcTestEnv;
 use solana_pubkey::Pubkey;
-use test_kit::Signer;
 
 mod setup;
 
@@ -17,7 +16,7 @@ async fn test_get_slot_leaders() {
     assert_eq!(leaders.len(), 1, "should return a single leader");
     assert_eq!(
         leaders[0],
-        env.execution.payer.pubkey(),
+        env.execution.get_payer().pubkey,
         "leader should be the validator's own identity"
     );
 }
@@ -193,7 +192,7 @@ async fn test_get_cluster_nodes() {
     assert_eq!(nodes.len(), 1, "should be exactly one node in the cluster");
     assert_eq!(
         nodes[0].pubkey,
-        env.execution.payer.pubkey().to_string(),
+        env.execution.get_payer().pubkey.to_string(),
         "node pubkey should match validator identity"
     );
 }

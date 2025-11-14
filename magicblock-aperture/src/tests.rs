@@ -57,7 +57,7 @@ mod event_processor {
         let env = ExecutionTestEnv::new();
         env.advance_slot();
         let node_context = NodeContext {
-            identity: env.payer.pubkey(),
+            identity: env.get_payer().pubkey,
             ..Default::default()
         };
         let state = SharedState::new(
