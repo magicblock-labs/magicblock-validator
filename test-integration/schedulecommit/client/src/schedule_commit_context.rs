@@ -241,11 +241,8 @@ impl ScheduleCommitTestContext {
     }
 
     pub fn escrow_lamports_for_payer(&self) -> Result<Signature> {
-        let validator_identity = self
-            .common_ctx
-            .ephem_validator_identity
-            .as_ref()
-            .copied();
+        let validator_identity =
+            self.common_ctx.ephem_validator_identity.as_ref().copied();
         let ixs = init_payer_escrow_with_validator(
             self.payer_ephem.pubkey(),
             validator_identity,
