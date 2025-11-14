@@ -108,35 +108,6 @@ pub fn init_system_metrics_ticker(
     accountsdb: &Arc<AccountsDb>,
     token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
-    fn try_set_ledger_storage_size(ledger: &Ledger) {
-        match ledger.storage_size() {
-            Ok(byte_size) => metrics::set_ledger_size(byte_size),
-            Err(err) => warn!("Failed to get ledger storage size: {:?}", err),
-        }
-    }
-    let ledger = ledger.clone();
-    tokio::task::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = tokio::time::sleep(tick_duration) => {
-                    try_set_ledger_storage_size(&ledger);
-                },
-                _ = token.cancelled() => {
-                    break;
-                }
-            }
-        }
-    })
-}
-
-/*
-#[allow(unused_variables)]
-pub fn init_system_metrics_ticker_old(
-    tick_duration: Duration,
-    ledger: &Arc<Ledger>,
-    accountsdb: &Arc<AccountsDb>,
-    token: CancellationToken,
-) -> tokio::task::JoinHandle<()> {
     fn try_set_ledger_counts(ledger: &Ledger) {
         macro_rules! try_set_ledger_count {
             ($name:ident) => {
@@ -173,23 +144,28 @@ pub fn init_system_metrics_ticker_old(
             Err(err) => warn!("Failed to get ledger storage size: {:?}", err),
         }
     }
-    fn set_accounts_storage_size(bank: &Bank) {
-        let byte_size = bank.accounts_db_storage_size();
-        metrics::set_accounts_size(byte_size);
+    fn set_accounts_storage_size(accounts_db: &AccountsDb) {
+        let byte_size = accounts_db.storage_size();
+        metrics::set_accounts_size(byte_size.try_into().unwrap_or(i64::MAX));
     }
-    fn set_accounts_count(bank: &Bank) {
-        metrics::set_accounts_count(bank.accounts_db.get_accounts_count());
+    fn set_accounts_count(accounts_db: &AccountsDb) {
+        metrics::set_accounts_count(
+            accounts_db
+                .get_accounts_count()
+                .try_into()
+                .unwrap_or(i64::MAX),
+        );
     }
 
     let ledger = ledger.clone();
-    let bank = bank.clone();
+    let bank = accountsdb.clone();
     tokio::task::spawn(async move {
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(tick_duration) => {
                     try_set_ledger_storage_size(&ledger);
                     set_accounts_storage_size(&bank);
-                    try_set_ledger_counts(&ledger);
+                    metrics::observe_columns_count_duration(|| try_set_ledger_counts(&ledger));
                     set_accounts_count(&bank);
                 },
                 _ = token.cancelled() => {
@@ -198,7 +174,4 @@ pub fn init_system_metrics_ticker_old(
             }
         }
     })
-
-    tokio::task::spawn(async move {})
 }
-*/
