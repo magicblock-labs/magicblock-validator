@@ -157,6 +157,7 @@ impl TaskStrategist {
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
         let calculate_tx_length = |tasks: &[Box<dyn BaseTask>]| {
+            // TODO (snawaz): we seem to discard lots of heavy computations here
             match TransactionUtils::assemble_tasks_tx(
                 &Keypair::new(), // placeholder
                 tasks,
@@ -263,10 +264,10 @@ mod tests {
 
     // Helper to create a simple commit task
     fn create_test_commit_task(commit_id: u64, data_size: usize) -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::Commit(CommitTask {
+        ArgsTask::new(ArgsTaskType::Commit(CommitTask::new(
             commit_id,
-            allow_undelegation: false,
-            committed_account: CommittedAccount {
+            false,
+            CommittedAccount {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
                     lamports: 1000,
@@ -276,7 +277,7 @@ mod tests {
                     rent_epoch: 0,
                 },
             },
-        }))
+        )))
     }
 
     // Helper to create a Base action task

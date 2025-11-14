@@ -1,4 +1,4 @@
-use dlp::args::{CallHandlerArgs, CommitStateArgs};
+use dlp::args::CallHandlerArgs;
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 
@@ -44,20 +44,7 @@ impl ArgsTask {
 impl BaseTask for ArgsTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.task_type {
-            ArgsTaskType::Commit(value) => {
-                let args = CommitStateArgs {
-                    nonce: value.commit_id,
-                    lamports: value.committed_account.account.lamports,
-                    data: value.committed_account.account.data.clone(),
-                    allow_undelegation: value.allow_undelegation,
-                };
-                dlp::instruction_builder::commit_state(
-                    *validator,
-                    value.committed_account.pubkey,
-                    value.committed_account.account.owner,
-                    args,
-                )
-            }
+            ArgsTaskType::Commit(value) => value.create_commit_ix(validator),
             ArgsTaskType::Finalize(value) => {
                 dlp::instruction_builder::finalize(
                     *validator,
@@ -101,6 +88,18 @@ impl BaseTask for ArgsTask {
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
         match self.task_type {
+            ArgsTaskType::Commit(mut value) if value.is_commit_diff() => {
+                // TODO (snawaz): Currently, we do not support executing CommitDiff
+                // as BufferTask, which is why we're forcing CommitTask to use CommitState
+                // before converting this task into BufferTask Once CommitDiff is supported
+                // by BufferTask, we do not have to force_commit_state and we can remove
+                // force_commit_state stuff, as it's essentially a downgrade.
+
+                value.force_commit_state();
+                Ok(Box::new(BufferTask::new_preparation_required(
+                    BufferTaskType::Commit(value),
+                )))
+            }
             ArgsTaskType::Commit(value) => {
                 Ok(Box::new(BufferTask::new_preparation_required(
                     BufferTaskType::Commit(value),

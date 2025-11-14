@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures_util::future::join_all;
 use log::error;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
@@ -8,6 +9,7 @@ use magicblock_program::magic_scheduled_base_intent::{
 };
 use solana_pubkey::Pubkey;
 
+use super::account_fetcher::AccountFetcher;
 use crate::{
     intent_executor::task_info_fetcher::{
         TaskInfoFetcher, TaskInfoFetcherError,
@@ -85,19 +87,19 @@ impl TasksBuilder for TaskBuilderImpl {
                 }
             });
 
-        let tasks = accounts
+        let tasks = join_all(accounts
             .iter()
-            .map(|account| {
+            .map(|account| async {
                 let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                let task = ArgsTaskType::Commit(CommitTask {
+                let task = ArgsTaskType::Commit(CommitTask::new(
                     commit_id,
                     allow_undelegation,
-                    committed_account: account.clone(),
-                });
+                    account.clone(),
+                    AccountFetcher::new(),
+                ).await);
 
                 Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
-            })
-            .collect();
+            })).await;
 
         Ok(tasks)
     }
