@@ -18,7 +18,7 @@ use solana_svm::{
 };
 use solana_svm_transaction::svm_message::SVMMessage;
 use solana_transaction::sanitized::SanitizedTransaction;
-use solana_transaction_error::TransactionResult;
+use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status::{
     map_inner_instructions, TransactionStatusMeta,
 };
@@ -153,9 +153,26 @@ impl super::TransactionExecutor {
         // SAFETY:
         // we passed a single transaction for execution, and
         // we will get a guaranteed single result back.
-        let result = output.processing_results.pop().expect(
+        let mut result = output.processing_results.pop().expect(
             "single transaction result is always present in the output",
         );
+
+        let feepayer_was_modified = result
+            .as_ref()
+            .ok()
+            .and_then(|r| r.executed_transaction())
+            .and_then(|txn| txn.loaded_transaction.accounts.first())
+            .map(|acc| acc.1.is_dirty())
+            .unwrap_or_default();
+        let gasless = self.environment.fee_lamports_per_signature == 0;
+        // If we are running in the gasless mode, we should not allow
+        // any mutation of the feepayer account, since that would make
+        // it possible for malicious actors to peform transfer operations
+        // from undelegated feepayers to delegated accounts, which would
+        // result in validator loosing funds upon balance settling.
+        if gasless && feepayer_was_modified {
+            result = Err(TransactionError::UnbalancedTransaction);
+        };
         (result, output.balances)
     }
 
