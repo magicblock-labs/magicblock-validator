@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::str::FromStr;
 
 use cleanass::{assert, assert_eq};
