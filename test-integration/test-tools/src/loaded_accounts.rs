@@ -55,7 +55,7 @@ impl LoadedAccounts {
     /// Use `new_with_new_validator_authority()` instead for new tests.
     /// Keep this only for backward compatibility with existing test infrastructure.
     #[deprecated(
-        since = "issue-602",
+        since = "0.2.3",
         note = "DLP now uses production build without unit_test_config. Use new_with_new_validator_authority() instead."
     )]
     pub fn with_delegation_program_test_authority() -> Self {

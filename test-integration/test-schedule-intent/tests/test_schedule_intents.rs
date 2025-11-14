@@ -299,7 +299,7 @@ fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
         payer.pubkey(),
         payer.pubkey(),
         dlp::args::DelegateEphemeralBalanceArgs {
-            index: 0,
+            index: 1,
             delegate_args: dlp::args::DelegateArgs {
                 commit_frequency_ms: 0,
                 seeds: vec![],
