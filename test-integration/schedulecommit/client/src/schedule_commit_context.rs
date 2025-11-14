@@ -5,7 +5,7 @@ use integration_test_tools::IntegrationTestContext;
 use log::*;
 use program_schedulecommit::api::{
     delegate_account_cpi_instruction, init_account_instruction,
-    init_order_book_instruction, init_payer_escrow, UserSeeds,
+    init_order_book_instruction, init_payer_escrow_with_validator, UserSeeds,
 };
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -241,7 +241,15 @@ impl ScheduleCommitTestContext {
     }
 
     pub fn escrow_lamports_for_payer(&self) -> Result<Signature> {
-        let ixs = init_payer_escrow(self.payer_ephem.pubkey());
+        let validator_identity = self
+            .common_ctx
+            .ephem_validator_identity
+            .as_ref()
+            .copied();
+        let ixs = init_payer_escrow_with_validator(
+            self.payer_ephem.pubkey(),
+            validator_identity,
+        );
 
         // The init tx for all payers is funded by the first payer for simplicity
         let tx = Transaction::new_signed_with_payer(
