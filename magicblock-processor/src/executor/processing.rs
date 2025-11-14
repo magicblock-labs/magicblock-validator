@@ -7,7 +7,7 @@ use magicblock_core::link::{
     },
 };
 use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
-use solana_account::ReadableAccount;
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
@@ -284,12 +284,23 @@ impl super::TransactionExecutor {
             }
         };
 
+        // The first loaded account is always a feepayer, check
+        // whether we are running in privileged execution mode
+        let privileged = accounts
+            .first()
+            .map(|feepayer| feepayer.1.privileged())
+            .unwrap_or_default();
+
         for (pubkey, account) in accounts {
             // only persist account's update if it was actually modified, ignore
-            // the rest, even if an account was writeable in the transaction. We
-            // also don't persist accounts that are empty, since those are managed
-            // by the chainlink, and we cannot interfere with its logic here.
-            if !account.is_dirty() || account.lamports() == 0 {
+            // the rest, even if an account was writeable in the transaction.
+            //
+            // We also don't persist accounts that are empty, with an exception
+            // for special cases, when those are inserted forcefully as placeholders
+            // (for example by the chainlink), those cases can be distinguished from
+            // others by the fact that such a transaction is always running in a
+            // privileged mode.
+            if !account.is_dirty() || (account.lamports() == 0 && !privileged) {
                 continue;
             }
             self.accountsdb.insert_account(pubkey, account);
