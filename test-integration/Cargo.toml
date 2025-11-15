@@ -74,7 +74,7 @@ rayon = "1.10.0"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "f454d4a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "8f7050a" }
 solana-loader-v2-interface = "2.2"
 solana-loader-v3-interface = "4.0"
 solana-loader-v4-interface = "2.1"
@@ -106,4 +106,4 @@ url = "2.5.0"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "f454d4a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "8f7050a" }

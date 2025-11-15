@@ -162,7 +162,18 @@ impl super::TransactionExecutor {
             .ok()
             .and_then(|r| r.executed_transaction())
             .and_then(|txn| txn.loaded_transaction.accounts.first())
-            .map(|acc| acc.1.is_dirty())
+            .map(|acc| {
+                let dirty = acc.1.is_dirty() && !acc.1.privileged();
+                if dirty {
+                    println!(
+                        "FEEPAYER IS DIRTY {}: {}: \n{:?}",
+                        acc.1.is_shared(),
+                        acc.0,
+                        acc.1,
+                    );
+                }
+                dirty
+            })
             .unwrap_or_default();
         let gasless = self.environment.fee_lamports_per_signature == 0;
         // If we are running in the gasless mode, we should not allow
