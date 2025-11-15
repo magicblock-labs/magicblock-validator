@@ -157,12 +157,19 @@ impl super::TransactionExecutor {
             "single transaction result is always present in the output",
         );
 
-        let feepayer_was_modified = result
+        let undelegated_feepayer_was_modified = result
             .as_ref()
             .ok()
             .and_then(|r| r.executed_transaction())
             .and_then(|txn| txn.loaded_transaction.accounts.first())
-            .map(|acc| acc.1.is_dirty() && !acc.1.privileged())
+            .map(|acc| {
+                // The check logic: if we have an undelegated feepayer, then
+                // it cannot have been mutated. The only exception is the
+                // privileged feepayer (internal validator operations), for
+                // which we do allow the mutations, since it can be used to
+                // fund other accounts.
+                acc.1.is_dirty() && !acc.1.delegated() && !acc.1.privileged()
+            })
             .unwrap_or_default();
         let gasless = self.environment.fee_lamports_per_signature == 0;
         // If we are running in the gasless mode, we should not allow
@@ -170,7 +177,7 @@ impl super::TransactionExecutor {
         // it possible for malicious actors to peform transfer operations
         // from undelegated feepayers to delegated accounts, which would
         // result in validator loosing funds upon balance settling.
-        if gasless && feepayer_was_modified {
+        if gasless && undelegated_feepayer_was_modified {
             result = Err(TransactionError::UnbalancedTransaction);
         };
         (result, output.balances)
