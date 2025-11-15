@@ -147,6 +147,7 @@ impl LoadedProgram {
     ///       after the deploy.
     pub fn try_into_deploy_data_and_ixs_v4(
         self,
+        ephem_slot: u64,
         validator_auth: Pubkey,
     ) -> ClonerResult<DeployableV4Program> {
         let Self {
@@ -156,13 +157,14 @@ impl LoadedProgram {
             loader,
             ..
         } = self;
+        let five_slots_ago = ephem_slot.saturating_sub(5).max(1);
         let pre_deploy_loader_state = LoaderV4State {
-            slot: 1,
+            slot: five_slots_ago,
             authority_address_or_next_version: validator_auth,
             status: LoaderV4Status::Retracted,
         };
         let post_deploy_loader_state = LoaderV4State {
-            slot: 1,
+            slot: five_slots_ago,
             authority_address_or_next_version: authority,
             status: LoaderV4Status::Deployed,
         };
@@ -474,7 +476,7 @@ mod tests {
             loader_status: LoaderV4Status::Deployed,
             remote_slot: 0,
         }
-        .try_into_deploy_data_and_ixs_v4(validator_kp.pubkey())
+        .try_into_deploy_data_and_ixs_v4(1, validator_kp.pubkey())
         .unwrap();
         let recent_blockhash = Hash::new_unique();
 

@@ -16,8 +16,10 @@ pub async fn setup_actor_and_client() -> (
     mpsc::Receiver<SubscriptionUpdate>,
     RpcClient,
 ) {
+    let (tx, _) = mpsc::channel(10);
     let (actor, updates_rx) = ChainPubsubActor::new_from_url(
         PUBSUB_URL,
+        tx,
         CommitmentConfig::confirmed(),
     )
     .await
@@ -54,13 +56,13 @@ pub async fn unsubscribe(actor: &ChainPubsubActor, pubkey: Pubkey) {
         .expect("unsubscribe failed");
 }
 
-pub async fn recycle(actor: &ChainPubsubActor) {
+pub async fn reconnect(actor: &ChainPubsubActor) {
     let (tx, rx) = oneshot::channel();
     actor
-        .send_msg(ChainPubsubActorMessage::RecycleConnections { response: tx })
+        .send_msg(ChainPubsubActorMessage::Reconnect { response: tx })
         .await
-        .expect("failed to send RecycleConnections message");
+        .expect("failed to send Reconnect message");
     rx.await
-        .expect("recycle ack channel dropped")
-        .expect("recycle failed");
+        .expect("reconnect ack channel dropped")
+        .expect("reconnect failed");
 }

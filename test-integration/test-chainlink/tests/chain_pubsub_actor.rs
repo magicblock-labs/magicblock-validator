@@ -2,7 +2,7 @@ use magicblock_chainlink::{
     remote_account_provider::SubscriptionUpdate,
     testing::{
         chain_pubsub::{
-            recycle, setup_actor_and_client, subscribe, unsubscribe,
+            reconnect, setup_actor_and_client, subscribe, unsubscribe,
         },
         utils::{airdrop, init_logger, random_pubkey},
     },
@@ -90,9 +90,16 @@ async fn ixtest_recycle_connections() {
     .await;
 
     // 5. Recycle connections
-    recycle(&actor).await;
+    reconnect(&actor).await;
 
-    // 6. Airdrop again and ensure we receive the update again
+    // 6. Airdrop again and ensure we don't yet receive the update
+    airdrop(&rpc_client, &pubkey, 2_500_000).await;
+    expect_no_update_for(&mut updates_rx, pubkey, 1500).await;
+
+    // 6. Resubscribe to the account
+    subscribe(&actor, pubkey).await;
+
+    // 7. Airdrop again and ensure we receive the update again
     let _second_update = airdrop_and_expect_update(
         &rpc_client,
         &mut updates_rx,
@@ -144,7 +151,20 @@ async fn ixtest_recycle_connections_multiple_accounts() {
     unsubscribe(&actor, unsub_pk).await;
 
     // Recycle connections
-    recycle(&actor).await;
+    reconnect(&actor).await;
+
+    // Airdrop to each and ensure we receiive no updates yet
+    for &pk in &pks {
+        airdrop(&rpc_client, &pk, 2_500_000).await;
+    }
+    for &pk in &pks {
+        expect_no_update_for(&mut updates_rx, pk, 1500).await;
+    }
+
+    // Resubscribe to first three
+    for &pk in &pks[0..3] {
+        subscribe(&actor, pk).await;
+    }
 
     // Airdrop to first three and expect updates
     for &pk in &pks[0..3] {

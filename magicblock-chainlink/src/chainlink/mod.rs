@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
@@ -136,15 +139,55 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub fn reset_accounts_bank(&self) {
         let blacklisted_accounts =
             blacklisted_accounts(&self.validator_id, &self.faucet_id);
+
+        let delegated = AtomicU64::new(0);
+        let dlp_owned_not_delegated = AtomicU64::new(0);
+        let blacklisted = AtomicU64::new(0);
+        let remaining = AtomicU64::new(0);
+        let remaining_empty = AtomicU64::new(0);
+
         let removed = self.accounts_bank.remove_where(|pubkey, account| {
-            (!account.delegated()
-                // This fixes the edge-case of accounts that were in the process of
-                // being undelegated but never completed while the validator was running
-                || account.owner().eq(&dlp::id()))
-                && !blacklisted_accounts.contains(pubkey)
+            if blacklisted_accounts.contains(pubkey) {
+                blacklisted.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
+            if account.delegated() {
+                delegated.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
+            if account.owner().eq(&dlp::id()) {
+                dlp_owned_not_delegated.fetch_add(1, Ordering::Relaxed);
+                return true;
+            }
+            trace!(
+                "Removing non-delegated, non-DLP-owned account: {pubkey} {:#?}",
+                account
+            );
+            remaining.fetch_add(1, Ordering::Relaxed);
+            if account.lamports() == 0
+                && account.owner().ne(&solana_sdk::feature::id())
+            {
+                remaining_empty.fetch_add(1, Ordering::Relaxed);
+            }
+            true
         });
 
-        debug!("Removed {removed} non-delegated accounts");
+        let non_empty = remaining
+            .load(Ordering::Relaxed)
+            .saturating_sub(remaining_empty.load(Ordering::Relaxed));
+
+        info!(
+            "Removed {removed} accounts from bank:
+{} DLP-owned non-delegated
+{} non-delegated non-blacklisted, no-feature non-empty.
+{} non-delegated non-blacklisted empty
+Kept: {} delegated, {} blacklisted",
+            dlp_owned_not_delegated.into_inner(),
+            non_empty,
+            remaining_empty.into_inner(),
+            delegated.into_inner(),
+            blacklisted.into_inner()
+        );
     }
 
     fn subscribe_account_removals(
@@ -283,7 +326,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 .map(|p| p.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            trace!("Fetching accounts: {pubkeys_str}");
+            let mark_empty_str = mark_empty_if_not_found
+                .map(|keys| {
+                    keys.iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            trace!("Fetching accounts: {pubkeys_str}, mark_empty_if_not_found: {mark_empty_str}");
         }
         Self::promote_accounts(
             fetch_cloner,
@@ -311,7 +362,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         &self,
         pubkey: Pubkey,
     ) -> ChainlinkResult<()> {
-        trace!("Undelegation requested for account: {pubkey}");
+        debug!("Undelegation requested for account: {pubkey}");
+
+        magicblock_metrics::metrics::inc_undelegation_requested();
 
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(());
@@ -321,7 +374,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         // once it's undelegated
         fetch_cloner.subscribe_to_account(&pubkey).await?;
 
-        trace!("Successfully subscribed to account {pubkey} for undelegation tracking");
+        debug!("Successfully subscribed to account {pubkey} for undelegation tracking");
         Ok(())
     }
 

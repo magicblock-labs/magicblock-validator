@@ -215,6 +215,26 @@ where
                             );
                         }
                     }
+                    // Check if this is an undelegation completion
+                    // Conditions:
+                    // 1. In bank: account is delegated
+                    // 2. In bank: owner is dlp::id() indicating undelegation was triggered
+                    // 3. In update: owner is not dlp::id()
+                    // NOTE: this check will be simpler once we have the `undelegating` flag
+                    if let Some(in_bank) =
+                        self.accounts_bank.get_account(&pubkey)
+                    {
+                        if in_bank.delegated()
+                            && in_bank.owner().eq(&dlp::id())
+                            && !account.owner().eq(&dlp::id())
+                        {
+                            debug!(
+                                "Undelegation completed for account: {pubkey}"
+                            );
+                            magicblock_metrics::metrics::inc_undelegation_completed();
+                        }
+                    }
+
                     if account.executable() {
                         self.handle_executable_sub_update(pubkey, account)
                             .await;
@@ -581,7 +601,7 @@ where
         // For accounts we couldn't find we cannot do anything. We will let code depending
         // on them to be in the bank fail on its own
         if !not_found.is_empty() {
-            debug!(
+            trace!(
                 "Could not find accounts on chain: {:?}",
                 not_found
                     .iter()
@@ -960,24 +980,37 @@ where
                 .lock()
                 .expect("pending_requests lock poisoned");
 
-            for &pubkey in pubkeys {
-                // Check synchronously if account is in bank
-                if self.accounts_bank.get_account(&pubkey).is_some() {
-                    // Account is already in bank, we can skip it as it will be handled
-                    // by the existing fetch_and_clone_accounts logic when needed
-                    continue;
+            for pubkey in pubkeys {
+                // Check synchronously if account is in bank and subscribed when it should be
+                if let Some(account_in_bank) =
+                    self.accounts_bank.get_account(pubkey)
+                {
+                    // NOTE: we defensively correct accounts that we should have been watching but
+                    //       were not for some reason. We fetch them again in that case.
+                    //       This actually would point to a bug in the subscription logic.
+                    // TODO(thlorenz): remove this once we are certain (by perusing logs) that this
+                    //                 does not happen anymore
+                    if account_in_bank.owner().eq(&dlp::id())
+                        || account_in_bank.delegated()
+                        || self.blacklisted_accounts.contains(pubkey)
+                        || self.is_watching(pubkey)
+                    {
+                        continue;
+                    } else if !self.is_watching(pubkey) {
+                        debug!("Account {pubkey} should be watched but wasn't");
+                    }
                 }
 
                 // Check if account fetch is already pending
-                if let Some(requests) = pending.get_mut(&pubkey) {
+                if let Some(requests) = pending.get_mut(pubkey) {
                     let (sender, receiver) = oneshot::channel();
                     requests.push(sender);
-                    await_pending.push((pubkey, receiver));
+                    await_pending.push((*pubkey, receiver));
                     continue;
                 }
 
                 // Account needs to be fetched - add to fetch list
-                fetch_new.push(pubkey);
+                fetch_new.push(*pubkey);
             }
 
             // Create pending entries for accounts we need to fetch
@@ -1024,9 +1057,14 @@ where
 
         // Wait for any pending requests to complete
         let mut joinset = JoinSet::new();
-        for (_, receiver) in await_pending {
+        for (pubkey, receiver) in await_pending {
             joinset.spawn(async move {
-                if let Err(err) = receiver.await {
+                if let Err(err) = receiver
+                    .await
+                    .inspect_err(|err| {
+                        warn!("FetchCloner::clone_accounts - RecvError occurred while awaiting account {}: {err:?}. This indicates the account fetch sender was dropped without sending a value.", pubkey);
+                    })
+                {
                     // The sender was dropped, likely due to an error in the other request
                     error!(
                         "Failed to receive account from pending request: {err}"
@@ -1499,9 +1537,12 @@ mod tests {
                 rpc_client,
                 pubsub_client,
                 forward_tx,
-                &RemoteAccountProviderConfig::default_with_lifecycle_mode(
+                &RemoteAccountProviderConfig::try_new_with_metrics(
+                    1000,
                     LifecycleMode::Ephemeral,
-                ),
+                    false,
+                )
+                .unwrap(),
             )
             .await
             .unwrap(),

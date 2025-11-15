@@ -101,7 +101,6 @@ async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
         error!("Failed to process scheduled commits: {:?}", err);
     }
 }
-
 #[allow(unused_variables)]
 pub fn init_system_metrics_ticker(
     tick_duration: Duration,

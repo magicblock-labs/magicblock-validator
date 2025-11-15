@@ -2934,6 +2934,8 @@ dependencies = [
  "solana-transaction-status",
  "tempfile",
  "toml 0.8.23",
+ "ureq",
+ "url 2.5.4",
 ]
 
 [[package]]
@@ -3599,7 +3601,7 @@ dependencies = [
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=4d27862)",
  "solana-transaction",
  "tempfile",
  "thiserror 1.0.69",
@@ -3611,6 +3613,7 @@ dependencies = [
 name = "magicblock-chainlink"
 version = "0.2.3"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "bincode",
  "env_logger 0.11.8",
@@ -3620,6 +3623,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-magic-program-api 0.2.3",
+ "magicblock-metrics",
  "serde_json",
  "solana-account",
  "solana-account-decoder",
@@ -3785,7 +3789,7 @@ dependencies = [
  "solana-metrics",
  "solana-sdk",
  "solana-storage-proto 0.2.3",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=4d27862)",
  "solana-timings",
  "solana-transaction-status",
  "thiserror 1.0.69",
@@ -3852,7 +3856,7 @@ dependencies = [
  "solana-pubkey",
  "solana-rent-collector",
  "solana-sdk-ids",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=4d27862)",
  "solana-svm-transaction",
  "solana-system-program",
  "solana-transaction",
@@ -3928,7 +3932,7 @@ dependencies = [
  "solana-program",
  "solana-pubsub-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=4d27862)",
  "solana-timings",
  "thiserror 1.0.69",
  "tokio",
@@ -5626,6 +5630,7 @@ version = "0.23.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7160e3e10bf4535308537f3c4e1641468cd0e485175d6163087c0393c7d46643"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -9103,7 +9108,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2#11bbaf2249aeb16cec4111e86f2e18a0c45ff1f2"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=4d27862#4d278626742352432e5a6a856e73be7ca4bbd727"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -11187,6 +11192,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
+name = "ureq"
+version = "2.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
+dependencies = [
+ "base64 0.22.1",
+ "flate2",
+ "log",
+ "once_cell",
+ "rustls 0.23.28",
+ "rustls-pki-types",
+ "url 2.5.4",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
 name = "uriparse"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11449,6 +11470,24 @@ name = "webpki-roots"
 version = "0.25.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.4",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2878ef029c47c6e8cf779119f20fcf52bde7ad42a731b2a304bc221df17571e"
+dependencies = [
+ "rustls-pki-types",
+]
 
 [[package]]
 name = "which"
