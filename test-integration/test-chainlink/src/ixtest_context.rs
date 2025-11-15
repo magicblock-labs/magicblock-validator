@@ -1,7 +1,5 @@
-#![allow(unused)]
 use std::sync::Arc;
 
-use dlp::args::DelegateEphemeralBalanceArgs;
 use integration_test_tools::dlp_interface;
 use log::*;
 use magicblock_chainlink::{
@@ -11,13 +9,9 @@ use magicblock_chainlink::{
     fetch_cloner::FetchCloner,
     native_program_accounts,
     remote_account_provider::{
-        chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
-        config::{
-            RemoteAccountProviderConfig,
-            DEFAULT_SUBSCRIBED_ACCOUNTS_LRU_CAPACITY,
-        },
-        Endpoint, RemoteAccountProvider,
+        chain_updates_client::ChainUpdatesClient, Endpoint,
+        RemoteAccountProvider,
     },
     submux::SubMuxClient,
     testing::cloner_stub::ClonerStub,
@@ -35,11 +29,11 @@ use solana_sdk::{
 use solana_sdk_ids::native_loader;
 use tokio::task;
 
-use crate::{programs::send_instructions, sleep_ms};
+use crate::sleep_ms;
 
 pub type IxtestChainlink = Chainlink<
     ChainRpcClientImpl,
-    SubMuxClient<ChainPubsubClientImpl>,
+    SubMuxClient<ChainUpdatesClient>,
     AccountsBankStub,
     ClonerStub,
 >;
@@ -47,14 +41,13 @@ pub type IxtestChainlink = Chainlink<
 #[derive(Clone)]
 pub struct IxtestContext {
     pub rpc_client: Arc<RpcClient>,
-    // pub pubsub_client: ChainPubsubClientImpl
     pub chainlink: Arc<IxtestChainlink>,
     pub bank: Arc<AccountsBankStub>,
     pub remote_account_provider: Option<
         Arc<
             RemoteAccountProvider<
                 ChainRpcClientImpl,
-                SubMuxClient<ChainPubsubClientImpl>,
+                SubMuxClient<ChainUpdatesClient>,
             >,
         >,
     >,
@@ -82,7 +75,6 @@ impl IxtestContext {
         let faucet_kp = Keypair::new();
 
         let commitment = CommitmentConfig::confirmed();
-        let lifecycle_mode = LifecycleMode::Ephemeral;
         let bank = Arc::<AccountsBankStub>::default();
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
         let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -289,7 +281,10 @@ impl IxtestContext {
         let counter_pda = self.counter_pda(&counter_auth.pubkey());
         // The committor service will call this in order to have
         // chainlink subscribe to account updates of the counter account
-        self.chainlink.undelegation_requested(counter_pda).await;
+        self.chainlink
+            .undelegation_requested(counter_pda)
+            .await
+            .unwrap();
 
         // In order to make the account undelegatable we first need to
         // commmit and finalize
@@ -353,7 +348,7 @@ impl IxtestContext {
         delegate: bool,
     ) -> (Pubkey, Pubkey) {
         let validator = delegate.then_some(self.validator_kp.pubkey());
-        let (sig, ephemeral_balance_pda, deleg_record) =
+        let (_sig, ephemeral_balance_pda, deleg_record) =
             dlp_interface::top_up_ephemeral_fee_balance(
                 &self.rpc_client,
                 payer,
