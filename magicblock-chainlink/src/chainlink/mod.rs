@@ -247,14 +247,16 @@ Kept: {} delegated, {} blacklisted",
                 .is_none_or(|a| !a.delegated())
         };
 
-        let mark_empty_if_not_found = if clone_escrow {
+        // Always allow the fee payer to be treated as empty-if-not-found so that
+        // transactions can still be processed in gasless mode
+        let mut mark_empty_if_not_found = vec![*feepayer];
+
+        if clone_escrow {
             let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
             trace!("Adding balance PDA {balance_pda} for feepayer {feepayer}");
             pubkeys.push(balance_pda);
-            vec![balance_pda]
-        } else {
-            vec![]
-        };
+            mark_empty_if_not_found.push(balance_pda);
+        }
         let mark_empty_if_not_found = (!mark_empty_if_not_found.is_empty())
             .then(|| &mark_empty_if_not_found[..]);
         self.ensure_accounts(&pubkeys, mark_empty_if_not_found)
