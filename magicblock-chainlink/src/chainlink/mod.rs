@@ -248,9 +248,7 @@ Kept: {} delegated, {} blacklisted",
         };
 
         // Always allow the fee payer to be treated as empty-if-not-found so that
-        // transactions can still be processed in scenarios like gasless mode or
-        // when the payer hasn't been created yet. This mirrors Solana loader
-        // behavior which provides an empty placeholder AccountInfo at load time.
+        // transactions can still be processed in gasless mode
         let mut mark_empty_if_not_found = vec![*feepayer];
 
         if clone_escrow {
