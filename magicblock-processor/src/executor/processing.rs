@@ -351,7 +351,7 @@ impl super::TransactionExecutor {
     }
 }
 
-// A utils
+// A utils to extract the rollback lamports of the feepayer
 fn rollback_feepayer_lamports(rollback: &RollbackAccounts) -> u64 {
     match rollback {
         RollbackAccounts::FeePayerOnly { fee_payer_account } => {
