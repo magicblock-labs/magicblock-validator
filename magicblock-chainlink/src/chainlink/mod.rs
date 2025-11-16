@@ -32,6 +32,7 @@ pub mod errors;
 pub mod fetch_cloner;
 
 pub use blacklisted_accounts::*;
+use magicblock_core::link::transactions::SanitizeableTransaction;
 
 // -----------------
 // Chainlink

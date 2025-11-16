@@ -1,6 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use guinea::GuineaInstruction;
+use magicblock_core::traits::AccountsBank;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_keypair::Keypair;
 use solana_program::{
@@ -310,7 +311,7 @@ async fn test_transaction_gasless_mode() {
 }
 
 /// Verifies that in zero-fee ("gasless") mode, transactions are processed
-/// successfully with not existing accounts (not the feepayer).
+/// successfully when using a not existing accounts (not the feepayer).
 #[tokio::test]
 async fn test_transaction_gasless_mode_with_not_existing_account() {
     // Initialize the environment with a base fee of 0.
@@ -366,7 +367,6 @@ async fn test_transaction_gasless_mode_not_existing_feepayer() {
     // Initialize the environment with a base fee of 0.
     let payer = Keypair::new();
     let env = ExecutionTestEnv::new_with_payer_and_fees(&payer, 0);
-    let initial_balance = 0;
 
     // Simple noop instruction that does not touch the fee payer account
     let ix = Instruction::new_with_bincode(
@@ -395,10 +395,14 @@ async fn test_transaction_gasless_mode_not_existing_feepayer() {
         "Transaction execution should be successful"
     );
 
-    // Verify that absolutely no fee was charged.
-    let final_balance = env.get_payer().lamports();
+    // Verify that the payer balance is zero (or doesn't exist)
+    let final_balance = env
+        .accountsdb
+        .get_account(&payer.pubkey())
+        .unwrap_or_default()
+        .lamports();
     assert_eq!(
-        initial_balance, final_balance,
-        "payer balance should not change in gasless mode"
+        final_balance, 0,
+        "payer balance of a not existing feepayer should be 0 in gasless mode"
     );
 }

@@ -161,14 +161,34 @@ impl super::TransactionExecutor {
             .as_ref()
             .ok()
             .and_then(|r| r.executed_transaction())
-            .and_then(|txn| txn.loaded_transaction.accounts.first())
-            .map(|acc| {
+            .and_then(|txn| {
+                let first_acc = txn.loaded_transaction.accounts.first();
+                // Extract the fee-payer account lamports from rollback snapshot
+                let rollback_lamports =
+                    match &txn.loaded_transaction.rollback_accounts {
+                        RollbackAccounts::FeePayerOnly {
+                            fee_payer_account,
+                        } => fee_payer_account.lamports(),
+                        RollbackAccounts::SameNonceAndFeePayer { nonce } => {
+                            nonce.account().lamports()
+                        }
+                        RollbackAccounts::SeparateNonceAndFeePayer {
+                            fee_payer_account,
+                            ..
+                        } => fee_payer_account.lamports(),
+                    };
+                first_acc.map(|acc| (acc, rollback_lamports))
+            })
+            .map(|(acc, rollback_lamports)| {
                 // The check logic: if we have an undelegated feepayer, then
                 // it cannot have been mutated. The only exception is the
                 // privileged feepayer (internal validator operations), for
                 // which we do allow the mutations, since it can be used to
                 // fund other accounts.
-                acc.1.is_dirty() && !acc.1.delegated() && !acc.1.privileged()
+                (acc.1.is_dirty()
+                    && !(acc.1.lamports() == 0 && rollback_lamports == 0))
+                    && !acc.1.delegated()
+                    && !acc.1.privileged()
             })
             .unwrap_or_default();
         let gasless = self.environment.fee_lamports_per_signature == 0;
@@ -178,7 +198,8 @@ impl super::TransactionExecutor {
         // from undelegated feepayers to delegated accounts, which would
         // result in validator loosing funds upon balance settling.
         if gasless && undelegated_feepayer_was_modified {
-            result = Err(TransactionError::UnbalancedTransaction);
+            println!("{:?}", result);
+            result = Err(TransactionError::InvalidAccountForFee);
         };
         (result, output.balances)
     }
