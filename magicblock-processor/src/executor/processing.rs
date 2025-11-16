@@ -174,10 +174,10 @@ impl super::TransactionExecutor {
                 // privileged feepayer (internal validator operations), for
                 // which we do allow the mutations, since it can be used to
                 // fund other accounts.
-                    (acc.1.is_dirty()
-                        && (acc.1.lamports() != 0 || rollback_lamports != 0))
-                        && !acc.1.delegated()
-                        && !acc.1.privileged()
+                (acc.1.is_dirty()
+                    && (acc.1.lamports() != 0 || rollback_lamports != 0))
+                    && !acc.1.delegated()
+                    && !acc.1.privileged()
             })
             .unwrap_or_default();
         let gasless = self.environment.fee_lamports_per_signature == 0;
