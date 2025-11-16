@@ -2,6 +2,7 @@ use std::{collections::HashSet, time::Duration};
 
 use guinea::GuineaInstruction;
 use solana_account::{ReadableAccount, WritableAccount};
+use solana_keypair::Keypair;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     native_token::LAMPORTS_PER_SOL,
@@ -274,6 +275,100 @@ async fn test_transaction_gasless_mode() {
     let initial_balance = payer.lamports();
     payer.commmit();
 
+    let ix = Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::PrintSizes,
+        vec![],
+    );
+    let txn = env.build_transaction(&[ix]);
+    let signature = txn.signatures[0];
+
+    // In a normal fee-paying mode, this execution would fail.
+    env.execute_transaction(txn)
+        .await
+        .expect("transaction should succeed in gasless mode");
+
+    // Verify the transaction was fully processed and broadcast successfully.
+    let status = env
+        .dispatch
+        .transaction_status
+        .recv_timeout(Duration::from_millis(100))
+        .expect("should receive a transaction status update");
+
+    assert_eq!(status.signature, signature);
+    assert!(
+        status.result.result.is_ok(),
+        "Transaction execution should be successful"
+    );
+
+    // Verify that absolutely no fee was charged.
+    let final_balance = env.get_payer().lamports();
+    assert_eq!(
+        initial_balance, final_balance,
+        "payer balance should not change in gasless mode"
+    );
+}
+
+/// Verifies that in zero-fee ("gasless") mode, transactions are processed
+/// successfully with not existing accounts (not the feepayer).
+#[tokio::test]
+async fn test_transaction_gasless_mode_with_not_existing_account() {
+    // Initialize the environment with a base fee of 0.
+    let env = ExecutionTestEnv::new_with_fee(0);
+    let mut payer = env.get_payer();
+    payer.set_lamports(1); // Not enough to cover standard fee
+    payer.set_delegated(false); // Explicitly set the payer as NON-delegated.
+    let initial_balance = payer.lamports();
+    payer.commmit();
+
+    let ix = Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::PrintSizes,
+        vec![AccountMeta {
+            pubkey: Keypair::new().pubkey(),
+            is_signer: false,
+            is_writable: false,
+        }],
+    );
+    let txn = env.build_transaction(&[ix]);
+    let signature = txn.signatures[0];
+
+    // In a normal fee-paying mode, this execution would fail.
+    env.execute_transaction(txn)
+        .await
+        .expect("transaction should succeed in gasless mode");
+
+    // Verify the transaction was fully processed and broadcast successfully.
+    let status = env
+        .dispatch
+        .transaction_status
+        .recv_timeout(Duration::from_millis(100))
+        .expect("should receive a transaction status update");
+
+    assert_eq!(status.signature, signature);
+    assert!(
+        status.result.result.is_ok(),
+        "Transaction execution should be successful"
+    );
+
+    // Verify that absolutely no fee was charged.
+    let final_balance = env.get_payer().lamports();
+    assert_eq!(
+        initial_balance, final_balance,
+        "payer balance should not change in gasless mode"
+    );
+}
+
+/// Verifies that in zero-fee ("gasless") mode, transactions are processed
+/// successfully even when the fee payer does not exists.
+#[tokio::test]
+async fn test_transaction_gasless_mode_not_existing_feepayer() {
+    // Initialize the environment with a base fee of 0.
+    let payer = Keypair::new();
+    let env = ExecutionTestEnv::new_with_payer_and_fees(&payer, 0);
+    let initial_balance = 0;
+
+    // Simple noop instruction that does not touch the fee payer account
     let ix = Instruction::new_with_bincode(
         guinea::ID,
         &GuineaInstruction::PrintSizes,

@@ -81,6 +81,12 @@ impl ExecutionTestEnv {
         Self::new_with_fee(Self::BASE_FEE)
     }
 
+    pub fn new_with_payer_and_fees(payer: &Keypair, fee: u64) -> Self {
+        let mut ctx = Self::new_with_fee(fee);
+        ctx.payer = payer.insecure_clone();
+        ctx
+    }
+
     /// Creates a new, fully initialized validator test environment with given base fee
     ///
     /// This function sets up a complete validator stack:
