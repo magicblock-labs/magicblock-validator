@@ -23,6 +23,7 @@ use magicblock_rpc_client::{
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
 use solana_pubkey::Pubkey;
+use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_sdk::{
     message::VersionedMessage,
     signature::{Keypair, Signature, Signer, SignerError},
@@ -687,11 +688,17 @@ where
             cu.into()
         }
 
+        let config = RpcTransactionConfig {
+            commitment: Some(rpc_client.commitment()),
+            max_supported_transaction_version: Some(0),
+            ..Default::default()
+        };
         let cu_metrics = || async {
             match execution_outcome {
                 ExecutionOutput::SingleStage(signature) => {
-                    let tx =
-                        rpc_client.get_transaction(&signature, None).await?;
+                    let tx = rpc_client
+                        .get_transaction(&signature, Some(config))
+                        .await?;
                     Ok::<_, MagicBlockRpcClientError>(extract_cu(
                         tx.transaction,
                     ))
@@ -701,10 +708,10 @@ where
                     finalize_signature,
                 } => {
                     let commit_tx = rpc_client
-                        .get_transaction(&commit_signature, None)
+                        .get_transaction(&commit_signature, Some(config))
                         .await?;
                     let finalize_tx = rpc_client
-                        .get_transaction(&finalize_signature, None)
+                        .get_transaction(&finalize_signature, Some(config))
                         .await?;
                     let commit_cu = extract_cu(commit_tx.transaction);
                     let finalize_cu = extract_cu(finalize_tx.transaction);
