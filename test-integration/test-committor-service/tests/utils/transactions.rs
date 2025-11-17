@@ -10,6 +10,7 @@ use solana_rpc_client_api::config::{
 };
 use solana_sdk::{
     commitment_config::CommitmentConfig,
+    compute_budget::ComputeBudgetInstruction,
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signature, Signer},
     transaction::Transaction,
@@ -131,6 +132,7 @@ pub async fn tx_logs_contain(
 }
 
 /// This needs to be run for each test that required a new counter to be delegated
+#[allow(dead_code)]
 pub async fn init_and_delegate_account_on_chain(
     counter_auth: &Keypair,
     bytes: u64,
@@ -227,6 +229,7 @@ pub async fn init_and_delegate_account_on_chain(
 }
 
 /// This needs to be run for each test that required a new counter to be compressed delegated
+#[allow(dead_code)]
 pub async fn init_and_delegate_compressed_account_on_chain(
     counter_auth: &Keypair,
 ) -> (Pubkey, [u8; 32], Account) {
@@ -276,14 +279,18 @@ pub async fn init_and_delegate_compressed_account_on_chain(
     let pda_acc = get_account!(rpc_client, pda, "pda");
 
     // 2. Delegate account
-    let sig = rpc_client
+    let tx = Transaction::new_signed_with_payer(
+        &[
+            ComputeBudgetInstruction::set_compute_unit_limit(250_000),
+            delegate_ix,
+        ],
+        Some(&counter_auth.pubkey()),
+        &[&counter_auth],
+        latest_block_hash,
+    );
+    rpc_client
         .send_and_confirm_transaction_with_spinner_and_config(
-            &Transaction::new_signed_with_payer(
-                &[delegate_ix],
-                Some(&counter_auth.pubkey()),
-                &[&counter_auth],
-                latest_block_hash,
-            ),
+            &tx,
             CommitmentConfig::confirmed(),
             RpcSendTransactionConfig {
                 skip_preflight: true,
@@ -291,8 +298,10 @@ pub async fn init_and_delegate_compressed_account_on_chain(
             },
         )
         .await
+        .inspect_err(|_err| {
+            error!("Failed to delegate, signature: {:?}", tx.signatures[0])
+        })
         .expect("Failed to delegate");
-    debug!("Delegated account: {:?}, signature: {}", pda, sig);
 
     // Wait for the indexer to index the account
     sleep_millis(500).await;
@@ -307,12 +316,13 @@ pub async fn init_and_delegate_compressed_account_on_chain(
         .expect("Failed to get compressed account")
         .value;
 
-    eprintln!("Compressed account: {:?}", compressed_account);
+    debug!("Compressed account: {:?}", compressed_account);
 
     (pda, compressed_account.hash, pda_acc)
 }
 
 /// This needs to be run once for all tests
+#[allow(dead_code)]
 pub async fn fund_validator_auth_and_ensure_validator_fees_vault(
     validator_auth: &Keypair,
 ) {

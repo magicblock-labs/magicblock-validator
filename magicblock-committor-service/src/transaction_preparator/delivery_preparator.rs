@@ -147,6 +147,10 @@ impl DeliveryPreparator {
                 ))?;
             }
             PreparationTask::Compressed => {
+                // NOTE: indexer can take some time to catch update
+                // TODO(dode): avoid sleeping, use min slot instead
+                sleep(Duration::from_millis(1000)).await;
+
                 let delegated_account = task
                     .delegated_account()
                     .ok_or(InternalError::DelegatedAccountNotFound)?;

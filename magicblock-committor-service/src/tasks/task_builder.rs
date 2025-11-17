@@ -403,9 +403,7 @@ pub(crate) async fn get_compressed_data(
     pubkey: &Pubkey,
     photon_client: &PhotonIndexer,
 ) -> Result<CompressedData, TaskBuilderError> {
-    debug!("Getting compressed data for pubkey: {}", pubkey);
     let cda = derive_cda_from_pda(pubkey);
-    debug!("CDA: {:?}", cda);
     let compressed_delegation_record = photon_client
         .get_compressed_account(cda.to_bytes(), None)
         .await
@@ -439,17 +437,7 @@ pub(crate) async fn get_compressed_data(
             .ok_or(TaskBuilderError::MissingAddress)?,
         output_state_tree_index: packed_tree_accounts.output_tree_index,
     };
-    debug!("Compressed data obtained!");
-    debug!("Compressed data: {:?}", account_meta);
-    debug!(
-        "Remaining accounts: {:?}",
-        remaining_accounts.to_account_metas().0
-    );
-    debug!("Proof: {:?}", proof_result.proof);
-    debug!(
-        "Compressed delegation record: {:?}",
-        compressed_delegation_record
-    );
+
     Ok(CompressedData {
         hash: compressed_delegation_record.hash,
         compressed_delegation_record_bytes: compressed_delegation_record

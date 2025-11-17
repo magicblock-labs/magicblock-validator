@@ -16,16 +16,16 @@ use magicblock_committor_service::{
 use magicblock_program::validator::{
     generate_validator_authority_if_needed, validator_authority_id,
 };
-use solana_sdk::{
-    rent::Rent, signature::Keypair, signer::Signer, sysvar::Sysvar,
-};
+use solana_sdk::{rent::Rent, signature::Keypair, signer::Signer};
 use test_kit::init_logger;
 
-use crate::common::{
-    create_commit_task, create_compressed_commit_task, generate_random_bytes,
-    TestFixture,
+use crate::{
+    common::{
+        create_commit_task, create_compressed_commit_task,
+        generate_random_bytes, TestFixture,
+    },
+    utils::transactions::init_and_delegate_compressed_account_on_chain,
 };
-use crate::utils::transactions::init_and_delegate_compressed_account_on_chain;
 
 mod common;
 mod utils;

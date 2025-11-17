@@ -1,6 +1,7 @@
 #![allow(deprecated)]
 #![allow(unused_imports)]
 
+#[rustfmt::skip]
 #[path = "generated/mod.rs"]
 mod generated_original;
 mod utils;

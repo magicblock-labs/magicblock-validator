@@ -69,12 +69,8 @@ fn expect_strategies(
 // -----------------
 #[tokio::test]
 async fn test_ix_commit_single_account_100_bytes() {
-    commit_single_account(
-        100,
-        CommitStrategy::Args,
-        CommitSingleAccountMode::Commit,
-    )
-    .await;
+    commit_single_account(100, CommitStrategy::Args, CommitAccountMode::Commit)
+        .await;
 }
 
 #[tokio::test]
@@ -82,7 +78,7 @@ async fn test_ix_commit_single_account_100_bytes_and_undelegate() {
     commit_single_account(
         100,
         CommitStrategy::Args,
-        CommitSingleAccountMode::CommitAndUndelegate,
+        CommitAccountMode::CommitAndUndelegate,
     )
     .await;
 }
@@ -92,7 +88,7 @@ async fn test_ix_commit_single_account_800_bytes() {
     commit_single_account(
         800,
         CommitStrategy::FromBuffer,
-        CommitSingleAccountMode::Commit,
+        CommitAccountMode::Commit,
     )
     .await;
 }
@@ -102,7 +98,7 @@ async fn test_ix_commit_single_account_800_bytes_and_undelegate() {
     commit_single_account(
         800,
         CommitStrategy::FromBuffer,
-        CommitSingleAccountMode::CommitAndUndelegate,
+        CommitAccountMode::CommitAndUndelegate,
     )
     .await;
 }
@@ -112,7 +108,7 @@ async fn test_ix_commit_single_account_one_kb() {
     commit_single_account(
         1024,
         CommitStrategy::FromBuffer,
-        CommitSingleAccountMode::Commit,
+        CommitAccountMode::Commit,
     )
     .await;
 }
@@ -122,52 +118,12 @@ async fn test_ix_commit_single_account_ten_kb() {
     commit_single_account(
         10 * 1024,
         CommitStrategy::FromBuffer,
-        CommitSingleAccountMode::Commit,
+        CommitAccountMode::Commit,
     )
     .await;
 }
 
-#[tokio::test]
-async fn test_ix_commit_single_compressed_account_100_bytes() {
-    commit_single_account(
-        100,
-        CommitStrategy::Args,
-        CommitSingleAccountMode::CompressedCommit,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn test_ix_commit_single_compressed_account_100_bytes_and_undelegate() {
-    commit_single_account(
-        100,
-        CommitStrategy::Args,
-        CommitSingleAccountMode::CompressedCommitAndUndelegate,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn test_ix_commit_single_compressed_account_500_bytes() {
-    commit_single_account(
-        500,
-        CommitStrategy::Args,
-        CommitSingleAccountMode::CompressedCommit,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn test_ix_commit_single_compressed_account_500_bytes_and_undelegate() {
-    commit_single_account(
-        500,
-        CommitStrategy::Args,
-        CommitSingleAccountMode::CompressedCommitAndUndelegate,
-    )
-    .await;
-}
-
-enum CommitSingleAccountMode {
+enum CommitAccountMode {
     Commit,
     CompressedCommit,
     CommitAndUndelegate,
@@ -177,7 +133,7 @@ enum CommitSingleAccountMode {
 async fn commit_single_account(
     bytes: usize,
     expected_strategy: CommitStrategy,
-    mode: CommitSingleAccountMode,
+    mode: CommitAccountMode,
 ) {
     init_logger!();
 
@@ -195,8 +151,7 @@ async fn commit_single_account(
 
     let counter_auth = Keypair::new();
     let (pubkey, mut account) = match mode {
-        CommitSingleAccountMode::Commit
-        | CommitSingleAccountMode::CommitAndUndelegate => {
+        CommitAccountMode::Commit | CommitAccountMode::CommitAndUndelegate => {
             init_and_delegate_account_on_chain(&counter_auth, bytes as u64)
                 .await
         }
@@ -212,21 +167,21 @@ async fn commit_single_account(
 
     let account = CommittedAccount { pubkey, account };
     let base_intent = match mode {
-        CommitSingleAccountMode::CommitAndUndelegate => {
+        CommitAccountMode::CommitAndUndelegate => {
             MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
                 commit_action: CommitType::Standalone(vec![account]),
                 undelegate_action: UndelegateType::Standalone,
             })
         }
-        CommitSingleAccountMode::Commit => {
+        CommitAccountMode::Commit => {
             MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
         }
-        CommitSingleAccountMode::CompressedCommit => {
+        CommitAccountMode::CompressedCommit => {
             MagicBaseIntent::CompressedCommit(CommitType::Standalone(vec![
                 account,
             ]))
         }
-        CommitSingleAccountMode::CompressedCommitAndUndelegate => {
+        CommitAccountMode::CompressedCommitAndUndelegate => {
             MagicBaseIntent::CompressedCommitAndUndelegate(
                 CommitAndUndelegate {
                     commit_action: CommitType::Standalone(vec![account]),
@@ -269,7 +224,7 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
     commit_multiple_accounts(
         &[1024, 2048],
         1,
-        false,
+        CommitAccountMode::Commit,
         expect_strategies(&[(CommitStrategy::FromBuffer, 2)]),
     )
     .await;
@@ -281,7 +236,7 @@ async fn test_ix_commit_two_accounts_512kb() {
     commit_multiple_accounts(
         &[512, 512],
         1,
-        false,
+        CommitAccountMode::Commit,
         expect_strategies(&[(CommitStrategy::Args, 2)]),
     )
     .await;
@@ -293,7 +248,7 @@ async fn test_ix_commit_three_accounts_512kb() {
     commit_multiple_accounts(
         &[512, 512, 512],
         1,
-        false,
+        CommitAccountMode::Commit,
         expect_strategies(&[(CommitStrategy::Args, 3)]),
     )
     .await;
@@ -305,7 +260,7 @@ async fn test_ix_commit_six_accounts_512kb() {
     commit_multiple_accounts(
         &[512, 512, 512, 512, 512, 512],
         1,
-        false,
+        CommitAccountMode::Commit,
         expect_strategies(&[(CommitStrategy::Args, 6)]),
     )
     .await;
@@ -317,7 +272,7 @@ async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
     commit_multiple_accounts(
         &[1024, 2 * 1024, 5 * 1024, 10 * 1024],
         1,
-        false,
+        CommitAccountMode::Commit,
         expect_strategies(&[(CommitStrategy::FromBuffer, 4)]),
     )
     .await;
@@ -337,7 +292,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
     commit_5_accounts_1kb(
         3,
         expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
-        false,
+        CommitAccountMode::Commit,
     )
     .await;
 }
@@ -351,7 +306,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
             (CommitStrategy::FromBufferWithLookupTable, 3),
             (CommitStrategy::FromBuffer, 2),
         ]),
-        true,
+        CommitAccountMode::CommitAndUndelegate,
     )
     .await;
 }
@@ -364,7 +319,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
             (CommitStrategy::FromBuffer, 1),
             (CommitStrategy::FromBufferWithLookupTable, 4),
         ]),
-        false,
+        CommitAccountMode::Commit,
     )
     .await;
 }
@@ -377,7 +332,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
             (CommitStrategy::FromBuffer, 1),
             (CommitStrategy::FromBufferWithLookupTable, 4),
         ]),
-        true,
+        CommitAccountMode::CommitAndUndelegate,
     )
     .await;
 }
@@ -387,7 +342,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_5_undelegate_all() {
     commit_5_accounts_1kb(
         5,
         expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 5)]),
-        true,
+        CommitAccountMode::CommitAndUndelegate,
     )
     .await;
 }
@@ -458,20 +413,136 @@ async fn test_commit_20_accounts_1kb_bundle_size_8() {
     .await;
 }
 
+// -----------------
+// Compressed Account Commits
+// -----------------
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_100_bytes() {
+    commit_single_account(
+        100,
+        CommitStrategy::Args,
+        CommitAccountMode::CompressedCommit,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_100_bytes_and_undelegate() {
+    commit_single_account(
+        100,
+        CommitStrategy::Args,
+        CommitAccountMode::CompressedCommitAndUndelegate,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_500_bytes() {
+    commit_single_account(
+        500,
+        CommitStrategy::Args,
+        CommitAccountMode::CompressedCommit,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_500_bytes_and_undelegate() {
+    commit_single_account(
+        500,
+        CommitStrategy::Args,
+        CommitAccountMode::CompressedCommitAndUndelegate,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_two_compressed_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512],
+        1,
+        CommitAccountMode::CompressedCommit,
+        expect_strategies(&[(CommitStrategy::Args, 2)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_three_compressed_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512, 512],
+        1,
+        CommitAccountMode::CompressedCommit,
+        expect_strategies(&[(CommitStrategy::Args, 3)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_six_compressed_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512, 512, 512, 512, 512],
+        1,
+        CommitAccountMode::CompressedCommit,
+        expect_strategies(&[(CommitStrategy::Args, 6)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_commit_20_compressed_accounts_100bytes_bundle_size_2() {
+    commit_20_compressed_accounts_100bytes(
+        2,
+        expect_strategies(&[(CommitStrategy::Args, 20)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_commit_5_compressed_accounts_100bytes_bundle_size_2() {
+    commit_5_compressed_accounts_100bytes(
+        2,
+        expect_strategies(&[(CommitStrategy::Args, 5)]),
+        CommitAccountMode::CompressedCommit,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_commit_5_compressed_accounts_100bytes_bundle_size_2_undelegate_all(
+) {
+    commit_5_compressed_accounts_100bytes(
+        2,
+        expect_strategies(&[(CommitStrategy::Args, 2)]),
+        CommitAccountMode::CompressedCommitAndUndelegate,
+    )
+    .await;
+}
+
 async fn commit_5_accounts_1kb(
     bundle_size: usize,
     expected_strategies: ExpectedStrategies,
-    undelegate_all: bool,
+    mode_all: CommitAccountMode,
 ) {
     init_logger!();
     let accs = (0..5).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(
-        &accs,
-        bundle_size,
-        undelegate_all,
-        expected_strategies,
-    )
-    .await;
+    commit_multiple_accounts(&accs, bundle_size, mode_all, expected_strategies)
+        .await;
+}
+
+async fn commit_5_compressed_accounts_100bytes(
+    bundle_size: usize,
+    expected_strategies: ExpectedStrategies,
+    mode_all: CommitAccountMode,
+) {
+    init_logger!();
+    let accs = (0..5).map(|_| 100).collect::<Vec<_>>();
+    commit_multiple_accounts(&accs, bundle_size, mode_all, expected_strategies)
+        .await;
 }
 
 async fn commit_8_accounts_1kb(
@@ -480,8 +551,13 @@ async fn commit_8_accounts_1kb(
 ) {
     init_logger!();
     let accs = (0..8).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, bundle_size, false, expected_strategies)
-        .await;
+    commit_multiple_accounts(
+        &accs,
+        bundle_size,
+        CommitAccountMode::Commit,
+        expected_strategies,
+    )
+    .await;
 }
 
 async fn commit_20_accounts_1kb(
@@ -490,22 +566,51 @@ async fn commit_20_accounts_1kb(
 ) {
     init_logger!();
     let accs = (0..20).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, bundle_size, false, expected_strategies)
-        .await;
+    commit_multiple_accounts(
+        &accs,
+        bundle_size,
+        CommitAccountMode::Commit,
+        expected_strategies,
+    )
+    .await;
+}
+
+async fn commit_20_compressed_accounts_100bytes(
+    bundle_size: usize,
+    expected_strategies: ExpectedStrategies,
+) {
+    init_logger!();
+    let accs = (0..20).map(|_| 100).collect::<Vec<_>>();
+    commit_multiple_accounts(
+        &accs,
+        bundle_size,
+        CommitAccountMode::CompressedCommit,
+        expected_strategies,
+    )
+    .await;
 }
 
 async fn create_bundles(
     bundle_size: usize,
     bytess: &[usize],
+    compressed: bool,
 ) -> Vec<Vec<CommittedAccount>> {
     let mut join_set = JoinSet::new();
     for bytes in bytess {
         let bytes = *bytes;
         join_set.spawn(async move {
             let counter_auth = Keypair::new();
-            let (pda, mut pda_acc) =
+            let (pda, mut pda_acc) = if !compressed {
                 init_and_delegate_account_on_chain(&counter_auth, bytes as u64)
+                    .await
+            } else {
+                let (pda, _hash, pda_acc) =
+                    init_and_delegate_compressed_account_on_chain(
+                        &counter_auth,
+                    )
                     .await;
+                (pda, pda_acc)
+            };
 
             pda_acc.owner = program_flexi_counter::id();
             pda_acc.data = vec![0u8; bytes];
@@ -527,7 +632,7 @@ async fn create_bundles(
 async fn commit_multiple_accounts(
     bytess: &[usize],
     bundle_size: usize,
-    undelegate_all: bool,
+    mode_all: CommitAccountMode,
     expected_strategies: ExpectedStrategies,
 ) {
     init_logger!();
@@ -544,18 +649,41 @@ async fn commit_multiple_accounts(
     let service = CommittorServiceExt::new(Arc::new(service));
 
     // Create bundles of committed accounts
-    let bundles_of_committees = create_bundles(bundle_size, bytess).await;
+    let bundles_of_committees = create_bundles(
+        bundle_size,
+        bytess,
+        matches!(
+            mode_all,
+            CommitAccountMode::CompressedCommit
+                | CommitAccountMode::CompressedCommitAndUndelegate
+        ),
+    )
+    .await;
     // Create intent for each bundle
     let intents = bundles_of_committees
         .into_iter()
-        .map(|committees| {
-            if undelegate_all {
+        .map(|committees| match mode_all {
+            CommitAccountMode::CommitAndUndelegate => {
                 MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
                     commit_action: CommitType::Standalone(committees),
                     undelegate_action: UndelegateType::Standalone,
                 })
-            } else {
+            }
+            CommitAccountMode::Commit => {
                 MagicBaseIntent::Commit(CommitType::Standalone(committees))
+            }
+            CommitAccountMode::CompressedCommit => {
+                MagicBaseIntent::CompressedCommit(CommitType::Standalone(
+                    committees,
+                ))
+            }
+            CommitAccountMode::CompressedCommitAndUndelegate => {
+                MagicBaseIntent::CompressedCommitAndUndelegate(
+                    CommitAndUndelegate {
+                        commit_action: CommitType::Standalone(committees),
+                        undelegate_action: UndelegateType::Standalone,
+                    },
+                )
             }
         })
         .enumerate()
