@@ -3903,6 +3903,7 @@ version = "0.2.3"
 dependencies = [
  "ed25519-dalek",
  "log",
+ "magicblock-metrics",
  "magicblock-rpc-client",
  "rand 0.8.5",
  "sha3",

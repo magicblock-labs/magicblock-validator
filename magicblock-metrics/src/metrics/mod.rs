@@ -261,6 +261,23 @@ lazy_static::lazy_static! {
     static ref COMMITTOR_INTENT_CU_USAGE: IntGauge = IntGauge::new(
         "committor_intent_cu_usage_gauge", "Compute units used for Intent"
     ).unwrap();
+
+    // GetMultiplAccount investigation
+    static ref REMOTE_ACCOUNT_PROVIDER_A_COUNT: IntCounter = IntCounter::new(
+        "remote_account_provider_a_count", "Get mupltiple account count"
+    ).unwrap();
+
+    static ref TASK_INFO_FETCHER_A_COUNT: IntCounter = IntCounter::new(
+        "task_info_fetcher_a_count", "Get mupltiple account count"
+    ).unwrap();
+
+    static ref TABLE_MANIA_A_COUNT: IntCounter =  IntCounter::new(
+        "table_mania_a_count", "Get mupltiple account count"
+    ).unwrap();
+
+    static ref TABLE_MANIA_CLOSED_A_COUNT: IntCounter = IntCounter::new(
+        "table_mania_closed_a_count", "Get account counter"
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -311,6 +328,10 @@ pub(crate) fn register() {
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
+        register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
+        register!(TASK_INFO_FETCHER_A_COUNT);
+        register!(TABLE_MANIA_A_COUNT);
+        register!(TABLE_MANIA_CLOSED_A_COUNT);
     });
 }
 
@@ -457,4 +478,20 @@ pub fn inc_undelegation_requested() {
 
 pub fn inc_undelegation_completed() {
     UNDELEGATION_COMPLETED_COUNT.inc();
+}
+
+pub fn inc_remote_account_provider_a_count() {
+    REMOTE_ACCOUNT_PROVIDER_A_COUNT.inc()
+}
+
+pub fn inc_task_info_fetcher_a_count() {
+    TASK_INFO_FETCHER_A_COUNT.inc()
+}
+
+pub fn inc_table_mania_a_count() {
+    TABLE_MANIA_A_COUNT.inc()
+}
+
+pub fn inc_table_mania_cloase_a_count() {
+    TABLE_MANIA_CLOSED_A_COUNT.inc()
 }

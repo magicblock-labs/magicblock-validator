@@ -9,6 +9,7 @@ use std::{
 };
 
 use log::*;
+use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicblockRpcClient,
@@ -696,6 +697,7 @@ impl LookupTableRc {
         &self,
         rpc_client: &MagicblockRpcClient,
     ) -> TableManiaResult<bool> {
+        metrics::inc_table_mania_cloase_a_count();
         let acc = rpc_client.get_account(self.table_address()).await?;
         Ok(acc.is_none())
     }
