@@ -88,6 +88,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn try_new_from_endpoints(
         endpoints: &[Endpoint],
         commitment: CommitmentConfig,
