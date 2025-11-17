@@ -10,18 +10,19 @@ use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
-            ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+            NullTaskInfoFetcher, ResetType, TaskInfoFetcher,
+            TaskInfoFetcherResult,
         },
         IntentExecutorImpl,
     },
-    tasks::{account_fetcher::AccountFetcher, CommitTask},
+    tasks::CommitTask,
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
     ComputeBudgetConfig,
 };
 use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
-use magicblock_rpc_client::MagicblockRpcClient;
+use magicblock_rpc_client::{MagicBlockRpcClientResult, MagicblockRpcClient};
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -104,17 +105,22 @@ impl TestFixture {
     ) -> IntentExecutorImpl<TransactionPreparatorImpl, MockTaskInfoFetcher>
     {
         let transaction_preparator = self.create_transaction_preparator();
-        let task_info_fetcher = Arc::new(MockTaskInfoFetcher);
 
         IntentExecutorImpl::new(
             self.rpc_client.clone(),
             transaction_preparator,
-            task_info_fetcher,
+            self.create_task_info_fetcher(),
         )
+    }
+
+    #[allow(dead_code)]
+    pub fn create_task_info_fetcher(&self) -> Arc<MockTaskInfoFetcher> {
+        Arc::new(MockTaskInfoFetcher(self.rpc_client.clone()))
     }
 }
 
-pub struct MockTaskInfoFetcher;
+pub struct MockTaskInfoFetcher(MagicblockRpcClient);
+
 #[async_trait]
 impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_next_commit_ids(
@@ -136,6 +142,13 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     }
 
     fn reset(&self, _: ResetType) {}
+
+    async fn get_base_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> MagicBlockRpcClientResult<Option<Account>> {
+        self.0.get_account(pubkey).await
+    }
 }
 
 #[allow(dead_code)]
@@ -162,7 +175,7 @@ pub async fn create_commit_task(data: &[u8]) -> CommitTask {
                 rent_epoch: 0,
             },
         },
-        AccountFetcher::new(),
+        &Arc::new(NullTaskInfoFetcher),
     )
     .await
 }

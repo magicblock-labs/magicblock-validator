@@ -9,7 +9,6 @@ use magicblock_program::magic_scheduled_base_intent::{
 };
 use solana_pubkey::Pubkey;
 
-use super::account_fetcher::AccountFetcher;
 use crate::{
     intent_executor::task_info_fetcher::{
         TaskInfoFetcher, TaskInfoFetcherError,
@@ -25,14 +24,14 @@ use crate::{
 pub trait TasksBuilder {
     // Creates tasks for commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
-        commit_id_fetcher: &Arc<C>,
+        task_info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 
     // Create tasks for finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
-        info_fetcher: &Arc<C>,
+        task_info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 }
@@ -45,7 +44,7 @@ pub struct TaskBuilderImpl;
 impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
-        commit_id_fetcher: &Arc<C>,
+        task_info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
@@ -73,7 +72,7 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .map(|account| account.pubkey)
             .collect::<Vec<_>>();
-        let commit_ids = commit_id_fetcher
+        let commit_ids = task_info_fetcher
             .fetch_next_commit_ids(&committed_pubkeys)
             .await
             .map_err(TaskBuilderError::CommitTasksBuildError)?;
@@ -95,7 +94,7 @@ impl TasksBuilder for TaskBuilderImpl {
                     commit_id,
                     allow_undelegation,
                     account.clone(),
-                    AccountFetcher::new(),
+                    task_info_fetcher,
                 ).await);
 
                 Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
@@ -106,7 +105,7 @@ impl TasksBuilder for TaskBuilderImpl {
 
     /// Returns [`Task`]s for Finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
-        info_fetcher: &Arc<C>,
+        task_info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
@@ -169,7 +168,7 @@ impl TasksBuilder for TaskBuilderImpl {
                     .iter()
                     .map(|account| account.pubkey)
                     .collect::<Vec<_>>();
-                let rent_reimbursements = info_fetcher
+                let rent_reimbursements = task_info_fetcher
                     .fetch_rent_reimbursements(&pubkeys)
                     .await
                     .map_err(TaskBuilderError::FinalizedTasksBuildError)?;

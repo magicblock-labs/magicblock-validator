@@ -3,7 +3,6 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
-        account_fetcher::AccountFetcher,
         args_task::{ArgsTask, ArgsTaskType},
         buffer_task::{BufferTask, BufferTaskType},
         task_strategist::{TaskStrategist, TransactionStrategy},
@@ -41,7 +40,7 @@ async fn test_prepare_commit_tx_with_single_account() {
                 1,
                 true,
                 committed_account.clone(),
-                AccountFetcher::new(),
+                &fixture.create_task_info_fetcher(),
             )
             .await,
         ))) as Box<dyn BaseTask>,
@@ -100,7 +99,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
                 1,
                 true,
                 committed_account2.clone(),
-                AccountFetcher::new(),
+                &fixture.create_task_info_fetcher(),
             )
             .await,
         ));
@@ -112,7 +111,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
                 1,
                 true,
                 committed_account1.clone(),
-                AccountFetcher::new(),
+                &fixture.create_task_info_fetcher(),
             )
             .await,
         ))) as Box<dyn BaseTask>,
@@ -204,7 +203,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
                 1,
                 true,
                 committed_account.clone(),
-                AccountFetcher::new(),
+                &fixture.create_task_info_fetcher(),
             )
             .await,
         ));

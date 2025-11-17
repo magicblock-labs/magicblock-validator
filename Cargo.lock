@@ -3830,6 +3830,7 @@ dependencies = [
  "borsh 1.5.7",
  "bytemuck",
  "num_enum",
+ "paste",
  "pinocchio",
  "pinocchio-log",
  "pinocchio-pubkey",

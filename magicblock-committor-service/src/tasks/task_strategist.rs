@@ -250,6 +250,8 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use futures_util::future::join_all;
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, CommittedAccount, ProgramArgs,
@@ -259,11 +261,9 @@ mod tests {
 
     use super::*;
     use crate::{
+        intent_executor::task_info_fetcher::NullTaskInfoFetcher,
         persist::IntentPersisterImpl,
-        tasks::{
-            AccountFetcher, BaseActionTask, CommitTask, TaskStrategy,
-            UndelegateTask,
-        },
+        tasks::{BaseActionTask, CommitTask, TaskStrategy, UndelegateTask},
     };
 
     // Helper to create a simple commit task
@@ -285,7 +285,7 @@ mod tests {
                         rent_epoch: 0,
                     },
                 },
-                AccountFetcher::new(),
+                &Arc::new(NullTaskInfoFetcher),
             )
             .await,
         ))

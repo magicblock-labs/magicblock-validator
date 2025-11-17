@@ -1,4 +1,5 @@
-use account_fetcher::*;
+use std::sync::Arc;
+
 use dlp::{
     args::{CommitDiffArgs, CommitStateArgs},
     compute_diff,
@@ -23,7 +24,10 @@ use solana_pubkey::Pubkey;
 use solana_sdk::instruction::Instruction;
 use thiserror::Error;
 
-use crate::tasks::visitor::Visitor;
+use crate::{
+    intent_executor::task_info_fetcher::TaskInfoFetcher,
+    tasks::visitor::Visitor,
+};
 
 pub mod args_task;
 pub mod buffer_task;
@@ -32,8 +36,6 @@ pub mod task_strategist;
 pub(crate) mod task_visitors;
 pub mod utils;
 pub mod visitor;
-
-pub mod account_fetcher;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
@@ -123,20 +125,25 @@ impl CommitTask {
     // or 4 u64 fields.
     const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 
-    pub async fn new(
+    pub async fn new<C: TaskInfoFetcher>(
         commit_id: u64,
         allow_undelegation: bool,
         committed_account: CommittedAccount,
-        account_fetcher: AccountFetcher,
+        task_info_fetcher: &Arc<C>,
     ) -> Self {
         let base_account = if committed_account.account.data.len()
             > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
         {
-            match account_fetcher
-                .fetch_account(&committed_account.pubkey)
+            match task_info_fetcher
+                .get_base_account(&committed_account.pubkey)
                 .await
             {
-                Ok(account) => Some(account),
+                Ok(Some(account)) => Some(account),
+                Ok(None) => {
+                    log::warn!("AccountNotFound for commit_diff, pubkey: {}, commit_id: {}, Falling back to commit_state.",
+                        committed_account.pubkey, commit_id);
+                    None
+                }
                 Err(e) => {
                     log::warn!("Failed to fetch base account for commit diff, pubkey: {}, commit_id: {}, error: {}. Falling back to commit_state.",
                         committed_account.pubkey, commit_id, e);
@@ -411,10 +418,13 @@ mod serialization_safety_test {
     };
     use solana_account::Account;
 
-    use crate::tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
-        buffer_task::{BufferTask, BufferTaskType},
-        *,
+    use crate::{
+        intent_executor::task_info_fetcher::NullTaskInfoFetcher,
+        tasks::{
+            args_task::{ArgsTask, ArgsTaskType},
+            buffer_task::{BufferTask, BufferTaskType},
+            *,
+        },
     };
 
     // Test all ArgsTask variants
@@ -437,7 +447,7 @@ mod serialization_safety_test {
                         rent_epoch: 0,
                     },
                 },
-                AccountFetcher::new(),
+                &Arc::new(NullTaskInfoFetcher),
             )
             .await,
         )
@@ -501,7 +511,7 @@ mod serialization_safety_test {
                             rent_epoch: 0,
                         },
                     },
-                    AccountFetcher::new(),
+                    &Arc::new(NullTaskInfoFetcher),
                 )
                 .await,
             ));
@@ -529,7 +539,7 @@ mod serialization_safety_test {
                             rent_epoch: 0,
                         },
                     },
-                    AccountFetcher::new(),
+                    &Arc::new(NullTaskInfoFetcher),
                 )
                 .await,
             ));
