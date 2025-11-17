@@ -57,7 +57,7 @@ async fn replay_blocks(
             break;
         };
         if log::log_enabled!(Level::Info)
-            && slot.is_multiple_of(PROGRESS_REPORT_INTERVAL)
+            && slot % PROGRESS_REPORT_INTERVAL == 0
         {
             info!(
                 "Processing block: {}/{}",
@@ -160,7 +160,12 @@ pub async fn process_ledger(
 
     // Since transactions may refer to blockhashes that were present when they
     // ran initially we ensure that they are present during replay as well
-    let blockhashes_only_starting_slot = if full_process_starting_slot > max_age { full_process_starting_slot - max_age } else { Default::default() };
+    let blockhashes_only_starting_slot = if full_process_starting_slot > max_age
+    {
+        full_process_starting_slot - max_age
+    } else {
+        Default::default()
+    };
     debug!(
         "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
         blockhashes_only_starting_slot, full_process_starting_slot

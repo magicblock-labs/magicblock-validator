@@ -181,7 +181,7 @@ impl AccountsDb {
         &self,
         program: &Pubkey,
         filter: F,
-    ) -> AccountsDbResult<AccountsScanner<'_, F>>
+    ) -> AccountsDbResult<AccountsScanner<F>>
     where
         F: Fn(&AccountSharedData) -> bool + 'static,
     {
@@ -241,7 +241,7 @@ impl AccountsDb {
     pub fn set_slot(self: &Arc<Self>, slot: u64) {
         self.storage.set_slot(slot);
 
-        if !slot.is_multiple_of(self.snapshot_frequency) {
+        if slot % self.snapshot_frequency != 0 {
             return;
         }
         let this = self.clone();
