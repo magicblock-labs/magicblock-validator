@@ -303,16 +303,16 @@ pub struct NullTaskInfoFetcher;
 impl TaskInfoFetcher for NullTaskInfoFetcher {
     async fn fetch_next_commit_ids(
         &self,
-        pubkeys: &[Pubkey],
+        _pubkeys: &[Pubkey],
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+        Ok(Default::default())
     }
 
     async fn fetch_rent_reimbursements(
         &self,
-        pubkeys: &[Pubkey],
+        _pubkeys: &[Pubkey],
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-        Ok(pubkeys.to_vec())
+        Ok(Default::default())
     }
 
     fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
