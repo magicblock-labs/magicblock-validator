@@ -328,6 +328,9 @@ pub(crate) fn register() {
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
+        register!(TASK_INFO_FETCHER_A_COUNT);
+        register!(TABLE_MANIA_A_COUNT);
+        register!(TABLE_MANIA_CLOSED_A_COUNT);
     });
 }
 
