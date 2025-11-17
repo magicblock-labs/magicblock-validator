@@ -2,6 +2,7 @@ use std::{collections::HashSet, num::NonZeroUsize, sync::Mutex};
 
 use log::*;
 use lru::LruCache;
+use magicblock_metrics::metrics::inc_evicted_accounts_count;
 use solana_pubkey::Pubkey;
 use solana_sdk::sysvar;
 
@@ -79,6 +80,7 @@ impl AccountsLruCache {
             .map(|(evicted_pubkey, _)| evicted_pubkey);
 
         if let Some(evicted_pubkey) = evicted {
+            inc_evicted_accounts_count();
             debug_assert_ne!(
                 evicted_pubkey, pubkey,
                 "Should not evict the same pubkey that we added"
