@@ -11,7 +11,6 @@ use magicblock_config::{
 use solana_sdk::{signature::Keypair, signer::Signer, system_instruction};
 use test_kit::init_logger;
 
-#[ignore = "Auto airdrop is not generally supported at this point, we will add this back as needed"]
 #[test]
 fn test_auto_airdrop_feepayer_balance_after_tx() {
     init_logger!();

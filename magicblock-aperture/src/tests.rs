@@ -42,6 +42,7 @@ fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
         None,
         Pubkey::new_unique(),
         Pubkey::new_unique(),
+        0,
     )
     .expect("Failed to create Chainlink")
 }

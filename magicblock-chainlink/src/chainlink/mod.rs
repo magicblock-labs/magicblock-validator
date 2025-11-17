@@ -53,6 +53,9 @@ pub struct Chainlink<
 
     validator_id: Pubkey,
     faucet_id: Pubkey,
+
+    /// If > 0, automatically airdrop this many lamports to feepayers when they are new/empty
+    auto_airdrop_lamports: u64,
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
@@ -63,6 +66,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
+        auto_airdrop_lamports: u64,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
@@ -80,9 +84,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             removed_accounts_sub,
             validator_id: validator_pubkey,
             faucet_id: faucet_pubkey,
+            auto_airdrop_lamports,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn try_new_from_endpoints(
         endpoints: &[Endpoint],
         commitment: CommitmentConfig,
@@ -91,6 +97,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
         config: ChainlinkConfig,
+        auto_airdrop_lamports: u64,
     ) -> ChainlinkResult<
         Chainlink<
             ChainRpcClientImpl,
@@ -129,6 +136,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             fetch_cloner,
             validator_pubkey,
             faucet_pubkey,
+            auto_airdrop_lamports,
         )
     }
 
@@ -259,8 +267,36 @@ Kept: {} delegated, {} blacklisted",
         }
         let mark_empty_if_not_found = (!mark_empty_if_not_found.is_empty())
             .then(|| &mark_empty_if_not_found[..]);
-        self.ensure_accounts(&pubkeys, mark_empty_if_not_found)
-            .await
+        let res = self
+            .ensure_accounts(&pubkeys, mark_empty_if_not_found)
+            .await?;
+
+        // Best-effort auto airdrop for fee payer if configured and still empty locally
+        if self.auto_airdrop_lamports > 0 {
+            if let Some(fetch_cloner) = self.fetch_cloner() {
+                let lamports = self
+                    .accounts_bank
+                    .get_account(feepayer)
+                    .map(|a| a.lamports())
+                    .unwrap_or(0);
+                if lamports == 0 {
+                    if let Err(err) = fetch_cloner
+                        .airdrop_account_if_empty(
+                            *feepayer,
+                            self.auto_airdrop_lamports,
+                        )
+                        .await
+                    {
+                        warn!(
+                            "Auto airdrop for feepayer {} failed: {:?}",
+                            feepayer, err
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(res)
     }
 
     /// Same as fetch accounts, but does not return the accounts, just
