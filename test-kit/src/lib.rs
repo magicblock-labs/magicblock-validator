@@ -280,7 +280,7 @@ impl ExecutionTestEnv {
         }
     }
 
-    pub fn get_payer(&self) -> CommitableAccount<'_> {
+    pub fn get_payer(&self) -> CommitableAccount {
         self.get_account(self.payer.pubkey())
     }
 }

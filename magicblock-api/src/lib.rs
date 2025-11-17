@@ -1,5 +1,3 @@
-#![allow(clippy::large_enum_variant)]
-
 pub mod domain_registry_manager;
 pub mod errors;
 pub mod external_config;
