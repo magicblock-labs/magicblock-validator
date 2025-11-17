@@ -14,6 +14,7 @@ use log::*;
 use magicblock_core::traits::AccountsBank;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
+use solana_sdk::system_program;
 use tokio::{
     sync::{mpsc, oneshot},
     task,
@@ -1229,6 +1230,32 @@ where
         &self,
     ) -> ChainlinkResult<mpsc::Receiver<Pubkey>> {
         Ok(self.remote_account_provider.try_get_removed_account_rx()?)
+    }
+
+    /// Best-effort airdrop helper: if the account doesn't exist in the bank or has 0 lamports,
+    /// create/overwrite it as a plain system account with the provided lamports using the cloner path.
+    pub async fn airdrop_account_if_empty(
+        &self,
+        pubkey: Pubkey,
+        lamports: u64,
+    ) -> ClonerResult<()> {
+        if lamports == 0 {
+            return Ok(());
+        }
+        if let Some(acc) = self.accounts_bank.get_account(&pubkey) {
+            if acc.lamports() > 0 {
+                return Ok(());
+            }
+        }
+        // Build a plain system account with the requested balance
+        let account =
+            AccountSharedData::new(lamports, 0, &system_program::id());
+        debug!(
+            "Auto-airdropping {} lamports to new/empty account {}",
+            lamports, pubkey
+        );
+        let _sig = self.cloner.clone_account(pubkey, account).await?;
+        Ok(())
     }
 }
 
