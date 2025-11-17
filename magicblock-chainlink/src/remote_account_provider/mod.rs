@@ -46,10 +46,13 @@ pub mod program_account;
 mod remote_account;
 
 pub use chain_pubsub_actor::SubscriptionUpdate;
-use magicblock_metrics::metrics::{
-    inc_account_fetches_failed, inc_account_fetches_found,
-    inc_account_fetches_not_found, inc_account_fetches_success,
-    set_monitored_accounts_count,
+use magicblock_metrics::{
+    metrics,
+    metrics::{
+        inc_account_fetches_failed, inc_account_fetches_found,
+        inc_account_fetches_not_found, inc_account_fetches_success,
+        set_monitored_accounts_count,
+    },
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
@@ -888,6 +891,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 // We provide the min_context slot in order to _force_ the RPC to update
                 // its account cache. Otherwise we could just keep fetching the accounts
                 // until the context slot is high enough.
+                metrics::inc_remote_account_provider_a_count();
                 match rpc_client
                     .get_multiple_accounts_with_config(
                         &pubkeys,
