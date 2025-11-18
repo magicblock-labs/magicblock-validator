@@ -1,4 +1,4 @@
-use log::error;
+use log::*;
 use magicblock_core::link::{
     accounts::{AccountWithSlot, LockedAccount},
     transactions::{
@@ -187,7 +187,6 @@ impl super::TransactionExecutor {
         // from undelegated feepayers to delegated accounts, which would
         // result in validator loosing funds upon balance settling.
         if gasless && undelegated_feepayer_was_modified {
-            println!("{:?}", result);
             result = Err(TransactionError::InvalidAccountForFee);
         };
         (result, output.balances)
