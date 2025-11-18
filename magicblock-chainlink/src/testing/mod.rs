@@ -356,16 +356,6 @@ macro_rules! min_max_with_deviation_percent {
     }};
 }
 
-#[allow(unused)]
-fn min_max_with_deviation_percent(size: usize, percent: f64) -> (usize, usize) {
-    // Program size may vary a bit
-    // especially across differnt solana versions + OSes
-    let deviation = (size as f64 * percent / 100.0).ceil() as usize;
-    let min = size.saturating_sub(deviation);
-    let max = size + deviation;
-    (min, max)
-}
-
 #[macro_export]
 macro_rules! assert_loaded_program_with_min_size {
     ($cloner:expr, $program_id:expr, $auth:expr, $loader:expr, $loader_status:expr, $size:expr) => {{

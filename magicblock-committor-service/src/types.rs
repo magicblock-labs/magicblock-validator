@@ -24,7 +24,11 @@ impl metrics::LabelValue for ScheduledBaseIntentWrapper {
         match &self.inner.base_intent {
             MagicBaseIntent::BaseActions(_) => "actions",
             MagicBaseIntent::Commit(_) => "commit",
+            MagicBaseIntent::CompressedCommit(_) => "compressed_commit",
             MagicBaseIntent::CommitAndUndelegate(_) => "commit_and_undelegate",
+            MagicBaseIntent::CompressedCommitAndUndelegate(_) => {
+                "compressed_commit_and_undelegate"
+            }
         }
     }
 }
