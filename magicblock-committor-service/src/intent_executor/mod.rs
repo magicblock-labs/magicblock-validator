@@ -788,6 +788,8 @@ where
         let result = self.execute_inner(base_intent, &persister).await;
         if let Some(pubkeys) = pubkeys {
             // Reset TaskInfoFetcher, as cache could become invalid
+            // NOTE: if undelegation was removed - we still reset
+            // We assume its safe since all consecutive commits will fail
             if result.is_err() || is_undelegate {
                 self.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
             }
