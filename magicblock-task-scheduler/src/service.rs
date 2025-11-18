@@ -6,7 +6,7 @@ use std::{
 
 use futures_util::StreamExt;
 use log::*;
-use magicblock_config::TaskSchedulerConfig;
+use magicblock_config::config::TaskSchedulerConfig;
 use magicblock_core::link::transactions::{
     ScheduledTasksRx, TransactionSchedulerHandle,
 };

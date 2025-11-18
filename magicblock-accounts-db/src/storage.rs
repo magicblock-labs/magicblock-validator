@@ -7,7 +7,7 @@ use std::{
 };
 
 use log::error;
-use magicblock_config::{AccountsDbConfig, BlockSize};
+use magicblock_config::config::{AccountsDbConfig, BlockSize};
 use memmap2::MmapMut;
 use solana_account::AccountSharedData;
 
@@ -289,7 +289,7 @@ impl StorageMeta {
         // cases, and prevent accidental creation of few kilobyte large or 0 sized databases
         const MIN_DB_SIZE: usize = 16 * 1024 * 1024;
         assert!(
-            config.db_size > MIN_DB_SIZE,
+            config.database_size > MIN_DB_SIZE,
             "database file should be larger than {MIN_DB_SIZE} bytes in length"
         );
         let db_size = calculate_db_size(config);
@@ -394,7 +394,7 @@ fn adjust_database_file_size(file: &mut File, size: u64) -> io::Result<()> {
 
 fn calculate_db_size(config: &AccountsDbConfig) -> usize {
     let block_size = config.block_size as usize;
-    let block_num = config.db_size.div_ceil(block_size);
+    let block_num = config.database_size.div_ceil(block_size);
     let meta_blocks = METADATA_STORAGE_SIZE.div_ceil(block_size);
     (block_num + meta_blocks) * block_size
 }

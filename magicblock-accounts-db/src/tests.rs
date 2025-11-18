@@ -1,6 +1,6 @@
 use std::{collections::HashSet, ops::Deref, sync::Arc};
 
-use magicblock_config::AccountsDbConfig;
+use magicblock_config::config::AccountsDbConfig;
 use magicblock_core::traits::AccountsBank;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
@@ -13,8 +13,6 @@ const SPACE: usize = 73;
 const OWNER: Pubkey = Pubkey::new_from_array([23; 32]);
 const ACCOUNT_DATA: &[u8] = b"hello world?";
 const INIT_DATA_LEN: usize = ACCOUNT_DATA.len();
-
-const SNAPSHOT_FREQUENCY: u64 = 16;
 
 #[test]
 fn test_get_account() {
@@ -236,23 +234,23 @@ fn test_take_snapshot() {
     let mut acc = tenv.account();
 
     assert_eq!(tenv.slot(), 0, "fresh accountsdb should have 0 slot");
-    tenv.set_slot(SNAPSHOT_FREQUENCY);
+    tenv.set_slot(tenv.snapshot_frequency);
     assert_eq!(
         tenv.slot(),
-        SNAPSHOT_FREQUENCY,
+        tenv.snapshot_frequency,
         "adb slot must have been updated"
     );
     assert!(
-        tenv.snapshot_exists(SNAPSHOT_FREQUENCY),
+        tenv.snapshot_exists(tenv.snapshot_frequency),
         "first snapshot should have been created"
     );
     acc.account.set_data(ACCOUNT_DATA.to_vec());
 
     tenv.insert_account(&acc.pubkey, &acc.account);
 
-    tenv.set_slot(2 * SNAPSHOT_FREQUENCY);
+    tenv.set_slot(2 * tenv.snapshot_frequency);
     assert!(
-        tenv.snapshot_exists(2 * SNAPSHOT_FREQUENCY),
+        tenv.snapshot_exists(2 * tenv.snapshot_frequency),
         "second snapshot should have been created"
     );
 }
@@ -263,8 +261,8 @@ fn test_restore_from_snapshot() {
     let mut acc = tenv.account();
     let new_lamports = 42;
 
-    tenv.set_slot(SNAPSHOT_FREQUENCY); // trigger snapshot
-    tenv.set_slot(SNAPSHOT_FREQUENCY + 1);
+    tenv.set_slot(tenv.snapshot_frequency); // trigger snapshot
+    tenv.set_slot(tenv.snapshot_frequency + 1);
     acc.account.set_lamports(new_lamports);
     tenv.insert_account(&acc.pubkey, &acc.account);
 
@@ -276,12 +274,13 @@ fn test_restore_from_snapshot() {
         new_lamports,
         "account's lamports should have been updated after commit"
     );
-    tenv.set_slot(SNAPSHOT_FREQUENCY * 3);
+    tenv.set_slot(tenv.snapshot_frequency * 3);
 
-    tenv = tenv.ensure_at_most(SNAPSHOT_FREQUENCY * 2);
+    let snapshot_frequency = tenv.snapshot_frequency;
+    tenv = tenv.ensure_at_most(snapshot_frequency * 2);
     assert_eq!(
         tenv.slot(),
-        SNAPSHOT_FREQUENCY,
+        tenv.snapshot_frequency,
         "slot should have been rolled back"
     );
     let acc_rolledback = tenv
@@ -292,7 +291,7 @@ fn test_restore_from_snapshot() {
         LAMPORTS,
         "account's lamports should have been rolled back"
     );
-    assert_eq!(tenv.slot(), SNAPSHOT_FREQUENCY);
+    assert_eq!(tenv.slot(), tenv.snapshot_frequency);
 }
 
 #[test]
@@ -309,7 +308,7 @@ fn test_get_all_accounts_after_rollback() {
     }
 
     let mut post_snap_pks = vec![];
-    for i in ITERS..ITERS + SNAPSHOT_FREQUENCY {
+    for i in ITERS..ITERS + tenv.snapshot_frequency {
         let acc = tenv.account();
         tenv.insert_account(&acc.pubkey, &acc.account);
         tenv.set_slot(i + 1);
@@ -562,6 +561,45 @@ fn test_reallocation_split() {
     assert!(account4.account.data().as_ptr() > data_ptr1);
 }
 
+#[test]
+fn test_database_reset() {
+    // 1. Initialize DB and insert some data
+    let (adb, temp_dir) = init_db();
+    let pubkey = Pubkey::new_unique();
+    let account = AccountSharedData::new(LAMPORTS, SPACE, &OWNER);
+
+    adb.insert_account(&pubkey, &account);
+    assert!(
+        adb.get_account(&pubkey).is_some(),
+        "Account should exist before reset"
+    );
+    assert_eq!(adb.get_accounts_count(), 1);
+
+    // 2. Drop the current instance to release any file locks or handles
+    drop(adb);
+
+    // 3. Re-initialize the DB with the same path but with reset = true
+    let config = AccountsDbConfig {
+        reset: true,
+        ..Default::default()
+    };
+
+    // Use the path from the temp_dir (which is maintained alive by `temp_dir`)
+    let adb_reset = AccountsDb::new(&config, temp_dir.path(), 0)
+        .expect("should be able to re-open db with reset");
+
+    // 4. Verify the database is empty
+    assert!(
+        adb_reset.get_account(&pubkey).is_none(),
+        "Account should be gone after reset"
+    );
+    assert_eq!(
+        adb_reset.get_accounts_count(),
+        0,
+        "Account count should be zero"
+    );
+}
+
 // ==============================================================
 // ==============================================================
 //                      UTILITY CODE BELOW
@@ -585,7 +623,7 @@ pub fn init_db() -> (Arc<AccountsDb>, TempDir) {
         .try_init();
     let directory =
         tempfile::tempdir().expect("failed to create temporary directory");
-    let config = AccountsDbConfig::temp_for_tests(SNAPSHOT_FREQUENCY);
+    let config = AccountsDbConfig::default();
 
     let adb = AccountsDb::new(&config, directory.path(), 0)
         .expect("expected to initialize ADB")

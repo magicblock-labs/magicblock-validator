@@ -1,11 +1,8 @@
 mod shutdown;
 
 use log::*;
-use magicblock_api::{
-    ledger,
-    magic_validator::{MagicValidator, MagicValidatorConfig},
-};
-use magicblock_config::MagicBlockConfig;
+use magicblock_api::{ledger, magic_validator::MagicValidator};
+use magicblock_config::ValidatorParams;
 use solana_sdk::signature::Signer;
 use tokio::runtime::Builder;
 
@@ -84,26 +81,28 @@ async fn run() {
     init_logger();
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
-    let mb_config = MagicBlockConfig::parse_config();
-    match &mb_config.config_file {
-        Some(file) => info!("Loading config from '{:?}'.", file),
-        None => info!("Using default config. Override it by passing the path to a config file."),
+    let args = std::env::args_os();
+    let config = match ValidatorParams::try_new(args) {
+        Ok(c) => c,
+        Err(err) => {
+            eprintln!("Failed to read validator config: {err}");
+            std::process::exit(1);
+        }
     };
-    info!("Starting validator with config:\n{}", mb_config.config);
+    info!("Starting validator with config:\n{:#?}", config);
     // Add a more developer-friendly startup message
     const WS_PORT_OFFSET: u16 = 1;
-    let rpc_port = mb_config.config.rpc.port;
+    let rpc_port = config.listen.port();
     let ws_port = rpc_port + WS_PORT_OFFSET; // WebSocket port is typically RPC port + 1
-    let rpc_host = mb_config.config.rpc.addr;
-    let validator_keypair = mb_config.validator_keypair();
-    let validator_identity = validator_keypair.pubkey();
-    let config = MagicValidatorConfig {
-        validator_config: mb_config.config,
+    let rpc_host = config.listen.ip();
+    let validator_identity = config.validator.keypair.pubkey();
+    let mut api = match MagicValidator::try_from_config(config).await {
+        Ok(api) => api,
+        Err(error) => {
+            eprintln!("Failed to create validator runtime: {error}");
+            std::process::exit(1);
+        }
     };
-    debug!("{:#?}", config);
-    let mut api = MagicValidator::try_from_config(config, validator_keypair)
-        .await
-        .unwrap();
     debug!("Created API .. starting things up");
     // We need to create and hold on to the ledger lock here in order to keep the
     // underlying file locked while the app is running.
