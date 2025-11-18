@@ -784,7 +784,7 @@ mod tests {
             pubkeys: &[Pubkey],
             _compressed: bool,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 1)).collect())
+            Ok(pubkeys.iter().map(|&pk| (pk, 1)).collect())
         }
 
         async fn fetch_rent_reimbursements(
