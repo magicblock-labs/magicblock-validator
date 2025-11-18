@@ -294,7 +294,7 @@ where
         intent: &ScheduledBaseIntentWrapper,
         result: &IntentExecutorResult<ExecutionOutput>,
     ) {
-        const EXECUTION_TIME_THRESHOLD: f64 = 2.0;
+        const EXECUTION_TIME_THRESHOLD: f64 = 5.0;
 
         let intent_execution_secs = execution_time.as_secs_f64();
         metrics::observe_committor_intent_execution_time_histogram(
@@ -309,12 +309,8 @@ where
         // Loki alerts
         if intent_execution_secs >= EXECUTION_TIME_THRESHOLD {
             info!(
-                "Intent took too long to execute: {}s. {}",
-                intent_execution_secs,
-                result
-                    .as_ref()
-                    .map(|_| "succeeded".to_string())
-                    .unwrap_or_else(|err| format!("{err:?}"))
+                "Intent took too long to execute: {}s. {:?}",
+                intent_execution_secs, result
             );
         } else {
             trace!("Seconds took to execute intent: {}", intent_execution_secs);

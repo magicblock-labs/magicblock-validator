@@ -24,7 +24,7 @@ pub struct SingleStageExecutor<'a, T, F> {
 
 impl<'a, T, F> SingleStageExecutor<'a, T, F>
 where
-    T: TransactionPreparator,
+    T: TransactionPreparator + Clone,
     F: TaskInfoFetcher,
 {
     pub fn new(executor: &'a IntentExecutorImpl<T, F>) -> Self {
