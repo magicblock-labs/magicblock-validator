@@ -183,7 +183,7 @@ impl super::TransactionExecutor {
         let gasless = self.environment.fee_lamports_per_signature == 0;
         // If we are running in the gasless mode, we should not allow
         // any mutation of the feepayer account, since that would make
-        // it possible for malicious actors to peform transfer operations
+        // it possible for malicious actors to perform transfer operations
         // from undelegated feepayers to delegated accounts, which would
         // result in validator loosing funds upon balance settling.
         if gasless
