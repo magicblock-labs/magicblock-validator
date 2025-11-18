@@ -367,6 +367,8 @@ async fn test_commit_id_error_recovery() {
             )
         })
         .collect();
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
     verify(
         &fixture.table_mania,
         fixture.rpc_client.get_inner(),
@@ -407,6 +409,7 @@ async fn test_undelegation_error_recovery() {
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
 
+    tokio::time::sleep(Duration::from_secs(1)).await;
     verify(
         &fixture.table_mania,
         fixture.rpc_client.get_inner(),
@@ -460,6 +463,8 @@ async fn test_action_error_recovery() {
         &[committed_account],
     )
     .await;
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
     verify_table_mania_released(
         &fixture.table_mania,
         &pre_test_tablemania_state,
@@ -517,6 +522,8 @@ async fn test_commit_id_and_action_errors_recovery() {
         &[committed_account],
     )
     .await;
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
     verify_table_mania_released(
         &fixture.table_mania,
         &pre_test_tablemania_state,
@@ -589,6 +596,7 @@ async fn test_cpi_limits_error_recovery() {
         }
     ));
 
+    tokio::time::sleep(Duration::from_secs(1)).await;
     let commit_ids_by_pk: HashMap<_, _> = committed_accounts
         .iter()
         .map(|el| {
@@ -701,6 +709,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         }
     ));
 
+    tokio::time::sleep(Duration::from_secs(1)).await;
     let commit_ids_by_pk: HashMap<_, _> = committed_accounts
         .iter()
         .map(|el| {
