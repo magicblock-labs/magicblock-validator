@@ -91,7 +91,7 @@ impl BaseTask for ArgsTask {
             ArgsTaskType::Commit(mut value) if value.is_commit_diff() => {
                 // TODO (snawaz): Currently, we do not support executing CommitDiff
                 // as BufferTask, which is why we're forcing CommitTask to use CommitState
-                // before converting this task into BufferTask Once CommitDiff is supported
+                // before converting this task into BufferTask. Once CommitDiff is supported
                 // by BufferTask, we do not have to force_commit_state and we can remove
                 // force_commit_state stuff, as it's essentially a downgrade.
 
