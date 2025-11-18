@@ -61,28 +61,31 @@ impl super::TransactionExecutor {
                 self.commit_failed_transaction(txn, status.clone());
                 FAILED_TRANSACTIONS_COUNT.inc();
                 tx.map(|tx| tx.send(status));
+                // NOTE:
+                // Transactions that failed to load, cannot have touched the thread
+                // local storage, thus there's no need to clear it before returning
                 return;
             }
         };
 
         // The transaction has been processed, we can commit the account state changes
-        // Failed transactions still pay fees, so we need to commit the accounts even if the transaction failed
+        // NOTE:
+        // Failed transactions still pay fees, so we need to
+        // commit the accounts even if the transaction failed
         let feepayer = *txn.fee_payer();
         self.commit_accounts(feepayer, &processed, is_replay);
 
         let result = processed.status();
-        if result.is_ok() {
+        if result.is_ok() && !is_replay {
             // If the transaction succeeded, check for potential tasks
             // that may have been scheduled during the transaction execution
             // TODO: send intents here as well once implemented
-            if !is_replay {
-                while let Some(task) = ExecutionTlsStash::next_task() {
-                    // This is a best effort send, if the tasks service has terminated
-                    // for some reason, logging is the best we can do at this point
-                    let _ = self.tasks_tx.send(task).inspect_err(|_|
-                            error!("Scheduled tasks service has hung up and is no longer running")
-                        );
-                }
+            while let Some(task) = ExecutionTlsStash::next_task() {
+                // This is a best effort send, if the tasks service has terminated
+                // for some reason, logging is the best we can do at this point
+                let _ = self.tasks_tx.send(task).inspect_err(|_|
+                    error!("Scheduled tasks service has hung up and is no longer running")
+                );
             }
         }
 
@@ -109,9 +112,6 @@ impl super::TransactionExecutor {
         transaction: [SanitizedTransaction; 1],
         tx: TxnSimulationResultTx,
     ) {
-        // Defensively clear any stale data from previous calls
-        ExecutionTlsStash::clear();
-
         let (result, _) = self.process(&transaction);
         let result = match result {
             Ok(processed) => {
@@ -171,37 +171,11 @@ impl super::TransactionExecutor {
         let mut result = output.processing_results.pop().expect(
             "single transaction result is always present in the output",
         );
-
-        let gasless = self.environment.fee_lamports_per_signature == 0;
-        // If we are running in the gasless mode, we should not allow
-        // any mutation of the feepayer account, since that would make
-        // it possible for malicious actors to perform transfer operations
-        // from undelegated feepayers to delegated accounts, which would
-        // result in validator losing funds upon balance settling.
-        if gasless {
-            let undelegated_feepayer_was_modified = result
-                .as_ref()
-                .ok()
-                .and_then(|r| r.executed_transaction())
-                .and_then(|txn| {
-                    let first_acc = txn.loaded_transaction.accounts.first();
-                    let rollback_lamports = rollback_feepayer_lamports(
-                        &txn.loaded_transaction.rollback_accounts,
-                    );
-                    first_acc.map(|acc| (acc, rollback_lamports))
-                })
-                .map(|(acc, rollback_lamports)| {
-                    (acc.1.is_dirty()
-                        && (acc.1.lamports() != 0 || rollback_lamports != 0))
-                        && !acc.1.delegated()
-                        && !acc.1.privileged()
-                })
-                .unwrap_or(false);
-
-            if undelegated_feepayer_was_modified {
-                result = Err(TransactionError::InvalidAccountForFee);
-            }
+        // Verify that account state invariants haven't been violated
+        if let Ok(ref mut processed) = result {
+            self.verify_account_states(processed);
         }
+
         (result, output.balances)
     }
 
@@ -361,9 +335,80 @@ impl super::TransactionExecutor {
             let _ = self.accounts_tx.send(account);
         }
     }
+
+    /// Ensure that no post execution account state violations occurred:
+    /// 1. No modification of the non-delegated feepayer in gasless mode
+    /// 2. No illegal account resizing when the balance is zero
+    fn verify_account_states(&self, processed: &mut ProcessedTransaction) {
+        let ProcessedTransaction::Executed(executed) = processed else {
+            return;
+        };
+        let txn = &executed.loaded_transaction;
+        let feepayer = txn.accounts.first();
+        let rollback_lamports =
+            rollback_feepayer_lamports(&txn.rollback_accounts);
+
+        let gasless = self.environment.fee_lamports_per_signature == 0;
+        if gasless {
+            // If we are running in the gasless mode, we should not allow
+            // any mutation of the feepayer account, since that would make
+            // it possible for malicious actors to peform transfer operations
+            // from undelegated feepayers to delegated accounts, which would
+            // result in validator loosing funds upon balance settling.
+            let undelegated_feepayer_was_modified = feepayer
+                .map(|acc| {
+                    (acc.1.is_dirty()
+                        && (acc.1.lamports() != 0 || rollback_lamports != 0))
+                        && !acc.1.delegated()
+                        && !acc.1.privileged()
+                })
+                .unwrap_or_default();
+            if undelegated_feepayer_was_modified {
+                executed.execution_details.status =
+                    Err(TransactionError::InvalidAccountForFee);
+                if let Some(logs) = &mut executed.execution_details.log_messages
+                {
+                    let msg = "Feepayer balance has been modified illegally"
+                        .to_string();
+                    logs.push(msg);
+                }
+                return;
+            }
+        }
+        // SVM ignores rent exemption enforcement for accounts, which have
+        // 0 lamports, so it's possible to call realloc on account with zero
+        // balance bypassing the runtime checks. In order to prevent this
+        // edge case we perform explicit post execution check here.
+        for (i, (pubkey, acc)) in txn.accounts.iter().enumerate() {
+            if !acc.is_dirty() {
+                continue;
+            }
+            let Some(rent) = self.environment.rent_collector else {
+                continue;
+            };
+            if acc.lamports() == 0 && acc.data().is_empty() {
+                continue;
+            }
+            let rent_exemption_balance =
+                rent.get_rent().minimum_balance(acc.data().len());
+            if acc.lamports() >= rent_exemption_balance {
+                continue;
+            }
+            let error = Err(TransactionError::InsufficientFundsForRent {
+                account_index: i as u8,
+            });
+            executed.execution_details.status = error;
+            if let Some(logs) = &mut executed.execution_details.log_messages {
+                let msg =
+                    format!("Account {pubkey} has violated rent exemption",);
+                logs.push(msg);
+            }
+            return;
+        }
+    }
 }
 
-// A utils to extract the rollback lamports of the feepayer
+// A utility to extract the rollback lamports of the feepayer
 fn rollback_feepayer_lamports(rollback: &RollbackAccounts) -> u64 {
     match rollback {
         RollbackAccounts::FeePayerOnly { fee_payer_account } => {

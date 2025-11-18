@@ -8,7 +8,6 @@ use program_schedulecommit::{
     ScheduleCommitCpiArgs, ScheduleCommitInstruction,
 };
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
-use solana_program::instruction::InstructionError;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
@@ -168,15 +167,9 @@ fn test_committing_account_delegated_to_another_validator() {
         // Schedule commit of account delegated to another validator
         let res = schedule_commit_tx(&ctx, &payer, &player, player_pda, false);
 
-        // We expect IllegalOwner error since account isn't delegated to our validator
+        // We expect InvalidAccountForFee error since account isn't delegated to our validator
         let (_, tx_err) = extract_transaction_error(res);
-        assert_eq!(
-            tx_err.unwrap(),
-            TransactionError::InstructionError(
-                0,
-                InstructionError::IllegalOwner
-            )
-        )
+        assert_eq!(tx_err.unwrap(), TransactionError::InvalidAccountForFee)
     });
 }
 
@@ -205,9 +198,9 @@ fn test_undelegating_account_delegated_to_another_validator() {
         // Schedule undelegation of account delegated to another validator
         let res = schedule_commit_tx(&ctx, &payer, &player, player_pda, true);
 
-        // We expect IllegalOwner error since account isn't delegated to our validator
+        // We expect InvalidAccountForFee error since account isn't delegated to our validator
         let (_, tx_err) = extract_transaction_error(res);
-        assert_eq!(tx_err.unwrap(), TransactionError::InvalidWritableAccount);
+        assert_eq!(tx_err.unwrap(), TransactionError::InvalidAccountForFee);
     });
 }
 
