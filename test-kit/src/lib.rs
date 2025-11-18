@@ -122,6 +122,7 @@ impl ExecutionTestEnv {
         this.advance_slot(); // Move to slot 1 to ensure a non-genesis state.
 
         let scheduler_state = TransactionSchedulerState {
+            is_auto_airdrop_lamports_enabled: false,
             accountsdb,
             ledger,
             account_update_tx: validator_channels.account_update,

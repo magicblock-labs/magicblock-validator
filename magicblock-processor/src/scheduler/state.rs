@@ -28,6 +28,8 @@ use crate::executor::SimpleForkGraph;
 /// This struct acts as a container for the entire transaction processing pipeline,
 /// holding all the necessary handles to global state and communication endpoints.
 pub struct TransactionSchedulerState {
+    /// True when auto airdrop for fee payers is enabled (auto_airdrop_lamports > 0).
+    pub is_auto_airdrop_lamports_enabled: bool,
     /// A handle to the globally shared accounts database.
     pub accountsdb: Arc<AccountsDb>,
     /// A handle to the globally shared ledger of blocks and transactions.
