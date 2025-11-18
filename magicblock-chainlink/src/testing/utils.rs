@@ -2,13 +2,13 @@
 #![allow(dead_code)]
 use std::{num::NonZeroUsize, sync::Arc};
 
+use magicblock_config::config::LifecycleMode;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{signature::Keypair, signer::Signer};
 
 use crate::{
     accounts_bank::mock::AccountsBankStub,
-    config::LifecycleMode,
     remote_account_provider::{
         config::RemoteAccountProviderConfig, AccountsLruCache, RemoteAccount,
         RemoteAccountUpdateSource,

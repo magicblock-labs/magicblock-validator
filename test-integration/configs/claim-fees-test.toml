@@ -1,25 +1,19 @@
-[accounts]
-remote.cluster = "devnet"
+remote = "devnet"
 lifecycle = "offline"
-commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
+commit = { compute-unit-price = 1_000_000 }
+listen = "0.0.0.0:7799"
 
-[accounts.db]
-db-size = 1048576000
+[accountsdb]
+database-size = 1048576000
 block-size = "block256"
-index-map-size = 2048576
+index-size = 2048576
 max-snapshots = 7
 snapshot-frequency = 1024
 
 [ledger]
-resume-strategy = { kind = "reset" }
+reset = true
+block-time = "50ms"
 
-[validator]
-millis_per_slot = 50
-sigverify = true
-
-[[program]]
+[[programs]]
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 path = "../schedulecommit/elfs/dlp.so"
-
-[rpc]
-port = 7799

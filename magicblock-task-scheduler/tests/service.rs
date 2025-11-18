@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use guinea::GuineaInstruction;
-use magicblock_config::TaskSchedulerConfig;
+use magicblock_config::config::TaskSchedulerConfig;
 use magicblock_program::{
     args::ScheduleTaskArgs,
     validator::{init_validator_authority_if_needed, validator_authority_id},

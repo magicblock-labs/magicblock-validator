@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use arc_swap::{ArcSwapAny, Guard};
-pub use database::meta::PerfSample;
+pub use database::{
+    meta::PerfSample, options::BLOCKSTORE_DIRECTORY_ROCKS_LEVEL,
+};
 use solana_sdk::{clock::Clock, hash::Hash};
 pub use store::api::{Ledger, SignatureInfosForAddress};
 use tokio::sync::broadcast;

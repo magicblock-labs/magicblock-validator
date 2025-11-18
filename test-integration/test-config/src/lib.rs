@@ -10,9 +10,15 @@ use integration_test_tools::{
 };
 use log::*;
 use magicblock_config::{
-    AccountsCloneConfig, AccountsConfig, EphemeralConfig, LedgerConfig,
-    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
-    PrepareLookupTables, ProgramConfig, RemoteCluster, RemoteConfig,
+    config::{
+        accounts::AccountsDbConfig, chain::ChainLinkConfig,
+        ledger::LedgerConfig, LifecycleMode, LoadableProgram,
+    },
+    types::{
+        crypto::SerdePubkey,
+        network::{Remote, RemoteCluster},
+    },
+    ValidatorParams,
 };
 use program_flexi_counter::instruction::{
     create_add_ix, create_delegate_ix, create_init_ix,
@@ -23,46 +29,39 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 
-fn get_programs() -> Vec<ProgramConfig> {
+fn get_programs() -> Vec<LoadableProgram> {
     let flexicounter_id = program_flexi_counter::id();
-    resolve_programs(Some(vec![ProgramConfig {
-        id: flexicounter_id,
-        path: "program_flexi_counter.so".to_string(),
+    resolve_programs(Some(vec![LoadableProgram {
+        id: SerdePubkey(flexicounter_id),
+        path: "program_flexi_counter.so".into(),
     }]))
 }
 
 /// Starts a validator with the given clone configuration
 pub fn start_validator_with_clone_config(
-    prepare_lookup_tables: PrepareLookupTables,
+    prepare_lookup_tables: bool,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let programs = get_programs();
 
-    let config = EphemeralConfig {
+    let config = ValidatorParams {
         programs,
-        accounts: AccountsConfig {
-            remote: RemoteConfig {
-                cluster: RemoteCluster::Custom,
-                url: Some(
-                    IntegrationTestContext::url_chain().try_into().unwrap(),
-                ),
-                ws_url: Some(vec![IntegrationTestContext::ws_url_chain()
-                    .try_into()
-                    .unwrap()]),
-            },
-
-            lifecycle: LifecycleMode::Ephemeral,
-            clone: AccountsCloneConfig {
-                prepare_lookup_tables,
-                auto_airdrop_lamports: 0,
-            },
+        lifecycle: LifecycleMode::Ephemeral,
+        remote: RemoteCluster::Single(Remote::Disjointed {
+            http: IntegrationTestContext::url_chain().parse().unwrap(),
+            ws: IntegrationTestContext::ws_url_chain().parse().unwrap(),
+        }),
+        chainlink: ChainLinkConfig {
+            prepare_lookup_tables,
+            auto_airdrop_lamports: 0,
+            ..Default::default()
+        },
+        accountsdb: AccountsDbConfig {
+            reset: true,
             ..Default::default()
         },
         ledger: LedgerConfig {
-            resume_strategy_config: LedgerResumeStrategyConfig {
-                kind: LedgerResumeStrategyType::Reset,
-                ..Default::default()
-            },
+            reset: true,
             ..Default::default()
         },
         ..Default::default()
