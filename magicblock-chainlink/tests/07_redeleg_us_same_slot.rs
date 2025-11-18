@@ -7,10 +7,7 @@ use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_not_subscribed,
     assert_remain_undelegating,
-    testing::{
-        accounts::account_shared_with_owner, deleg::add_delegation_record_for,
-        init_logger,
-    },
+    testing::{deleg::add_delegation_record_for, init_logger},
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -191,9 +188,10 @@ async fn test_undelegate_redelegate_to_us_in_same_slot_compressed() {
         );
 
         let acc = rpc_client.get_account_at_slot(&pubkey).unwrap();
-        let delegated_acc = account_shared_with_owner(
+        let delegated_acc = account_shared_with_owner_and_slot(
             &acc.account,
             compressed_delegation_client::id(),
+            slot,
         );
         let updated = ctx
             .send_and_receive_account_update(
