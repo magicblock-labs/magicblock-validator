@@ -69,7 +69,8 @@ pub fn create_init_ix(args: CreateInitIxArgs) -> (Instruction, Pubkey, Pubkey) {
     (
         Instruction::new_with_bytes(
             program_id,
-            &ix.try_to_vec().unwrap(),
+            &ix.try_to_vec()
+                .expect("Serialization of instruction should never fail"),
             accounts,
         ),
         chunks_pda,

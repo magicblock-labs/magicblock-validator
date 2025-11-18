@@ -48,5 +48,10 @@ pub fn create_write_ix(args: CreateWriteIxArgs) -> Instruction {
         AccountMeta::new(chunks_pda, false),
         AccountMeta::new(buffer_pda, false),
     ];
-    Instruction::new_with_bytes(program_id, &ix.try_to_vec().unwrap(), accounts)
+    Instruction::new_with_bytes(
+        program_id,
+        &ix.try_to_vec()
+            .expect("Serialization of instruction should never fail"),
+        accounts,
+    )
 }

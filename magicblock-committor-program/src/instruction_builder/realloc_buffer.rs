@@ -83,5 +83,10 @@ fn create_realloc_buffer_ix(
         AccountMeta::new(authority, true),
         AccountMeta::new(buffer_pda, false),
     ];
-    Instruction::new_with_bytes(program_id, &ix.try_to_vec().unwrap(), accounts)
+    Instruction::new_with_bytes(
+        program_id,
+        &ix.try_to_vec()
+            .expect("Serialization of instruction should never fail"),
+        accounts,
+    )
 }
