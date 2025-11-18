@@ -789,6 +789,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
         if self.is_watching(pubkey) {
+            // Promote in LRU cache even if already subscribed
+            self.lrucache_subscribed_accounts.add(*pubkey);
             return Ok(());
         }
 
