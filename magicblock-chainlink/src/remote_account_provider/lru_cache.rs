@@ -128,6 +128,10 @@ impl AccountsLruCache {
         self.accounts_to_never_evict.iter().cloned().collect()
     }
 
+    pub fn can_evict(&self, pubkey: &Pubkey) -> bool {
+        !self.accounts_to_never_evict.contains(pubkey)
+    }
+
     pub fn pubkeys(&self) -> Vec<Pubkey> {
         let subs = self
             .subscribed_accounts
