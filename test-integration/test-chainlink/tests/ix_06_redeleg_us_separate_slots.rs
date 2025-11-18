@@ -58,7 +58,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {
         );
 
         ctx.undelegate_counter(&counter_auth, false).await;
-        sleep_ms(500).await;
+        sleep_ms(1_500).await;
 
         // Account should be cloned as undelegated (owned by program again)
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
@@ -76,7 +76,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {
     {
         info!("3. Account redelegated to us - Would allow write");
         ctx.delegate_counter(&counter_auth).await;
-        sleep_ms(500).await;
+        sleep_ms(1_500).await;
 
         // Account should be cloned as delegated back to us
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
