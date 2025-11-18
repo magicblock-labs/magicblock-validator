@@ -190,7 +190,6 @@ impl super::TransactionExecutor {
             && undelegated_feepayer_was_modified
             && !self.is_auto_airdrop_lamports_enabled
         {
-            println!("{:?}", result);
             result = Err(TransactionError::InvalidAccountForFee);
         };
         (result, output.balances)
