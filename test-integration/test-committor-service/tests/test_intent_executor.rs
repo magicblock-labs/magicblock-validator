@@ -196,7 +196,7 @@ async fn test_undelegation_error_parsing() {
         .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
 
-    // Verify that we got CommitIdError
+    // Verify that we got UndelegationError
     let execution_result = execution_result.unwrap();
     assert!(execution_result.is_err());
     let err = execution_result.unwrap_err();
