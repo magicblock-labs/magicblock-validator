@@ -162,17 +162,10 @@ pub struct CommitTask {
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
     base_account: Option<Account>,
-    force_commit_state: bool,
+    strategy: TaskStrategy,
 }
 
 impl CommitTask {
-    pub fn is_commit_diff(&self) -> bool {
-        !self.force_commit_state
-            && self.committed_account.account.data.len()
-                > CommitTaskBuilder::COMMIT_STATE_SIZE_THRESHOLD
-            && self.base_account.is_some()
-    }
-
     pub fn switch_to_buffer_strategy(mut self) -> Self {
         self.strategy = TaskStrategy::Buffer;
         self
