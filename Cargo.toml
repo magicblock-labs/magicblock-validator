@@ -93,11 +93,11 @@ jsonrpc-pubsub = "18.0.0"
 jsonrpc-ws-server = "18.0.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
-light-client = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
-light-compressed-account = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
-light-hasher = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
-light-sdk = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
-light-sdk-types = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
+light-client = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
+light-compressed-account = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
+light-hasher = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
+light-sdk = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
+light-sdk-types = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
 log = { version = "0.4.20", features = ["release_max_level_info"] }
 lru = "0.16.0"
 macrotest = "1"

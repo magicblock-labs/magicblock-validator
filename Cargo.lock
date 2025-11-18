@@ -3574,7 +3574,7 @@ dependencies = [
 [[package]]
 name = "light-account-checks"
 version = "0.3.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "solana-account-info",
  "solana-msg",
@@ -3599,7 +3599,7 @@ dependencies = [
 [[package]]
 name = "light-client"
 version = "0.13.1"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "async-trait",
  "base64 0.13.1",
@@ -3644,7 +3644,7 @@ dependencies = [
 [[package]]
 name = "light-compressed-account"
 version = "0.3.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "borsh 0.10.4",
  "bytemuck",
@@ -3662,7 +3662,7 @@ dependencies = [
 [[package]]
 name = "light-concurrent-merkle-tree"
 version = "2.1.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "borsh 0.10.4",
  "light-bounded-vec",
@@ -3675,7 +3675,7 @@ dependencies = [
 [[package]]
 name = "light-hasher"
 version = "3.1.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "ark-bn254 0.5.0",
  "ark-ff 0.5.0",
@@ -3694,7 +3694,7 @@ dependencies = [
 [[package]]
 name = "light-indexed-array"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "light-hasher",
  "num-bigint 0.4.6",
@@ -3705,7 +3705,7 @@ dependencies = [
 [[package]]
 name = "light-indexed-merkle-tree"
 version = "2.1.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "light-bounded-vec",
  "light-concurrent-merkle-tree",
@@ -3720,7 +3720,7 @@ dependencies = [
 [[package]]
 name = "light-macros"
 version = "2.1.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "bs58",
  "proc-macro2",
@@ -3731,7 +3731,7 @@ dependencies = [
 [[package]]
 name = "light-merkle-tree-metadata"
 version = "0.3.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "borsh 0.10.4",
  "bytemuck",
@@ -3746,7 +3746,7 @@ dependencies = [
 [[package]]
 name = "light-merkle-tree-reference"
 version = "2.0.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "light-hasher",
  "light-indexed-array",
@@ -3800,7 +3800,7 @@ dependencies = [
 [[package]]
 name = "light-prover-client"
 version = "2.0.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "ark-bn254 0.5.0",
  "ark-serialize 0.5.0",
@@ -3822,7 +3822,7 @@ dependencies = [
 [[package]]
 name = "light-sdk"
 version = "0.13.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "borsh 0.10.4",
  "light-account-checks",
@@ -3845,7 +3845,7 @@ dependencies = [
 [[package]]
 name = "light-sdk-macros"
 version = "0.13.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "light-hasher",
  "light-poseidon 0.3.0",
@@ -3858,7 +3858,7 @@ dependencies = [
 [[package]]
 name = "light-sdk-types"
 version = "0.13.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "borsh 0.10.4",
  "light-account-checks",
@@ -3873,7 +3873,7 @@ dependencies = [
 [[package]]
 name = "light-sparse-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "light-hasher",
  "light-indexed-array",
@@ -3885,7 +3885,7 @@ dependencies = [
 [[package]]
 name = "light-zero-copy"
 version = "0.2.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "light-zero-copy-derive",
  "zerocopy",
@@ -3894,7 +3894,7 @@ dependencies = [
 [[package]]
 name = "light-zero-copy-derive"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -5226,7 +5226,7 @@ dependencies = [
 [[package]]
 name = "photon-api"
 version = "0.51.0"
-source = "git+https://github.com/magicblock-labs/light-protocol?branch=dode%2Fsdk-v2-2#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
+source = "git+https://github.com/magicblock-labs/light-protocol?rev=849e6aa#849e6aae59b6afc6fa03872c2a8c6fb312be12f1"
 dependencies = [
  "reqwest 0.12.23",
  "serde",

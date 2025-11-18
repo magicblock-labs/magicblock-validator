@@ -42,12 +42,12 @@ futures = "0.3.31"
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"
-light-batched-merkle-tree = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
-light-client = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
-light-compressed-account = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
-light-hasher = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
-light-sdk = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
-light-sdk-types = { git = "https://github.com/magicblock-labs/light-protocol", branch = "dode/sdk-v2-2" }
+light-batched-merkle-tree = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
+light-client = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
+light-compressed-account = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
+light-hasher = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
+light-sdk = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
+light-sdk-types = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
 log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
 magicblock-chainlink = { path = "../magicblock-chainlink", features = [
