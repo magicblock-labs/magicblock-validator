@@ -733,9 +733,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
         // 1. First realize subscription
-        if let Err(err) = self.pubsub_client.subscribe(*pubkey).await {
-            return Err(err);
-        }
+        self.pubsub_client.subscribe(*pubkey).await?;
 
         // 2. Add to LRU cache
         // If an account is evicted then we need to unsubscribe from it
