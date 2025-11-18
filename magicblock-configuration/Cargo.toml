@@ -1,0 +1,22 @@
+[package]
+name = "magicblock-configuration"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+bs58 = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+derive_more = { workspace = true, features = ["display", "from_str"] }
+figment = { workspace = true, features = ["toml", "env"] }
+humantime = { workspace = true }
+isocountry = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_with = { workspace = true }
+url = { workspace = true, features = ["serde"] }
+
+solana-pubkey = { workspace = true }
+solana-keypair = { workspace = true }
