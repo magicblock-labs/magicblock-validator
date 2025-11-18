@@ -96,6 +96,7 @@ impl TestEnv {
 
         let intent_executor = IntentExecutorImpl::new(
             fixture.rpc_client.clone(),
+            fixture.photon_client.clone(),
             transaction_preparator,
             task_info_fetcher.clone(),
         );

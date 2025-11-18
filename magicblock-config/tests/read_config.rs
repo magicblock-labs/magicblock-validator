@@ -6,11 +6,12 @@ use std::{
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsCloneConfig, AccountsConfig, CommitStrategyConfig, EphemeralConfig,
-    LedgerConfig, LedgerResumeStrategyConfig, LedgerResumeStrategyType,
-    LifecycleMode, MagicBlockConfig, MetricsConfig, MetricsServiceConfig,
-    PrepareLookupTables, ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig,
-    TaskSchedulerConfig, ValidatorConfig,
+    AccountsCloneConfig, AccountsConfig, CommitStrategyConfig,
+    CompressionConfig, EphemeralConfig, LedgerConfig,
+    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
+    MagicBlockConfig, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
+    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, TaskSchedulerConfig,
+    ValidatorConfig,
 };
 use solana_pubkey::pubkey;
 use url::Url;
@@ -102,6 +103,7 @@ fn test_load_local_dev_with_programs_toml() {
                 ..Default::default()
             },
             task_scheduler: TaskSchedulerConfig::default(),
+            compression: CompressionConfig::default(),
         }
     )
 }
@@ -143,6 +145,8 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("CLONE_AUTO_AIRDROP_LAMPORTS", "123");
     env::set_var("TASK_SCHEDULER_RESET", "true");
     env::set_var("TASK_SCHEDULER_MILLIS_PER_TICK", "1000");
+    env::set_var("COMPRESSION_PHOTON_URL", "http://localhost:8787");
+    env::set_var("COMPRESSION_API_KEY", "api_key");
 
     let config = parse_config_with_file(&config_file_dir);
 
@@ -205,6 +209,10 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             task_scheduler: TaskSchedulerConfig {
                 reset: true,
                 millis_per_tick: 1000,
+            },
+            compression: CompressionConfig {
+                photon_url: "http://localhost:8787".to_string(),
+                api_key: Some("api_key".to_string()),
             },
         }
     );

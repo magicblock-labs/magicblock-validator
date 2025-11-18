@@ -23,6 +23,7 @@ light-sdk = { workspace = true, features = ["v2"] }
 log = { workspace = true }
 lru = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-config = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",
 ] }

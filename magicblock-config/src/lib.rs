@@ -9,6 +9,7 @@ use solana_pubkey::Pubkey;
 mod accounts;
 mod accounts_db;
 mod cli;
+mod compression;
 pub mod errors;
 mod helpers;
 mod ledger;
@@ -20,6 +21,7 @@ mod validator;
 pub use accounts::*;
 pub use accounts_db::*;
 pub use cli::*;
+pub use compression::*;
 pub use ledger::*;
 pub use metrics::*;
 pub use program::*;
@@ -66,6 +68,9 @@ pub struct EphemeralConfig {
     #[serde(default)]
     #[command(flatten)]
     pub task_scheduler: TaskSchedulerConfig,
+    #[serde(default)]
+    #[command(flatten)]
+    pub compression: CompressionConfig,
 }
 
 impl EphemeralConfig {
@@ -272,6 +277,10 @@ mod tests {
                 reset: true,
                 millis_per_tick: 1000,
             },
+            compression: CompressionConfig {
+                photon_url: "http://localhost:8787".to_string(),
+                api_key: Some("api_key".to_string()),
+            },
         };
         let original_config = config.clone();
         let other = EphemeralConfig::default();
@@ -360,6 +369,10 @@ mod tests {
                 reset: true,
                 millis_per_tick: 1000,
             },
+            compression: CompressionConfig {
+                photon_url: "http://localhost:8787".to_string(),
+                api_key: Some("api_key".to_string()),
+            },
         };
 
         config.merge(other.clone());
@@ -445,6 +458,10 @@ mod tests {
                 reset: true,
                 millis_per_tick: 2000,
             },
+            compression: CompressionConfig {
+                photon_url: "http://localhost:8787".to_string(),
+                api_key: Some("api_key".to_string()),
+            },
         };
         let original_config = config.clone();
         let other = EphemeralConfig {
@@ -523,6 +540,10 @@ mod tests {
                 reset: true,
                 millis_per_tick: 1000,
             },
+            compression: CompressionConfig {
+                photon_url: "http://localhost:8787".to_string(),
+                api_key: Some("api_key".to_string()),
+            },
         };
 
         config.merge(other);
@@ -569,6 +590,7 @@ mod tests {
             programs: vec![],
             metrics: MetricsConfig::default(),
             task_scheduler: TaskSchedulerConfig::default(),
+            compression: CompressionConfig::default(),
         };
 
         config.merge(other.clone());

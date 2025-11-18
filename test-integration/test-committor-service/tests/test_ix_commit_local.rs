@@ -48,6 +48,8 @@ mod utils;
 // -----------------
 // Utilities and Setup
 // -----------------
+const PHOTON_URL: &str = "http://localhost:8784";
+
 type ExpectedStrategies = HashMap<CommitStrategy, u8>;
 
 fn expect_strategies(
@@ -140,11 +142,15 @@ async fn commit_single_account(
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
+    let photon_client =
+        Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None));
+
     // Run each test with and without finalizing
     let service = CommittorService::try_start(
         validator_auth.insecure_clone(),
         ":memory:",
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        photon_client,
     )
     .unwrap();
     let service = CommittorServiceExt::new(Arc::new(service));
@@ -640,10 +646,14 @@ async fn commit_multiple_accounts(
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
+    let photon_client =
+        Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None));
+
     let service = CommittorService::try_start(
         validator_auth.insecure_clone(),
         ":memory:",
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        photon_client,
     )
     .unwrap();
     let service = CommittorServiceExt::new(Arc::new(service));

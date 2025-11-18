@@ -15,6 +15,7 @@ crossbeam-channel = { workspace = true }
 fd-lock = { workspace = true }
 itertools = { workspace = true }
 libloading = "0.7.4"
+light-client = { workspace = true, features = ["v2"] }
 log = { workspace = true }
 
 magic-domain-program = { workspace = true }

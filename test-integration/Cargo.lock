@@ -4228,6 +4228,7 @@ dependencies = [
  "fd-lock",
  "itertools 0.14.0",
  "libloading 0.7.4",
+ "light-client",
  "log",
  "magic-domain-program",
  "magicblock-account-cloner",
@@ -4328,6 +4329,7 @@ dependencies = [
  "log",
  "lru 0.16.0",
  "magicblock-committor-program",
+ "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-metrics",
@@ -6560,6 +6562,7 @@ dependencies = [
 name = "schedulecommit-test-scenarios"
 version = "0.0.0"
 dependencies = [
+ "borsh 0.10.4",
  "ephemeral-rollups-sdk",
  "integration-test-tools",
  "log",

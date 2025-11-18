@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::*;
 use magicblock_account_cloner::{
     map_committor_request_result, ChainlinkCloner,
@@ -34,8 +35,8 @@ use magicblock_committor_service::{
     ComputeBudgetConfig,
 };
 use magicblock_config::{
-    EphemeralConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
-    PrepareLookupTables, ProgramConfig,
+    CompressionConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
+    LifecycleMode, PrepareLookupTables, ProgramConfig,
 };
 use magicblock_core::{
     link::{
@@ -250,6 +251,7 @@ impl MagicValidator {
             committor_persist_path,
             &accounts_config,
             &config.accounts.clone.prepare_lookup_tables,
+            &config.compression,
         )
         .await?;
         let chainlink = Arc::new(
@@ -350,7 +352,13 @@ impl MagicValidator {
         committor_persist_path: PathBuf,
         accounts_config: &magicblock_accounts::AccountsConfig,
         prepare_lookup_tables: &PrepareLookupTables,
+        compression_config: &CompressionConfig,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
+        let photon_client = Arc::new(PhotonIndexer::new(
+            compression_config.photon_url.clone(),
+            compression_config.api_key.clone(),
+        ));
+
         // TODO(thlorenz): when we support lifecycle modes again, only start it when needed
         let committor_service = Some(Arc::new(CommittorService::try_start(
             identity_keypair.insecure_clone(),
@@ -362,6 +370,7 @@ impl MagicValidator {
                     accounts_config.commit_compute_unit_price,
                 ),
             },
+            photon_client,
         )?));
 
         if let Some(committor_service) = &committor_service {

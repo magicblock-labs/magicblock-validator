@@ -123,6 +123,7 @@ impl TestFixture {
 
         IntentExecutorImpl::new(
             self.rpc_client.clone(),
+            self.photon_client.clone(),
             transaction_preparator,
             task_info_fetcher,
         )

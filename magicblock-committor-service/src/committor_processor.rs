@@ -37,6 +37,7 @@ impl CommittorProcessor {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        photon_client: Arc<PhotonIndexer>,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
@@ -49,12 +50,6 @@ impl CommittorProcessor {
         );
         let rpc_client = Arc::new(rpc_client);
         let magic_block_rpc_client = MagicblockRpcClient::new(rpc_client);
-
-        // TODO(dode): Get photon url and api key from config
-        let photon_client = Arc::new(PhotonIndexer::new(
-            String::from("http://localhost:8784"),
-            None,
-        ));
 
         // Create TableMania
         let gc_config = GarbageCollectorConfig::default();
@@ -70,7 +65,7 @@ impl CommittorProcessor {
         // Create commit scheduler
         let commits_scheduler = IntentExecutionManager::new(
             magic_block_rpc_client.clone(),
-            photon_client,
+            photon_client.clone(),
             DummyDB::new(),
             Some(persister.clone()),
             table_mania.clone(),
