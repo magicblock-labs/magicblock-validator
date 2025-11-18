@@ -183,7 +183,7 @@ async fn test_clone_mini_v4_loader_program_and_upgrade() {
         loop {
             ctx.wait_for_delta_slot_ephem(5).unwrap();
 
-            let bump = (remaining_retries + 1).saturating_sub(MAX_RETRIES);
+            let bump = MAX_RETRIES.saturating_sub(remaining_retries) + 1;
             let msg = format!("Hola Mundo {bump}");
             let ix = sdk.log_msg_instruction(&payer.pubkey(), &msg);
             let (sig, found) = ctx
