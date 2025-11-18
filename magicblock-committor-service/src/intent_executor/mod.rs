@@ -53,7 +53,7 @@ use crate::{
             TaskStrategist, TaskStrategistError, TransactionStrategy,
         },
         task_visitors::utility_visitor::TaskVisitorUtils,
-        BaseTask, TaskType,
+        Task, TaskType,
     },
     transaction_preparator::{
         error::TransactionPreparatorError, TransactionPreparator,
@@ -127,8 +127,8 @@ where
     /// Checks if it is possible to unite Commit & Finalize stages in 1 transaction
     /// Returns corresponding `TransactionStrategy` if possible, otherwise `None`
     fn try_unite_tasks<P: IntentPersister>(
-        commit_tasks: &[Box<dyn BaseTask>],
-        finalize_task: &[Box<dyn BaseTask>],
+        commit_tasks: &[Task],
+        finalize_task: &[Task],
         authority: &Pubkey,
         persister: &Option<P>,
     ) -> Result<Option<TransactionStrategy>, SignerError> {
@@ -179,7 +179,7 @@ where
         }
 
         // Build tasks for commit stage
-        let commit_tasks = TaskBuilderImpl::commit_tasks(
+        let commit_tasks = TaskBuilderImpl::create_commit_tasks(
             &self.task_info_fetcher,
             &base_intent,
             persister,
@@ -626,7 +626,7 @@ where
     async fn execute_message_with_retries(
         &self,
         prepared_message: VersionedMessage,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[Task],
     ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
     {
         struct IntentErrorMapper<TxMap> {
@@ -837,7 +837,7 @@ mod tests {
         let intent = create_test_intent(0, &pubkey);
 
         let info_fetcher = Arc::new(MockInfoFetcher);
-        let commit_task = TaskBuilderImpl::commit_tasks(
+        let commit_task = TaskBuilderImpl::create_commit_tasks(
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
