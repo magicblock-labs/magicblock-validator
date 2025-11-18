@@ -193,7 +193,7 @@ lazy_static::lazy_static! {
     // CommittorService
     // -----------------
     static ref COMMITTOR_INTENTS_COUNT: IntCounter = IntCounter::new(
-        "committor_intents_count", "Total number of scheduled"
+        "committor_intents_count", "Total number of scheduled committor intents"
     ).unwrap();
 
     static ref COMMITTOR_INTENTS_BACKLOG_COUNT: IntGauge = IntGauge::new(
@@ -228,7 +228,7 @@ lazy_static::lazy_static! {
     static ref COMMITTOR_INTENT_TASK_PREPARATION_TIME: HistogramVec = HistogramVec::new(
         HistogramOpts::new(
             "committor_intent_task_preparation_time",
-            "Committor in seconds spent on task preparation"
+            "Time in seconds spent on task preparation"
         )
         .buckets(
             vec![0.1, 1.0, 2.0, 3.0, 5.0]
@@ -239,7 +239,7 @@ lazy_static::lazy_static! {
     static ref COMMITTOR_INTENT_ALT_PREPARATION_TIME: Histogram = Histogram::with_opts(
         HistogramOpts::new(
             "committor_intent_alt_preparation_time",
-            "Committor in seconds spent on ALTs preparation"
+            "Time in seconds spent on ALTs preparation"
         )
         .buckets(
             vec![1.0, 3.0, 5.0, 10.0, 15.0, 17.0, 20.0]
