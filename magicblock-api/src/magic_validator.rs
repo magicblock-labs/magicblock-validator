@@ -278,6 +278,11 @@ impl MagicValidator {
         validator::init_validator_authority(identity_keypair);
 
         let txn_scheduler_state = TransactionSchedulerState {
+            is_auto_airdrop_lamports_enabled: config
+                .accounts
+                .clone
+                .auto_airdrop_lamports
+                > 0,
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
             transaction_status_tx: validator_channels.transaction_status,

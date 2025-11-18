@@ -186,7 +186,10 @@ impl super::TransactionExecutor {
         // it possible for malicious actors to peform transfer operations
         // from undelegated feepayers to delegated accounts, which would
         // result in validator loosing funds upon balance settling.
-        if gasless && undelegated_feepayer_was_modified {
+        if gasless
+            && undelegated_feepayer_was_modified
+            && !self.is_auto_airdrop_lamports_enabled
+        {
             println!("{:?}", result);
             result = Err(TransactionError::InvalidAccountForFee);
         };
