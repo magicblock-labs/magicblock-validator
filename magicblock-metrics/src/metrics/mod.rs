@@ -222,6 +222,13 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
+    pub static ref UNSTUCK_UNDELEGATION_COUNT: IntCounter =
+        IntCounter::new(
+            "unstuck_undelegation_count",
+            "Total number of undelegating accounts found to be already undelegated on chain",
+        )
+        .unwrap();
+
 
     // -----------------
     // Transaction Execution
@@ -327,6 +334,7 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
+        register!(UNSTUCK_UNDELEGATION_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
         register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
         register!(TASK_INFO_FETCHER_A_COUNT);
@@ -478,6 +486,10 @@ pub fn inc_undelegation_requested() {
 
 pub fn inc_undelegation_completed() {
     UNDELEGATION_COMPLETED_COUNT.inc();
+}
+
+pub fn inc_unstuck_undelegation_count() {
+    UNSTUCK_UNDELEGATION_COUNT.inc();
 }
 
 pub fn inc_remote_account_provider_a_count() {
