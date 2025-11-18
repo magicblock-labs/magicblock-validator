@@ -37,7 +37,7 @@ use crate::{
         },
         schedule_intent::process_create_intent,
     },
-    state::FlexiCounter,
+    state::{FlexiCounter, FAIL_UNDELEGATION_CODE, FAIL_UNDELEGATION_LABEL},
     utils::assert_keys_equal,
 };
 
@@ -386,6 +386,15 @@ fn process_undelegate_request(
             msg!("ERROR: failed to parse account seeds {:?}", err);
             ProgramError::InvalidArgument
         })?;
+
+    let counter = {
+        let data = delegated_account.data.borrow();
+        FlexiCounter::deserialize(&mut data.as_ref())?
+    };
+
+    if counter.label == FAIL_UNDELEGATION_LABEL {
+        return Err(ProgramError::Custom(FAIL_UNDELEGATION_CODE));
+    }
 
     undelegate_account(
         delegated_account,

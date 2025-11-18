@@ -112,7 +112,8 @@ async fn commit_single_account(
 
     let counter_auth = Keypair::new();
     let (pubkey, mut account) =
-        init_and_delegate_account_on_chain(&counter_auth, bytes as u64).await;
+        init_and_delegate_account_on_chain(&counter_auth, bytes as u64, None)
+            .await;
     account.owner = program_flexi_counter::id();
     account.data = vec![101_u8; bytes];
 
@@ -393,9 +394,12 @@ async fn create_bundles(
         let bytes = *bytes;
         join_set.spawn(async move {
             let counter_auth = Keypair::new();
-            let (pda, mut pda_acc) =
-                init_and_delegate_account_on_chain(&counter_auth, bytes as u64)
-                    .await;
+            let (pda, mut pda_acc) = init_and_delegate_account_on_chain(
+                &counter_auth,
+                bytes as u64,
+                None,
+            )
+            .await;
 
             pda_acc.owner = program_flexi_counter::id();
             pda_acc.data = vec![0u8; bytes];
