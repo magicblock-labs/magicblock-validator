@@ -162,7 +162,7 @@ impl TransactionStrategyExecutionError {
                 transaction_err,
                 signature,
             )),
-            // Filter CommitIdError by custom error code
+            // Map per-task InstructionError into CommitID / Actions / Undelegation errors when possible
             TransactionError::InstructionError(index, instruction_err) => {
                 let tx_err_helper = |instruction_err| -> TransactionError {
                     TransactionError::InstructionError(index, instruction_err)
