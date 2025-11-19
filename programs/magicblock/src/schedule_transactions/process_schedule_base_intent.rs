@@ -14,7 +14,7 @@ use crate::{
     },
     schedule_transactions::check_magic_context_id,
     utils::{
-        account_actions::set_account_owner_to_delegation_program,
+        account_actions::mark_account_as_undelegating,
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
@@ -144,8 +144,7 @@ pub(crate) fn process_schedule_base_intent(
         undelegated_accounts_ref
             .into_iter()
             .for_each(|(_, account_ref)| {
-                set_account_owner_to_delegation_program(account_ref);
-                account_ref.borrow_mut().set_undelegating(true);
+                mark_account_as_undelegating(account_ref);
             });
     }
 
