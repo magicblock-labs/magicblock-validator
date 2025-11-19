@@ -515,7 +515,7 @@ fn process_delegate_compressed(
 ) -> ProgramResult {
     msg!("DelegateCompressed");
 
-    let [payer_info, counter_pda_info, compressed_delegation_program_info, compressed_delegation_cpi_signer_info, remaining_accounts @ ..] =
+    let [payer_info, counter_pda_info, compressed_delegation_program_info, remaining_accounts @ ..] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -552,9 +552,6 @@ fn process_delegate_compressed(
     DelegateCpiBuilder::new(compressed_delegation_program_info)
         .payer(payer_info)
         .delegated_account(counter_pda_info)
-        .compressed_delegation_program(compressed_delegation_program_info)
-        .compressed_delegation_cpi_signer(compressed_delegation_cpi_signer_info)
-        .light_system_program(&remaining_accounts[0])
         .args(DelegateArgsCpi {
             validator: args.validator,
             validity_proof: args.validity_proof,

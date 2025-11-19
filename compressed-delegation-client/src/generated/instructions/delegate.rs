@@ -17,12 +17,6 @@ pub struct Delegate {
     pub payer: solana_pubkey::Pubkey,
 
     pub delegated_account: solana_pubkey::Pubkey,
-
-    pub compressed_delegation_program: solana_pubkey::Pubkey,
-
-    pub compressed_delegation_cpi_signer: solana_pubkey::Pubkey,
-
-    pub light_system_program: solana_pubkey::Pubkey,
 }
 
 impl Delegate {
@@ -39,23 +33,11 @@ impl Delegate {
         args: DelegateInstructionArgs,
         remaining_accounts: &[solana_instruction::AccountMeta],
     ) -> solana_instruction::Instruction {
-        let mut accounts = Vec::with_capacity(5 + remaining_accounts.len());
+        let mut accounts = Vec::with_capacity(2 + remaining_accounts.len());
         accounts.push(solana_instruction::AccountMeta::new(self.payer, true));
         accounts.push(solana_instruction::AccountMeta::new_readonly(
             self.delegated_account,
             true,
-        ));
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            self.compressed_delegation_program,
-            false,
-        ));
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            self.compressed_delegation_cpi_signer,
-            false,
-        ));
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            self.light_system_program,
-            false,
         ));
         accounts.extend_from_slice(remaining_accounts);
         let mut data = borsh::to_vec(&DelegateInstructionData::new()).unwrap();
@@ -100,16 +82,10 @@ pub struct DelegateInstructionArgs {
 ///
 ///   0. `[writable, signer]` payer
 ///   1. `[signer]` delegated_account
-///   2. `[]` compressed_delegation_program
-///   3. `[]` compressed_delegation_cpi_signer
-///   4. `[]` light_system_program
 #[derive(Clone, Debug, Default)]
 pub struct DelegateBuilder {
     payer: Option<solana_pubkey::Pubkey>,
     delegated_account: Option<solana_pubkey::Pubkey>,
-    compressed_delegation_program: Option<solana_pubkey::Pubkey>,
-    compressed_delegation_cpi_signer: Option<solana_pubkey::Pubkey>,
-    light_system_program: Option<solana_pubkey::Pubkey>,
     args: Option<DelegateArgs>,
     __remaining_accounts: Vec<solana_instruction::AccountMeta>,
 }
@@ -129,32 +105,6 @@ impl DelegateBuilder {
         delegated_account: solana_pubkey::Pubkey,
     ) -> &mut Self {
         self.delegated_account = Some(delegated_account);
-        self
-    }
-    #[inline(always)]
-    pub fn compressed_delegation_program(
-        &mut self,
-        compressed_delegation_program: solana_pubkey::Pubkey,
-    ) -> &mut Self {
-        self.compressed_delegation_program =
-            Some(compressed_delegation_program);
-        self
-    }
-    #[inline(always)]
-    pub fn compressed_delegation_cpi_signer(
-        &mut self,
-        compressed_delegation_cpi_signer: solana_pubkey::Pubkey,
-    ) -> &mut Self {
-        self.compressed_delegation_cpi_signer =
-            Some(compressed_delegation_cpi_signer);
-        self
-    }
-    #[inline(always)]
-    pub fn light_system_program(
-        &mut self,
-        light_system_program: solana_pubkey::Pubkey,
-    ) -> &mut Self {
-        self.light_system_program = Some(light_system_program);
         self
     }
     #[inline(always)]
@@ -187,15 +137,6 @@ impl DelegateBuilder {
             delegated_account: self
                 .delegated_account
                 .expect("delegated_account is not set"),
-            compressed_delegation_program: self
-                .compressed_delegation_program
-                .expect("compressed_delegation_program is not set"),
-            compressed_delegation_cpi_signer: self
-                .compressed_delegation_cpi_signer
-                .expect("compressed_delegation_cpi_signer is not set"),
-            light_system_program: self
-                .light_system_program
-                .expect("light_system_program is not set"),
         };
         let args = DelegateInstructionArgs {
             args: self.args.clone().expect("args is not set"),
@@ -213,13 +154,6 @@ pub struct DelegateCpiAccounts<'a, 'b> {
     pub payer: &'b solana_account_info::AccountInfo<'a>,
 
     pub delegated_account: &'b solana_account_info::AccountInfo<'a>,
-
-    pub compressed_delegation_program: &'b solana_account_info::AccountInfo<'a>,
-
-    pub compressed_delegation_cpi_signer:
-        &'b solana_account_info::AccountInfo<'a>,
-
-    pub light_system_program: &'b solana_account_info::AccountInfo<'a>,
 }
 
 /// `delegate` CPI instruction.
@@ -230,13 +164,6 @@ pub struct DelegateCpi<'a, 'b> {
     pub payer: &'b solana_account_info::AccountInfo<'a>,
 
     pub delegated_account: &'b solana_account_info::AccountInfo<'a>,
-
-    pub compressed_delegation_program: &'b solana_account_info::AccountInfo<'a>,
-
-    pub compressed_delegation_cpi_signer:
-        &'b solana_account_info::AccountInfo<'a>,
-
-    pub light_system_program: &'b solana_account_info::AccountInfo<'a>,
     /// The arguments for the instruction.
     pub __args: DelegateInstructionArgs,
 }
@@ -251,11 +178,6 @@ impl<'a, 'b> DelegateCpi<'a, 'b> {
             __program: program,
             payer: accounts.payer,
             delegated_account: accounts.delegated_account,
-            compressed_delegation_program: accounts
-                .compressed_delegation_program,
-            compressed_delegation_cpi_signer: accounts
-                .compressed_delegation_cpi_signer,
-            light_system_program: accounts.light_system_program,
             __args: args,
         }
     }
@@ -293,24 +215,12 @@ impl<'a, 'b> DelegateCpi<'a, 'b> {
             bool,
         )],
     ) -> solana_program_error::ProgramResult {
-        let mut accounts = Vec::with_capacity(5 + remaining_accounts.len());
+        let mut accounts = Vec::with_capacity(2 + remaining_accounts.len());
         accounts
             .push(solana_instruction::AccountMeta::new(*self.payer.key, true));
         accounts.push(solana_instruction::AccountMeta::new_readonly(
             *self.delegated_account.key,
             true,
-        ));
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            *self.compressed_delegation_program.key,
-            false,
-        ));
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            *self.compressed_delegation_cpi_signer.key,
-            false,
-        ));
-        accounts.push(solana_instruction::AccountMeta::new_readonly(
-            *self.light_system_program.key,
-            false,
         ));
         remaining_accounts.iter().for_each(|remaining_account| {
             accounts.push(solana_instruction::AccountMeta {
@@ -329,13 +239,10 @@ impl<'a, 'b> DelegateCpi<'a, 'b> {
             data,
         };
         let mut account_infos =
-            Vec::with_capacity(6 + remaining_accounts.len());
+            Vec::with_capacity(3 + remaining_accounts.len());
         account_infos.push(self.__program.clone());
         account_infos.push(self.payer.clone());
         account_infos.push(self.delegated_account.clone());
-        account_infos.push(self.compressed_delegation_program.clone());
-        account_infos.push(self.compressed_delegation_cpi_signer.clone());
-        account_infos.push(self.light_system_program.clone());
         remaining_accounts.iter().for_each(|remaining_account| {
             account_infos.push(remaining_account.0.clone())
         });
@@ -358,9 +265,6 @@ impl<'a, 'b> DelegateCpi<'a, 'b> {
 ///
 ///   0. `[writable, signer]` payer
 ///   1. `[signer]` delegated_account
-///   2. `[]` compressed_delegation_program
-///   3. `[]` compressed_delegation_cpi_signer
-///   4. `[]` light_system_program
 #[derive(Clone, Debug)]
 pub struct DelegateCpiBuilder<'a, 'b> {
     instruction: Box<DelegateCpiBuilderInstruction<'a, 'b>>,
@@ -372,9 +276,6 @@ impl<'a, 'b> DelegateCpiBuilder<'a, 'b> {
             __program: program,
             payer: None,
             delegated_account: None,
-            compressed_delegation_program: None,
-            compressed_delegation_cpi_signer: None,
-            light_system_program: None,
             args: None,
             __remaining_accounts: Vec::new(),
         });
@@ -394,34 +295,6 @@ impl<'a, 'b> DelegateCpiBuilder<'a, 'b> {
         delegated_account: &'b solana_account_info::AccountInfo<'a>,
     ) -> &mut Self {
         self.instruction.delegated_account = Some(delegated_account);
-        self
-    }
-    #[inline(always)]
-    pub fn compressed_delegation_program(
-        &mut self,
-        compressed_delegation_program: &'b solana_account_info::AccountInfo<'a>,
-    ) -> &mut Self {
-        self.instruction.compressed_delegation_program =
-            Some(compressed_delegation_program);
-        self
-    }
-    #[inline(always)]
-    pub fn compressed_delegation_cpi_signer(
-        &mut self,
-        compressed_delegation_cpi_signer: &'b solana_account_info::AccountInfo<
-            'a,
-        >,
-    ) -> &mut Self {
-        self.instruction.compressed_delegation_cpi_signer =
-            Some(compressed_delegation_cpi_signer);
-        self
-    }
-    #[inline(always)]
-    pub fn light_system_program(
-        &mut self,
-        light_system_program: &'b solana_account_info::AccountInfo<'a>,
-    ) -> &mut Self {
-        self.instruction.light_system_program = Some(light_system_program);
         self
     }
     #[inline(always)]
@@ -480,21 +353,6 @@ impl<'a, 'b> DelegateCpiBuilder<'a, 'b> {
                 .instruction
                 .delegated_account
                 .expect("delegated_account is not set"),
-
-            compressed_delegation_program: self
-                .instruction
-                .compressed_delegation_program
-                .expect("compressed_delegation_program is not set"),
-
-            compressed_delegation_cpi_signer: self
-                .instruction
-                .compressed_delegation_cpi_signer
-                .expect("compressed_delegation_cpi_signer is not set"),
-
-            light_system_program: self
-                .instruction
-                .light_system_program
-                .expect("light_system_program is not set"),
             __args: args,
         };
         instruction.invoke_signed_with_remaining_accounts(
@@ -509,11 +367,6 @@ struct DelegateCpiBuilderInstruction<'a, 'b> {
     __program: &'b solana_account_info::AccountInfo<'a>,
     payer: Option<&'b solana_account_info::AccountInfo<'a>>,
     delegated_account: Option<&'b solana_account_info::AccountInfo<'a>>,
-    compressed_delegation_program:
-        Option<&'b solana_account_info::AccountInfo<'a>>,
-    compressed_delegation_cpi_signer:
-        Option<&'b solana_account_info::AccountInfo<'a>>,
-    light_system_program: Option<&'b solana_account_info::AccountInfo<'a>>,
     args: Option<DelegateArgs>,
     /// Additional instruction accounts `(AccountInfo, is_writable, is_signer)`.
     __remaining_accounts:

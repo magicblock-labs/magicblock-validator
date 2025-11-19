@@ -140,8 +140,6 @@ pub async fn init_account_and_delegate_compressed_ixs(
         payer,
         &remaining_accounts_metas,
         DelegateCompressedArgs {
-            valid_until: i64::MAX,
-            commit_frequency_ms: u32::MAX,
             validator: Some(validator_authority_id()),
             validity_proof,
             account_meta,

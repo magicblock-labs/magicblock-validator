@@ -525,7 +525,6 @@ pub fn create_delegate_compressed_ix(
         AccountMeta::new(payer, true),
         AccountMeta::new(pda, false),
         AccountMeta::new_readonly(compressed_delegation_client::ID, false),
-        AccountMeta::new_readonly(LIGHT_CPI_SIGNER.cpi_signer.into(), false),
     ];
     accounts.extend(remaining_accounts.iter().cloned());
     Instruction::new_with_bytes(
