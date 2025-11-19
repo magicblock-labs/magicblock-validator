@@ -213,7 +213,9 @@ pub fn start_light_validator_with_config(
     eprintln!("{}", script);
     let validator = command.spawn().expect("Failed to start validator");
     // Waiting for the prover, which is the last thing to start
-    wait_for_validator(validator, 3001)
+    // Starts by default on port 3001
+    let prover_port = 3001;
+    wait_for_validator(validator, prover_port)
 }
 
 pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
