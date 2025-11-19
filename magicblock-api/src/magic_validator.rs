@@ -455,6 +455,7 @@ impl MagicValidator {
             validator_pubkey,
             faucet_pubkey,
             chainlink_config,
+            config.accounts.clone.auto_airdrop_lamports,
         )
         .await?;
 

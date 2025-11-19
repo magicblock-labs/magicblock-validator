@@ -116,6 +116,7 @@ impl TestContext {
             fetch_cloner,
             validator_pubkey,
             faucet_pubkey,
+            0,
         )
         .unwrap();
         Self {

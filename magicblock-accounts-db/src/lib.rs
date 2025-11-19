@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::{collections::HashSet, path::Path, sync::Arc};
 
 use error::AccountsDbError;
 use index::{
@@ -356,7 +356,7 @@ impl AccountsBank for AccountsDb {
             .iter_all()
             .filter(|(pk, acc)| predicate(pk, acc))
             .map(|(pk, _)| pk)
-            .collect::<Vec<_>>();
+            .collect::<HashSet<_>>();
         let removed = to_remove.len();
         for pk in to_remove {
             self.remove_account(&pk);

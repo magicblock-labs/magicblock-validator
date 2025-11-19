@@ -1,4 +1,4 @@
-use log::error;
+use log::*;
 use magicblock_core::{
     link::{
         accounts::{AccountWithSlot, LockedAccount},
@@ -10,6 +10,7 @@ use magicblock_core::{
     tls::ExecutionTlsStash,
 };
 use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
+use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
@@ -20,7 +21,7 @@ use solana_svm::{
 };
 use solana_svm_transaction::svm_message::SVMMessage;
 use solana_transaction::sanitized::SanitizedTransaction;
-use solana_transaction_error::TransactionResult;
+use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status::{
     map_inner_instructions, TransactionStatusMeta,
 };
@@ -167,9 +168,40 @@ impl super::TransactionExecutor {
         // SAFETY:
         // we passed a single transaction for execution, and
         // we will get a guaranteed single result back.
-        let result = output.processing_results.pop().expect(
+        let mut result = output.processing_results.pop().expect(
             "single transaction result is always present in the output",
         );
+
+        let gasless = self.environment.fee_lamports_per_signature == 0;
+        // If we are running in the gasless mode, we should not allow
+        // any mutation of the feepayer account, since that would make
+        // it possible for malicious actors to perform transfer operations
+        // from undelegated feepayers to delegated accounts, which would
+        // result in validator losing funds upon balance settling.
+        if gasless {
+            let undelegated_feepayer_was_modified = result
+                .as_ref()
+                .ok()
+                .and_then(|r| r.executed_transaction())
+                .and_then(|txn| {
+                    let first_acc = txn.loaded_transaction.accounts.first();
+                    let rollback_lamports = rollback_feepayer_lamports(
+                        &txn.loaded_transaction.rollback_accounts,
+                    );
+                    first_acc.map(|acc| (acc, rollback_lamports))
+                })
+                .map(|(acc, rollback_lamports)| {
+                    (acc.1.is_dirty()
+                        && (acc.1.lamports() != 0 || rollback_lamports != 0))
+                        && !acc.1.delegated()
+                        && !acc.1.privileged()
+                })
+                .unwrap_or(false);
+
+            if undelegated_feepayer_was_modified {
+                result = Err(TransactionError::InvalidAccountForFee);
+            }
+        }
         (result, output.balances)
     }
 
@@ -298,10 +330,23 @@ impl super::TransactionExecutor {
             }
         };
 
+        // The first loaded account is always a feepayer, check
+        // whether we are running in privileged execution mode
+        let privileged = accounts
+            .first()
+            .map(|feepayer| feepayer.1.privileged())
+            .unwrap_or_default();
+
         for (pubkey, account) in accounts {
             // only persist account's update if it was actually modified, ignore
-            // the rest, even if an account was writeable in the transaction
-            if !account.is_dirty() {
+            // the rest, even if an account was writeable in the transaction.
+            //
+            // We also don't persist accounts that are empty, with an exception
+            // for special cases, when those are inserted forcefully as placeholders
+            // (for example by the chainlink), those cases can be distinguished from
+            // others by the fact that such a transaction is always running in a
+            // privileged mode.
+            if !account.is_dirty() || (account.lamports() == 0 && !privileged) {
                 continue;
             }
             self.accountsdb.insert_account(pubkey, account);
@@ -315,5 +360,21 @@ impl super::TransactionExecutor {
             };
             let _ = self.accounts_tx.send(account);
         }
+    }
+}
+
+// A utils to extract the rollback lamports of the feepayer
+fn rollback_feepayer_lamports(rollback: &RollbackAccounts) -> u64 {
+    match rollback {
+        RollbackAccounts::FeePayerOnly { fee_payer_account } => {
+            fee_payer_account.lamports()
+        }
+        RollbackAccounts::SameNonceAndFeePayer { nonce } => {
+            nonce.account().lamports()
+        }
+        RollbackAccounts::SeparateNonceAndFeePayer {
+            fee_payer_account,
+            ..
+        } => fee_payer_account.lamports(),
     }
 }

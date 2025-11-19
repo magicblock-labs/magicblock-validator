@@ -1,4 +1,4 @@
-use log::{debug, trace};
+use log::*;
 use magicblock_metrics::metrics::{
     TRANSACTION_PROCESSING_TIME, TRANSACTION_SKIP_PREFLIGHT,
 };

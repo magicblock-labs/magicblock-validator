@@ -145,6 +145,7 @@ pub(crate) fn process_schedule_base_intent(
             .into_iter()
             .for_each(|(_, account_ref)| {
                 set_account_owner_to_delegation_program(account_ref);
+                account_ref.borrow_mut().set_undelegating(true);
             });
     }
 

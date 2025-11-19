@@ -174,12 +174,15 @@ impl ChainlinkCloner {
                 // Create and initialize the program account in retracted state
                 // and then deploy it and finally set the authority to match the
                 // one on chain
+                let slot = self.accounts_db.slot();
                 let DeployableV4Program {
                     pre_deploy_loader_state,
                     deploy_instruction,
                     post_deploy_loader_state,
-                } = program
-                    .try_into_deploy_data_and_ixs_v4(validator_kp.pubkey())?;
+                } = program.try_into_deploy_data_and_ixs_v4(
+                    slot,
+                    validator_kp.pubkey(),
+                )?;
 
                 let lamports = Rent::default()
                     .minimum_balance(pre_deploy_loader_state.len());

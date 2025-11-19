@@ -16,6 +16,7 @@ use log::*;
 use magicblock_core::traits::AccountsBank;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
+use solana_sdk::system_program;
 use tokio::{
     sync::{mpsc, oneshot},
     task,
@@ -184,7 +185,7 @@ where
                 let resolved_account =
                     self.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(update)
                     .await;
-                if let Some(account) = resolved_account {
+                if let Some(mut account) = resolved_account {
                     // Ensure that the subscription update isn't out of order, i.e. we don't already
                     // hold a newer version of the account in our bank
                     let out_of_order_slot = self
@@ -220,6 +221,30 @@ where
                             );
                         }
                     }
+                    // Check if this is an undelegation completion
+                    // Conditions:
+                    // 1. In bank: account is delegated
+                    // 2. In bank: owner is dlp::id() indicating undelegation was triggered
+                    // 3. In update: owner is not dlp::id()
+                    // NOTE: this check will be simpler once we have the `undelegating` flag
+                    if let Some(in_bank) =
+                        self.accounts_bank.get_account(&pubkey)
+                    {
+                        if in_bank.delegated()
+                            && in_bank.owner().eq(&dlp::id())
+                            && !account.owner().eq(&dlp::id())
+                        {
+                            debug!(
+                                "Undelegation completed for account: {pubkey}"
+                            );
+                            magicblock_metrics::metrics::inc_undelegation_completed();
+                        }
+                    }
+
+                    // When cloning from subscription update, reset undelegating flag
+                    // since the subscription update reflects current chain state
+                    account.set_undelegating(false);
+
                     if account.executable() {
                         self.handle_executable_sub_update(pubkey, account)
                             .await;
@@ -348,14 +373,11 @@ where
                         let account = if let Some(delegation_record) =
                             delegation_record
                         {
-                            let delegation_record = match DelegationRecord::try_from_bytes_with_discriminator(
+                            let delegation_record =
+                                match Self::parse_delegation_record(
                                     delegation_record.data(),
-                                ).map_err(|err| {
-                                    ChainlinkError::InvalidDelegationRecord(
-                                        delegation_record_pubkey,
-                                        err,
-                                    )
-                                }) {
+                                    delegation_record_pubkey,
+                                ) {
                                     Ok(x) => Some(x),
                                     Err(err) => {
                                         error!("Failed to parse delegation record for {pubkey}: {err}. Not cloning account.");
@@ -477,6 +499,83 @@ where
             // a fresh remote account
             error!("BUG: Received subscription update for {pubkey} without fresh account: {account:?}");
             None
+        }
+    }
+
+    /// Parses a delegation record from account data bytes.
+    /// Returns the parsed DelegationRecord, or InvalidDelegationRecord error
+    /// if parsing fails.
+    fn parse_delegation_record(
+        data: &[u8],
+        delegation_record_pubkey: Pubkey,
+    ) -> ChainlinkResult<DelegationRecord> {
+        DelegationRecord::try_from_bytes_with_discriminator(data)
+            .copied()
+            .map_err(|err| {
+                ChainlinkError::InvalidDelegationRecord(
+                    delegation_record_pubkey,
+                    err,
+                )
+            })
+    }
+
+    /// Fetches and parses the delegation record for an account, returning the
+    /// parsed DelegationRecord if found and valid, None otherwise.
+    async fn fetch_and_parse_delegation_record(
+        &self,
+        account_pubkey: Pubkey,
+        min_context_slot: u64,
+    ) -> Option<DelegationRecord> {
+        let delegation_record_pubkey =
+            delegation_record_pda_from_delegated_account(&account_pubkey);
+
+        match self
+            .remote_account_provider
+            .try_get_multi_until_slots_match(
+                &[delegation_record_pubkey],
+                Some(MatchSlotsConfig {
+                    min_context_slot: Some(min_context_slot),
+                    ..Default::default()
+                }),
+            )
+            .await
+        {
+            Ok(mut delegation_records) => {
+                if let Some(delegation_record_remote) = delegation_records.pop()
+                {
+                    match delegation_record_remote.fresh_account() {
+                        Some(delegation_record_account) => {
+                            Self::parse_delegation_record(
+                                delegation_record_account.data(),
+                                delegation_record_pubkey,
+                            )
+                            .ok()
+                        }
+                        None => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Checks if an account marked as undelegating is still delegated to our
+    /// validator. If not, returns false to indicate the account should be
+    /// refetched from chain. If still delegated to us, returns true to indicate
+    /// the bank version should be used.
+    async fn is_still_delegated_to_us(&self, pubkey: Pubkey) -> bool {
+        let min_context_slot = self.remote_account_provider.chain_slot();
+        match self
+            .fetch_and_parse_delegation_record(pubkey, min_context_slot)
+            .await
+        {
+            Some(delegation_record) => {
+                delegation_record.authority.eq(&self.validator_pubkey)
+                    || delegation_record.authority.eq(&Pubkey::default())
+            }
+            None => false,
         }
     }
 
@@ -647,7 +746,7 @@ where
         // For accounts we couldn't find we cannot do anything. We will let code depending
         // on them to be in the bank fail on its own
         if !not_found.is_empty() {
-            debug!(
+            trace!(
                 "Could not find accounts on chain: {:?}",
                 not_found
                     .iter()
@@ -676,6 +775,46 @@ where
                     .map(|(p, _)| p.to_string())
                     .collect::<Vec<_>>()
             );
+        }
+
+        // For accounts in the bank that are marked as undelegating, check if they're still
+        // delegated to us. If not, we need to refetch them from chain instead of using the
+        // bank version.
+        let mut accounts_to_refetch = vec![];
+        for (pubkey, slot) in &in_bank {
+            if let Some(bank_account) = self.accounts_bank.get_account(pubkey) {
+                if bank_account.undelegating() {
+                    // Check if still delegated to us
+                    if !self.is_still_delegated_to_us(*pubkey).await {
+                        debug!(
+                            "Account {pubkey} marked as undelegating is no longer delegated to us, refetching from chain"
+                        );
+                        accounts_to_refetch.push((*pubkey, *slot));
+                    }
+                }
+            }
+        }
+
+        // Remove accounts that need to be refetched from in_bank list
+        let _in_bank: Vec<_> = in_bank
+            .into_iter()
+            .filter(|(pubkey, _)| {
+                !accounts_to_refetch.iter().any(|(p, _)| p == pubkey)
+            })
+            .collect();
+
+        // Add accounts that need to be refetched to the plain list
+        // (they will be fetched from chain)
+        let mut plain = plain;
+        for (pubkey, _slot) in accounts_to_refetch {
+            if let Some(account) = self
+                .remote_account_provider
+                .try_get(pubkey)
+                .await?
+                .fresh_account()
+            {
+                plain.push((pubkey, account));
+            }
         }
 
         // Calculate min context slot: use the greater of subscription slot or last chain slot
@@ -785,34 +924,35 @@ where
 
                 // If the account is delegated we set the owner and delegation state
                 if let Some(delegation_record_data) = delegation_record {
-                    let delegation_record = match
-                        DelegationRecord::try_from_bytes_with_discriminator(
-                            delegation_record_data.data(),
-                        )
-                        // NOTE: failing here is fine when resolving all accounts for a transaction
-                        // since if something is off we better not run it anyways
-                        // However we may consider a different behavior when user is getting
-                        // mutliple accounts.
-                        .map_err(|err| {
-                            ChainlinkError::InvalidDelegationRecord(
-                                delegation_record_pubkey,
-                                err,
+                    // NOTE: failing here is fine when resolving all accounts for a transaction
+                    // since if something is off we better not run it anyways
+                    // However we may consider a different behavior when user is getting
+                    // mutliple accounts.
+                    let delegation_record = match Self::parse_delegation_record(
+                        delegation_record_data.data(),
+                        delegation_record_pubkey,
+                    ) {
+                        Ok(x) => x,
+                        Err(err) => {
+                            // Cancel all new subs since we won't clone any accounts
+                            cancel_subs(
+                                &self.remote_account_provider,
+                                CancelStrategy::New {
+                                    new_subs: pubkeys
+                                        .iter()
+                                        .cloned()
+                                        .chain(record_subs.iter().cloned())
+                                        .collect(),
+                                    existing_subs: existing_subs
+                                        .into_iter()
+                                        .cloned()
+                                        .collect(),
+                                },
                             )
-                        }) {
-                            Ok(x) => x,
-                            Err(err) => {
-                                // Cancel all new subs since we won't clone any accounts
-                                cancel_subs(
-                                    &self.remote_account_provider,
-                                    CancelStrategy::New {
-                                        new_subs: pubkeys.iter().cloned().chain(record_subs.iter().cloned()).collect(),
-                                        existing_subs: existing_subs.into_iter().cloned().collect(),
-                                    },
-                                )
-                                .await;
-                                return Err(err);
-                            }
-                        };
+                            .await;
+                            return Err(err);
+                        }
+                    };
 
                     trace!("Delegation record found for {pubkey}: {delegation_record:?}");
                     let is_delegated_to_us = delegation_record
@@ -1051,24 +1191,37 @@ where
                 .lock()
                 .expect("pending_requests lock poisoned");
 
-            for &pubkey in pubkeys {
-                // Check synchronously if account is in bank
-                if self.accounts_bank.get_account(&pubkey).is_some() {
-                    // Account is already in bank, we can skip it as it will be handled
-                    // by the existing fetch_and_clone_accounts logic when needed
-                    continue;
+            for pubkey in pubkeys {
+                // Check synchronously if account is in bank and subscribed when it should be
+                if let Some(account_in_bank) =
+                    self.accounts_bank.get_account(pubkey)
+                {
+                    // NOTE: we defensively correct accounts that we should have been watching but
+                    //       were not for some reason. We fetch them again in that case.
+                    //       This actually would point to a bug in the subscription logic.
+                    // TODO(thlorenz): remove this once we are certain (by perusing logs) that this
+                    //                 does not happen anymore
+                    if account_in_bank.owner().eq(&dlp::id())
+                        || account_in_bank.delegated()
+                        || self.blacklisted_accounts.contains(pubkey)
+                        || self.is_watching(pubkey)
+                    {
+                        continue;
+                    } else if !self.is_watching(pubkey) {
+                        debug!("Account {pubkey} should be watched but wasn't");
+                    }
                 }
 
                 // Check if account fetch is already pending
-                if let Some(requests) = pending.get_mut(&pubkey) {
+                if let Some(requests) = pending.get_mut(pubkey) {
                     let (sender, receiver) = oneshot::channel();
                     requests.push(sender);
-                    await_pending.push((pubkey, receiver));
+                    await_pending.push((*pubkey, receiver));
                     continue;
                 }
 
                 // Account needs to be fetched - add to fetch list
-                fetch_new.push(pubkey);
+                fetch_new.push(*pubkey);
             }
 
             // Create pending entries for accounts we need to fetch
@@ -1115,9 +1268,14 @@ where
 
         // Wait for any pending requests to complete
         let mut joinset = JoinSet::new();
-        for (_, receiver) in await_pending {
+        for (pubkey, receiver) in await_pending {
             joinset.spawn(async move {
-                if let Err(err) = receiver.await {
+                if let Err(err) = receiver
+                    .await
+                    .inspect_err(|err| {
+                        warn!("FetchCloner::clone_accounts - RecvError occurred while awaiting account {}: {err:?}. This indicates the account fetch sender was dropped without sending a value.", pubkey);
+                    })
+                {
                     // The sender was dropped, likely due to an error in the other request
                     error!(
                         "Failed to receive account from pending request: {err}"
@@ -1282,6 +1440,32 @@ where
         &self,
     ) -> ChainlinkResult<mpsc::Receiver<Pubkey>> {
         Ok(self.remote_account_provider.try_get_removed_account_rx()?)
+    }
+
+    /// Best-effort airdrop helper: if the account doesn't exist in the bank or has 0 lamports,
+    /// create/overwrite it as a plain system account with the provided lamports using the cloner path.
+    pub async fn airdrop_account_if_empty(
+        &self,
+        pubkey: Pubkey,
+        lamports: u64,
+    ) -> ClonerResult<()> {
+        if lamports == 0 {
+            return Ok(());
+        }
+        if let Some(acc) = self.accounts_bank.get_account(&pubkey) {
+            if acc.lamports() > 0 {
+                return Ok(());
+            }
+        }
+        // Build a plain system account with the requested balance
+        let account =
+            AccountSharedData::new(lamports, 0, &system_program::id());
+        debug!(
+            "Auto-airdropping {} lamports to new/empty account {}",
+            lamports, pubkey
+        );
+        let _sig = self.cloner.clone_account(pubkey, account).await?;
+        Ok(())
     }
 }
 
@@ -1602,9 +1786,12 @@ mod tests {
                 pubsub_client,
                 None::<PhotonClientMock>,
                 forward_tx,
-                &RemoteAccountProviderConfig::default_with_lifecycle_mode(
+                &RemoteAccountProviderConfig::try_new_with_metrics(
+                    1000,
                     LifecycleMode::Ephemeral,
-                ),
+                    false,
+                )
+                .unwrap(),
             )
             .await
             .unwrap(),

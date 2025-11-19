@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
@@ -54,6 +57,9 @@ pub struct Chainlink<
 
     validator_id: Pubkey,
     faucet_id: Pubkey,
+
+    /// If > 0, automatically airdrop this many lamports to feepayers when they are new/empty
+    auto_airdrop_lamports: u64,
 }
 
 impl<
@@ -69,6 +75,7 @@ impl<
         fetch_cloner: Option<ArcFetchCloner<T, U, V, C, P>>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
+        auto_airdrop_lamports: u64,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
@@ -86,9 +93,11 @@ impl<
             removed_accounts_sub,
             validator_id: validator_pubkey,
             faucet_id: faucet_pubkey,
+            auto_airdrop_lamports,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn try_new_from_endpoints(
         endpoints: &[Endpoint],
         commitment: CommitmentConfig,
@@ -97,6 +106,7 @@ impl<
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
         config: ChainlinkConfig,
+        auto_airdrop_lamports: u64,
     ) -> ChainlinkResult<
         Chainlink<
             ChainRpcClientImpl,
@@ -136,6 +146,7 @@ impl<
             fetch_cloner,
             validator_pubkey,
             faucet_pubkey,
+            auto_airdrop_lamports,
         )
     }
 
@@ -146,15 +157,56 @@ impl<
     pub fn reset_accounts_bank(&self) {
         let blacklisted_accounts =
             blacklisted_accounts(&self.validator_id, &self.faucet_id);
+
+        let delegated = AtomicU64::new(0);
+        let dlp_owned_not_delegated = AtomicU64::new(0);
+        let blacklisted = AtomicU64::new(0);
+        let remaining = AtomicU64::new(0);
+        let remaining_empty = AtomicU64::new(0);
+
         let removed = self.accounts_bank.remove_where(|pubkey, account| {
-            (!account.delegated()
-                // This fixes the edge-case of accounts that were in the process of
-                // being undelegated but never completed while the validator was running
-                || account.owner().eq(&dlp::id()))
-                && !blacklisted_accounts.contains(pubkey)
+            if blacklisted_accounts.contains(pubkey) {
+                blacklisted.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
+            // TODO: this potentially looses data and is a temporary measure
+            if account.owner().eq(&dlp::id()) {
+                dlp_owned_not_delegated.fetch_add(1, Ordering::Relaxed);
+                return true;
+            }
+            if account.delegated() {
+                delegated.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
+            trace!(
+                "Removing non-delegated, non-DLP-owned account: {pubkey} {:#?}",
+                account
+            );
+            remaining.fetch_add(1, Ordering::Relaxed);
+            if account.lamports() == 0
+                && account.owner().ne(&solana_sdk::feature::id())
+            {
+                remaining_empty.fetch_add(1, Ordering::Relaxed);
+            }
+            true
         });
 
-        debug!("Removed {removed} non-delegated accounts");
+        let non_empty = remaining
+            .load(Ordering::Relaxed)
+            .saturating_sub(remaining_empty.load(Ordering::Relaxed));
+
+        info!(
+            "Removed {removed} accounts from bank:
+{} DLP-owned non-delegated
+{} non-delegated non-blacklisted, no-feature non-empty.
+{} non-delegated non-blacklisted empty
+Kept: {} delegated, {} blacklisted",
+            dlp_owned_not_delegated.into_inner(),
+            non_empty,
+            remaining_empty.into_inner(),
+            delegated.into_inner(),
+            blacklisted.into_inner()
+        );
     }
 
     fn subscribe_account_removals(
@@ -214,18 +266,48 @@ impl<
                 .is_none_or(|a| !a.delegated())
         };
 
-        let mark_empty_if_not_found = if clone_escrow {
+        // Always allow the fee payer to be treated as empty-if-not-found so that
+        // transactions can still be processed in gasless mode
+        let mut mark_empty_if_not_found = vec![*feepayer];
+
+        if clone_escrow {
             let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
             trace!("Adding balance PDA {balance_pda} for feepayer {feepayer}");
             pubkeys.push(balance_pda);
-            vec![balance_pda]
-        } else {
-            vec![]
-        };
+            mark_empty_if_not_found.push(balance_pda);
+        }
         let mark_empty_if_not_found = (!mark_empty_if_not_found.is_empty())
             .then(|| &mark_empty_if_not_found[..]);
-        self.ensure_accounts(&pubkeys, mark_empty_if_not_found)
-            .await
+        let res = self
+            .ensure_accounts(&pubkeys, mark_empty_if_not_found)
+            .await?;
+
+        // Best-effort auto airdrop for fee payer if configured and still empty locally
+        if self.auto_airdrop_lamports > 0 {
+            if let Some(fetch_cloner) = self.fetch_cloner() {
+                let lamports = self
+                    .accounts_bank
+                    .get_account(feepayer)
+                    .map(|a| a.lamports())
+                    .unwrap_or(0);
+                if lamports == 0 {
+                    if let Err(err) = fetch_cloner
+                        .airdrop_account_if_empty(
+                            *feepayer,
+                            self.auto_airdrop_lamports,
+                        )
+                        .await
+                    {
+                        warn!(
+                            "Auto airdrop for feepayer {} failed: {:?}",
+                            feepayer, err
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(res)
     }
 
     /// Same as fetch accounts, but does not return the accounts, just
@@ -293,7 +375,15 @@ impl<
                 .map(|p| p.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            trace!("Fetching accounts: {pubkeys_str}");
+            let mark_empty_str = mark_empty_if_not_found
+                .map(|keys| {
+                    keys.iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            trace!("Fetching accounts: {pubkeys_str}, mark_empty_if_not_found: {mark_empty_str}");
         }
         Self::promote_accounts(
             fetch_cloner,
@@ -321,7 +411,9 @@ impl<
         &self,
         pubkey: Pubkey,
     ) -> ChainlinkResult<()> {
-        trace!("Undelegation requested for account: {pubkey}");
+        debug!("Undelegation requested for account: {pubkey}");
+
+        magicblock_metrics::metrics::inc_undelegation_requested();
 
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(());
@@ -331,7 +423,7 @@ impl<
         // once it's undelegated
         fetch_cloner.subscribe_to_account(&pubkey).await?;
 
-        trace!("Successfully subscribed to account {pubkey} for undelegation tracking");
+        debug!("Successfully subscribed to account {pubkey} for undelegation tracking");
         Ok(())
     }
 

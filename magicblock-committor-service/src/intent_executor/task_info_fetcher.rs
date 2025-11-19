@@ -18,6 +18,7 @@ use light_client::{
 use log::{error, warn};
 use lru::LruCache;
 use magicblock_core::compression::derive_cda_from_pda;
+use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 
@@ -172,6 +173,7 @@ impl CacheTaskInfoFetcher {
             })
             .collect::<Vec<_>>();
 
+        metrics::inc_task_info_fetcher_a_count();
         let accounts_data = rpc_client
             .get_multiple_accounts(&pda_accounts, None)
             .await?;

@@ -12,6 +12,8 @@ random-port = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 shlex = { workspace = true }
+ureq = { workspace = true }
+url = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-delegation-program = { workspace = true, features = [

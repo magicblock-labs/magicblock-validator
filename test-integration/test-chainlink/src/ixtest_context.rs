@@ -179,6 +179,7 @@ impl IxtestContext {
             fetch_cloner,
             validator_kp.pubkey(),
             faucet_kp.pubkey(),
+            0,
         )
         .unwrap();
 
