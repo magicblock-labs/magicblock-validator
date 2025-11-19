@@ -210,16 +210,18 @@ where
                         if in_bank.undelegating()
                             && !should_override_undelegating_account(
                                 &pubkey,
-                                in_bank.delegated(),
+                                account.delegated(),
                                 in_bank.remote_slot(),
                                 deleg_record,
                             )
                         {
                             continue;
-                        } else if in_bank.owner().eq(&dlp::id()) {
+                        } else if !in_bank.undelegating()
+                            && in_bank.owner().eq(&dlp::id())
+                        {
                             debug!(
-                                    "Account {pubkey} owned by deleg program not marked as undelegating"
-                                );
+                                "Received update for {pubkey} owned by deleg program not marked as undelegating"
+                            );
                         }
                     } else {
                         warn!(
@@ -714,21 +716,26 @@ where
                             ),
                         )
                         .await;
+                    let delegated_on_chain =
+                        deleg_record.as_ref().map_or(false, |dr| {
+                            dr.authority.eq(&self.validator_pubkey)
+                                || dr.authority.eq(&Pubkey::default())
+                        });
                     if should_override_undelegating_account(
                         pubkey,
-                        in_bank.delegated(),
-                        *slot,
+                        delegated_on_chain,
+                        in_bank.remote_slot(),
                         deleg_record,
                     ) {
                         debug!(
                             "Account {pubkey} marked as undelegating will be overridden since undelegation completed"
                         );
                         accounts_to_refetch.push((*pubkey, *slot));
-                    } else if in_bank.owner().eq(&dlp::id()) {
-                        debug!(
+                    }
+                } else if in_bank.owner().eq(&dlp::id()) {
+                    debug!(
                             "Account {pubkey} owned by deleg program not marked as undelegating"
                         );
-                    }
                 }
             }
         }

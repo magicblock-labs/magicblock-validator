@@ -6,15 +6,15 @@ use solana_pubkey::Pubkey;
 /// (overwritten) by the remote account state and the `undelegating` flag cleared.
 ///
 /// - `pubkey`: the account pubkey
-/// - `is_delegated`: whether the account is currently delegated to us on chain
-/// - `remote_slot`: the chain slot at which we last fetched and cloned state
+/// - `is_delegated_on_chain`: whether the account is currently delegated to us on chain
+/// - `remote_slot_in_bank`: the chain slot at which we last fetched and cloned state
 ///                  of the account in our bank
 /// - `delegation_record`: the delegation record associated with the account in our bank, if found
 /// - returns `true` if the account should be updated, `false` otherwise.
 pub(crate) fn should_override_undelegating_account(
     pubkey: &Pubkey,
-    is_delegated: bool,
-    remote_slot: u64,
+    is_delegated_on_chain: bool,
+    remote_slot_in_bank: u64,
     deleg_record: Option<DelegationRecord>,
 ) -> bool {
     // In the case of a subscription update for an account that was undelegating
@@ -38,7 +38,7 @@ pub(crate) fn should_override_undelegating_account(
     // In all other cases we want to clone the remote version of the account into
     // our bank which will automatically set the correct delegated state and
     // untoggle the undelegating flag.
-    if is_delegated {
+    if is_delegated_on_chain {
         // B) or D)
         // Since the account was found to be delegated we must have
         // found a delegation record and thus have the delegation slot.
@@ -46,7 +46,7 @@ pub(crate) fn should_override_undelegating_account(
             .as_ref()
             .map(|d| d.delegation_slot)
             .unwrap_or_default();
-        if delegation_slot < remote_slot {
+        if delegation_slot < remote_slot_in_bank {
             // The last update of the account was after the last delegation
             // Therefore the account was not redelegated which indicates
             // that the undelegation is still not completed. Case (D))
