@@ -96,13 +96,16 @@ impl CacheTaskInfoFetcher {
                 Ok(value) => return Ok(value),
                 err @ Err(TaskInfoFetcherError::InvalidAccountDataError(_))
                 | err @ Err(TaskInfoFetcherError::MetadataNotFoundError(_))
-                | err @ Err(TaskInfoFetcherError::IndexerError(_))
                 | err @ Err(TaskInfoFetcherError::DeserializeError(_)) => {
                     return err
                 }
                 Err(TaskInfoFetcherError::LightRpcError(err)) => {
                     // TODO(edwin0: RPC error handlings should be more robust
                     last_err = TaskInfoFetcherError::LightRpcError(err)
+                }
+                Err(TaskInfoFetcherError::IndexerError(err)) => {
+                    // TODO(edwin0: RPC error handlings should be more robust
+                    last_err = TaskInfoFetcherError::IndexerError(err)
                 }
                 Err(TaskInfoFetcherError::MagicBlockRpcClientError(err)) => {
                     // TODO(edwin): RPC error handlings should be more robust
