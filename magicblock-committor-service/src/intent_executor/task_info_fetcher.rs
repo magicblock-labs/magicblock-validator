@@ -389,11 +389,11 @@ pub enum TaskInfoFetcherError {
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
     #[error("IndexerError: {0}")]
     IndexerError(#[from] IndexerError),
-    #[error("IndexerError: {0}")]
+    #[error("NoCompressedAccount: {0}")]
     NoCompressedAccount(Pubkey),
     #[error("CompressedAccountDataNotFound: {0}")]
     NoCompressedData(Pubkey),
-    #[error("CompressedAccountDataNotFound: {0}")]
+    #[error("CompressedAccountDataDeserializeError: {0}")]
     DeserializeError(#[from] std::io::Error),
 }
 
