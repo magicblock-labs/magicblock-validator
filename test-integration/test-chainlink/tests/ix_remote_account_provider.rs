@@ -144,15 +144,9 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
     );
     let rpc_client = remote_account_provider.rpc_client();
 
-    airdrop(rpc_client, &pubkey1, 1_000_000).await;
-    airdrop(rpc_client, &pubkey2, 2_000_000).await;
-    airdrop(rpc_client, &pubkey3, 3_000_000).await;
-
     let all_pubkeys = vec![pubkey1, pubkey2, pubkey3, pubkey4];
 
     {
-        // Fetching immediately does not return the accounts yet
-        // They are updated via subscriptions instead
         let remote_accounts = remote_account_provider
             .try_get_multi(&all_pubkeys, None)
             .await
@@ -170,6 +164,10 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
             vec![false; 4]
         );
     }
+
+    airdrop(rpc_client, &pubkey1, 1_000_000).await;
+    airdrop(rpc_client, &pubkey2, 2_000_000).await;
+    airdrop(rpc_client, &pubkey3, 3_000_000).await;
 
     sleep_ms(500).await;
     await_next_slot(rpc_client).await;
