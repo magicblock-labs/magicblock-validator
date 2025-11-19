@@ -20,3 +20,6 @@ url = { workspace = true, features = ["serde"] }
 
 solana-pubkey = { workspace = true }
 solana-keypair = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -10,6 +10,8 @@ use std::{ffi::OsString, path::PathBuf};
 
 pub mod config;
 pub mod consts;
+#[cfg(test)]
+mod tests;
 pub mod types;
 
 use crate::{

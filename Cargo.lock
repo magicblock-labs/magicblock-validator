@@ -3842,6 +3842,7 @@ dependencies = [
  "serde_with",
  "solana-keypair",
  "solana-pubkey",
+ "tempfile",
  "url 2.5.4",
 ]
 

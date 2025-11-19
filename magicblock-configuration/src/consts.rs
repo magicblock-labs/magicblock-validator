@@ -11,9 +11,9 @@ pub const DEFAULT_BASE_FEE_STR: &str = "100";
 pub const DEFAULT_COMPUTE_UNIT_PRICE: u64 = 1_000_000;
 
 // Remote URL Aliases
-pub const MAINNET_URL: &str = "https://api.mainnet-beta.solana.com";
-pub const DEVNET_URL: &str = "https://api.devnet.solana.com";
-pub const TESTNET_URL: &str = "https://api.testnet.solana.com";
+pub const MAINNET_URL: &str = "https://api.mainnet-beta.solana.com/";
+pub const DEVNET_URL: &str = "https://api.devnet.solana.com/";
+pub const TESTNET_URL: &str = "https://api.testnet.solana.com/";
 pub const LOCALHOST_URL: &str = "http://127.0.0.1:8899";
 
 // Figment Configuration
