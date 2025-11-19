@@ -37,10 +37,6 @@ pub struct CancelArgs {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct DelegateCompressedArgs {
-    /// The valid until timestamp
-    pub valid_until: i64,
-    /// The commit frequency in milliseconds
-    pub commit_frequency_ms: u32,
     /// The validator authority that is added to the delegation record
     pub validator: Option<Pubkey>,
     /// The proof of the account data
