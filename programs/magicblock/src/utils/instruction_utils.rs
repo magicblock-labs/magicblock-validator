@@ -44,17 +44,10 @@ impl InstructionUtils {
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
     ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new(*payer, true),
-            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-        ];
-        for pubkey in &pdas {
-            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
-        }
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::ScheduleCommit,
-            account_metas,
+        schedule_commit_instruction_helper(
+            payer,
+            pdas,
+            MagicBlockInstruction::ScheduleCommit,
         )
     }
 
@@ -79,17 +72,10 @@ impl InstructionUtils {
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
     ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new(*payer, true),
-            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-        ];
-        for pubkey in &pdas {
-            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
-        }
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::ScheduleCompressedCommit,
-            account_metas,
+        schedule_commit_instruction_helper(
+            payer,
+            pdas,
+            MagicBlockInstruction::ScheduleCompressedCommit,
         )
     }
 
@@ -114,17 +100,10 @@ impl InstructionUtils {
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
     ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new(*payer, true),
-            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-        ];
-        for pubkey in &pdas {
-            account_metas.push(AccountMeta::new(*pubkey, true));
-        }
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::ScheduleCommitAndUndelegate,
-            account_metas,
+        schedule_commit_instruction_helper(
+            payer,
+            pdas,
+            MagicBlockInstruction::ScheduleCommitAndUndelegate,
         )
     }
     // -----------------
@@ -148,17 +127,10 @@ impl InstructionUtils {
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
     ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new(*payer, true),
-            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-        ];
-        for pubkey in &pdas {
-            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
-        }
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::ScheduleCompressedCommitAndUndelegate,
-            account_metas,
+        schedule_commit_instruction_helper(
+            payer,
+            pdas,
+            MagicBlockInstruction::ScheduleCompressedCommitAndUndelegate,
         )
     }
 
@@ -399,4 +371,21 @@ impl InstructionUtils {
             recent_blockhash,
         )
     }
+}
+
+/// Schedule commit instructions use exactly the same accounts
+#[cfg(test)]
+fn schedule_commit_instruction_helper(
+    payer: &Pubkey,
+    pdas: Vec<Pubkey>,
+    instruction: MagicBlockInstruction,
+) -> Instruction {
+    let mut account_metas = vec![
+        AccountMeta::new(*payer, true),
+        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+    ];
+    for pubkey in &pdas {
+        account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+    }
+    Instruction::new_with_bincode(crate::id(), &instruction, account_metas)
 }
