@@ -662,7 +662,10 @@ fn process_external_undelegate_compressed(
         &system_instruction::transfer(
             payer.key,
             delegated_account.key,
-            args.delegation_record.lamports - delegated_account.lamports(),
+            args.delegation_record
+                .lamports
+                .checked_sub(delegated_account.lamports())
+                .ok_or(ProgramError::ArithmeticOverflow)?,
         ),
         &[payer.clone(), delegated_account.clone()],
     )?;
