@@ -11,7 +11,6 @@ use magicblock_chainlink::{
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::ixtest_context::IxtestContext;
 
-#[ignore = "Started failing when fixing excessive subs, last time passing ded9c50a"]
 #[tokio::test]
 async fn ixtest_undelegate_redelegate_to_us_in_same_slot() {
     init_logger();
@@ -34,7 +33,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_same_slot() {
         info!("1. Account delegated to us");
 
         ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
-        sleep_ms(500).await;
+        sleep_ms(1_500).await;
 
         // Account should be cloned as delegated
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
@@ -61,7 +60,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_same_slot() {
         ctx.undelegate_counter(&counter_auth, true).await;
 
         // Wait for pubsub update to trigger subscription handler
-        sleep_ms(500).await;
+        sleep_ms(1_500).await;
 
         // Account should still be cloned as delegated to us
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
