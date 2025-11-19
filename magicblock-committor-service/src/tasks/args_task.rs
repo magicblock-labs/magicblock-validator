@@ -264,16 +264,16 @@ impl BaseTask for ArgsTask {
         }
     }
 
-    fn get_compressed_data(&self) -> Option<CompressedData> {
+    fn get_compressed_data(&self) -> Option<&CompressedData> {
         match &self.task_type {
             ArgsTaskType::CompressedCommit(value) => {
-                Some(value.compressed_data.clone())
+                Some(&value.compressed_data)
             }
             ArgsTaskType::CompressedFinalize(value) => {
-                Some(value.compressed_data.clone())
+                Some(&value.compressed_data)
             }
             ArgsTaskType::CompressedUndelegate(value) => {
-                Some(value.compressed_data.clone())
+                Some(&value.compressed_data)
             }
             _ => None,
         }

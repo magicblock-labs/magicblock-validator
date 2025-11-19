@@ -156,7 +156,7 @@ impl BaseTask for BufferTask {
 
     fn get_compressed_data(
         &self,
-    ) -> Option<super::task_builder::CompressedData> {
+    ) -> Option<&super::task_builder::CompressedData> {
         None
     }
 

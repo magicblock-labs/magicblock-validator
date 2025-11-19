@@ -102,7 +102,7 @@ pub trait BaseTask: Send + Sync + DynClone {
     fn set_compressed_data(&mut self, compressed_data: CompressedData);
 
     /// Gets compressed data for task
-    fn get_compressed_data(&self) -> Option<CompressedData>;
+    fn get_compressed_data(&self) -> Option<&CompressedData>;
 
     /// Delegated account for task
     fn delegated_account(&self) -> Option<Pubkey>;
