@@ -51,7 +51,7 @@ pub struct MagicBlockParams {
 
     // --- File-Only Configuration ---
     pub commit: CommitStrategy,
-    pub accounts_db: AccountsDbConfig,
+    pub accountsdb: AccountsDbConfig,
     pub ledger: LedgerConfig,
     pub chainlink: ChainLinkConfig,
     pub chain_operation: Option<ChainOperationConfig>,
