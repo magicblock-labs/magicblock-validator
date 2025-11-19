@@ -57,6 +57,8 @@ pub(super) struct TransactionExecutor {
     /// A read lock held during a slot's processing to synchronize with critical global
     /// operations like `AccountsDb` snapshots.
     sync: StWLock,
+    /// True when auto airdrop for fee payers is enabled (auto_airdrop_lamports > 0).
+    pub is_auto_airdrop_lamports_enabled: bool,
 }
 
 impl TransactionExecutor {
@@ -103,6 +105,8 @@ impl TransactionExecutor {
             accounts_tx: state.account_update_tx.clone(),
             transaction_tx: state.transaction_status_tx.clone(),
             tasks_tx: state.tasks_tx.clone(),
+            is_auto_airdrop_lamports_enabled: state
+                .is_auto_airdrop_lamports_enabled,
         };
 
         this.processor.fill_missing_sysvar_cache_entries(&this);
