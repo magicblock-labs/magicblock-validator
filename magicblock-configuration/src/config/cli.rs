@@ -12,8 +12,7 @@ use std::path::PathBuf;
 #[command(author, version, about)]
 pub struct CliParams {
     /// Path to the TOML configuration file (overrides CLI args).
-    #[arg(long, short, global = true)]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long, short)]
     pub config: Option<PathBuf>,
 
     /// Remote Solana cluster URL or a predefined alias.
@@ -22,7 +21,7 @@ pub struct CliParams {
     pub remote: Option<RemoteCluster>,
 
     /// The application's operational mode.
-    #[arg(long, value_enum)]
+    #[arg(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<LifecycleMode>,
 
@@ -43,7 +42,6 @@ pub struct CliParams {
 
     /// Validator-specific arguments.
     #[command(flatten)]
-    #[serde(flatten)]
     pub validator: CliValidatorConfig,
 }
 

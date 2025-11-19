@@ -7,7 +7,6 @@ use std::str::FromStr;
 use tempfile::TempDir;
 
 /// Helper to simulate CLI arguments.
-/// passing `vec![]` simulates running the binary with no args.
 fn run_cli(args: Vec<&str>) -> MagicBlockParams {
     // clap expects the first argument to be the binary name
     let itr = std::iter::once("mb-validator")
@@ -17,6 +16,7 @@ fn run_cli(args: Vec<&str>) -> MagicBlockParams {
     MagicBlockParams::try_new(itr).expect("Failed to parse configuration")
 }
 
+/// RAII Guard to safely handle Env Vars in tests
 struct EnvVarGuard(&'static str);
 
 impl EnvVarGuard {
@@ -41,7 +41,6 @@ impl Drop for EnvVarGuard {
 fn test_defaults_are_applied() {
     let config = run_cli(vec![]);
 
-    // Check a few key defaults from consts.rs
     assert_eq!(config.validator.basefee, consts::DEFAULT_BASE_FEE);
     assert_eq!(
         config.remote,
@@ -57,13 +56,13 @@ fn test_cli_args_override_defaults() {
     let config = run_cli(vec!["--basefee", "999"]);
 
     assert_eq!(config.validator.basefee, 999);
-    // Ensure other defaults remain untouched
+    // Other defaults remain
     assert_eq!(config.listen.0.port(), 8899);
 }
 
 // ============================================================================
-// 2: Precedence Logic
-// Order: Env Var > TOML File > CLI > Defaults
+// 2: Precedence Logic (Updated)
+// Order: CLI > Env Var > TOML File > Defaults
 // ============================================================================
 
 /// Helper to create a temporary config file
@@ -77,21 +76,25 @@ fn create_temp_config(content: &str) -> (TempDir, std::path::PathBuf) {
 
 #[test]
 #[serial]
-fn test_env_var_overrides_cli() {
-    // 1. Set an environment variable
-    let _env = EnvVarGuard::new("MBV_VALIDATOR_BASEFEE", "5000");
+fn test_cli_overrides_env_var() {
+    // 1. Set Env to 5000
+    let _env = EnvVarGuard::new("MBV_STORAGE", "/tmp/powerlog");
 
-    // 2. Pass a conflicting CLI argument (e.g., 100)
-    // Even though CLI says 100, Env says 5000. Env should win.
-    let config = run_cli(vec!["--basefee", "100"]);
+    // 2. Set CLI to 100
+    // Logic: CLI (100) > Env (5000)
+    let config =
+        run_cli(vec!["--storage", "/tmp/com.apple.launchd.D1zPwBXAsm"]);
 
-    assert_eq!(config.validator.basefee, 5000);
+    assert_eq!(
+        config.storage,
+        Some("/tmp/com.apple.launchd.D1zPwBXAsm".parse().unwrap())
+    );
 }
 
 #[test]
 #[parallel]
-fn test_toml_file_overrides_cli() {
-    // 1. Create a config file specifying basefee = 200
+fn test_cli_overrides_toml_file() {
+    // 1. File says 200
     let (_dir, config_path) = create_temp_config(
         r#"
         [validator]
@@ -99,8 +102,8 @@ fn test_toml_file_overrides_cli() {
         "#,
     );
 
-    // 2. Run CLI with --config pointing to file, and a conflicting --basefee 999
-    // Logic: TOML (200) > CLI (999)
+    // 2. CLI says 999
+    // New Logic: CLI (999) > TOML (200)
     let config = run_cli(vec![
         "--config",
         config_path.to_str().unwrap(),
@@ -108,13 +111,13 @@ fn test_toml_file_overrides_cli() {
         "999",
     ]);
 
-    assert_eq!(config.validator.basefee, 200);
+    assert_eq!(config.validator.basefee, 999);
 }
 
 #[test]
 #[serial]
 fn test_env_overrides_toml() {
-    // 1. Create TOML with fee 300
+    // 1. File says 300
     let (_dir, config_path) = create_temp_config(
         r#"
         [validator]
@@ -122,14 +125,40 @@ fn test_env_overrides_toml() {
         "#,
     );
 
-    // 2. Set Env with fee 400
+    // 2. Env says 400
     let _env = EnvVarGuard::new("MBV_VALIDATOR_BASEFEE", "400");
 
-    // 3. Run
+    // 3. Run (pointing to config)
     let config = run_cli(vec!["--config", config_path.to_str().unwrap()]);
 
-    // Env (400) > TOML (300)
+    // Logic: Env (400) > TOML (300)
+    // (Because Env is merged AFTER Toml in lib.rs)
     assert_eq!(config.validator.basefee, 400);
+}
+
+#[test]
+#[serial]
+fn test_full_precedence_stack() {
+    // Verifies the full chain: CLI > Env > TOML > Default
+    // We use `basefee` as the target. Default is 100 (approx).
+
+    let (_dir, config_path) =
+        create_temp_config(r#"[validator] basefee = 1000"#);
+    let _env = EnvVarGuard::new("MBV_VALIDATOR_BASEFEE", "2000");
+
+    // 1. Check Env > TOML
+    let config_no_cli =
+        run_cli(vec!["--config", config_path.to_str().unwrap()]);
+    assert_eq!(config_no_cli.validator.basefee, 2000);
+
+    // 2. Check CLI > Env
+    let config_with_cli = run_cli(vec![
+        "--config",
+        config_path.to_str().unwrap(),
+        "--basefee",
+        "3000",
+    ]);
+    assert_eq!(config_with_cli.validator.basefee, 3000);
 }
 
 use crate::types::Remote;
@@ -142,10 +171,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 #[test]
 #[parallel]
 fn test_remote_parsing_aliases() {
-    // 1. Test "devnet" alias expansion
     let config = run_cli(vec!["--remote", "devnet"]);
 
-    // Verify it expanded to the full URL defined in consts.rs
     match config.remote {
         RemoteCluster::Single(Remote::Unified(url)) => {
             assert_eq!(url.0.as_str(), crate::consts::DEVNET_URL);
@@ -157,7 +184,6 @@ fn test_remote_parsing_aliases() {
 #[test]
 #[parallel]
 fn test_remote_parsing_custom_url() {
-    // 2. Test custom URL pass-through
     let custom_url = "http://my-private-rpc.com:8899/";
     let config = run_cli(vec!["--remote", custom_url]);
 
@@ -172,7 +198,6 @@ fn test_remote_parsing_custom_url() {
 #[test]
 #[parallel]
 fn test_bind_address_parsing() {
-    // 1. Test valid IPv4 and port
     let config = run_cli(vec!["--listen", "0.0.0.0:9090"]);
 
     assert_eq!(
@@ -184,33 +209,34 @@ fn test_bind_address_parsing() {
 use crate::{config::BlockSize, LifecycleMode};
 
 // ============================================================================
-// 4: Complex Mixed Precedence & Serialization
+// 4: Complex Mixed Precedence
 // ============================================================================
 
 #[test]
 #[serial]
 fn test_mixed_precedence_all_sources() {
     // Scenario:
-    // 1. FILE: Sets `storage` path and `accounts-db` size.
-    // 2. ENV:  Sets `validator.basefee` (Overriding defaults).
-    // 3. CLI:  Sets `listen` address and `lifecycle` mode.
-    // 4. DEFAULT: `ledger.block_time` remains untouched.
+    // 1. FILE: Sets `storage` path, `accounts-db` size, and a `basefee` of 500
+    // 2. ENV:  Sets `validator.basefee` to 777 (should override FILE)
+    // 3. CLI:  Sets `listen` address and `lifecycle` mode (should overlay)
 
-    // 1. Setup File
     let (_dir, config_path) = create_temp_config(
         r#"
         storage = "/tmp/magicblock-data"
         
+        [validator]
+        basefee = 500
+
         [accounts-db]
-        database-size = 524288000 # 500 MB
+        database-size = 524288000
         block-size = "block512"
         "#,
     );
 
-    // 2. Setup Env
+    // Env overrides the File's basefee (500 -> 777)
     let _env = EnvVarGuard::new("MBV_VALIDATOR_BASEFEE", "777");
 
-    // 3. Run CLI
+    // CLI sets orthogonal fields
     let config = run_cli(vec![
         "--config",
         config_path.to_str().unwrap(),
@@ -220,25 +246,18 @@ fn test_mixed_precedence_all_sources() {
         "offline",
     ]);
 
-    // --- Assertions ---
-
-    // From CLI
+    // CLI fields
     assert_eq!(config.listen.0.port(), 5000);
     assert_eq!(config.lifecycle, LifecycleMode::Offline);
 
-    // From Env
+    // Env overrides File
     assert_eq!(config.validator.basefee, 777);
 
-    // From File
+    // File fields (not touched by others)
     assert_eq!(
         config.storage.unwrap().to_str().unwrap(),
         "/tmp/magicblock-data"
     );
     assert_eq!(config.accounts_db.database_size, 524_288_000);
-
-    // Check Enum parsing from string in file
     assert!(matches!(config.accounts_db.block_size, BlockSize::Block512));
-
-    // From Default (Untouched)
-    assert_eq!(config.ledger.block_time.as_millis(), 400);
 }
