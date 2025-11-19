@@ -8,7 +8,9 @@ use compressed_delegation_client::{
     EXTERNAL_UNDELEGATE_DISCRIMINATOR as EXTERNAL_UNDELEGATE_COMPRESSED_DISCRIMINATOR,
 };
 use ephemeral_rollups_sdk::{
-    consts::{EXTERNAL_UNDELEGATE_DISCRIMINATOR, MAGIC_PROGRAM_ID},
+    consts::{
+        EXTERNAL_UNDELEGATE_DISCRIMINATOR, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID,
+    },
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
@@ -521,6 +523,13 @@ fn process_delegate_compressed(
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
+    if compressed_delegation_program_info
+        .key
+        .ne(&compressed_delegation_client::ID)
+    {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+
     let pda_seeds = FlexiCounter::seeds(payer_info.key);
     let (counter_pda, bump) =
         Pubkey::find_program_address(&pda_seeds, &crate::id());
@@ -588,6 +597,14 @@ fn process_schedule_commit_compressed(
     let [payer, counter, magic_context, magic_program] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
+
+    if magic_context.key.ne(&MAGIC_CONTEXT_ID) {
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    if magic_program.key.ne(&MAGIC_PROGRAM_ID) {
+        return Err(ProgramError::IncorrectProgramId);
+    }
 
     let (pda, _bump) = FlexiCounter::pda(payer.key);
     assert_keys_equal(counter.key, &pda, || {
