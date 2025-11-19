@@ -211,13 +211,10 @@ pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    build_instruction(
-        program_id,
-        ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(
-            players.to_vec(),
-        ),
-        account_metas,
-    )
+    let ix = ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(
+        players.to_vec(),
+    );
+    build_instruction(program_id, ix, account_metas)
 }
 
 pub fn increase_count_instruction(committee: Pubkey) -> Instruction {
