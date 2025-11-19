@@ -504,6 +504,6 @@ pub fn inc_table_mania_a_count() {
     TABLE_MANIA_A_COUNT.inc()
 }
 
-pub fn inc_table_mania_cloase_a_count() {
+pub fn inc_table_mania_close_a_count() {
     TABLE_MANIA_CLOSED_A_COUNT.inc()
 }

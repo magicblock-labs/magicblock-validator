@@ -697,7 +697,7 @@ impl LookupTableRc {
         &self,
         rpc_client: &MagicblockRpcClient,
     ) -> TableManiaResult<bool> {
-        metrics::inc_table_mania_cloase_a_count();
+        metrics::inc_table_mania_close_a_count();
         let acc = rpc_client.get_account(self.table_address()).await?;
         Ok(acc.is_none())
     }
