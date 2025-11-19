@@ -157,38 +157,36 @@ impl super::TransactionExecutor {
             "single transaction result is always present in the output",
         );
 
-        let undelegated_feepayer_was_modified = result
-            .as_ref()
-            .ok()
-            .and_then(|r| r.executed_transaction())
-            .and_then(|txn| {
-                let first_acc = txn.loaded_transaction.accounts.first();
-                let rollback_lamports = rollback_feepayer_lamports(
-                    &txn.loaded_transaction.rollback_accounts,
-                );
-                first_acc.map(|acc| (acc, rollback_lamports))
-            })
-            .map(|(acc, rollback_lamports)| {
-                // The check logic: if we have an undelegated feepayer, then
-                // it cannot have been mutated. The only exception is the
-                // privileged feepayer (internal validator operations), for
-                // which we do allow the mutations, since it can be used to
-                // fund other accounts.
-                (acc.1.is_dirty()
-                    && (acc.1.lamports() != 0 || rollback_lamports != 0))
-                    && !acc.1.delegated()
-                    && !acc.1.privileged()
-            })
-            .unwrap_or_default();
         let gasless = self.environment.fee_lamports_per_signature == 0;
         // If we are running in the gasless mode, we should not allow
         // any mutation of the feepayer account, since that would make
-        // it possible for malicious actors to peform transfer operations
+        // it possible for malicious actors to perform transfer operations
         // from undelegated feepayers to delegated accounts, which would
-        // result in validator loosing funds upon balance settling.
-        if gasless && undelegated_feepayer_was_modified {
-            result = Err(TransactionError::InvalidAccountForFee);
-        };
+        // result in validator losing funds upon balance settling.
+        if gasless {
+            let undelegated_feepayer_was_modified = result
+                .as_ref()
+                .ok()
+                .and_then(|r| r.executed_transaction())
+                .and_then(|txn| {
+                    let first_acc = txn.loaded_transaction.accounts.first();
+                    let rollback_lamports = rollback_feepayer_lamports(
+                        &txn.loaded_transaction.rollback_accounts,
+                    );
+                    first_acc.map(|acc| (acc, rollback_lamports))
+                })
+                .map(|(acc, rollback_lamports)| {
+                    (acc.1.is_dirty()
+                        && (acc.1.lamports() != 0 || rollback_lamports != 0))
+                        && !acc.1.delegated()
+                        && !acc.1.privileged()
+                })
+                .unwrap_or(false);
+
+            if undelegated_feepayer_was_modified {
+                result = Err(TransactionError::InvalidAccountForFee);
+            }
+        }
         (result, output.balances)
     }
 
