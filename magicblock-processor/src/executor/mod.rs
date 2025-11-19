@@ -5,7 +5,8 @@ use magicblock_accounts_db::{AccountsDb, StWLock};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
     transactions::{
-        TransactionProcessingMode, TransactionStatusTx, TransactionToProcessRx,
+        ScheduledTasksTx, TransactionProcessingMode, TransactionStatusTx,
+        TransactionToProcessRx,
     },
 };
 use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
@@ -49,6 +50,8 @@ pub(super) struct TransactionExecutor {
     transaction_tx: TransactionStatusTx,
     /// A channel to send out account state updates after processing.
     accounts_tx: AccountUpdateTx,
+    /// A channel to send scheduled (crank) tasks created by transactions.
+    tasks_tx: ScheduledTasksTx,
     /// A back-channel to notify the `TransactionScheduler` that this worker is ready for more work.
     ready_tx: Sender<WorkerId>,
     /// A read lock held during a slot's processing to synchronize with critical global
@@ -103,6 +106,7 @@ impl TransactionExecutor {
             ready_tx,
             accounts_tx: state.account_update_tx.clone(),
             transaction_tx: state.transaction_status_tx.clone(),
+            tasks_tx: state.tasks_tx.clone(),
         };
 
         this.processor.fill_missing_sysvar_cache_entries(&this);

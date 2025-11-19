@@ -1,10 +1,13 @@
-use log::error;
-use magicblock_core::link::{
-    accounts::{AccountWithSlot, LockedAccount},
-    transactions::{
-        TransactionExecutionResult, TransactionSimulationResult,
-        TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
+use log::*;
+use magicblock_core::{
+    link::{
+        accounts::{AccountWithSlot, LockedAccount},
+        transactions::{
+            TransactionExecutionResult, TransactionSimulationResult,
+            TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
+        },
     },
+    tls::ExecutionTlsStash,
 };
 use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
 use solana_account::ReadableAccount;
@@ -49,41 +52,47 @@ impl super::TransactionExecutor {
         let (result, balances) = self.process(&transaction);
         let [txn] = transaction;
 
-        // Transaction failed to load, we persist it to the
-        // ledger, only for the convenience of the user
-        if let Err(err) = result {
-            let status = Err(err);
-            self.commit_failed_transaction(txn, status.clone());
-            FAILED_TRANSACTIONS_COUNT.inc();
-            tx.map(|tx| tx.send(status));
-            return;
+        let processed = match result {
+            Ok(processed) => processed,
+            Err(err) => {
+                // Transaction failed to load, we persist it to the
+                // ledger, only for the convenience of the user
+                let status = Err(err);
+                self.commit_failed_transaction(txn, status.clone());
+                FAILED_TRANSACTIONS_COUNT.inc();
+                tx.map(|tx| tx.send(status));
+                return;
+            }
+        };
+
+        // The transaction has been processed, we can commit the account state changes
+        // Failed transactions still pay fees, so we need to commit the accounts even if the transaction failed
+        let feepayer = *txn.fee_payer();
+        self.commit_accounts(feepayer, &processed, is_replay);
+
+        let result = processed.status();
+        if result.is_ok() {
+            // If the transaction succeeded, check for potential tasks
+            // that may have been scheduled during the transaction execution
+            // TODO: send intents here as well once implemented
+            if !is_replay {
+                while let Some(task) = ExecutionTlsStash::next_task() {
+                    // This is a best effort send, if the tasks service has terminated
+                    // for some reason, logging is the best we can do at this point
+                    let _ = self.tasks_tx.send(task).inspect_err(|_|
+                            error!("Scheduled tasks service has hung up and is no longer running")
+                        );
+                }
+            }
         }
 
-        // If the transaction failed to load entirely, then it was handled above
-        let result = result.and_then(|processed| {
-            let result = processed.status();
+        // We always commit transaction to the ledger (mostly for user convenience)
+        if !is_replay {
+            self.commit_transaction(txn, processed, balances);
+        }
 
-            // If the transaction failed during the execution and the caller is waiting
-            // for the result, do not persist any changes (preflight check is true)
-            if result.is_err() && tx.is_some() {
-                // But we always commit transaction to the ledger (mostly for user convenience)
-                if !is_replay {
-                    self.commit_transaction(txn, processed, balances);
-                }
-                return result;
-            }
-
-            let feepayer = *txn.fee_payer();
-            // Otherwise commit the account state changes
-            self.commit_accounts(feepayer, &processed, is_replay);
-
-            // And commit transaction to the ledger
-            if !is_replay {
-                self.commit_transaction(txn, processed, balances);
-            }
-
-            result
-        });
+        // Make sure that no matter what happened to the transaction we clear the stash
+        ExecutionTlsStash::clear();
 
         // Send the final result back to the caller if they are waiting.
         tx.map(|tx| tx.send(result));
@@ -100,6 +109,9 @@ impl super::TransactionExecutor {
         transaction: [SanitizedTransaction; 1],
         tx: TxnSimulationResultTx,
     ) {
+        // Defensively clear any stale data from previous calls
+        ExecutionTlsStash::clear();
+
         let (result, _) = self.process(&transaction);
         let result = match result {
             Ok(processed) => {
@@ -129,6 +141,9 @@ impl super::TransactionExecutor {
                 inner_instructions: None,
             },
         };
+        // Make sure that we clear the stash, so that simulations
+        // don't interfere with actual transaction executions
+        ExecutionTlsStash::clear();
         let _ = tx.send(result);
     }
 
@@ -157,45 +172,45 @@ impl super::TransactionExecutor {
             "single transaction result is always present in the output",
         );
 
-        let undelegated_feepayer_was_modified = result
-            .as_ref()
-            .ok()
-            .and_then(|r| r.executed_transaction())
-            .and_then(|txn| {
-                let first_acc = txn.loaded_transaction.accounts.first();
-                let rollback_lamports = rollback_feepayer_lamports(
-                    &txn.loaded_transaction.rollback_accounts,
-                );
-                first_acc.map(|acc| (acc, rollback_lamports))
-            })
-            .map(|(acc, rollback_lamports)| {
-                // The check logic: if we have an undelegated feepayer, then
-                // it cannot have been mutated. The only exception is the
-                // privileged feepayer (internal validator operations), for
-                // which we do allow the mutations, since it can be used to
-                // fund other accounts.
-                (acc.1.is_dirty()
-                    && (acc.1.lamports() != 0 || rollback_lamports != 0))
-                    && !acc.1.delegated()
-                    && !acc.1.privileged()
-            })
-            .unwrap_or_default();
         let gasless = self.environment.fee_lamports_per_signature == 0;
         // If we are running in the gasless mode, we should not allow
         // any mutation of the feepayer account, since that would make
         // it possible for malicious actors to perform transfer operations
         // from undelegated feepayers to delegated accounts, which would
-        // result in validator loosing funds upon balance settling.
-        if gasless
-            && undelegated_feepayer_was_modified
-            && !self.is_auto_airdrop_lamports_enabled
-        {
-            if let Ok(processed) = &mut result {
-                if let ProcessedTransaction::Executed(ref mut executed) = processed {
-                    executed.execution_details.status = Err(TransactionError::InvalidAccountForFee)
+        // result in validator losing funds upon balance settling.
+        if gasless {
+            let undelegated_feepayer_was_modified = result
+                .as_ref()
+                .ok()
+                .and_then(|r| r.executed_transaction())
+                .and_then(|txn| {
+                    let first_acc = txn.loaded_transaction.accounts.first();
+                    let rollback_lamports = rollback_feepayer_lamports(
+                        &txn.loaded_transaction.rollback_accounts,
+                    );
+                    first_acc.map(|acc| (acc, rollback_lamports))
+                })
+                .map(|(acc, rollback_lamports)| {
+                    (acc.1.is_dirty()
+                        && (acc.1.lamports() != 0 || rollback_lamports != 0))
+                        && !acc.1.delegated()
+                        && !acc.1.privileged()
+                })
+                .unwrap_or(false);
+
+            if undelegated_feepayer_was_modified
+                && !self.is_auto_airdrop_lamports_enabled
+            {
+                if let Ok(processed) = &mut result {
+                    if let ProcessedTransaction::Executed(ref mut executed) =
+                        processed
+                    {
+                        executed.execution_details.status =
+                            Err(TransactionError::InvalidAccountForFee)
+                    }
                 }
             }
-        };
+        }
         (result, output.balances)
     }
 

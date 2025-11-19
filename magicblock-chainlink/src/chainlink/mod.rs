@@ -159,13 +159,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 blacklisted.fetch_add(1, Ordering::Relaxed);
                 return false;
             }
-            if account.delegated() {
-                delegated.fetch_add(1, Ordering::Relaxed);
-                return false;
-            }
+            // TODO: this potentially looses data and is a temporary measure
             if account.owner().eq(&dlp::id()) {
                 dlp_owned_not_delegated.fetch_add(1, Ordering::Relaxed);
                 return true;
+            }
+            if account.delegated() {
+                delegated.fetch_add(1, Ordering::Relaxed);
+                return false;
             }
             trace!(
                 "Removing non-delegated, non-DLP-owned account: {pubkey} {:#?}",

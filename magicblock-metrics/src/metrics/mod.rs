@@ -117,8 +117,8 @@ lazy_static::lazy_static! {
         "monitored_accounts_gauge", "number of undelegated accounts, being monitored via websocket",
     ).unwrap();
 
-    static ref EVICTED_ACCOUNTS_COUNT: IntGauge = IntGauge::new(
-        "evicted_accounts_count", "number of accounts forcefully removed from monitored list and database",
+    static ref EVICTED_ACCOUNTS_COUNT: IntCounter = IntCounter::new(
+        "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
 
     // -----------------
@@ -219,6 +219,13 @@ lazy_static::lazy_static! {
         IntCounter::new(
             "undelegation_completed_count",
             "Total number of completed undelegations detected",
+        )
+        .unwrap();
+
+    pub static ref UNSTUCK_UNDELEGATION_COUNT: IntCounter =
+        IntCounter::new(
+            "unstuck_undelegation_count",
+            "Total number of undelegating accounts found to be already undelegated on chain",
         )
         .unwrap();
 
@@ -327,6 +334,7 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
+        register!(UNSTUCK_UNDELEGATION_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
         register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
         register!(TASK_INFO_FETCHER_A_COUNT);
@@ -418,6 +426,10 @@ pub fn ensure_accounts_end(timer: HistogramTimer) {
     timer.stop_and_record();
 }
 
+/// Sets the absolute number of monitored accounts.
+///
+/// This metric reflects the current total count of accounts being monitored.
+/// Callers must pass the total number of monitored accounts, not a delta.
 pub fn set_monitored_accounts_count(count: usize) {
     MONITORED_ACCOUNTS_GAUGE.set(count as i64);
 }
@@ -480,6 +492,10 @@ pub fn inc_undelegation_completed() {
     UNDELEGATION_COMPLETED_COUNT.inc();
 }
 
+pub fn inc_unstuck_undelegation_count() {
+    UNSTUCK_UNDELEGATION_COUNT.inc();
+}
+
 pub fn inc_remote_account_provider_a_count() {
     REMOTE_ACCOUNT_PROVIDER_A_COUNT.inc()
 }
@@ -492,6 +508,6 @@ pub fn inc_table_mania_a_count() {
     TABLE_MANIA_A_COUNT.inc()
 }
 
-pub fn inc_table_mania_cloase_a_count() {
+pub fn inc_table_mania_close_a_count() {
     TABLE_MANIA_CLOSED_A_COUNT.inc()
 }

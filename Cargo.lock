@@ -2248,6 +2248,7 @@ name = "guinea"
 version = "0.2.3"
 dependencies = [
  "bincode",
+ "magicblock-magic-program-api",
  "serde",
  "solana-program",
 ]
@@ -3953,19 +3954,25 @@ dependencies = [
  "bincode",
  "chrono",
  "futures-util",
+ "guinea",
  "log",
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
+ "magicblock-magic-program-api",
  "magicblock-processor",
  "magicblock-program",
  "rusqlite",
  "serde",
+ "solana-account",
  "solana-program",
+ "solana-pubkey",
  "solana-pubsub-client",
  "solana-sdk",
+ "solana-signature",
  "solana-svm",
  "solana-timings",
+ "test-kit",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.15",
@@ -5916,10 +5923,11 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.219"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0e2c6ed6606019b4e29e69dbaba95b11854410e5347d525002456dbbb786b6"
+checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
+ "serde_core",
  "serde_derive",
 ]
 
@@ -5942,10 +5950,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_derive"
-version = "1.0.219"
+name = "serde_core"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b0276cf7f2c73365f7157c8123c21cd9a50fbbd844757af28ca1f5925fc2a00"
+checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
+dependencies = [
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6220,7 +6237,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=8f7050a#8f7050ad949465d2f94e7d798e2f9633a7c407f5"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=731fa50#731fa5037bf89929da76759f2281c1cb4833a8b7"
 dependencies = [
  "bincode",
  "qualifier_attr",

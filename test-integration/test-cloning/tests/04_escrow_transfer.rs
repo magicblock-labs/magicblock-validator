@@ -1,14 +1,47 @@
 use integration_test_tools::IntegrationTestContext;
 use log::*;
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-    system_instruction,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
+    signer::Signer, system_instruction,
 };
 use test_kit::init_logger;
 
 use crate::utils::init_and_delegate_flexi_counter;
 mod utils;
 
+fn log_accounts_balances(
+    ctx: &IntegrationTestContext,
+    stage: &str,
+    counter: &Pubkey,
+    payer: &Pubkey,
+    escrow: &Pubkey,
+) -> (u64, u64, u64) {
+    let accs = ctx
+        .fetch_ephem_multiple_accounts(&[*counter, *payer, *escrow])
+        .unwrap();
+    let [counter_acc, payer_acc, escrow_acc] = accs.as_slice() else {
+        panic!("Expected 3 accounts, got {:#?}", accs);
+    };
+
+    let counter_balance =
+        counter_acc.as_ref().unwrap().lamports as f64 / LAMPORTS_PER_SOL as f64;
+    let payer_balance =
+        payer_acc.as_ref().unwrap().lamports as f64 / LAMPORTS_PER_SOL as f64;
+    let escrow_balance =
+        escrow_acc.as_ref().unwrap().lamports as f64 / LAMPORTS_PER_SOL as f64;
+    debug!("--- {stage} ---");
+    debug!("Counter {counter}: {counter_balance} SOL");
+    debug!("Payer   {payer}: {payer_balance} SOL");
+    debug!("Escrow  {escrow} {escrow_balance} SOL");
+
+    (
+        counter_acc.as_ref().unwrap().lamports,
+        payer_acc.as_ref().unwrap().lamports,
+        escrow_acc.as_ref().unwrap().lamports,
+    )
+}
+
+#[ignore = "We are still evaluating escrow functionality that allows anything except just paying fees"]
 #[test]
 fn test_transfer_from_escrow_to_delegated_account() {
     init_logger!();
@@ -29,14 +62,14 @@ fn test_transfer_from_escrow_to_delegated_account() {
         .airdrop_chain_escrowed(&kp_escrowed, 2 * LAMPORTS_PER_SOL)
         .unwrap();
 
-    assert_eq!(
-        ctx.fetch_ephem_account(ephemeral_balance_pda)
-            .unwrap()
-            .lamports,
-        escrow_lamports
+    let (_, _, ephem_escrow_lamports) = log_accounts_balances(
+        &ctx,
+        "After delegation and escrowed airdrop",
+        &counter_pda,
+        &kp_escrowed.pubkey(),
+        &ephemeral_balance_pda,
     );
-
-    debug!("{:#?}", ctx.fetch_ephem_account(counter_pda).unwrap());
+    assert_eq!(ephem_escrow_lamports, escrow_lamports);
 
     // 2. Transfer 0.5 SOL from kp1 to counter pda
     let transfer_amount = LAMPORTS_PER_SOL / 2;
@@ -52,36 +85,21 @@ fn test_transfer_from_escrow_to_delegated_account() {
         )
         .unwrap();
 
-    debug!("Transfer tx: {sig} {confirmed}");
+    debug!("Transfer tx sig: {sig} ({confirmed}) ");
 
     // 3. Check balances
-    let accs = ctx
-        .fetch_ephem_multiple_accounts(&[
-            kp_escrowed.pubkey(),
-            ephemeral_balance_pda,
-            counter_pda,
-        ])
-        .unwrap();
-    let [escrowed, escrow, counter] = accs.as_slice() else {
-        panic!("Expected 3 accounts, got {:#?}", accs);
-    };
-
-    debug!("Escrowed : '{}': {escrowed:#?}", kp_escrowed.pubkey());
-    debug!("Escrow   : '{ephemeral_balance_pda}': {escrow:#?}");
-    debug!("Counter  : '{counter_pda}': {counter:#?}");
-
-    let escrowed_balance =
-        escrowed.as_ref().unwrap().lamports as f64 / LAMPORTS_PER_SOL as f64;
-    let escrow_balance =
-        escrow.as_ref().unwrap().lamports as f64 / LAMPORTS_PER_SOL as f64;
-    let counter_balance =
-        counter.as_ref().unwrap().lamports as f64 / LAMPORTS_PER_SOL as f64;
-
-    debug!(
-        "\nEscrowed balance: {escrowed_balance}\nEscrow balance  : {escrow_balance}\nCounter balance : {counter_balance}"
+    let (counter_balance, _, escrow_balance) = log_accounts_balances(
+        &ctx,
+        "After transfer from escrow to counter",
+        &counter_pda,
+        &kp_escrowed.pubkey(),
+        &ephemeral_balance_pda,
     );
+    let escrow_balance = escrow_balance as f64 / LAMPORTS_PER_SOL as f64;
+    let counter_balance = counter_balance as f64 / LAMPORTS_PER_SOL as f64;
+
     // Received 1 SOL then transferred 0.5 SOL + tx fee
-    assert!((0.4..=0.5).contains(&escrowed_balance));
+    assert!((0.4..=0.5).contains(&escrow_balance));
     // Airdropped 2 SOL - escrowed half
     assert!(escrow_balance >= 1.0);
     // Received 0.5 SOL

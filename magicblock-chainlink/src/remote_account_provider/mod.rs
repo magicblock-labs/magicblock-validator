@@ -712,7 +712,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         subscribe_and_fetch: &[(Pubkey, oneshot::Receiver<FetchResult>)],
     ) -> RemoteAccountProviderResult<()> {
-        if log_enabled!(log::Level::Debug) {
+        if log_enabled!(log::Level::Trace) {
             let pubkeys = subscribe_and_fetch
                 .iter()
                 .map(|(pk, _)| pk.to_string())
@@ -732,29 +732,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        // If an account is evicted then we need to unsubscribe from it first
+        // 1. First realize subscription
+        self.pubsub_client.subscribe(*pubkey).await?;
+
+        // 2. Add to LRU cache
+        // If an account is evicted then we need to unsubscribe from it
         // and then inform upstream that we are no longer tracking it
         if let Some(evicted) = self.lrucache_subscribed_accounts.add(*pubkey) {
             trace!("Evicting {pubkey}");
 
             // 1. Unsubscribe from the account directly (LRU has already removed it)
             if let Err(err) = self.pubsub_client.unsubscribe(evicted).await {
+                // Should we retry here?
                 warn!(
                     "Failed to unsubscribe from pubsub for evicted account {evicted}: {err:?}");
-                // Rollback the LRU add since eviction failed
-                self.lrucache_subscribed_accounts.remove(pubkey);
-                return Err(err);
             }
 
             // 2. Inform upstream so it can remove it from the store
             self.send_removal_update(evicted).await?;
-        }
-
-        // 3. Subscribe to the new account (only after successful eviction handling)
-        if let Err(err) = self.pubsub_client.subscribe(*pubkey).await {
-            // Rollback the LRU add since subscription failed
-            self.lrucache_subscribed_accounts.remove(pubkey);
-            return Err(err);
         }
 
         Ok(())
@@ -789,6 +784,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
         if self.is_watching(pubkey) {
+            // Promote in LRU cache even if already subscribed
+            self.lrucache_subscribed_accounts.add(*pubkey);
             return Ok(());
         }
 
@@ -801,6 +798,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
+        if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
+            warn!(
+                "Tried to unsubscribe from account {} that should never be evicted",
+                pubkey
+            );
+            return Ok(());
+        }
         if !self.lrucache_subscribed_accounts.contains(pubkey) {
             warn!(
                 "Tried to unsubscribe from account {} that was not subscribed in the LRU cache",

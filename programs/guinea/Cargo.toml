@@ -16,3 +16,4 @@ bincode = { workspace = true }
 serde = { workspace = true }
 
 solana-program = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
