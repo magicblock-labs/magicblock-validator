@@ -198,8 +198,15 @@ impl super::TransactionExecutor {
                 })
                 .unwrap_or(false);
 
-            if undelegated_feepayer_was_modified {
-                result = Err(TransactionError::InvalidAccountForFee);
+            if undelegated_feepayer_was_modified
+                && !self.is_auto_airdrop_lamports_enabled
+            {
+                if let Ok(ProcessedTransaction::Executed(ref mut executed)) =
+                    &mut result
+                {
+                    executed.execution_details.status =
+                        Err(TransactionError::InvalidAccountForFee)
+                }
             }
         }
         (result, output.balances)

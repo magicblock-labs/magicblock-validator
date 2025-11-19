@@ -132,6 +132,7 @@ impl ExecutionTestEnv {
             txn_to_process_rx: validator_channels.transaction_to_process,
             tasks_tx: validator_channels.tasks_service,
             environment,
+            is_auto_airdrop_lamports_enabled: false,
         };
 
         // Load test program
