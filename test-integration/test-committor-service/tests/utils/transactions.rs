@@ -17,13 +17,10 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-use crate::utils::{
-    instructions::{
-        init_account_and_delegate_compressed_ixs,
-        init_account_and_delegate_ixs, init_validator_fees_vault_ix,
-        InitAccountAndDelegateCompressedIxs, InitAccountAndDelegateIxs,
-    },
-    sleep_millis,
+use crate::utils::instructions::{
+    init_account_and_delegate_compressed_ixs, init_account_and_delegate_ixs,
+    init_validator_fees_vault_ix, InitAccountAndDelegateCompressedIxs,
+    InitAccountAndDelegateIxs,
 };
 
 #[macro_export]
@@ -73,6 +70,53 @@ macro_rules! get_account {
     }};
     ($rpc_client:ident, $pubkey:expr, $label:literal) => {{
         get_account!($rpc_client, $pubkey, $label, |_: &Account, _: u8| true)
+    }};
+}
+
+#[macro_export]
+macro_rules! get_compressed_account {
+    ($photon_client:ident, $address:expr, $label:literal, $predicate:expr) => {{
+        const GET_ACCOUNT_RETRIES: u8 = 12;
+
+        let mut remaining_tries = GET_ACCOUNT_RETRIES;
+        loop {
+            let acc = $photon_client
+                .get_compressed_account($address, None)
+                .await
+                .ok()
+                .and_then(|acc| Some(acc.value.clone()));
+            if let Some(acc) = acc {
+                if $predicate(&acc, remaining_tries) {
+                    break acc;
+                }
+                remaining_tries -= 1;
+                if remaining_tries == 0 {
+                    panic!(
+                        "{} account ({:?}) does not match condition after {} retries",
+                        $label, $address, GET_ACCOUNT_RETRIES
+                    );
+                }
+                $crate::utils::sleep_millis(800).await;
+            } else {
+                remaining_tries -= 1;
+                if remaining_tries == 0 {
+                    panic!(
+                        "Unable to get {} account ({:?}) matching condition after {} retries",
+                        $label, $address, GET_ACCOUNT_RETRIES
+                    );
+                }
+                if remaining_tries % 10 == 0 {
+                    debug!(
+                        "Waiting for {} account ({:?}) to become available",
+                        $label, $address
+                    );
+                }
+                $crate::utils::sleep_millis(800).await;
+            }
+        }
+    }};
+    ($rpc_client:ident, $pubkey:expr, $label:literal) => {{
+        get_compressed_account!($rpc_client, $pubkey, $label, |_: &light_client::indexer::CompressedAccount, _: u8| true)
     }};
 }
 
@@ -302,19 +346,8 @@ pub async fn init_and_delegate_compressed_account_on_chain(
         })
         .expect("Failed to delegate");
 
-    // Wait for the indexer to index the account
-    sleep_millis(500).await;
-
-    debug!(
-        "Getting compressed account: {:?}",
-        Pubkey::new_from_array(address)
-    );
-    let compressed_account = photon_indexer
-        .get_compressed_account(address, None)
-        .await
-        .expect("Failed to get compressed account")
-        .value;
-
+    let compressed_account =
+        get_compressed_account!(photon_indexer, address, "pda");
     debug!("Compressed account: {:?}", compressed_account);
 
     (pda, compressed_account.hash, pda_acc)
