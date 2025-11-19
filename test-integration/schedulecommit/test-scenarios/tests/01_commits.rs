@@ -11,6 +11,7 @@ use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
+    instruction::InstructionError,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
@@ -169,7 +170,13 @@ fn test_committing_account_delegated_to_another_validator() {
 
         // We expect InvalidAccountForFee error since account isn't delegated to our validator
         let (_, tx_err) = extract_transaction_error(res);
-        assert_eq!(tx_err.unwrap(), InstructionError(0, IllegalOwner))
+        assert_eq!(
+            tx_err.unwrap(),
+            TransactionError::InstructionError(
+                0,
+                InstructionError::IllegalOwner
+            )
+        )
     });
 }
 
