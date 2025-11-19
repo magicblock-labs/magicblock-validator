@@ -155,6 +155,7 @@ serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
 serde_with = "3.16"
+serial_test = "3.2"
 sha3 = "0.10.8"
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "731fa50" }
 solana-account-decoder = { version = "2.2" }

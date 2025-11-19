@@ -1,4 +1,5 @@
 use crate::{consts, MagicBlockParams, RemoteCluster};
+use serial_test::{parallel, serial};
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::Write;
@@ -18,6 +19,13 @@ fn run_cli(args: Vec<&str>) -> MagicBlockParams {
 
 struct EnvVarGuard(&'static str);
 
+impl EnvVarGuard {
+    fn new(var: &'static str, val: &str) -> Self {
+        std::env::set_var(var, val);
+        Self(var)
+    }
+}
+
 impl Drop for EnvVarGuard {
     fn drop(&mut self) {
         std::env::remove_var(self.0);
@@ -29,6 +37,7 @@ impl Drop for EnvVarGuard {
 // ============================================================================
 
 #[test]
+#[parallel]
 fn test_defaults_are_applied() {
     let config = run_cli(vec![]);
 
@@ -42,6 +51,7 @@ fn test_defaults_are_applied() {
 }
 
 #[test]
+#[parallel]
 fn test_cli_args_override_defaults() {
     // Override basefee via CLI
     let config = run_cli(vec!["--basefee", "999"]);
@@ -66,21 +76,20 @@ fn create_temp_config(content: &str) -> (TempDir, std::path::PathBuf) {
 }
 
 #[test]
+#[serial]
 fn test_env_var_overrides_cli() {
     // 1. Set an environment variable
-    std::env::set_var("MBV_VALIDATOR_BASEFEE", "5000");
+    let _env = EnvVarGuard::new("MBV_VALIDATOR_BASEFEE", "5000");
 
     // 2. Pass a conflicting CLI argument (e.g., 100)
     // Even though CLI says 100, Env says 5000. Env should win.
     let config = run_cli(vec!["--basefee", "100"]);
 
     assert_eq!(config.validator.basefee, 5000);
-
-    // Cleanup
-    std::env::remove_var("MBV_VALIDATOR_BASEFEE");
 }
 
 #[test]
+#[parallel]
 fn test_toml_file_overrides_cli() {
     // 1. Create a config file specifying basefee = 200
     let (_dir, config_path) = create_temp_config(
@@ -103,6 +112,7 @@ fn test_toml_file_overrides_cli() {
 }
 
 #[test]
+#[serial]
 fn test_env_overrides_toml() {
     // 1. Create TOML with fee 300
     let (_dir, config_path) = create_temp_config(
@@ -113,15 +123,13 @@ fn test_env_overrides_toml() {
     );
 
     // 2. Set Env with fee 400
-    std::env::set_var("MBV_VALIDATOR_BASEFEE", "400");
+    let _env = EnvVarGuard::new("MBV_VALIDATOR_BASEFEE", "400");
 
     // 3. Run
     let config = run_cli(vec!["--config", config_path.to_str().unwrap()]);
 
     // Env (400) > TOML (300)
     assert_eq!(config.validator.basefee, 400);
-
-    std::env::remove_var("MBV_VALIDATOR_BASEFEE");
 }
 
 use crate::types::Remote;
@@ -132,6 +140,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 // ============================================================================
 
 #[test]
+#[parallel]
 fn test_remote_parsing_aliases() {
     // 1. Test "devnet" alias expansion
     let config = run_cli(vec!["--remote", "devnet"]);
@@ -146,6 +155,7 @@ fn test_remote_parsing_aliases() {
 }
 
 #[test]
+#[parallel]
 fn test_remote_parsing_custom_url() {
     // 2. Test custom URL pass-through
     let custom_url = "http://my-private-rpc.com:8899/";
@@ -160,6 +170,7 @@ fn test_remote_parsing_custom_url() {
 }
 
 #[test]
+#[parallel]
 fn test_bind_address_parsing() {
     // 1. Test valid IPv4 and port
     let config = run_cli(vec!["--listen", "0.0.0.0:9090"]);
@@ -177,6 +188,7 @@ use crate::{config::BlockSize, LifecycleMode};
 // ============================================================================
 
 #[test]
+#[serial]
 fn test_mixed_precedence_all_sources() {
     // Scenario:
     // 1. FILE: Sets `storage` path and `accounts-db` size.
@@ -196,7 +208,7 @@ fn test_mixed_precedence_all_sources() {
     );
 
     // 2. Setup Env
-    std::env::set_var("MBV_VALIDATOR_BASEFEE", "777");
+    let _env = EnvVarGuard::new("MBV_VALIDATOR_BASEFEE", "777");
 
     // 3. Run CLI
     let config = run_cli(vec![
@@ -229,7 +241,4 @@ fn test_mixed_precedence_all_sources() {
 
     // From Default (Untouched)
     assert_eq!(config.ledger.block_time.as_millis(), 400);
-
-    // Cleanup
-    std::env::remove_var("MBV_VALIDATOR_BASEFEE");
 }

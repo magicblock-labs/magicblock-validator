@@ -1,6 +1,7 @@
 //! A layered configuration library for the MagicBlock validator.
 
-use clap::{Parser, ValueEnum};
+use clap::Parser;
+use config::{cli::CliParams, LifecycleMode};
 use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment, Profile,
@@ -24,85 +25,72 @@ use crate::{
 };
 
 /// Top-level configuration, assembled from multiple sources.
-#[derive(Parser, Deserialize, Serialize, Debug, Default)]
+#[derive(Deserialize, Serialize, Debug, Default)]
 #[serde(default, rename_all = "kebab-case")]
-#[command(author, version, about)]
 pub struct MagicBlockParams {
     /// Path to the TOML configuration file (overrides CLI args).
-    #[arg(long, short, global = true)]
     pub config: Option<PathBuf>,
 
     /// Remote Solana cluster URL or a predefined alias.
-    #[arg(long, short, default_value = consts::DEFAULT_REMOTE)]
     pub remote: RemoteCluster,
 
     /// The application's operational mode.
-    #[arg(long, value_enum, default_value = consts::DEFAULT_LIFECYCLE)]
     pub lifecycle: LifecycleMode,
 
     /// Root directory for application storage.
-    #[arg(long)]
     pub storage: Option<PathBuf>,
 
     /// Primary listen address for the main RPC service.
-    #[arg(long, short, default_value = consts::DEFAULT_RPC_ADDR)]
     pub listen: BindAddress,
 
     /// Listen address for the metrics endpoint.
-    #[arg(long, short)]
     pub metrics: Option<BindAddress>,
 
     /// Validator-specific arguments.
-    #[clap(flatten)]
     pub validator: ValidatorConfig,
 
     // --- File-Only Configuration ---
-    #[clap(skip)]
     pub commit: CommitStrategy,
-    #[clap(skip)]
     pub accounts_db: AccountsDbConfig,
-    #[clap(skip)]
     pub ledger: LedgerConfig,
-    #[clap(skip)]
     pub chainlink: ChainLinkConfig,
-    #[clap(skip)]
     pub chain_operation: Option<ChainOperationConfig>,
-    #[clap(skip)]
     pub task_scheduler: TaskSchedulerConfig,
-    #[clap(skip)]
     pub programs: Vec<LoadableProgram>,
 }
 
 impl MagicBlockParams {
+    /// Assembles the final configuration.
+    /// Precedence: CLI (if set) > Environment > TOML File > Defaults
     pub fn try_new(
         args: impl Iterator<Item = OsString>,
     ) -> figment::Result<Self> {
-        let cli = Self::parse_from(args);
-        let mut figment = Figment::new().merge(Serialized::defaults(&cli));
+        // 1. Parse CLI arguments into the "Overlay" struct
+        let cli = CliParams::parse_from(args);
 
+        // 2. Start with system defaults
+        let mut figment = Figment::new()
+            .merge(Serialized::defaults(MagicBlockParams::default()));
+
+        // 3. Merge TOML File
+        // Check CLI first for config path, fall back to a default path if you have one
         if let Some(path) = &cli.config {
             figment = figment.merge(Toml::file(path).profile(Profile::Default));
         }
 
+        // 4. Merge Environment Variables
         figment = figment.merge(
             Env::prefixed(consts::ENV_VAR_PREFIX)
                 .split("_")
                 .profile(Profile::Default),
         );
 
-        figment.extract()
-    }
-}
+        // 5. Merge CLI "Overlay" (Highest Priority)
+        figment = figment.merge(Serialized::from(&cli, Profile::Default));
 
-#[derive(
-    ValueEnum, Debug, Clone, Default, PartialEq, Deserialize, Serialize,
-)]
-#[serde(rename_all = "kebab-case")]
-#[clap(rename_all = "kebab-case")]
-pub enum LifecycleMode {
-    #[default]
-    Ephemeral,
-    Replica,
-    Offline,
-    ProgramsReplica,
+        // 6. Extract and Validate
+        let params: Self = figment.extract()?;
+
+        Ok(params)
+    }
 }
