@@ -544,8 +544,10 @@ fn process_delegate_compressed(
 
     // Send back excess lamports to the payer
     let min_rent = Rent::get()?.minimum_balance(0);
-    **payer_info.try_borrow_mut_lamports()? +=
-        counter_pda_info.lamports() - min_rent;
+    **payer_info.try_borrow_mut_lamports()? += counter_pda_info
+        .lamports()
+        .checked_sub(min_rent)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
     **counter_pda_info.try_borrow_mut_lamports()? = min_rent;
 
     // Remove data from the delegated account and reassign ownership
