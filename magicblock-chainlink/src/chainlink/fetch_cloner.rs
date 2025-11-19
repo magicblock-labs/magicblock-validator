@@ -458,7 +458,7 @@ where
         delegation_record_pubkey: Pubkey,
     ) -> ChainlinkResult<DelegationRecord> {
         DelegationRecord::try_from_bytes_with_discriminator(data)
-            .map(|record| record.clone())
+            .copied()
             .map_err(|err| {
                 ChainlinkError::InvalidDelegationRecord(
                     delegation_record_pubkey,
