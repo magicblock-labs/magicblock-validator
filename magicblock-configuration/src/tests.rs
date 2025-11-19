@@ -142,8 +142,12 @@ fn test_full_precedence_stack() {
     // Verifies the full chain: CLI > Env > TOML > Default
     // We use `basefee` as the target. Default is 100 (approx).
 
-    let (_dir, config_path) =
-        create_temp_config(r#"[validator] basefee = 1000"#);
+    let (_dir, config_path) = create_temp_config(
+        r#"
+            [validator]
+            basefee = 1000
+        "#,
+    );
     let _env = EnvVarGuard::new("MBV_VALIDATOR_BASEFEE", "2000");
 
     // 1. Check Env > TOML
@@ -221,15 +225,12 @@ fn test_mixed_precedence_all_sources() {
     // 3. CLI:  Sets `listen` address and `lifecycle` mode (should overlay)
 
     let (_dir, config_path) = create_temp_config(
-        r#"
-        storage = "/tmp/magicblock-data"
-        
-        [validator]
-        basefee = 500
-
-        [accounts-db]
-        database-size = 524288000
-        block-size = "block512"
+        r#"storage = "/tmp/magicblock-data"
+            [validator]
+            basefee = 500
+            [accounts-db]
+            database-size = 524288000
+            block-size = "block512"
         "#,
     );
 
