@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use light_client::indexer::{photon_indexer::PhotonIndexer, Indexer};
 use log::{debug, error};
+use magicblock_chainlink::testing::utils::{PHOTON_URL, RPC_URL};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -233,11 +234,9 @@ pub async fn init_and_delegate_account_on_chain(
 pub async fn init_and_delegate_compressed_account_on_chain(
     counter_auth: &Keypair,
 ) -> (Pubkey, [u8; 32], Account) {
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
-    let photon_indexer = Arc::new(PhotonIndexer::new(
-        "http://localhost:8784".to_string(),
-        None,
-    ));
+    let rpc_client = RpcClient::new(RPC_URL.to_string());
+    let photon_indexer =
+        Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None));
 
     rpc_client
         .request_airdrop(&counter_auth.pubkey(), 777 * LAMPORTS_PER_SOL)

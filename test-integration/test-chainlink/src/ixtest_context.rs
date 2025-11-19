@@ -34,7 +34,11 @@ use magicblock_chainlink::{
         Endpoint, RemoteAccountProvider,
     },
     submux::SubMuxClient,
-    testing::{cloner_stub::ClonerStub, photon_client_mock::PhotonClientMock},
+    testing::{
+        cloner_stub::ClonerStub,
+        photon_client_mock::PhotonClientMock,
+        utils::{PHOTON_URL, RPC_URL},
+    },
     Chainlink,
 };
 use magicblock_core::compression::derive_cda_from_pda;
@@ -85,8 +89,6 @@ pub struct IxtestContext {
     pub validator_kp: Arc<Keypair>,
 }
 
-const RPC_URL: &str = "http://localhost:7799";
-const PHOTON_URL: &str = "http://localhost:8784";
 pub const TEST_AUTHORITY: [u8; 64] = [
     251, 62, 129, 184, 107, 49, 62, 184, 1, 147, 178, 128, 185, 157, 247, 92,
     56, 158, 145, 53, 51, 226, 202, 96, 178, 248, 195, 133, 133, 237, 237, 146,

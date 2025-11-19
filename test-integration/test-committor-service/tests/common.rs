@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use light_client::indexer::photon_indexer::PhotonIndexer;
 use light_compressed_account::instruction_data::compressed_proof::ValidityProof;
 use light_sdk_types::instruction::account_meta::CompressedAccountMeta;
+use magicblock_chainlink::testing::utils::PHOTON_URL;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
@@ -44,7 +45,7 @@ pub async fn create_test_client() -> MagicblockRpcClient {
 
 // Helper function to create a test PhotonIndexer
 pub fn create_test_photon_indexer() -> Arc<PhotonIndexer> {
-    let url = "http://localhost:8784".to_string();
+    let url = PHOTON_URL.to_string();
     Arc::new(PhotonIndexer::new(url, None))
 }
 

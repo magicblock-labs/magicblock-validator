@@ -13,6 +13,7 @@ light-sdk = { workspace = true, features = ["v2"] }
 light-sdk-types = { workspace = true, features = ["v2"] }
 log = { workspace = true }
 futures = { workspace = true }
+magicblock-chainlink = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",
 ] }

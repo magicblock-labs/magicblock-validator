@@ -6540,6 +6540,7 @@ dependencies = [
  "light-sdk",
  "light-sdk-types",
  "log",
+ "magicblock-chainlink",
  "magicblock-committor-program",
  "magicblock-committor-service",
  "magicblock-core",

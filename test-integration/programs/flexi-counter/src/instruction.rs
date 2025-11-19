@@ -210,6 +210,7 @@ pub enum FlexiCounterInstruction {
     /// 1.   `[write]`  The counter PDA account that will be delegated.
     /// 2.   `[]`       The compressed delegation program id
     /// 3.   `[]`       The CPI signer of the compressed delegation program
+    ///
     /// 4..N `[]`       Remaining accounts using by the Light program
     DelegateCompressed(DelegateCompressedArgs),
 

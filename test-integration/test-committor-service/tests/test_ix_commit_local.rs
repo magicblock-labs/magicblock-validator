@@ -9,6 +9,7 @@ use light_client::indexer::{
     photon_indexer::PhotonIndexer, CompressedAccount, Indexer,
 };
 use log::*;
+use magicblock_chainlink::testing::utils::{PHOTON_URL, RPC_URL};
 use magicblock_committor_service::{
     config::ChainConfig,
     intent_executor::ExecutionOutput,
@@ -48,7 +49,6 @@ mod utils;
 // -----------------
 // Utilities and Setup
 // -----------------
-const PHOTON_URL: &str = "http://localhost:8784";
 
 type ExpectedStrategies = HashMap<CommitStrategy, u8>;
 
@@ -758,9 +758,8 @@ async fn ix_commit_local(
     assert_eq!(execution_outputs.len(), base_intents.len());
     service.release_common_pubkeys().await.unwrap();
 
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
-    let photon_indexer =
-        PhotonIndexer::new("http://localhost:8784".to_string(), None);
+    let rpc_client = RpcClient::new(RPC_URL.to_string());
+    let photon_indexer = PhotonIndexer::new(PHOTON_URL.to_string(), None);
     let mut strategies = ExpectedStrategies::new();
     for (execution_output, base_intent) in
         execution_outputs.into_iter().zip(base_intents.into_iter())

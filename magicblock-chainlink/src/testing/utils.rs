@@ -11,7 +11,7 @@ use crate::{
 
 pub const PUBSUB_URL: &str = "ws://localhost:7800";
 pub const RPC_URL: &str = "http://localhost:7799";
-pub const COMPRESSION_URL: &str = "http://localhost:8784";
+pub const PHOTON_URL: &str = "http://localhost:8784";
 
 pub fn random_pubkey() -> Pubkey {
     Keypair::new().pubkey()
