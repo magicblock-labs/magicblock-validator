@@ -4,7 +4,7 @@ const fs = require("fs");
 const [, , inputSoFullPath, outputJsonFullPath] = process.argv;
 if (!inputSoFullPath || !outputJsonFullPath) {
   console.error(
-    "Usage: miniv2-json-from-so.js <inpuSoFullPath> <outputJsonFullPath>"
+    "Usage: miniv2-json-from-so.js <inputSoFullPath> <outputJsonFullPath>"
   );
   process.exit(1);
 }
