@@ -3636,6 +3636,7 @@ dependencies = [
 name = "magicblock-chainlink"
 version = "0.2.3"
 dependencies = [
+ "arc-swap",
  "assert_matches",
  "async-trait",
  "bincode",
@@ -3647,6 +3648,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-magic-program-api",
+ "magicblock-metrics",
  "serde_json",
  "solana-account",
  "solana-account-decoder",
@@ -3872,6 +3874,7 @@ dependencies = [
  "solana-feature-set",
  "solana-fee",
  "solana-fee-structure",
+ "solana-keypair",
  "solana-loader-v4-program",
  "solana-program",
  "solana-program-runtime",
@@ -3932,6 +3935,7 @@ version = "0.2.3"
 dependencies = [
  "ed25519-dalek",
  "log",
+ "magicblock-metrics",
  "magicblock-rpc-client",
  "rand 0.8.5",
  "sha3",
@@ -6233,7 +6237,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=f454d4a#f454d4a67a1ca64b87002025868f5369428e1c54"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=731fa50#731fa5037bf89929da76759f2281c1cb4833a8b7"
 dependencies = [
  "bincode",
  "qualifier_attr",

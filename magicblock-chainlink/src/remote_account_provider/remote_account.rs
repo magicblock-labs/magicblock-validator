@@ -109,6 +109,14 @@ impl ResolvedAccountSharedData {
         self
     }
 
+    pub fn undelegating(&self) -> bool {
+        use ResolvedAccountSharedData::*;
+        match self {
+            Fresh(account) => account.undelegating(),
+            Bank(account) => account.undelegating(),
+        }
+    }
+
     pub fn set_remote_slot(&mut self, remote_slot: Slot) -> &mut Self {
         use ResolvedAccountSharedData::*;
         match self {
