@@ -408,9 +408,8 @@ impl MagicValidator {
             })
             .collect::<Vec<_>>();
 
-        // TODO: @@@ HACK, make this configurable
         endpoints.push(Endpoint::Compression {
-            url: "http://127.0.0.1:8784".to_string(),
+            url: config.compression.photon_url.clone(),
         });
 
         let cloner = ChainlinkCloner::new(
