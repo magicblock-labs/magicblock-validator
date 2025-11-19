@@ -236,10 +236,6 @@ where
                         }
                     }
 
-                    // When cloning from subscription update, reset undelegating flag
-                    // since the subscription update reflects current chain state
-                    account.set_undelegating(false);
-
                     if account.executable() {
                         self.handle_executable_sub_update(pubkey, account)
                             .await;
