@@ -283,10 +283,7 @@ fn test_everything_defined() {
                     addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 },
             },
-            task_scheduler: TaskSchedulerConfig {
-                reset: true,
-                millis_per_tick: 1000,
-            },
+            task_scheduler: TaskSchedulerConfig { reset: true },
             compression: CompressionConfig {
                 photon_url: "http://localhost:8787".to_string(),
                 api_key: Some("api_key".to_string()),

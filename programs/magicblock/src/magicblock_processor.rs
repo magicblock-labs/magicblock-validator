@@ -13,9 +13,7 @@ use solana_sdk::{
 use crate::{
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
-    schedule_task::{
-        process_cancel_task, process_process_tasks, process_schedule_task,
-    },
+    schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
         process_accept_scheduled_commits, process_schedule_base_intent,
         process_schedule_commit, process_schedule_compressed_commit,
@@ -80,7 +78,6 @@ declare_process_instruction!(
             CancelTask { task_id } => {
                 process_cancel_task(signers, invoke_context, task_id)
             }
-            ProcessTasks => process_process_tasks(signers, invoke_context),
             DisableExecutableCheck => {
                 process_toggle_executable_check(signers, invoke_context, false)
             }

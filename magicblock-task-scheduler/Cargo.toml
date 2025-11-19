@@ -28,3 +28,11 @@ solana-pubsub-client = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+magicblock-magic-program-api = { workspace = true }
+test-kit = { workspace = true }
+guinea = { workspace = true }
+solana-account = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-signature = { workspace = true }
