@@ -7,6 +7,7 @@ use magicblock_api::{
 };
 use magicblock_config::MagicBlockConfig;
 use solana_sdk::signature::Signer;
+use tokio::runtime::Builder;
 
 use crate::shutdown::Shutdown;
 
@@ -49,24 +50,21 @@ fn init_logger() {
     });
 }
 
-/// Print informational startup messages.
-/// - If `RUST_LOG` is not set or is set to "quiet", prints to stdout using `println!()`.
-/// - Otherwise, emits an `info!` log so operators can control visibility
-///   (e.g., by setting `RUST_LOG=warn` to hide it).
-fn print_info<S: std::fmt::Display>(msg: S) {
-    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
-    let rust_log_trimmed = rust_log.trim().to_ascii_lowercase();
-    let use_plain_print =
-        rust_log_trimmed.is_empty() || rust_log_trimmed == "quiet";
-    if use_plain_print {
-        println!("{}", msg);
-    } else {
-        info!("{}", msg);
-    }
+fn main() {
+    // We dedicate half of the threads to async runtime (where RPC and other
+    // io/timer bound services are running), and the other half is allocated
+    // for the execution runtime (transaction scheduler/executor threads)
+    let workers = (num_cpus::get() / 2).max(1);
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(workers)
+        .enable_all()
+        .thread_name("async-runtime")
+        .build()
+        .expect("failed to build async runtime");
+    runtime.block_on(run());
 }
 
-#[tokio::main]
-async fn main() {
+async fn run() {
     init_logger();
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
@@ -136,4 +134,20 @@ async fn main() {
         error!("Failed to gracefully shutdown: {}", err);
     }
     api.stop().await;
+}
+
+/// Print informational startup messages.
+/// - If `RUST_LOG` is not set or is set to "quiet", prints to stdout using `println!()`.
+/// - Otherwise, emits an `info!` log so operators can control visibility
+///   (e.g., by setting `RUST_LOG=warn` to hide it).
+fn print_info<S: std::fmt::Display>(msg: S) {
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
+    let rust_log_trimmed = rust_log.trim().to_ascii_lowercase();
+    let use_plain_print =
+        rust_log_trimmed.is_empty() || rust_log_trimmed == "quiet";
+    if use_plain_print {
+        println!("{}", msg);
+    } else {
+        info!("{}", msg);
+    }
 }
