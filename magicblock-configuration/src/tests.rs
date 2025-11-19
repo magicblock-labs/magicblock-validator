@@ -319,3 +319,104 @@ fn test_parse_enum_case_insensitivity() {
     let config = run_cli(vec!["--config", config_path.to_str().unwrap()]);
     assert!(matches!(config.accountsdb.block_size, BlockSize::Block512));
 }
+
+#[test]
+#[parallel]
+fn test_remote_parsing_complex_types() {
+    // Case 1: Disjointed Remote (Separate HTTP and WebSocket URLs)
+    // TOML handles this via a table since Remote::Disjointed is a struct variant
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [remote]
+        http = "http://api.mainnet-beta.solana.com"
+        ws = "wss://api.mainnet-beta.solana.com"
+        "#,
+    );
+    let c1 = run_cli(vec!["--config", config_path.to_str().unwrap()]);
+
+    if let RemoteCluster::Single(crate::types::Remote::Disjointed {
+        http,
+        ws,
+    }) = c1.remote
+    {
+        assert_eq!(http.0.as_str(), "http://api.mainnet-beta.solana.com/");
+        assert_eq!(ws.0.as_str(), "wss://api.mainnet-beta.solana.com/");
+    } else {
+        panic!("Expected Remote::Disjointed for table config");
+    }
+
+    // Case 2: Multiple Remotes (Array of Remotes)
+    // Useful for failover or active-active setups
+    let (_dir2, config_path2) = create_temp_config(
+        r#"
+        remote = [ "devnet", { http = "http://backup-node:8899", ws = "ws://node:443" } ]
+        "#,
+    );
+    let c2 = run_cli(vec!["--config", config_path2.to_str().unwrap()]);
+
+    if let RemoteCluster::Multiple(remotes) = c2.remote {
+        assert_eq!(remotes.len(), 2);
+        // Verify first element parsed as Alias -> Unified
+        match &remotes[0] {
+            crate::types::Remote::Unified(u) => {
+                assert_eq!(u.0.as_str(), consts::DEVNET_URL)
+            }
+            _ => panic!("Expected Unified remote for alias"),
+        }
+    } else {
+        panic!("Expected RemoteCluster::Multiple for array config");
+    }
+}
+
+// ============================================================================
+// 8. Ledger, Time & Commit Strategies
+// ============================================================================
+
+#[test]
+#[parallel]
+fn test_ledger_and_commit_settings() {
+    // Verify 'humantime' deserialization (e.g., "1s 50ms")
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [ledger]
+        block-time = "800ms"
+        verify-keypair = false
+
+        [commit]
+        compute-unit-price = 123456
+        "#,
+    );
+
+    let config = run_cli(vec!["--config", config_path.to_str().unwrap()]);
+
+    assert_eq!(config.ledger.block_time.as_millis(), 800);
+    assert_eq!(config.ledger.verify_keypair, false);
+    assert_eq!(config.commit.compute_unit_price, 123456);
+}
+
+#[test]
+#[serial]
+fn test_task_scheduler_bool_env() {
+    // Verify standard boolean parsing from Env vars work on nested fields
+    let _guard = EnvVarGuard::new("MBV_TASK-SCHEDULER_RESET", "true");
+
+    let config = run_cli(vec![]);
+    assert!(config.task_scheduler.reset);
+}
+
+#[test]
+#[parallel]
+fn test_example_config_is_valid() {
+    // This test ensures that the documented example config (config.example.toml)
+    // remains valid and in-sync with the rest rest of the crate.
+
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let root = PathBuf::from(manifest_dir);
+
+    // Define the list of example files to validate
+    let filename = "config.example.toml";
+
+    let file_path = root.join(filename);
+
+    run_cli(vec!["--config", file_path.to_str().unwrap()]);
+}

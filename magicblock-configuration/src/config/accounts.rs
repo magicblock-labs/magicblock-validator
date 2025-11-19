@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Configuration for the accounts database performance and storage.
 #[derive(Deserialize, Serialize, Debug)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct AccountsDbConfig {
     /// Total size (in bytes) allocated for the accounts database file.
     /// Default: 100 MB.

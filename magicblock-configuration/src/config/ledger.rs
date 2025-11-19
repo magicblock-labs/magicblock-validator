@@ -5,7 +5,7 @@ use std::time::Duration;
 /// Configuration for the ledger database and block production.
 #[serde_as]
 #[derive(Deserialize, Serialize, Debug)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct LedgerConfig {
     /// Target duration for a single block slot.
     /// Default: 400ms.

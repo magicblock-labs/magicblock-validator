@@ -6,7 +6,7 @@ use url::Url;
 
 /// Strategy for committing transactions back to the base chain
 #[derive(Deserialize, Serialize, Debug, Clone)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CommitStrategy {
     /// The compute unit price (in micro-lamports) to set for commit transactions.
     /// Higher values increase inclusion priority on base chain.
@@ -24,7 +24,7 @@ impl Default for CommitStrategy {
 /// Metadata and operational settings for on-chain validator registration.
 #[serde_as]
 #[derive(Deserialize, Serialize, Debug)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ChainOperationConfig {
     /// The validator's two-letter ISO country code (e.g., "US", "DE").
     pub country_code: CountryCode,
@@ -39,7 +39,7 @@ pub struct ChainOperationConfig {
 
 /// Configuration for ChainLink (Cloning/BaseChain synchronization)
 #[derive(Deserialize, Serialize, Debug, Default)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ChainLinkConfig {
     /// If true, initializes address lookup tables for oracle accounts.
     pub prepare_lookup_tables: bool,

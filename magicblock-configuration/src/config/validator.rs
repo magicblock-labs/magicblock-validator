@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Configuration for the validator's core behavior and identity.
 #[derive(Deserialize, Serialize, Debug)]
-#[serde(default, rename_all = "kebab-case")]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ValidatorConfig {
     /// The minimum fee (in lamports) required to process a transaction.
     /// Defaults to 100 lamports.

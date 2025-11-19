@@ -26,7 +26,7 @@ use crate::{
 
 /// Top-level configuration, assembled from multiple sources.
 #[derive(Deserialize, Serialize, Debug, Default)]
-#[serde(default, rename_all = "kebab-case")]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct MagicBlockParams {
     /// Path to the TOML configuration file (overrides CLI args).
     pub config: Option<PathBuf>,
@@ -73,7 +73,6 @@ impl MagicBlockParams {
             .merge(Serialized::defaults(MagicBlockParams::default()));
 
         // 3. Merge TOML File
-        // Check CLI first for config path, fall back to a default path if you have one
         if let Some(path) = &cli.config {
             figment = figment.merge(Toml::file(path).profile(Profile::Default));
         }
@@ -88,9 +87,6 @@ impl MagicBlockParams {
         // 5. Merge CLI "Overlay" (Highest Priority)
         figment = figment.merge(Serialized::from(&cli, Profile::Default));
 
-        // 6. Extract and Validate
-        let params: Self = figment.extract()?;
-
-        Ok(params)
+        Ok(figment.extract()?)
     }
 }
