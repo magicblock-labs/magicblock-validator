@@ -44,6 +44,8 @@ pub struct TransactionSchedulerState {
     pub transaction_status_tx: TransactionStatusTx,
     /// A channel to send scheduled (crank) tasks created by transactions.
     pub tasks_tx: ScheduledTasksTx,
+    /// True when auto airdrop for fee payers is enabled.
+    pub is_auto_airdrop_lamports_enabled: bool,
 }
 
 impl TransactionSchedulerState {
