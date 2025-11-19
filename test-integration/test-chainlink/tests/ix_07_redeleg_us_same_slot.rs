@@ -11,7 +11,6 @@ use magicblock_chainlink::{
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::ixtest_context::IxtestContext;
 
-#[ignore = "Started failing when fixing excessive subs, last time passing ded9c50a"]
 #[tokio::test]
 async fn ixtest_undelegate_redelegate_to_us_in_same_slot() {
     init_logger();
