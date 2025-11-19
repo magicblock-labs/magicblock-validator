@@ -117,8 +117,8 @@ lazy_static::lazy_static! {
         "monitored_accounts_gauge", "number of undelegated accounts, being monitored via websocket",
     ).unwrap();
 
-    static ref EVICTED_ACCOUNTS_COUNT: IntGauge = IntGauge::new(
-        "evicted_accounts_count", "number of accounts forcefully removed from monitored list and database",
+    static ref EVICTED_ACCOUNTS_COUNT: IntCounter = IntCounter::new(
+        "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
 
     // -----------------
@@ -426,6 +426,10 @@ pub fn ensure_accounts_end(timer: HistogramTimer) {
     timer.stop_and_record();
 }
 
+/// Sets the absolute number of monitored accounts.
+///
+/// This metric reflects the current total count of accounts being monitored.
+/// Callers must pass the total number of monitored accounts, not a delta.
 pub fn set_monitored_accounts_count(count: usize) {
     MONITORED_ACCOUNTS_GAUGE.set(count as i64);
 }
