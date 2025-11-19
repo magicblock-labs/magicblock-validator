@@ -13,7 +13,7 @@ use solana_program::{
     system_program,
 };
 
-use crate::{state::FlexiCounter, LIGHT_CPI_SIGNER};
+use crate::state::FlexiCounter;
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct DelegateArgs {
