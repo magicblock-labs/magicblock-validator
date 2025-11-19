@@ -84,8 +84,7 @@ use crate::{
         remote_cluster_from_remote, try_convert_accounts_config,
     },
     fund_account::{
-        fund_magic_context, fund_task_context, funded_faucet,
-        init_validator_identity,
+        fund_magic_context, funded_faucet, init_validator_identity,
     },
     genesis_utils::{create_genesis_config_with_leader, GenesisConfigInfo},
     ledger::{
@@ -139,7 +138,7 @@ pub struct MagicValidator {
     block_udpate_tx: BlockUpdateTx,
     _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
     claim_fees_task: ClaimFeesTask,
-    task_scheduler_handle: Option<tokio::task::JoinHandle<()>>,
+    task_scheduler: Option<TaskSchedulerService>,
 }
 
 impl MagicValidator {
@@ -203,7 +202,6 @@ impl MagicValidator {
 
         init_validator_identity(&accountsdb, &validator_pubkey);
         fund_magic_context(&accountsdb);
-        fund_task_context(&accountsdb);
 
         let faucet_keypair =
             funded_faucet(&accountsdb, ledger.ledger_path().as_path())?;
@@ -235,7 +233,7 @@ impl MagicValidator {
 
         let accounts_config = try_get_remote_accounts_config(&config.accounts)?;
 
-        let (dispatch, validator_channels) = link();
+        let (mut dispatch, validator_channels) = link();
 
         let committor_persist_path =
             storage_path.join("committor_service.sqlite");
@@ -284,6 +282,7 @@ impl MagicValidator {
             txn_to_process_rx: validator_channels.transaction_to_process,
             account_update_tx: validator_channels.account_update,
             environment: build_svm_env(&accountsdb, latest_block.blockhash, 0),
+            tasks_tx: validator_channels.tasks_service,
         };
         txn_scheduler_state
             .load_upgradeable_programs(&programs_to_load(&config.programs))
@@ -322,6 +321,26 @@ impl MagicValidator {
         .await?;
         let rpc_handle = tokio::spawn(rpc.run());
 
+        let task_scheduler_db_path =
+            SchedulerDatabase::path(ledger.ledger_path().parent().expect(
+                "ledger_path didn't have a parent, should never happen",
+            ));
+        debug!(
+            "Task scheduler persists to: {}",
+            task_scheduler_db_path.display()
+        );
+        let task_scheduler = TaskSchedulerService::new(
+            &task_scheduler_db_path,
+            &config.task_scheduler,
+            dispatch.transaction_scheduler.clone(),
+            dispatch
+                .tasks_service
+                .take()
+                .expect("tasks_service should be initialized"),
+            ledger.latest_block().clone(),
+            token.clone(),
+        )?;
+
         Ok(Self {
             accountsdb,
             config,
@@ -340,7 +359,7 @@ impl MagicValidator {
             identity: validator_pubkey,
             transaction_scheduler: dispatch.transaction_scheduler,
             block_udpate_tx: validator_channels.block_update,
-            task_scheduler_handle: None,
+            task_scheduler: Some(task_scheduler),
         })
     }
 
@@ -654,30 +673,26 @@ impl MagicValidator {
 
         self.ledger_truncator.start();
 
-        let task_scheduler_db_path =
-            SchedulerDatabase::path(self.ledger.ledger_path().parent().expect(
-                "ledger_path didn't have a parent, should never happen",
-            ));
-        debug!(
-            "Task scheduler persists to: {}",
-            task_scheduler_db_path.display()
-        );
-        let task_scheduler_handle = TaskSchedulerService::start(
-            &task_scheduler_db_path,
-            &self.config.task_scheduler,
-            self.accountsdb.clone(),
-            self.transaction_scheduler.clone(),
-            self.ledger.latest_block().clone(),
-            self.token.clone(),
-        )?;
         // TODO: we should shutdown gracefully.
         // This is discussed in this comment:
         // https://github.com/magicblock-labs/magicblock-validator/pull/493#discussion_r2324560798
         // However there is no proper solution for this right now.
         // An issue to create a shutdown system is open here:
         // https://github.com/magicblock-labs/magicblock-validator/issues/524
-        self.task_scheduler_handle = Some(tokio::spawn(async move {
-            match task_scheduler_handle.await {
+        let task_scheduler = self
+            .task_scheduler
+            .take()
+            .expect("task_scheduler should be initialized");
+        tokio::spawn(async move {
+            let join_handle = match task_scheduler.start() {
+                Ok(join_handle) => join_handle,
+                Err(err) => {
+                    error!("Failed to start task scheduler: {:?}", err);
+                    error!("Exiting process...");
+                    std::process::exit(1);
+                }
+            };
+            match join_handle.await {
                 Ok(Ok(())) => {}
                 Ok(Err(err)) => {
                     error!("An error occurred while running the task scheduler: {:?}", err);
@@ -690,7 +705,7 @@ impl MagicValidator {
                     std::process::exit(1);
                 }
             }
-        }));
+        });
 
         validator::finished_starting_up();
         Ok(())

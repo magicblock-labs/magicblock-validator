@@ -152,10 +152,7 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
         },
         accounts: accounts_config.clone(),
         programs,
-        task_scheduler: TaskSchedulerConfig {
-            reset: true,
-            ..Default::default()
-        },
+        task_scheduler: TaskSchedulerConfig { reset: true },
         ..Default::default()
     };
     // Fund validator on chain
