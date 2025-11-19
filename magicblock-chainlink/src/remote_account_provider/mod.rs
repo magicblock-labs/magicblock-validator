@@ -1845,7 +1845,6 @@ mod test {
         let cacc2 = provider.try_get(cpk2).await.unwrap();
         assert_compressed_account!(cacc2, 777, 2);
         let cacc3 = provider.try_get(cpk3).await.unwrap();
-        assert_compressed_account!(cacc3, 777, 3);
         assert!(!cacc3.is_found());
 
         let acc2 = provider.try_get(pk2).await.unwrap();
