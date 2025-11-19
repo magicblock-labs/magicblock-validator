@@ -149,24 +149,20 @@ pub fn start_light_validator_with_config(
         ("--log", false),
         ("-r", false),
     ];
-    let mut filtered_devnet_args: Vec<String> =
-        Vec::with_capacity(devnet_args.len());
-    let mut must_skip_next = false;
+    let mut filtered_devnet_args = Vec::with_capacity(devnet_args.len());
+    let mut skip_next = false;
     for arg in devnet_args {
-        if must_skip_next {
-            must_skip_next = false;
+        if skip_next {
+            skip_next = false;
             continue;
         }
-        let token = &arg;
-        if let Some((_arg, skip_next)) =
-            args_to_remove.iter().find(|(arg, _skip_next)| token == arg)
+        if let Some(&(_, has_value)) =
+            args_to_remove.iter().find(|&&(flag, _)| flag == arg)
         {
-            if *skip_next {
-                must_skip_next = true;
-            }
+            skip_next = has_value;
             continue;
         }
-        filtered_devnet_args.push(token.clone());
+        filtered_devnet_args.push(arg);
     }
     devnet_args = filtered_devnet_args;
 
