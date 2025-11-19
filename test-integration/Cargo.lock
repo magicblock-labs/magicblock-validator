@@ -4304,7 +4304,6 @@ name = "magicblock-committor-program"
 version = "0.2.3"
 dependencies = [
  "borsh 0.10.4",
- "borsh-derive 1.5.7",
  "log",
  "paste",
  "solana-account",
