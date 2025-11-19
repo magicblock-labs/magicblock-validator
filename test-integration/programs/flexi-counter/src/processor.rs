@@ -613,8 +613,13 @@ fn process_schedule_commit_compressed(
         format!("Invalid counter PDA {}, should be {}", counter.key, pda)
     })?;
 
-    // always ALLOW_UNDELEGATION_DATA
-    let instruction_data: [u8; 4] = [4, 0, 0, 0];
+    let instruction_data = MagicBlockInstruction::ScheduleCommitAndUndelegate
+        .try_to_vec()
+        .map_err(|_| {
+            ProgramError::BorshIoError(
+                "ScheduleCommitAndUndelegate".to_string(),
+            )
+        })?;
 
     let account_metas = vec![
         AccountMeta::new(*payer.key, true),
