@@ -201,13 +201,11 @@ impl super::TransactionExecutor {
             if undelegated_feepayer_was_modified
                 && !self.is_auto_airdrop_lamports_enabled
             {
-                if let Ok(processed) = &mut result {
-                    if let ProcessedTransaction::Executed(ref mut executed) =
-                        processed
-                    {
-                        executed.execution_details.status =
-                            Err(TransactionError::InvalidAccountForFee)
-                    }
+                if let Ok(ProcessedTransaction::Executed(ref mut executed)) =
+                    &mut result
+                {
+                    executed.execution_details.status =
+                        Err(TransactionError::InvalidAccountForFee)
                 }
             }
         }
