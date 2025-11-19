@@ -1,11 +1,24 @@
+// src/types/network.rs
 use crate::consts;
-use derive_more::Display;
+use derive_more::{Display, FromStr};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
+use std::net::SocketAddr;
 use std::str::FromStr;
 use url::Url;
 
-/// A connection to one or more remote clusters.
+/// A network bind address that can be parsed from a string like "0.0.0.0:8080".
+#[derive(Clone, Debug, Deserialize, Serialize, FromStr, Display)]
+#[serde(transparent)]
+pub struct BindAddress(pub SocketAddr);
+
+impl Default for BindAddress {
+    fn default() -> Self {
+        consts::DEFAULT_RPC_ADDR.parse().unwrap()
+    }
+}
+
+/// A connection to one or more remote clusters (e.g., "devnet").
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "kebab-case", untagged)]
 pub enum RemoteCluster {
