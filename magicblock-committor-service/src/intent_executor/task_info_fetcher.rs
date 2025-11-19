@@ -206,7 +206,7 @@ impl CacheTaskInfoFetcher {
         Ok(metadatas)
     }
 
-    /// Fetches commit_ids using RPC
+    /// Fetches delegation records using Photon Indexer
     pub async fn fetch_compressed_delegation_record(
         photon_client: &PhotonIndexer,
         pubkeys: &[Pubkey],
