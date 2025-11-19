@@ -1,10 +1,13 @@
 use log::error;
-use magicblock_core::link::{
-    accounts::{AccountWithSlot, LockedAccount},
-    transactions::{
-        TransactionExecutionResult, TransactionSimulationResult,
-        TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
+use magicblock_core::{
+    link::{
+        accounts::{AccountWithSlot, LockedAccount},
+        transactions::{
+            TransactionExecutionResult, TransactionSimulationResult,
+            TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
+        },
     },
+    tls::ExecutionTlsStash,
 };
 use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
 use solana_pubkey::Pubkey;
@@ -48,41 +51,47 @@ impl super::TransactionExecutor {
         let (result, balances) = self.process(&transaction);
         let [txn] = transaction;
 
-        // Transaction failed to load, we persist it to the
-        // ledger, only for the convenience of the user
-        if let Err(err) = result {
-            let status = Err(err);
-            self.commit_failed_transaction(txn, status.clone());
-            FAILED_TRANSACTIONS_COUNT.inc();
-            tx.map(|tx| tx.send(status));
-            return;
+        let processed = match result {
+            Ok(processed) => processed,
+            Err(err) => {
+                // Transaction failed to load, we persist it to the
+                // ledger, only for the convenience of the user
+                let status = Err(err);
+                self.commit_failed_transaction(txn, status.clone());
+                FAILED_TRANSACTIONS_COUNT.inc();
+                tx.map(|tx| tx.send(status));
+                return;
+            }
+        };
+
+        // The transaction has been processed, we can commit the account state changes
+        // Failed transactions still pay fees, so we need to commit the accounts even if the transaction failed
+        let feepayer = *txn.fee_payer();
+        self.commit_accounts(feepayer, &processed, is_replay);
+
+        let result = processed.status();
+        if result.is_ok() {
+            // If the transaction succeeded, check for potential tasks
+            // that may have been scheduled during the transaction execution
+            // TODO: send intents here as well once implemented
+            if !is_replay {
+                while let Some(task) = ExecutionTlsStash::next_task() {
+                    // This is a best effort send, if the tasks service has terminated
+                    // for some reason, logging is the best we can do at this point
+                    let _ = self.tasks_tx.send(task).inspect_err(|_|
+                            error!("Scheduled tasks service has hung up and is no longer running")
+                        );
+                }
+            }
         }
 
-        // If the transaction failed to load entirely, then it was handled above
-        let result = result.and_then(|processed| {
-            let result = processed.status();
+        // We always commit transaction to the ledger (mostly for user convenience)
+        if !is_replay {
+            self.commit_transaction(txn, processed, balances);
+        }
 
-            // If the transaction failed during the execution and the caller is waiting
-            // for the result, do not persist any changes (preflight check is true)
-            if result.is_err() && tx.is_some() {
-                // But we always commit transaction to the ledger (mostly for user convenience)
-                if !is_replay {
-                    self.commit_transaction(txn, processed, balances);
-                }
-                return result;
-            }
-
-            let feepayer = *txn.fee_payer();
-            // Otherwise commit the account state changes
-            self.commit_accounts(feepayer, &processed, is_replay);
-
-            // And commit transaction to the ledger
-            if !is_replay {
-                self.commit_transaction(txn, processed, balances);
-            }
-
-            result
-        });
+        // Make sure that no matter what happened to the transaction we clear the stash
+        ExecutionTlsStash::clear();
 
         // Send the final result back to the caller if they are waiting.
         tx.map(|tx| tx.send(result));
@@ -99,6 +108,9 @@ impl super::TransactionExecutor {
         transaction: [SanitizedTransaction; 1],
         tx: TxnSimulationResultTx,
     ) {
+        // Defensively clear any stale data from previous calls
+        ExecutionTlsStash::clear();
+
         let (result, _) = self.process(&transaction);
         let result = match result {
             Ok(processed) => {
@@ -128,6 +140,9 @@ impl super::TransactionExecutor {
                 inner_instructions: None,
             },
         };
+        // Make sure that we clear the stash, so that simulations
+        // don't interfere with actual transaction executions
+        ExecutionTlsStash::clear();
         let _ = tx.send(result);
     }
 
