@@ -267,29 +267,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             PhotonClientImpl,
         >,
     > {
-        if endpoints.is_empty() {
+        // Build RPC clients (use the first one for now)
+        let Some(rpc_url) = endpoints
+            .iter()
+            .filter_map(|ep| {
+                if let Endpoint::Rpc { rpc_url, .. } = ep {
+                    Some(rpc_url)
+                } else {
+                    None
+                }
+            })
+            .next()
+        else {
             return Err(
                 RemoteAccountProviderError::AccountSubscriptionsFailed(
-                    "No endpoints provided".to_string(),
+                    "No RPC endpoints provided".to_string(),
                 ),
             );
-        }
-
-        // Build RPC clients (use the first one for now)
-        let rpc_client = {
-            let rpc_url = &endpoints
-                .iter()
-                .filter_map(|ep| {
-                    if let Endpoint::Rpc { rpc_url, .. } = ep {
-                        Some(rpc_url)
-                    } else {
-                        None
-                    }
-                })
-                .next()
-                .unwrap();
-            ChainRpcClientImpl::new_from_url(rpc_url.as_str(), commitment)
         };
+        let rpc_client = ChainRpcClientImpl::new_from_url(rpc_url, commitment);
 
         // Build pubsub clients and wrap them into a SubMuxClient
         let mut pubsubs: Vec<Arc<ChainPubsubClientImpl>> =
