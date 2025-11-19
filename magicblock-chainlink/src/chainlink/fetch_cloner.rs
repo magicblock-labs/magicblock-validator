@@ -216,6 +216,10 @@ where
                             )
                         {
                             continue;
+                        } else if in_bank.owner().eq(&dlp::id()) {
+                            debug!(
+                                    "Account {pubkey} owned by deleg program not marked as undelegating"
+                                );
                         }
                     } else {
                         warn!(
@@ -720,7 +724,10 @@ where
                             "Account {pubkey} marked as undelegating will be overridden since undelegation completed"
                         );
                         accounts_to_refetch.push((*pubkey, *slot));
-                        continue;
+                    } else if in_bank.owner().eq(&dlp::id()) {
+                        debug!(
+                            "Account {pubkey} owned by deleg program not marked as undelegating"
+                        );
                     }
                 }
             }
