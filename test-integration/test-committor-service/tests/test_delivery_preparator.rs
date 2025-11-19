@@ -42,6 +42,7 @@ async fn test_prepare_10kb_buffer() {
             buffer_task,
         ))],
         lookup_tables_keys: vec![],
+        compressed: false,
     };
 
     // Test preparation
@@ -114,6 +115,7 @@ async fn test_prepare_multiple_buffers() {
     let mut strategy = TransactionStrategy {
         optimized_tasks: buffer_tasks,
         lookup_tables_keys: vec![],
+        compressed: false,
     };
 
     // Test preparation
@@ -198,6 +200,7 @@ async fn test_lookup_tables() {
     let mut strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys,
+        compressed: false,
     };
 
     let result = preparator
@@ -237,6 +240,7 @@ async fn test_already_initialized_error_handled() {
             buffer_task,
         ))],
         lookup_tables_keys: vec![],
+        compressed: false,
     };
 
     // Test preparation
@@ -277,6 +281,7 @@ async fn test_already_initialized_error_handled() {
             buffer_task,
         ))],
         lookup_tables_keys: vec![],
+        compressed: false,
     };
 
     // Test preparation
@@ -345,6 +350,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             },
         ],
         lookup_tables_keys: vec![],
+        compressed: false,
     };
 
     // --- Step 1: initial prepare ---
@@ -446,6 +452,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             },
         ],
         lookup_tables_keys: vec![],
+        compressed: false,
     };
 
     let res2 = preparator

@@ -23,9 +23,31 @@ use crate::{
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<Box<dyn BaseTask>>,
     pub lookup_tables_keys: Vec<Pubkey>,
+    pub compressed: bool,
 }
 
 impl TransactionStrategy {
+    pub fn try_new(
+        optimized_tasks: Vec<Box<dyn BaseTask>>,
+        lookup_tables_keys: Vec<Pubkey>,
+    ) -> Result<Self, TaskStrategistError> {
+        let compressed = optimized_tasks
+            .iter()
+            .fold(None, |state, task| match state {
+                None => Some(Ok(task.is_compressed())),
+                Some(Ok(state)) if state != task.is_compressed() => {
+                    Some(Err(TaskStrategistError::InconsistentTaskCompression))
+                }
+                Some(Ok(state)) => Some(Ok(state)),
+                Some(Err(err)) => Some(Err(err)),
+            })
+            .unwrap_or(Ok(false))?;
+        Ok(Self {
+            optimized_tasks,
+            lookup_tables_keys,
+            compressed,
+        })
+    }
     /// In case old strategy used ALTs recalculate old value
     /// NOTE: this can be used when full revaluation is unnecessary, like:
     /// some tasks were reset, number of tasks didn't increase
@@ -69,10 +91,7 @@ impl TaskStrategist {
                     .for_each(|task| task.visit(&mut persistor_visitor));
             }
 
-            Ok(TransactionStrategy {
-                optimized_tasks: tasks,
-                lookup_tables_keys: vec![],
-            })
+            TransactionStrategy::try_new(tasks, vec![])
         }
         // In case task optimization didn't work
         // attempt using lookup tables for all keys involved in tasks
@@ -91,10 +110,7 @@ impl TaskStrategist {
             // Get lookup table keys
             let lookup_tables_keys =
                 Self::collect_lookup_table_keys(validator, &tasks);
-            Ok(TransactionStrategy {
-                optimized_tasks: tasks,
-                lookup_tables_keys,
-            })
+            TransactionStrategy::try_new(tasks, lookup_tables_keys)
         } else {
             Err(TaskStrategistError::FailedToFitError)
         }
@@ -155,7 +171,7 @@ impl TaskStrategist {
     /// Returns size of tx after optimizations
     fn optimize_strategy(
         tasks: &mut [Box<dyn BaseTask>],
-    ) -> Result<usize, SignerError> {
+    ) -> Result<usize, TaskStrategistError> {
         // Get initial transaction size
         let calculate_tx_length = |tasks: &[Box<dyn BaseTask>]| {
             match TransactionUtils::assemble_tasks_tx(
@@ -166,7 +182,7 @@ impl TaskStrategist {
             ) {
                 Ok(tx) => Ok(serialize_and_encode_base64(&tx).len()),
                 Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
-                Err(TaskStrategistError::SignerError(err)) => Err(err),
+                Err(err) => Err(err),
             }
         };
 
@@ -244,6 +260,8 @@ pub enum TaskStrategistError {
     FailedToFitError,
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
+    #[error("Inconsistent task compression")]
+    InconsistentTaskCompression,
 }
 
 pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;

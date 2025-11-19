@@ -27,6 +27,7 @@ use crate::{
     persist::IntentPersister,
     tasks::{
         args_task::{ArgsTask, ArgsTaskType},
+        task_strategist::TaskStrategistError,
         BaseActionTask, BaseTask, CommitTask, CompressedCommitTask,
         CompressedFinalizeTask, CompressedUndelegateTask, FinalizeTask,
         UndelegateTask,
@@ -395,6 +396,8 @@ pub enum TaskBuilderError {
     MissingCompressedData,
     #[error("Photon client not found")]
     PhotonClientNotFound,
+    #[error("TaskStrategistError: {0}")]
+    TaskStrategistError(#[from] TaskStrategistError),
 }
 
 pub type TaskBuilderResult<T, E = TaskBuilderError> = Result<T, E>;

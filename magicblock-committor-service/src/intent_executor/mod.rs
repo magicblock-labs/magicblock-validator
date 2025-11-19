@@ -27,7 +27,8 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_sdk::{
     message::VersionedMessage,
-    signature::{Keypair, Signature, Signer, SignerError},
+    signature::{Keypair, Signature, Signer},
+    signer::SignerError,
     transaction::VersionedTransaction,
 };
 
@@ -159,8 +160,8 @@ where
         match TaskStrategist::build_strategy(commit_tasks, authority, persister)
         {
             Ok(strategy) => Ok(Some(strategy)),
-            Err(TaskStrategistError::FailedToFitError) => Ok(None),
             Err(TaskStrategistError::SignerError(err)) => Err(err),
+            Err(_) => Ok(None),
         }
     }
 
@@ -400,6 +401,7 @@ where
         Ok(TransactionStrategy {
             optimized_tasks: to_cleanup,
             lookup_tables_keys: old_alts,
+            compressed: strategy.compressed,
         })
     }
 
@@ -421,6 +423,7 @@ where
         TransactionStrategy {
             optimized_tasks: action_tasks,
             lookup_tables_keys: old_alts,
+            compressed: strategy.compressed,
         }
     }
 
@@ -454,6 +457,7 @@ where
         let commit_strategy = TransactionStrategy {
             optimized_tasks: commit_stage_tasks,
             lookup_tables_keys: commit_alt_pubkeys,
+            compressed: strategy.compressed,
         };
 
         let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
@@ -467,12 +471,14 @@ where
         let finalize_strategy = TransactionStrategy {
             optimized_tasks: finalize_stage_tasks,
             lookup_tables_keys: finalize_alt_pubkeys,
+            compressed: strategy.compressed,
         };
 
         // We clean up only ALTs
         let to_cleanup = TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: strategy.lookup_tables_keys,
+            compressed: strategy.compressed,
         };
 
         (commit_strategy, finalize_strategy, to_cleanup)
@@ -556,9 +562,13 @@ where
             | Err(IntentExecutorError::CpiLimitError(_, _)) => None,
             Err(IntentExecutorError::EmptyIntentError)
             | Err(IntentExecutorError::FailedToFitError)
+            | Err(IntentExecutorError::InconsistentTaskCompression)
             | Err(IntentExecutorError::TaskBuilderError(_))
             | Err(IntentExecutorError::FailedCommitPreparationError(
                 TransactionPreparatorError::SignerError(_),
+            ))
+            | Err(IntentExecutorError::FailedCommitPreparationError(
+                TransactionPreparatorError::InconsistentTaskCompression,
             ))
             | Err(IntentExecutorError::FailedFinalizePreparationError(
                 TransactionPreparatorError::SignerError(_),
