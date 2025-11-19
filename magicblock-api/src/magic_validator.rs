@@ -283,6 +283,11 @@ impl MagicValidator {
             account_update_tx: validator_channels.account_update,
             environment: build_svm_env(&accountsdb, latest_block.blockhash, 0),
             tasks_tx: validator_channels.tasks_service,
+            is_auto_airdrop_lamports_enabled: config
+                .accounts
+                .clone
+                .auto_airdrop_lamports
+                > 0,
         };
         txn_scheduler_state
             .load_upgradeable_programs(&programs_to_load(&config.programs))
