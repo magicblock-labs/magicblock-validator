@@ -6,8 +6,8 @@ use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     remote_account_provider::{
-        chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
+        chain_updates_client::ChainUpdatesClient,
     },
     submux::SubMuxClient,
     Chainlink,
@@ -21,7 +21,7 @@ use transactions::TransactionsCache;
 
 pub type ChainlinkImpl = Chainlink<
     ChainRpcClientImpl,
-    SubMuxClient<ChainPubsubClientImpl>,
+    SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
     ChainlinkCloner,
 >;

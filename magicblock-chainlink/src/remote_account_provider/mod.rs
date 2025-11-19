@@ -16,6 +16,7 @@ use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
+use futures_util::future;
 use log::*;
 use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
@@ -36,19 +37,29 @@ use tokio::{
     task::{self, JoinSet},
 };
 
+pub(crate) mod chain_laser_actor;
+pub mod chain_laser_client;
 pub(crate) mod chain_pubsub_actor;
 pub mod chain_pubsub_client;
 pub mod chain_rpc_client;
+pub mod chain_updates_client;
 pub mod config;
 pub mod errors;
 mod lru_cache;
 pub mod program_account;
+pub mod pubsub_common;
 mod remote_account;
 
-pub use chain_pubsub_actor::SubscriptionUpdate;
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
-use crate::{errors::ChainlinkResult, submux::SubMuxClient};
+use crate::{
+    errors::ChainlinkResult,
+    remote_account_provider::{
+        chain_updates_client::ChainUpdatesClient,
+        pubsub_common::SubscriptionUpdate,
+    },
+    submux::SubMuxClient,
+};
 
 // Simple tracking for accounts currently being fetched to handle race conditions
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
@@ -121,6 +132,28 @@ pub struct Endpoint {
     pub pubsub_url: String,
 }
 
+impl Endpoint {
+    pub fn new(rpc_url: String, pubsub_url: String) -> Self {
+        Self {
+            rpc_url,
+            pubsub_url,
+        }
+    }
+
+    pub fn separate_pubsub_url_and_api_key(&self) -> (String, Option<String>) {
+        let (pubsub_url, pubsub_api_key) = self
+            .pubsub_url
+            .split_once("?api-key=")
+            .unwrap_or((&self.pubsub_url, ""));
+        let api_key = if !pubsub_api_key.is_empty() {
+            Some(pubsub_api_key.to_string())
+        } else {
+            None
+        };
+        (pubsub_url.to_string(), api_key)
+    }
+}
+
 impl
     RemoteAccountProvider<
         ChainRpcClientImpl,
@@ -136,7 +169,7 @@ impl
         Option<
             RemoteAccountProvider<
                 ChainRpcClientImpl,
-                SubMuxClient<ChainPubsubClientImpl>,
+                SubMuxClient<ChainUpdatesClient>,
             >,
         >,
     > {
@@ -148,7 +181,7 @@ impl
             Ok(Some(
                 RemoteAccountProvider::<
                     ChainRpcClientImpl,
-                    SubMuxClient<ChainPubsubClientImpl>,
+                    SubMuxClient<ChainUpdatesClient>,
                 >::try_new_from_urls(
                     endpoints,
                     commitment,
@@ -239,7 +272,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) -> RemoteAccountProviderResult<
         RemoteAccountProvider<
             ChainRpcClientImpl,
-            SubMuxClient<ChainPubsubClientImpl>,
+            SubMuxClient<ChainUpdatesClient>,
         >,
     > {
         if endpoints.is_empty() {
@@ -257,21 +290,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         };
 
         // Build pubsub clients and wrap them into a SubMuxClient
-        let mut pubsubs: Vec<Arc<ChainPubsubClientImpl>> =
-            Vec::with_capacity(endpoints.len());
-        for ep in endpoints {
-            let client = ChainPubsubClientImpl::try_new_from_url(
-                ep.pubsub_url.as_str(),
-                commitment,
-            )
-            .await?;
-            pubsubs.push(Arc::new(client));
-        }
+        let tasks = endpoints.iter().map(|ep| {
+            ChainUpdatesClient::try_new_from_endpoint(ep, commitment)
+        });
+        let clients = future::try_join_all(tasks).await?;
+        let pubsubs = clients.into_iter().map(Arc::new).collect();
         let submux = SubMuxClient::new(pubsubs, None);
 
         RemoteAccountProvider::<
             ChainRpcClientImpl,
-            SubMuxClient<ChainPubsubClientImpl>,
+            SubMuxClient<ChainUpdatesClient>,
         >::new(rpc_client, submux, subscription_forwarder, config)
         .await
     }
@@ -315,7 +343,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let subscription_forwarder = self.subscription_forwarder.clone();
         task::spawn(async move {
             while let Some(update) = updates.recv().await {
-                let slot = update.rpc_response.context.slot;
+                let slot = update.slot;
 
                 received_updates_count.fetch_add(1, Ordering::Relaxed);
                 last_update_slot.store(slot, Ordering::Relaxed);
@@ -331,21 +359,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         update.pubkey,
                         slot
                     );
-                    let remote_account =
-                        match update.rpc_response.value.decode::<Account>() {
-                            Some(account) => RemoteAccount::from_fresh_account(
-                                account,
-                                slot,
-                                RemoteAccountUpdateSource::Subscription,
-                            ),
-                            None => {
-                                error!(
+                    let remote_account = match update.account {
+                        Some(account) => RemoteAccount::from_fresh_account(
+                            account,
+                            slot,
+                            RemoteAccountUpdateSource::Subscription,
+                        ),
+                        None => {
+                            error!(
                                 "Account for {} update could not be decoded",
                                 update.pubkey
                             );
-                                RemoteAccount::NotFound(slot)
-                            }
-                        };
+                            RemoteAccount::NotFound(slot)
+                        }
+                    };
 
                     // Check if we're currently fetching this account
                     let forward_update = {
@@ -922,6 +949,15 @@ impl
         ChainRpcClientImpl,
         SubMuxClient<ChainPubsubClientImpl>,
     >
+{
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn rpc_client(&self) -> &RpcClient {
+        &self.rpc_client.rpc_client
+    }
+}
+
+impl
+    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
 {
     #[cfg(any(test, feature = "dev-context"))]
     pub fn rpc_client(&self) -> &RpcClient {
