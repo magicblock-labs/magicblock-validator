@@ -70,20 +70,22 @@ impl HttpDispatcher {
             }
             .into()
         };
-        let result = RpcSimulateTransactionResult {
-            err: result.result.err(),
-            logs: result.logs,
-            accounts: None,
-            units_consumed: Some(result.units_consumed),
-            return_data: result.return_data.map(Into::into),
-            inner_instructions: result
+        let inner_instructions = config.inner_instructions.then(|| {
+            result
                 .inner_instructions
                 .into_iter()
                 .flatten()
                 .enumerate()
                 .map(converter)
                 .collect::<Vec<_>>()
-                .into(),
+        });
+        let result = RpcSimulateTransactionResult {
+            err: result.result.err(),
+            logs: result.logs,
+            accounts: None,
+            units_consumed: Some(result.units_consumed),
+            return_data: result.return_data.map(Into::into),
+            inner_instructions,
             replacement_blockhash,
         };
 
