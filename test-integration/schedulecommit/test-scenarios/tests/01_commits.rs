@@ -198,9 +198,9 @@ fn test_undelegating_account_delegated_to_another_validator() {
         // Schedule undelegation of account delegated to another validator
         let res = schedule_commit_tx(&ctx, &payer, &player, player_pda, true);
 
-        // We expect InvalidAccountForFee error since account isn't delegated to our validator
+        // We expect InvalidWriteableAccount error since account isn't delegated to our validator
         let (_, tx_err) = extract_transaction_error(res);
-        assert_eq!(tx_err.unwrap(), TransactionError::InvalidAccountForFee);
+        assert_eq!(tx_err.unwrap(), TransactionError::InvalidWritableAccount);
     });
 }
 
