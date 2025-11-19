@@ -80,9 +80,10 @@ pub(crate) fn should_override_undelegating_account(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use dlp::state::DelegationRecord;
     use solana_pubkey::Pubkey;
+
+    use super::*;
 
     fn create_delegation_record(delegation_slot: u64) -> DelegationRecord {
         DelegationRecord {

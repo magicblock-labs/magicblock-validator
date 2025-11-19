@@ -198,10 +198,13 @@ pub(crate) fn process_schedule_commit(
             // that point
             // NOTE: this owner change only takes effect if the transaction which
             // includes this instruction succeeds.
+            //
+            // We also set the undelegating flag on the account in order to detect
+            // undelegations for which we miss updates
             mark_account_as_undelegating(acc);
             ic_msg!(
                 invoke_context,
-                "ScheduleCommit: account {} owner set to delegation program",
+                "ScheduleCommit: Marking account {} as undelegating",
                 acc_pubkey
             );
         }

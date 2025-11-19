@@ -129,7 +129,6 @@ pub(crate) fn process_schedule_base_intent(
         } else {
             None
         };
-
     let scheduled_intent = ScheduledBaseIntent::try_new(
         args,
         intent_id,
@@ -138,14 +137,21 @@ pub(crate) fn process_schedule_base_intent(
         &construction_context,
     )?;
 
-    if let Some(undelegated_accounts_ref) = undelegated_accounts_ref {
-        // Change owner to dlp
+    let mut undelegated_pubkeys = vec![];
+    if let Some(undelegated_accounts_ref) = undelegated_accounts_ref.as_ref() {
+        // Change owner to dlp and set undelegating flag
         // Once account is undelegated we need to make it immutable in our validator.
-        undelegated_accounts_ref
-            .into_iter()
-            .for_each(|(_, account_ref)| {
-                mark_account_as_undelegating(account_ref);
-            });
+        for (pubkey, account_ref) in undelegated_accounts_ref.iter() {
+            undelegated_pubkeys.push(pubkey.to_string());
+            mark_account_as_undelegating(account_ref);
+        }
+    }
+    if !undelegated_pubkeys.is_empty() {
+        ic_msg!(
+            invoke_context,
+            "Scheduling undelegation for accounts: {}",
+            undelegated_pubkeys.join(", ")
+        );
     }
 
     let action_sent_signature =
