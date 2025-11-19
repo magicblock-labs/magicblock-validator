@@ -4,7 +4,8 @@ use magicblock_chainlink::{
     remote_account_provider::{
         chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
-        config::RemoteAccountProviderConfig, Endpoint, RemoteAccountProvider,
+        config::RemoteAccountProviderConfig, Endpoint,
+        ForwardedSubscriptionUpdate, RemoteAccountProvider,
         RemoteAccountUpdateSource,
     },
     submux::SubMuxClient,
@@ -21,38 +22,45 @@ use solana_rpc_client_api::{
 use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::sync::mpsc;
 
-async fn init_remote_account_provider() -> RemoteAccountProvider<
-    ChainRpcClientImpl,
-    SubMuxClient<ChainPubsubClientImpl>,
-> {
-    let (fwd_tx, _fwd_rx) = mpsc::channel(100);
+async fn init_remote_account_provider() -> (
+    RemoteAccountProvider<
+        ChainRpcClientImpl,
+        SubMuxClient<ChainPubsubClientImpl>,
+    >,
+    mpsc::Receiver<ForwardedSubscriptionUpdate>,
+) {
+    let (fwd_tx, fwd_rx) = mpsc::channel(100);
     let endpoints = [Endpoint {
         rpc_url: RPC_URL.to_string(),
         pubsub_url: PUBSUB_URL.to_string(),
     }];
-    RemoteAccountProvider::<
-        ChainRpcClientImpl,
-        SubMuxClient<ChainPubsubClientImpl>,
-    >::try_new_from_urls(
-        &endpoints,
-        CommitmentConfig::confirmed(),
-        fwd_tx,
-        &RemoteAccountProviderConfig::try_new_with_metrics(
-            1000,
-            LifecycleMode::Ephemeral,
-            false,
+    (
+        RemoteAccountProvider::<
+            ChainRpcClientImpl,
+            SubMuxClient<ChainPubsubClientImpl>,
+        >::try_new_from_urls(
+            &endpoints,
+            CommitmentConfig::confirmed(),
+            fwd_tx,
+            &RemoteAccountProviderConfig::try_new_with_metrics(
+                1000,
+                LifecycleMode::Ephemeral,
+                false,
+            )
+            .unwrap(),
         )
+        .await
         .unwrap(),
+        fwd_rx,
     )
-    .await
-    .unwrap()
 }
 
 #[tokio::test]
 async fn ixtest_get_non_existing_account() {
     init_logger();
 
-    let remote_account_provider = init_remote_account_provider().await;
+    let (remote_account_provider, _fwd_rx) =
+        init_remote_account_provider().await;
 
     let pubkey = random_pubkey();
     let remote_account = remote_account_provider.try_get(pubkey).await.unwrap();
@@ -63,7 +71,8 @@ async fn ixtest_get_non_existing_account() {
 async fn ixtest_existing_account_for_future_slot() {
     init_logger();
 
-    let remote_account_provider = init_remote_account_provider().await;
+    let (remote_account_provider, _fwd_rx) =
+        init_remote_account_provider().await;
 
     let pubkey = random_pubkey();
     let rpc_client = remote_account_provider.rpc_client();
@@ -98,7 +107,8 @@ async fn ixtest_existing_account_for_future_slot() {
 async fn ixtest_get_existing_account_for_valid_slot() {
     init_logger();
 
-    let remote_account_provider = init_remote_account_provider().await;
+    let (remote_account_provider, _fwd_rx) =
+        init_remote_account_provider().await;
 
     let pubkey = random_pubkey();
     let rpc_client = remote_account_provider.rpc_client();
@@ -134,7 +144,8 @@ async fn ixtest_get_existing_account_for_valid_slot() {
 async fn ixtest_get_multiple_accounts_for_valid_slot() {
     init_logger();
 
-    let remote_account_provider = init_remote_account_provider().await;
+    let (remote_account_provider, _fwd_rx) =
+        init_remote_account_provider().await;
 
     let (pubkey1, pubkey2, pubkey3, pubkey4) = (
         random_pubkey(),
