@@ -57,8 +57,10 @@ pub(super) struct TransactionExecutor {
     /// A read lock held during a slot's processing to synchronize with critical global
     /// operations like `AccountsDb` snapshots.
     sync: StWLock,
+    /// Hacky temporary solution to allow automatic airdrops, the flag
+    /// is tightly contolled and will be removed in the nearest future
     /// True when auto airdrop for fee payers is enabled (auto_airdrop_lamports > 0).
-    pub is_auto_airdrop_lamports_enabled: bool,
+    is_auto_airdrop_lamports_enabled: bool,
 }
 
 impl TransactionExecutor {
