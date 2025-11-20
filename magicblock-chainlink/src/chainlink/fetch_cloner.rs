@@ -888,7 +888,11 @@ where
                     account
                         .set_owner(delegation_record.owner)
                         .set_delegated(is_delegated_to_us);
-                    Some(delegation_record.commit_frequency_ms)
+                    if is_delegated_to_us {
+                        Some(delegation_record.commit_frequency_ms)
+                    } else {
+                        None
+                    }
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.remote_slot()));
