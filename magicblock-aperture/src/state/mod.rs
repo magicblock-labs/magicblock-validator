@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use blocks::BlocksCache;
+use blocks::{BlocksCache, LastCachedBlock};
 use cache::ExpiringCache;
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
@@ -81,11 +81,16 @@ impl SharedState {
         blocktime: u64,
     ) -> Self {
         const TRANSACTIONS_CACHE_TTL: Duration = Duration::from_secs(75);
+        let block = ledger.latest_block().load();
+        let latest = LastCachedBlock {
+            blockhash: block.blockhash,
+            slot: block.slot,
+        };
         Self {
             context,
             accountsdb,
             transactions: ExpiringCache::new(TRANSACTIONS_CACHE_TTL).into(),
-            blocks: BlocksCache::new(blocktime).into(),
+            blocks: BlocksCache::new(blocktime, latest).into(),
             ledger,
             chainlink,
             subscriptions: Default::default(),

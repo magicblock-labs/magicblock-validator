@@ -52,7 +52,7 @@ impl BlocksCache {
     ///
     /// # Panics
     /// Panics if `blocktime` is zero.
-    pub(crate) fn new(blocktime: u64) -> Self {
+    pub(crate) fn new(blocktime: u64, latest: LastCachedBlock) -> Self {
         const BLOCK_CACHE_TTL: Duration = Duration::from_secs(60);
         assert!(blocktime != 0, "blocktime cannot be zero");
 
@@ -62,7 +62,7 @@ impl BlocksCache {
         let block_validity = blocktime_ratio * MAX_VALID_BLOCKHASH_SLOTS;
         let cache = ExpiringCache::new(BLOCK_CACHE_TTL);
         Self {
-            latest: ArcSwapAny::default(),
+            latest: ArcSwapAny::new(latest.into()),
             block_validity: block_validity as u64,
             cache,
         }
