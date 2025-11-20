@@ -5,15 +5,22 @@ use solana_pubkey::Pubkey;
 /// Decides if an account that is undelegating should be updated
 /// (overwritten) by the remote account state and the `undelegating` flag cleared.
 ///
+/// The only case when an account should not be updated is when the following is true:
+///
+/// - account is still delegated to us on chain
+/// - the delegation slot is older than the slot at which we last fetched
+///   the account state from chain.
+///
+/// # Arguments
 /// - `pubkey`: the account pubkey
 /// - `is_delegated_on_chain`: whether the account is currently delegated to us on chain
 /// - `remote_slot_in_bank`: the chain slot at which we last fetched and cloned state
 ///                  of the account in our bank
 /// - `delegation_record`: the delegation record associated with the account in our bank, if found
-/// - returns `true` if the account should be updated, `false` otherwise.
-pub(crate) fn should_override_undelegating_account(
+/// - returns `true` if the account is still undelegating, `false` otherwise.
+pub(crate) fn account_still_undelegating_on_chain(
     pubkey: &Pubkey,
-    is_delegated_on_chain: bool,
+    is_delegated_to_us_on_chain: bool,
     remote_slot_in_bank: u64,
     deleg_record: Option<DelegationRecord>,
 ) -> bool {
@@ -38,7 +45,7 @@ pub(crate) fn should_override_undelegating_account(
     // In all other cases we want to clone the remote version of the account into
     // our bank which will automatically set the correct delegated state and
     // untoggle the undelegating flag.
-    if is_delegated_on_chain {
+    if is_delegated_to_us_on_chain {
         // B) or D)
         // Since the account was found to be delegated we must have
         // found a delegation record and thus have the delegation slot.
@@ -53,7 +60,7 @@ pub(crate) fn should_override_undelegating_account(
             debug!(
                 "Undelegation for {pubkey} is still pending. Keeping bank account.",
             );
-            false
+            true
         } else {
             // This is a re-delegation to us after undelegation completed.
             // Case (B))
@@ -61,20 +68,20 @@ pub(crate) fn should_override_undelegating_account(
                 "Undelegation completed for account {pubkey} and it was re-delegated to us at slot: ({delegation_slot}).",
             );
             magicblock_metrics::metrics::inc_undelegation_completed();
-            true
+            false
         }
     } else if deleg_record.is_none() {
         // Account no longer delegated (Case A)) -> clone as is
         debug!("Account {pubkey} was undelegated and remained so");
         magicblock_metrics::metrics::inc_undelegation_completed();
-        true
+        false
     } else {
         // Account delegated to other (Case C)) -> clone as is
         debug!(
             "Account {pubkey} was undelegated and re-delegated to another validator",
         );
         magicblock_metrics::metrics::inc_undelegation_completed();
-        true
+        false
     }
 }
 
@@ -108,7 +115,7 @@ mod tests {
         let remote_slot = 100;
         let deleg_record = None;
 
-        assert!(should_override_undelegating_account(
+        assert!(!account_still_undelegating_on_chain(
             &pubkey,
             is_delegated,
             remote_slot,
@@ -131,7 +138,7 @@ mod tests {
         // Subcase B1: delegation_slot == remote_slot
         let delegation_slot = 100;
         let deleg_record = Some(create_delegation_record(delegation_slot));
-        assert!(should_override_undelegating_account(
+        assert!(!account_still_undelegating_on_chain(
             &pubkey,
             is_delegated,
             remote_slot,
@@ -141,7 +148,7 @@ mod tests {
         // Subcase B2: delegation_slot > remote_slot
         let delegation_slot = 101;
         let deleg_record = Some(create_delegation_record(delegation_slot));
-        assert!(should_override_undelegating_account(
+        assert!(!account_still_undelegating_on_chain(
             &pubkey,
             is_delegated,
             remote_slot,
@@ -164,7 +171,7 @@ mod tests {
         let delegation_slot = 90;
         let deleg_record = Some(create_delegation_record(delegation_slot));
 
-        assert!(should_override_undelegating_account(
+        assert!(!account_still_undelegating_on_chain(
             &pubkey,
             is_delegated,
             remote_slot,
@@ -186,7 +193,7 @@ mod tests {
         let delegation_slot = 99;
         let deleg_record = Some(create_delegation_record(delegation_slot));
 
-        assert!(!should_override_undelegating_account(
+        assert!(account_still_undelegating_on_chain(
             &pubkey,
             is_delegated,
             remote_slot,

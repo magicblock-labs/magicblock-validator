@@ -24,8 +24,8 @@ use tokio::{
 use super::errors::{ChainlinkError, ChainlinkResult};
 use crate::{
     chainlink::{
+        account_still_undelegating_on_chain::account_still_undelegating_on_chain,
         blacklisted_accounts::blacklisted_accounts,
-        should_override_undelegating_account::should_override_undelegating_account,
     },
     cloner::{errors::ClonerResult, Cloner},
     remote_account_provider::{
@@ -183,7 +183,7 @@ where
                 let (resolved_account, deleg_record) =
                     self.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(update)
                     .await;
-                if let Some(account) = resolved_account {
+                if let Some(mut account) = resolved_account {
                     // Ensure that the subscription update isn't out of order, i.e. we don't already
                     // hold a newer version of the account in our bank
                     let out_of_order_slot = self
@@ -207,18 +207,27 @@ where
                     if let Some(in_bank) =
                         self.accounts_bank.get_account(&pubkey)
                     {
-                        if in_bank.undelegating()
-                            && !should_override_undelegating_account(
+                        if in_bank.undelegating() {
+                            // We expect the account to still be delegated, but with the delegation
+                            // program owner
+                            debug!("Received update for undelegating account {pubkey} delegated in bank={} delegated on chain={}", in_bank.delegated(), account.delegated());
+
+                            // This will only be true in the following case:
+                            // 1. a commit was triggered for the account
+                            // 2. a commit + undelegate was triggered for the account -> undelegating
+                            // 3. we receive the update for (1.)
+                            //
+                            // Thus our state is more up to date and we don't need to update our
+                            // bank.
+                            if account_still_undelegating_on_chain(
                                 &pubkey,
                                 account.delegated(),
                                 in_bank.remote_slot(),
                                 deleg_record,
-                            )
-                        {
-                            continue;
-                        } else if !in_bank.undelegating()
-                            && in_bank.owner().eq(&dlp::id())
-                        {
+                            ) {
+                                continue;
+                            }
+                        } else if in_bank.owner().eq(&dlp::id()) {
                             debug!(
                                 "Received update for {pubkey} owned by deleg program not marked as undelegating"
                             );
@@ -707,7 +716,11 @@ where
         let mut accounts_to_refetch = vec![];
         for (pubkey, slot) in &in_bank {
             if let Some(in_bank) = self.accounts_bank.get_account(pubkey) {
+                if in_bank.owner().eq(&dlp::id()) {
+                    debug!("Account {pubkey} owned by deleg program. delegated={}, undelegating={}", in_bank.delegated(), in_bank.undelegating());
+                }
                 if in_bank.undelegating() {
+                    debug!("Fetching account {pubkey} marked as undelegating");
                     let deleg_record = self
                         .fetch_and_parse_delegation_record(
                             *pubkey,
@@ -717,11 +730,11 @@ where
                         )
                         .await;
                     let delegated_on_chain =
-                        deleg_record.as_ref().map_or(false, |dr| {
+                        deleg_record.as_ref().is_some_and(|dr| {
                             dr.authority.eq(&self.validator_pubkey)
                                 || dr.authority.eq(&Pubkey::default())
                         });
-                    if should_override_undelegating_account(
+                    if !account_still_undelegating_on_chain(
                         pubkey,
                         delegated_on_chain,
                         in_bank.remote_slot(),
@@ -734,8 +747,8 @@ where
                     }
                 } else if in_bank.owner().eq(&dlp::id()) {
                     debug!(
-                            "Account {pubkey} owned by deleg program not marked as undelegating"
-                        );
+                        "Account {pubkey} owned by deleg program not marked as undelegating"
+                    );
                 }
             }
         }
