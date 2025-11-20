@@ -351,6 +351,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 // TODO: Compressed undelegate is not supported yet
                 // This is because the validator would have to pay rent out of pocket.
                 // This could be solved by using the ephemeral payer to ensure the user can pay the rent.
+                // https://github.com/magicblock-labs/magicblock-validator/issues/651
 
                 // tasks.extend(
                 //     t.get_committed_accounts()
