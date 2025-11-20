@@ -379,4 +379,26 @@ mod test {
             Err(InstructionError::InvalidInstructionData),
         );
     }
+
+    #[test]
+    fn test_process_schedule_task_with_invalid_iterations() {
+        let (payer, pdas, transaction_accounts) = setup_accounts(0);
+        let args = ScheduleTaskArgs {
+            task_id: 1,
+            execution_interval_millis: 1000,
+            iterations: -100,
+            instructions: vec![create_simple_ix()],
+        };
+        let ix = InstructionUtils::schedule_task_instruction(
+            &payer.pubkey(),
+            args,
+            &pdas,
+        );
+        process_instruction(
+            &ix.data,
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::InvalidInstructionData),
+        );
+    }
 }
