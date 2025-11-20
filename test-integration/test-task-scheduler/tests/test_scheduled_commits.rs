@@ -68,8 +68,8 @@ fn test_scheduled_commits() {
     // Check that the counter value is properly incremented on mainnet
     const MAX_TRIES: u32 = 30;
     let mut tries = 0;
-    let mut chain_values = vec![0, 1, 2];
-    let mut ephem_values = vec![0, 1, 2];
+    let mut chain_values = vec![1, 2];
+    let mut ephem_values = vec![1, 2];
     loop {
         let chain_counter_account = expect!(
             ctx.try_chain_client().and_then(|client| client
