@@ -310,12 +310,11 @@ impl ChainPubsubActor {
                     send_ok(response, client_id);
                     return;
                 }
-                if let Some(AccountSubscription {
-                    cancellation_token, ..
-                }) = subscriptions
-                    .lock()
-                    .expect("subcriptions lock poisoned")
-                    .get(&pubkey)
+                if let Some(AccountSubscription { cancellation_token }) =
+                    subscriptions
+                        .lock()
+                        .expect("subcriptions lock poisoned")
+                        .get(&pubkey)
                 {
                     cancellation_token.cancel();
                     let _ = response.send(Ok(()));
@@ -524,13 +523,7 @@ impl ChainPubsubActor {
             std::mem::take(&mut *subs_lock)
         };
         let drained_len = drained.len();
-        for (
-            _,
-            AccountSubscription {
-                cancellation_token, ..
-            },
-        ) in drained
-        {
+        for (_, AccountSubscription { cancellation_token }) in drained {
             cancellation_token.cancel();
         }
         debug!(
