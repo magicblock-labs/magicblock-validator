@@ -3540,6 +3540,7 @@ dependencies = [
 name = "magicblock-aperture"
 version = "0.2.3"
 dependencies = [
+ "arc-swap",
  "base64 0.21.7",
  "bincode",
  "bs58",

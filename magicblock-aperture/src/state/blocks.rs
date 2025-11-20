@@ -1,10 +1,6 @@
-use std::{
-    ops::Deref,
-    sync::atomic::{AtomicPtr, Ordering},
-    time::Duration,
-};
+use std::{ops::Deref, sync::Arc, time::Duration};
 
-use log::*;
+use arc_swap::ArcSwapAny;
 use magicblock_core::{
     link::blocks::{BlockHash, BlockMeta, BlockUpdate},
     Slot,
@@ -28,14 +24,14 @@ pub(crate) struct BlocksCache {
     /// This is calculated based on the host ER's block time relative to Solana's.
     block_validity: u64,
     /// Latest observed block (updated whenever the ledger transitions to new slot)
-    latest: AtomicPtr<LastCachedBlock>,
+    latest: ArcSwapAny<Arc<LastCachedBlock>>,
     /// An underlying time-based cache for storing `BlockHash` to `BlockMeta` mappings.
     cache: ExpiringCache<BlockHash, BlockMeta>,
 }
 
 /// Last produced block that has been put into cache. We need to keep this separately,
 /// as there's no way to access the cache efficiently to find the latest inserted entry
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Copy)]
 pub(crate) struct LastCachedBlock {
     pub(crate) blockhash: BlockHash,
     pub(crate) slot: Slot,
@@ -66,7 +62,7 @@ impl BlocksCache {
         let block_validity = blocktime_ratio * MAX_VALID_BLOCKHASH_SLOTS;
         let cache = ExpiringCache::new(BLOCK_CACHE_TTL);
         Self {
-            latest: AtomicPtr::default(),
+            latest: ArcSwapAny::default(),
             block_validity: block_validity as u64,
             cache,
         }
@@ -74,26 +70,20 @@ impl BlocksCache {
 
     /// Updates the latest block information in the cache.
     pub(crate) fn set_latest(&self, latest: BlockUpdate) {
-        // Allocate a 'static memory for the last observed block
-        let last = Box::leak(Box::new(LastCachedBlock {
+        let last = LastCachedBlock {
             blockhash: latest.hash,
             slot: latest.meta.slot,
-        })) as *mut _;
+        };
 
         // Register the block in the expiring cache
         self.cache.push(latest.hash, latest.meta);
         // And mark it as latest observed
-        let prev = self.latest.swap(last, Ordering::Release);
-        // Reclaim the allocation of the previous block
-        (!prev.is_null()).then(|| unsafe { Box::from_raw(prev) });
+        self.latest.swap(last.into());
     }
 
     /// Retrieves information about the latest block, including its calculated validity period.
     pub(crate) fn get_latest(&self) -> BlockHashInfo {
-        let Some(block) = self.load_latest() else {
-            warn!("Failed to load latest cached block, the cache is empty");
-            return Default::default();
-        };
+        let block = self.latest.load();
         BlockHashInfo {
             hash: block.blockhash,
             validity: block.slot + self.block_validity,
@@ -103,14 +93,7 @@ impl BlocksCache {
 
     /// Returns the slot number of the most recent block, also known as the block height.
     pub(crate) fn block_height(&self) -> Slot {
-        self.load_latest().map(|b| b.slot).unwrap_or_default()
-    }
-
-    // Helper function to load latest observed block (if any)
-    #[inline]
-    fn load_latest(&self) -> Option<&LastCachedBlock> {
-        let latest = self.latest.load(Ordering::Relaxed);
-        (!latest.is_null()).then(|| unsafe { &*latest })
+        self.latest.load().slot
     }
 }
 
