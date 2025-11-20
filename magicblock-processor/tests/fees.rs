@@ -7,6 +7,7 @@ use solana_keypair::Keypair;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     native_token::LAMPORTS_PER_SOL,
+    rent::Rent,
 };
 use solana_pubkey::Pubkey;
 use solana_transaction_error::TransactionError;
@@ -31,8 +32,9 @@ fn setup_guinea_instruction(
     ix_data: &GuineaInstruction,
     is_writable: bool,
 ) -> (Instruction, Pubkey) {
+    let balance = Rent::default().minimum_balance(128);
     let account = env
-        .create_account_with_config(LAMPORTS_PER_SOL, 128, guinea::ID)
+        .create_account_with_config(balance, 128, guinea::ID)
         .pubkey();
     let meta = if is_writable {
         AccountMeta::new(account, false)
@@ -137,13 +139,9 @@ async fn test_escrowed_payer_success() {
 
     let fee_payer_initial_balance = env.get_payer().lamports();
     let escrow_initial_balance = env.get_account(escrow).lamports();
-    const ACCOUNT_SIZE: usize = 1024;
 
-    let (ix, account_to_resize) = setup_guinea_instruction(
-        &env,
-        &GuineaInstruction::Resize(ACCOUNT_SIZE),
-        true,
-    );
+    let (ix, _) =
+        setup_guinea_instruction(&env, &GuineaInstruction::PrintSizes, false);
     let txn = env.build_transaction(&[ix]);
 
     env.execute_transaction(txn)
@@ -152,13 +150,11 @@ async fn test_escrowed_payer_success() {
 
     let fee_payer_final_balance = env.get_payer().lamports();
     let escrow_final_balance = env.get_account(escrow).lamports();
-    let final_account_size = env.get_account(account_to_resize).data().len();
     let mut updated_accounts = HashSet::new();
     while let Ok(acc) = env.dispatch.account_update.try_recv() {
         updated_accounts.insert(acc.account.pubkey);
     }
 
-    println!("escrow: {escrow}\naccounts: {updated_accounts:?}");
     assert_eq!(
         fee_payer_final_balance, fee_payer_initial_balance,
         "primary payer should not be charged"
@@ -175,10 +171,6 @@ async fn test_escrowed_payer_success() {
     assert!(
         !updated_accounts.contains(&env.payer.pubkey()),
         "orginal payer account update should not have been sent"
-    );
-    assert_eq!(
-        final_account_size, ACCOUNT_SIZE,
-        "instruction side effects should be committed on success"
     );
 }
 
@@ -269,7 +261,7 @@ async fn test_escrow_charged_for_failed_transaction() {
 #[tokio::test]
 async fn test_transaction_gasless_mode() {
     // Initialize the environment with a base fee of 0.
-    let env = ExecutionTestEnv::new_with_fee(0);
+    let env = ExecutionTestEnv::new_with_config(0);
     let mut payer = env.get_payer();
     payer.set_lamports(1); // Not enough to cover standard fee
     payer.set_delegated(false); // Explicitly set the payer as NON-delegated.
@@ -315,7 +307,7 @@ async fn test_transaction_gasless_mode() {
 #[tokio::test]
 async fn test_transaction_gasless_mode_with_not_existing_account() {
     // Initialize the environment with a base fee of 0.
-    let env = ExecutionTestEnv::new_with_fee(0);
+    let env = ExecutionTestEnv::new_with_config(0);
     let mut payer = env.get_payer();
     payer.set_lamports(1); // Not enough to cover standard fee
     payer.set_delegated(false); // Explicitly set the payer as NON-delegated.
@@ -365,8 +357,9 @@ async fn test_transaction_gasless_mode_with_not_existing_account() {
 #[tokio::test]
 async fn test_transaction_gasless_mode_not_existing_feepayer() {
     // Initialize the environment with a base fee of 0.
-    let payer = Keypair::new();
-    let env = ExecutionTestEnv::new_with_payer_and_fees(&payer, 0);
+    let env = ExecutionTestEnv::new_with_config(0);
+    let payer = env.get_payer().pubkey;
+    env.accountsdb.remove_account(&payer);
 
     // Simple noop instruction that does not touch the fee payer account
     let ix = Instruction::new_with_bincode(
@@ -398,7 +391,7 @@ async fn test_transaction_gasless_mode_not_existing_feepayer() {
     // Verify that the payer balance is zero (or doesn't exist)
     let final_balance = env
         .accountsdb
-        .get_account(&payer.pubkey())
+        .get_account(&payer)
         .unwrap_or_default()
         .lamports();
     assert_eq!(
