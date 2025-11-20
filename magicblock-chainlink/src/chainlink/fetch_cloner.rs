@@ -183,7 +183,7 @@ where
                 let (resolved_account, deleg_record) =
                     self.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(update)
                     .await;
-                if let Some(mut account) = resolved_account {
+                if let Some(account) = resolved_account {
                     // Ensure that the subscription update isn't out of order, i.e. we don't already
                     // hold a newer version of the account in our bank
                     let out_of_order_slot = self
@@ -534,6 +534,8 @@ where
     /// - **mark_empty**: optional list of accounts that should be added as empty if not found on
     ///   chain
     /// - **slot**: optional slot to use as minimum context slot for the accounts being cloned
+    ///
+    /// NOTE: accounts fetched here have not been found in the bank
     async fn fetch_and_clone_accounts(
         &self,
         pubkeys: &[Pubkey],
@@ -578,12 +580,11 @@ where
 
         trace!("Fetched {accs:?}");
 
-        let (not_found, mut in_bank, plain, owned_by_deleg, programs) =
+        let (not_found, plain, owned_by_deleg, programs) =
             accs.into_iter().zip(pubkeys).fold(
-                (vec![], vec![], vec![], vec![], vec![]),
+                (vec![], vec![], vec![], vec![]),
                 |(
                     mut not_found,
-                    mut in_bank,
                     mut plain,
                     mut owned_by_deleg,
                     mut programs,
@@ -633,13 +634,13 @@ where
                                         ));
                                     }
                                 }
-                                ResolvedAccount::Bank(pubkey) => {
-                                    in_bank.push(pubkey);
+                                ResolvedAccount::Bank((pubkey, slot)) => {
+                                    error!("We should not be fetching accounts that are already in bank: {pubkey}:{slot}");
                                 }
                             };
                         }
                     }
-                    (not_found, in_bank, plain, owned_by_deleg, programs)
+                    (not_found, plain, owned_by_deleg, programs)
                 },
             );
 
@@ -647,10 +648,6 @@ where
             let not_found = not_found
                 .iter()
                 .map(|(pubkey, slot)| (pubkey.to_string(), *slot))
-                .collect::<Vec<_>>();
-            let in_bank = in_bank
-                .iter()
-                .map(|(p, _)| p.to_string())
                 .collect::<Vec<_>>();
             let plain =
                 plain.iter().map(|(p, _)| p.to_string()).collect::<Vec<_>>();
@@ -663,7 +660,7 @@ where
                 .map(|(p, _, _)| p.to_string())
                 .collect::<Vec<_>>();
             trace!(
-                "Fetched accounts: \nnot_found:      {not_found:?} \nin_bank:        {in_bank:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?}\nprograms:       {programs:?}",
+                "Fetched accounts: \nnot_found:      {not_found:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?}\nprograms:       {programs:?}",
             );
         }
 
@@ -688,17 +685,6 @@ where
             );
         }
 
-        // For accounts already in bank we don't need to do anything
-        if log::log_enabled!(log::Level::Trace) {
-            trace!(
-                "Accounts already in bank: {:?}",
-                in_bank
-                    .iter()
-                    .map(|(p, _)| p.to_string())
-                    .collect::<Vec<_>>()
-            );
-        }
-
         // We mark some accounts as empty if we know that they will never exist on chain
         if log::log_enabled!(log::Level::Trace) && !clone_as_empty.is_empty() {
             trace!(
@@ -708,74 +694,6 @@ where
                     .map(|(p, _)| p.to_string())
                     .collect::<Vec<_>>()
             );
-        }
-
-        // For accounts in the bank that are marked as undelegating, check if they're still
-        // delegated to us. If not, we need to refetch them from chain instead of using the
-        // bank version.
-        let mut accounts_to_refetch = vec![];
-        for (pubkey, slot) in &in_bank {
-            if let Some(in_bank) = self.accounts_bank.get_account(pubkey) {
-                if in_bank.owner().eq(&dlp::id()) {
-                    debug!("Account {pubkey} owned by deleg program. delegated={}, undelegating={}", in_bank.delegated(), in_bank.undelegating());
-                }
-                if in_bank.undelegating() {
-                    debug!("Fetching account {pubkey} marked as undelegating");
-                    let deleg_record = self
-                        .fetch_and_parse_delegation_record(
-                            *pubkey,
-                            *slot.max(
-                                &self.remote_account_provider.chain_slot(),
-                            ),
-                        )
-                        .await;
-                    let delegated_on_chain =
-                        deleg_record.as_ref().is_some_and(|dr| {
-                            dr.authority.eq(&self.validator_pubkey)
-                                || dr.authority.eq(&Pubkey::default())
-                        });
-                    if !account_still_undelegating_on_chain(
-                        pubkey,
-                        delegated_on_chain,
-                        in_bank.remote_slot(),
-                        deleg_record,
-                    ) {
-                        debug!(
-                            "Account {pubkey} marked as undelegating will be overridden since undelegation completed"
-                        );
-                        accounts_to_refetch.push((*pubkey, *slot));
-                    }
-                } else if in_bank.owner().eq(&dlp::id()) {
-                    debug!(
-                        "Account {pubkey} owned by deleg program not marked as undelegating"
-                    );
-                }
-            }
-        }
-
-        // Remove accounts that need to be refetched from in_bank list
-        in_bank.retain(|(pubkey, _)| {
-            !accounts_to_refetch.iter().any(|(p, _)| p == pubkey)
-        });
-
-        // Add accounts that need to be refetched to the plain list
-        // (they will be fetched from chain)
-        let mut plain = plain;
-        let mut owned_by_deleg = owned_by_deleg;
-        for (pubkey, _slot) in accounts_to_refetch {
-            if let Some(account) = self
-                .remote_account_provider
-                .try_get(pubkey)
-                .await?
-                .fresh_account()
-            {
-                if account.owner().eq(&dlp::id()) {
-                    let remote_slot = account.remote_slot();
-                    owned_by_deleg.push((pubkey, account, remote_slot));
-                } else {
-                    plain.push((pubkey, account));
-                }
-            }
         }
 
         // Calculate min context slot: use the greater of subscription slot or last chain slot
@@ -1085,6 +1003,45 @@ where
         })
     }
 
+    async fn should_refresh_undelegating_in_bank_account(
+        &self,
+        pubkey: &Pubkey,
+        in_bank: &AccountSharedData,
+    ) -> bool {
+        if in_bank.owner().eq(&dlp::id()) {
+            debug!("Account {pubkey} owned by deleg program. delegated={}, undelegating={}", in_bank.delegated(), in_bank.undelegating());
+        }
+        if in_bank.undelegating() {
+            debug!("Fetching account {pubkey} marked as undelegating");
+            let deleg_record = self
+                .fetch_and_parse_delegation_record(
+                    *pubkey,
+                    self.remote_account_provider.chain_slot(),
+                )
+                .await;
+            let delegated_on_chain = deleg_record.as_ref().is_some_and(|dr| {
+                dr.authority.eq(&self.validator_pubkey)
+                    || dr.authority.eq(&Pubkey::default())
+            });
+            if !account_still_undelegating_on_chain(
+                pubkey,
+                delegated_on_chain,
+                in_bank.remote_slot(),
+                deleg_record,
+            ) {
+                debug!(
+                    "Account {pubkey} marked as undelegating will be overridden since undelegation completed"
+                );
+                return true;
+            }
+        } else if in_bank.owner().eq(&dlp::id()) {
+            debug!(
+                "Account {pubkey} owned by deleg program not marked as undelegating"
+            );
+        }
+        false
+    }
+
     /// Fetch and clone accounts with request deduplication to avoid parallel fetches of the same account.
     /// This method implements the new logic where:
     /// 1. Check synchronously if account is in bank, return immediately if found
@@ -1104,7 +1061,7 @@ where
         // We cannot clone blacklisted accounts, thus either they are already
         // in the bank (e.g. native programs) or they don't exist and the transaction
         // will fail later
-        let pubkeys = pubkeys
+        let mut pubkeys = pubkeys
             .iter()
             .filter(|p| !self.blacklisted_accounts.contains(p))
             .collect::<Vec<_>>();
@@ -1119,6 +1076,38 @@ where
 
         let mut await_pending = vec![];
         let mut fetch_new = vec![];
+        let mut in_bank = vec![];
+        for pubkey in pubkeys.iter() {
+            if let Some(account_in_bank) =
+                self.accounts_bank.get_account(pubkey)
+            {
+                // NOTE: we defensively correct accounts that we should have been watching but
+                //       were not for some reason. We fetch them again in that case.
+                //       This actually would point to a bug in the subscription logic.
+                // TODO(thlorenz): remove this once we are certain (by perusing logs) that this
+                //                 does not happen anymore
+                let is_ok = account_in_bank.owner().eq(&dlp::id())
+                    || account_in_bank.delegated()
+                    || self.blacklisted_accounts.contains(pubkey)
+                    || self.is_watching(pubkey);
+
+                if !is_ok && !self.is_watching(pubkey) {
+                    debug!("Account {pubkey} should be watched but wasn't");
+                }
+                let should_refresh = self
+                    .should_refresh_undelegating_in_bank_account(
+                        pubkey,
+                        &account_in_bank,
+                    )
+                    .await;
+                if is_ok && !should_refresh {
+                    // Account is in bank and subscribed correctly - return immediately
+                    trace!("Account {pubkey} found in bank in valid state, no fetch needed");
+                    in_bank.push(*pubkey);
+                }
+            }
+        }
+        pubkeys.retain(|p| !in_bank.contains(p));
 
         // Check pending requests and bank synchronously
         {
@@ -1128,26 +1117,6 @@ where
                 .expect("pending_requests lock poisoned");
 
             for pubkey in pubkeys {
-                // Check synchronously if account is in bank and subscribed when it should be
-                if let Some(account_in_bank) =
-                    self.accounts_bank.get_account(pubkey)
-                {
-                    // NOTE: we defensively correct accounts that we should have been watching but
-                    //       were not for some reason. We fetch them again in that case.
-                    //       This actually would point to a bug in the subscription logic.
-                    // TODO(thlorenz): remove this once we are certain (by perusing logs) that this
-                    //                 does not happen anymore
-                    if account_in_bank.owner().eq(&dlp::id())
-                        || account_in_bank.delegated()
-                        || self.blacklisted_accounts.contains(pubkey)
-                        || self.is_watching(pubkey)
-                    {
-                        continue;
-                    } else if !self.is_watching(pubkey) {
-                        debug!("Account {pubkey} should be watched but wasn't");
-                    }
-                }
-
                 // Check if account fetch is already pending
                 if let Some(requests) = pending.get_mut(pubkey) {
                     let (sender, receiver) = oneshot::channel();
