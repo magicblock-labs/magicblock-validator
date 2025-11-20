@@ -279,8 +279,12 @@ impl ChainPubsubActor {
         match msg {
             ChainPubsubActorMessage::AccountSubscribe { pubkey, response } => {
                 if !is_connected.load(Ordering::SeqCst) {
-                    trace!("[client_id={client_id}] Ignoring subscribe request for {pubkey} because disconnected");
-                    send_ok(response, client_id);
+                    warn!("[client_id={client_id}] Ignoring subscribe request for {pubkey} because disconnected");
+                    let _ = response.send(Err(
+                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                            format!("Client {client_id} disconnected"),
+                        ),
+                    ));
                     return;
                 }
                 let commitment_config = pubsub_client_config.commitment_config;
@@ -294,7 +298,8 @@ impl ChainPubsubActor {
                     is_connected,
                     commitment_config,
                     client_id,
-                );
+                )
+                .await;
             }
             ChainPubsubActorMessage::AccountUnsubscribe {
                 pubkey,
@@ -334,7 +339,7 @@ impl ChainPubsubActor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn add_sub(
+    async fn add_sub(
         pubkey: Pubkey,
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
         subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
@@ -375,33 +380,36 @@ impl ChainPubsubActor {
             );
         }
 
+        let config = RpcAccountInfoConfig {
+            commitment: Some(commitment_config),
+            encoding: Some(UiAccountEncoding::Base64Zstd),
+            ..Default::default()
+        };
+
+        // Perform the subscription
+        let (mut update_stream, unsubscribe) = match pubsub_connection
+            .account_subscribe(&pubkey, config.clone())
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                error!("[client_id={client_id}] Failed to subscribe to account {pubkey} {err:?}");
+                Self::abort_and_signal_connection_issue(
+                    client_id,
+                    subs.clone(),
+                    abort_sender,
+                    is_connected.clone(),
+                );
+                // RPC failed - inform the requester
+                let _ = sub_response.send(Err(err.into()));
+                return;
+            }
+        };
+
+        // RPC succeeded - confirm to the requester that the subscription was made
+        let _ = sub_response.send(Ok(()));
+
         tokio::spawn(async move {
-            let config = RpcAccountInfoConfig {
-                commitment: Some(commitment_config),
-                encoding: Some(UiAccountEncoding::Base64Zstd),
-                ..Default::default()
-            };
-            let (mut update_stream, unsubscribe) = match pubsub_connection
-                .account_subscribe(&pubkey, config.clone())
-                .await
-            {
-                Ok(res) => res,
-                Err(err) => {
-                    error!("[client_id={client_id}] Failed to subscribe to account {pubkey} {err:?}");
-                    Self::abort_and_signal_connection_issue(
-                        client_id,
-                        subs.clone(),
-                        abort_sender,
-                        is_connected.clone(),
-                    );
-
-                    return;
-                }
-            };
-
-            // RPC succeeded - confirm to the requester that the subscription was made
-            let _ = sub_response.send(Ok(()));
-
             // Now keep listening for updates and relay them to the
             // subscription updates sender until it is cancelled
             loop {

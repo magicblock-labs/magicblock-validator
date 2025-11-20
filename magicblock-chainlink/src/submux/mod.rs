@@ -23,6 +23,9 @@ const DEBOUNCE_INTERVAL_MILLIS: u64 = 2_000;
 mod debounce_state;
 pub use self::debounce_state::DebounceState;
 
+mod subscription_task;
+pub use self::subscription_task::AccountSubscriptionTask;
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DebounceConfig {
     /// The deduplication window in milliseconds. If None, defaults to
@@ -143,7 +146,10 @@ struct ForwarderParams {
     allowed_count: usize,
 }
 
-impl<T: ChainPubsubClient + ReconnectableClient> SubMuxClient<T> {
+impl<T> SubMuxClient<T>
+where
+    T: ChainPubsubClient + ReconnectableClient,
+{
     pub fn new(
         clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
         dedupe_window_millis: Option<u64>,
@@ -578,26 +584,24 @@ where
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        for client in &self.clients {
-            client.subscribe(pubkey).await?;
-        }
-        Ok(())
+        AccountSubscriptionTask::Subscribe(pubkey)
+            .process(self.clients.clone())
+            .await
     }
 
     async fn unsubscribe(
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        for client in &self.clients {
-            client.unsubscribe(pubkey).await?;
-        }
-        Ok(())
+        AccountSubscriptionTask::Unsubscribe(pubkey)
+            .process(self.clients.clone())
+            .await
     }
 
     async fn shutdown(&self) {
-        for client in &self.clients {
-            client.shutdown().await;
-        }
+        let _ = AccountSubscriptionTask::Shutdown
+            .process(self.clients.clone())
+            .await;
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {

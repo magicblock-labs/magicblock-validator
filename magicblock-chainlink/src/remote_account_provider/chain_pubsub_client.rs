@@ -388,7 +388,7 @@ pub mod mock {
         ) -> RemoteAccountProviderResult<()> {
             if !*self.connected.lock().unwrap() {
                 return Err(
-                    RemoteAccountProviderError::AccountSubscriptionsFailed(
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                         "mock: subscribe while disconnected".to_string(),
                     ),
                 );
@@ -452,7 +452,7 @@ pub mod mock {
                 if *to_fail > 0 {
                     *to_fail -= 1;
                     return Err(
-                        RemoteAccountProviderError::AccountSubscriptionsFailed(
+                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                             "mock: forced resubscribe failure".to_string(),
                         ),
                     );

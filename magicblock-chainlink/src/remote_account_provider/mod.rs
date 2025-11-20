@@ -345,7 +345,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     > {
         if endpoints.is_empty() {
             return Err(
-                RemoteAccountProviderError::AccountSubscriptionsFailed(
+                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                     "No endpoints provided".to_string(),
                 ),
             );
