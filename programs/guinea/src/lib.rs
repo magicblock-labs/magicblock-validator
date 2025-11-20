@@ -28,7 +28,7 @@ pub enum GuineaInstruction {
     Transfer(u64),
     Resize(usize),
     ScheduleTask(ScheduleTaskArgs),
-    CancelTask(u64),
+    CancelTask(i64),
 }
 
 fn compute_balances(accounts: slice::Iter<AccountInfo>) {
@@ -131,7 +131,7 @@ fn schedule_task(
 
 fn cancel_task(
     mut accounts: slice::Iter<AccountInfo>,
-    task_id: u64,
+    task_id: i64,
 ) -> ProgramResult {
     let magic_program_info = next_account_info(&mut accounts)?;
     let payer_info = next_account_info(&mut accounts)?;

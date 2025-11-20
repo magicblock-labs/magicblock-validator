@@ -13,7 +13,7 @@ use crate::{
     validator::validator_authority_id,
 };
 
-const MIN_EXECUTION_INTERVAL: u64 = 10;
+const MIN_EXECUTION_INTERVAL: i64 = 10;
 
 pub(crate) fn process_schedule_task(
     signers: HashSet<Pubkey>,
@@ -70,6 +70,15 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::InvalidInstructionData);
     }
 
+    // Enforce minimal number of iterations
+    if args.iterations < 1 {
+        ic_msg!(
+            invoke_context,
+            "ScheduleTask ERR: iterations must be at least 1"
+        );
+        return Err(InstructionError::InvalidInstructionData);
+    }
+
     // Enforce minimal number of instructions
     if args.instructions.is_empty() {
         ic_msg!(
@@ -93,10 +102,20 @@ pub(crate) fn process_schedule_task(
         for account in &instruction.accounts {
             let val_id = validator_authority_id();
             if account.is_signer && account.pubkey.ne(&val_id) {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleTask: signer account '{}' is not the validator authority.",
+                    account.pubkey,
+                );
                 return Err(InstructionError::MissingRequiredSignature);
             }
 
             if !ix_accounts.contains(&account.pubkey) {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleTask: missing account '{}'.",
+                    account.pubkey,
+                );
                 return Err(InstructionError::MissingAccount);
             }
         }

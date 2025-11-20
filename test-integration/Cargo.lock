@@ -3468,6 +3468,8 @@ dependencies = [
  "magicblock-magic-program-api 0.2.3",
  "magicblock-program",
  "magicblock-rpc-client",
+ "rand 0.8.5",
+ "solana-instruction",
  "solana-sdk",
  "thiserror 1.0.69",
  "tokio",
@@ -3522,6 +3524,7 @@ dependencies = [
 name = "magicblock-aperture"
 version = "0.2.3"
 dependencies = [
+ "arc-swap",
  "base64 0.21.7",
  "bincode",
  "bs58",
@@ -3637,6 +3640,7 @@ dependencies = [
  "solana-rpc-client-api",
  "solana-sdk",
  "solana-sdk-ids",
+ "solana-signer",
  "solana-system-interface",
  "solana-transaction-error",
  "thiserror 1.0.69",

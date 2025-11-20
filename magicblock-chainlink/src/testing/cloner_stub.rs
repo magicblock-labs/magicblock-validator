@@ -11,6 +11,8 @@ use solana_loader_v4_interface::state::LoaderV4State;
 use solana_pubkey::Pubkey;
 use solana_sdk::{instruction::InstructionError, signature::Signature};
 
+#[cfg(any(test, feature = "dev-context"))]
+use crate::cloner::AccountCloneRequest;
 use crate::{
     accounts_bank::mock::AccountsBankStub,
     cloner::{errors::ClonerResult, Cloner},
@@ -70,10 +72,9 @@ impl ClonerStub {
 impl Cloner for ClonerStub {
     async fn clone_account(
         &self,
-        pubkey: Pubkey,
-        account: AccountSharedData,
+        request: AccountCloneRequest,
     ) -> ClonerResult<Signature> {
-        self.accounts_bank.insert(pubkey, account);
+        self.accounts_bank.insert(request.pubkey, request.account);
         Ok(Signature::default())
     }
 
