@@ -258,8 +258,7 @@ Kept: {} delegated, {} blacklisted",
         }
 
         // Mark *all* pubkeys as empty-if-not-found
-        let mark_empty_if_not_found: Vec<Pubkey> = pubkeys.clone();
-        let mark_empty_if_not_found = Some(mark_empty_if_not_found.as_slice());
+        let mark_empty_if_not_found = Some(pubkeys.as_slice());
 
         // Ensure accounts
         let res = self
