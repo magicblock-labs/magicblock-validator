@@ -1,10 +1,10 @@
-use std::{ops::Deref, time::Duration};
+use std::{ops::Deref, sync::Arc, time::Duration};
 
+use arc_swap::ArcSwapAny;
 use magicblock_core::{
     link::blocks::{BlockHash, BlockMeta, BlockUpdate},
     Slot,
 };
-use magicblock_ledger::LatestBlock;
 use solana_rpc_client_api::response::RpcBlockhash;
 
 use super::ExpiringCache;
@@ -23,10 +23,18 @@ pub(crate) struct BlocksCache {
     /// The number of slots for which a blockhash is considered valid.
     /// This is calculated based on the host ER's block time relative to Solana's.
     block_validity: u64,
-    /// The most recent block update received, protected by a `RwLock` for concurrent access.
-    latest: LatestBlock,
+    /// Latest observed block (updated whenever the ledger transitions to new slot)
+    latest: ArcSwapAny<Arc<LastCachedBlock>>,
     /// An underlying time-based cache for storing `BlockHash` to `BlockMeta` mappings.
     cache: ExpiringCache<BlockHash, BlockMeta>,
+}
+
+/// Last produced block that has been put into cache. We need to keep this separately,
+/// as there's no way to access the cache efficiently to find the latest inserted entry
+#[derive(Default, Debug, Clone, Copy)]
+pub(crate) struct LastCachedBlock {
+    pub(crate) blockhash: BlockHash,
+    pub(crate) slot: Slot,
 }
 
 impl Deref for BlocksCache {
@@ -44,7 +52,7 @@ impl BlocksCache {
     ///
     /// # Panics
     /// Panics if `blocktime` is zero.
-    pub(crate) fn new(blocktime: u64, latest: LatestBlock) -> Self {
+    pub(crate) fn new(blocktime: u64, latest: LastCachedBlock) -> Self {
         const BLOCK_CACHE_TTL: Duration = Duration::from_secs(60);
         assert!(blocktime != 0, "blocktime cannot be zero");
 
@@ -54,7 +62,7 @@ impl BlocksCache {
         let block_validity = blocktime_ratio * MAX_VALID_BLOCKHASH_SLOTS;
         let cache = ExpiringCache::new(BLOCK_CACHE_TTL);
         Self {
-            latest,
+            latest: ArcSwapAny::new(latest.into()),
             block_validity: block_validity as u64,
             cache,
         }
@@ -62,8 +70,15 @@ impl BlocksCache {
 
     /// Updates the latest block information in the cache.
     pub(crate) fn set_latest(&self, latest: BlockUpdate) {
-        // The `push` method adds the blockhash to the underlying expiring cache.
+        let last = LastCachedBlock {
+            blockhash: latest.hash,
+            slot: latest.meta.slot,
+        };
+
+        // Register the block in the expiring cache
         self.cache.push(latest.hash, latest.meta);
+        // And mark it as latest observed
+        self.latest.swap(last.into());
     }
 
     /// Retrieves information about the latest block, including its calculated validity period.
@@ -83,6 +98,7 @@ impl BlocksCache {
 }
 
 /// A data structure containing essential details about a blockhash for RPC responses.
+#[derive(Default)]
 pub(crate) struct BlockHashInfo {
     /// The blockhash.
     pub(crate) hash: BlockHash,
