@@ -1,5 +1,5 @@
 [accounts]
-remote = { cluster = "custom", url = "https://rpc.magicblock.app/devnet" }
+remote.cluster = "devnet"
 lifecycle = "ephemeral"
 commit = { frequency-millis = 50_000 }
 
