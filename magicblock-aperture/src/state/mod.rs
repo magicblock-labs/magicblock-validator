@@ -81,12 +81,11 @@ impl SharedState {
         blocktime: u64,
     ) -> Self {
         const TRANSACTIONS_CACHE_TTL: Duration = Duration::from_secs(75);
-        let latest = ledger.latest_block().clone();
         Self {
             context,
             accountsdb,
             transactions: ExpiringCache::new(TRANSACTIONS_CACHE_TTL).into(),
-            blocks: BlocksCache::new(blocktime, latest).into(),
+            blocks: BlocksCache::new(blocktime).into(),
             ledger,
             chainlink,
             subscriptions: Default::default(),
