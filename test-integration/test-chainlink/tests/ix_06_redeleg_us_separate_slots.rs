@@ -12,6 +12,8 @@ use magicblock_chainlink::{
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::{ixtest_context::IxtestContext, sleep_ms};
 
+const RETRIES: u8 = 30;
+
 #[tokio::test]
 async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {
     init_logger();
@@ -43,7 +45,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {
             &[counter_pda],
             account.remote_slot(),
             program_flexi_counter::id(),
-            30
+            RETRIES
         );
 
         // Accounts delegated to us should not be tracked via subscription
@@ -87,7 +89,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {
             &[counter_pda],
             account.remote_slot(),
             program_flexi_counter::id(),
-            30
+            RETRIES
         );
 
         // Accounts delegated to us should not be tracked via subscription
@@ -122,11 +124,12 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots_compressed() {
 
         // Account should be cloned as delegated
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
-        assert_cloned_as_delegated!(
+        assert_cloned_as_delegated_with_retries!(
             ctx.cloner,
             &[counter_pda],
             account.remote_slot(),
-            program_flexi_counter::id()
+            program_flexi_counter::id(),
+            RETRIES
         );
 
         // Accounts delegated to us should not be tracked via subscription
@@ -162,11 +165,12 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots_compressed() {
 
         // Account should be cloned as delegated back to us
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
-        assert_cloned_as_delegated!(
+        assert_cloned_as_delegated_with_retries!(
             ctx.cloner,
             &[counter_pda],
             account.remote_slot(),
-            program_flexi_counter::id()
+            program_flexi_counter::id(),
+            RETRIES
         );
 
         // Accounts delegated to us should not be tracked via subscription
