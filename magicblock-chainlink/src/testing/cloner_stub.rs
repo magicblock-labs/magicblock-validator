@@ -70,6 +70,9 @@ impl ClonerStub {
 #[cfg(any(test, feature = "dev-context"))]
 #[async_trait]
 impl Cloner for ClonerStub {
+    // NOTE: commit_frequency_ms is intentionally ignored by this test stub.
+    // This stub only performs cloning, not commit scheduling, so future readers/tests
+    // should understand this limitation.
     async fn clone_account(
         &self,
         request: AccountCloneRequest,
