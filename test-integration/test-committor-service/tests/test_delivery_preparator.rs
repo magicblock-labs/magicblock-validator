@@ -539,7 +539,7 @@ async fn test_prepare_compressed_commit() {
     let mut task = Box::new(ArgsTask::new(ArgsTaskType::CompressedCommit(
         create_compressed_commit_task(pda, Default::default(), data.as_slice()),
     ))) as Box<dyn BaseTask>;
-    let compressed_data = task.as_ref().get_compressed_data().clone();
+    let compressed_data = task.get_compressed_data().cloned();
 
     preparator
         .prepare_task(
@@ -552,7 +552,7 @@ async fn test_prepare_compressed_commit() {
         .expect("Failed to prepare compressed commit");
 
     // Verify the compressed data was updated
-    let new_compressed_data = task.as_ref().get_compressed_data();
+    let new_compressed_data = task.get_compressed_data().cloned();
     assert_ne!(
         new_compressed_data, compressed_data,
         "Compressed data size mismatch"

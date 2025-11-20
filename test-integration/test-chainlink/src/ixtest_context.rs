@@ -486,9 +486,6 @@ impl IxtestContext {
             let (remaining_accounts_metas, _, _) =
                 remaining_accounts.to_account_metas();
 
-            let counter_data =
-                self.rpc_client.get_account(&pda).await.unwrap().data;
-
             (
                 remaining_accounts_metas,
                 rpc_result.proof,
