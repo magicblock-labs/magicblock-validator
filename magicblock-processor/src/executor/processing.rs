@@ -358,6 +358,7 @@ impl super::TransactionExecutor {
             let undelegated_feepayer_was_modified = feepayer
                 .map(|acc| {
                     (acc.1.is_dirty()
+                        && !self.is_auto_airdrop_lamports_enabled
                         && (acc.1.lamports() != 0 || rollback_lamports != 0))
                         && !acc.1.delegated()
                         && !acc.1.privileged()
@@ -366,12 +367,12 @@ impl super::TransactionExecutor {
             if undelegated_feepayer_was_modified {
                 executed.execution_details.status =
                     Err(TransactionError::InvalidAccountForFee);
-                if let Some(logs) = &mut executed.execution_details.log_messages
-                {
-                    let msg = "Feepayer balance has been modified illegally"
-                        .to_string();
-                    logs.push(msg);
-                }
+                let logs = executed
+                    .execution_details
+                    .log_messages
+                    .get_or_insert_default();
+                let msg = "Feepayer balance has been modified illegally".into();
+                logs.push(msg);
                 return;
             }
         }
@@ -398,11 +399,12 @@ impl super::TransactionExecutor {
                 account_index: i as u8,
             });
             executed.execution_details.status = error;
-            if let Some(logs) = &mut executed.execution_details.log_messages {
-                let msg =
-                    format!("Account {pubkey} has violated rent exemption",);
-                logs.push(msg);
-            }
+            let logs = executed
+                .execution_details
+                .log_messages
+                .get_or_insert_default();
+            let msg = format!("Account {pubkey} has violated rent exemption");
+            logs.push(msg);
             return;
         }
     }
