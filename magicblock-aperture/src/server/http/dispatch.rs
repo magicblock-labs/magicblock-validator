@@ -176,7 +176,7 @@ impl HttpDispatcher {
     fn handle_cors_preflight() -> Result<Response<JsonBody>, Infallible> {
         use hyper::header::{
             ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-            ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_MAX_AGE
+            ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_MAX_AGE,
         };
 
         let response = Response::builder()
