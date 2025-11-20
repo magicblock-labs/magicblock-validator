@@ -3522,6 +3522,7 @@ dependencies = [
 name = "magicblock-aperture"
 version = "0.2.3"
 dependencies = [
+ "arc-swap",
  "base64 0.21.7",
  "bincode",
  "bs58",
@@ -6260,7 +6261,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=731fa50#731fa5037bf89929da76759f2281c1cb4833a8b7"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=5afcedc#5afcedca1bd1608594cfe6d8ecdedea0e0380b5a"
 dependencies = [
  "bincode",
  "qualifier_attr",
