@@ -98,9 +98,9 @@ pub(crate) fn process_schedule_task(
                 .copied()
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let val_id = validator_authority_id();
     for instruction in &args.instructions {
         for account in &instruction.accounts {
-            let val_id = validator_authority_id();
             if account.is_signer && account.pubkey.ne(&val_id) {
                 ic_msg!(
                     invoke_context,
