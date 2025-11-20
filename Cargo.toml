@@ -220,7 +220,7 @@ vergen = "8.3.1"
 
 [workspace.dependencies.solana-svm]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "11bbaf2"
+rev = "e480fa2"
 features = ["dev-context-only-utils"]
 
 [patch.crates-io]
@@ -229,4 +229,4 @@ features = ["dev-context-only-utils"]
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "731fa50" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "11bbaf2" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "e480fa2" }
