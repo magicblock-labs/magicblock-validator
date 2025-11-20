@@ -87,7 +87,7 @@ pub trait IntentExecutor: Send + Sync + 'static {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`
     async fn execute<P: IntentPersister>(
-        &self,
+        &mut self,
         base_intent: ScheduledBaseIntent,
         persister: Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput>;
@@ -98,6 +98,11 @@ pub struct IntentExecutorImpl<T, F> {
     rpc_client: MagicblockRpcClient,
     transaction_preparator: T,
     task_info_fetcher: Arc<F>,
+
+    /// Junk that needs to be cleaned up
+    pub junk: Vec<TransactionStrategy>,
+    /// Errors we patched trying to recover intent
+    pub patched_errors: Vec<TransactionStrategyExecutionError>,
 }
 
 impl<T, F> IntentExecutorImpl<T, F>
@@ -116,6 +121,8 @@ where
             rpc_client,
             transaction_preparator,
             task_info_fetcher,
+            junk: vec![],
+            patched_errors: vec![],
         }
     }
 
@@ -154,7 +161,7 @@ where
     }
 
     async fn execute_inner<P: IntentPersister>(
-        &self,
+        &mut self,
         base_intent: ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
@@ -254,38 +261,84 @@ where
 
     /// Starting execution from single stage
     pub async fn single_stage_execution_flow<P: IntentPersister>(
-        &self,
+        &mut self,
         base_intent: ScheduledBaseIntent,
         transaction_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let mut junk = Vec::new();
-        let res = SingleStageExecutor::new(self)
-            .execute(base_intent, transaction_strategy, &mut junk, persister)
-            .await;
-        self.spawn_cleanup_task(junk);
+        let mut single_stage_executor =
+            SingleStageExecutor::new(self, transaction_strategy);
 
-        res
+        let committed_pubkeys = base_intent.get_committed_pubkeys();
+        let res = single_stage_executor
+            .execute(
+                committed_pubkeys.as_ref().map(|el| el.as_slice()),
+                persister,
+            )
+            .await;
+
+        // After execution is complete record junk & patched errors
+        self.junk.append(&mut single_stage_executor.junk);
+        self.patched_errors
+            .append(&mut single_stage_executor.patched_errors);
+
+        let execution_err = match res {
+            Ok(value) => return Ok(value),
+            Err(err) => err,
+        };
+
+        if !(execution_err.is_cpi_limit_error() && committed_pubkeys.is_some())
+        {
+            // Can't recover this - return Err
+            return Err(execution_err);
+        }
+
+        // With actions, we can't predict num of CPIs
+        // If we get here we will try to switch from Single stage to Two Stage commit
+        // Note that this not necessarily will pass at the end due to the same reason
+        // SAFETY: is_some() checked prior
+        let committed_pubkeys = committed_pubkeys.unwrap();
+        let (commit_strategy, finalize_strategy, cleanup) = self
+            .handle_cpi_limit_error(single_stage_executor.transaction_strategy);
+        self.junk.push(cleanup);
+        self.patched_errors.push(execution_err);
+
+        self.two_stage_execution_flow(
+            &committed_pubkeys,
+            commit_strategy,
+            finalize_strategy,
+            persister,
+        )
+        .await
     }
 
     pub async fn two_stage_execution_flow<P: IntentPersister>(
-        &self,
+        &mut self,
         committed_pubkeys: &[Pubkey],
         commit_strategy: TransactionStrategy,
         finalize_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let mut junk = Vec::new();
-        let res = TwoStageExecutor::new(self)
-            .execute(
-                committed_pubkeys,
-                commit_strategy,
-                finalize_strategy,
-                &mut junk,
-                persister,
-            )
+        let mut two_stage_executor =
+            TwoStageExecutor::new(self, commit_strategy, finalize_strategy);
+        let res = two_stage_executor
+            .execute(committed_pubkeys, persister)
             .await;
-        self.spawn_cleanup_task(junk);
+
+        // Dissasemble executor to take all the goodies
+        let TwoStageExecutor {
+            inner: _,
+            commit_strategy,
+            finalize_strategy,
+            junk,
+            patched_errors,
+        } = two_stage_executor;
+        // After execution ended - everything becomes junk
+        // need to dispose it
+        self.junk.extend(junk.into_iter());
+        self.junk.push(commit_strategy);
+        self.junk.push(finalize_strategy);
+        self.patched_errors.extend(patched_errors.into_iter());
 
         res
     }
@@ -773,7 +826,7 @@ where
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`
     async fn execute<P: IntentPersister>(
-        &self,
+        &mut self,
         base_intent: ScheduledBaseIntent,
         persister: Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {

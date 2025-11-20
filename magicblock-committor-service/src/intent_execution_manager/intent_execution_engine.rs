@@ -238,7 +238,7 @@ where
 
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit
     async fn execute(
-        executor: E,
+        mut executor: E,
         persister: Option<P>,
         intent: ScheduledBaseIntentWrapper,
         inner_scheduler: Arc<Mutex<IntentScheduler>>,

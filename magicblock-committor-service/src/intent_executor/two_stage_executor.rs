@@ -17,8 +17,18 @@ use crate::{
     transaction_preparator::TransactionPreparator,
 };
 
+// TODO(edwin): Could be splitted into 2 States
+// TwoStageExecutor<Commit> & TwoStageExecutorCommit<Finalize>
 pub struct TwoStageExecutor<'a, T, F> {
     inner: &'a IntentExecutorImpl<T, F>,
+    // TODO(edwin): don't forget to cleanup this at the end
+    pub commit_strategy: TransactionStrategy,
+    pub finalize_strategy: TransactionStrategy,
+
+    /// Junk that needs to be cleaned up
+    pub junk: Vec<TransactionStrategy>,
+    /// Errors we patched trying to recover intent
+    pub patched_errors: Vec<TransactionStrategyExecutionError>,
 }
 
 impl<'a, T, F> TwoStageExecutor<'a, T, F>
@@ -26,62 +36,74 @@ where
     T: TransactionPreparator + Clone,
     F: TaskInfoFetcher,
 {
-    pub fn new(executor: &'a IntentExecutorImpl<T, F>) -> Self {
-        Self { inner: executor }
+    pub fn new(
+        executor: &'a IntentExecutorImpl<T, F>,
+        commit_strategy: TransactionStrategy,
+        finalize_strategy: TransactionStrategy,
+    ) -> Self {
+        Self {
+            inner: executor,
+            commit_strategy,
+            finalize_strategy,
+
+            junk: vec![],
+            patched_errors: vec![],
+        }
     }
 
     pub async fn execute<P: IntentPersister>(
-        &self,
+        &mut self,
         committed_pubkeys: &[Pubkey],
-        mut commit_strategy: TransactionStrategy,
-        mut finalize_strategy: TransactionStrategy,
-        junk: &mut Vec<TransactionStrategy>,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         const RECURSION_CEILING: u8 = 10;
 
         let mut i = 0;
-        let (commit_result, last_commit_strategy) = loop {
+        let commit_result = loop {
             i += 1;
 
             // Prepare & execute message
             let execution_result = self
-                .prepare_and_execute_strategy(&mut commit_strategy, persister)
+                .inner
+                .prepare_and_execute_strategy(
+                    &mut self.commit_strategy,
+                    persister,
+                )
                 .await
                 .map_err(IntentExecutorError::FailedCommitPreparationError)?;
             let execution_err = match execution_result {
-                Ok(value) => break (Ok(value), commit_strategy),
+                Ok(value) => break Ok(value),
                 Err(err) => err,
             };
 
-            let flow = self
-                .patch_commit_strategy(
-                    &execution_err,
-                    &mut commit_strategy,
-                    committed_pubkeys,
-                )
-                .await?;
+            let flow = Self::patch_commit_strategy(
+                self.inner,
+                &execution_err,
+                &mut self.commit_strategy,
+                committed_pubkeys,
+            )
+            .await?;
             let cleanup = match flow {
                 ControlFlow::Continue(value) => {
                     info!("Patched intent, error was: {:?}", execution_err);
                     value
                 }
                 ControlFlow::Break(()) => {
-                    break (Err(execution_err), commit_strategy)
+                    break Err(execution_err);
                 }
             };
+            self.junk.push(cleanup);
 
             if i >= RECURSION_CEILING {
                 error!(
                     "CRITICAL! Recursion ceiling reached in intent execution."
                 );
-                break (Err(execution_err), cleanup);
+                break Err(execution_err);
             } else {
-                junk.push(cleanup);
+                self.patched_errors.push(execution_err);
             }
         };
 
-        junk.push(last_commit_strategy);
         let commit_signature = commit_result.map_err(|err| {
             IntentExecutorError::from_strategy_execution_error(
                 err,
@@ -96,41 +118,48 @@ where
         })?;
 
         i = 0;
-        let (finalize_result, last_finalize_strategy) = loop {
+        let finalize_result = loop {
             i += 1;
 
             // Prepare & execute message
             let execution_result = self
-                .prepare_and_execute_strategy(&mut finalize_strategy, persister)
+                .inner
+                .prepare_and_execute_strategy(
+                    &mut self.finalize_strategy,
+                    persister,
+                )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
             let execution_err = match execution_result {
-                Ok(value) => break (Ok(value), finalize_strategy),
+                Ok(value) => break Ok(value),
                 Err(err) => err,
             };
 
-            let flow = self
-                .patch_finalize_strategy(&execution_err, &mut finalize_strategy)
-                .await?;
+            let flow = Self::patch_finalize_strategy(
+                self.inner,
+                &execution_err,
+                &mut self.finalize_strategy,
+            )
+            .await?;
 
             let cleanup = match flow {
                 ControlFlow::Continue(cleanup) => cleanup,
                 ControlFlow::Break(()) => {
-                    break (Err(execution_err), finalize_strategy)
+                    break Err(execution_err);
                 }
             };
+            self.junk.push(cleanup);
 
             if i >= RECURSION_CEILING {
                 error!(
                     "CRITICAL! Recursion ceiling reached in intent execution."
                 );
-                break (Err(execution_err), cleanup);
+                break Err(execution_err);
             } else {
-                junk.push(cleanup);
+                self.patched_errors.push(execution_err);
             }
         };
 
-        junk.push(last_finalize_strategy);
         let finalize_signature = finalize_result.map_err(|err| {
             IntentExecutorError::from_strategy_execution_error(
                 err,
@@ -159,14 +188,14 @@ where
     /// - `Continue(to_cleanup)` when a retry should be attempted with cleanup metadata, or
     /// - `Break(())` when this stage cannot be recovered.
     pub async fn patch_commit_strategy(
-        &self,
+        inner: &IntentExecutorImpl<T, F>,
         err: &TransactionStrategyExecutionError,
         commit_strategy: &mut TransactionStrategy,
         committed_pubkeys: &[Pubkey],
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
         match err {
             TransactionStrategyExecutionError::CommitIDError(_, _) => {
-                let to_cleanup = self
+                let to_cleanup = inner
                     .handle_commit_id_error(committed_pubkeys, commit_strategy)
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
@@ -203,7 +232,7 @@ where
     /// - `Continue(to_cleanup)` when a retry should be attempted with cleanup metadata, or
     /// - `Break(())` when this stage cannot be recovered.
     pub async fn patch_finalize_strategy(
-        &self,
+        inner: &IntentExecutorImpl<T, F>,
         err: &TransactionStrategyExecutionError,
         finalize_strategy: &mut TransactionStrategy,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
@@ -216,14 +245,14 @@ where
             TransactionStrategyExecutionError::ActionsError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
-                let to_cleanup = self.handle_actions_error(finalize_strategy);
+                let to_cleanup = inner.handle_actions_error(finalize_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let to_cleanup =
-                    self.handle_undelegation_error(finalize_strategy);
+                    inner.handle_undelegation_error(finalize_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _) => {
