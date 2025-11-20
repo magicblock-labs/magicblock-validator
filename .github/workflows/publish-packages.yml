@@ -9,13 +9,13 @@ on:
     types: [published]
   push:
     branches:
-      - 'release/v*'
+      - "release/v*"
   workflow_dispatch:
     inputs:
       release_version:
-        description: 'The release version'
+        description: "The release version"
         required: true
-        default: 'v0.1.0'
+        default: "v0.1.0"
 
 jobs:
   publish-binaries:
@@ -26,35 +26,35 @@ jobs:
       matrix:
         build:
           - {
-            NAME: linux-x64-glibc,
-            OS: ubuntu-latest,
-            TOOLCHAIN: stable,
-            TARGET: x86_64-unknown-linux-gnu
-          }
+              NAME: linux-x64-glibc,
+              OS: ubuntu-latest,
+              TOOLCHAIN: stable,
+              TARGET: x86_64-unknown-linux-gnu,
+            }
           - {
-            NAME: linux-arm64-glibc,
-            OS: arm64,
-            TOOLCHAIN: stable,
-            TARGET: aarch64-unknown-linux-gnu
-          }
+              NAME: linux-arm64-glibc,
+              OS: arm64,
+              TOOLCHAIN: stable,
+              TARGET: aarch64-unknown-linux-gnu,
+            }
           - {
-            NAME: win32-x64-msvc,
-            OS: windows-latest,
-            TOOLCHAIN: stable,
-            TARGET: x86_64-pc-windows-msvc
-          }
+              NAME: win32-x64-msvc,
+              OS: windows-latest,
+              TOOLCHAIN: stable,
+              TARGET: x86_64-pc-windows-msvc,
+            }
           - {
-            NAME: darwin-x64,
-            OS: macos-latest,
-            TOOLCHAIN: stable,
-            TARGET: x86_64-apple-darwin
-          }
+              NAME: darwin-x64,
+              OS: macos-latest,
+              TOOLCHAIN: stable,
+              TARGET: x86_64-apple-darwin,
+            }
           - {
-            NAME: darwin-arm64,
-            OS: macos-latest,
-            TOOLCHAIN: stable,
-            TARGET: aarch64-apple-darwin
-          }
+              NAME: darwin-arm64,
+              OS: macos-latest,
+              TOOLCHAIN: stable,
+              TARGET: aarch64-apple-darwin,
+            }
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v4
@@ -219,13 +219,11 @@ jobs:
         working-directory: magicblock-magic-program-api/
         run: |
           DRY_RUN_FLAG=""
+          NO_VERIFY_FLAG=""
           if [ "${DRY_RUN}" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
-          fi
-
-          if [ "${DRY_RUN}" = "true" ]; then
             NO_VERIFY_FLAG="--no-verify"
-          fi      
+          fi
           cargo publish $DRY_RUN_FLAG --manifest-path=./Cargo.toml --token $CRATES_TOKEN $NO_VERIFY_FLAG
         env:
           CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
