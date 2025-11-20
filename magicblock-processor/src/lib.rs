@@ -46,9 +46,10 @@ pub fn build_svm_env(
     }
 
     // We have a static rent which is setup once at startup,
-    // and never changes afterwards. For now we use the same
-    // values as the vanila solana validator (default())
-    let rent_collector = Box::leak(Box::new(RentCollector::default()));
+    // and never changes afterwards, so we just extend the
+    // lifetime to 'static by leaking the allocation.
+    let rent_collector = RentCollector::default();
+    let rent_collector = Box::leak(Box::new(rent_collector));
 
     TransactionProcessingEnvironment {
         blockhash,
