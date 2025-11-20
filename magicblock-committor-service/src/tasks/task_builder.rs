@@ -230,8 +230,7 @@ impl TasksBuilder for TaskBuilderImpl {
                     for account in committed_accounts {
                         compressed_data.push(
                             get_compressed_data(&account.pubkey, photon_client)
-                                .await
-                                .ok(),
+                                .await?,
                         );
                     }
 
@@ -239,7 +238,7 @@ impl TasksBuilder for TaskBuilderImpl {
                         .iter()
                         .zip(compressed_data)
                         .map(|(account, compressed_data)| {
-                            finalize_task(account, compressed_data)
+                            finalize_task(account, Some(compressed_data))
                         })
                         .collect())
                 }
