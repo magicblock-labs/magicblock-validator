@@ -555,17 +555,10 @@ impl IxtestContext {
         // In order to make the account undelegatable we first need to
         // commmit and finalize
         let (pda, bump) = FlexiCounter::pda(&counter_auth.pubkey());
-        let seed =
-            hashv_to_bn254_field_size_be_const_array::<3>(&[&pda.to_bytes()])
-                .unwrap();
-        let record_address = derive_address(
-            &seed,
-            &ADDRESS_TREE_PUBKEY.to_bytes(),
-            &compressed_delegation_client::ID.to_bytes(),
-        );
+        let record_address = derive_cda_from_pda(&pda);
         let compressed_account = self
             .photon_indexer
-            .get_compressed_account(record_address, None)
+            .get_compressed_account(record_address.to_bytes(), None)
             .await
             .unwrap()
             .value;
@@ -640,7 +633,7 @@ impl IxtestContext {
         // Finalize
         let compressed_account = self
             .photon_indexer
-            .get_compressed_account(record_address, None)
+            .get_compressed_account(record_address.to_bytes(), None)
             .await
             .unwrap()
             .value;
@@ -709,7 +702,7 @@ impl IxtestContext {
 
         let compressed_account = self
             .photon_indexer
-            .get_compressed_account(record_address, None)
+            .get_compressed_account(record_address.to_bytes(), None)
             .await
             .unwrap()
             .value;
