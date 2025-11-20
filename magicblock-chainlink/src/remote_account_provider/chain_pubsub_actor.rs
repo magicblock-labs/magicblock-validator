@@ -279,8 +279,12 @@ impl ChainPubsubActor {
         match msg {
             ChainPubsubActorMessage::AccountSubscribe { pubkey, response } => {
                 if !is_connected.load(Ordering::SeqCst) {
-                    trace!("[client_id={client_id}] Ignoring subscribe request for {pubkey} because disconnected");
-                    send_ok(response, client_id);
+                    warn!("[client_id={client_id}] Ignoring subscribe request for {pubkey} because disconnected");
+                    let _ = response.send(Err(
+                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                            format!("Client {client_id} disconnected"),
+                        ),
+                    ));
                     return;
                 }
                 let commitment_config = pubsub_client_config.commitment_config;
