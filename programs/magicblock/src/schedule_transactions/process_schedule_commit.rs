@@ -128,6 +128,7 @@ pub(crate) fn process_schedule_commit(
     // program owning the PDAs invoked us via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
+    let val_id = validator_authority_id();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
@@ -159,7 +160,7 @@ pub(crate) fn process_schedule_commit(
             let acc_owner = *acc.borrow().owner();
             if parent_program_id != Some(&acc_owner)
                 && !signers.contains(acc_pubkey)
-                && !signers.contains(&validator_authority_id())
+                && !signers.contains(&val_id)
             {
                 return match parent_program_id {
                     None => {
