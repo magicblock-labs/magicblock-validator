@@ -214,7 +214,9 @@ impl ScheduledCommitsProcessorImpl {
             let (intent_id, trigger_type) = execution_result
                 .as_ref()
                 .map(|output| (output.id, output.trigger_type))
-                .unwrap_or_else(|(id, trigger_type, _)| (*id, *trigger_type));
+                .unwrap_or_else(|(id, trigger_type, _, _)| {
+                    (*id, *trigger_type)
+                });
 
             // Here we handle on OnChain triggered intent
             // TODO: should be removed once crank supported
@@ -251,7 +253,7 @@ impl ScheduledCommitsProcessorImpl {
                     )
                     .await;
                 }
-                Err((_, _, err)) => {
+                Err((_, _, _, err)) => {
                     match err.as_ref() {
                         &magicblock_committor_service::intent_executor::error::IntentExecutorError::EmptyIntentError => {
                             warn!("Empty intent was scheduled!");

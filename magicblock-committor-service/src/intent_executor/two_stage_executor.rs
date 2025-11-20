@@ -2,6 +2,7 @@ use std::ops::{ControlFlow, Deref};
 
 use log::{error, info, warn};
 use solana_pubkey::Pubkey;
+use solana_sdk::signature::Signature;
 
 use crate::{
     intent_executor::{
@@ -10,7 +11,7 @@ use crate::{
             TransactionStrategyExecutionError,
         },
         task_info_fetcher::TaskInfoFetcher,
-        ExecutionOutput, IntentExecutorImpl,
+        IntentExecutorImpl,
     },
     persist::IntentPersister,
     tasks::task_strategist::TransactionStrategy,
@@ -20,8 +21,7 @@ use crate::{
 // TODO(edwin): Could be splitted into 2 States
 // TwoStageExecutor<Commit> & TwoStageExecutorCommit<Finalize>
 pub struct TwoStageExecutor<'a, T, F> {
-    inner: &'a IntentExecutorImpl<T, F>,
-    // TODO(edwin): don't forget to cleanup this at the end
+    pub(in crate::intent_executor) inner: &'a IntentExecutorImpl<T, F>,
     pub commit_strategy: TransactionStrategy,
     pub finalize_strategy: TransactionStrategy,
 
@@ -33,9 +33,11 @@ pub struct TwoStageExecutor<'a, T, F> {
 
 impl<'a, T, F> TwoStageExecutor<'a, T, F>
 where
-    T: TransactionPreparator + Clone,
+    T: TransactionPreparator,
     F: TaskInfoFetcher,
 {
+    const RECURSION_CEILING: u8 = 10;
+
     pub fn new(
         executor: &'a IntentExecutorImpl<T, F>,
         commit_strategy: TransactionStrategy,
@@ -51,13 +53,11 @@ where
         }
     }
 
-    pub async fn execute<P: IntentPersister>(
+    pub async fn commit<P: IntentPersister>(
         &mut self,
         committed_pubkeys: &[Pubkey],
         persister: &Option<P>,
-    ) -> IntentExecutorResult<ExecutionOutput> {
-        const RECURSION_CEILING: u8 = 10;
-
+    ) -> IntentExecutorResult<Signature> {
         let mut i = 0;
         let commit_result = loop {
             i += 1;
@@ -94,7 +94,7 @@ where
             };
             self.junk.push(cleanup);
 
-            if i >= RECURSION_CEILING {
+            if i >= Self::RECURSION_CEILING {
                 error!(
                     "CRITICAL! Recursion ceiling reached in intent execution."
                 );
@@ -105,19 +105,18 @@ where
         };
 
         let commit_signature = commit_result.map_err(|err| {
-            IntentExecutorError::from_strategy_execution_error(
-                err,
-                |internal_err| {
-                    let signature = internal_err.signature();
-                    IntentExecutorError::FailedToCommitError {
-                        err: internal_err,
-                        signature,
-                    }
-                },
-            )
+            IntentExecutorError::from_commmit_execution_error(err)
         })?;
 
-        i = 0;
+        Ok(commit_signature)
+    }
+
+    pub async fn finalize<P: IntentPersister>(
+        &mut self,
+        commit_signature: Signature,
+        persister: &Option<P>,
+    ) -> IntentExecutorResult<Signature> {
+        let mut i = 0;
         let finalize_result = loop {
             i += 1;
 
@@ -150,7 +149,7 @@ where
             };
             self.junk.push(cleanup);
 
-            if i >= RECURSION_CEILING {
+            if i >= Self::RECURSION_CEILING {
                 error!(
                     "CRITICAL! Recursion ceiling reached in intent execution."
                 );
@@ -161,23 +160,13 @@ where
         };
 
         let finalize_signature = finalize_result.map_err(|err| {
-            IntentExecutorError::from_strategy_execution_error(
+            IntentExecutorError::from_finalize_execution_error(
                 err,
-                |internal_err| {
-                    let finalize_signature = internal_err.signature();
-                    IntentExecutorError::FailedToFinalizeError {
-                        err: internal_err,
-                        commit_signature: Some(commit_signature),
-                        finalize_signature,
-                    }
-                },
+                Some(commit_signature),
             )
         })?;
 
-        Ok(ExecutionOutput::TwoStage {
-            commit_signature,
-            finalize_signature,
-        })
+        Ok(finalize_signature)
     }
 
     /// Patches Commit stage `transaction_strategy` in response to a recoverable

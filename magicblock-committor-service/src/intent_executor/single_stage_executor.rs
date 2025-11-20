@@ -18,7 +18,7 @@ use crate::{
 };
 
 pub struct SingleStageExecutor<'a, T, F> {
-    inner: &'a IntentExecutorImpl<T, F>,
+    pub(in crate::intent_executor) inner: &'a IntentExecutorImpl<T, F>,
     pub transaction_strategy: TransactionStrategy,
 
     /// Junk that needs to be cleaned up
@@ -29,7 +29,7 @@ pub struct SingleStageExecutor<'a, T, F> {
 
 impl<'a, T, F> SingleStageExecutor<'a, T, F>
 where
-    T: TransactionPreparator + Clone,
+    T: TransactionPreparator,
     F: TaskInfoFetcher,
 {
     pub fn new(
@@ -64,6 +64,7 @@ where
                 )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
+
             // Process error: Ok - return, Err - handle further
             let execution_err = match execution_result {
                 // break with result, strategy that was executed at this point has to be returned for cleanup
@@ -99,20 +100,11 @@ where
             }
         };
 
-        // Special case
-        let err = IntentExecutorError::from_strategy_execution_error(
+        Err(IntentExecutorError::from_finalize_execution_error(
             execution_err,
-            |internal_err| {
-                let signature = internal_err.signature();
-                IntentExecutorError::FailedToFinalizeError {
-                    err: internal_err,
-                    commit_signature: signature,
-                    finalize_signature: signature,
-                }
-            },
-        );
-
-        Err(err)
+            // TODO(edwin): shall one stage have same signature for commit & finalize
+            None,
+        ))
     }
 
     /// Patch the current `transaction_strategy` in response to a recoverable

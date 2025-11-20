@@ -21,7 +21,10 @@ use crate::{
         IntentExecutionManagerError,
     },
     intent_executor::{
-        error::{IntentExecutorError, IntentExecutorResult},
+        error::{
+            IntentExecutorError, IntentExecutorResult,
+            TransactionStrategyExecutionError,
+        },
         intent_executor_factory::IntentExecutorFactory,
         ExecutionOutput, IntentExecutor,
     },
@@ -33,14 +36,22 @@ const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 /// Max number of executors that can send messages in parallel to Base layer
 const MAX_EXECUTORS: u8 = 50;
 
+pub type PatchedErrors = Vec<TransactionStrategyExecutionError>;
+
 #[derive(Clone, Debug)]
 pub struct ExecutionOutputWrapper {
     pub id: u64,
     pub output: ExecutionOutput,
+    pub patched_errors: Arc<PatchedErrors>,
     pub trigger_type: TriggerType,
 }
 
-pub type BroadcastedError = (u64, TriggerType, Arc<IntentExecutorError>);
+pub type BroadcastedError = (
+    u64,
+    TriggerType,
+    Arc<PatchedErrors>,
+    Arc<IntentExecutorError>,
+);
 
 pub type BroadcastedIntentExecutionResult =
     IntentExecutorResult<ExecutionOutputWrapper, BroadcastedError>;
@@ -246,28 +257,30 @@ where
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
         let instant = Instant::now();
-        let result = executor
-            .execute(intent.inner.clone(), persister)
-            .await
-            .inspect_err(|err| {
-                error!(
-                    "Failed to execute BaseIntent. id: {}. {}",
-                    intent.id, err
-                )
-            });
+        let result = executor.execute(intent.inner.clone(), persister).await;
+
+        let _ = result.inner.as_ref().inspect_err(|err| {
+            error!("Failed to execute BaseIntent. id: {}. {}", intent.id, err)
+        });
 
         // Metrics
-        Self::execution_metrics(instant.elapsed(), &intent, &result);
+        Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
 
-        let result = result
-            .map(|output| ExecutionOutputWrapper {
+        let patched_errors = Arc::new(result.patched_errors);
+        let result = match result.inner {
+            Ok(output) => Ok(ExecutionOutputWrapper {
                 id: intent.id,
                 trigger_type: intent.trigger_type,
+                patched_errors,
                 output,
-            })
-            .map_err(|err| {
-                (intent.inner.id, intent.trigger_type, Arc::new(err))
-            });
+            }),
+            Err(err) => Err((
+                intent.inner.id,
+                intent.trigger_type,
+                patched_errors,
+                Arc::new(err),
+            )),
+        };
 
         // Broadcast result to subscribers
         if let Err(err) = result_sender.send(result) {
@@ -283,6 +296,18 @@ where
             .expect(POISONED_INNER_MSG)
             .complete(&intent.inner)
             .expect("Valid completion of previously scheduled message");
+
+        tokio::spawn(async move {
+            // Cleanup after intent
+            // Note: in some cases it maybe critical to execute cleanup synchronously
+            // Example: if commit nonces were invalid during execution
+            // next intent could use wrongly initiated buffers by current intent
+            // We assume that this case is highly unlikely since it would mean:
+            // user redelegates amd reaches current commit id faster than we execute transactions below
+            if let Err(err) = executor.cleanup().await {
+                error!("Failed to cleanup after intent: {}", err);
+            }
+        });
 
         // Free worker
         drop(execution_permit);

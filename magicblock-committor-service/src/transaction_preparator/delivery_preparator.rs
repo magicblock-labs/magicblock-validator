@@ -439,7 +439,7 @@ impl DeliveryPreparator {
         authority: &Keypair,
         tasks: &[Box<dyn BaseTask>],
         lookup_table_keys: &[Pubkey],
-    ) -> DeliveryPreparatorResult<(), InternalError> {
+    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         self.table_mania
             .release_pubkeys(&HashSet::from_iter(
                 lookup_table_keys.iter().cloned(),
@@ -490,7 +490,6 @@ impl DeliveryPreparator {
         join_all(close_futs)
             .await
             .into_iter()
-            .map(|res| res.map_err(InternalError::from))
             .inspect(|res| {
                 if let Err(err) = res {
                     error!("Failed to cleanup buffers: {}", err);
