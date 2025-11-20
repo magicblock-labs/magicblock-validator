@@ -378,7 +378,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             .next()
         else {
             return Err(
-                RemoteAccountProviderError::AccountSubscriptionsFailed(
+                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                     "No RPC endpoints provided".to_string(),
                 ),
             );

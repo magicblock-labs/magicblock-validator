@@ -380,7 +380,11 @@ impl ChainPubsubActor {
             );
         }
 
-        trace!("[client_id={client_id}] Adding subscription for {pubkey} with commitment {commitment_config:?}");
+        let config = RpcAccountInfoConfig {
+            commitment: Some(commitment_config),
+            encoding: Some(UiAccountEncoding::Base64Zstd),
+            ..Default::default()
+        };
 
         // Perform the subscription
         let (mut update_stream, unsubscribe) = match pubsub_connection
