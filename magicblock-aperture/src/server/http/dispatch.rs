@@ -176,13 +176,14 @@ impl HttpDispatcher {
     fn handle_cors_preflight() -> Result<Response<JsonBody>, Infallible> {
         use hyper::header::{
             ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-            ACCESS_CONTROL_ALLOW_ORIGIN,
+            ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_MAX_AGE
         };
 
         let response = Response::builder()
             .header(ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-            .header(ACCESS_CONTROL_ALLOW_METHODS, "POST, OPTIONS")
+            .header(ACCESS_CONTROL_ALLOW_METHODS, "POST, OPTIONS, GET")
             .header(ACCESS_CONTROL_ALLOW_HEADERS, "*")
+            .header(ACCESS_CONTROL_MAX_AGE, "86400")
             .body(JsonBody::from(""))
             // SAFETY: This is safe with static, valid headers
             .expect("Building CORS response failed");
