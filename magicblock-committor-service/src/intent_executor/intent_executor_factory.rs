@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 
@@ -21,6 +22,7 @@ pub trait IntentExecutorFactory {
 /// Dummy struct to simplify signature of CommitSchedulerWorker
 pub struct IntentExecutorFactoryImpl {
     pub rpc_client: MagicblockRpcClient,
+    pub photon_client: Arc<PhotonIndexer>,
     pub table_mania: TableMania,
     pub compute_budget_config: ComputeBudgetConfig,
     pub commit_id_tracker: Arc<CacheTaskInfoFetcher>,
@@ -38,6 +40,7 @@ impl IntentExecutorFactory for IntentExecutorFactoryImpl {
         );
         IntentExecutorImpl::<TransactionPreparatorImpl, CacheTaskInfoFetcher>::new(
             self.rpc_client.clone(),
+            self.photon_client.clone(),
             transaction_preparator,
             self.commit_id_tracker.clone(),
         )

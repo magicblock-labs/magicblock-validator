@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Arc, time::Instant};
 
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::*;
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signature};
@@ -98,6 +99,7 @@ impl CommittorActor {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        photon_client: Arc<PhotonIndexer>,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
@@ -106,6 +108,7 @@ impl CommittorActor {
             authority,
             persist_file,
             chain_config,
+            photon_client,
         )?);
 
         Ok(Self {
@@ -260,6 +263,7 @@ impl CommittorService {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        photon_client: Arc<PhotonIndexer>,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
@@ -274,6 +278,7 @@ impl CommittorService {
                 authority,
                 persist_file,
                 chain_config,
+                photon_client,
             )?;
             tokio::spawn(async move {
                 actor.run(cancel_token).await;

@@ -1,7 +1,8 @@
-use std::{collections::HashSet, ops::ControlFlow, time::Duration};
+use std::{collections::HashSet, ops::ControlFlow, sync::Arc, time::Duration};
 
 use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all, try_join_all};
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::{error, info};
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
@@ -31,8 +32,10 @@ use solana_sdk::{
 use crate::{
     persist::{CommitStatus, IntentPersister},
     tasks::{
-        task_strategist::TransactionStrategy, BaseTask, BaseTaskError,
-        CleanupTask, PreparationState, PreparationTask,
+        task_builder::{get_compressed_data, TaskBuilderError},
+        task_strategist::TransactionStrategy,
+        BaseTask, BaseTaskError, BufferPreparationTask, CleanupTask,
+        PreparationState, PreparationTask,
     },
     utils::persist_status_update,
     ComputeBudgetConfig,
@@ -64,10 +67,16 @@ impl DeliveryPreparator {
         authority: &Keypair,
         strategy: &mut TransactionStrategy,
         persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures =
             strategy.optimized_tasks.iter_mut().map(|task| {
-                self.prepare_task_handling_errors(authority, task, persister)
+                self.prepare_task_handling_errors(
+                    authority,
+                    task,
+                    persister,
+                    photon_client,
+                )
             });
 
         let task_preparations = join_all(preparation_futures);
@@ -89,6 +98,7 @@ impl DeliveryPreparator {
         authority: &Keypair,
         task: &mut dyn BaseTask,
         persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let PreparationState::Required(preparation_task) =
             task.preparation_state()
@@ -96,42 +106,72 @@ impl DeliveryPreparator {
             return Ok(());
         };
 
-        // Persist as failed until rewritten
-        let update_status = CommitStatus::BufferAndChunkPartiallyInitialized;
-        persist_status_update(
-            persister,
-            &preparation_task.pubkey,
-            preparation_task.commit_id,
-            update_status,
-        );
+        match preparation_task {
+            PreparationTask::Buffer(buffer_info) => {
+                // Persist as failed until rewritten
+                let update_status =
+                    CommitStatus::BufferAndChunkPartiallyInitialized;
+                persist_status_update(
+                    persister,
+                    &buffer_info.pubkey,
+                    buffer_info.commit_id,
+                    update_status,
+                );
 
-        // Initialize buffer account. Init + reallocs
-        self.initialize_buffer_account(authority, preparation_task)
-            .await?;
+                // Initialize buffer account. Init + reallocs
+                self.initialize_buffer_account(authority, buffer_info)
+                    .await?;
 
-        // Persist initialization success
-        let update_status = CommitStatus::BufferAndChunkInitialized;
-        persist_status_update(
-            persister,
-            &preparation_task.pubkey,
-            preparation_task.commit_id,
-            update_status,
-        );
+                // Persist initialization success
+                let update_status = CommitStatus::BufferAndChunkInitialized;
+                persist_status_update(
+                    persister,
+                    &buffer_info.pubkey,
+                    buffer_info.commit_id,
+                    update_status,
+                );
 
-        // Writing chunks with some retries
-        self.write_buffer_with_retries(authority, preparation_task)
-            .await?;
-        // Persist that buffer account initiated successfully
-        let update_status = CommitStatus::BufferAndChunkFullyInitialized;
-        persist_status_update(
-            persister,
-            &preparation_task.pubkey,
-            preparation_task.commit_id,
-            update_status,
-        );
+                // Writing chunks with some retries
+                self.write_buffer_with_retries(authority, buffer_info)
+                    .await?;
+                // Persist that buffer account initiated successfully
+                let update_status =
+                    CommitStatus::BufferAndChunkFullyInitialized;
+                persist_status_update(
+                    persister,
+                    &buffer_info.pubkey,
+                    buffer_info.commit_id,
+                    update_status,
+                );
 
-        let cleanup_task = preparation_task.cleanup_task();
-        task.switch_preparation_state(PreparationState::Cleanup(cleanup_task))?;
+                let cleanup_task = buffer_info.cleanup_task();
+                task.switch_preparation_state(PreparationState::Cleanup(
+                    cleanup_task,
+                ))?;
+            }
+            PreparationTask::Compressed => {
+                // NOTE: indexer can take some time to catch update
+                // TODO(dode): avoid sleeping, use min slot instead
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+
+                let delegated_account = task
+                    .delegated_account()
+                    .ok_or(InternalError::DelegatedAccountNotFound)?;
+                let photon_client = photon_client
+                    .as_ref()
+                    .ok_or(InternalError::PhotonClientNotFound)?;
+
+                let Ok(compressed_data) =
+                    get_compressed_data(&delegated_account, photon_client)
+                        .await
+                else {
+                    error!("Failed to get compressed data");
+                    return Err(InternalError::CompressedDataNotFound);
+                };
+                task.set_compressed_data(compressed_data);
+            }
+        }
+
         Ok(())
     }
 
@@ -142,8 +182,11 @@ impl DeliveryPreparator {
         authority: &Keypair,
         task: &mut Box<dyn BaseTask>,
         persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> Result<(), InternalError> {
-        let res = self.prepare_task(authority, task.as_mut(), persister).await;
+        let res = self
+            .prepare_task(authority, task.as_mut(), persister, photon_client)
+            .await;
         match res {
             Err(InternalError::BufferExecutionError(
                 BufferExecutionError::AccountAlreadyInitializedError(
@@ -161,8 +204,9 @@ impl DeliveryPreparator {
         }
 
         // Prepare cleanup task
-        let PreparationState::Required(preparation_task) =
-            task.preparation_state().clone()
+        let PreparationState::Required(PreparationTask::Buffer(
+            preparation_task,
+        )) = task.preparation_state().clone()
         else {
             return Ok(());
         };
@@ -172,10 +216,11 @@ impl DeliveryPreparator {
         self.cleanup(authority, std::slice::from_ref(task), &[])
             .await?;
         task.switch_preparation_state(PreparationState::Required(
-            preparation_task,
+            PreparationTask::Buffer(preparation_task),
         ))?;
 
-        self.prepare_task(authority, task.as_mut(), persister).await
+        self.prepare_task(authority, task.as_mut(), persister, photon_client)
+            .await
     }
 
     /// Initializes buffer account for future writes
@@ -183,8 +228,8 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask,
-    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
+        preparation_task: &BufferPreparationTask,
+    ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
         let init_instruction =
             preparation_task.init_instruction(&authority_pubkey);
@@ -227,7 +272,7 @@ impl DeliveryPreparator {
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask,
+        preparation_task: &BufferPreparationTask,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
         let chunks_pda = preparation_task.chunks_pda(&authority_pubkey);
@@ -508,6 +553,8 @@ impl From<MagicBlockRpcClientError> for BufferExecutionError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalError {
+    #[error("Compressed data not found")]
+    CompressedDataNotFound,
     #[error("0 retries was requested")]
     ZeroRetriesRequestedError,
     #[error("Chunks PDA does not exist for writing. pda: {0}")]
@@ -516,8 +563,18 @@ pub enum InternalError {
     BorshError(#[from] std::io::Error),
     #[error("TableManiaError: {0}")]
     TableManiaError(#[from] TableManiaError),
+    #[error("TransactionCreationError: {0}")]
+    TransactionCreationError(#[from] CompileError),
+    #[error("TransactionSigningError: {0}")]
+    TransactionSigningError(#[from] SignerError),
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+    #[error("Delegated account not found")]
+    DelegatedAccountNotFound,
+    #[error("PhotonClientNotFound")]
+    PhotonClientNotFound,
+    #[error("TaskBuilderError: {0}")]
+    TaskBuilderError(#[from] TaskBuilderError),
     #[error("BufferExecutionError: {0}")]
     BufferExecutionError(#[from] BufferExecutionError),
     #[error("BaseTaskError: {0}")]

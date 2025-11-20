@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub use intent_execution_engine::{
     BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
 };
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
@@ -34,6 +35,7 @@ pub struct IntentExecutionManager<D: DB> {
 impl<D: DB> IntentExecutionManager<D> {
     pub fn new<P: IntentPersister>(
         rpc_client: MagicblockRpcClient,
+        photon_client: Arc<PhotonIndexer>,
         db: D,
         intent_persister: Option<P>,
         table_mania: TableMania,
@@ -41,10 +43,13 @@ impl<D: DB> IntentExecutionManager<D> {
     ) -> Self {
         let db = Arc::new(db);
 
-        let commit_id_tracker =
-            Arc::new(CacheTaskInfoFetcher::new(rpc_client.clone()));
+        let commit_id_tracker = Arc::new(CacheTaskInfoFetcher::new(
+            rpc_client.clone(),
+            photon_client.clone(),
+        ));
         let executor_factory = IntentExecutorFactoryImpl {
             rpc_client,
+            photon_client,
             table_mania,
             compute_budget_config,
             commit_id_tracker,

@@ -314,5 +314,9 @@ fn schedule_commit_cpi_illegal_owner(
         commit_payer: true,
     };
     let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args);
-    Instruction::new_with_borsh(program_id, &ix, account_metas)
+    Instruction::new_with_bytes(
+        program_id,
+        &borsh::to_vec(&ix).expect("Serializing instruction should never fail"),
+        account_metas,
+    )
 }

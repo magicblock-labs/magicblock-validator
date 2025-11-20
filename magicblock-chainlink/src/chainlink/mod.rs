@@ -20,6 +20,7 @@ use crate::{
     config::ChainlinkConfig,
     fetch_cloner::FetchAndCloneResult,
     remote_account_provider::{
+        photon_client::{PhotonClient, PhotonClientImpl},
         ChainPubsubClient, ChainPubsubClientImpl, ChainRpcClient,
         ChainRpcClientImpl, Endpoint, RemoteAccountProvider,
     },
@@ -33,6 +34,8 @@ pub mod fetch_cloner;
 
 pub use blacklisted_accounts::*;
 
+type ArcFetchCloner<T, U, V, C, P> = Arc<FetchCloner<T, U, V, C, P>>;
+
 // -----------------
 // Chainlink
 // -----------------
@@ -41,9 +44,10 @@ pub struct Chainlink<
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 > {
     accounts_bank: Arc<V>,
-    fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+    fetch_cloner: Option<ArcFetchCloner<T, U, V, C, P>>,
     /// The subscription to events for each account that is removed from
     /// the accounts tracked by the provider.
     /// In that case we also remove it from the bank since it is no longer
@@ -58,12 +62,17 @@ pub struct Chainlink<
     auto_airdrop_lamports: u64,
 }
 
-impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
-    Chainlink<T, U, V, C>
+impl<
+        T: ChainRpcClient,
+        U: ChainPubsubClient,
+        V: AccountsBank,
+        C: Cloner,
+        P: PhotonClient,
+    > Chainlink<T, U, V, C, P>
 {
     pub fn try_new(
         accounts_bank: &Arc<V>,
-        fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+        fetch_cloner: Option<ArcFetchCloner<T, U, V, C, P>>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
         auto_airdrop_lamports: u64,
@@ -104,6 +113,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             SubMuxClient<ChainPubsubClientImpl>,
             V,
             C,
+            PhotonClientImpl,
         >,
     > {
         // Extract accounts provider and create fetch cloner while connecting
@@ -221,7 +231,7 @@ Kept: {} delegated, {} blacklisted",
     /// does nothing as only existing accounts are affected.
     /// See [lru::LruCache::promote]
     fn promote_accounts(
-        fetch_cloner: &FetchCloner<T, U, V, C>,
+        fetch_cloner: &FetchCloner<T, U, V, C, P>,
         pubkeys: &[&Pubkey],
     ) {
         fetch_cloner.promote_accounts(pubkeys);
@@ -349,7 +359,7 @@ Kept: {} delegated, {} blacklisted",
 
     async fn fetch_accounts_common(
         &self,
-        fetch_cloner: &FetchCloner<T, U, V, C>,
+        fetch_cloner: &FetchCloner<T, U, V, C, P>,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
@@ -411,7 +421,7 @@ Kept: {} delegated, {} blacklisted",
         Ok(())
     }
 
-    pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
+    pub fn fetch_cloner(&self) -> Option<&ArcFetchCloner<T, U, V, C, P>> {
         self.fetch_cloner.as_ref()
     }
 

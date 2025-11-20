@@ -9,9 +9,32 @@ pub fn cleanup_validators(
     kill_validators();
 }
 
+pub fn cleanup_validators_with_light(
+    ephem_validator: &mut Child,
+    light_validator: &mut Child,
+) {
+    cleanup_validator(ephem_validator, "ephemeral");
+    cleanup_light_validator(light_validator, "light");
+    kill_validators();
+}
+
 pub fn cleanup_devnet_only(devnet_validator: &mut Child) {
     cleanup_validator(devnet_validator, "devnet");
     kill_validators();
+}
+
+pub fn cleanup_light_validator(validator: &mut Child, label: &str) {
+    validator.kill().unwrap_or_else(|err| {
+        panic!("Failed to kill {} validator ({:?})", label, err)
+    });
+    let command = process::Command::new("light")
+        .arg("test-validator")
+        .arg("--stop")
+        .output()
+        .unwrap();
+    if !command.status.success() {
+        panic!("Failed to stop light validator: {:?}", command);
+    }
 }
 
 pub fn cleanup_validator(validator: &mut Child, label: &str) {

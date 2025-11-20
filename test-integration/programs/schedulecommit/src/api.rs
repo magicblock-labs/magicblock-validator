@@ -25,9 +25,9 @@ pub fn init_account_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::Init,
+        ScheduleCommitInstruction::Init,
         account_metas,
     )
 }
@@ -83,9 +83,9 @@ pub fn delegate_account_cpi_instruction(
         delegate_metas.system_program,
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::DelegateCpi(args),
+        ScheduleCommitInstruction::DelegateCpi(args),
         account_metas,
     )
 }
@@ -191,7 +191,7 @@ fn schedule_commit_cpi_instruction_impl(
         commit_payer: args.commit_payer,
     };
     let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args);
-    Instruction::new_with_borsh(program_id, &ix, account_metas)
+    build_instruction(program_id, ix, account_metas)
 }
 
 pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
@@ -211,21 +211,18 @@ pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    Instruction::new_with_borsh(
-        program_id,
-        &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(
-            players.to_vec(),
-        ),
-        account_metas,
-    )
+    let ix = ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(
+        players.to_vec(),
+    );
+    build_instruction(program_id, ix, account_metas)
 }
 
 pub fn increase_count_instruction(committee: Pubkey) -> Instruction {
     let program_id = crate::id();
     let account_metas = vec![AccountMeta::new(committee, false)];
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::IncreaseCount,
+        ScheduleCommitInstruction::IncreaseCount,
         account_metas,
     )
 }
@@ -257,4 +254,16 @@ pub fn pda_and_bump(acc_id: &Pubkey) -> (Pubkey, u8) {
     let program_id = crate::id();
     let seeds = pda_seeds(acc_id);
     Pubkey::find_program_address(&seeds, &program_id)
+}
+
+fn build_instruction(
+    program_id: Pubkey,
+    instruction: ScheduleCommitInstruction,
+    account_metas: Vec<AccountMeta>,
+) -> Instruction {
+    Instruction::new_with_bytes(
+        program_id,
+        &borsh::to_vec(&instruction).unwrap(),
+        account_metas,
+    )
 }

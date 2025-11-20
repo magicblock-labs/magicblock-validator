@@ -8,6 +8,7 @@ use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures_util::future::try_join_all;
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::{error, trace, warn};
 use magicblock_metrics::metrics;
 use magicblock_program::{
@@ -96,6 +97,7 @@ pub trait IntentExecutor: Send + Sync + 'static {
 pub struct IntentExecutorImpl<T, F> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
+    photon_client: Arc<PhotonIndexer>,
     transaction_preparator: T,
     task_info_fetcher: Arc<F>,
 }
@@ -107,6 +109,7 @@ where
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
+        photon_client: Arc<PhotonIndexer>,
         transaction_preparator: T,
         task_info_fetcher: Arc<F>,
     ) -> Self {
@@ -114,6 +117,7 @@ where
         Self {
             authority,
             rpc_client,
+            photon_client,
             transaction_preparator,
             task_info_fetcher,
         }
@@ -128,6 +132,13 @@ where
         persister: &Option<P>,
     ) -> Result<Option<TransactionStrategy>, SignerError> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
+
+        // If any of the tasks are compressed, we can't unite them
+        if commit_tasks.iter().any(|task| task.is_compressed())
+            || finalize_task.iter().any(|task| task.is_compressed())
+        {
+            return Ok(None);
+        }
 
         // We can unite in 1 tx a lot of commits
         // but then there's a possibility of hitting CPI limit, aka
@@ -148,8 +159,8 @@ where
         match TaskStrategist::build_strategy(commit_tasks, authority, persister)
         {
             Ok(strategy) => Ok(Some(strategy)),
-            Err(TaskStrategistError::FailedToFitError) => Ok(None),
             Err(TaskStrategistError::SignerError(err)) => Err(err),
+            Err(_) => Ok(None),
         }
     }
 
@@ -157,6 +168,7 @@ where
         &self,
         base_intent: ScheduledBaseIntent,
         persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         if base_intent.is_empty() {
             return Err(IntentExecutorError::EmptyIntentError);
@@ -178,6 +190,7 @@ where
             &self.task_info_fetcher,
             &base_intent,
             persister,
+            photon_client,
         )
         .await?;
 
@@ -195,6 +208,7 @@ where
                         base_intent,
                         strategy,
                         persister,
+                        photon_client,
                     )
                     .await;
             }
@@ -203,6 +217,7 @@ where
         let finalize_tasks = TaskBuilderImpl::finalize_tasks(
             &self.task_info_fetcher,
             &base_intent,
+            photon_client,
         )
         .await?;
 
@@ -219,6 +234,7 @@ where
                     base_intent,
                     single_tx_strategy,
                     persister,
+                    photon_client,
                 )
                 .await?;
 
@@ -245,6 +261,7 @@ where
                     commit_strategy,
                     finalize_strategy,
                     persister,
+                    photon_client,
                 )
                 .await?;
 
@@ -259,10 +276,17 @@ where
         base_intent: ScheduledBaseIntent,
         transaction_strategy: TransactionStrategy,
         persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let mut junk = Vec::new();
         let res = SingleStageExecutor::new(self)
-            .execute(base_intent, transaction_strategy, &mut junk, persister)
+            .execute(
+                base_intent,
+                transaction_strategy,
+                &mut junk,
+                persister,
+                photon_client,
+            )
             .await;
 
         // Cleanup after intent
@@ -289,6 +313,7 @@ where
         commit_strategy: TransactionStrategy,
         finalize_strategy: TransactionStrategy,
         persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let mut junk = Vec::new();
         let res = TwoStageExecutor::new(self)
@@ -298,6 +323,7 @@ where
                 finalize_strategy,
                 &mut junk,
                 persister,
+                photon_client,
             )
             .await;
 
@@ -321,7 +347,7 @@ where
 
     /// Handles out of sync commit id error, fixes current strategy
     /// Returns strategy to be cleaned up
-    /// TODO(edwin): TransactionStrategy -> CleanuoStrategy or something, naming it confusing for something that is cleaned up
+    /// TODO(edwin): TransactionStrategy -> CleanupStrategy or something, naming it confusing for something that is cleaned up
     async fn handle_commit_id_error(
         &self,
         committed_pubkeys: &[Pubkey],
@@ -334,7 +360,14 @@ where
             .reset(ResetType::Specific(committed_pubkeys));
         let commit_ids = self
             .task_info_fetcher
-            .fetch_next_commit_ids(committed_pubkeys)
+            .fetch_next_commit_ids(
+                committed_pubkeys,
+                // TODO(dode): Handle cases where some tasks are compressed and some are not
+                strategy
+                    .optimized_tasks
+                    .iter()
+                    .any(|task| task.is_compressed()),
+            )
             .await
             .map_err(TaskBuilderError::CommitTasksBuildError)?;
 
@@ -367,6 +400,7 @@ where
         Ok(TransactionStrategy {
             optimized_tasks: to_cleanup,
             lookup_tables_keys: old_alts,
+            compressed: strategy.compressed,
         })
     }
 
@@ -388,6 +422,7 @@ where
         TransactionStrategy {
             optimized_tasks: action_tasks,
             lookup_tables_keys: old_alts,
+            compressed: strategy.compressed,
         }
     }
 
@@ -421,6 +456,7 @@ where
         let commit_strategy = TransactionStrategy {
             optimized_tasks: commit_stage_tasks,
             lookup_tables_keys: commit_alt_pubkeys,
+            compressed: strategy.compressed,
         };
 
         let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
@@ -434,12 +470,14 @@ where
         let finalize_strategy = TransactionStrategy {
             optimized_tasks: finalize_stage_tasks,
             lookup_tables_keys: finalize_alt_pubkeys,
+            compressed: strategy.compressed,
         };
 
         // We clean up only ALTs
         let to_cleanup = TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: strategy.lookup_tables_keys,
+            compressed: strategy.compressed,
         };
 
         (commit_strategy, finalize_strategy, to_cleanup)
@@ -523,9 +561,13 @@ where
             | Err(IntentExecutorError::CpiLimitError(_, _)) => None,
             Err(IntentExecutorError::EmptyIntentError)
             | Err(IntentExecutorError::FailedToFitError)
+            | Err(IntentExecutorError::InconsistentTaskCompression)
             | Err(IntentExecutorError::TaskBuilderError(_))
             | Err(IntentExecutorError::FailedCommitPreparationError(
                 TransactionPreparatorError::SignerError(_),
+            ))
+            | Err(IntentExecutorError::FailedCommitPreparationError(
+                TransactionPreparatorError::InconsistentTaskCompression,
             ))
             | Err(IntentExecutorError::FailedFinalizePreparationError(
                 TransactionPreparatorError::SignerError(_),
@@ -593,6 +635,7 @@ where
         &self,
         transaction_strategy: &mut TransactionStrategy,
         persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<
         IntentExecutorResult<Signature, TransactionStrategyExecutionError>,
         TransactionPreparatorError,
@@ -604,6 +647,7 @@ where
                 &self.authority,
                 transaction_strategy,
                 persister,
+                photon_client,
             )
             .await?;
 
@@ -755,7 +799,13 @@ where
         let is_undelegate = base_intent.is_undelegate();
         let pubkeys = base_intent.get_committed_pubkeys();
 
-        let result = self.execute_inner(base_intent, &persister).await;
+        let result = self
+            .execute_inner(
+                base_intent,
+                &persister,
+                &Some(self.photon_client.clone()),
+            )
+            .await;
         if let Some(pubkeys) = pubkeys {
             // Reset TaskInfoFetcher, as cache could become invalid
             if result.is_err() || is_undelegate {
@@ -778,6 +828,7 @@ where
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
+    use light_client::indexer::photon_indexer::PhotonIndexer;
     use solana_pubkey::Pubkey;
 
     use crate::{
@@ -799,15 +850,16 @@ mod tests {
         async fn fetch_next_commit_ids(
             &self,
             pubkeys: &[Pubkey],
+            _compressed: bool,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
         }
 
         async fn fetch_rent_reimbursements(
             &self,
-            pubkeys: &[Pubkey],
+            accounts: &[Pubkey],
         ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
+            Ok(accounts.iter().map(|_| Pubkey::new_unique()).collect())
         }
 
         fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
@@ -822,18 +874,26 @@ mod tests {
         let pubkey = [Pubkey::new_unique()];
         let intent = create_test_intent(0, &pubkey);
 
+        let photon_client = Arc::new(PhotonIndexer::new(
+            "https://api.photon.com".to_string(),
+            None,
+        ));
         let info_fetcher = Arc::new(MockInfoFetcher);
         let commit_task = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
+            &Some(photon_client.clone()),
         )
         .await
         .unwrap();
-        let finalize_task =
-            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
-                .await
-                .unwrap();
+        let finalize_task = TaskBuilderImpl::finalize_tasks(
+            &info_fetcher,
+            &intent,
+            &Some(photon_client),
+        )
+        .await
+        .unwrap();
 
         let result = IntentExecutorImpl::<
             TransactionPreparatorImpl,

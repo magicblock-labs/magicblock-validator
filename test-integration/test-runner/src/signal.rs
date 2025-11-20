@@ -4,11 +4,12 @@ use std::{
     sync::mpsc::channel,
 };
 
-use crate::cleanup::cleanup_validator;
+use crate::cleanup::{cleanup_light_validator, cleanup_validator};
 
 pub fn wait_for_ctrlc(
     devnet_validator: Option<process::Child>,
     ephem_validator: Option<process::Child>,
+    light_validator: Option<process::Child>,
     output: Output,
 ) -> Result<Output, Box<dyn Error>> {
     let (tx, rx) = channel();
@@ -25,6 +26,8 @@ pub fn wait_for_ctrlc(
     if let Some(mut validator) = ephem_validator {
         cleanup_validator(&mut validator, "ephemeral");
     }
-
+    if let Some(mut validator) = light_validator {
+        cleanup_light_validator(&mut validator, "light");
+    }
     Ok(output)
 }

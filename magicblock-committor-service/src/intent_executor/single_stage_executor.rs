@@ -1,5 +1,9 @@
-use std::ops::{ControlFlow, Deref};
+use std::{
+    ops::{ControlFlow, Deref},
+    sync::Arc,
+};
 
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::{error, info};
 use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 
@@ -37,6 +41,7 @@ where
         mut transaction_strategy: TransactionStrategy,
         junk: &mut Vec<TransactionStrategy>,
         persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         const RECURSION_CEILING: u8 = 10;
 
@@ -49,6 +54,7 @@ where
                 .prepare_and_execute_strategy(
                     &mut transaction_strategy,
                     persister,
+                    photon_client,
                 )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
@@ -117,6 +123,7 @@ where
                 commit_strategy,
                 finalize_strategy,
                 persister,
+                photon_client,
             )
             .await
         } else {

@@ -15,6 +15,8 @@ use utils::test_context::TestContext;
 mod utils;
 
 use magicblock_chainlink::testing::init_logger;
+
+use crate::utils::accounts::compressed_account_shared_with_owner_and_slot;
 const CURRENT_SLOT: u64 = 11;
 
 async fn setup(slot: Slot) -> TestContext {
@@ -44,7 +46,7 @@ async fn test_write_non_existing_account() {
 }
 
 // -----------------
-// BasicScenarios:Case 1 Account is initialized and never delegated
+// BasicScenarios: Case 1 Account is initialized and never delegated
 // -----------------
 #[tokio::test]
 async fn test_existing_account_undelegated() {
@@ -250,4 +252,134 @@ async fn test_write_existing_account_invalid_delegation_record() {
     assert!(cloner.get_account(&pubkey).is_none());
 
     assert_not_subscribed!(chainlink, &[&deleg_record_pubkey, &pubkey]);
+}
+
+// -----------------
+// Compressed delegation record is initialized and delegated to us
+// -----------------
+#[tokio::test]
+async fn test_compressed_delegation_record_delegated() {
+    let TestContext {
+        chainlink,
+        photon_client,
+        cloner,
+        validator_pubkey,
+        ..
+    } = setup(CURRENT_SLOT).await;
+
+    let pubkey = Pubkey::new_unique();
+    let owner = Pubkey::new_unique();
+    let compressed_account = compressed_account_shared_with_owner_and_slot(
+        pubkey,
+        validator_pubkey,
+        owner,
+        CURRENT_SLOT,
+    );
+    photon_client.add_account(
+        pubkey,
+        compressed_account.clone().into(),
+        CURRENT_SLOT,
+    );
+
+    let pubkeys = [pubkey];
+    let res = chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    debug!("res: {res:?}");
+
+    assert_cloned_as_delegated!(cloner, &pubkeys, CURRENT_SLOT);
+    assert_not_subscribed!(chainlink, &[&pubkey]);
+}
+
+// -----------------
+// Compressed delegation record is initialized and delegated to another authority
+// -----------------
+#[tokio::test]
+async fn test_compressed_delegation_record_delegated_to_other() {
+    let TestContext {
+        chainlink,
+        photon_client,
+        cloner,
+        ..
+    } = setup(CURRENT_SLOT).await;
+
+    let pubkey = Pubkey::new_unique();
+    let authority = Pubkey::new_unique();
+    let owner = Pubkey::new_unique();
+    let compressed_account = compressed_account_shared_with_owner_and_slot(
+        pubkey,
+        authority,
+        owner,
+        CURRENT_SLOT,
+    );
+    photon_client.add_account(
+        pubkey,
+        compressed_account.clone().into(),
+        CURRENT_SLOT,
+    );
+
+    let pubkeys = [pubkey];
+    let res = chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    debug!("res: {res:?}");
+
+    assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT);
+    assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
+}
+
+// -----------------
+// Compressed delegation record is initialized and delegated to us and the pda exists
+// -----------------
+#[tokio::test]
+async fn test_compressed_delegation_record_delegated_shadows_pda() {
+    let TestContext {
+        chainlink,
+        rpc_client,
+        photon_client,
+        cloner,
+        validator_pubkey,
+        ..
+    } = setup(CURRENT_SLOT).await;
+
+    let pubkey = Pubkey::new_unique();
+    let owner = Pubkey::new_unique();
+    let compressed_account = compressed_account_shared_with_owner_and_slot(
+        pubkey,
+        validator_pubkey,
+        owner,
+        CURRENT_SLOT,
+    );
+    photon_client.add_account(
+        pubkey,
+        compressed_account.clone().into(),
+        CURRENT_SLOT,
+    );
+    rpc_client.add_account(pubkey, Account::default());
+
+    let pubkeys = [pubkey];
+    let res = chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    debug!("res: {res:?}");
+
+    assert_cloned_as_delegated!(cloner, &pubkeys, CURRENT_SLOT);
+    assert_not_subscribed!(chainlink, &[&pubkey]);
+}
+
+// -----------------
+// Compressed delegation record is initialized and empty (undelegated)
+// -----------------
+#[tokio::test]
+async fn test_compressed_account_undelegated() {
+    let TestContext {
+        chainlink,
+        photon_client,
+        cloner,
+        ..
+    } = setup(CURRENT_SLOT).await;
+
+    let pubkey = Pubkey::new_unique();
+    photon_client.add_account(pubkey, Account::default(), CURRENT_SLOT);
+
+    let pubkeys = [pubkey];
+    let res = chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    debug!("res: {res:?}");
+
+    assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT);
+    assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
 }

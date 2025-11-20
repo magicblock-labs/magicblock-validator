@@ -93,6 +93,7 @@ impl ChainlinkCloner {
             data: Some(account.data().to_owned()),
             executable: Some(account.executable()),
             delegated: Some(account.delegated()),
+            compressed: Some(account.compressed()),
         };
         InstructionUtils::modify_accounts(
             vec![account_modification],

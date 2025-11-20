@@ -8,6 +8,7 @@ use solana_sdk::clock::Slot;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteAccountUpdateSource {
     Fetch,
+    Compressed,
     Subscription,
 }
 
@@ -157,6 +158,10 @@ impl ResolvedAccountSharedData {
             Bank(account) => account.remote_slot(),
         }
     }
+
+    pub fn compressed(&self) -> bool {
+        self.account_shared_data().compressed()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,6 +184,10 @@ impl RemoteAccount {
     ) -> Self {
         let mut account_shared_data = AccountSharedData::from(account);
         account_shared_data.set_remote_slot(slot);
+        account_shared_data.set_compressed(matches!(
+            source,
+            RemoteAccountUpdateSource::Compressed
+        ));
         RemoteAccount::Found(RemoteAccountState {
             account: ResolvedAccount::Fresh(account_shared_data),
             source,
@@ -248,6 +257,10 @@ impl RemoteAccount {
         self.fresh_account().map(|acc| acc.lamports())
     }
 
+    pub fn fresh_data_len(&self) -> Option<usize> {
+        self.fresh_account().map(|acc| acc.data().len())
+    }
+
     pub fn owner(&self) -> Option<Pubkey> {
         self.fresh_account().map(|acc| *acc.owner())
     }
@@ -255,4 +268,15 @@ impl RemoteAccount {
     pub fn is_owned_by_delegation_program(&self) -> bool {
         self.owner().is_some_and(|owner| owner.eq(&dlp::id()))
     }
+
+    pub fn is_owned_by_compressed_delegation_program(&self) -> bool {
+        self.owner()
+            .is_some_and(|owner| owner.eq(&compressed_delegation_client::id()))
+    }
+}
+
+#[derive(Clone)]
+pub enum FetchedRemoteAccounts {
+    Rpc(Vec<RemoteAccount>),
+    Compressed(Vec<RemoteAccount>),
 }

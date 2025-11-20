@@ -4,8 +4,8 @@ use magicblock_chainlink::{
     remote_account_provider::{
         chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
-        config::RemoteAccountProviderConfig, Endpoint,
-        ForwardedSubscriptionUpdate, RemoteAccountProvider,
+        config::RemoteAccountProviderConfig, photon_client::PhotonClientImpl,
+        Endpoint, ForwardedSubscriptionUpdate, RemoteAccountProvider,
         RemoteAccountUpdateSource,
     },
     submux::SubMuxClient,
@@ -26,11 +26,12 @@ async fn init_remote_account_provider() -> (
     RemoteAccountProvider<
         ChainRpcClientImpl,
         SubMuxClient<ChainPubsubClientImpl>,
+        PhotonClientImpl,
     >,
     mpsc::Receiver<ForwardedSubscriptionUpdate>,
 ) {
     let (fwd_tx, fwd_rx) = mpsc::channel(100);
-    let endpoints = [Endpoint {
+    let endpoints = [Endpoint::Rpc {
         rpc_url: RPC_URL.to_string(),
         pubsub_url: PUBSUB_URL.to_string(),
     }];
@@ -38,6 +39,7 @@ async fn init_remote_account_provider() -> (
         RemoteAccountProvider::<
             ChainRpcClientImpl,
             SubMuxClient<ChainPubsubClientImpl>,
+            PhotonClientImpl,
         >::try_new_from_urls(
             &endpoints,
             CommitmentConfig::confirmed(),

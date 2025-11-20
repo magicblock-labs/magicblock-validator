@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_pubkey::Pubkey;
@@ -30,6 +33,7 @@ pub trait TransactionPreparator: Send + Sync + 'static {
         authority: &Keypair,
         transaction_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> PreparatorResult<VersionedMessage>;
 
     /// Cleans up after strategy
@@ -76,6 +80,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         authority: &Keypair,
         tx_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> PreparatorResult<VersionedMessage> {
         // If message won't fit, there's no reason to prepare anything
         // Fail early
@@ -94,7 +99,12 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator
-            .prepare_for_delivery(authority, tx_strategy, intent_persister)
+            .prepare_for_delivery(
+                authority,
+                tx_strategy,
+                intent_persister,
+                photon_client,
+            )
             .await?;
 
         let message = TransactionUtils::assemble_tasks_tx(

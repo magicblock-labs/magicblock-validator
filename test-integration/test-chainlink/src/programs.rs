@@ -150,8 +150,8 @@ pub mod resolve_deploy {
     macro_rules! fetch_and_assert_loaded_program_v1_v2_v4 {
         ($rpc_client:expr, $program_id:expr, $expected:expr) => {{
             use log::*;
+            use solana_account::AccountSharedData;
             use solana_loader_v4_interface::state::LoaderV4Status;
-            use solana_sdk::account::AccountSharedData;
 
             let program_account = $rpc_client
                 .get_account(&$program_id)

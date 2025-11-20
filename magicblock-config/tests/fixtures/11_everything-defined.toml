@@ -50,3 +50,7 @@ system-metrics-tick-interval-secs = 10
 
 [task-scheduler]
 reset = true
+
+[compression]
+photon-url = "http://localhost:8787"
+api-key = "api_key"

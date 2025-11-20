@@ -16,6 +16,7 @@ num-traits = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 magicblock-core = { workspace = true }
 magicblock-metrics = { workspace = true }
+solana-account = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-log-collector = { workspace = true }
 solana-sdk = { workspace = true }

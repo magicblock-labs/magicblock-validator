@@ -15,7 +15,7 @@ pub struct ChangesetChunk {
     pub offset: u32,
     pub data_chunk: Vec<u8>,
     // chunk size can never exceed the ix max size which is well below u16::MAX (65_535)
-    #[borsh(skip)]
+    #[borsh_skip]
     chunk_size: u16,
 }
 

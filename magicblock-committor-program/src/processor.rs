@@ -1,4 +1,4 @@
-use borsh::{to_vec, BorshDeserialize};
+use borsh::{BorshDeserialize, BorshSerialize};
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, log::sol_log_64, msg,
     program::invoke_signed, program_error::ProgramError, system_instruction,
@@ -191,7 +191,7 @@ fn process_init(
     chunks_account_info
         .data
         .borrow_mut()
-        .copy_from_slice(&to_vec(&chunks)?);
+        .copy_from_slice(&chunks.try_to_vec()?);
 
     Ok(())
 }
@@ -337,7 +337,7 @@ fn process_write(
     chunks
         .set_offset_delivered(offset as usize)
         .map_err(CommittorError::from)?;
-    chunks_data.copy_from_slice(&to_vec(&chunks)?);
+    chunks_data.copy_from_slice(&chunks.try_to_vec()?);
 
     Ok(())
 }
