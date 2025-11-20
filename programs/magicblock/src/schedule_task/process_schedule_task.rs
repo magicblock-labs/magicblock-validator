@@ -97,7 +97,7 @@ pub(crate) fn process_schedule_task(
             get_instruction_pubkey_with_idx(transaction_context, i as u16)
                 .copied()
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<HashSet<_>, _>>()?;
     let val_id = validator_authority_id();
     for instruction in &args.instructions {
         for account in &instruction.accounts {
