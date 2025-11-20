@@ -143,6 +143,9 @@ impl DeliveryPreparator {
                     buffer_info.commit_id,
                     update_status,
                 );
+              
+                let cleanup_task = buffer_info.cleanup_task();
+                task.switch_preparation_state(PreparationState::Cleanup(cleanup_task))?;
             }
             PreparationTask::Compressed => {
                 // NOTE: indexer can take some time to catch update
