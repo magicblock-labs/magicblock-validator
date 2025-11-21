@@ -200,7 +200,6 @@ async fn test_undelegation_error_parsing() {
     let execution_result = execution_result.unwrap();
     assert!(execution_result.is_err());
     let err = execution_result.unwrap_err();
-    println!("{}", err.to_string());
     assert!(matches!(
         err,
         TransactionStrategyExecutionError::UndelegationError(_, _)
