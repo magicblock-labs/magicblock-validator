@@ -396,14 +396,14 @@ fn process_undelegate_request(
         account_seeds,
     )?;
 
-    let counter = {
+    {
         let data = delegated_account.data.borrow();
-        FlexiCounter::deserialize(&mut data.as_ref())?
+        if let Ok(counter) = FlexiCounter::deserialize(&mut data.as_ref()) {
+            if counter.label == FAIL_UNDELEGATION_LABEL {
+                return Err(ProgramError::Custom(FAIL_UNDELEGATION_CODE));
+            }
+        }
     };
-
-    if counter.label == FAIL_UNDELEGATION_LABEL {
-        return Err(ProgramError::Custom(FAIL_UNDELEGATION_CODE));
-    }
 
     Ok(())
 }
