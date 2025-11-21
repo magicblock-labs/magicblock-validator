@@ -387,6 +387,8 @@ mod tests {
         },
         persist::IntentPersisterImpl,
         tasks::{
+            intent_executor::NullTaskInfoFetcher,
+            persist::IntentPersisterImpl,
             task_builder::{TaskBuilderImpl, TasksBuilder},
             BaseActionTask, CommitTask, TaskStrategy, UndelegateTask,
         },
@@ -422,7 +424,7 @@ mod tests {
         data_size: usize,
     ) -> ArgsTask {
         ArgsTask::new(ArgsTaskType::Commit(
-            CommitTask::new(
+            CommitTaskBuilder::create_commit_task(
                 commit_id,
                 false,
                 CommittedAccount {

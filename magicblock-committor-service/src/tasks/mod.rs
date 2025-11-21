@@ -110,30 +110,23 @@ pub trait BaseTask: Send + Sync + DynClone + LabelValue {
 
 dyn_clone::clone_trait_object!(BaseTask);
 
-#[derive(Clone)]
-pub struct CommitTask {
-    pub commit_id: u64,
-    pub allow_undelegation: bool,
-    pub committed_account: CommittedAccount,
-    base_account: Option<Account>,
-    force_commit_state: bool,
-}
+pub struct CommitTaskBuilder;
 
-impl CommitTask {
+impl CommitTaskBuilder {
     // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD, use CommitDiff to
     // reduce instruction size. Below this, commit is sent as CommitState.
     // Chose 256 as thresold seems good enough as it could hold 8 u32 fields
     // or 4 u64 fields.
     const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 
-    pub async fn new<C: TaskInfoFetcher>(
+    pub async fn create_commit_task<C: TaskInfoFetcher>(
         commit_id: u64,
         allow_undelegation: bool,
         committed_account: CommittedAccount,
         task_info_fetcher: &Arc<C>,
-    ) -> Self {
+    ) -> CommitTask {
         let base_account = if committed_account.account.data.len()
-            > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
+            > CommitTaskBuilder::COMMIT_STATE_SIZE_THRESHOLD
         {
             match task_info_fetcher
                 .get_base_account(&committed_account.pubkey)
@@ -155,7 +148,7 @@ impl CommitTask {
             None
         };
 
-        Self {
+        CommitTask {
             commit_id,
             allow_undelegation,
             committed_account,
@@ -163,11 +156,22 @@ impl CommitTask {
             force_commit_state: false,
         }
     }
+}
 
+#[derive(Clone)]
+pub struct CommitTask {
+    pub commit_id: u64,
+    pub allow_undelegation: bool,
+    pub committed_account: CommittedAccount,
+    base_account: Option<Account>,
+    force_commit_state: bool,
+}
+
+impl CommitTask {
     pub fn is_commit_diff(&self) -> bool {
         !self.force_commit_state
             && self.committed_account.account.data.len()
-                > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
+                > CommitTaskBuilder::COMMIT_STATE_SIZE_THRESHOLD
             && self.base_account.is_some()
     }
 
@@ -420,7 +424,7 @@ mod serialization_safety_test {
     use solana_account::Account;
 
     use crate::{
-        intent_executor::task_info_fetcher::NullTaskInfoFetcher,
+        intent_executor::NullTaskInfoFetcher,
         tasks::{
             args_task::{ArgsTask, ArgsTaskType},
             buffer_task::{BufferTask, BufferTaskType},
@@ -435,7 +439,7 @@ mod serialization_safety_test {
 
         // Test Commit variant
         let commit_task: ArgsTask = ArgsTaskType::Commit(
-            CommitTask::new(
+            CommitTaskBuilder::create_commit_task(
                 123,
                 true,
                 CommittedAccount {
@@ -499,7 +503,7 @@ mod serialization_safety_test {
 
         let buffer_task =
             BufferTask::new_preparation_required(BufferTaskType::Commit(
-                CommitTask::new(
+                CommitTaskBuilder::create_commit_task(
                     456,
                     false,
                     CommittedAccount {
@@ -527,7 +531,7 @@ mod serialization_safety_test {
         // Test BufferTask preparation
         let buffer_task =
             BufferTask::new_preparation_required(BufferTaskType::Commit(
-                CommitTask::new(
+                CommitTaskBuilder::create_commit_task(
                     789,
                     true,
                     CommittedAccount {

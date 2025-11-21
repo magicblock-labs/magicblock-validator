@@ -29,7 +29,6 @@ magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true }
-magicblock-config = { workspace = true }
 rusqlite = { workspace = true }
 solana-account = { workspace = true }
 solana-address-lookup-table-interface = { workspace = true }

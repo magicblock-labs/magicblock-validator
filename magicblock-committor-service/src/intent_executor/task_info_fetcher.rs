@@ -43,9 +43,7 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
     async fn get_base_account(
         &self,
         _pubkey: &Pubkey,
-    ) -> MagicBlockRpcClientResult<Option<Account>> {
-        Ok(None) // AccountNotFound
-    }
+    ) -> MagicBlockRpcClientResult<Option<Account>>;
 }
 
 pub enum ResetType<'a> {
@@ -309,37 +307,3 @@ impl TaskInfoFetcherError {
 }
 
 pub type TaskInfoFetcherResult<T, E = TaskInfoFetcherError> = Result<T, E>;
-
-#[cfg(any(test, feature = "dev-context-only-utils"))]
-pub struct NullTaskInfoFetcher;
-
-#[cfg(any(test, feature = "dev-context-only-utils"))]
-#[async_trait]
-impl TaskInfoFetcher for NullTaskInfoFetcher {
-    async fn fetch_next_commit_ids(
-        &self,
-        _pubkeys: &[Pubkey],
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        Ok(Default::default())
-    }
-
-    async fn fetch_rent_reimbursements(
-        &self,
-        _pubkeys: &[Pubkey],
-    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-        Ok(Default::default())
-    }
-
-    fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
-        None
-    }
-
-    fn reset(&self, _: ResetType) {}
-
-    async fn get_base_account(
-        &self,
-        _pubkey: &Pubkey,
-    ) -> MagicBlockRpcClientResult<Option<Account>> {
-        Ok(None) // AccountNotFound
-    }
-}

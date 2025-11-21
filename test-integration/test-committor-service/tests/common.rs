@@ -10,12 +10,11 @@ use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
-            NullTaskInfoFetcher, ResetType, TaskInfoFetcher,
-            TaskInfoFetcherResult,
+            ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
         },
-        IntentExecutorImpl,
+        IntentExecutorImpl, NullTaskInfoFetcher,
     },
-    tasks::CommitTask,
+    tasks::{CommitTask, CommitTaskBuilder},
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
@@ -162,7 +161,7 @@ pub fn generate_random_bytes(length: usize) -> Vec<u8> {
 #[allow(dead_code)]
 pub async fn create_commit_task(data: &[u8]) -> CommitTask {
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
-    CommitTask::new(
+    CommitTaskBuilder::create_commit_task(
         COMMIT_ID.fetch_add(1, Ordering::Relaxed),
         false,
         CommittedAccount {

@@ -371,6 +371,8 @@ mod tests {
 
     use async_trait::async_trait;
     use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
+    use magicblock_rpc_client::MagicBlockRpcClientResult;
+    use solana_account::Account;
     use solana_pubkey::{pubkey, Pubkey};
     use solana_signature::Signature;
     use solana_signer::SignerError;
@@ -820,6 +822,26 @@ mod tests {
 
         async fn cleanup(self) -> Result<(), BufferExecutionError> {
             Ok(())
+        }
+
+        async fn fetch_rent_reimbursements(
+            &self,
+            pubkeys: &[Pubkey],
+        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
+        }
+
+        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
+            None
+        }
+
+        fn reset(&self, _: ResetType) {}
+
+        async fn get_base_account(
+            &self,
+            _pubkey: &Pubkey,
+        ) -> MagicBlockRpcClientResult<Option<Account>> {
+            Ok(None) // AccountNotFound
         }
     }
 }

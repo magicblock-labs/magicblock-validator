@@ -17,7 +17,8 @@ use crate::{
     persist::IntentPersister,
     tasks::{
         args_task::{ArgsTask, ArgsTaskType},
-        BaseActionTask, BaseTask, CommitTask, FinalizeTask, UndelegateTask,
+        BaseActionTask, BaseTask, CommitTaskBuilder, FinalizeTask,
+        UndelegateTask,
     },
 };
 
@@ -91,7 +92,7 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .map(|account| async {
                 let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                let task = ArgsTaskType::Commit(CommitTask::new(
+                let task = ArgsTaskType::Commit(CommitTaskBuilder::create_commit_task(
                     commit_id,
                     allow_undelegation,
                     account.clone(),
