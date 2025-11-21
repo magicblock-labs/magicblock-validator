@@ -504,6 +504,7 @@ where
                         delegation_record.authority.eq(&self.validator_pubkey);
                     account.set_delegated(is_delegated_to_us);
 
+                    // TODO(dode): commit frequency ms is not supported for compressed delegation records
                     (
                         Some(account),
                         Some(DelegationRecord {
