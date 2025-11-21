@@ -200,8 +200,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 Kept: {} delegated, {} blacklisted",
             non_empty,
             remaining_empty.into_inner(),
-            undelegating,
             delegated_only,
+            undelegating,
             delegated_only + undelegating,
             blacklisted.into_inner()
         );
