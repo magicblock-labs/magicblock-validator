@@ -12,6 +12,7 @@ use dlp::{
 };
 use log::*;
 use magicblock_core::traits::AccountsBank;
+use magicblock_metrics::metrics;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk::system_program;
@@ -1008,11 +1009,8 @@ where
         pubkey: &Pubkey,
         in_bank: &AccountSharedData,
     ) -> bool {
-        if in_bank.owner().eq(&dlp::id()) {
-            debug!("Account {pubkey} owned by deleg program. delegated={}, undelegating={}", in_bank.delegated(), in_bank.undelegating());
-        }
         if in_bank.undelegating() {
-            debug!("Fetching account {pubkey} marked as undelegating");
+            debug!("Fetching undelegating account {pubkey}. delegated={}, undelegating={}", in_bank.delegated(), in_bank.undelegating());
             let deleg_record = self
                 .fetch_and_parse_delegation_record(
                     *pubkey,
@@ -1086,25 +1084,36 @@ where
                 //       This actually would point to a bug in the subscription logic.
                 // TODO(thlorenz): remove this once we are certain (by perusing logs) that this
                 //                 does not happen anymore
-                let is_ok = account_in_bank.owner().eq(&dlp::id())
-                    || account_in_bank.delegated()
-                    || self.blacklisted_accounts.contains(pubkey)
-                    || self.is_watching(pubkey);
-
-                if !is_ok && !self.is_watching(pubkey) {
-                    debug!("Account {pubkey} should be watched but wasn't");
+                let should_be_watching = {
+                    let no_watch_needed = (account_in_bank.delegated()
+                        && !account_in_bank.undelegating())
+                        || self.blacklisted_accounts.contains(pubkey)
+                        || self.is_watching(pubkey);
+                    !no_watch_needed
+                };
+                if should_be_watching {
+                    debug!("Account {pubkey} should be watched but wasn't and is fetched again");
+                    metrics::inc_refetched_unwatched_count();
                 }
-                let should_refresh = self
+
+                let should_refresh_undelegating = self
                     .should_refresh_undelegating_in_bank_account(
                         pubkey,
                         &account_in_bank,
                     )
                     .await;
-                if is_ok && !should_refresh {
-                    // Account is in bank and subscribed correctly - return immediately
-                    trace!("Account {pubkey} found in bank in valid state, no fetch needed");
-                    in_bank.push(*pubkey);
+                if should_refresh_undelegating {
+                    debug!("Account {pubkey} needs completed undelegation which we missed and is fetched again");
+                    metrics::inc_unstuck_undelegation_count();
                 }
+                if should_be_watching || should_refresh_undelegating {
+                    // Account is in an invalid state in the bank - fetch it again
+                    continue;
+                }
+
+                // Account is in bank and subscribed correctly - no fetch needed
+                trace!("Account {pubkey} found in bank in valid state, no fetch needed");
+                in_bank.push(*pubkey);
             }
         }
         pubkeys.retain(|p| !in_bank.contains(p));
