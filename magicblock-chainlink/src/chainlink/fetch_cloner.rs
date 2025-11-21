@@ -1035,6 +1035,7 @@ where
     /// If it has finished undelegating, we should refresh it in the bank.
     /// - **pubkey**: the account pubkey
     /// - **in_bank**: the account as it exists in the bank
+    ///
     /// Returns true if the account should be refreshed in the bank
     async fn should_refresh_undelegating_in_bank_account(
         &self,
