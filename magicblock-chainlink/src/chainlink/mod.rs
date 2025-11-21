@@ -1,4 +1,7 @@
-use std::{cell::Cell, sync::Arc};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
@@ -156,52 +159,61 @@ impl<
         let blacklisted_accounts =
             blacklisted_accounts(&self.validator_id, &self.faucet_id);
 
-        let delegated = Cell::new(0_u64);
-        let dlp_owned_not_delegated = Cell::new(0_u64);
-        let blacklisted = Cell::new(0_u64);
-        let remaining = Cell::new(0_u64);
-        let remaining_empty = Cell::new(0_u64);
+        let delegated_only = AtomicU64::new(0);
+        let undelegating = AtomicU64::new(0);
+        let blacklisted = AtomicU64::new(0);
+        let remaining = AtomicU64::new(0);
+        let remaining_empty = AtomicU64::new(0);
 
         let removed = self.accounts_bank.remove_where(|pubkey, account| {
             if blacklisted_accounts.contains(pubkey) {
-                blacklisted.set(blacklisted.get() + 1);
+                blacklisted.fetch_add(1, Ordering::Relaxed);
                 return false;
             }
-            // TODO: this potentially looses data and is a temporary measure
-            if account.owner().eq(&dlp::id()) {
-                dlp_owned_not_delegated.set(dlp_owned_not_delegated.get() + 1);
-                return true;
-            }
-            if account.delegated() {
-                delegated.set(delegated.get() + 1);
+            // Undelegating accounts are normally also delegated, but if that ever changes
+            // we want to make sure we never remove an account of which we aren't sure
+            // if the undelegation completed on chain or not.
+            if account.delegated() || account.undelegating() {
+                if account.undelegating() {
+                    undelegating.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    delegated_only.fetch_add(1, Ordering::Relaxed);
+                }
                 return false;
             }
             trace!(
                 "Removing non-delegated, non-DLP-owned account: {pubkey} {:#?}",
                 account
             );
-            remaining.set(remaining.get() + 1);
+            remaining.fetch_add(1, Ordering::Relaxed);
             if account.lamports() == 0
                 && account.owner().ne(&solana_sdk::feature::id())
             {
-                remaining_empty.set(remaining_empty.get() + 1);
+                remaining_empty.fetch_add(1, Ordering::Relaxed);
             }
             true
         });
 
-        let non_empty = remaining.get().saturating_sub(remaining_empty.get());
+        let non_empty = remaining
+            .load(Ordering::Relaxed)
+            .saturating_sub(remaining_empty.load(Ordering::Relaxed));
+
+        let delegated_only = delegated_only.into_inner();
+        let undelegating = undelegating.into_inner();
 
         info!(
             "Removed {removed} accounts from bank:
-{} DLP-owned non-delegated
 {} non-delegated non-blacklisted, no-feature non-empty.
 {} non-delegated non-blacklisted empty
+{} delegated not undelegating
+{} delegated and undelegating
 Kept: {} delegated, {} blacklisted",
-            dlp_owned_not_delegated.get(),
             non_empty,
-            remaining_empty.get(),
-            delegated.get(),
-            blacklisted.get()
+            remaining_empty.into_inner(),
+            delegated_only,
+            undelegating,
+            delegated_only + undelegating,
+            blacklisted.into_inner()
         );
     }
 
