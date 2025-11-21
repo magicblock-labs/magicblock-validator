@@ -1,4 +1,5 @@
 use std::{
+    ops::Deref,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -26,7 +27,7 @@ use crate::{
             TransactionStrategyExecutionError,
         },
         intent_executor_factory::IntentExecutorFactory,
-        ExecutionOutput, IntentExecutor,
+        ExecutionOutput, IntentExecutionResult, IntentExecutor,
     },
     persist::IntentPersister,
     types::{ScheduledBaseIntentWrapper, TriggerType},
@@ -39,22 +40,37 @@ const MAX_EXECUTORS: u8 = 50;
 pub type PatchedErrors = Vec<TransactionStrategyExecutionError>;
 
 #[derive(Clone, Debug)]
-pub struct ExecutionOutputWrapper {
+pub struct BroadcastedIntentExecutionResult {
+    pub inner: Result<ExecutionOutput, Arc<IntentExecutorError>>,
     pub id: u64,
-    pub output: ExecutionOutput,
-    pub patched_errors: Arc<PatchedErrors>,
     pub trigger_type: TriggerType,
+    pub patched_errors: Arc<PatchedErrors>,
 }
 
-pub type BroadcastedError = (
-    u64,
-    TriggerType,
-    Arc<PatchedErrors>,
-    Arc<IntentExecutorError>,
-);
+impl BroadcastedIntentExecutionResult {
+    fn new(
+        id: u64,
+        trigger_type: TriggerType,
+        execution_result: IntentExecutionResult,
+    ) -> Self {
+        let inner = execution_result.inner.map_err(Arc::new);
+        let patched_errors = execution_result.patched_errors.into();
+        Self {
+            id,
+            trigger_type,
+            patched_errors,
+            inner,
+        }
+    }
+}
 
-pub type BroadcastedIntentExecutionResult =
-    IntentExecutorResult<ExecutionOutputWrapper, BroadcastedError>;
+impl Deref for BroadcastedIntentExecutionResult {
+    type Target = Result<ExecutionOutput, Arc<IntentExecutorError>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
 
 /// Struct that exposes only `subscribe` method of `broadcast::Sender` for better isolation
 pub struct ResultSubscriber(
@@ -257,33 +273,23 @@ where
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
         let instant = Instant::now();
-        let result = executor.execute(intent.inner.clone(), persister).await;
 
+        // Execute an Intent
+        let result = executor.execute(intent.inner.clone(), persister).await;
         let _ = result.inner.as_ref().inspect_err(|err| {
             error!("Failed to execute BaseIntent. id: {}. {}", intent.id, err)
         });
 
-        // Metrics
+        // Record metrics after execution
         Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
 
-        let patched_errors = Arc::new(result.patched_errors);
-        let result = match result.inner {
-            Ok(output) => Ok(ExecutionOutputWrapper {
-                id: intent.id,
-                trigger_type: intent.trigger_type,
-                patched_errors,
-                output,
-            }),
-            Err(err) => Err((
-                intent.inner.id,
-                intent.trigger_type,
-                patched_errors,
-                Arc::new(err),
-            )),
-        };
-
         // Broadcast result to subscribers
-        if let Err(err) = result_sender.send(result) {
+        let broadcasted_result = BroadcastedIntentExecutionResult::new(
+            intent.id,
+            intent.trigger_type,
+            result,
+        );
+        if let Err(err) = result_sender.send(broadcasted_result) {
             warn!("No result listeners of intent execution: {}", err);
         }
 
@@ -366,8 +372,10 @@ mod tests {
     use async_trait::async_trait;
     use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
     use solana_pubkey::{pubkey, Pubkey};
-    use solana_sdk::{signature::Signature, signer::SignerError};
-    use solana_sdk::transaction::TransactionError;
+    use solana_sdk::{
+        signature::Signature, signer::SignerError,
+        transaction::TransactionError,
+    };
     use tokio::{sync::mpsc, time::sleep};
 
     use super::*;
@@ -543,7 +551,7 @@ mod tests {
             let result = result_receiver.recv().await.unwrap();
             assert!(result.is_ok());
             // Tasks are blocking so will complete sequentially
-            assert_eq!(result.unwrap().id, completed as u64);
+            assert_eq!(result.id, completed as u64);
             completed += 1;
         }
 
@@ -793,8 +801,8 @@ mod tests {
                     patched_errors: vec![
                         TransactionStrategyExecutionError::ActionsError(
                             TransactionError::AccountNotFound,
-                            None
-                        )
+                            None,
+                        ),
                     ],
                 }
             } else {

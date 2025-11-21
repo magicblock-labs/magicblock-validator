@@ -28,9 +28,7 @@ use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
 };
-use solana_sdk::{
-    hash::Hash, pubkey::Pubkey, signature::Signature, transaction::Transaction,
-};
+use solana_sdk::{hash::Hash, pubkey::Pubkey, transaction::Transaction};
 use tokio::{
     sync::{broadcast, oneshot},
     task,
@@ -209,13 +207,8 @@ impl ScheduledCommitsProcessorImpl {
                 }
             };
 
-            let (intent_id, trigger_type) = execution_result
-                .as_ref()
-                .map(|output| (output.id, output.trigger_type))
-                .unwrap_or_else(|(id, trigger_type, _, _)| {
-                    (*id, *trigger_type)
-                });
-
+            let intent_id = execution_result.id;
+            let trigger_type = execution_result.trigger_type;
             // Here we handle on OnChain triggered intent
             // TODO: should be removed once crank supported
             if matches!(trigger_type, TriggerType::OffChain) {
@@ -257,40 +250,10 @@ impl ScheduledCommitsProcessorImpl {
         result: BroadcastedIntentExecutionResult,
         mut intent_meta: ScheduledBaseIntentMeta,
     ) {
-        let error_message = result
-            .as_ref()
-            .err()
-            .map(|(_, _, _, err)| format!("{:?}", err));
-        let chain_signatures = match result {
-            Ok(execution_outcome) => match execution_outcome.output {
-                ExecutionOutput::SingleStage(signature) => vec![signature],
-                ExecutionOutput::TwoStage {
-                    commit_signature,
-                    finalize_signature,
-                } => vec![commit_signature, finalize_signature],
-            },
-            Err((_, _, _, err)) => {
-                error!(
-                    "Failed to commit in slot: {}, blockhash: {}. {:?}",
-                    intent_meta.slot, intent_meta.blockhash, err
-                );
-                err.signatures()
-                    .map(|(commit, finalize)| {
-                        finalize
-                            .map(|finalize| vec![commit, finalize])
-                            .unwrap_or(vec![commit])
-                    })
-                    .unwrap_or(vec![])
-            }
-        };
         let intent_sent_transaction =
             std::mem::take(&mut intent_meta.intent_sent_transaction);
-        let sent_commit = Self::build_sent_commit(
-            intent_id,
-            chain_signatures,
-            intent_meta,
-            error_message,
-        );
+        let sent_commit =
+            Self::build_sent_commit(intent_id, intent_meta, result);
         register_scheduled_commit_sent(sent_commit);
         match internal_transaction_scheduler
             .execute(intent_sent_transaction)
@@ -308,10 +271,39 @@ impl ScheduledCommitsProcessorImpl {
 
     fn build_sent_commit(
         intent_id: u64,
-        chain_signatures: Vec<Signature>,
         intent_meta: ScheduledBaseIntentMeta,
-        error_message: Option<String>,
+        result: BroadcastedIntentExecutionResult,
     ) -> SentCommit {
+        let error_message =
+            result.as_ref().err().map(|err| format!("{:?}", err));
+        let chain_signatures = match result.inner {
+            Ok(value) => match value {
+                ExecutionOutput::SingleStage(signature) => vec![signature],
+                ExecutionOutput::TwoStage {
+                    commit_signature,
+                    finalize_signature,
+                } => vec![commit_signature, finalize_signature],
+            },
+            Err(err) => {
+                error!(
+                    "Failed to commit in slot: {}, blockhash: {}. {:?}",
+                    intent_meta.slot, intent_meta.blockhash, err
+                );
+                err.signatures()
+                    .map(|(commit, finalize)| {
+                        finalize
+                            .map(|finalize| vec![commit, finalize])
+                            .unwrap_or(vec![commit])
+                    })
+                    .unwrap_or(vec![])
+            }
+        };
+        let patched_errors = result
+            .patched_errors
+            .iter()
+            .map(|err| err.to_string())
+            .collect();
+
         SentCommit {
             message_id: intent_id,
             slot: intent_meta.slot,
@@ -322,6 +314,7 @@ impl ScheduledCommitsProcessorImpl {
             excluded_pubkeys: intent_meta.excluded_pubkeys,
             requested_undelegation: intent_meta.requested_undelegation,
             error_message,
+            patched_errors,
         }
     }
 }
