@@ -7,23 +7,23 @@ reviews:
   request_changes_workflow: false
   high_level_summary: true
   high_level_summary_instructions: ''
-  high_level_summary_placeholder: Summary
+  high_level_summary_placeholder: "<!-- coderabbit-summary -->"
   high_level_summary_in_walkthrough: false
   auto_title_placeholder: ''
   auto_title_instructions: ''
   review_status: true
   commit_status: true
   fail_commit_status: false
-  collapse_walkthrough: false
-  changed_files_summary: true
-  sequence_diagrams: true
-  estimate_code_review_effort: true
+  collapse_walkthrough: true
+  changed_files_summary: false
+  sequence_diagrams: false
+  estimate_code_review_effort: false
   assess_linked_issues: true
   related_issues: true
   related_prs: true
-  suggested_labels: true
+  suggested_labels: false
   labeling_instructions: []
-  auto_apply_labels: true
+  auto_apply_labels: false
   suggested_reviewers: true
   auto_assign_reviewers: false
   in_progress_fortune: false
@@ -42,18 +42,18 @@ reviews:
     ignore_usernames: []
   finishing_touches:
     docstrings:
-      enabled: true
+      enabled: false
     unit_tests:
       enabled: true
   pre_merge_checks:
     docstrings:
-      mode: warning
+      mode: off
       threshold: 80
     title:
-      mode: warning
+      mode: off
       requirements: ''
     description:
-      mode: warning
+      mode: off
     issue_assessment:
       mode: warning
     custom_checks: []
@@ -70,7 +70,7 @@ reviews:
     markdownlint:
       enabled: true
     github-checks:
-      enabled: true
+      enabled: false
       timeout_ms: 90000
     languagetool:
       enabled: true
