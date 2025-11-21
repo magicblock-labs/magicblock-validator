@@ -525,11 +525,11 @@ async fn ix_commit_local(
 
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
     let mut strategies = ExpectedStrategies::new();
-    for (execution_output, base_intent) in
+    for (execution_result, base_intent) in
         execution_outputs.into_iter().zip(base_intents.into_iter())
     {
-        let execution_output = execution_output.inner.unwrap();
-        let (commit_signature, finalize_signature) = match execution_output {
+        let output = execution_result.inner.unwrap();
+        let (commit_signature, finalize_signature) = match output {
             ExecutionOutput::SingleStage(signature) => (signature, signature),
             ExecutionOutput::TwoStage {
                 commit_signature,
@@ -537,6 +537,11 @@ async fn ix_commit_local(
             } => (commit_signature, finalize_signature),
         };
 
+        assert_eq!(
+            execution_result.patched_errors.len(),
+            0,
+            "No errors expected to be patched"
+        );
         assert!(
             tx_logs_contain(&rpc_client, &commit_signature, "CommitState")
                 .await
