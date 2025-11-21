@@ -885,8 +885,10 @@ where
             }
 
             let fetch_result = if !pubkeys_to_fetch.is_empty() {
-                self.fetch_count
-                    .fetch_add(pubkeys_to_fetch.len() as u64, Ordering::Relaxed);
+                self.fetch_count.fetch_add(
+                    pubkeys_to_fetch.len() as u64,
+                    Ordering::Relaxed,
+                );
                 self.remote_account_provider
                     .try_get_multi_until_slots_match(
                         &pubkeys_to_fetch,
@@ -1298,9 +1300,9 @@ where
                 .try_get_multi_until_slots_match(
                     &[pubkey, delegation_record_pubkey],
                     Some(MatchSlotsConfig {
-                            min_context_slot: Some(slot),
-                            ..Default::default()
-                        }),
+                        min_context_slot: Some(slot),
+                        ..Default::default()
+                    }),
                 )
                 .await
                 // SAFETY: we always get two results here
@@ -1333,9 +1335,9 @@ where
         match (acc, deleg) {
             // Account not found even though we found it previously - this is invalid,
             // either way we cannot use it now
-            (NotFound(_), NotFound(_)) | (NotFound(_), Found(_)) => Err(
-                ChainlinkError::ResolvedAccountCouldNoLongerBeFound(pubkey),
-            ),
+            (NotFound(_), NotFound(_)) | (NotFound(_), Found(_)) => {
+                Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(pubkey))
+            }
             (Found(acc), NotFound(_)) => {
                 // Only account found without a delegation record, it is either invalid
                 // or a delegation record itself.
@@ -1347,9 +1349,11 @@ where
                         companion_pubkey: delegation_record_pubkey,
                         companion_account: None,
                     }),
-                    None => Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                        pubkey,
-                    )),
+                    None => Err(
+                        ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
+                            pubkey,
+                        ),
+                    ),
                 }
             }
             (Found(acc), Found(deleg)) => {
@@ -1358,14 +1362,20 @@ where
                 let Some(deleg_account) =
                     deleg.account.resolved_account_shared_data(&**bank)
                 else {
-                    return Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                        pubkey,
-                    ));
+                    return Err(
+                        ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
+                            pubkey,
+                        ),
+                    );
                 };
-                let Some(account) = acc.account.resolved_account_shared_data(&**bank) else {
-                    return Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                        pubkey,
-                    ));
+                let Some(account) =
+                    acc.account.resolved_account_shared_data(&**bank)
+                else {
+                    return Err(
+                        ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
+                            pubkey,
+                        ),
+                    );
                 };
                 Ok(AccountWithCompanion {
                     pubkey,
