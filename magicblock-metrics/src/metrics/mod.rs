@@ -229,13 +229,6 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
-    pub static ref REFETCHED_UNWATCHED_COUNT: IntCounter =
-        IntCounter::new(
-            "refetched_unwatched_count",
-            "Total number of refetched accounts that we should have been watching but were not",
-        )
-        .unwrap();
-
 
     // -----------------
     // Transaction Execution
@@ -342,7 +335,6 @@ pub(crate) fn register() {
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(UNSTUCK_UNDELEGATION_COUNT);
-        register!(REFETCHED_UNWATCHED_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
         register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
         register!(TASK_INFO_FETCHER_A_COUNT);
@@ -502,14 +494,6 @@ pub fn inc_undelegation_completed() {
 
 pub fn inc_unstuck_undelegation_count() {
     UNSTUCK_UNDELEGATION_COUNT.inc();
-}
-
-pub fn inc_refetched_unwatched_count() {
-    REFETCHED_UNWATCHED_COUNT.inc();
-}
-
-pub fn read_refetched_unwatched_count() -> u64 {
-    REFETCHED_UNWATCHED_COUNT.get()
 }
 
 pub fn inc_remote_account_provider_a_count() {

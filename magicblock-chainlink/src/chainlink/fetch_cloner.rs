@@ -1086,23 +1086,6 @@ where
             if let Some(account_in_bank) =
                 self.accounts_bank.get_account(pubkey)
             {
-                // NOTE: we defensively correct accounts that we should have been watching but
-                //       were not for some reason. We fetch them again in that case.
-                //       This actually would point to a bug in the subscription logic.
-                // TODO(thlorenz): remove this once we are certain (by perusing logs) that this
-                //                 does not happen anymore
-                let should_be_watching = {
-                    let no_watch_needed = (account_in_bank.delegated()
-                        && !account_in_bank.undelegating())
-                        || self.blacklisted_accounts.contains(pubkey)
-                        || self.is_watching(pubkey);
-                    !no_watch_needed
-                };
-                if should_be_watching {
-                    debug!("Account {pubkey} should be watched but wasn't and is fetched again");
-                    metrics::inc_refetched_unwatched_count();
-                }
-
                 let should_refresh_undelegating = self
                     .should_refresh_undelegating_in_bank_account(
                         pubkey,
@@ -1113,9 +1096,7 @@ where
                     debug!("Account {pubkey} completed undelegation which we missed and is fetched again");
                     metrics::inc_unstuck_undelegation_count();
                 }
-                let refresh_needed =
-                    should_be_watching || should_refresh_undelegating;
-                if !refresh_needed {
+                if !should_refresh_undelegating {
                     // Account is in bank and subscribed correctly - no fetch needed
                     trace!("Account {pubkey} found in bank in valid state, no fetch needed");
                     in_bank.push(*pubkey);
