@@ -859,11 +859,14 @@ where
 
         let (loaded_programs, program_data_subs, errors) = {
             // For LoaderV3 accounts we fetch the program data account
-            let mut fetch_with_program_data_join_set = JoinSet::new();
             let (loaderv3_programs, single_account_programs): (Vec<_>, Vec<_>) =
                 programs
                     .into_iter()
                     .partition(|(_, acc, _)| acc.owner().eq(&LOADER_V3));
+
+            let mut pubkeys_to_fetch =
+                Vec::with_capacity(loaderv3_programs.len() * 2);
+            let mut batch_min_context_slot = min_context_slot;
 
             for (pubkey, _, account_slot) in &loaderv3_programs {
                 let effective_slot = if let Some(min_slot) = min_context_slot {
@@ -871,26 +874,62 @@ where
                 } else {
                     *account_slot
                 };
-                fetch_with_program_data_join_set.spawn(
-                    self.task_to_fetch_with_program_data(
-                        *pubkey,
-                        effective_slot,
-                    ),
+                batch_min_context_slot = Some(
+                    batch_min_context_slot.unwrap_or(0).max(effective_slot),
                 );
+
+                let program_data_pubkey =
+                    get_loaderv3_get_program_data_address(pubkey);
+                pubkeys_to_fetch.push(*pubkey);
+                pubkeys_to_fetch.push(program_data_pubkey);
             }
-            let joined = fetch_with_program_data_join_set.join_all().await;
-            let (mut errors, accounts_with_program_data) = joined
-                .into_iter()
-                .fold((vec![], vec![]), |(mut errors, mut successes), res| {
-                    match res {
-                        Ok(Ok(account_with_program_data)) => {
-                            successes.push(account_with_program_data)
+
+            let fetch_result = if !pubkeys_to_fetch.is_empty() {
+                self.fetch_count
+                    .fetch_add(pubkeys_to_fetch.len() as u64, Ordering::Relaxed);
+                self.remote_account_provider
+                    .try_get_multi_until_slots_match(
+                        &pubkeys_to_fetch,
+                        Some(MatchSlotsConfig {
+                            min_context_slot: batch_min_context_slot,
+                            ..Default::default()
+                        }),
+                    )
+                    .await
+            } else {
+                Ok(vec![])
+            };
+
+            let (mut errors, accounts_with_program_data) = match fetch_result {
+                Ok(remote_accounts) => {
+                    let mut successes = Vec::new();
+                    let mut errors = Vec::new();
+
+                    for (i, chunk) in remote_accounts.chunks(2).enumerate() {
+                        if chunk.len() != 2 {
+                            continue;
                         }
-                        Ok(Err(err)) => errors.push(err),
-                        Err(err) => errors.push(err.into()),
+                        let (pubkey, _, _) = loaderv3_programs[i];
+                        let program_data_pubkey = pubkeys_to_fetch[i * 2 + 1];
+
+                        let acc = chunk[0].clone();
+                        let deleg = chunk[1].clone();
+
+                        match Self::resolve_account_with_companion(
+                            &self.accounts_bank,
+                            pubkey,
+                            program_data_pubkey,
+                            acc,
+                            deleg,
+                        ) {
+                            Ok(res) => successes.push(res),
+                            Err(err) => errors.push(err),
+                        }
                     }
                     (errors, successes)
-                });
+                }
+                Err(err) => (vec![ChainlinkError::from(err)], vec![]),
+            };
             let mut loaded_programs = vec![];
 
             // Cancel subs for program data accounts
@@ -1272,61 +1311,70 @@ where
                 })
                 .map_err(ChainlinkError::from)
                 .and_then(|(acc, deleg)| {
-                    use RemoteAccount::*;
-                    match (acc, deleg) {
-                        // Account not found even though we found it previously - this is invalid,
-                        // either way we cannot use it now
-                        (NotFound(_), NotFound(_)) |
-                        (NotFound(_), Found(_)) => Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                                pubkey
-                            )),
-                        (Found(acc), NotFound(_)) => {
-                            // Only account found without a delegation record, it is either invalid
-                            // or a delegation record itself.
-                            // Clone it as is (without changing the owner or flagging as delegated)
-                            match acc.account.resolved_account_shared_data(&*bank) {
-                                Some(account) =>
-                                    Ok(AccountWithCompanion {
-                                        pubkey,
-                                        account,
-                                        companion_pubkey: delegation_record_pubkey,
-                                        companion_account: None,
-                                     }),
-                                None => Err(
-                                    ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                                        pubkey
-                                    ),
-                                ),
-                            }
-                        }
-                        (Found(acc), Found(deleg)) => {
-                            // Found the delegation record, we include it so that the caller can
-                            // use it to add metadata to the account and use it for decision making
-                            let Some(deleg_account) =
-                                deleg.account.resolved_account_shared_data(&*bank)
-                            else {
-                                return Err(
-                                    ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                                    pubkey
-                                ));
-                            };
-                            let Some(account) = acc.account.resolved_account_shared_data(&*bank) else {
-                                return Err(
-                                    ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                                        pubkey
-                                    ),
-                                );
-                            };
-                            Ok(AccountWithCompanion {
-                                pubkey,
-                                account,
-                                companion_pubkey: delegation_record_pubkey,
-                                companion_account: Some(deleg_account),
-                             })
-                        },
-                    }
+                    Self::resolve_account_with_companion(
+                        &bank,
+                        pubkey,
+                        delegation_record_pubkey,
+                        acc,
+                        deleg,
+                    )
                 })
         })
+    }
+
+    fn resolve_account_with_companion(
+        bank: &Arc<V>,
+        pubkey: Pubkey,
+        delegation_record_pubkey: Pubkey,
+        acc: RemoteAccount,
+        deleg: RemoteAccount,
+    ) -> ChainlinkResult<AccountWithCompanion> {
+        use RemoteAccount::*;
+        match (acc, deleg) {
+            // Account not found even though we found it previously - this is invalid,
+            // either way we cannot use it now
+            (NotFound(_), NotFound(_)) | (NotFound(_), Found(_)) => Err(
+                ChainlinkError::ResolvedAccountCouldNoLongerBeFound(pubkey),
+            ),
+            (Found(acc), NotFound(_)) => {
+                // Only account found without a delegation record, it is either invalid
+                // or a delegation record itself.
+                // Clone it as is (without changing the owner or flagging as delegated)
+                match acc.account.resolved_account_shared_data(&**bank) {
+                    Some(account) => Ok(AccountWithCompanion {
+                        pubkey,
+                        account,
+                        companion_pubkey: delegation_record_pubkey,
+                        companion_account: None,
+                    }),
+                    None => Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
+                        pubkey,
+                    )),
+                }
+            }
+            (Found(acc), Found(deleg)) => {
+                // Found the delegation record, we include it so that the caller can
+                // use it to add metadata to the account and use it for decision making
+                let Some(deleg_account) =
+                    deleg.account.resolved_account_shared_data(&**bank)
+                else {
+                    return Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
+                        pubkey,
+                    ));
+                };
+                let Some(account) = acc.account.resolved_account_shared_data(&**bank) else {
+                    return Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
+                        pubkey,
+                    ));
+                };
+                Ok(AccountWithCompanion {
+                    pubkey,
+                    account,
+                    companion_pubkey: delegation_record_pubkey,
+                    companion_account: Some(deleg_account),
+                })
+            }
+        }
     }
 
     /// Check if an account is currently being watched (subscribed to) by the
