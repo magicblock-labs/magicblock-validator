@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-
+use borsh::to_vec;
 use log::*;
 use magicblock_committor_service::{
     config::ChainConfig,
@@ -27,6 +27,7 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use tokio::task::JoinSet;
+use program_flexi_counter::state::FlexiCounter;
 use utils::transactions::tx_logs_contain;
 
 use crate::utils::{
@@ -115,7 +116,15 @@ async fn commit_single_account(
         init_and_delegate_account_on_chain(&counter_auth, bytes as u64, None)
             .await;
     account.owner = program_flexi_counter::id();
-    account.data = vec![101_u8; bytes];
+
+    let counter = FlexiCounter {
+        label: "Counter".to_string(),
+        updates: 0,
+        count: 101
+    };
+    let mut data = to_vec(&counter).unwrap();
+    data.resize(bytes, 0);
+    account.data = data;
 
     let account = CommittedAccount { pubkey, account };
     let base_intent = if undelegate {
@@ -507,8 +516,7 @@ async fn ix_commit_local(
         .await
         .unwrap()
         .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .expect("Some commits failed");
+        .collect::<Vec<_>>();
 
     // Assert that all completed
     assert_eq!(execution_outputs.len(), base_intents.len());
@@ -519,7 +527,7 @@ async fn ix_commit_local(
     for (execution_output, base_intent) in
         execution_outputs.into_iter().zip(base_intents.into_iter())
     {
-        let execution_output = execution_output.output;
+        let execution_output = execution_output.inner.unwrap();
         let (commit_signature, finalize_signature) = match execution_output {
             ExecutionOutput::SingleStage(signature) => (signature, signature),
             ExecutionOutput::TwoStage {
