@@ -12,6 +12,27 @@ pub struct ActionArgs {
     pub data: Vec<u8>,
 }
 
+impl ActionArgs {
+    pub fn default(data: Vec<u8>) -> Self {
+        Self {
+            escrow_index: 255,
+            data,
+        }
+    }
+    pub fn escrow_index(&self) -> u8 {
+        self.escrow_index
+    }
+
+    pub fn data(&self) -> &Vec<u8> {
+        &self.data
+    }
+
+    pub fn with_escrow_index(mut self, index: u8) -> Self {
+        self.escrow_index = index;
+        self
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct BaseActionArgs {
     pub args: ActionArgs,
