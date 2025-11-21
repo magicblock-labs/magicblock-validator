@@ -163,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn test_accout_was_undelegated_and_redelegated_to_another() {
+    fn test_account_was_undelegated_and_redelegated_to_another() {
         // Case C: The account was undelegated and then re-delegated to another validator.
         // Conditions:
         // - is_delegated: false (not delegated to us on chain)
