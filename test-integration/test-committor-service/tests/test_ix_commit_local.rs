@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+
 use borsh::to_vec;
 use log::*;
 use magicblock_committor_service::{
@@ -18,6 +19,7 @@ use magicblock_program::magic_scheduled_base_intent::{
     ScheduledBaseIntent, UndelegateType,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
+use program_flexi_counter::state::FlexiCounter;
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -27,7 +29,6 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use tokio::task::JoinSet;
-use program_flexi_counter::state::FlexiCounter;
 use utils::transactions::tx_logs_contain;
 
 use crate::utils::{
@@ -120,7 +121,7 @@ async fn commit_single_account(
     let counter = FlexiCounter {
         label: "Counter".to_string(),
         updates: 0,
-        count: 101
+        count: 101,
     };
     let mut data = to_vec(&counter).unwrap();
     data.resize(bytes, 0);
