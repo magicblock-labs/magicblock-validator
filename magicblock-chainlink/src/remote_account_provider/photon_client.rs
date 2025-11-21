@@ -131,6 +131,8 @@ fn account_from_compressed_account(
     compressed_acc: Option<CompressedAccount>,
 ) -> Option<Account> {
     let compressed_acc = compressed_acc?;
+    // NOTE: delegated compressed accounts are set to zero lamports when cloned
+    // Actual lamports have to be paid back when undelegating
     Some(Account {
         lamports: 0,
         data: compressed_acc.data.unwrap_or_default().data,
