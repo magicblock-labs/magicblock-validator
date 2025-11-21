@@ -274,6 +274,7 @@ mod tests {
             excluded_pubkeys: Default::default(),
             requested_undelegation: false,
             error_message: None,
+            patched_errors: vec![],
         }
     }
 

@@ -1,4 +1,4 @@
-use std::ops::{ControlFlow, Deref};
+use std::ops::ControlFlow;
 
 use log::{error, info, warn};
 use solana_pubkey::Pubkey;
@@ -11,6 +11,7 @@ use crate::{
             TransactionStrategyExecutionError,
         },
         task_info_fetcher::TaskInfoFetcher,
+        two_stage_executor::sealed::Sealed,
         IntentExecutorImpl,
     },
     persist::IntentPersister,
@@ -18,20 +19,33 @@ use crate::{
     transaction_preparator::TransactionPreparator,
 };
 
-// TODO(edwin): Could be splitted into 2 States
-// TwoStageExecutor<Commit> & TwoStageExecutorCommit<Finalize>
-pub struct TwoStageExecutor<'a, T, F> {
-    pub(in crate::intent_executor) inner: &'a IntentExecutorImpl<T, F>,
+pub struct Initialized {
+    /// Commit stage strategy
     pub commit_strategy: TransactionStrategy,
+    /// Finalize stage strategy
     pub finalize_strategy: TransactionStrategy,
-
-    /// Junk that needs to be cleaned up
-    pub junk: Vec<TransactionStrategy>,
-    /// Errors we patched trying to recover intent
-    pub patched_errors: Vec<TransactionStrategyExecutionError>,
 }
 
-impl<'a, T, F> TwoStageExecutor<'a, T, F>
+pub struct Committed {
+    /// Signature of commit stage
+    pub commit_signature: Signature,
+    /// Finalize stage strategy
+    pub finalize_strategy: TransactionStrategy,
+}
+
+pub struct Finalized {
+    /// Signature of commit stage
+    pub commit_signature: Signature,
+    /// Signature of finalize stage
+    pub finalize_signature: Signature,
+}
+
+pub struct TwoStageExecutor<'a, T, F, S: Sealed> {
+    pub(in crate::intent_executor) inner: &'a mut IntentExecutorImpl<T, F>,
+    pub state: S,
+}
+
+impl<'a, T, F> TwoStageExecutor<'a, T, F, Initialized>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
@@ -39,25 +53,24 @@ where
     const RECURSION_CEILING: u8 = 10;
 
     pub fn new(
-        executor: &'a IntentExecutorImpl<T, F>,
+        executor: &'a mut IntentExecutorImpl<T, F>,
         commit_strategy: TransactionStrategy,
         finalize_strategy: TransactionStrategy,
     ) -> Self {
         Self {
             inner: executor,
-            commit_strategy,
-            finalize_strategy,
-
-            junk: vec![],
-            patched_errors: vec![],
+            state: Initialized {
+                commit_strategy,
+                finalize_strategy,
+            },
         }
     }
 
     pub async fn commit<P: IntentPersister>(
-        &mut self,
+        mut self,
         committed_pubkeys: &[Pubkey],
         persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature> {
+    ) -> IntentExecutorResult<TwoStageExecutor<'a, T, F, Committed>> {
         let mut i = 0;
         let commit_result = loop {
             i += 1;
@@ -66,7 +79,7 @@ where
             let execution_result = self
                 .inner
                 .prepare_and_execute_strategy(
-                    &mut self.commit_strategy,
+                    &mut self.state.commit_strategy,
                     persister,
                 )
                 .await
@@ -79,7 +92,7 @@ where
             let flow = Self::patch_commit_strategy(
                 self.inner,
                 &execution_err,
-                &mut self.commit_strategy,
+                &mut self.state.commit_strategy,
                 committed_pubkeys,
             )
             .await?;
@@ -92,7 +105,7 @@ where
                     break Err(execution_err);
                 }
             };
-            self.junk.push(cleanup);
+            self.inner.junk.push(cleanup);
 
             if i >= Self::RECURSION_CEILING {
                 error!(
@@ -100,73 +113,24 @@ where
                 );
                 break Err(execution_err);
             } else {
-                self.patched_errors.push(execution_err);
+                self.inner.patched_errors.push(execution_err);
             }
         };
 
+        // Even if failed - dump commit into junk
+        self.inner.junk.push(self.state.commit_strategy);
         let commit_signature = commit_result.map_err(|err| {
             IntentExecutorError::from_commit_execution_error(err)
         })?;
 
-        Ok(commit_signature)
-    }
-
-    pub async fn finalize<P: IntentPersister>(
-        &mut self,
-        commit_signature: Signature,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature> {
-        let mut i = 0;
-        let finalize_result = loop {
-            i += 1;
-
-            // Prepare & execute message
-            let execution_result = self
-                .inner
-                .prepare_and_execute_strategy(
-                    &mut self.finalize_strategy,
-                    persister,
-                )
-                .await
-                .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
-            let execution_err = match execution_result {
-                Ok(value) => break Ok(value),
-                Err(err) => err,
-            };
-
-            let flow = Self::patch_finalize_strategy(
-                self.inner,
-                &execution_err,
-                &mut self.finalize_strategy,
-            )
-            .await?;
-
-            let cleanup = match flow {
-                ControlFlow::Continue(cleanup) => cleanup,
-                ControlFlow::Break(()) => {
-                    break Err(execution_err);
-                }
-            };
-            self.junk.push(cleanup);
-
-            if i >= Self::RECURSION_CEILING {
-                error!(
-                    "CRITICAL! Recursion ceiling reached in intent execution."
-                );
-                break Err(execution_err);
-            } else {
-                self.patched_errors.push(execution_err);
-            }
+        let state = Committed {
+            commit_signature,
+            finalize_strategy: self.state.finalize_strategy,
         };
-
-        let finalize_signature = finalize_result.map_err(|err| {
-            IntentExecutorError::from_finalize_execution_error(
-                err,
-                Some(commit_signature),
-            )
-        })?;
-
-        Ok(finalize_signature)
+        Ok(TwoStageExecutor {
+            inner: self.inner,
+            state,
+        })
     }
 
     /// Patches Commit stage `transaction_strategy` in response to a recoverable
@@ -211,6 +175,80 @@ where
                 Ok(ControlFlow::Break(()))
             }
         }
+    }
+}
+
+impl<'a, T, F> TwoStageExecutor<'a, T, F, Committed>
+where
+    T: TransactionPreparator,
+    F: TaskInfoFetcher,
+{
+    const RECURSION_CEILING: u8 = 10;
+
+    pub async fn finalize<P: IntentPersister>(
+        mut self,
+        persister: &Option<P>,
+    ) -> IntentExecutorResult<TwoStageExecutor<'a, T, F, Finalized>> {
+        let mut i = 0;
+        let finalize_result = loop {
+            i += 1;
+
+            // Prepare & execute message
+            let execution_result = self
+                .inner
+                .prepare_and_execute_strategy(
+                    &mut self.state.finalize_strategy,
+                    persister,
+                )
+                .await
+                .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
+            let execution_err = match execution_result {
+                Ok(value) => break Ok(value),
+                Err(err) => err,
+            };
+
+            let flow = Self::patch_finalize_strategy(
+                self.inner,
+                &execution_err,
+                &mut self.state.finalize_strategy,
+            )
+            .await?;
+
+            let cleanup = match flow {
+                ControlFlow::Continue(cleanup) => cleanup,
+                ControlFlow::Break(()) => {
+                    break Err(execution_err);
+                }
+            };
+            self.inner.junk.push(cleanup);
+
+            if i >= Self::RECURSION_CEILING {
+                error!(
+                    "CRITICAL! Recursion ceiling reached in intent execution."
+                );
+                break Err(execution_err);
+            } else {
+                self.inner.patched_errors.push(execution_err);
+            }
+        };
+
+        // Even if failed - dump commit into junk
+        self.inner.junk.push(self.state.finalize_strategy);
+        let finalize_signature = finalize_result.map_err(|err| {
+            IntentExecutorError::from_finalize_execution_error(
+                err,
+                Some(self.state.commit_signature),
+            )
+        })?;
+
+        let finalized = Finalized {
+            commit_signature: self.state.commit_signature,
+            finalize_signature,
+        };
+        Ok(TwoStageExecutor {
+            inner: self.inner,
+            state: finalized,
+        })
     }
 
     /// Patches Finalize stage `transaction_strategy` in response to a recoverable
@@ -257,10 +295,10 @@ where
     }
 }
 
-impl<'a, T, F> Deref for TwoStageExecutor<'a, T, F> {
-    type Target = IntentExecutorImpl<T, F>;
+mod sealed {
+    pub trait Sealed {}
 
-    fn deref(&self) -> &'a Self::Target {
-        self.inner
-    }
+    impl Sealed for super::Initialized {}
+    impl Sealed for super::Committed {}
+    impl Sealed for super::Finalized {}
 }

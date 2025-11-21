@@ -440,8 +440,7 @@ mod tests {
         // Verify the message was processed
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_ok());
-        let output = result.unwrap();
-        assert_eq!(output.id, 1);
+        assert_eq!(result.id, 1);
     }
 
     #[tokio::test]
@@ -461,12 +460,12 @@ mod tests {
         // First message should be processed immediately
         let result1 = result_receiver.recv().await.unwrap();
         assert!(result1.is_ok());
-        assert_eq!(result1.unwrap().id, 1);
+        assert_eq!(result1.id, 1);
 
         // Second message should be processed after first completes
         let result2 = result_receiver.recv().await.unwrap();
         assert!(result2.is_ok());
-        assert_eq!(result2.unwrap().id, 2);
+        assert_eq!(result2.id, 2);
     }
 
     #[tokio::test]
@@ -484,17 +483,15 @@ mod tests {
 
         // Verify the failure was properly reported
         let result = result_receiver.recv().await.unwrap();
-        let Err((id, trigger_type, patched_errors, err)) = result else {
-            panic!();
-        };
-        assert_eq!(id, 1);
-        assert_eq!(trigger_type, TriggerType::OffChain);
+        assert!(result.inner.is_err());
+        assert_eq!(result.id, 1);
+        assert_eq!(result.trigger_type, TriggerType::OffChain);
         assert_eq!(
-            patched_errors[0].to_string(),
+            result.patched_errors[0].to_string(),
             "User supplied actions are ill-formed: Attempt to debit an account but found no record of a prior credit.. None"
         );
         assert_eq!(
-            err.to_string(),
+            result.inner.unwrap_err().to_string(),
             "FailedToCommitError: InternalError: SignerError: custom error: oops"
         );
     }
@@ -517,7 +514,7 @@ mod tests {
         // Verify the message from DB was processed
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().id, 1);
+        assert_eq!(result.id, 1);
     }
 
     /// Tests multiple blocking messages being sent at the same time
@@ -619,7 +616,7 @@ mod tests {
             assert!(result.is_ok());
 
             // Message has to be present in set
-            let id = result.unwrap().id;
+            let id = result.id;
             assert!(received_ids.remove(&id));
 
             completed += 1;

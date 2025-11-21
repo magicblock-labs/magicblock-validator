@@ -1,4 +1,4 @@
-use std::ops::{ControlFlow, Deref};
+use std::ops::ControlFlow;
 
 use log::error;
 use solana_pubkey::Pubkey;
@@ -18,13 +18,8 @@ use crate::{
 };
 
 pub struct SingleStageExecutor<'a, T, F> {
-    pub(in crate::intent_executor) inner: &'a IntentExecutorImpl<T, F>,
+    pub(in crate::intent_executor) inner: &'a mut IntentExecutorImpl<T, F>,
     pub transaction_strategy: TransactionStrategy,
-
-    /// Junk that needs to be cleaned up
-    pub junk: Vec<TransactionStrategy>,
-    /// Errors we patched trying to recover intent
-    pub patched_errors: Vec<TransactionStrategyExecutionError>,
 }
 
 impl<'a, T, F> SingleStageExecutor<'a, T, F>
@@ -33,14 +28,12 @@ where
     F: TaskInfoFetcher,
 {
     pub fn new(
-        executor: &'a IntentExecutorImpl<T, F>,
+        executor: &'a mut IntentExecutorImpl<T, F>,
         transaction_strategy: TransactionStrategy,
     ) -> Self {
         Self {
             inner: executor,
             transaction_strategy,
-            junk: vec![],
-            patched_errors: vec![],
         }
     }
 
@@ -52,7 +45,7 @@ where
         const RECURSION_CEILING: u8 = 10;
 
         let mut i = 0;
-        let execution_err = loop {
+        let result = loop {
             i += 1;
 
             // Prepare & execute message
@@ -69,7 +62,7 @@ where
             let execution_err = match execution_result {
                 // break with result, strategy that was executed at this point has to be returned for cleanup
                 Ok(value) => {
-                    return Ok(ExecutionOutput::SingleStage(value));
+                    break Ok(ExecutionOutput::SingleStage(value));
                 }
                 Err(err) => err,
             };
@@ -85,26 +78,28 @@ where
             let cleanup = match flow {
                 ControlFlow::Continue(cleanup) => cleanup,
                 ControlFlow::Break(()) => {
-                    break execution_err;
+                    break Err(execution_err);
                 }
             };
-            self.junk.push(cleanup);
+            self.inner.junk.push(cleanup);
 
             if i >= RECURSION_CEILING {
                 error!(
                     "CRITICAL! Recursion ceiling reached in intent execution."
                 );
-                break execution_err;
+                break Err(execution_err);
             } else {
-                self.patched_errors.push(execution_err);
+                self.inner.patched_errors.push(execution_err);
             }
         };
 
-        Err(IntentExecutorError::from_finalize_execution_error(
-            execution_err,
-            // TODO(edwin): shall one stage have same signature for commit & finalize
-            None,
-        ))
+        result.map_err(|err| {
+            IntentExecutorError::from_finalize_execution_error(
+                err,
+                // TODO(edwin): shall one stage have same signature for commit & finalize
+                None,
+            )
+        })
     }
 
     /// Patch the current `transaction_strategy` in response to a recoverable
@@ -161,13 +156,5 @@ where
                 Ok(ControlFlow::Break(()))
             }
         }
-    }
-}
-
-impl<'a, T, F> Deref for SingleStageExecutor<'a, T, F> {
-    type Target = IntentExecutorImpl<T, F>;
-
-    fn deref(&self) -> &'a Self::Target {
-        self.inner
     }
 }

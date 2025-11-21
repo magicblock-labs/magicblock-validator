@@ -282,26 +282,14 @@ where
 
         let committed_pubkeys = base_intent.get_committed_pubkeys();
         let res = single_stage_executor
-            .execute(
-                committed_pubkeys.as_ref().map(|el| el.as_slice()),
-                persister,
-            )
+            .execute(committed_pubkeys.as_deref(), persister)
             .await;
-
-        // After execution is complete record junk & patched errors
-        let SingleStageExecutor {
-            inner: _,
-            transaction_strategy,
-            junk,
-            patched_errors,
-        } = single_stage_executor;
-        self.junk.extend(junk.into_iter());
-        self.patched_errors.extend(patched_errors.into_iter());
 
         // Here we continue only IF the error is CpiLimitError
         // We can recover that Error by splitting execution
         // in 2 stages - commit & finalize
         // Otherwise we return error
+        let transaction_strategy = single_stage_executor.transaction_strategy;
         let execution_err = match res {
             Err(IntentExecutorError::FailedToFinalizeError {
                 err:
@@ -341,56 +329,20 @@ where
         finalize_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        // TODO: implement custom drop where we flush junk Into Exector?
-        let mut two_stage_executor =
+        let two_stage_executor =
             TwoStageExecutor::new(self, commit_strategy, finalize_strategy);
 
         // Execute commit stage
-        let commit_signature = two_stage_executor
+        let committed_stage = two_stage_executor
             .commit(committed_pubkeys, persister)
-            .await;
-        let commit_signature = match commit_signature {
-            Ok(signature) => signature,
-            Err(err) => {
-                let TwoStageExecutor {
-                    inner: _,
-                    finalize_strategy: _,
-                    commit_strategy,
-                    junk,
-                    patched_errors,
-                } = two_stage_executor;
-                self.junk.extend(junk.into_iter());
-                self.junk.push(commit_strategy);
-                self.patched_errors.extend(patched_errors.into_iter());
-
-                return Err(err);
-            }
-        };
+            .await?;
 
         // Execute finalize stage
-        let finalize_result = two_stage_executor
-            .finalize(commit_signature, persister)
-            .await;
+        let finalized_stage = committed_stage.finalize(persister).await?;
 
-        // Dissasemble executor to take all the goodies
-        // After execution ended - everything becomes junk
-        // need to dispose it
-        let TwoStageExecutor {
-            inner: _,
-            commit_strategy,
-            finalize_strategy,
-            junk,
-            patched_errors,
-        } = two_stage_executor;
-        self.junk.extend(junk.into_iter());
-        self.junk.push(commit_strategy);
-        self.junk.push(finalize_strategy);
-        self.patched_errors.extend(patched_errors.into_iter());
-
-        let finalize_signature = finalize_result?;
         Ok(ExecutionOutput::TwoStage {
-            commit_signature,
-            finalize_signature,
+            commit_signature: finalized_stage.state.commit_signature,
+            finalize_signature: finalized_stage.state.finalize_signature,
         })
     }
 
