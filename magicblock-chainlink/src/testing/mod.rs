@@ -342,6 +342,36 @@ macro_rules! assert_cloned_as_empty_placeholder {
 }
 
 #[macro_export]
+macro_rules! assert_not_undelegating {
+    ($cloner:expr, $pubkeys:expr, $slot:expr) => {{
+        use solana_account::ReadableAccount;
+        for pubkey in $pubkeys {
+            let account = $cloner
+                .get_account(pubkey)
+                .expect(&format!("Expected account {} to be cloned", pubkey));
+            assert!(
+                !account.undelegating(),
+                "Expected account {} to not be undelegating",
+                pubkey
+            );
+            assert_eq!(
+                account.remote_slot(),
+                $slot,
+                "Expected account {} to have remote slot {}",
+                pubkey,
+                $slot
+            );
+            assert_ne!(
+                account.owner(),
+                &dlp::id(),
+                "Expected account {} to not be owned by the delegation program",
+                pubkey,
+            );
+        }
+    }};
+}
+
+#[macro_export]
 macro_rules! assert_remain_undelegating {
     ($cloner:expr, $pubkeys:expr, $slot:expr) => {{
         use solana_account::ReadableAccount;
@@ -349,6 +379,11 @@ macro_rules! assert_remain_undelegating {
             let account = $cloner
                 .get_account(pubkey)
                 .expect(&format!("Expected account {} to be cloned", pubkey));
+            assert!(
+                account.undelegating(),
+                "Expected account {} to remain undelegating",
+                pubkey
+            );
             assert_eq!(
                 account.remote_slot(),
                 $slot,

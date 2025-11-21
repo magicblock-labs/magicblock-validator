@@ -126,6 +126,11 @@ pub(crate) fn process_mutate_accounts(
             account_key,
         );
 
+        // While an account is undelegating and the delegation is not completed,
+        // we will never clone/mutate it. Thus we can safely untoggle this flag
+        // here.
+        account.borrow_mut().set_undelegating(false);
+
         if let Some(lamports) = modification.lamports {
             ic_msg!(
                 invoke_context,
