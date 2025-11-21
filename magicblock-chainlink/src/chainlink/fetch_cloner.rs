@@ -225,6 +225,7 @@ where
                                 account.delegated(),
                                 in_bank.remote_slot(),
                                 deleg_record,
+                                &self.validator_pubkey,
                             ) {
                                 continue;
                             }
@@ -1004,6 +1005,11 @@ where
         })
     }
 
+    /// Determines if the account finished undelegating on chain.
+    /// If it has finished undelegating, we should refresh it in the bank.
+    /// - **pubkey**: the account pubkey
+    /// - **in_bank**: the account as it exists in the bank
+    /// Returns true if the account should be refreshed in the bank
     async fn should_refresh_undelegating_in_bank_account(
         &self,
         pubkey: &Pubkey,
@@ -1026,6 +1032,7 @@ where
                 delegated_on_chain,
                 in_bank.remote_slot(),
                 deleg_record,
+                &self.validator_pubkey,
             ) {
                 debug!(
                     "Account {pubkey} marked as undelegating will be overridden since undelegation completed"
@@ -1103,17 +1110,16 @@ where
                     )
                     .await;
                 if should_refresh_undelegating {
-                    debug!("Account {pubkey} needs completed undelegation which we missed and is fetched again");
+                    debug!("Account {pubkey} completed undelegation which we missed and is fetched again");
                     metrics::inc_unstuck_undelegation_count();
                 }
-                if should_be_watching || should_refresh_undelegating {
-                    // Account is in an invalid state in the bank - fetch it again
-                    continue;
+                let refresh_needed =
+                    should_be_watching || should_refresh_undelegating;
+                if !refresh_needed {
+                    // Account is in bank and subscribed correctly - no fetch needed
+                    trace!("Account {pubkey} found in bank in valid state, no fetch needed");
+                    in_bank.push(*pubkey);
                 }
-
-                // Account is in bank and subscribed correctly - no fetch needed
-                trace!("Account {pubkey} found in bank in valid state, no fetch needed");
-                in_bank.push(*pubkey);
             }
         }
         pubkeys.retain(|p| !in_bank.contains(p));

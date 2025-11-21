@@ -17,12 +17,14 @@ use solana_pubkey::Pubkey;
 /// - `remote_slot_in_bank`: the chain slot at which we last fetched and cloned state
 ///                  of the account in our bank
 /// - `delegation_record`: the delegation record associated with the account in our bank, if found
+/// - `validator_auth`: the validator authority pubkey
 /// - returns `true` if the account is still undelegating, `false` otherwise.
 pub(crate) fn account_still_undelegating_on_chain(
     pubkey: &Pubkey,
     is_delegated_to_us_on_chain: bool,
     remote_slot_in_bank: u64,
     deleg_record: Option<DelegationRecord>,
+    validator_auth: &Pubkey,
 ) -> bool {
     // In the case of a subscription update for an account that was undelegating
     // we know that the undelegation or associated commit or possibly a previous
@@ -70,16 +72,17 @@ pub(crate) fn account_still_undelegating_on_chain(
             magicblock_metrics::metrics::inc_undelegation_completed();
             false
         }
-    } else if deleg_record.is_none() {
-        // Account no longer delegated (Case A)) -> clone as is
-        debug!("Account {pubkey} was undelegated and remained so");
+    } else if let Some(deleg_record) = deleg_record {
+        // Account delegated to other (Case C)) -> clone as is
+        debug!(
+            "Account {pubkey} was undelegated and re-delegated to another validator. authority: {}, delegated_to: {}",
+            validator_auth, deleg_record.authority
+        );
         magicblock_metrics::metrics::inc_undelegation_completed();
         false
     } else {
-        // Account delegated to other (Case C)) -> clone as is
-        debug!(
-            "Account {pubkey} was undelegated and re-delegated to another validator",
-        );
+        // Account no longer delegated (Case A)) -> clone as is
+        debug!("Account {pubkey} was undelegated and remained so");
         magicblock_metrics::metrics::inc_undelegation_completed();
         false
     }
@@ -119,7 +122,8 @@ mod tests {
             &pubkey,
             is_delegated,
             remote_slot,
-            deleg_record
+            deleg_record,
+            &Pubkey::default(),
         ));
     }
 
@@ -142,7 +146,8 @@ mod tests {
             &pubkey,
             is_delegated,
             remote_slot,
-            deleg_record
+            deleg_record,
+            &Pubkey::default(),
         ));
 
         // Subcase B2: delegation_slot > remote_slot
@@ -152,7 +157,8 @@ mod tests {
             &pubkey,
             is_delegated,
             remote_slot,
-            deleg_record
+            deleg_record,
+            &Pubkey::default(),
         ));
     }
 
@@ -175,7 +181,8 @@ mod tests {
             &pubkey,
             is_delegated,
             remote_slot,
-            deleg_record
+            deleg_record,
+            &Pubkey::default(),
         ));
     }
 
@@ -197,7 +204,8 @@ mod tests {
             &pubkey,
             is_delegated,
             remote_slot,
-            deleg_record
+            deleg_record,
+            &Pubkey::default(),
         ));
     }
 }
