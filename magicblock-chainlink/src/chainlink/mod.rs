@@ -149,8 +149,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         let blacklisted_accounts =
             blacklisted_accounts(&self.validator_id, &self.faucet_id);
 
-        let delegated = AtomicU64::new(0);
-        let dlp_owned_not_delegated = AtomicU64::new(0);
+        let delegated_only = AtomicU64::new(0);
+        let undelegating = AtomicU64::new(0);
         let blacklisted = AtomicU64::new(0);
         let remaining = AtomicU64::new(0);
         let remaining_empty = AtomicU64::new(0);
@@ -160,13 +160,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 blacklisted.fetch_add(1, Ordering::Relaxed);
                 return false;
             }
-            // TODO: this potentially looses data and is a temporary measure
-            if account.owner().eq(&dlp::id()) {
-                dlp_owned_not_delegated.fetch_add(1, Ordering::Relaxed);
-                return true;
-            }
             if account.delegated() {
-                delegated.fetch_add(1, Ordering::Relaxed);
+                if account.undelegating() {
+                    undelegating.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    delegated_only.fetch_add(1, Ordering::Relaxed);
+                }
                 return false;
             }
             trace!(
@@ -186,16 +185,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .load(Ordering::Relaxed)
             .saturating_sub(remaining_empty.load(Ordering::Relaxed));
 
+        let delegated_only = delegated_only.into_inner();
+        let undelegating = undelegating.into_inner();
+
         info!(
             "Removed {removed} accounts from bank:
-{} DLP-owned non-delegated
 {} non-delegated non-blacklisted, no-feature non-empty.
 {} non-delegated non-blacklisted empty
+{} delegated not undelegating
+{} delegated and undelegating
 Kept: {} delegated, {} blacklisted",
-            dlp_owned_not_delegated.into_inner(),
             non_empty,
             remaining_empty.into_inner(),
-            delegated.into_inner(),
+            undelegating,
+            delegated_only,
+            delegated_only + undelegating,
             blacklisted.into_inner()
         );
     }
