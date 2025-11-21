@@ -9,10 +9,11 @@
 //! returning default or empty responses, rather than 'method not found' errors.
 
 use magicblock_core::link::blocks::BlockHash;
+use magicblock_metrics::metrics::TRANSACTION_COUNT;
 use solana_account_decoder::parse_token::UiTokenAmount;
 use solana_rpc_client_api::response::{
-    RpcBlockCommitment, RpcContactInfo, RpcPerfSample, RpcSnapshotSlotInfo,
-    RpcSupply, RpcVoteAccountStatus,
+    RpcBlockCommitment, RpcContactInfo, RpcSnapshotSlotInfo, RpcSupply,
+    RpcVoteAccountStatus,
 };
 
 use super::prelude::*;
@@ -39,7 +40,7 @@ impl HttpDispatcher {
         &self,
         request: &JsonRequest,
     ) -> HandlerResult {
-        let count = self.ledger.count_transactions()?;
+        let count = TRANSACTION_COUNT.get();
         Ok(ResponsePayload::encode_no_context(&request.id, count))
     }
 
@@ -230,25 +231,6 @@ impl HttpDispatcher {
             feature_set: None,
         };
         Ok(ResponsePayload::encode_no_context(&request.id, [info]))
-    }
-
-    pub(crate) fn get_recent_performance_samples(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
-        const PERIOD: u16 = 60;
-        const SLOTS_PER_PERIOD: u64 = 20;
-
-        let num_transactions =
-            self.ledger.count_transactions().map(|c| c as _)?;
-        let samples = RpcPerfSample {
-            slot: self.blocks.block_height(),
-            num_slots: PERIOD as u64 * SLOTS_PER_PERIOD,
-            num_transactions,
-            num_non_vote_transactions: Some(num_transactions),
-            sample_period_secs: PERIOD,
-        };
-        Ok(ResponsePayload::encode_no_context(&request.id, [samples]))
     }
 
     pub(crate) fn get_vote_accounts(
