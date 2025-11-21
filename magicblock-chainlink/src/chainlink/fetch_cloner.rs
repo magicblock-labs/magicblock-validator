@@ -495,8 +495,11 @@ where
     ) -> Option<DelegationRecord> {
         let delegation_record_pubkey =
             delegation_record_pda_from_delegated_account(&account_pubkey);
+        let was_watching_deleg_record = self
+            .remote_account_provider
+            .is_watching(&delegation_record_pubkey);
 
-        match self
+        let res = match self
             .remote_account_provider
             .try_get_multi_until_slots_match(
                 &[delegation_record_pubkey],
@@ -525,7 +528,30 @@ where
                 }
             }
             Err(_) => None,
+        };
+
+        if !was_watching_deleg_record
+            // Handle edge case where it was cloned in the meantime.
+            // The small possiblility of a fetch + clone of this delegation record being in process
+            // still exits, but it's negligible
+            && self
+                .accounts_bank
+                .get_account(&delegation_record_pubkey)
+                .is_none()
+        {
+            // We only subscribed to fetch the delegation record, so unsubscribe now
+            if let Err(err) = self
+                .remote_account_provider
+                .unsubscribe(&delegation_record_pubkey)
+                .await
+            {
+                error!(
+                    "Failed to unsubscribe from delegation record {delegation_record_pubkey}: {err}"
+                );
+            }
         }
+
+        res
     }
 
     /// Tries to fetch all accounts in `pubkeys` and clone them into the bank.
