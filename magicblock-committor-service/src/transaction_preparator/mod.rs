@@ -7,7 +7,7 @@ use solana_sdk::{message::VersionedMessage, signature::Keypair};
 use crate::{
     persist::IntentPersister,
     tasks::{
-        task_strategist::TransactionStrategy, utils::TransactionUtils, BaseTask,
+        task_strategist::TransactionStrategy, utils::TransactionUtils, Task,
     },
     transaction_preparator::{
         delivery_preparator::{
@@ -24,7 +24,7 @@ pub mod error;
 #[async_trait]
 pub trait TransactionPreparator: Send + Sync + 'static {
     /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
-    /// Handles all necessary preparation needed for successful [`BaseTask`] execution
+    /// Handles all necessary preparation needed for successful [`Task`] execution
     async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,
@@ -36,7 +36,7 @@ pub trait TransactionPreparator: Send + Sync + 'static {
     async fn cleanup_for_strategy(
         &self,
         authority: &Keypair,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[Task],
         lookup_table_keys: &[Pubkey],
     ) -> DeliveryPreparatorResult<(), InternalError>;
 }
@@ -112,7 +112,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
     async fn cleanup_for_strategy(
         &self,
         authority: &Keypair,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[Task],
         lookup_table_keys: &[Pubkey],
     ) -> DeliveryPreparatorResult<(), InternalError> {
         self.delivery_preparator

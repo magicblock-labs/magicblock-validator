@@ -23,18 +23,18 @@ IntentExecutor - responsible for execution of Intent. Calls  **TransactionPrepar
 TransactionPreparator - is an entity that handles all of the above "Transaction preparation" calling **TaskBuilderV1**,  **TaskStrategist**, **DeliveryPreparator** and then assempling it all and passing to **MessageExecutor**
 
 ## DeliveryPreparator
-After our **BaseTask**s are ready we need to prepare eveything for their successful execution. **DeliveryPreparator** - handles ALTs and commit buffers
+After our **Task**s are ready we need to prepare eveything for their successful execution. **DeliveryPreparator** - handles ALTs and commit buffers
 
 ## TaskBuilder
 First, lets build atomic tasks from scheduled message/intent.
 
-High level: TaskBuilder responsible for creating BaseTasks(to be renamed...) from ScheduledBaseIntent(to be renamed...).
+High level: TaskBuilder responsible for creating Tasks(to be renamed...) from ScheduledBaseIntent(to be renamed...).
 Details: To do that is requires additional information from DelegationMetadata, it is provided **CommitIdFetcher**
 
-### BaseTask
-High level: BaseTask - is an atomic operation that is to be performed on the Base layer, like: Commit, Undelegate, Finalize, Action.
+### Task
+High level: Task - is an atomic operation that is to be performed on the Base layer, like: Commit, Undelegate, Finalize, Action.
 
-Details: There's to implementation of BaseTask: ArgsTask, BufferTask. ArgsTask - gives instruction using args. BufferTask - gives instruction using buffer. BufferTask at the moment supports only commits
+Details: There's to implementation of Task: ArgsTask, BufferTask. ArgsTask - gives instruction using args. BufferTask - gives instruction using buffer. BufferTask at the moment supports only commits
 
 ### TaskInfoFetcher
 High level: for account to be accepted by `dlp` it needs to have incremental commit ids. TaskInfoFetcher provides a user with the correct ids/nonces for set of committees
