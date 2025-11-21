@@ -16,9 +16,7 @@ use magicblock_chainlink::{
     Chainlink,
 };
 use magicblock_committor_service::{
-    intent_execution_manager::{
-        BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
-    },
+    intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput,
     types::{ScheduledBaseIntentWrapper, TriggerType},
     BaseIntentCommittor, CommittorService,
@@ -243,79 +241,56 @@ impl ScheduledCommitsProcessorImpl {
                 continue;
             };
 
-            match execution_result {
-                Ok(value) => {
-                    Self::process_intent_result(
-                        intent_id,
-                        &internal_transaction_scheduler,
-                        value,
-                        intent_meta,
-                    )
-                    .await;
-                }
-                Err((_, _, _, err)) => {
-                    match err.as_ref() {
-                        &magicblock_committor_service::intent_executor::error::IntentExecutorError::EmptyIntentError => {
-                            warn!("Empty intent was scheduled!");
-                            Self::process_empty_intent(
-                                intent_id,
-                                &internal_transaction_scheduler,
-                                intent_meta
-                            ).await;
-                        }
-                        _ => {
-                            error!(
-                                "Failed to commit in slot: {}, blockhash: {}. {:?}",
-                                intent_meta.slot, intent_meta.blockhash, err
-                            );
-                        }
-                    }
-                }
-            }
+            Self::process_intent_result(
+                intent_id,
+                &internal_transaction_scheduler,
+                execution_result,
+                intent_meta,
+            )
+            .await;
         }
     }
 
     async fn process_intent_result(
         intent_id: u64,
         internal_transaction_scheduler: &TransactionSchedulerHandle,
-        execution_outcome: ExecutionOutputWrapper,
+        result: BroadcastedIntentExecutionResult,
         mut intent_meta: ScheduledBaseIntentMeta,
     ) {
-        let chain_signatures = match execution_outcome.output {
-            ExecutionOutput::SingleStage(signature) => vec![signature],
-            ExecutionOutput::TwoStage {
-                commit_signature,
-                finalize_signature,
-            } => vec![commit_signature, finalize_signature],
+        let error_message = result
+            .as_ref()
+            .err()
+            .map(|(_, _, _, err)| format!("{:?}", err));
+        let chain_signatures = match result {
+            Ok(execution_outcome) => match execution_outcome.output {
+                ExecutionOutput::SingleStage(signature) => vec![signature],
+                ExecutionOutput::TwoStage {
+                    commit_signature,
+                    finalize_signature,
+                } => vec![commit_signature, finalize_signature],
+            },
+            Err((_, _, _, err)) => {
+                error!(
+                    "Failed to commit in slot: {}, blockhash: {}. {:?}",
+                    intent_meta.slot, intent_meta.blockhash, err
+                );
+                err.signatures()
+                    .map(|(commit, finalize)| {
+                        finalize
+                            .map(|finalize| vec![commit, finalize])
+                            .unwrap_or(vec![commit])
+                    })
+                    .unwrap_or(vec![])
+            }
         };
         let intent_sent_transaction =
             std::mem::take(&mut intent_meta.intent_sent_transaction);
-        let sent_commit =
-            Self::build_sent_commit(intent_id, chain_signatures, intent_meta);
-        register_scheduled_commit_sent(sent_commit);
-        match internal_transaction_scheduler
-            .execute(intent_sent_transaction)
-            .await
-        {
-            Ok(signature) => debug!(
-                "Signaled sent commit with internal signature: {:?}",
-                signature
-            ),
-            Err(err) => {
-                error!("Failed to signal sent commit via transaction: {}", err);
-            }
-        }
-    }
-
-    async fn process_empty_intent(
-        intent_id: u64,
-        internal_transaction_scheduler: &TransactionSchedulerHandle,
-        mut intent_meta: ScheduledBaseIntentMeta,
-    ) {
-        let intent_sent_transaction =
-            std::mem::take(&mut intent_meta.intent_sent_transaction);
-        let sent_commit =
-            Self::build_sent_commit(intent_id, vec![], intent_meta);
+        let sent_commit = Self::build_sent_commit(
+            intent_id,
+            chain_signatures,
+            intent_meta,
+            error_message,
+        );
         register_scheduled_commit_sent(sent_commit);
         match internal_transaction_scheduler
             .execute(intent_sent_transaction)
@@ -335,6 +310,7 @@ impl ScheduledCommitsProcessorImpl {
         intent_id: u64,
         chain_signatures: Vec<Signature>,
         intent_meta: ScheduledBaseIntentMeta,
+        error_message: Option<String>,
     ) -> SentCommit {
         SentCommit {
             message_id: intent_id,
@@ -345,6 +321,7 @@ impl ScheduledCommitsProcessorImpl {
             included_pubkeys: intent_meta.included_pubkeys,
             excluded_pubkeys: intent_meta.excluded_pubkeys,
             requested_undelegation: intent_meta.requested_undelegation,
+            error_message,
         }
     }
 }

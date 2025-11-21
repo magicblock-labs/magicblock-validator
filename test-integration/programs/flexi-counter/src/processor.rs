@@ -405,7 +405,6 @@ fn process_undelegate_request(
         return Err(ProgramError::Custom(FAIL_UNDELEGATION_CODE));
     }
 
-
     Ok(())
 }
 
