@@ -58,14 +58,13 @@ reviews:
       mode: warning
     custom_checks: []
   tools:
+    # Audited languages: Rust, Shell, TypeScript/JavaScript, Protobuf, Markdown, YAML, TOML, Makefile.
     ast-grep:
       rule_dirs: []
       util_dirs: []
       essential_rules: true
       packages: []
     shellcheck:
-      enabled: true
-    ruff:
       enabled: true
     markdownlint:
       enabled: true
@@ -82,68 +81,23 @@ reviews:
       level: default
     biome:
       enabled: true
-    hadolint:
-      enabled: true
-    swiftlint:
-      enabled: true
-    phpstan:
-      enabled: true
-      level: default
-    phpmd:
-      enabled: true
-    phpcs:
-      enabled: true
-    golangci-lint:
-      enabled: true
     yamllint:
       enabled: true
     gitleaks:
       enabled: true
-    checkov:
-      enabled: true
-    detekt:
-      enabled: true
     eslint:
-      enabled: true
-    flake8:
-      enabled: true
-    rubocop:
       enabled: true
     buf:
       enabled: true
-    regal:
-      enabled: true
     actionlint:
-      enabled: true
-    pmd:
-      enabled: true
-    clang:
-      enabled: true
-    cppcheck:
       enabled: true
     semgrep:
       enabled: true
-    circleci:
-      enabled: true
     clippy:
-      enabled: true
-    sqlfluff:
-      enabled: true
-    prismaLint:
-      enabled: true
-    pylint:
       enabled: true
     oxc:
       enabled: true
-    shopifyThemeCheck:
-      enabled: true
-    luacheck:
-      enabled: true
-    brakeman:
-      enabled: true
     dotenvLint:
-      enabled: true
-    htmlhint:
       enabled: true
     checkmake:
       enabled: true
