@@ -160,7 +160,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 blacklisted.fetch_add(1, Ordering::Relaxed);
                 return false;
             }
-            if account.delegated() {
+            // Undelegating accounts are normally also delegated, but if that ever changes
+            // we want to make sure we never remove an account of which we aren't sure
+            // if the undelegation completed on chain or not.
+            if account.delegated() || account.undelegating() {
                 if account.undelegating() {
                     undelegating.fetch_add(1, Ordering::Relaxed);
                 } else {
