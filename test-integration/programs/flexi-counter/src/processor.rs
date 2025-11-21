@@ -387,6 +387,15 @@ fn process_undelegate_request(
             ProgramError::InvalidArgument
         })?;
 
+    undelegate_account(
+        delegated_account,
+        &crate::id(),
+        buffer,
+        payer,
+        system_program,
+        account_seeds,
+    )?;
+
     let counter = {
         let data = delegated_account.data.borrow();
         FlexiCounter::deserialize(&mut data.as_ref())?
@@ -396,14 +405,6 @@ fn process_undelegate_request(
         return Err(ProgramError::Custom(FAIL_UNDELEGATION_CODE));
     }
 
-    undelegate_account(
-        delegated_account,
-        &crate::id(),
-        buffer,
-        payer,
-        system_program,
-        account_seeds,
-    )?;
     Ok(())
 }
 
