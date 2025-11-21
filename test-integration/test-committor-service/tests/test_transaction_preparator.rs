@@ -7,8 +7,8 @@ use magicblock_committor_service::{
         buffer_task::{BufferTask, BufferTaskType},
         task_strategist::{TaskStrategist, TransactionStrategy},
         utils::TransactionUtils,
-        BaseActionTask, BaseTask, CommitTask, FinalizeTask, PreparationState,
-        UndelegateTask,
+        BaseActionTask, BaseTask, CommitTaskBuilder, FinalizeTask,
+        PreparationState, UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -36,7 +36,7 @@ async fn test_prepare_commit_tx_with_single_account() {
 
     let tasks = vec![
         Box::new(ArgsTask::new(ArgsTaskType::Commit(
-            CommitTask::new(
+            CommitTaskBuilder::create_commit_task(
                 1,
                 true,
                 committed_account.clone(),
@@ -95,7 +95,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
 
     let buffer_commit_task =
         BufferTask::new_preparation_required(BufferTaskType::Commit(
-            CommitTask::new(
+            CommitTaskBuilder::create_commit_task(
                 1,
                 true,
                 committed_account2.clone(),
@@ -107,7 +107,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     let tasks = vec![
         // account 1
         Box::new(ArgsTask::new(ArgsTaskType::Commit(
-            CommitTask::new(
+            CommitTaskBuilder::create_commit_task(
                 1,
                 true,
                 committed_account1.clone(),
@@ -199,7 +199,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
 
     let buffer_commit_task =
         BufferTask::new_preparation_required(BufferTaskType::Commit(
-            CommitTask::new(
+            CommitTaskBuilder::create_commit_task(
                 1,
                 true,
                 committed_account.clone(),

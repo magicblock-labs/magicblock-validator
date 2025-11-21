@@ -261,9 +261,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        intent_executor::task_info_fetcher::NullTaskInfoFetcher,
+        intent_executor::NullTaskInfoFetcher,
         persist::IntentPersisterImpl,
-        tasks::{BaseActionTask, CommitTask, TaskStrategy, UndelegateTask},
+        tasks::{
+            BaseActionTask, CommitTaskBuilder, TaskStrategy, UndelegateTask,
+        },
     };
 
     // Helper to create a simple commit task
@@ -272,7 +274,7 @@ mod tests {
         data_size: usize,
     ) -> ArgsTask {
         ArgsTask::new(ArgsTaskType::Commit(
-            CommitTask::new(
+            CommitTaskBuilder::create_commit_task(
                 commit_id,
                 false,
                 CommittedAccount {

@@ -195,8 +195,6 @@ impl IntegrationTestContext {
             (logs, sig)
         };
 
-        println!("Ephem Logs level-1: {:#?}", ephem_logs_l1);
-
         // 2. Find chain commit signatures
         let ephem_logs_l2 = self
             .fetch_ephemeral_logs(scheduled_commmit_sent_sig)
@@ -206,8 +204,6 @@ impl IntegrationTestContext {
                     ephem_logs_l1, scheduled_commmit_sent_sig
                 )
             })?;
-
-        println!("Ephem Logs level-2: {:#?}", ephem_logs_l2);
 
         let (included, excluded, feepayers, sigs) =
             extract_sent_commit_info_from_logs(&ephem_logs_l2);

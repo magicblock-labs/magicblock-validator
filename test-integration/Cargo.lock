@@ -3713,7 +3713,6 @@ dependencies = [
  "log",
  "lru 0.16.0",
  "magicblock-committor-program",
- "magicblock-config",
  "magicblock-delegation-program 1.1.2",
  "magicblock-metrics",
  "magicblock-program",

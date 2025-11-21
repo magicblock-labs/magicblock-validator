@@ -115,11 +115,22 @@ impl<'a> OrderBook<'a> {
             "data is not properly aligned for OrderBook to be constructed"
         );
 
+        let capacity = levels_bytes.len() / ORDER_LEVEL_SIZE;
+        let header =
+            unsafe { &mut *(header_bytes.as_ptr() as *mut OrderBookHeader) };
+
+        // Ensure header lengths never exceed backing storage; if they do, treat it as corrupted
+        // data and panic rather than creating out-of-bounds slices in `bids()`/`asks_reversed()`.
+        let used = header.bids_len as usize + header.asks_len as usize;
+
+        assert!(
+            used <= capacity,
+            "OrderBook header lengths (bids_len + asks_len) exceed capacity"
+        );
+
         Self {
-            header: unsafe {
-                &mut *(header_bytes.as_ptr() as *mut OrderBookHeader)
-            },
-            capacity: levels_bytes.len() / ORDER_LEVEL_SIZE,
+            header,
+            capacity,
             levels: levels_bytes.as_mut_ptr() as *mut OrderLevel,
         }
     }

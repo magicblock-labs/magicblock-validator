@@ -344,6 +344,8 @@ mod tests {
 
     use async_trait::async_trait;
     use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
+    use magicblock_rpc_client::MagicBlockRpcClientResult;
+    use solana_account::Account;
     use solana_pubkey::{pubkey, Pubkey};
     use solana_sdk::{signature::Signature, signer::SignerError};
     use tokio::{sync::mpsc, time::sleep};
@@ -798,5 +800,12 @@ mod tests {
         }
 
         fn reset(&self, _: ResetType) {}
+
+        async fn get_base_account(
+            &self,
+            _pubkey: &Pubkey,
+        ) -> MagicBlockRpcClientResult<Option<Account>> {
+            Ok(None) // AccountNotFound
+        }
     }
 }
