@@ -81,13 +81,7 @@ impl ExecutionTestEnv {
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
     pub fn new() -> Self {
-        Self::new_with_fee(Self::BASE_FEE)
-    }
-
-    pub fn new_with_payer_and_fees(payer: &Keypair, fee: u64) -> Self {
-        let mut ctx = Self::new_with_fee(fee);
-        ctx.payer = payer.insecure_clone();
-        ctx
+        Self::new_with_config(Self::BASE_FEE)
     }
 
     /// Creates a new, fully initialized validator test environment with given base fee
@@ -98,7 +92,7 @@ impl ExecutionTestEnv {
     /// 3.  Spawns a `TransactionScheduler` with one worker thread.
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
-    pub fn new_with_fee(fee: u64) -> Self {
+    pub fn new_with_config(fee: u64) -> Self {
         init_logger!();
         let dir =
             tempfile::tempdir().expect("creating temp dir for validator state");

@@ -20,14 +20,14 @@ magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 
 solana-account = { workspace = true }
+solana-address-lookup-table-program = { workspace = true }
 solana-bpf-loader-program = { workspace = true }
 solana-compute-budget-program = { workspace = true }
 solana-feature-set = { workspace = true }
 solana-fee = { workspace = true }
 solana-fee-structure = { workspace = true }
-solana-address-lookup-table-program = { workspace = true }
-solana-program = { workspace = true }
 solana-loader-v4-program = { workspace = true }
+solana-program = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rent-collector = { workspace = true }
@@ -36,8 +36,8 @@ solana-svm = { workspace = true }
 solana-svm-transaction = { workspace = true }
 solana-system-program = { workspace = true }
 solana-transaction = { workspace = true }
-solana-transaction-status = { workspace = true }
 solana-transaction-error = { workspace = true }
+solana-transaction-status = { workspace = true }
 
 [dev-dependencies]
 guinea = { workspace = true }

@@ -157,7 +157,6 @@ impl MagicValidator {
         let GenesisConfigInfo {
             genesis_config,
             validator_pubkey,
-            ..
         } = create_genesis_config_with_leader(
             u64::MAX,
             &validator_pubkey,
@@ -274,7 +273,7 @@ impl MagicValidator {
             });
 
         validator::init_validator_authority(identity_keypair);
-
+        let base_fee = config.validator.base_fees.unwrap_or_default();
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
@@ -303,7 +302,7 @@ impl MagicValidator {
         let node_context = NodeContext {
             identity: validator_pubkey,
             faucet,
-            base_fee: config.validator.base_fees.unwrap_or_default(),
+            base_fee,
             featureset: txn_scheduler_state.environment.feature_set.clone(),
         };
         let transaction_scheduler =

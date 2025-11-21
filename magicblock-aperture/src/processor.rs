@@ -83,15 +83,19 @@ impl EventProcessor {
     }
 
     /// The main event processing loop for a single worker instance.
-    ///
-    /// This function listens on all event channels concurrently and processes messages
-    /// as they arrive. The `tokio::select!` macro is biased to prioritize account
-    /// processing, as it is typically the most frequent and time-sensitive event.
     async fn run(self, id: usize, cancel: CancellationToken) {
         info!("event processor {id} is running");
         loop {
             tokio::select! {
                 biased;
+
+                // Process a new block.
+                Ok(latest) = self.block_update_rx.recv_async() => {
+                    // Notify subscribers waiting on slot updates.
+                    self.subscriptions.send_slot(latest.meta.slot);
+                    // Update the global blocks cache with the latest block.
+                    self.blocks.set_latest(latest);
+                }
 
                 // Process a new account state update.
                 Ok(state) = self.account_update_rx.recv_async() => {
@@ -119,14 +123,6 @@ impl EventProcessor {
                         result: status.result.result
                     };
                     self.transactions.push(status.signature, Some(result));
-                }
-
-                // Process a new block.
-                Ok(latest) = self.block_update_rx.recv_async() => {
-                    // Notify subscribers waiting on slot updates.
-                    self.subscriptions.send_slot(latest.meta.slot);
-                    // Update the global blocks cache with the latest block.
-                    self.blocks.set_latest(latest);
                 }
 
                 // Listen for the cancellation signal to gracefully shut down.

@@ -244,36 +244,29 @@ Kept: {} delegated, {} blacklisted",
             .copied()
             .collect::<Vec<_>>();
         let feepayer = tx.message().fee_payer();
-        // In the case of transactions we need to clone the feepayer account
-        let clone_escrow = {
-            // If the fee payer account is in the bank we only clone the balance
-            // escrow account if the fee payer is not delegated
-            // If it is not in the bank we include it just in case, it is fine
-            // if it doesn't exist and once we cloned the feepayer account itself
-            // and it turns out to be delegated, then we will avoid cloning the
-            // escrow account next time
-            self.accounts_bank
-                .get_account(feepayer)
-                .is_none_or(|a| !a.delegated())
-        };
 
-        // Always allow the fee payer to be treated as empty-if-not-found so that
-        // transactions can still be processed in gasless mode
-        let mut mark_empty_if_not_found = vec![*feepayer];
+        // Determine if we need to clone the escrow account for the feepayer
+        let clone_escrow = self
+            .accounts_bank
+            .get_account(feepayer)
+            .is_none_or(|a| !a.delegated());
 
+        // If cloning escrow, add the balance PDA
         if clone_escrow {
             let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
             trace!("Adding balance PDA {balance_pda} for feepayer {feepayer}");
             pubkeys.push(balance_pda);
-            mark_empty_if_not_found.push(balance_pda);
         }
-        let mark_empty_if_not_found = (!mark_empty_if_not_found.is_empty())
-            .then(|| &mark_empty_if_not_found[..]);
+
+        // Mark *all* pubkeys as empty-if-not-found
+        let mark_empty_if_not_found = Some(pubkeys.as_slice());
+
+        // Ensure accounts
         let res = self
             .ensure_accounts(&pubkeys, mark_empty_if_not_found)
             .await?;
 
-        // Best-effort auto airdrop for fee payer if configured and still empty locally
+        // Best-effort auto airdrop for fee payer if configured
         if self.auto_airdrop_lamports > 0 {
             if let Some(fetch_cloner) = self.fetch_cloner() {
                 let lamports = self
@@ -281,6 +274,7 @@ Kept: {} delegated, {} blacklisted",
                     .get_account(feepayer)
                     .map(|a| a.lamports())
                     .unwrap_or(0);
+
                 if lamports == 0 {
                     if let Err(err) = fetch_cloner
                         .airdrop_account_if_empty(
