@@ -89,11 +89,7 @@ impl IntentExecutorError {
 
     pub fn signatures(&self) -> Option<(Signature, Option<Signature>)> {
         match self {
-            IntentExecutorError::CpiLimitError(_, signature)
-            | IntentExecutorError::ActionsError(_, signature)
-            | IntentExecutorError::CommitIDError(_, signature)
-            | IntentExecutorError::UndelegationError(_, signature)
-            | IntentExecutorError::FailedToCommitError { signature, err: _ } => {
+            IntentExecutorError::FailedToCommitError { signature, err: _ } => {
                 signature.map(|el| (el, None))
             }
             IntentExecutorError::FailedCommitPreparationError(err)
