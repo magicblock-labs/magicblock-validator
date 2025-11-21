@@ -342,6 +342,14 @@ fn process_add_and_schedule_commit(
     let magic_context_info = next_account_info(account_info_iter)?;
     let magic_program_info = next_account_info(account_info_iter)?;
 
+    if magic_context_info.key != &MAGIC_CONTEXT_ID {
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    if magic_program_info.key != &MAGIC_PROGRAM_ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+
     // Perform the add operation
     add(payer_info, counter_pda_info, count)?;
 
@@ -422,9 +430,13 @@ fn process_schedule_task(
     msg!("ScheduleTask");
 
     let account_info_iter = &mut accounts.iter();
-    let _magic_program_info = next_account_info(account_info_iter)?;
+    let magic_program_info = next_account_info(account_info_iter)?;
     let payer_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
+
+    if magic_program_info.key != &MAGIC_PROGRAM_ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
 
     let (counter_pda, bump) = FlexiCounter::pda(payer_info.key);
     if counter_pda_info.key.ne(&counter_pda) {
@@ -455,7 +467,7 @@ fn process_schedule_task(
     })?;
 
     let ix = Instruction::new_with_bytes(
-        MAGIC_PROGRAM_ID,
+        *magic_program_info.key,
         &ix_data,
         vec![
             AccountMeta::new(*payer_info.key, true),
@@ -479,8 +491,12 @@ fn process_cancel_task(
     msg!("CancelTask");
 
     let account_info_iter = &mut accounts.iter();
-    let _magic_program_info = next_account_info(account_info_iter)?;
+    let magic_program_info = next_account_info(account_info_iter)?;
     let payer_info = next_account_info(account_info_iter)?;
+
+    if magic_program_info.key != &MAGIC_PROGRAM_ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
 
     let ix_data = bincode::serialize(&MagicBlockInstruction::CancelTask {
         task_id: args.task_id,
@@ -491,7 +507,7 @@ fn process_cancel_task(
     })?;
 
     let ix = Instruction::new_with_bytes(
-        MAGIC_PROGRAM_ID,
+        *magic_program_info.key,
         &ix_data,
         vec![AccountMeta::new(*payer_info.key, true)],
     );
