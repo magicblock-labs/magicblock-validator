@@ -65,7 +65,7 @@ pub enum IntentExecutorError {
 }
 
 impl IntentExecutorError {
-    pub fn from_commmit_execution_error(
+    pub fn from_commit_execution_error(
         error: TransactionStrategyExecutionError,
     ) -> IntentExecutorError {
         let signature = error.signature();
@@ -150,7 +150,7 @@ impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
 
 impl TransactionStrategyExecutionError {
     pub fn is_cpi_limit_error(&self) -> bool {
-        matches!(self, Self::CommitIDError(_, _))
+        matches!(self, Self::CpiLimitError(_, _))
     }
 
     pub fn signature(&self) -> Option<Signature> {

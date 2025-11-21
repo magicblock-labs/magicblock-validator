@@ -105,7 +105,7 @@ where
         };
 
         let commit_signature = commit_result.map_err(|err| {
-            IntentExecutorError::from_commmit_execution_error(err)
+            IntentExecutorError::from_commit_execution_error(err)
         })?;
 
         Ok(commit_signature)
@@ -228,7 +228,7 @@ where
         match err {
             TransactionStrategyExecutionError::CommitIDError(_, _) => {
                 // Unexpected error in Two Stage commit
-                error!("Unexpected error in Two stage commit flow: {}", err);
+                error!("Unexpected error in two stage commit flow: {}", err);
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::ActionsError(_, _) => {

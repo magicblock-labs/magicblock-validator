@@ -301,7 +301,10 @@ impl ScheduledCommitsProcessorImpl {
         let patched_errors = result
             .patched_errors
             .iter()
-            .map(|err| err.to_string())
+            .map(|err| {
+                info!("Patched intent, error was: {}", err);
+                err.to_string()
+            })
             .collect();
 
         SentCommit {
