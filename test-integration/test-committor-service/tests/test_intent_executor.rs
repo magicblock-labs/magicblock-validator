@@ -163,7 +163,7 @@ async fn test_commit_id_error_parsing() {
 #[tokio::test]
 async fn test_undelegation_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "Invalid undelegation: Error processing Instruction 4: custom program error: 0x7a";
+    const EXPECTED_ERR_MSG: &str = "Invalid undelegation: Error processing Instruction 4: custom program error: 0x7a.";
 
     let TestEnv {
         fixture,
