@@ -329,16 +329,12 @@ where
         finalize_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let two_stage_executor =
-            TwoStageExecutor::new(self, commit_strategy, finalize_strategy);
-
-        // Execute commit stage
-        let committed_stage = two_stage_executor
-            .commit(committed_pubkeys, persister)
-            .await?;
-
-        // Execute finalize stage
-        let finalized_stage = committed_stage.finalize(persister).await?;
+        let finalized_stage =
+            TwoStageExecutor::new(self, commit_strategy, finalize_strategy)
+                .commit(committed_pubkeys, persister)
+                .await?
+                .finalize(persister)
+                .await?;
 
         Ok(ExecutionOutput::TwoStage {
             commit_signature: finalized_stage.state.commit_signature,
