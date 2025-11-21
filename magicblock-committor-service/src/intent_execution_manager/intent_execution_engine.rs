@@ -367,6 +367,7 @@ mod tests {
     use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
     use solana_pubkey::{pubkey, Pubkey};
     use solana_sdk::{signature::Signature, signer::SignerError};
+    use solana_sdk::transaction::TransactionError;
     use tokio::{sync::mpsc, time::sleep};
 
     use super::*;
@@ -376,15 +377,14 @@ mod tests {
             intent_scheduler::create_test_intent,
         },
         intent_executor::{
-            error::{
-                IntentExecutorError as ExecutorError, IntentExecutorResult,
-                InternalError,
-            },
+            error::{IntentExecutorError as ExecutorError, InternalError},
             task_info_fetcher::{
                 ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
             },
+            IntentExecutionResult,
         },
         persist::IntentPersisterImpl,
+        transaction_preparator::delivery_preparator::BufferExecutionError,
     };
 
     type MockIntentExecutionEngine = IntentExecutionEngine<
@@ -476,14 +476,18 @@ mod tests {
 
         // Verify the failure was properly reported
         let result = result_receiver.recv().await.unwrap();
-        let Err((id, trigger_type, err)) = result else {
+        let Err((id, trigger_type, patched_errors, err)) = result else {
             panic!();
         };
         assert_eq!(id, 1);
         assert_eq!(trigger_type, TriggerType::OffChain);
         assert_eq!(
+            patched_errors[0].to_string(),
+            "User supplied actions are ill-formed: Attempt to debit an account but found no record of a prior credit.. None"
+        );
+        assert_eq!(
             err.to_string(),
-            "FailedToCommitError: SignerError: custom error: oops"
+            "FailedToCommitError: InternalError: SignerError: custom error: oops"
         );
     }
 
@@ -767,32 +771,49 @@ mod tests {
     #[async_trait]
     impl IntentExecutor for MockIntentExecutor {
         async fn execute<P: IntentPersister>(
-            &self,
+            &mut self,
             _base_intent: ScheduledBaseIntent,
             _persister: Option<P>,
-        ) -> IntentExecutorResult<ExecutionOutput> {
+        ) -> IntentExecutionResult {
             self.on_task_started();
 
             // Simulate some work
             sleep(Duration::from_millis(50)).await;
 
             let result = if self.should_fail {
-                Err(ExecutorError::FailedToCommitError {
-                    err: InternalError::SignerError(SignerError::Custom(
-                        "oops".to_string(),
-                    )),
-                    signature: None,
-                })
+                IntentExecutionResult {
+                    inner: Err(ExecutorError::FailedToCommitError {
+                        err: TransactionStrategyExecutionError::InternalError(
+                            InternalError::SignerError(SignerError::Custom(
+                                "oops".to_string(),
+                            )),
+                        ),
+                        signature: None,
+                    }),
+                    patched_errors: vec![
+                        TransactionStrategyExecutionError::ActionsError(
+                            TransactionError::AccountNotFound,
+                            None
+                        )
+                    ],
+                }
             } else {
-                Ok(ExecutionOutput::TwoStage {
-                    commit_signature: Signature::default(),
-                    finalize_signature: Signature::default(),
-                })
+                IntentExecutionResult {
+                    inner: Ok(ExecutionOutput::TwoStage {
+                        commit_signature: Signature::default(),
+                        finalize_signature: Signature::default(),
+                    }),
+                    patched_errors: vec![],
+                }
             };
 
             self.on_task_finished();
 
             result
+        }
+
+        async fn cleanup(self) -> Result<(), BufferExecutionError> {
+            Ok(())
         }
     }
 

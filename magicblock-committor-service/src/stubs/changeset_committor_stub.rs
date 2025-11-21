@@ -206,6 +206,7 @@ impl BaseIntentCommittorExt for ChangesetCommittorStub {
                         commit_signature: Signature::new_unique(),
                         finalize_signature: Signature::new_unique(),
                     },
+                    patched_errors: Arc::new(vec![]),
                     trigger_type: TriggerType::OnChain,
                 })
             })
