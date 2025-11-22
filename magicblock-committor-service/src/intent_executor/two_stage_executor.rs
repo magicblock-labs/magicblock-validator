@@ -202,7 +202,13 @@ where
             TransactionStrategyExecutionError::ActionsError(_, _) => {
                 // Unexpected in Two Stage commit
                 // That would mean that Two Stage executes Standalone commit
-                error!("Unexpected error in Two stage commit flow: {}", err);
+                error!("Unexpected error in two stage commit flow: {}", err);
+                Ok(ControlFlow::Break(()))
+            }
+            TransactionStrategyExecutionError::UndelegationError(_, _) => {
+                // Unexpected in Two Stage commit
+                // That would mean that Two Stage executes undelegation in commit phase
+                error!("Unexpected error in two stage commit flow: {}", err);
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _) => {
@@ -239,6 +245,13 @@ where
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let to_cleanup = self.handle_actions_error(finalize_strategy);
+                Ok(ControlFlow::Continue(to_cleanup))
+            }
+            TransactionStrategyExecutionError::UndelegationError(_, _) => {
+                // Here we patch strategy for it to be retried in next iteration
+                // & we also record data that has to be cleaned up after patch
+                let to_cleanup =
+                    self.handle_undelegation_error(finalize_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _) => {

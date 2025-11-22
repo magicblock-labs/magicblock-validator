@@ -40,6 +40,8 @@ pub enum IntentExecutorError {
     EmptyIntentError,
     #[error("User supplied actions are ill-formed: {0}. {:?}", .1)]
     ActionsError(#[source] TransactionError, Option<Signature>),
+    #[error("Invalid undelegation: {0}. {:?}", .1)]
+    UndelegationError(#[source] TransactionError, Option<Signature>),
     #[error("Accounts committed with an invalid Commit id: {0}. {:?}", .1)]
     CommitIDError(#[source] TransactionError, Option<Signature>),
     #[error("Max instruction trace length exceeded: {0}. {:?}", .1)]
@@ -96,6 +98,10 @@ impl IntentExecutorError {
                 err,
                 signature,
             ) => IntentExecutorError::CommitIDError(err, signature),
+            TransactionStrategyExecutionError::UndelegationError(
+                err,
+                signature,
+            ) => IntentExecutorError::UndelegationError(err, signature),
             TransactionStrategyExecutionError::InternalError(err) => {
                 converter(err)
             }
@@ -119,6 +125,8 @@ impl metrics::LabelValue for IntentExecutorError {
 pub enum TransactionStrategyExecutionError {
     #[error("User supplied actions are ill-formed: {0}. {:?}", .1)]
     ActionsError(#[source] TransactionError, Option<Signature>),
+    #[error("Invalid undelegation: {0}. {:?}", .1)]
+    UndelegationError(#[source] TransactionError, Option<Signature>),
     #[error("Accounts committed with an invalid Commit id: {0}. {:?}", .1)]
     CommitIDError(#[source] TransactionError, Option<Signature>),
     #[error("Max instruction trace length exceeded: {0}. {:?}", .1)]
@@ -148,14 +156,6 @@ impl TransactionStrategyExecutionError {
             dlp::error::DlpError::NonceOutOfOrder as u32;
 
         match err {
-            // Filter CommitIdError by custom error code
-            transaction_err @ TransactionError::InstructionError(
-                _,
-                InstructionError::Custom(NONCE_OUT_OF_ORDER),
-            ) => Ok(TransactionStrategyExecutionError::CommitIDError(
-                transaction_err,
-                signature,
-            )),
             // Some tx may use too much CPIs and we can handle it in certain cases
             transaction_err @ TransactionError::InstructionError(
                 _,
@@ -164,25 +164,45 @@ impl TransactionStrategyExecutionError {
                 transaction_err,
                 signature,
             )),
-            // Filter ActionError, we can attempt recovery by stripping away actions
-            transaction_err @ TransactionError::InstructionError(index, _) => {
+            // Map per-task InstructionError into CommitID / Actions / Undelegation errors when possible
+            TransactionError::InstructionError(index, instruction_err) => {
+                let tx_err_helper = |instruction_err| -> TransactionError {
+                    TransactionError::InstructionError(index, instruction_err)
+                };
                 let Some(action_index) = index.checked_sub(OFFSET) else {
-                    return Err(transaction_err);
+                    return Err(tx_err_helper(instruction_err));
                 };
 
-                // If index corresponds to an Action -> ActionsError; otherwise -> InternalError.
-                if matches!(
-                    tasks
-                        .get(action_index as usize)
-                        .map(|task| task.task_type()),
-                    Some(TaskType::Action)
-                ) {
-                    Ok(TransactionStrategyExecutionError::ActionsError(
-                        transaction_err,
+                let Some(task_type) = tasks
+                    .get(action_index as usize)
+                    .map(|task| task.task_type())
+                else {
+                    return Err(tx_err_helper(instruction_err));
+                };
+
+                match (task_type, instruction_err) {
+                    (
+                        TaskType::Commit,
+                        InstructionError::Custom(NONCE_OUT_OF_ORDER),
+                    ) => Ok(TransactionStrategyExecutionError::CommitIDError(
+                        tx_err_helper(InstructionError::Custom(
+                            NONCE_OUT_OF_ORDER,
+                        )),
                         signature,
-                    ))
-                } else {
-                    Err(transaction_err)
+                    )),
+                    (TaskType::Action, instruction_err) => {
+                        Ok(TransactionStrategyExecutionError::ActionsError(
+                            tx_err_helper(instruction_err),
+                            signature,
+                        ))
+                    }
+                    (TaskType::Undelegate, instruction_err) => Ok(
+                        TransactionStrategyExecutionError::UndelegationError(
+                            tx_err_helper(instruction_err),
+                            signature,
+                        ),
+                    ),
+                    (_, instruction_err) => Err(tx_err_helper(instruction_err)),
                 }
             }
             // This means transaction failed to other reasons that we don't handle - propagate

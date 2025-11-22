@@ -484,6 +484,37 @@ where
         (commit_strategy, finalize_strategy, to_cleanup)
     }
 
+    /// Handles actions error, stripping away actions
+    /// Returns [`TransactionStrategy`] to be cleaned up
+    fn handle_undelegation_error(
+        &self,
+        strategy: &mut TransactionStrategy,
+    ) -> TransactionStrategy {
+        let position = strategy
+            .optimized_tasks
+            .iter()
+            .position(|el| el.task_type() == TaskType::Undelegate);
+
+        if let Some(position) = position {
+            // Remove everything after undelegation including post undelegation actions
+            let removed_task =
+                strategy.optimized_tasks.drain(position..).collect();
+            let old_alts =
+                strategy.dummy_revaluate_alts(&self.authority.pubkey());
+            TransactionStrategy {
+                optimized_tasks: removed_task,
+                lookup_tables_keys: old_alts,
+                compressed: strategy.compressed,
+            }
+        } else {
+            TransactionStrategy {
+                optimized_tasks: vec![],
+                lookup_tables_keys: vec![],
+                compressed: strategy.compressed,
+            }
+        }
+    }
+
     /// Shared helper for sending transactions
     async fn send_prepared_message(
         &self,
@@ -559,7 +590,8 @@ where
             }
             Err(IntentExecutorError::CommitIDError(_, _))
             | Err(IntentExecutorError::ActionsError(_, _))
-            | Err(IntentExecutorError::CpiLimitError(_, _)) => None,
+            | Err(IntentExecutorError::CpiLimitError(_, _))
+            | Err(IntentExecutorError::UndelegationError(_, _)) => None,
             Err(IntentExecutorError::EmptyIntentError)
             | Err(IntentExecutorError::FailedToFitError)
             | Err(IntentExecutorError::InconsistentTaskCompression)
@@ -811,6 +843,8 @@ where
             .await;
         if let Some(pubkeys) = pubkeys {
             // Reset TaskInfoFetcher, as cache could become invalid
+            // NOTE: if undelegation was removed - we still reset
+            // We assume its safe since all consecutive commits will fail
             if result.is_err() || is_undelegate {
                 self.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
             }

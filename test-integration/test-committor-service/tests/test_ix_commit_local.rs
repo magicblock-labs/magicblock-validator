@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use borsh::to_vec;
 use compressed_delegation_client::CompressedDelegationRecord;
 use light_client::indexer::{
     photon_indexer::PhotonIndexer, CompressedAccount, Indexer,
@@ -24,6 +25,7 @@ use magicblock_program::magic_scheduled_base_intent::{
     ScheduledBaseIntent, UndelegateType,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
+use program_flexi_counter::state::FlexiCounter;
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -158,8 +160,12 @@ async fn commit_single_account(
     let counter_auth = Keypair::new();
     let (pubkey, mut account) = match mode {
         CommitAccountMode::Commit | CommitAccountMode::CommitAndUndelegate => {
-            init_and_delegate_account_on_chain(&counter_auth, bytes as u64)
-                .await
+            init_and_delegate_account_on_chain(
+                &counter_auth,
+                bytes as u64,
+                None,
+            )
+            .await
         }
         _ => {
             let (pubkey, _hash, account) =
@@ -168,8 +174,16 @@ async fn commit_single_account(
             (pubkey, account)
         }
     };
+
+    let counter = FlexiCounter {
+        label: "Counter".to_string(),
+        updates: 0,
+        count: 101,
+    };
+    let mut data = to_vec(&counter).unwrap();
+    data.resize(bytes, 0);
+    account.data = data;
     account.owner = program_flexi_counter::id();
-    account.data = vec![101_u8; bytes];
 
     let account = CommittedAccount { pubkey, account };
     let base_intent = match mode {
@@ -607,8 +621,12 @@ async fn create_bundles(
         join_set.spawn(async move {
             let counter_auth = Keypair::new();
             let (pda, mut pda_acc) = if !compressed {
-                init_and_delegate_account_on_chain(&counter_auth, bytes as u64)
-                    .await
+                init_and_delegate_account_on_chain(
+                    &counter_auth,
+                    bytes as u64,
+                    None,
+                )
+                .await
             } else {
                 let (pda, _hash, pda_acc) =
                     init_and_delegate_compressed_account_on_chain(

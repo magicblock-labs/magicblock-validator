@@ -183,6 +183,13 @@ where
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
+            TransactionStrategyExecutionError::UndelegationError(_, _) => {
+                // Here we patch strategy for it to be retried in next iteration
+                // & we also record data that has to be cleaned up after patch
+                let to_cleanup =
+                    self.handle_undelegation_error(transaction_strategy);
+                Ok(ControlFlow::Continue(to_cleanup))
+            }
             TransactionStrategyExecutionError::CpiLimitError(_, _) => {
                 // Can't be handled in scope of single stage execution
                 // We signal flow break

@@ -145,6 +145,98 @@ macro_rules! assert_cloned_as_undelegated {
 }
 
 #[macro_export]
+macro_rules! assert_cloned_as_delegated_with_retries {
+    ($cloner:expr, $pubkeys:expr, $retries:expr) => {{
+        for pubkey in $pubkeys {
+            let mut account_opt = None;
+            for _ in 0..$retries {
+                account_opt = $cloner.get_account(pubkey);
+                if let Some(account) = &account_opt {
+                    if account.delegated() {
+                        break;
+                    }
+                }
+                ::std::thread::sleep(::std::time::Duration::from_millis(100));
+            }
+            let account = account_opt
+                .expect(&format!("Expected account {} to be cloned", pubkey));
+            assert!(
+                account.delegated(),
+                "Expected account {} to be delegated",
+                pubkey
+            );
+        }
+    }};
+    ($cloner:expr, $pubkeys:expr, $slot:expr, $retries:expr) => {{
+        for pubkey in $pubkeys {
+            let mut account_opt = None;
+            for _ in 0..$retries {
+                account_opt = $cloner.get_account(pubkey);
+                if let Some(account) = &account_opt {
+                    if account.delegated() && account.remote_slot() == $slot {
+                        break;
+                    }
+                }
+                ::std::thread::sleep(::std::time::Duration::from_millis(100));
+            }
+            let account = account_opt
+                .expect(&format!("Expected account {} to be cloned", pubkey));
+            assert!(
+                account.delegated(),
+                "Expected account {} to be delegated",
+                pubkey
+            );
+            assert_eq!(
+                account.remote_slot(),
+                $slot,
+                "Expected account {} to have remote slot {}",
+                pubkey,
+                $slot
+            );
+        }
+    }};
+    ($cloner:expr, $pubkeys:expr, $slot:expr, $owner:expr, $retries:expr) => {{
+        use solana_account::ReadableAccount;
+        for pubkey in $pubkeys {
+            let mut account_opt = None;
+            for _ in 0..$retries {
+                account_opt = $cloner.get_account(pubkey);
+                if let Some(account) = &account_opt {
+                    if account.delegated()
+                        && account.remote_slot() == $slot
+                        && account.owner() == &$owner
+                    {
+                        break;
+                    }
+                }
+                ::std::thread::sleep(::std::time::Duration::from_millis(100));
+            }
+            let account = account_opt
+                .expect(&format!("Expected account {} to be cloned", pubkey));
+            assert!(
+                account.delegated(),
+                "Expected account {} to be delegated",
+                pubkey
+            );
+            assert_eq!(
+                account.remote_slot(),
+                $slot,
+                "Expected account {} to have remote slot {}",
+                pubkey,
+                $slot
+            );
+            assert_eq!(
+                account.owner(),
+                &$owner,
+                "Expected account {} to have owner {}",
+                pubkey,
+                $owner
+            );
+        }
+    }};
+}
+
+#[macro_export]
 macro_rules! assert_cloned_as_delegated {
     ($cloner:expr, $pubkeys:expr) => {{
         for pubkey in $pubkeys {
