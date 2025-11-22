@@ -1,5 +1,7 @@
+use core::str;
 use std::{convert::Infallible, sync::Arc};
 
+use futures::{stream::FuturesOrdered, StreamExt};
 use hyper::{
     body::Incoming,
     header::{
@@ -22,7 +24,7 @@ use crate::{
     requests::{
         http::{extract_bytes, parse_body, HandlerResult},
         payload::ResponseErrorPayload,
-        JsonHttpRequest,
+        JsonHttpRequest, RpcRequest,
     },
     state::{
         blocks::BlocksCache, transactions::TransactionsCache, ChainlinkImpl,
@@ -105,7 +107,9 @@ impl HttpDispatcher {
                 match $result {
                     Ok(r) => r,
                     Err(error) => {
-                        return Ok(ResponseErrorPayload::encode($id, error));
+                        let mut resp = ResponseErrorPayload::encode($id, error);
+                        Self::set_access_control_headers(&mut resp);
+                        return Ok(resp);
                     }
                 }
             };
@@ -113,11 +117,39 @@ impl HttpDispatcher {
 
         // Extract and parse the request body.
         let body = unwrap!(extract_bytes(request).await, None);
-        let mut request = unwrap!(parse_body(body), None);
+        let request = unwrap!(parse_body(body), None);
+
         // Resolve the handler for request and process it
-        let response = self.process(&mut request).await;
-        // Handle any errors from the execution stage
-        let response = unwrap!(response, Some(&request.id));
+        let (response, id) = match request {
+            RpcRequest::Single(mut r) => {
+                let response = self.process(&mut r).await;
+                (response, Some(r.id))
+            }
+            RpcRequest::Multi(requests) => {
+                let mut jobs = FuturesOrdered::new();
+                for mut r in requests {
+                    let j = async {
+                        let response = self.process(&mut r).await;
+                        (response, r)
+                    };
+                    jobs.push_back(j);
+                }
+                let mut body = vec![b'['];
+                while let Some((response, request)) = jobs.next().await {
+                    let response = unwrap!(response, Some(&request.id));
+                    body.extend_from_slice(&response.into_body().0);
+                    body.push(b',');
+                }
+                if let Some(b) = body.last_mut() {
+                    *b = b']'
+                }
+                (Ok(Response::new(JsonBody(body))), None)
+            }
+        };
+
+        // Handle any errors from the handling stage
+        let mut response = unwrap!(response, id.as_ref());
+        Self::set_access_control_headers(&mut response);
         Ok(response)
     }
 
@@ -130,7 +162,7 @@ impl HttpDispatcher {
             .with_label_values(&[method])
             .start_timer();
 
-        let mut result = match request.method {
+        match request.method {
             GetAccountInfo => self.get_account_info(request).await,
             GetBalance => self.get_balance(request).await,
             GetBlock => self.get_block(request),
@@ -181,11 +213,7 @@ impl HttpDispatcher {
             RequestAirdrop => self.request_airdrop(request).await,
             SendTransaction => self.send_transaction(request).await,
             SimulateTransaction => self.simulate_transaction(request).await,
-        };
-        if let Ok(response) = &mut result {
-            Self::set_access_control_headers(response);
         }
-        result
     }
 
     /// Set CORS/Access control related headers (required by explorers/web apps)

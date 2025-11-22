@@ -142,6 +142,7 @@ protobuf-src = "1.1"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10.0"
+reqwest = "0.11"
 # bundled sqlite 3.44
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 rustc_version = "0.4"
