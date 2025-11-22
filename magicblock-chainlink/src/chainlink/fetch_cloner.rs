@@ -1284,21 +1284,21 @@ where
     fn task_to_fetch_with_companion(
         &self,
         pubkey: Pubkey,
-        delegation_record_pubkey: Pubkey,
+        companion_pubkey: Pubkey,
         slot: u64,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let provider = self.remote_account_provider.clone();
         let bank = self.accounts_bank.clone();
         let fetch_count = self.fetch_count.clone();
         task::spawn(async move {
-            trace!("Fetching account {pubkey} with delegation record {delegation_record_pubkey} at slot {slot}");
+            trace!("Fetching account {pubkey} with companion {companion_pubkey} at slot {slot}");
 
             // Increment fetch counter for testing deduplication (2 accounts: pubkey + delegation_record_pubkey)
             fetch_count.fetch_add(2, Ordering::Relaxed);
 
             provider
                 .try_get_multi_until_slots_match(
-                    &[pubkey, delegation_record_pubkey],
+                    &[pubkey, companion_pubkey],
                     Some(MatchSlotsConfig {
                         min_context_slot: Some(slot),
                         ..Default::default()
@@ -1316,7 +1316,7 @@ where
                     Self::resolve_account_with_companion(
                         &bank,
                         pubkey,
-                        delegation_record_pubkey,
+                        companion_pubkey,
                         acc,
                         deleg,
                     )
@@ -1325,7 +1325,7 @@ where
     }
 
     fn resolve_account_with_companion(
-        bank: &Arc<V>,
+        bank: &V,
         pubkey: Pubkey,
         delegation_record_pubkey: Pubkey,
         acc: RemoteAccount,
@@ -1342,7 +1342,7 @@ where
                 // Only account found without a delegation record, it is either invalid
                 // or a delegation record itself.
                 // Clone it as is (without changing the owner or flagging as delegated)
-                match acc.account.resolved_account_shared_data(&**bank) {
+                match acc.account.resolved_account_shared_data(bank) {
                     Some(account) => Ok(AccountWithCompanion {
                         pubkey,
                         account,
@@ -1360,16 +1360,16 @@ where
                 // Found the delegation record, we include it so that the caller can
                 // use it to add metadata to the account and use it for decision making
                 let Some(deleg_account) =
-                    deleg.account.resolved_account_shared_data(&**bank)
+                    deleg.account.resolved_account_shared_data(bank)
                 else {
                     return Err(
-                        ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                            pubkey,
+                        ChainlinkError::ResolvedCompanionAccountCouldNoLongerBeFound(
+                            delegation_record_pubkey,
                         ),
                     );
                 };
                 let Some(account) =
-                    acc.account.resolved_account_shared_data(&**bank)
+                    acc.account.resolved_account_shared_data(bank)
                 else {
                     return Err(
                         ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
