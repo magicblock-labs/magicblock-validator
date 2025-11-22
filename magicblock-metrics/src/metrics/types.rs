@@ -76,28 +76,26 @@ pub enum AccountFetchOrigin {
     SendTransaction,
 }
 
-impl fmt::Display for AccountFetchOrigin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AccountFetchOrigin::GetMultipleAccounts => {
-                write!(f, "get_multiple_accounts")
-            }
-            AccountFetchOrigin::GetAccount => write!(f, "get_account"),
-            AccountFetchOrigin::SendTransaction => {
-                write!(f, "send_transaction")
-            }
-        }
-    }
-}
-
-impl LabelValue for AccountFetchOrigin {
-    fn value(&self) -> &str {
+impl AccountFetchOrigin {
+    pub fn as_str(&self) -> &str {
         use AccountFetchOrigin::*;
         match self {
             GetMultipleAccounts => "get_multiple_accounts",
             GetAccount => "get_account",
             SendTransaction => "send_transaction",
         }
+    }
+}
+
+impl fmt::Display for AccountFetchOrigin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for AccountFetchOrigin {
+    fn value(&self) -> &str {
+        self.as_str()
     }
 }
 
