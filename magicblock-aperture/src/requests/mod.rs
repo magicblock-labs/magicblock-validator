@@ -16,11 +16,9 @@ pub(crate) struct JsonRequest<M> {
     pub(crate) params: Option<Array>,
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-pub enum RpcRequest<M> {
-    Single(JsonRequest<M>),
-    Multi(Vec<JsonRequest<M>>),
+pub enum RpcRequest {
+    Single(JsonHttpRequest),
+    Multi(Vec<JsonHttpRequest>),
 }
 
 impl<M> JsonRequest<M> {

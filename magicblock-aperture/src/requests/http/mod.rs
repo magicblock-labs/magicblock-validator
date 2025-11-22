@@ -1,3 +1,4 @@
+use core::str;
 use std::{mem::size_of, ops::Range};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -19,7 +20,7 @@ use solana_transaction::{
 };
 use solana_transaction_status::UiTransactionEncoding;
 
-use super::{JsonRpcHttpMethod, RpcRequest};
+use super::RpcRequest;
 use crate::{
     error::RpcError, server::http::dispatch::HttpDispatcher, RpcResult,
 };
@@ -45,9 +46,7 @@ impl Data {
 }
 
 /// Deserializes the raw request body bytes into a structured `JsonHttpRequest`.
-pub(crate) fn parse_body(
-    body: Data,
-) -> RpcResult<RpcRequest<JsonRpcHttpMethod>> {
+pub(crate) fn parse_body(body: Data) -> RpcResult<RpcRequest> {
     let body_bytes = match &body {
         Data::Empty => {
             return Err(RpcError::invalid_request("missing request body"))
@@ -55,7 +54,13 @@ pub(crate) fn parse_body(
         Data::SingleChunk(slice) => slice.as_ref(),
         Data::MultiChunk(vec) => vec.as_ref(),
     };
-    json::from_slice(body_bytes).map_err(Into::into)
+    // Hacky/cheap way to detect single request vs an array of requests
+    if body_bytes.first().map(|&b| b == b'{').unwrap_or_default() {
+        json::from_slice(body_bytes).map(RpcRequest::Single)
+    } else {
+        json::from_slice(body_bytes).map(RpcRequest::Multi)
+    }
+    .map_err(Into::into)
 }
 
 /// Asynchronously reads all data from an HTTP request body, correctly handling chunked transfers.

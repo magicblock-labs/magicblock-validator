@@ -1,3 +1,4 @@
+use core::str;
 use std::{convert::Infallible, sync::Arc};
 
 use futures::{stream::FuturesOrdered, StreamExt};
@@ -106,10 +107,9 @@ impl HttpDispatcher {
                 match $result {
                     Ok(r) => r,
                     Err(error) => {
-                        let mut response =
-                            ResponseErrorPayload::encode($id, error);
-                        Self::set_access_control_headers(&mut response);
-                        return Ok(response);
+                        let mut resp = ResponseErrorPayload::encode($id, error);
+                        Self::set_access_control_headers(&mut resp);
+                        return Ok(resp);
                     }
                 }
             };
@@ -138,13 +138,16 @@ impl HttpDispatcher {
                 while let Some((response, request)) = jobs.next().await {
                     let response = unwrap!(response, Some(&request.id));
                     body.extend_from_slice(&response.into_body().0);
+                    body.push(b',');
                 }
-                body.push(b']');
-                (Ok(Response::new(body.into())), None)
+                if let Some(b) = body.last_mut() {
+                    *b = b']'
+                }
+                (Ok(Response::new(JsonBody(body))), None)
             }
         };
 
-        // Handle any errors from the execution stage
+        // Handle any errors from the handling stage
         let mut response = unwrap!(response, id.as_ref());
         Self::set_access_control_headers(&mut response);
         Ok(response)
