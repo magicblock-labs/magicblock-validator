@@ -9,7 +9,9 @@ use magicblock_core::{
     },
     tls::ExecutionTlsStash,
 };
-use magicblock_metrics::metrics::FAILED_TRANSACTIONS_COUNT;
+use magicblock_metrics::metrics::{
+    FAILED_TRANSACTIONS_COUNT, TRANSACTION_COUNT,
+};
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_svm::{
@@ -51,6 +53,7 @@ impl super::TransactionExecutor {
     ) {
         let (result, balances) = self.process(&transaction);
         let [txn] = transaction;
+        TRANSACTION_COUNT.inc();
 
         let processed = match result {
             Ok(processed) => processed,
