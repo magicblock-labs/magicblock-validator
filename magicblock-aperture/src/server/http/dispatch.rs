@@ -1,5 +1,6 @@
 use std::{convert::Infallible, sync::Arc};
 
+use futures::{stream::FuturesOrdered, StreamExt};
 use hyper::{body::Incoming, Method, Request, Response};
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
@@ -14,7 +15,7 @@ use crate::{
     requests::{
         http::{extract_bytes, parse_body, HandlerResult},
         payload::ResponseErrorPayload,
-        JsonHttpRequest,
+        JsonHttpRequest, RpcRequest,
     },
     state::{
         blocks::BlocksCache, transactions::TransactionsCache, ChainlinkImpl,
@@ -103,11 +104,35 @@ impl HttpDispatcher {
 
         // Extract and parse the request body.
         let body = unwrap!(extract_bytes(request).await, None);
-        let mut request = unwrap!(parse_body(body), None);
+        let request = unwrap!(parse_body(body), None);
+
         // Resolve the handler for request and process it
-        let response = self.process(&mut request).await;
+        let (response, id) = match request {
+            RpcRequest::Single(mut r) => {
+                let response = self.process(&mut r).await;
+                (response, Some(r.id))
+            }
+            RpcRequest::Multi(requests) => {
+                let mut jobs = FuturesOrdered::new();
+                for mut r in requests {
+                    let j = async {
+                        let response = self.process(&mut r).await;
+                        (response, r)
+                    };
+                    jobs.push_back(j);
+                }
+                let mut body = vec![b'['];
+                while let Some((response, request)) = jobs.next().await {
+                    let response = unwrap!(response, Some(&request.id));
+                    body.extend_from_slice(&response.into_body().0);
+                }
+                body.push(b']');
+                (Ok(Response::new(body.into())), None)
+            }
+        };
+
         // Handle any errors from the execution stage
-        let response = unwrap!(response, Some(&request.id));
+        let response = unwrap!(response, id.as_ref());
         Ok(response)
     }
 

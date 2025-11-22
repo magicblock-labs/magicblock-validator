@@ -19,7 +19,7 @@ use solana_transaction::{
 };
 use solana_transaction_status::UiTransactionEncoding;
 
-use super::JsonHttpRequest;
+use super::{JsonRpcHttpMethod, RpcRequest};
 use crate::{
     error::RpcError, server::http::dispatch::HttpDispatcher, RpcResult,
 };
@@ -45,7 +45,9 @@ impl Data {
 }
 
 /// Deserializes the raw request body bytes into a structured `JsonHttpRequest`.
-pub(crate) fn parse_body(body: Data) -> RpcResult<JsonHttpRequest> {
+pub(crate) fn parse_body(
+    body: Data,
+) -> RpcResult<RpcRequest<JsonRpcHttpMethod>> {
     let body_bytes = match &body {
         Data::Empty => {
             return Err(RpcError::invalid_request("missing request body"))

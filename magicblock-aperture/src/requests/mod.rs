@@ -16,6 +16,13 @@ pub(crate) struct JsonRequest<M> {
     pub(crate) params: Option<Array>,
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum RpcRequest<M> {
+    Single(JsonRequest<M>),
+    Multi(Vec<JsonRequest<M>>),
+}
+
 impl<M> JsonRequest<M> {
     /// A helper method to get a mutable reference to the
     /// `params` array, returning an error if it is `None`.
