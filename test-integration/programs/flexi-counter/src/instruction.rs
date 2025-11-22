@@ -300,6 +300,13 @@ pub fn create_delegate_ix(payer: Pubkey) -> Instruction {
     )
 }
 
+pub fn create_delegate_ix_with_validator(
+    payer: Pubkey,
+    _validator: Option<Pubkey>,
+) -> Instruction {
+    create_delegate_ix(payer)
+}
+
 pub fn create_add_and_schedule_commit_ix(
     payer: Pubkey,
     count: u8,
