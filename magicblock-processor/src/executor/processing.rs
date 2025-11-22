@@ -376,39 +376,7 @@ impl super::TransactionExecutor {
                     .get_or_insert_default();
                 let msg = "Feepayer balance has been modified illegally".into();
                 logs.push(msg);
-                return;
             }
-        }
-        // SVM ignores rent exemption enforcement for accounts, which have
-        // 0 lamports, so it's possible to call realloc on account with zero
-        // balance bypassing the runtime checks. In order to prevent this
-        // edge case we perform explicit post execution check here.
-        for (i, (pubkey, acc)) in txn.accounts.iter().enumerate() {
-            if !acc.is_dirty() {
-                continue;
-            }
-            let Some(rent) = self.environment.rent_collector else {
-                continue;
-            };
-            if acc.lamports() == 0 && acc.data().is_empty() {
-                continue;
-            }
-            let rent_exemption_balance =
-                rent.get_rent().minimum_balance(acc.data().len());
-            if acc.lamports() >= rent_exemption_balance {
-                continue;
-            }
-            let error = Err(TransactionError::InsufficientFundsForRent {
-                account_index: i as u8,
-            });
-            executed.execution_details.status = error;
-            let logs = executed
-                .execution_details
-                .log_messages
-                .get_or_insert_default();
-            let msg = format!("Account {pubkey} has violated rent exemption");
-            logs.push(msg);
-            return;
         }
     }
 }
