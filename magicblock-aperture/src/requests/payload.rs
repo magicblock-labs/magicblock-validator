@@ -1,4 +1,4 @@
-use hyper::{body::Bytes, Response};
+use hyper::{body::Bytes, header::CONTENT_TYPE, Response};
 use json::{Serialize, Value};
 use magicblock_core::Slot;
 
@@ -160,10 +160,8 @@ impl<'id, T: Serialize> ResponsePayload<'id, T> {
 
 /// Builds a standard `200 OK` JSON HTTP response with appropriate headers.
 fn build_json_response<T: Serialize>(payload: T) -> Response<JsonBody> {
-    use hyper::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
     Response::builder()
         .header(CONTENT_TYPE, "application/json")
-        .header(ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .body(JsonBody::from(payload))
         // SAFETY: Safe with static values
         .expect("Building JSON response failed")
