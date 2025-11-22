@@ -69,10 +69,6 @@ pub enum AccountCommit<'a> {
     CommitAndUndelegate { pubkey: &'a str, outcome: Outcome },
 }
 
-pub trait LabelValue {
-    fn value(&self) -> &str;
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountFetchOrigin {
     GetMultipleAccounts,
@@ -92,6 +88,21 @@ impl fmt::Display for AccountFetchOrigin {
             }
         }
     }
+}
+
+impl LabelValue for AccountFetchOrigin {
+    fn value(&self) -> &str {
+        use AccountFetchOrigin::*;
+        match self {
+            GetMultipleAccounts => "get_multiple_accounts",
+            GetAccount => "get_account",
+            SendTransaction => "send_transaction",
+        }
+    }
+}
+
+pub trait LabelValue {
+    fn value(&self) -> &str;
 }
 
 impl<T, E> LabelValue for Result<T, E>
