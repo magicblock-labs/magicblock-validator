@@ -14,7 +14,7 @@ use crate::{
     },
     schedule_transactions::check_magic_context_id,
     utils::{
-        account_actions::mark_account_as_undelegating,
+        account_actions::perform_account_undelegation,
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
@@ -143,7 +143,7 @@ pub(crate) fn process_schedule_base_intent(
         // Once account is undelegated we need to make it immutable in our validator.
         for (pubkey, account_ref) in undelegated_accounts_ref.iter() {
             undelegated_pubkeys.push(pubkey.to_string());
-            mark_account_as_undelegating(account_ref);
+            perform_account_undelegation(account_ref);
         }
     }
     if !undelegated_pubkeys.is_empty() {
