@@ -20,5 +20,4 @@ serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 magicblock-config-helpers = { workspace = true }
-trybuild = { workspace = true }
-macrotest = { workspace = true }
+prettyplease = "0.2"
