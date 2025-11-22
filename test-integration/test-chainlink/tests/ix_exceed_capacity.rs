@@ -3,6 +3,7 @@ use magicblock_chainlink::{
     config::{ChainlinkConfig, LifecycleMode},
     remote_account_provider::config::RemoteAccountProviderConfig,
     testing::{init_logger, utils::random_pubkeys},
+    AccountFetchOrigin,
 };
 use test_chainlink::ixtest_context::IxtestContext;
 
@@ -41,7 +42,10 @@ async fn ixtest_read_multiple_accounts_not_exceeding_capacity() {
     let (ctx, pubkeys) =
         setup(subscribed_accounts_lru_capacity, pubkeys_len).await;
 
-    ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    ctx.chainlink
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .await
+        .unwrap();
 
     // Verify all accounts are present in the cache
     for pubkey in pubkeys {
@@ -71,11 +75,11 @@ async fn ixtest_read_multiple_accounts_exceeding_capacity() {
     // will be removed, but since they haven't been added yet that does nothing and
     // they get still added later right after. Therefore here we go in steps:
     ctx.chainlink
-        .ensure_accounts(&pubkeys[0..4], None)
+        .ensure_accounts(&pubkeys[0..4], None, AccountFetchOrigin::GetAccount)
         .await
         .unwrap();
     ctx.chainlink
-        .ensure_accounts(&pubkeys[4..8], None)
+        .ensure_accounts(&pubkeys[4..8], None, AccountFetchOrigin::GetAccount)
         .await
         .unwrap();
 

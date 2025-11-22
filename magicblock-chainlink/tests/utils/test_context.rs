@@ -22,7 +22,7 @@ use magicblock_chainlink::{
         photon_client_mock::PhotonClientMock,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
     },
-    Chainlink,
+    AccountFetchOrigin, Chainlink,
 };
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
@@ -210,7 +210,13 @@ impl TestContext {
         &self,
         pubkey: &Pubkey,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        self.chainlink.ensure_accounts(&[*pubkey], None).await
+        self.chainlink
+            .ensure_accounts(
+                &[*pubkey],
+                None,
+                AccountFetchOrigin::GetMultipleAccounts,
+            )
+            .await
     }
 
     /// Force undelegation of an account in the bank to mark it as such until

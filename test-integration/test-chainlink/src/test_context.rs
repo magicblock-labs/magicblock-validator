@@ -212,7 +212,13 @@ impl TestContext {
         &self,
         pubkey: &Pubkey,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        self.chainlink.ensure_accounts(&[*pubkey], None).await
+        self.chainlink
+            .ensure_accounts(
+                &[*pubkey],
+                None,
+                magicblock_chainlink::AccountFetchOrigin::GetAccount,
+            )
+            .await
     }
 
     /// Force undelegation of an account in the bank to mark it as such until

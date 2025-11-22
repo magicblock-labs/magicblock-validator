@@ -12,6 +12,7 @@ use magicblock_chainlink::{
         accounts::account_shared_with_owner, deleg::add_delegation_record_for,
         init_logger,
     },
+    AccountFetchOrigin,
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -239,7 +240,14 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots_compressed() {
             .await;
         assert!(updated, "Failed to receive delegation update");
 
-        chainlink.ensure_accounts(&[pubkey], None).await.unwrap();
+        chainlink
+            .ensure_accounts(
+                &[pubkey],
+                None,
+                AccountFetchOrigin::GetMultipleAccounts,
+            )
+            .await
+            .unwrap();
 
         // Account should be cloned as delegated back to us
         info!("3.2. Would allow write (delegated to us again)");
