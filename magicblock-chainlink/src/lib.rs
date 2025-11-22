@@ -6,6 +6,7 @@ pub mod remote_account_provider;
 pub mod submux;
 
 pub use chainlink::*;
+pub use magicblock_metrics::metrics::AccountFetchOrigin;
 
 #[cfg(any(test, feature = "dev-context"))]
 pub mod testing;

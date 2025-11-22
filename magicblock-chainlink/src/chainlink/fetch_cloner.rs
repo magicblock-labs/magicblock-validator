@@ -12,7 +12,7 @@ use dlp::{
 };
 use log::*;
 use magicblock_core::traits::AccountsBank;
-use magicblock_metrics::metrics;
+use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk::system_program;
@@ -293,6 +293,7 @@ where
                 self,
                 pubkey,
                 account.remote_slot(),
+                AccountFetchOrigin::GetAccount,
             )
             .await
             {
@@ -361,6 +362,7 @@ where
                         pubkey,
                         delegation_record_pubkey,
                         account.remote_slot(),
+                        AccountFetchOrigin::GetAccount,
                     )
                     .await
                 {
@@ -492,6 +494,7 @@ where
         &self,
         account_pubkey: Pubkey,
         min_context_slot: u64,
+        fetch_origin: metrics::AccountFetchOrigin,
     ) -> Option<DelegationRecord> {
         let delegation_record_pubkey =
             delegation_record_pda_from_delegated_account(&account_pubkey);
@@ -507,6 +510,7 @@ where
                     min_context_slot: Some(min_context_slot),
                     ..Default::default()
                 }),
+                fetch_origin,
             )
             .await
         {
@@ -569,6 +573,7 @@ where
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
+        fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys = pubkeys
@@ -603,7 +608,7 @@ where
 
         let accs = self
             .remote_account_provider
-            .try_get_multi(pubkeys, mark_empty_if_not_found)
+            .try_get_multi(pubkeys, mark_empty_if_not_found, fetch_origin)
             .await?;
 
         trace!("Fetched {accs:?}");
@@ -741,6 +746,7 @@ where
                 self.task_to_fetch_with_delegation_record(
                     *pubkey,
                     effective_slot,
+                    fetch_origin,
                 ),
             );
         }
@@ -898,6 +904,7 @@ where
                             min_context_slot: batch_min_context_slot,
                             ..Default::default()
                         }),
+                        fetch_origin,
                     )
                     .await
             } else {
@@ -1106,6 +1113,7 @@ where
         &self,
         pubkey: &Pubkey,
         in_bank: &AccountSharedData,
+        fetch_origin: AccountFetchOrigin,
     ) -> bool {
         if in_bank.undelegating() {
             debug!("Fetching undelegating account {pubkey}. delegated={}, undelegating={}", in_bank.delegated(), in_bank.undelegating());
@@ -1113,6 +1121,7 @@ where
                 .fetch_and_parse_delegation_record(
                     *pubkey,
                     self.remote_account_provider.chain_slot(),
+                    fetch_origin,
                 )
                 .await;
             let delegated_on_chain = deleg_record.as_ref().is_some_and(|dr| {
@@ -1154,6 +1163,7 @@ where
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
+        fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         // We cannot clone blacklisted accounts, thus either they are already
         // in the bank (e.g. native programs) or they don't exist and the transaction
@@ -1182,6 +1192,7 @@ where
                     .should_refresh_undelegating_in_bank_account(
                         pubkey,
                         &account_in_bank,
+                        fetch_origin,
                     )
                     .await;
                 if should_refresh_undelegating {
@@ -1230,6 +1241,7 @@ where
                 &fetch_new,
                 mark_empty_if_not_found,
                 slot,
+                fetch_origin,
             )
             .await
         } else {
@@ -1285,6 +1297,7 @@ where
         &self,
         pubkey: Pubkey,
         slot: u64,
+        fetch_origin: AccountFetchOrigin,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let delegation_record_pubkey =
             delegation_record_pda_from_delegated_account(&pubkey);
@@ -1292,6 +1305,7 @@ where
             pubkey,
             delegation_record_pubkey,
             slot,
+            fetch_origin,
         )
     }
 
@@ -1299,10 +1313,16 @@ where
         &self,
         pubkey: Pubkey,
         slot: u64,
+        fetch_origin: AccountFetchOrigin,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let program_data_pubkey =
             get_loaderv3_get_program_data_address(&pubkey);
-        self.task_to_fetch_with_companion(pubkey, program_data_pubkey, slot)
+        self.task_to_fetch_with_companion(
+            pubkey,
+            program_data_pubkey,
+            slot,
+            fetch_origin,
+        )
     }
 
     fn task_to_fetch_with_companion(
@@ -1310,6 +1330,7 @@ where
         pubkey: Pubkey,
         companion_pubkey: Pubkey,
         slot: u64,
+        fetch_origin: AccountFetchOrigin,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let provider = self.remote_account_provider.clone();
         let bank = self.accounts_bank.clone();
@@ -1327,6 +1348,7 @@ where
                         min_context_slot: Some(slot),
                         ..Default::default()
                     }),
+                    fetch_origin,
                 )
                 .await
                 // SAFETY: we always get two results here
@@ -1861,7 +1883,12 @@ mod tests {
             .await;
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -1894,7 +1921,12 @@ mod tests {
         .await;
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[non_existing_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[non_existing_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -1948,7 +1980,12 @@ mod tests {
 
         // Test fetch and clone
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -2020,7 +2057,12 @@ mod tests {
         );
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -2097,7 +2139,12 @@ mod tests {
             account_owner,
         );
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[deleg_record_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[deleg_record_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
         assert!(result.is_ok());
 
@@ -2106,7 +2153,12 @@ mod tests {
 
         // Fetch and clone the delegated account
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         assert!(result.is_ok());
@@ -2203,6 +2255,7 @@ mod tests {
                 ],
                 None,
                 None,
+                AccountFetchOrigin::GetAccount,
             )
             .await;
 
@@ -2305,6 +2358,7 @@ mod tests {
                 &[delegated_pubkey, invalid_delegated_pubkey],
                 None,
                 None,
+                AccountFetchOrigin::GetAccount,
             )
             .await;
 
@@ -2372,7 +2426,12 @@ mod tests {
         // Initially we should not be able to clone the account since we cannot
         // find a valid delegation record (up to date the same way the account is)
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -2388,7 +2447,12 @@ mod tests {
         // at the required slot then all is ok
         rpc_client.account_override_slot(&deleg_record_pubkey, CURRENT_SLOT);
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
         debug!("Test result after updating delegation record: {result:?}");
         assert!(result.is_ok());
@@ -2437,7 +2501,12 @@ mod tests {
         // Initially we should not be able to clone the account since the account
         // is stale (delegation record is up to date but account is behind)
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -2452,7 +2521,12 @@ mod tests {
         // After the RPC provider updates the account to the current slot
         rpc_client.account_override_slot(&account_pubkey, CURRENT_SLOT);
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
         debug!("Test result after updating account: {result:?}");
         assert!(result.is_ok());
@@ -2512,6 +2586,7 @@ mod tests {
                         &[account_pubkey],
                         None,
                         None,
+                        AccountFetchOrigin::GetAccount,
                     )
                     .await
             })
@@ -2580,6 +2655,7 @@ mod tests {
                         &[account_pubkey],
                         None,
                         None,
+                        AccountFetchOrigin::GetAccount,
                     )
                     .await
             })
@@ -2651,7 +2727,12 @@ mod tests {
         // Initially fetch and clone the delegated account
         // This should result in no active subscription since it's delegated to us
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
         assert!(result.is_ok());
 
@@ -2738,7 +2819,12 @@ mod tests {
             let fetch_cloner = fetch_cloner.clone();
             tokio::spawn(async move {
                 fetch_cloner
-                    .fetch_and_clone_accounts_with_dedup(&accounts, None, None)
+                    .fetch_and_clone_accounts_with_dedup(
+                        &accounts,
+                        None,
+                        None,
+                        AccountFetchOrigin::GetAccount,
+                    )
                     .await
             })
         };
@@ -2823,6 +2909,7 @@ mod tests {
                 ],
                 Some(&[marked_non_existing_account_pubkey]),
                 None,
+                AccountFetchOrigin::GetAccount,
             )
             .await
             .expect("Fetch and clone failed");

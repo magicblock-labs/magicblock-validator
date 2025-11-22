@@ -5,7 +5,9 @@ use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
     IntGauge, IntGaugeVec, Opts, Registry,
 };
-pub use types::{AccountClone, AccountCommit, LabelValue, Outcome};
+pub use types::{
+    AccountClone, AccountCommit, AccountFetchOrigin, LabelValue, Outcome,
+};
 
 mod types;
 
@@ -192,21 +194,23 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
-    pub static ref ACCOUNT_FETCHES_FOUND_COUNT: IntCounter =
-        IntCounter::new(
+    pub static ref ACCOUNT_FETCHES_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new(
             "account_fetches_found_count",
-            "Total number of network account fetches that \
-             found an account",
-        )
-        .unwrap();
+            "Total number of network account fetches that found an account",
+        ),
+        &["origin"],
+    )
+    .unwrap();
 
-    pub static ref ACCOUNT_FETCHES_NOT_FOUND_COUNT: IntCounter =
-        IntCounter::new(
+    pub static ref ACCOUNT_FETCHES_NOT_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new(
             "account_fetches_not_found_count",
-            "Total number of network account fetches where \
-             account was not found",
-        )
-        .unwrap();
+            "Total number of network account fetches where account was not found",
+        ),
+        &["origin"],
+    )
+    .unwrap();
 
     pub static ref UNDELEGATION_REQUESTED_COUNT: IntCounter =
         IntCounter::new(
@@ -480,12 +484,19 @@ pub fn inc_account_fetches_failed(count: u64) {
     ACCOUNT_FETCHES_FAILED_COUNT.inc_by(count);
 }
 
-pub fn inc_account_fetches_found(count: u64) {
-    ACCOUNT_FETCHES_FOUND_COUNT.inc_by(count);
+pub fn inc_account_fetches_found(fetch_origin: AccountFetchOrigin, count: u64) {
+    ACCOUNT_FETCHES_FOUND_COUNT
+        .with_label_values(&[fetch_origin.value()])
+        .inc_by(count);
 }
 
-pub fn inc_account_fetches_not_found(count: u64) {
-    ACCOUNT_FETCHES_NOT_FOUND_COUNT.inc_by(count);
+pub fn inc_account_fetches_not_found(
+    fetch_origin: AccountFetchOrigin,
+    count: u64,
+) {
+    ACCOUNT_FETCHES_NOT_FOUND_COUNT
+        .with_label_values(&[fetch_origin.value()])
+        .inc_by(count);
 }
 
 pub fn inc_undelegation_requested() {
