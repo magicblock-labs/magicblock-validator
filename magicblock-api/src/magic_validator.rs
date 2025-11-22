@@ -49,7 +49,7 @@ use magicblock_ledger::{
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
     LatestBlock, Ledger,
 };
-use magicblock_metrics::MetricsService;
+use magicblock_metrics::{metrics::TRANSACTION_COUNT, MetricsService};
 use magicblock_processor::{
     build_svm_env,
     scheduler::{state::TransactionSchedulerState, TransactionScheduler},
@@ -291,6 +291,7 @@ impl MagicValidator {
                 .auto_airdrop_lamports
                 > 0,
         };
+        TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
         txn_scheduler_state
             .load_upgradeable_programs(&programs_to_load(&config.programs))
             .map_err(|err| {

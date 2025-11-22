@@ -233,6 +233,10 @@ lazy_static::lazy_static! {
     // -----------------
     // Transaction Execution
     // -----------------
+    pub static ref TRANSACTION_COUNT: IntCounter = IntCounter::new(
+        "transaction_count", "Total number of executed transactions"
+    ).unwrap();
+
     pub static ref FAILED_TRANSACTIONS_COUNT: IntCounter = IntCounter::new(
         "failed_transactions_count", "Total number of failed transactions"
     ).unwrap();
