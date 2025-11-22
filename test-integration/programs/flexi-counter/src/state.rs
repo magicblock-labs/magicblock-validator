@@ -9,6 +9,8 @@ pub struct FlexiCounter {
 }
 
 const FLEXI_COUNTER_SEED: &[u8] = b"flexi_counter";
+pub const FAIL_UNDELEGATION_LABEL: &str = "undelegate_fail";
+pub const FAIL_UNDELEGATION_CODE: u32 = 122;
 
 impl FlexiCounter {
     pub fn new(label: String) -> Self {

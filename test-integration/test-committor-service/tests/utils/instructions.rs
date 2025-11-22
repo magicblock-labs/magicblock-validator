@@ -20,12 +20,14 @@ pub struct InitAccountAndDelegateIxs {
 pub fn init_account_and_delegate_ixs(
     payer: Pubkey,
     bytes: u64,
+    label: Option<String>,
 ) -> InitAccountAndDelegateIxs {
     const MAX_ALLOC: u64 = magicblock_committor_program::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
 
     use program_flexi_counter::{instruction::*, state::*};
 
-    let init_counter_ix = create_init_ix(payer, "COUNTER".to_string());
+    let init_counter_ix =
+        create_init_ix(payer, label.unwrap_or("COUNTER".to_string()));
     let rent_exempt = Rent::default().minimum_balance(bytes as usize);
 
     let num_reallocs = bytes.div_ceil(MAX_ALLOC);
