@@ -64,7 +64,10 @@ impl HttpServer {
     /// 2.  The server then waits for all active connections (which hold a clone of the
     ///     `shutdown` handle) to complete their work and drop their handles. Only then
     ///     does the `run` method return.
-    pub(crate) async fn run(mut self) {
+    pub(crate) async fn run(self) {
+        let dispatcher = self.dispatcher.clone();
+        let cancel = self.cancel.clone();
+        tokio::spawn(dispatcher.run_perf_samples_collector(cancel));
         loop {
             tokio::select! {
                 biased;
@@ -87,7 +90,7 @@ impl HttpServer {
     ///
     /// Each connection is managed by a Hyper connection handler and is integrated with
     /// the server's cancellation mechanism for graceful shutdown.
-    fn handle(&mut self, stream: TcpStream) {
+    fn handle(&self, stream: TcpStream) {
         // Create a child token so this specific connection can be cancelled.
         let cancel = self.cancel.child_token();
 
