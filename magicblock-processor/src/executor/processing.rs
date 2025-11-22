@@ -373,7 +373,6 @@ impl super::TransactionExecutor {
                     .get_or_insert_default();
                 let msg = "Feepayer balance has been modified illegally".into();
                 logs.push(msg);
-                return;
             }
         }
     }
