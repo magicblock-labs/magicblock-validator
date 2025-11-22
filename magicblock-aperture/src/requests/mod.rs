@@ -58,6 +58,7 @@ pub(crate) enum JsonRpcHttpMethod {
     GetLatestBlockhash,
     GetMultipleAccounts,
     GetProgramAccounts,
+    GetRecentPerformanceSamples,
     GetSignatureStatuses,
     GetSignaturesForAddress,
     GetSlot,
@@ -72,6 +73,7 @@ pub(crate) enum JsonRpcHttpMethod {
     GetTransaction,
     GetTransactionCount,
     GetVersion,
+    GetVoteAccounts,
     IsBlockhashValid,
     MinimumLedgerSlot,
     RequestAirdrop,
@@ -98,60 +100,48 @@ pub(crate) enum JsonRpcWsMethod {
 impl JsonRpcHttpMethod {
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
-            JsonRpcHttpMethod::GetAccountInfo => "getAccountInfo",
-            JsonRpcHttpMethod::GetBalance => "getBalance",
-            JsonRpcHttpMethod::GetBlock => "getBlock",
-            JsonRpcHttpMethod::GetBlockCommitment => "getBlockCommitment",
-            JsonRpcHttpMethod::GetBlockHeight => "getBlockHeight",
-            JsonRpcHttpMethod::GetBlockTime => "getBlockTime",
-            JsonRpcHttpMethod::GetBlocks => "getBlocks",
-            JsonRpcHttpMethod::GetBlocksWithLimit => "getBlocksWithLimit",
-            JsonRpcHttpMethod::GetClusterNodes => "getClusterNodes",
-            JsonRpcHttpMethod::GetEpochInfo => "getEpochInfo",
-            JsonRpcHttpMethod::GetEpochSchedule => "getEpochSchedule",
-            JsonRpcHttpMethod::GetFeeForMessage => "getFeeForMessage",
-            JsonRpcHttpMethod::GetFirstAvailableBlock => {
-                "getFirstAvailableBlock"
-            }
-            JsonRpcHttpMethod::GetGenesisHash => "getGenesisHash",
-            JsonRpcHttpMethod::GetHealth => "getHealth",
-            JsonRpcHttpMethod::GetHighestSnapshotSlot => {
-                "getHighestSnapshotSlot"
-            }
-            JsonRpcHttpMethod::GetIdentity => "getIdentity",
-            JsonRpcHttpMethod::GetLargestAccounts => "getLargestAccounts",
-            JsonRpcHttpMethod::GetLatestBlockhash => "getLatestBlockhash",
-            JsonRpcHttpMethod::GetMultipleAccounts => "getMultipleAccounts",
-            JsonRpcHttpMethod::GetProgramAccounts => "getProgramAccounts",
-            JsonRpcHttpMethod::GetSignatureStatuses => "getSignatureStatuses",
-            JsonRpcHttpMethod::GetSignaturesForAddress => {
-                "getSignaturesForAddress"
-            }
-            JsonRpcHttpMethod::GetSlot => "getSlot",
-            JsonRpcHttpMethod::GetSlotLeader => "getSlotLeader",
-            JsonRpcHttpMethod::GetSlotLeaders => "getSlotLeaders",
-            JsonRpcHttpMethod::GetSupply => "getSupply",
-            JsonRpcHttpMethod::GetTokenAccountBalance => {
-                "getTokenAccountBalance"
-            }
-            JsonRpcHttpMethod::GetTokenAccountsByDelegate => {
-                "getTokenAccountsByDelegate"
-            }
-            JsonRpcHttpMethod::GetTokenAccountsByOwner => {
-                "getTokenAccountsByOwner"
-            }
-            JsonRpcHttpMethod::GetTokenLargestAccounts => {
-                "getTokenLargestAccounts"
-            }
-            JsonRpcHttpMethod::GetTokenSupply => "getTokenSupply",
-            JsonRpcHttpMethod::GetTransaction => "getTransaction",
-            JsonRpcHttpMethod::GetTransactionCount => "getTransactionCount",
-            JsonRpcHttpMethod::GetVersion => "getVersion",
-            JsonRpcHttpMethod::IsBlockhashValid => "isBlockhashValid",
-            JsonRpcHttpMethod::MinimumLedgerSlot => "minimumLedgerSlot",
-            JsonRpcHttpMethod::RequestAirdrop => "requestAirdrop",
-            JsonRpcHttpMethod::SendTransaction => "sendTransaction",
-            JsonRpcHttpMethod::SimulateTransaction => "simulateTransaction",
+            Self::GetAccountInfo => "getAccountInfo",
+            Self::GetBalance => "getBalance",
+            Self::GetBlock => "getBlock",
+            Self::GetBlockCommitment => "getBlockCommitment",
+            Self::GetBlockHeight => "getBlockHeight",
+            Self::GetBlockTime => "getBlockTime",
+            Self::GetBlocks => "getBlocks",
+            Self::GetBlocksWithLimit => "getBlocksWithLimit",
+            Self::GetClusterNodes => "getClusterNodes",
+            Self::GetEpochInfo => "getEpochInfo",
+            Self::GetEpochSchedule => "getEpochSchedule",
+            Self::GetFeeForMessage => "getFeeForMessage",
+            Self::GetFirstAvailableBlock => "getFirstAvailableBlock",
+            Self::GetGenesisHash => "getGenesisHash",
+            Self::GetHealth => "getHealth",
+            Self::GetHighestSnapshotSlot => "getHighestSnapshotSlot",
+            Self::GetIdentity => "getIdentity",
+            Self::GetLargestAccounts => "getLargestAccounts",
+            Self::GetLatestBlockhash => "getLatestBlockhash",
+            Self::GetMultipleAccounts => "getMultipleAccounts",
+            Self::GetProgramAccounts => "getProgramAccounts",
+            Self::GetRecentPerformanceSamples => "getRecentPerformanceSamples",
+            Self::GetSignatureStatuses => "getSignatureStatuses",
+            Self::GetSignaturesForAddress => "getSignaturesForAddress",
+            Self::GetSlot => "getSlot",
+            Self::GetSlotLeader => "getSlotLeader",
+            Self::GetSlotLeaders => "getSlotLeaders",
+            Self::GetSupply => "getSupply",
+            Self::GetTokenAccountBalance => "getTokenAccountBalance",
+            Self::GetTokenAccountsByDelegate => "getTokenAccountsByDelegate",
+            Self::GetTokenAccountsByOwner => "getTokenAccountsByOwner",
+            Self::GetTokenLargestAccounts => "getTokenLargestAccounts",
+            Self::GetTokenSupply => "getTokenSupply",
+            Self::GetTransaction => "getTransaction",
+            Self::GetTransactionCount => "getTransactionCount",
+            Self::GetVersion => "getVersion",
+            Self::GetVoteAccounts => "getVoteAccounts",
+            Self::IsBlockhashValid => "isBlockhashValid",
+            Self::MinimumLedgerSlot => "minimumLedgerSlot",
+            Self::RequestAirdrop => "requestAirdrop",
+            Self::SendTransaction => "sendTransaction",
+            Self::SimulateTransaction => "simulateTransaction",
         }
     }
 }
@@ -159,16 +149,16 @@ impl JsonRpcHttpMethod {
 impl JsonRpcWsMethod {
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
-            JsonRpcWsMethod::AccountSubscribe => "accountSubscribe",
-            JsonRpcWsMethod::AccountUnsubscribe => "accountUnsubscribe",
-            JsonRpcWsMethod::LogsSubscribe => "logsSubscribe",
-            JsonRpcWsMethod::LogsUnsubscribe => "logsUnsubscribe",
-            JsonRpcWsMethod::ProgramSubscribe => "programSubscribe",
-            JsonRpcWsMethod::ProgramUnsubscribe => "programUnsubscribe",
-            JsonRpcWsMethod::SignatureSubscribe => "signatureSubscribe",
-            JsonRpcWsMethod::SignatureUnsubscribe => "signatureUnsubscribe",
-            JsonRpcWsMethod::SlotSubscribe => "slotSubscribe",
-            JsonRpcWsMethod::SlotUnsubscribe => "slotUnsubscribe",
+            Self::AccountSubscribe => "accountSubscribe",
+            Self::AccountUnsubscribe => "accountUnsubscribe",
+            Self::LogsSubscribe => "logsSubscribe",
+            Self::LogsUnsubscribe => "logsUnsubscribe",
+            Self::ProgramSubscribe => "programSubscribe",
+            Self::ProgramUnsubscribe => "programUnsubscribe",
+            Self::SignatureSubscribe => "signatureSubscribe",
+            Self::SignatureUnsubscribe => "signatureUnsubscribe",
+            Self::SlotSubscribe => "slotSubscribe",
+            Self::SlotUnsubscribe => "slotUnsubscribe",
         }
     }
 }
