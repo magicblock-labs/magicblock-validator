@@ -50,6 +50,21 @@ pub const MINIV3_AUTH: Pubkey =
 pub const MINIV4_AUTH: Pubkey =
     pubkey!("MiniV4AUTH111111111111111111111111111111111");
 
+/// Additional v3 loader program for testing parallel cloning of multiple
+/// programs. This program is cloned from devnet in ephemeral tests.
+/// Note: In devnet tests, these programs are deployed with different IDs
+/// but using the same MINIV3 binary. They're used to test batched fetching
+/// of multiple LoaderV3 programs.
+pub const PARALLEL_MINIV3_1: Pubkey =
+    pubkey!("MiniV32111111111111111111111111111111111111");
+pub const PARALLEL_MINIV3_1_AUTH: Pubkey =
+    pubkey!("MiniV4AUTH211111111111111111111111111111111");
+
+pub const PARALLEL_MINIV3_2: Pubkey =
+    pubkey!("MiniV33111111111111111111111111111111111111");
+pub const PARALLEL_MINIV3_2_AUTH: Pubkey =
+    pubkey!("MiniV4AUTH311111111111111111111111111111111");
+
 const CHUNK_SIZE: usize = 800;
 
 pub async fn airdrop_sol(

@@ -27,6 +27,9 @@ pub enum ChainlinkError {
     #[error("Failed to find account that was just resolved {0}")]
     ResolvedAccountCouldNoLongerBeFound(Pubkey),
 
+    #[error("Failed to find companion account that was just resolved {0}")]
+    ResolvedCompanionAccountCouldNoLongerBeFound(Pubkey),
+
     #[error("Failed to subscribe to account {0}: {1:?}")]
     FailedToSubscribeToAccount(Pubkey, RemoteAccountProviderError),
 
