@@ -1,3 +1,9 @@
+use std::sync::Arc;
+
+use dlp::{
+    args::{CommitDiffArgs, CommitStateArgs},
+    compute_diff,
+};
 use dyn_clone::DynClone;
 use magicblock_committor_program::{
     instruction_builder::{
@@ -13,11 +19,15 @@ use magicblock_committor_program::{
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
+use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::Instruction;
 use thiserror::Error;
 
-use crate::tasks::visitor::Visitor;
+use crate::{
+    intent_executor::task_info_fetcher::TaskInfoFetcher,
+    tasks::visitor::Visitor,
+};
 
 pub mod args_task;
 pub mod buffer_task;
@@ -53,6 +63,8 @@ pub enum TaskStrategy {
 pub trait BaseTask: Send + Sync + DynClone {
     /// Gets all pubkeys that involved in Task's instruction
     fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
+        // TODO (snawaz): rewrite it.
+        // currently it is slow as it discards heavy computations and memory allocations.
         self.instruction(validator)
             .accounts
             .iter()
@@ -97,11 +109,125 @@ pub trait BaseTask: Send + Sync + DynClone {
 
 dyn_clone::clone_trait_object!(BaseTask);
 
+pub struct CommitTaskBuilder;
+
+impl CommitTaskBuilder {
+    // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD, use CommitDiff to
+    // reduce instruction size. Below this, commit is sent as CommitState.
+    // Chose 256 as thresold seems good enough as it could hold 8 u32 fields
+    // or 4 u64 fields.
+    const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
+
+    pub async fn create_commit_task<C: TaskInfoFetcher>(
+        commit_id: u64,
+        allow_undelegation: bool,
+        committed_account: CommittedAccount,
+        task_info_fetcher: &Arc<C>,
+    ) -> CommitTask {
+        let base_account = if committed_account.account.data.len()
+            > CommitTaskBuilder::COMMIT_STATE_SIZE_THRESHOLD
+        {
+            match task_info_fetcher
+                .get_base_account(&committed_account.pubkey)
+                .await
+            {
+                Ok(Some(account)) => Some(account),
+                Ok(None) => {
+                    log::warn!("AccountNotFound for commit_diff, pubkey: {}, commit_id: {}, Falling back to commit_state.",
+                        committed_account.pubkey, commit_id);
+                    None
+                }
+                Err(e) => {
+                    log::warn!("Failed to fetch base account for commit diff, pubkey: {}, commit_id: {}, error: {}. Falling back to commit_state.",
+                        committed_account.pubkey, commit_id, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        CommitTask {
+            commit_id,
+            allow_undelegation,
+            committed_account,
+            base_account,
+            force_commit_state: false,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct CommitTask {
     pub commit_id: u64,
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
+    base_account: Option<Account>,
+    force_commit_state: bool,
+}
+
+impl CommitTask {
+    pub fn is_commit_diff(&self) -> bool {
+        !self.force_commit_state
+            && self.committed_account.account.data.len()
+                > CommitTaskBuilder::COMMIT_STATE_SIZE_THRESHOLD
+            && self.base_account.is_some()
+    }
+
+    pub fn force_commit_state(&mut self) {
+        self.force_commit_state = true;
+    }
+
+    pub fn create_commit_ix(&self, validator: &Pubkey) -> Instruction {
+        if let Some(fetched_account) = self.base_account.as_ref() {
+            self.create_commit_diff_ix(validator, fetched_account)
+        } else {
+            self.create_commit_state_ix(validator)
+        }
+    }
+
+    fn create_commit_state_ix(&self, validator: &Pubkey) -> Instruction {
+        let args = CommitStateArgs {
+            nonce: self.commit_id,
+            lamports: self.committed_account.account.lamports,
+            data: self.committed_account.account.data.clone(),
+            allow_undelegation: self.allow_undelegation,
+        };
+        dlp::instruction_builder::commit_state(
+            *validator,
+            self.committed_account.pubkey,
+            self.committed_account.account.owner,
+            args,
+        )
+    }
+
+    fn create_commit_diff_ix(
+        &self,
+        validator: &Pubkey,
+        fetched_account: &Account,
+    ) -> Instruction {
+        if self.force_commit_state {
+            return self.create_commit_state_ix(validator);
+        }
+
+        let args = CommitDiffArgs {
+            nonce: self.commit_id,
+            lamports: self.committed_account.account.lamports,
+            diff: compute_diff(
+                fetched_account.data(),
+                self.committed_account.account.data(),
+            )
+            .to_vec(),
+            allow_undelegation: self.allow_undelegation,
+        };
+
+        dlp::instruction_builder::commit_diff(
+            *validator,
+            self.committed_account.pubkey,
+            self.committed_account.account.owner,
+            args,
+        )
+    }
 }
 
 #[derive(Clone)]
@@ -296,32 +422,39 @@ mod serialization_safety_test {
     };
     use solana_account::Account;
 
-    use crate::tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
-        buffer_task::{BufferTask, BufferTaskType},
-        *,
+    use crate::{
+        intent_executor::NullTaskInfoFetcher,
+        tasks::{
+            args_task::{ArgsTask, ArgsTaskType},
+            buffer_task::{BufferTask, BufferTaskType},
+            *,
+        },
     };
 
     // Test all ArgsTask variants
-    #[test]
-    fn test_args_task_instruction_serialization() {
+    #[tokio::test]
+    async fn test_args_task_instruction_serialization() {
         let validator = Pubkey::new_unique();
 
         // Test Commit variant
-        let commit_task: ArgsTask = ArgsTaskType::Commit(CommitTask {
-            commit_id: 123,
-            allow_undelegation: true,
-            committed_account: CommittedAccount {
-                pubkey: Pubkey::new_unique(),
-                account: Account {
-                    lamports: 1000,
-                    data: vec![1, 2, 3],
-                    owner: Pubkey::new_unique(),
-                    executable: false,
-                    rent_epoch: 0,
+        let commit_task: ArgsTask = ArgsTaskType::Commit(
+            CommitTaskBuilder::create_commit_task(
+                123,
+                true,
+                CommittedAccount {
+                    pubkey: Pubkey::new_unique(),
+                    account: Account {
+                        lamports: 1000,
+                        data: vec![1, 2, 3],
+                        owner: Pubkey::new_unique(),
+                        executable: false,
+                        rent_epoch: 0,
+                    },
                 },
-            },
-        })
+                &Arc::new(NullTaskInfoFetcher),
+            )
+            .await,
+        )
         .into();
         assert_serializable(&commit_task.instruction(&validator));
 
@@ -363,51 +496,57 @@ mod serialization_safety_test {
     }
 
     // Test BufferTask variants
-    #[test]
-    fn test_buffer_task_instruction_serialization() {
+    #[tokio::test]
+    async fn test_buffer_task_instruction_serialization() {
         let validator = Pubkey::new_unique();
 
-        let buffer_task = BufferTask::new_preparation_required(
-            BufferTaskType::Commit(CommitTask {
-                commit_id: 456,
-                allow_undelegation: false,
-                committed_account: CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: Account {
-                        lamports: 2000,
-                        data: vec![7, 8, 9],
-                        owner: Pubkey::new_unique(),
-                        executable: false,
-                        rent_epoch: 0,
+        let buffer_task =
+            BufferTask::new_preparation_required(BufferTaskType::Commit(
+                CommitTaskBuilder::create_commit_task(
+                    456,
+                    false,
+                    CommittedAccount {
+                        pubkey: Pubkey::new_unique(),
+                        account: Account {
+                            lamports: 2000,
+                            data: vec![7, 8, 9],
+                            owner: Pubkey::new_unique(),
+                            executable: false,
+                            rent_epoch: 0,
+                        },
                     },
-                },
-            }),
-        );
+                    &Arc::new(NullTaskInfoFetcher),
+                )
+                .await,
+            ));
         assert_serializable(&buffer_task.instruction(&validator));
     }
 
     // Test preparation instructions
-    #[test]
-    fn test_preparation_instructions_serialization() {
+    #[tokio::test]
+    async fn test_preparation_instructions_serialization() {
         let authority = Pubkey::new_unique();
 
         // Test BufferTask preparation
-        let buffer_task = BufferTask::new_preparation_required(
-            BufferTaskType::Commit(CommitTask {
-                commit_id: 789,
-                allow_undelegation: true,
-                committed_account: CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: Account {
-                        lamports: 3000,
-                        data: vec![0; 1024], // Larger data to test chunking
-                        owner: Pubkey::new_unique(),
-                        executable: false,
-                        rent_epoch: 0,
+        let buffer_task =
+            BufferTask::new_preparation_required(BufferTaskType::Commit(
+                CommitTaskBuilder::create_commit_task(
+                    789,
+                    true,
+                    CommittedAccount {
+                        pubkey: Pubkey::new_unique(),
+                        account: Account {
+                            lamports: 3000,
+                            data: vec![0; 1024], // Larger data to test chunking
+                            owner: Pubkey::new_unique(),
+                            executable: false,
+                            rent_epoch: 0,
+                        },
                     },
-                },
-            }),
-        );
+                    &Arc::new(NullTaskInfoFetcher),
+                )
+                .await,
+            ));
 
         let PreparationState::Required(preparation_task) =
             buffer_task.preparation_state()

@@ -157,6 +157,7 @@ impl TaskStrategist {
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
         let calculate_tx_length = |tasks: &[Box<dyn BaseTask>]| {
+            // TODO (snawaz): we seem to discard lots of heavy computations here
             match TransactionUtils::assemble_tasks_tx(
                 &Keypair::new(), // placeholder
                 tasks,
@@ -249,6 +250,9 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use futures_util::future::join_all;
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, CommittedAccount, ProgramArgs,
     };
@@ -257,26 +261,36 @@ mod tests {
 
     use super::*;
     use crate::{
+        intent_executor::NullTaskInfoFetcher,
         persist::IntentPersisterImpl,
-        tasks::{BaseActionTask, CommitTask, TaskStrategy, UndelegateTask},
+        tasks::{
+            BaseActionTask, CommitTaskBuilder, TaskStrategy, UndelegateTask,
+        },
     };
 
     // Helper to create a simple commit task
-    fn create_test_commit_task(commit_id: u64, data_size: usize) -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::Commit(CommitTask {
-            commit_id,
-            allow_undelegation: false,
-            committed_account: CommittedAccount {
-                pubkey: Pubkey::new_unique(),
-                account: Account {
-                    lamports: 1000,
-                    data: vec![1; data_size],
-                    owner: system_program::id(),
-                    executable: false,
-                    rent_epoch: 0,
+    async fn create_test_commit_task(
+        commit_id: u64,
+        data_size: usize,
+    ) -> ArgsTask {
+        ArgsTask::new(ArgsTaskType::Commit(
+            CommitTaskBuilder::create_commit_task(
+                commit_id,
+                false,
+                CommittedAccount {
+                    pubkey: Pubkey::new_unique(),
+                    account: Account {
+                        lamports: 1000,
+                        data: vec![1; data_size],
+                        owner: system_program::id(),
+                        executable: false,
+                        rent_epoch: 0,
+                    },
                 },
-            },
-        }))
+                &Arc::new(NullTaskInfoFetcher),
+            )
+            .await,
+        ))
     }
 
     // Helper to create a Base action task
@@ -311,10 +325,10 @@ mod tests {
         }))
     }
 
-    #[test]
-    fn test_build_strategy_with_single_small_task() {
+    #[tokio::test]
+    async fn test_build_strategy_with_single_small_task() {
         let validator = Pubkey::new_unique();
-        let task = create_test_commit_task(1, 100);
+        let task = create_test_commit_task(1, 100).await;
         let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
 
         let strategy = TaskStrategist::build_strategy(
@@ -328,11 +342,11 @@ mod tests {
         assert!(strategy.lookup_tables_keys.is_empty());
     }
 
-    #[test]
-    fn test_build_strategy_optimizes_to_buffer_when_needed() {
+    #[tokio::test]
+    async fn test_build_strategy_optimizes_to_buffer_when_needed() {
         let validator = Pubkey::new_unique();
 
-        let task = create_test_commit_task(1, 1000); // Large task
+        let task = create_test_commit_task(1, 1000).await; // Large task
         let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
 
         let strategy = TaskStrategist::build_strategy(
@@ -349,11 +363,11 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_build_strategy_optimizes_to_buffer_u16_exceeded() {
+    #[tokio::test]
+    async fn test_build_strategy_optimizes_to_buffer_u16_exceeded() {
         let validator = Pubkey::new_unique();
 
-        let task = create_test_commit_task(1, 66_000); // Large task
+        let task = create_test_commit_task(1, 66_000).await; // Large task
         let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
 
         let strategy = TaskStrategist::build_strategy(
@@ -370,19 +384,18 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_build_strategy_creates_multiple_buffers() {
+    #[tokio::test]
+    async fn test_build_strategy_creates_multiple_buffers() {
         // TODO: ALSO MAX NUM WITH PURE BUFFER commits, no alts
         const NUM_COMMITS: u64 = 3;
 
         let validator = Pubkey::new_unique();
 
-        let tasks = (0..NUM_COMMITS)
-            .map(|i| {
-                let task = create_test_commit_task(i, 500); // Large task
-                Box::new(task) as Box<dyn BaseTask>
-            })
-            .collect();
+        let tasks = join_all((0..NUM_COMMITS).map(|i| async move {
+            let task = create_test_commit_task(i, 500).await; // Large task
+            Box::new(task) as Box<dyn BaseTask>
+        }))
+        .await;
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
@@ -397,20 +410,19 @@ mod tests {
         assert!(strategy.lookup_tables_keys.is_empty());
     }
 
-    #[test]
-    fn test_build_strategy_with_lookup_tables_when_needed() {
+    #[tokio::test]
+    async fn test_build_strategy_with_lookup_tables_when_needed() {
         // Also max number of committed accounts fit with ALTs!
         const NUM_COMMITS: u64 = 22;
 
         let validator = Pubkey::new_unique();
 
-        let tasks = (0..NUM_COMMITS)
-            .map(|i| {
-                // Large task
-                let task = create_test_commit_task(i, 10000);
-                Box::new(task) as Box<dyn BaseTask>
-            })
-            .collect();
+        let tasks = join_all((0..NUM_COMMITS).map(|i| async move {
+            // Large task
+            let task = create_test_commit_task(i, 10000).await;
+            Box::new(task) as Box<dyn BaseTask>
+        }))
+        .await;
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
@@ -425,19 +437,18 @@ mod tests {
         assert!(!strategy.lookup_tables_keys.is_empty());
     }
 
-    #[test]
-    fn test_build_strategy_fails_when_cant_fit() {
+    #[tokio::test]
+    async fn test_build_strategy_fails_when_cant_fit() {
         const NUM_COMMITS: u64 = 23;
 
         let validator = Pubkey::new_unique();
 
-        let tasks = (0..NUM_COMMITS)
-            .map(|i| {
-                // Large task
-                let task = create_test_commit_task(i, 1000);
-                Box::new(task) as Box<dyn BaseTask>
-            })
-            .collect();
+        let tasks = join_all((0..NUM_COMMITS).map(|i| async move {
+            // Large task
+            let task = create_test_commit_task(i, 1000).await;
+            Box::new(task) as Box<dyn BaseTask>
+        }))
+        .await;
 
         let result = TaskStrategist::build_strategy(
             tasks,
@@ -447,12 +458,15 @@ mod tests {
         assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
     }
 
-    #[test]
-    fn test_optimize_strategy_prioritizes_largest_tasks() {
+    #[tokio::test]
+    async fn test_optimize_strategy_prioritizes_largest_tasks() {
         let mut tasks = [
-            Box::new(create_test_commit_task(1, 100)) as Box<dyn BaseTask>,
-            Box::new(create_test_commit_task(2, 1000)) as Box<dyn BaseTask>, // Larger task
-            Box::new(create_test_commit_task(3, 1000)) as Box<dyn BaseTask>, // Larger task
+            Box::new(create_test_commit_task(1, 100).await)
+                as Box<dyn BaseTask>,
+            Box::new(create_test_commit_task(2, 1000).await)
+                as Box<dyn BaseTask>, // Larger task
+            Box::new(create_test_commit_task(3, 1000).await)
+                as Box<dyn BaseTask>, // Larger task
         ];
 
         let _ = TaskStrategist::optimize_strategy(&mut tasks);
@@ -461,11 +475,12 @@ mod tests {
         assert!(matches!(tasks[1].strategy(), TaskStrategy::Buffer));
     }
 
-    #[test]
-    fn test_mixed_task_types_with_optimization() {
+    #[tokio::test]
+    async fn test_mixed_task_types_with_optimization() {
         let validator = Pubkey::new_unique();
         let tasks = vec![
-            Box::new(create_test_commit_task(1, 1000)) as Box<dyn BaseTask>,
+            Box::new(create_test_commit_task(1, 1000).await)
+                as Box<dyn BaseTask>,
             Box::new(create_test_finalize_task()) as Box<dyn BaseTask>,
             Box::new(create_test_base_action_task(500)) as Box<dyn BaseTask>,
             Box::new(create_test_undelegate_task()) as Box<dyn BaseTask>,

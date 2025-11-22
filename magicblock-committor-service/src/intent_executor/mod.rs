@@ -4,6 +4,9 @@ pub mod single_stage_executor;
 pub mod task_info_fetcher;
 pub mod two_stage_executor;
 
+#[cfg(any(test, feature = "dev-context-only-utils"))]
+mod null_task_info_fetcher;
+
 use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
@@ -22,6 +25,8 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
+#[cfg(any(test, feature = "dev-context-only-utils"))]
+pub use null_task_info_fetcher::*;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_sdk::{
@@ -778,6 +783,8 @@ where
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
+    use magicblock_rpc_client::MagicBlockRpcClientResult;
+    use solana_account::Account;
     use solana_pubkey::Pubkey;
 
     use crate::{
@@ -815,6 +822,13 @@ mod tests {
         }
 
         fn reset(&self, _: ResetType) {}
+
+        async fn get_base_account(
+            &self,
+            _pubkey: &Pubkey,
+        ) -> MagicBlockRpcClientResult<Option<Account>> {
+            Ok(None) // AccountNotFound
+        }
     }
 
     #[tokio::test]

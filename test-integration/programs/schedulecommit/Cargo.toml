@@ -8,6 +8,8 @@ borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
 solana-program = { workspace = true }
 magicblock-delegation-program = { workspace = true }
+rkyv = { workspace = true }
+static_assertions = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "lib"]

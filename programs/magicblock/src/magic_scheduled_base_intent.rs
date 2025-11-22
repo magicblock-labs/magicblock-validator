@@ -308,6 +308,7 @@ impl BaseAction {
 }
 
 type CommittedAccountRef<'a> = (Pubkey, &'a RefCell<AccountSharedData>);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommittedAccount {
     pub pubkey: Pubkey,

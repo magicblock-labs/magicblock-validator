@@ -43,7 +43,8 @@ mod utils;
 #[test]
 fn test_committing_one_account() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(1);
+        let ctx =
+            get_context_with_delegated_committees(1, b"magic_schedule_commit");
 
         let ScheduleCommitTestContextFields {
             payer_ephem: payer,
@@ -96,7 +97,8 @@ fn test_committing_one_account() {
 #[test]
 fn test_committing_two_accounts() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(2);
+        let ctx =
+            get_context_with_delegated_committees(2, b"magic_schedule_commit");
 
         let ScheduleCommitTestContextFields {
             payer_ephem: payer,
@@ -227,6 +229,7 @@ fn init_and_delegate_player(
         payer.pubkey(),
         validator,
         player.pubkey(),
+        b"magic_schedule_commit",
     );
 
     // Send transaction

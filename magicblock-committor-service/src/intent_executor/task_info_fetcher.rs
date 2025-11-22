@@ -9,7 +9,10 @@ use dlp::{
 use log::{error, warn};
 use lru::LruCache;
 use magicblock_metrics::metrics;
-use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
+use magicblock_rpc_client::{
+    MagicBlockRpcClientError, MagicBlockRpcClientResult, MagicblockRpcClient,
+};
+use solana_account::Account;
 use solana_pubkey::Pubkey;
 
 const NUM_FETCH_RETRIES: NonZeroUsize =
@@ -36,6 +39,11 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
 
     /// Resets cache for some or all accounts
     fn reset(&self, reset_type: ResetType);
+
+    async fn get_base_account(
+        &self,
+        _pubkey: &Pubkey,
+    ) -> MagicBlockRpcClientResult<Option<Account>>;
 }
 
 pub enum ResetType<'a> {
@@ -263,6 +271,13 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
                 });
             }
         }
+    }
+
+    async fn get_base_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> MagicBlockRpcClientResult<Option<Account>> {
+        self.rpc_client.get_account(pubkey).await
     }
 }
 

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures_util::future::join_all;
 use log::error;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
@@ -15,7 +16,8 @@ use crate::{
     persist::IntentPersister,
     tasks::{
         args_task::{ArgsTask, ArgsTaskType},
-        BaseActionTask, BaseTask, CommitTask, FinalizeTask, UndelegateTask,
+        BaseActionTask, BaseTask, CommitTaskBuilder, FinalizeTask,
+        UndelegateTask,
     },
 };
 
@@ -23,14 +25,14 @@ use crate::{
 pub trait TasksBuilder {
     // Creates tasks for commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
-        commit_id_fetcher: &Arc<C>,
+        task_info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 
     // Create tasks for finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
-        info_fetcher: &Arc<C>,
+        task_info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 }
@@ -43,7 +45,7 @@ pub struct TaskBuilderImpl;
 impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
-        commit_id_fetcher: &Arc<C>,
+        task_info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
@@ -71,7 +73,7 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .map(|account| account.pubkey)
             .collect::<Vec<_>>();
-        let commit_ids = commit_id_fetcher
+        let commit_ids = task_info_fetcher
             .fetch_next_commit_ids(&committed_pubkeys)
             .await
             .map_err(TaskBuilderError::CommitTasksBuildError)?;
@@ -85,26 +87,26 @@ impl TasksBuilder for TaskBuilderImpl {
                 }
             });
 
-        let tasks = accounts
+        let tasks = join_all(accounts
             .iter()
-            .map(|account| {
+            .map(|account| async {
                 let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                let task = ArgsTaskType::Commit(CommitTask {
+                let task = ArgsTaskType::Commit(CommitTaskBuilder::create_commit_task(
                     commit_id,
                     allow_undelegation,
-                    committed_account: account.clone(),
-                });
+                    account.clone(),
+                    task_info_fetcher,
+                ).await);
 
                 Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
-            })
-            .collect();
+            })).await;
 
         Ok(tasks)
     }
 
     /// Returns [`Task`]s for Finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
-        info_fetcher: &Arc<C>,
+        task_info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
@@ -167,7 +169,7 @@ impl TasksBuilder for TaskBuilderImpl {
                     .iter()
                     .map(|account| account.pubkey)
                     .collect::<Vec<_>>();
-                let rent_reimbursements = info_fetcher
+                let rent_reimbursements = task_info_fetcher
                     .fetch_rent_reimbursements(&pubkeys)
                     .await
                     .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
