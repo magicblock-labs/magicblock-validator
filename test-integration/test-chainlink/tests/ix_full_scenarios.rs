@@ -162,8 +162,8 @@ async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
     // Initially the new_pubkey does not exist on chain so it will be returned as None
     {
         let (fetched_pubkeys, fetched_strs) = {
-            let fetched_accounts =
-                ctx.chainlink
+            let fetched_accounts = ctx
+                .chainlink
                 .fetch_accounts(&all_pubkeys, AccountFetchOrigin::GetAccount)
                 .await
                 .unwrap();
@@ -210,8 +210,8 @@ async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
         sleep_ms(500).await;
 
         let (fetched_pubkeys, fetched_strs) = {
-            let fetched_accounts =
-                ctx.chainlink
+            let fetched_accounts = ctx
+                .chainlink
                 .fetch_accounts(&all_pubkeys, AccountFetchOrigin::GetAccount)
                 .await
                 .unwrap();

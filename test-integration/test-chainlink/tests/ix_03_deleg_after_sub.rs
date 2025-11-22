@@ -21,10 +21,11 @@ async fn ixtest_deleg_after_subscribe_case2() {
     // 1. Initially the account does not exist
     {
         info!("1. Initially the account does not exist");
-        let res = ctx.chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
-        .await
-        .unwrap();
+        let res = ctx
+            .chainlink
+            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
 
         assert_not_found!(res, &pubkeys);
         assert_not_cloned!(ctx.cloner, &pubkeys);
@@ -37,9 +38,9 @@ async fn ixtest_deleg_after_subscribe_case2() {
         ctx.init_counter(&counter_auth).await;
 
         ctx.chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
-        .await
-        .unwrap();
+            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
 
         // Assert cloned account state matches the remote account and slot
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
@@ -61,9 +62,9 @@ async fn ixtest_deleg_after_subscribe_case2() {
         let deleg_record_pubkey = ctx.delegation_record_pubkey(&counter_pda);
 
         ctx.chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
-        .await
-        .unwrap();
+            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
 
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
         assert_cloned_as_delegated!(

@@ -119,11 +119,10 @@ async fn ixtest_get_existing_account_for_valid_slot() {
 
     {
         // Fetching immediately does not return the account yet
-        let remote_account =
-            remote_account_provider
-        .try_get(pubkey, AccountFetchOrigin::GetAccount)
-        .await
-        .unwrap();
+        let remote_account = remote_account_provider
+            .try_get(pubkey, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
         assert!(!remote_account.is_found());
     }
 
@@ -139,11 +138,10 @@ async fn ixtest_get_existing_account_for_valid_slot() {
     {
         // After waiting for a bit the subscription update came in
         let cs = current_slot(rpc_client).await;
-        let remote_account =
-            remote_account_provider
-        .try_get(pubkey, AccountFetchOrigin::GetAccount)
-        .await
-        .unwrap();
+        let remote_account = remote_account_provider
+            .try_get(pubkey, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
         assert!(remote_account.is_found());
         assert!(remote_account.slot() >= cs);
         assert_eq!(remote_account.fresh_lamports().unwrap(), 2_000_000);
