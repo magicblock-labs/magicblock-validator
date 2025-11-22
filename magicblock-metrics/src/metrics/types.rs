@@ -73,6 +73,27 @@ pub trait LabelValue {
     fn value(&self) -> &str;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountFetchOrigin {
+    GetMultipleAccounts,
+    GetAccount,
+    SendTransaction,
+}
+
+impl fmt::Display for AccountFetchOrigin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AccountFetchOrigin::GetMultipleAccounts => {
+                write!(f, "get_multiple_accounts")
+            }
+            AccountFetchOrigin::GetAccount => write!(f, "get_account"),
+            AccountFetchOrigin::SendTransaction => {
+                write!(f, "send_transaction")
+            }
+        }
+    }
+}
+
 impl<T, E> LabelValue for Result<T, E>
 where
     T: LabelValue,

@@ -5,7 +5,9 @@ use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
     IntGauge, IntGaugeVec, Opts, Registry,
 };
-pub use types::{AccountClone, AccountCommit, LabelValue, Outcome};
+pub use types::{
+    AccountClone, AccountCommit, AccountFetchOrigin, LabelValue, Outcome,
+};
 
 mod types;
 
@@ -192,19 +194,45 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
-    pub static ref ACCOUNT_FETCHES_FOUND_COUNT: IntCounter =
+    pub static ref ACCOUNT_FETCHES_GET_MULTIPLE_ACCOUNTS_FOUND_COUNT: IntCounter =
         IntCounter::new(
-            "account_fetches_found_count",
-            "Total number of network account fetches that \
-             found an account",
+            "account_fetches_get_multiple_accounts_found_count",
+            "Total number of network account fetches for getMultipleAccounts that found an account",
         )
         .unwrap();
 
-    pub static ref ACCOUNT_FETCHES_NOT_FOUND_COUNT: IntCounter =
+    pub static ref ACCOUNT_FETCHES_GET_MULTIPLE_ACCOUNTS_NOT_FOUND_COUNT: IntCounter =
         IntCounter::new(
-            "account_fetches_not_found_count",
-            "Total number of network account fetches where \
-             account was not found",
+            "account_fetches_get_multiple_accounts_not_found_count",
+            "Total number of network account fetches for getMultipleAccounts where account was not found",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_GET_ACCOUNT_FOUND_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_get_account_found_count",
+            "Total number of network account fetches for getAccount that found an account",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_GET_ACCOUNT_NOT_FOUND_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_get_account_not_found_count",
+            "Total number of network account fetches for getAccount where account was not found",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_SEND_TRANSACTION_FOUND_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_send_transaction_found_count",
+            "Total number of network account fetches for sendTransaction that found an account",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_SEND_TRANSACTION_NOT_FOUND_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_send_transaction_not_found_count",
+            "Total number of network account fetches for sendTransaction where account was not found",
         )
         .unwrap();
 
@@ -334,8 +362,12 @@ pub(crate) fn register() {
         register!(RPC_WS_SUBSCRIPTIONS_COUNT);
         register!(ACCOUNT_FETCHES_SUCCESS_COUNT);
         register!(ACCOUNT_FETCHES_FAILED_COUNT);
-        register!(ACCOUNT_FETCHES_FOUND_COUNT);
-        register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
+        register!(ACCOUNT_FETCHES_GET_MULTIPLE_ACCOUNTS_FOUND_COUNT);
+        register!(ACCOUNT_FETCHES_GET_MULTIPLE_ACCOUNTS_NOT_FOUND_COUNT);
+        register!(ACCOUNT_FETCHES_GET_ACCOUNT_FOUND_COUNT);
+        register!(ACCOUNT_FETCHES_GET_ACCOUNT_NOT_FOUND_COUNT);
+        register!(ACCOUNT_FETCHES_SEND_TRANSACTION_FOUND_COUNT);
+        register!(ACCOUNT_FETCHES_SEND_TRANSACTION_NOT_FOUND_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(UNSTUCK_UNDELEGATION_COUNT);
@@ -480,12 +512,37 @@ pub fn inc_account_fetches_failed(count: u64) {
     ACCOUNT_FETCHES_FAILED_COUNT.inc_by(count);
 }
 
-pub fn inc_account_fetches_found(count: u64) {
-    ACCOUNT_FETCHES_FOUND_COUNT.inc_by(count);
+pub fn inc_account_fetches_found(fetch_origin: AccountFetchOrigin, count: u64) {
+    use AccountFetchOrigin::*;
+    match fetch_origin {
+        GetMultipleAccounts => {
+            ACCOUNT_FETCHES_GET_MULTIPLE_ACCOUNTS_FOUND_COUNT.inc_by(count);
+        }
+        GetAccount => {
+            ACCOUNT_FETCHES_GET_ACCOUNT_FOUND_COUNT.inc_by(count);
+        }
+        SendTransaction => {
+            ACCOUNT_FETCHES_SEND_TRANSACTION_FOUND_COUNT.inc_by(count);
+        }
+    }
 }
 
-pub fn inc_account_fetches_not_found(count: u64) {
-    ACCOUNT_FETCHES_NOT_FOUND_COUNT.inc_by(count);
+pub fn inc_account_fetches_not_found(
+    fetch_origin: AccountFetchOrigin,
+    count: u64,
+) {
+    use AccountFetchOrigin::*;
+    match fetch_origin {
+        GetMultipleAccounts => {
+            ACCOUNT_FETCHES_GET_MULTIPLE_ACCOUNTS_NOT_FOUND_COUNT.inc_by(count);
+        }
+        GetAccount => {
+            ACCOUNT_FETCHES_GET_ACCOUNT_NOT_FOUND_COUNT.inc_by(count);
+        }
+        SendTransaction => {
+            ACCOUNT_FETCHES_SEND_TRANSACTION_NOT_FOUND_COUNT.inc_by(count);
+        }
+    }
 }
 
 pub fn inc_undelegation_requested() {

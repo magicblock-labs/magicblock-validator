@@ -6,7 +6,7 @@ use magicblock_chainlink::{
     assert_not_cloned, assert_not_found, assert_not_subscribed,
     assert_not_undelegating, assert_remain_undelegating,
     assert_subscribed_without_delegation_record,
-    testing::deleg::add_delegation_record_for,
+    testing::deleg::add_delegation_record_for, AccountFetchOrigin,
 };
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
@@ -36,7 +36,14 @@ async fn test_write_non_existing_account() {
 
     let pubkey = Pubkey::new_unique();
     let pubkeys = [pubkey];
-    let res = chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    let res = chainlink
+        .ensure_accounts(
+            &pubkeys,
+            None,
+            AccountFetchOrigin::GetMultipleAccounts,
+        )
+        .await
+        .unwrap();
     debug!("res: {res:?}");
 
     assert_not_found!(res, &pubkeys);
@@ -60,7 +67,14 @@ async fn test_existing_account_undelegated() {
     rpc_client.add_account(pubkey, Account::default());
 
     let pubkeys = [pubkey];
-    let res = chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    let res = chainlink
+        .ensure_accounts(
+            &pubkeys,
+            None,
+            AccountFetchOrigin::GetMultipleAccounts,
+        )
+        .await
+        .unwrap();
     debug!("res: {res:?}");
 
     assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT);
@@ -89,7 +103,14 @@ async fn test_existing_account_missing_delegation_record() {
     );
 
     let pubkeys = [pubkey];
-    let res = chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    let res = chainlink
+        .ensure_accounts(
+            &pubkeys,
+            None,
+            AccountFetchOrigin::GetMultipleAccounts,
+        )
+        .await
+        .unwrap();
     debug!("res: {res:?}");
 
     assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT);
@@ -123,7 +144,14 @@ async fn test_write_existing_account_valid_delegation_record() {
         add_delegation_record_for(&rpc_client, pubkey, validator_pubkey, owner);
 
     let pubkeys = [pubkey];
-    let res = chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    let res = chainlink
+        .ensure_accounts(
+            &pubkeys,
+            None,
+            AccountFetchOrigin::GetMultipleAccounts,
+        )
+        .await
+        .unwrap();
     debug!("res: {res:?}");
 
     // The account is cloned into the bank as delegated, the delegation record isn't
@@ -161,7 +189,14 @@ async fn test_write_existing_account_other_authority() {
         add_delegation_record_for(&rpc_client, pubkey, authority, owner);
 
     let pubkeys = [pubkey];
-    let res = chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    let res = chainlink
+        .ensure_accounts(
+            &pubkeys,
+            None,
+            AccountFetchOrigin::GetMultipleAccounts,
+        )
+        .await
+        .unwrap();
     debug!("res: {res:?}");
 
     // The account is cloned into the bank as undelegated, the delegation record isn't
@@ -209,7 +244,14 @@ async fn test_write_undelegating_account_undelegated_to_other_validator() {
     bank.insert(pubkey, shared_data);
 
     let pubkeys = [pubkey];
-    let res = chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    let res = chainlink
+        .ensure_accounts(
+            &pubkeys,
+            None,
+            AccountFetchOrigin::GetMultipleAccounts,
+        )
+        .await
+        .unwrap();
     debug!("res: {res:?}");
     assert_not_undelegating!(cloner, &pubkeys, CURRENT_SLOT);
 }
@@ -250,7 +292,14 @@ async fn test_write_undelegating_account_still_being_undelegated() {
     bank.insert(pubkey, shared_data);
 
     let pubkeys = [pubkey];
-    let res = chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+    let res = chainlink
+        .ensure_accounts(
+            &pubkeys,
+            None,
+            AccountFetchOrigin::GetMultipleAccounts,
+        )
+        .await
+        .unwrap();
     debug!("res: {res:?}");
     assert_remain_undelegating!(cloner, &pubkeys, CURRENT_SLOT);
 }
@@ -286,7 +335,13 @@ async fn test_write_existing_account_invalid_delegation_record() {
         },
     );
 
-    let res = chainlink.ensure_accounts(&[pubkey], None).await;
+    let res = chainlink
+        .ensure_accounts(
+            &[pubkey],
+            None,
+            AccountFetchOrigin::GetMultipleAccounts,
+        )
+        .await;
     debug!("res: {res:?}");
 
     assert_matches!(res, Err(_));
