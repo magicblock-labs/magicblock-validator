@@ -1,6 +1,5 @@
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
-use magicblock_program::ID as MAGIC_PROGRAM_ID;
 use magicblock_task_scheduler::{db::DbTask, SchedulerDatabase};
 use program_flexi_counter::{
     instruction::create_schedule_task_ix, state::FlexiCounter,
@@ -31,8 +30,8 @@ fn test_unauthorized_reschedule() {
         validator
     );
 
-    create_delegated_counter(&ctx, &payer, &mut validator);
-    create_delegated_counter(&ctx, &different_payer, &mut validator);
+    create_delegated_counter(&ctx, &payer, &mut validator, 0);
+    create_delegated_counter(&ctx, &different_payer, &mut validator, 0);
 
     // Noop tx to make sure the noop program is cloned
     let ephem_blockhash = send_noop_tx(&ctx, &payer, &mut validator);
@@ -46,7 +45,6 @@ fn test_unauthorized_reschedule() {
             &mut Transaction::new_signed_with_payer(
                 &[create_schedule_task_ix(
                     payer.pubkey(),
-                    MAGIC_PROGRAM_ID,
                     task_id,
                     execution_interval_millis,
                     iterations,
@@ -81,7 +79,6 @@ fn test_unauthorized_reschedule() {
             &mut Transaction::new_signed_with_payer(
                 &[create_schedule_task_ix(
                     different_payer.pubkey(),
-                    MAGIC_PROGRAM_ID,
                     task_id,
                     new_execution_interval_millis,
                     iterations,
@@ -160,7 +157,7 @@ fn test_unauthorized_reschedule() {
     let counter =
         expect!(FlexiCounter::try_decode(&counter_account.data), validator);
     assert!(
-        counter.count == iterations,
+        counter.count == iterations as u64,
         cleanup(&mut validator),
         "counter.count: {}",
         counter.count

@@ -15,7 +15,9 @@ use magicblock_config::{
     LedgerResumeStrategyType, LifecycleMode, RemoteCluster, RemoteConfig,
     TaskSchedulerConfig, ValidatorConfig,
 };
-use program_flexi_counter::instruction::{create_delegate_ix, create_init_ix};
+use program_flexi_counter::instruction::{
+    create_delegate_ix_with_commit_frequency_ms, create_init_ix,
+};
 use solana_sdk::{
     hash::Hash, instruction::Instruction, pubkey::Pubkey, signature::Keypair,
     signer::Signer, transaction::Transaction,
@@ -80,6 +82,7 @@ pub fn create_delegated_counter(
     ctx: &IntegrationTestContext,
     payer: &Keypair,
     validator: &mut Child,
+    commit_frequency_ms: u32,
 ) {
     // Initialize the counter
     let blockhash = expect!(
@@ -109,7 +112,10 @@ pub fn create_delegated_counter(
     expect!(
         ctx.send_transaction_chain(
             &mut Transaction::new_signed_with_payer(
-                &[create_delegate_ix(payer.pubkey())],
+                &[create_delegate_ix_with_commit_frequency_ms(
+                    payer.pubkey(),
+                    commit_frequency_ms
+                )],
                 Some(&payer.pubkey()),
                 &[&payer],
                 blockhash,

@@ -11,7 +11,7 @@ use crate::utils::accounts::get_instruction_pubkey_with_idx;
 pub(crate) fn process_cancel_task(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
-    task_id: u64,
+    task_id: i64,
 ) -> Result<(), InstructionError> {
     const TASK_AUTHORITY_IDX: u16 = 0;
 

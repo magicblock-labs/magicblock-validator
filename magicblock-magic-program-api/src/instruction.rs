@@ -84,7 +84,7 @@ pub enum MagicBlockInstruction {
     /// - **0.** `[WRITE, SIGNER]` Task authority
     /// - **1.** `[WRITE]`         Task context account
     CancelTask {
-        task_id: u64,
+        task_id: i64,
     },
 
     /// Disables the executable check, needed to modify the data of a program

@@ -54,7 +54,7 @@ pub fn send_transaction(
     skip_preflight: bool,
 ) -> Result<Signature, client_error::Error> {
     let blockhash = rpc_client.get_latest_blockhash()?;
-    tx.sign(signers, blockhash);
+    tx.try_sign(signers, blockhash)?;
     let sig = rpc_client.send_transaction_with_config(
         tx,
         RpcSendTransactionConfig {

@@ -8,6 +8,12 @@ use crate::remote_account_provider::program_account::LoadedProgram;
 
 pub mod errors;
 
+pub struct AccountCloneRequest {
+    pub pubkey: Pubkey,
+    pub account: AccountSharedData,
+    pub commit_frequency_ms: Option<u64>,
+}
+
 #[async_trait]
 pub trait Cloner: Send + Sync + 'static {
     /// Overrides the account in the bank to make sure it's a PDA that can be used as readonly
@@ -17,8 +23,7 @@ pub trait Cloner: Send + Sync + 'static {
     /// successfully.
     async fn clone_account(
         &self,
-        pubkey: Pubkey,
-        account: AccountSharedData,
+        request: AccountCloneRequest,
     ) -> ClonerResult<Signature>;
 
     // Overrides the accounts in the bank to make sure the program is usable normally (and upgraded)
