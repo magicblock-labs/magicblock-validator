@@ -4875,6 +4875,7 @@ dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
  "magicblock-delegation-program",
+ "magicblock-magic-program-api 0.2.4",
  "solana-program",
 ]
 
