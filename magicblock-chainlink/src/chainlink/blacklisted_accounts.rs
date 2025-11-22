@@ -11,7 +11,6 @@ pub fn blacklisted_accounts(
     // want to take a dependency on that crate just for this ID which won't change
     const NATIVE_SOL_ID: Pubkey =
         solana_sdk::pubkey!("So11111111111111111111111111111111111111112");
-
     let mut blacklisted_accounts = sysvar_accounts()
         .into_iter()
         .chain(native_program_accounts())
@@ -24,7 +23,6 @@ pub fn blacklisted_accounts(
 
     blacklisted_accounts.insert(magic_program::ID);
     blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
-    blacklisted_accounts.insert(magic_program::TASK_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
     blacklisted_accounts.insert(*faucet_id);
     blacklisted_accounts
@@ -49,6 +47,9 @@ pub fn sysvar_accounts() -> HashSet<Pubkey> {
 }
 
 pub fn native_program_accounts() -> HashSet<Pubkey> {
+    const NATIVE_TOKEN_PROGRAM_ID: Pubkey =
+        solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
     let mut blacklisted_programs = HashSet::new();
     blacklisted_programs.insert(solana_sdk::address_lookup_table::program::ID);
     blacklisted_programs.insert(solana_sdk::bpf_loader::ID);
@@ -64,5 +65,6 @@ pub fn native_program_accounts() -> HashSet<Pubkey> {
     blacklisted_programs.insert(solana_sdk::stake::program::ID);
     blacklisted_programs.insert(solana_sdk::system_program::ID);
     blacklisted_programs.insert(solana_sdk::vote::program::ID);
+    blacklisted_programs.insert(NATIVE_TOKEN_PROGRAM_ID);
     blacklisted_programs
 }

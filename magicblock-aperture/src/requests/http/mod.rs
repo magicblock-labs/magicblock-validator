@@ -112,7 +112,7 @@ impl HttpDispatcher {
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the account fails
                 // Log the error and return whatever is in the accounts db
-                warn!("Failed to ensure account {pubkey}: {e}");
+                debug!("Failed to ensure account {pubkey}: {e}");
             });
         self.accountsdb.get_account(pubkey)
     }

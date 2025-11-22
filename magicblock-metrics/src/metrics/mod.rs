@@ -38,7 +38,7 @@ lazy_static::lazy_static! {
 
 
     static ref CACHED_CLONE_OUTPUTS_COUNT: IntGauge = IntGauge::new(
-        "magicblock_account_cloner_cached_outputs",
+        "magicblock_account_cloner_cached_outputs_count",
         "Number of cloned accounts in the RemoteAccountClonerWorker"
     )
     .unwrap();
@@ -47,7 +47,7 @@ lazy_static::lazy_static! {
     // Ledger
     // -----------------
     static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "ledger_size", "Ledger size in Bytes",
+        "ledger_size_gauge", "Ledger size in Bytes",
     ).unwrap();
     static ref LEDGER_BLOCK_TIMES_GAUGE: IntGauge = IntGauge::new(
         "ledger_blocktimes_gauge", "Ledger Blocktimes Gauge",
@@ -101,29 +101,24 @@ lazy_static::lazy_static! {
     // Accounts
     // -----------------
     static ref ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "accounts_size", "Size of persisted accounts (in bytes) currently on disk",
+        "accounts_size_gauge", "Size of persisted accounts (in bytes) currently on disk",
     ).unwrap();
 
     static ref ACCOUNTS_COUNT_GAUGE: IntGauge = IntGauge::new(
-        "accounts_count", "Number of accounts currently in the database",
+        "accounts_count_gauge", "Number of accounts currently in the database",
     ).unwrap();
 
 
     static ref PENDING_ACCOUNT_CLONES_GAUGE: IntGauge = IntGauge::new(
-        "pending_account_clones", "Total number of account clone requests still in memory",
+        "pending_account_clones_gauge", "Total number of account clone requests still in memory",
     ).unwrap();
 
     static ref MONITORED_ACCOUNTS_GAUGE: IntGauge = IntGauge::new(
-        "monitored_accounts", "number of undelegated accounts, being monitored via websocket",
+        "monitored_accounts_gauge", "number of undelegated accounts, being monitored via websocket",
     ).unwrap();
 
-    static ref SUBSCRIPTIONS_COUNT_GAUGE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("subscriptions_count", "number of active account subscriptions"),
-        &["shard"],
-    ).unwrap();
-
-    static ref EVICTED_ACCOUNTS_COUNT: IntGauge = IntGauge::new(
-        "evicted_accounts", "number of accounts forcefully removed from monitored list and database",
+    static ref EVICTED_ACCOUNTS_COUNT: IntCounter = IntCounter::new(
+        "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
 
     // -----------------
@@ -167,7 +162,7 @@ lazy_static::lazy_static! {
     ).unwrap();
 
     pub static ref TRANSACTION_SKIP_PREFLIGHT: IntCounter = IntCounter::new(
-        "transaction_skip_preflight", "Count of transactions that skipped the preflight check",
+        "transaction_skip_preflight_count", "Count of transactions that skipped the preflight check",
     ).unwrap();
 
     pub static ref RPC_REQUESTS_COUNT: IntCounterVec = IntCounterVec::new(
@@ -179,6 +174,60 @@ lazy_static::lazy_static! {
         Opts::new("rpc_ws_subscriptions_count", "Count of active rpc websocket subscriptions"),
         &["name"],
     ).unwrap();
+
+    // Account fetch results from network (RPC)
+    pub static ref ACCOUNT_FETCHES_SUCCESS_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_success_count",
+            "Total number of successful network \
+             account fetches",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_FAILED_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_failed_count",
+            "Total number of failed network account fetches \
+             (RPC errors)",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_FOUND_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_found_count",
+            "Total number of network account fetches that \
+             found an account",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_NOT_FOUND_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_not_found_count",
+            "Total number of network account fetches where \
+             account was not found",
+        )
+        .unwrap();
+
+    pub static ref UNDELEGATION_REQUESTED_COUNT: IntCounter =
+        IntCounter::new(
+            "undelegation_requested_count",
+            "Total number of undelegation requests received",
+        )
+        .unwrap();
+
+    pub static ref UNDELEGATION_COMPLETED_COUNT: IntCounter =
+        IntCounter::new(
+            "undelegation_completed_count",
+            "Total number of completed undelegations detected",
+        )
+        .unwrap();
+
+    pub static ref UNSTUCK_UNDELEGATION_COUNT: IntCounter =
+        IntCounter::new(
+            "unstuck_undelegation_count",
+            "Total number of undelegating accounts found to be already undelegated on chain",
+        )
+        .unwrap();
 
 
     // -----------------
@@ -217,7 +266,24 @@ lazy_static::lazy_static! {
     ).unwrap();
 
     static ref COMMITTOR_INTENT_CU_USAGE: IntGauge = IntGauge::new(
-        "committor_intent_cu_usage", "Compute units used for Intent"
+        "committor_intent_cu_usage_gauge", "Compute units used for Intent"
+    ).unwrap();
+
+    // GetMultiplAccount investigation
+    static ref REMOTE_ACCOUNT_PROVIDER_A_COUNT: IntCounter = IntCounter::new(
+        "remote_account_provider_a_count", "Get mupltiple account count"
+    ).unwrap();
+
+    static ref TASK_INFO_FETCHER_A_COUNT: IntCounter = IntCounter::new(
+        "task_info_fetcher_a_count", "Get mupltiple account count"
+    ).unwrap();
+
+    static ref TABLE_MANIA_A_COUNT: IntCounter =  IntCounter::new(
+        "table_mania_a_count", "Get mupltiple account count"
+    ).unwrap();
+
+    static ref TABLE_MANIA_CLOSED_A_COUNT: IntCounter = IntCounter::new(
+        "table_mania_closed_a_count", "Get account counter"
     ).unwrap();
 }
 
@@ -250,7 +316,6 @@ pub(crate) fn register() {
         register!(ACCOUNTS_COUNT_GAUGE);
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
-        register!(SUBSCRIPTIONS_COUNT_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
@@ -263,7 +328,18 @@ pub(crate) fn register() {
         register!(TRANSACTION_SKIP_PREFLIGHT);
         register!(RPC_REQUESTS_COUNT);
         register!(RPC_WS_SUBSCRIPTIONS_COUNT);
+        register!(ACCOUNT_FETCHES_SUCCESS_COUNT);
+        register!(ACCOUNT_FETCHES_FAILED_COUNT);
+        register!(ACCOUNT_FETCHES_FOUND_COUNT);
+        register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
+        register!(UNDELEGATION_REQUESTED_COUNT);
+        register!(UNDELEGATION_COMPLETED_COUNT);
+        register!(UNSTUCK_UNDELEGATION_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
+        register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
+        register!(TASK_INFO_FETCHER_A_COUNT);
+        register!(TABLE_MANIA_A_COUNT);
+        register!(TABLE_MANIA_CLOSED_A_COUNT);
     });
 }
 
@@ -273,12 +349,6 @@ pub fn inc_slot() {
 
 pub fn set_cached_clone_outputs_count(count: usize) {
     CACHED_CLONE_OUTPUTS_COUNT.set(count as i64);
-}
-
-pub fn set_subscriptions_count(count: usize, shard: &str) {
-    SUBSCRIPTIONS_COUNT_GAUGE
-        .with_label_values(&[shard])
-        .set(count as i64);
 }
 
 pub fn set_ledger_size(size: u64) {
@@ -356,7 +426,11 @@ pub fn ensure_accounts_end(timer: HistogramTimer) {
     timer.stop_and_record();
 }
 
-pub fn adjust_monitored_accounts_count(count: usize) {
+/// Sets the absolute number of monitored accounts.
+///
+/// This metric reflects the current total count of accounts being monitored.
+/// Callers must pass the total number of monitored accounts, not a delta.
+pub fn set_monitored_accounts_count(count: usize) {
     MONITORED_ACCOUNTS_GAUGE.set(count as i64);
 }
 pub fn inc_evicted_accounts_count() {
@@ -392,4 +466,48 @@ pub fn observe_committor_intent_execution_time_histogram(
 
 pub fn set_commmittor_intent_cu_usage(value: i64) {
     COMMITTOR_INTENT_CU_USAGE.set(value)
+}
+
+pub fn inc_account_fetches_success(count: u64) {
+    ACCOUNT_FETCHES_SUCCESS_COUNT.inc_by(count);
+}
+
+pub fn inc_account_fetches_failed(count: u64) {
+    ACCOUNT_FETCHES_FAILED_COUNT.inc_by(count);
+}
+
+pub fn inc_account_fetches_found(count: u64) {
+    ACCOUNT_FETCHES_FOUND_COUNT.inc_by(count);
+}
+
+pub fn inc_account_fetches_not_found(count: u64) {
+    ACCOUNT_FETCHES_NOT_FOUND_COUNT.inc_by(count);
+}
+
+pub fn inc_undelegation_requested() {
+    UNDELEGATION_REQUESTED_COUNT.inc();
+}
+
+pub fn inc_undelegation_completed() {
+    UNDELEGATION_COMPLETED_COUNT.inc();
+}
+
+pub fn inc_unstuck_undelegation_count() {
+    UNSTUCK_UNDELEGATION_COUNT.inc();
+}
+
+pub fn inc_remote_account_provider_a_count() {
+    REMOTE_ACCOUNT_PROVIDER_A_COUNT.inc()
+}
+
+pub fn inc_task_info_fetcher_a_count() {
+    TASK_INFO_FETCHER_A_COUNT.inc()
+}
+
+pub fn inc_table_mania_a_count() {
+    TABLE_MANIA_A_COUNT.inc()
+}
+
+pub fn inc_table_mania_close_a_count() {
+    TABLE_MANIA_CLOSED_A_COUNT.inc()
 }

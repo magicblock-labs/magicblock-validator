@@ -29,6 +29,7 @@ use solana_transaction_status::{
     EncodedConfirmedBlock, EncodedConfirmedTransactionWithStatusMeta,
     UiTransactionEncoding,
 };
+use url::Url;
 
 use crate::{
     dlp_interface,
@@ -1147,5 +1148,58 @@ impl IntegrationTestContext {
     }
     pub fn ws_url_chain() -> &'static str {
         WS_URL_CHAIN
+    }
+
+    // -----------------
+    // Prometheus Metrics
+    // -----------------
+    pub fn get_monitored_accounts_count(&self, port: u16) -> Result<usize> {
+        let ephem_url = self.try_ephem_client()?.url();
+        let parsed_url = Url::parse(&ephem_url).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse ephemeral URL '{}': {}",
+                ephem_url,
+                e
+            )
+        })?;
+        let host = parsed_url.host_str().ok_or_else(|| {
+            anyhow::anyhow!("No host found in ephemeral URL: {}", ephem_url)
+        })?;
+        let metrics_url = format!("http://{host}:{port}/metrics");
+        let response = ureq::get(&metrics_url)
+            .call()
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to fetch metrics from {}: {}",
+                    metrics_url,
+                    e
+                )
+            })?
+            .into_string()
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to read metrics response: {}", e)
+            })?;
+
+        for line in response.lines() {
+            if line.starts_with("mbv_monitored_accounts ") {
+                let value_str =
+                    line.split_whitespace().nth(1).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Failed to parse monitored_accounts metric"
+                        )
+                    })?;
+                return value_str.parse::<usize>().map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to parse monitored_accounts value '{}': {}",
+                        value_str,
+                        e
+                    )
+                });
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "monitored_accounts metric not found in Prometheus response"
+        ))
     }
 }

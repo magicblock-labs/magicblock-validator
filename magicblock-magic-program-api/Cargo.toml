@@ -9,6 +9,6 @@ homepage.workspace = true
 edition.workspace = true
 
 [dependencies]
-solana-program = ">0"
-bincode = ">0"
-serde = { version = ">0", features = ["derive"] }
+solana-program = ">=1.16, <3.0.0"
+bincode = "^1.3.3"
+serde = { version = "^1.0.228", features = ["derive"] }
