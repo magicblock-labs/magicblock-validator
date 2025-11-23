@@ -141,4 +141,4 @@ code_generation:
     path_instructions: []
 issue_enrichment:
   planning:
-    enabled: false
+    enabled: true
