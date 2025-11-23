@@ -93,7 +93,7 @@ impl ScheduledCommitsProcessorImpl {
     fn preprocess_intent(
         &self,
         mut base_intent: ScheduledBaseIntent,
-    ) -> (ScheduledBaseIntentWrapper, Vec<Pubkey>, Vec<Pubkey>) {
+    ) -> (ScheduledBaseIntentWrapper, Vec<Pubkey>) {
         let is_undelegate = base_intent.is_undelegate();
         let Some(committed_accounts) = base_intent.get_committed_accounts_mut()
         else {
@@ -101,43 +101,37 @@ impl ScheduledCommitsProcessorImpl {
                 inner: base_intent,
                 trigger_type: TriggerType::OnChain,
             };
-            return (intent, vec![], vec![]);
+            return (intent, vec![]);
         };
 
-        let mut excluded_pubkeys = vec![];
-        let mut pubkeys_being_undelegated = vec![];
-        // Retains only account that are valid to be committed (all delegated ones)
-        committed_accounts.retain_mut(|account| {
-            let pubkey = account.pubkey;
-            let acc = self.accounts_bank.get_account(&pubkey);
-            match acc {
-                Some(acc) => {
-                    if acc.delegated() {
-                        if is_undelegate {
-                            pubkeys_being_undelegated.push(pubkey);
-                        }
-                        true
-                    } else {
-                        excluded_pubkeys.push(pubkey);
-                        false
-                    }
+        // dump undelegated pubkeys
+        let pubkeys_being_undelegated: Vec<_> = committed_accounts
+            .iter()
+            .inspect(|account| {
+                let pubkey = account.pubkey;
+                if self.accounts_bank.get_account(&pubkey).is_none() {
+                    // This doesn't affect intent validity
+                    // We assume that intent is correct at the moment of scheduling
+                    // All the checks are performed by runtime & magic-program at the moment of scheduling
+                    // This log could be a sign of eviction or a bug in implementation
+                    info!("Account got evicted from AccountsDB after intent was scheduled!");
                 }
-                None => {
-                    warn!(
-                        "Account {} not found in AccountsDb, skipping from commit",
-                        pubkey
-                    );
-                    false
+            })
+            .filter_map(|account| {
+                if is_undelegate {
+                    Some(account.pubkey)
+                } else {
+                    None
                 }
-            }
-        });
+            })
+            .collect();
 
         let intent = ScheduledBaseIntentWrapper {
             inner: base_intent,
             trigger_type: TriggerType::OnChain,
         };
 
-        (intent, excluded_pubkeys, pubkeys_being_undelegated)
+        (intent, pubkeys_being_undelegated)
     }
 
     async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
@@ -342,7 +336,7 @@ impl ScheduledCommitsProcessorImpl {
             payer: intent_meta.payer,
             chain_signatures,
             included_pubkeys: intent_meta.included_pubkeys,
-            excluded_pubkeys: intent_meta.excluded_pubkeys,
+            excluded_pubkeys: vec![],
             requested_undelegation: intent_meta.requested_undelegation,
         }
     }
@@ -351,14 +345,14 @@ impl ScheduledCommitsProcessorImpl {
 #[async_trait]
 impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
     async fn process(&self) -> ScheduledCommitsProcessorResult<()> {
-        let scheduled_base_intent =
+        let scheduled_base_intents =
             self.transaction_scheduler.take_scheduled_actions();
 
-        if scheduled_base_intent.is_empty() {
+        if scheduled_base_intents.is_empty() {
             return Ok(());
         }
 
-        let intents = scheduled_base_intent
+        let intents = scheduled_base_intents
             .into_iter()
             .map(|intent| self.preprocess_intent(intent));
 
@@ -369,10 +363,10 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
             let mut pubkeys_being_undelegated = HashSet::new();
 
             let intents = intents
-                .map(|(intent, excluded_pubkeys, undelegated)| {
+                .map(|(intent, undelegated)| {
                     intent_metas.insert(
                         intent.id,
-                        ScheduledBaseIntentMeta::new(&intent, excluded_pubkeys),
+                        ScheduledBaseIntentMeta::new(&intent),
                     );
                     pubkeys_being_undelegated.extend(undelegated);
 
@@ -410,16 +404,12 @@ struct ScheduledBaseIntentMeta {
     blockhash: Hash,
     payer: Pubkey,
     included_pubkeys: Vec<Pubkey>,
-    excluded_pubkeys: Vec<Pubkey>,
     intent_sent_transaction: Transaction,
     requested_undelegation: bool,
 }
 
 impl ScheduledBaseIntentMeta {
-    fn new(
-        intent: &ScheduledBaseIntent,
-        excluded_pubkeys: Vec<Pubkey>,
-    ) -> Self {
+    fn new(intent: &ScheduledBaseIntent) -> Self {
         Self {
             slot: intent.slot,
             blockhash: intent.blockhash,
@@ -427,7 +417,6 @@ impl ScheduledBaseIntentMeta {
             included_pubkeys: intent
                 .get_committed_pubkeys()
                 .unwrap_or_default(),
-            excluded_pubkeys,
             intent_sent_transaction: intent.action_sent_transaction.clone(),
             requested_undelegation: intent.is_undelegate(),
         }

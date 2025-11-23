@@ -243,13 +243,14 @@ impl CommitAndUndelegate {
     ) -> Result<(), InstructionError> {
         account_indices.iter().copied().try_for_each(|idx| {
             let is_writable = get_writable_with_idx(context.transaction_context, idx as u16)?;
-            if is_writable {
+            let delegated = get_instruction_account_with_idx(context.transaction_context, idx as u16)?;
+            if is_writable && delegated.borrow().delegated() {
                 Ok(())
             } else {
                 let pubkey = get_instruction_pubkey_with_idx(context.transaction_context, idx as u16)?;
                 ic_msg!(
                     context.invoke_context,
-                    "ScheduleCommit ERR: account {} is required to be writable in order to be undelegated",
+                    "ScheduleCommit ERR: account {} is required to be writable and delegated in order to be undelegated",
                     pubkey
                 );
                 Err(InstructionError::ReadonlyDataModified)
