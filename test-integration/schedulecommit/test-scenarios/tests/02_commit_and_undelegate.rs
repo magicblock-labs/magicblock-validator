@@ -593,10 +593,7 @@ fn test_committing_and_undelegating_two_accounts_twice() {
         // 3. Assert that the commit was not scheduled -> the transaction is not confirmed
         debug!("Verifying that commit was not scheduled: {scheduled_commmit_sent_sig}");
         assert!(!ctx
-            .ephem_client
-            .as_ref()
-            .unwrap()
-            .confirm_transaction(&scheduled_commmit_sent_sig)
+            .confirm_transaction_ephem(&scheduled_commmit_sent_sig, None)
             .unwrap());
         debug!("✅ Verified that not commit was scheduled since tx failed");
     });

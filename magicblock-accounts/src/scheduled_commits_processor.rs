@@ -335,7 +335,7 @@ impl ScheduledCommitsProcessorImpl {
             payer: intent_meta.payer,
             chain_signatures,
             included_pubkeys: intent_meta.included_pubkeys,
-            excluded_pubkeys: intent_meta.excluded_pubkeys,
+            excluded_pubkeys: vec![],
             requested_undelegation: intent_meta.requested_undelegation,
         }
     }
@@ -365,7 +365,7 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
                 .map(|(intent, undelegated)| {
                     intent_metas.insert(
                         intent.id,
-                        ScheduledBaseIntentMeta::new(&intent, vec![]),
+                        ScheduledBaseIntentMeta::new(&intent),
                     );
                     pubkeys_being_undelegated.extend(undelegated);
 
@@ -403,16 +403,12 @@ struct ScheduledBaseIntentMeta {
     blockhash: Hash,
     payer: Pubkey,
     included_pubkeys: Vec<Pubkey>,
-    excluded_pubkeys: Vec<Pubkey>,
     intent_sent_transaction: Transaction,
     requested_undelegation: bool,
 }
 
 impl ScheduledBaseIntentMeta {
-    fn new(
-        intent: &ScheduledBaseIntent,
-        excluded_pubkeys: Vec<Pubkey>,
-    ) -> Self {
+    fn new(intent: &ScheduledBaseIntent) -> Self {
         Self {
             slot: intent.slot,
             blockhash: intent.blockhash,
@@ -420,7 +416,6 @@ impl ScheduledBaseIntentMeta {
             included_pubkeys: intent
                 .get_committed_pubkeys()
                 .unwrap_or_default(),
-            excluded_pubkeys,
             intent_sent_transaction: intent.action_sent_transaction.clone(),
             requested_undelegation: intent.is_undelegate(),
         }

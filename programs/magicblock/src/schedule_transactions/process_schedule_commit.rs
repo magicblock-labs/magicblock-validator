@@ -16,7 +16,7 @@ use crate::{
     },
     schedule_transactions,
     utils::{
-        account_actions::perform_account_undelegation,
+        account_actions::mark_account_as_undelegated,
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
             get_writable_with_idx,
@@ -202,7 +202,7 @@ pub(crate) fn process_schedule_commit(
             //
             // We also set the undelegating flag on the account in order to detect
             // undelegations for which we miss updates
-            perform_account_undelegation(acc);
+            mark_account_as_undelegated(acc);
             ic_msg!(
                 invoke_context,
                 "ScheduleCommit: Marking account {} as undelegating",
