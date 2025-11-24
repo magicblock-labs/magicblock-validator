@@ -12,11 +12,14 @@ use magicblock_chainlink::{
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_sdk::clock::Slot;
-use utils::{
-    accounts::account_shared_with_owner_and_slot, test_context::TestContext,
-};
 
-use crate::utils::accounts::compressed_account_shared_with_owner_and_slot;
+use crate::utils::{
+    accounts::{
+        account_shared_with_owner_and_slot,
+        compressed_account_shared_with_owner_and_slot,
+    },
+    test_context::TestContext,
+};
 
 mod utils;
 
