@@ -348,8 +348,17 @@ fn schedule_commit_instruction_helper(
         AccountMeta::new(*payer, true),
         AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
     ];
+    let is_undelegation = matches!(
+        instruction,
+        MagicBlockInstruction::ScheduleCommitAndUndelegate
+            | MagicBlockInstruction::ScheduleCompressedCommitAndUndelegate
+    );
     for pubkey in &pdas {
-        account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        if is_undelegation {
+            account_metas.push(AccountMeta::new(*pubkey, false));
+        } else {
+            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        }
     }
     Instruction::new_with_bincode(crate::id(), &instruction, account_metas)
 }
