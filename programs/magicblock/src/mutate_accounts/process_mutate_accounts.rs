@@ -362,7 +362,7 @@ mod tests {
                 owner,
                 executable: false,
                 data,
-                rent_epoch: 0,
+                rent_epoch: u64::MAX,
             } => {
                 assert_eq!(lamports, AUTHORITY_BALANCE - 100);
                 assert_eq!(owner, system_program::id());
@@ -380,7 +380,7 @@ mod tests {
                 owner: owner_key,
                 executable: true,
                 data,
-                rent_epoch: 88,
+                rent_epoch: u64::MAX,
             } => {
                 assert_eq!(data, modification.data.unwrap());
                 assert_eq!(owner_key, modification.owner.unwrap());
