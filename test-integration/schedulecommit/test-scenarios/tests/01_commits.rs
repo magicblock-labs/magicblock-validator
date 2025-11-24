@@ -168,7 +168,7 @@ fn test_committing_account_delegated_to_another_validator() {
         // Schedule commit of account delegated to another validator
         let res = schedule_commit_tx(&ctx, &payer, &player, player_pda, false);
 
-        // We expect InvalidAccountForFee error since account isn't delegated to our validator
+        // We expect IllegalOwner error since account isn't delegated to our validator
         let (_, tx_err) = extract_transaction_error(res);
         assert_eq!(
             tx_err.unwrap(),
