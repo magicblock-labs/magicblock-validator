@@ -435,9 +435,6 @@ impl IxtestContext {
                 .unwrap()
                 .value;
 
-            let packed_tree_infos =
-                rpc_result.pack_tree_infos(&mut remaining_accounts);
-
             let packed_state_tree = rpc_result
                 .pack_tree_infos(&mut remaining_accounts)
                 .state_trees
