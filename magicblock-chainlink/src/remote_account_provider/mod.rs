@@ -404,7 +404,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 }
                 Compression { url } => {
                     if photon_client.is_some() {
-                        panic!("Multiple compression endpoints provided");
+                        return Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                            "Multiple compression endpoints provided".to_string(),
+                        ));
                     } else {
                         photon_client
                             .replace(PhotonClientImpl::new_from_url(url));
