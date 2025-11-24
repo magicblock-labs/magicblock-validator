@@ -10,6 +10,7 @@ use magicblock_committor_program::{
     },
     pdas, ChangesetChunks, Chunks,
 };
+use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
@@ -50,7 +51,7 @@ pub enum TaskStrategy {
 }
 
 /// A trait representing a task that can be executed on Base layer
-pub trait BaseTask: Send + Sync + DynClone {
+pub trait BaseTask: Send + Sync + DynClone + LabelValue {
     /// Gets all pubkeys that involved in Task's instruction
     fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
         self.instruction(validator)

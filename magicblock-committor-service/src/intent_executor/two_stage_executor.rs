@@ -23,7 +23,7 @@ pub struct TwoStageExecutor<'a, T, F> {
 
 impl<'a, T, F> TwoStageExecutor<'a, T, F>
 where
-    T: TransactionPreparator,
+    T: TransactionPreparator + Clone,
     F: TaskInfoFetcher,
 {
     pub fn new(executor: &'a IntentExecutorImpl<T, F>) -> Self {

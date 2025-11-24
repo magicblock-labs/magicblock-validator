@@ -249,6 +249,10 @@ lazy_static::lazy_static! {
     // -----------------
     // CommittorService
     // -----------------
+    static ref COMMITTOR_INTENTS_COUNT: IntCounter = IntCounter::new(
+        "committor_intents_count", "Total number of scheduled committor intents"
+    ).unwrap();
+
     static ref COMMITTOR_INTENTS_BACKLOG_COUNT: IntGauge = IntGauge::new(
         "committor_intent_backlog_count", "Number of intents in backlog",
     ).unwrap();
@@ -293,6 +297,28 @@ lazy_static::lazy_static! {
     static ref TABLE_MANIA_CLOSED_A_COUNT: IntCounter = IntCounter::new(
         "table_mania_closed_a_count", "Get account counter"
     ).unwrap();
+
+
+    static ref COMMITTOR_INTENT_TASK_PREPARATION_TIME: HistogramVec = HistogramVec::new(
+        HistogramOpts::new(
+            "committor_intent_task_preparation_time",
+            "Time in seconds spent on task preparation"
+        )
+        .buckets(
+            vec![0.1, 1.0, 2.0, 3.0, 5.0]
+        ),
+        &["task_type"],
+    ).unwrap();
+
+    static ref COMMITTOR_INTENT_ALT_PREPARATION_TIME: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "committor_intent_alt_preparation_time",
+            "Time in seconds spent on ALTs preparation"
+        )
+        .buckets(
+            vec![1.0, 3.0, 5.0, 10.0, 15.0, 17.0, 20.0]
+        ),
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -325,11 +351,14 @@ pub(crate) fn register() {
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
+        register!(COMMITTOR_INTENTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
         register!(COMMITTOR_EXECUTORS_BUSY_COUNT);
         register!(COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM);
         register!(COMMITTOR_INTENT_CU_USAGE);
+        register!(COMMITTOR_INTENT_TASK_PREPARATION_TIME);
+        register!(COMMITTOR_INTENT_ALT_PREPARATION_TIME);
         register!(ENSURE_ACCOUNTS_TIME);
         register!(RPC_REQUEST_HANDLING_TIME);
         register!(TRANSACTION_PROCESSING_TIME);
@@ -445,6 +474,14 @@ pub fn inc_evicted_accounts_count() {
     EVICTED_ACCOUNTS_COUNT.inc();
 }
 
+pub fn inc_committor_intents_count() {
+    COMMITTOR_INTENTS_COUNT.inc()
+}
+
+pub fn inc_committor_intents_count_by(by: u64) {
+    COMMITTOR_INTENTS_COUNT.inc_by(by)
+}
+
 pub fn set_committor_intents_backlog_count(value: i64) {
     COMMITTOR_INTENTS_BACKLOG_COUNT.set(value)
 }
@@ -474,6 +511,20 @@ pub fn observe_committor_intent_execution_time_histogram(
 
 pub fn set_commmittor_intent_cu_usage(value: i64) {
     COMMITTOR_INTENT_CU_USAGE.set(value)
+}
+
+pub fn observe_committor_intent_task_preparation_time<
+    L: LabelValue + ?Sized,
+>(
+    task_type: &L,
+) -> HistogramTimer {
+    COMMITTOR_INTENT_TASK_PREPARATION_TIME
+        .with_label_values(&[task_type.value()])
+        .start_timer()
+}
+
+pub fn observe_committor_intent_alt_preparation_time() -> HistogramTimer {
+    COMMITTOR_INTENT_ALT_PREPARATION_TIME.start_timer()
 }
 
 pub fn inc_account_fetches_success(count: u64) {
