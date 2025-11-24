@@ -43,7 +43,9 @@ pub fn compressed_account_shared_with_owner_and_slot(
         &compressed_delegation_client::ID,
     );
     acc.data = delegation_record_bytes;
-    AccountSharedData::from(acc)
+    let mut acc = AccountSharedData::from(acc);
+    acc.set_remote_slot(slot);
+    acc
 }
 
 #[derive(Debug, Clone)]
