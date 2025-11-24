@@ -264,22 +264,25 @@ fn schedule_commit(
         InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
     let commit_sent_sig = action_sent_transaction.signatures[0];
 
-    let base_intent = if opts.request_undelegation && compressed {
-        MagicBaseIntent::CompressedCommitAndUndelegate(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(committed_accounts),
-            undelegate_action: UndelegateType::Standalone,
-        })
-    } else if opts.request_undelegation && !compressed {
-        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(committed_accounts),
-            undelegate_action: UndelegateType::Standalone,
-        })
-    } else if compressed {
-        MagicBaseIntent::CompressedCommit(CommitType::Standalone(
-            committed_accounts,
-        ))
-    } else {
-        MagicBaseIntent::Commit(CommitType::Standalone(committed_accounts))
+    let base_intent = match (opts.request_undelegation, compressed) {
+        (true, true) => MagicBaseIntent::CompressedCommitAndUndelegate(
+            CommitAndUndelegate {
+                commit_action: CommitType::Standalone(committed_accounts),
+                undelegate_action: UndelegateType::Standalone,
+            },
+        ),
+        (true, false) => {
+            MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(committed_accounts),
+                undelegate_action: UndelegateType::Standalone,
+            })
+        }
+        (false, true) => MagicBaseIntent::CompressedCommit(
+            CommitType::Standalone(committed_accounts),
+        ),
+        (false, false) => {
+            MagicBaseIntent::Commit(CommitType::Standalone(committed_accounts))
+        }
     };
     let scheduled_base_intent = ScheduledBaseIntent {
         id: intent_id,
