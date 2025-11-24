@@ -8,6 +8,7 @@ use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
 use log::*;
 use magicblock_core::traits::AccountsBank;
+use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk::{
@@ -270,7 +271,11 @@ Kept: {} delegated, {} blacklisted",
 
         // Ensure accounts
         let res = self
-            .ensure_accounts(&pubkeys, mark_empty_if_not_found)
+            .ensure_accounts(
+                &pubkeys,
+                mark_empty_if_not_found,
+                AccountFetchOrigin::SendTransaction,
+            )
             .await?;
 
         // Best-effort auto airdrop for fee payer if configured
@@ -309,6 +314,7 @@ Kept: {} delegated, {} blacklisted",
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
+        fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(FetchAndCloneResult::default());
@@ -317,6 +323,7 @@ Kept: {} delegated, {} blacklisted",
             fetch_cloner,
             pubkeys,
             mark_empty_if_not_found,
+            fetch_origin,
         )
         .await
     }
@@ -328,6 +335,7 @@ Kept: {} delegated, {} blacklisted",
     pub async fn fetch_accounts(
         &self,
         pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys = pubkeys
@@ -345,7 +353,7 @@ Kept: {} delegated, {} blacklisted",
                 .collect());
         };
         let _ = self
-            .fetch_accounts_common(fetch_cloner, pubkeys, None)
+            .fetch_accounts_common(fetch_cloner, pubkeys, None, fetch_origin)
             .await?;
 
         let accounts = pubkeys
@@ -360,6 +368,7 @@ Kept: {} delegated, {} blacklisted",
         fetch_cloner: &FetchCloner<T, U, V, C>,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
+        fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys_str = pubkeys
@@ -389,6 +398,7 @@ Kept: {} delegated, {} blacklisted",
                 pubkeys,
                 mark_empty_if_not_found,
                 None,
+                fetch_origin,
             )
             .await?;
         trace!("Fetched and cloned accounts: {result:?}");

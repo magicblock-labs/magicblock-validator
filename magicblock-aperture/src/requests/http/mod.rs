@@ -11,7 +11,7 @@ use log::*;
 use magicblock_core::{
     link::transactions::SanitizeableTransaction, traits::AccountsBank,
 };
-use magicblock_metrics::metrics::ENSURE_ACCOUNTS_TIME;
+use magicblock_metrics::metrics::{AccountFetchOrigin, ENSURE_ACCOUNTS_TIME};
 use prelude::JsonBody;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -115,7 +115,7 @@ impl HttpDispatcher {
             .start_timer();
         let _ = self
             .chainlink
-            .ensure_accounts(&[*pubkey], None)
+            .ensure_accounts(&[*pubkey], None, AccountFetchOrigin::GetAccount)
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the account fails
@@ -137,7 +137,11 @@ impl HttpDispatcher {
             .start_timer();
         let _ = self
             .chainlink
-            .ensure_accounts(pubkeys, None)
+            .ensure_accounts(
+                pubkeys,
+                None,
+                AccountFetchOrigin::GetMultipleAccounts,
+            )
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the accounts fails
