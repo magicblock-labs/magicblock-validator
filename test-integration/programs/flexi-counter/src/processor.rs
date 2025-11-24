@@ -535,8 +535,7 @@ fn process_delegate_compressed(
     }
 
     let pda_seeds = FlexiCounter::seeds(payer_info.key);
-    let (counter_pda, bump) =
-        Pubkey::find_program_address(&pda_seeds, &crate::id());
+    let (counter_pda, bump) = FlexiCounter::pda(payer_info.key);
     if counter_pda_info.key.ne(&counter_pda) {
         msg!(
             "Invalid counter PDA {}, should be {}",
@@ -547,7 +546,8 @@ fn process_delegate_compressed(
     }
 
     // Send back excess lamports to the payer
-    let min_rent = Rent::get()?.minimum_balance(0);
+    let rent = Rent::get()?;
+    let min_rent = rent.minimum_balance(0);
     **payer_info.try_borrow_mut_lamports()? += counter_pda_info
         .lamports()
         .checked_sub(min_rent)
@@ -572,7 +572,7 @@ fn process_delegate_compressed(
             validity_proof: args.validity_proof,
             address_tree_info: args.address_tree_info,
             account_meta: args.account_meta,
-            lamports: Rent::get()?.minimum_balance(account_data.len()),
+            lamports: rent.minimum_balance(account_data.len()),
             account_data,
             pda_seeds: pda_seeds
                 .iter()
