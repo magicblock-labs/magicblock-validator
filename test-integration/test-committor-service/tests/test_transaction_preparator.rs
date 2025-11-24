@@ -60,6 +60,7 @@ async fn test_prepare_commit_tx_with_single_account() {
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
 
@@ -133,6 +134,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await
         .unwrap();
@@ -227,6 +229,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await
         .unwrap();
@@ -303,6 +306,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
 

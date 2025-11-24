@@ -52,6 +52,7 @@ async fn test_prepare_10kb_buffer() {
             &mut strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
 
@@ -125,6 +126,7 @@ async fn test_prepare_multiple_buffers() {
             &mut strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
 
@@ -209,6 +211,7 @@ async fn test_lookup_tables() {
             &mut strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
     assert!(result.is_ok(), "Failed to prepare lookup tables");
@@ -250,6 +253,7 @@ async fn test_already_initialized_error_handled() {
             &mut strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
@@ -291,6 +295,7 @@ async fn test_already_initialized_error_handled() {
             &mut strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
@@ -360,6 +365,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             &mut strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
     assert!(res.is_ok(), "Initial prepare failed: {:?}", res.err());
@@ -461,6 +467,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             &mut strategy2,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
     assert!(
@@ -547,6 +554,7 @@ async fn test_prepare_compressed_commit() {
             &mut *task,
             &None::<IntentPersisterImpl>,
             &Some(fixture.photon_client),
+            None,
         )
         .await
         .expect("Failed to prepare compressed commit");

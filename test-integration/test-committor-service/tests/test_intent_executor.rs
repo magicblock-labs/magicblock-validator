@@ -147,6 +147,7 @@ async fn test_commit_id_error_parsing() {
             &mut transaction_strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
@@ -207,6 +208,7 @@ async fn test_action_error_parsing() {
             &mut transaction_strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
@@ -264,6 +266,7 @@ async fn test_cpi_limits_error_parsing() {
             &mut transaction_strategy,
             &None::<IntentPersisterImpl>,
             &None::<Arc<PhotonIndexer>>,
+            None,
         )
         .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
