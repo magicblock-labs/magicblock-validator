@@ -351,7 +351,7 @@ where
         let owned_by_compressed_delegation_program =
             account.is_owned_by_compressed_delegation_program();
 
-        if let Some(mut account) = account.fresh_account() {
+        if let Some(mut account) = account.fresh_account().cloned() {
             // If the account is owned by the delegation program we need to resolve
             // its true owner and determine if it is delegated to us
             if owned_by_delegation_program {
@@ -476,7 +476,7 @@ where
                                 .remote_account_provider
                                 .try_get(pubkey)
                                 .await
-                                .map(|acc| acc.fresh_account())
+                                .map(|acc| acc.fresh_account().cloned())
                                 .ok()
                                 .flatten()
                             {

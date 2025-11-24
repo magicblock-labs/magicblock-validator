@@ -1,7 +1,4 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
+use std::{cell::Cell, sync::Arc};
 
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
@@ -159,42 +156,40 @@ impl<
         let blacklisted_accounts =
             blacklisted_accounts(&self.validator_id, &self.faucet_id);
 
-        let delegated = AtomicU64::new(0);
-        let dlp_owned_not_delegated = AtomicU64::new(0);
-        let blacklisted = AtomicU64::new(0);
-        let remaining = AtomicU64::new(0);
-        let remaining_empty = AtomicU64::new(0);
+        let delegated = Cell::new(0_u64);
+        let dlp_owned_not_delegated = Cell::new(0_u64);
+        let blacklisted = Cell::new(0_u64);
+        let remaining = Cell::new(0_u64);
+        let remaining_empty = Cell::new(0_u64);
 
         let removed = self.accounts_bank.remove_where(|pubkey, account| {
             if blacklisted_accounts.contains(pubkey) {
-                blacklisted.fetch_add(1, Ordering::Relaxed);
+                blacklisted.set(blacklisted.get() + 1);
                 return false;
             }
             // TODO: this potentially looses data and is a temporary measure
             if account.owner().eq(&dlp::id()) {
-                dlp_owned_not_delegated.fetch_add(1, Ordering::Relaxed);
+                dlp_owned_not_delegated.set(dlp_owned_not_delegated.get() + 1);
                 return true;
             }
             if account.delegated() {
-                delegated.fetch_add(1, Ordering::Relaxed);
+                delegated.set(delegated.get() + 1);
                 return false;
             }
             trace!(
                 "Removing non-delegated, non-DLP-owned account: {pubkey} {:#?}",
                 account
             );
-            remaining.fetch_add(1, Ordering::Relaxed);
+            remaining.set(remaining.get() + 1);
             if account.lamports() == 0
                 && account.owner().ne(&solana_sdk::feature::id())
             {
-                remaining_empty.fetch_add(1, Ordering::Relaxed);
+                remaining_empty.set(remaining_empty.get() + 1);
             }
             true
         });
 
-        let non_empty = remaining
-            .load(Ordering::Relaxed)
-            .saturating_sub(remaining_empty.load(Ordering::Relaxed));
+        let non_empty = remaining.get().saturating_sub(remaining_empty.get());
 
         info!(
             "Removed {removed} accounts from bank:
@@ -202,11 +197,11 @@ impl<
 {} non-delegated non-blacklisted, no-feature non-empty.
 {} non-delegated non-blacklisted empty
 Kept: {} delegated, {} blacklisted",
-            dlp_owned_not_delegated.into_inner(),
+            dlp_owned_not_delegated.get(),
             non_empty,
-            remaining_empty.into_inner(),
-            delegated.into_inner(),
-            blacklisted.into_inner()
+            remaining_empty.get(),
+            delegated.get(),
+            blacklisted.get()
         );
     }
 

@@ -235,12 +235,12 @@ impl RemoteAccount {
         !matches!(self, RemoteAccount::NotFound(_))
     }
 
-    pub fn fresh_account(&self) -> Option<AccountSharedData> {
+    pub fn fresh_account(&self) -> Option<&AccountSharedData> {
         match self {
             RemoteAccount::Found(RemoteAccountState {
                 account: ResolvedAccount::Fresh(account),
                 ..
-            }) => Some(account.clone()),
+            }) => Some(account),
             _ => None,
         }
     }
