@@ -51,7 +51,7 @@ use magicblock_metrics::{
     metrics::{
         inc_account_fetches_failed, inc_account_fetches_found,
         inc_account_fetches_not_found, inc_account_fetches_success,
-        set_monitored_accounts_count,
+        set_monitored_accounts_count, AccountFetchOrigin,
     },
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
@@ -317,7 +317,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         let updates = me.pubsub_client.take_updates();
         me.listen_for_account_updates(updates)?;
-        let clock_remote_account = me.try_get(clock::ID).await?;
+        let clock_remote_account = me
+            .try_get(clock::ID, AccountFetchOrigin::GetAccount)
+            .await?;
         match clock_remote_account {
             RemoteAccount::NotFound(_) => {
                 Err(RemoteAccountProviderError::ClockAccountCouldNotBeResolved(
@@ -507,8 +509,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub async fn try_get(
         &self,
         pubkey: Pubkey,
+        fetch_origin: AccountFetchOrigin,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey], None)
+        self.try_get_multi(&[pubkey], None, fetch_origin)
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
@@ -519,12 +522,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkeys: &[Pubkey],
         config: Option<MatchSlotsConfig>,
+        fetch_origin: AccountFetchOrigin,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         use SlotsMatchResult::*;
 
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
-        let remote_accounts = self.try_get_multi(pubkeys, None).await?;
+        let remote_accounts =
+            self.try_get_multi(pubkeys, None, fetch_origin).await?;
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
             config.as_ref().and_then(|c| c.min_context_slot),
@@ -547,7 +552,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     self.chain_slot()
                 );
             }
-            self.fetch(pubkeys.to_vec(), None, self.chain_slot());
+            self.fetch(pubkeys.to_vec(), None, self.chain_slot(), fetch_origin);
         }
 
         // 3. Wait for the slots to match
@@ -567,7 +572,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     pubkey_slots
                 );
             }
-            let remote_accounts = self.try_get_multi(pubkeys, None).await?;
+            let remote_accounts =
+                self.try_get_multi(pubkeys, None, fetch_origin).await?;
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
                 config.min_context_slot,
@@ -617,6 +623,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
+        fetch_origin: AccountFetchOrigin,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
             return Ok(vec![]);
@@ -651,7 +658,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // Start the fetch
         let min_context_slot = fetch_start_slot;
-        self.fetch(pubkeys.to_vec(), mark_empty_if_not_found, min_context_slot);
+        self.fetch(
+            pubkeys.to_vec(),
+            mark_empty_if_not_found,
+            min_context_slot,
+            fetch_origin,
+        );
 
         // Wait for all accounts to resolve (either from fetch or subscription override)
         let mut resolved_accounts = vec![];
@@ -842,6 +854,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkeys: Vec<Pubkey>,
         mark_empty_if_not_found: Option<&[Pubkey]>,
         min_context_slot: u64,
+        fetch_origin: AccountFetchOrigin,
     ) {
         const MAX_RETRIES: u64 = 10;
 
@@ -1019,8 +1032,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             // Update metrics for successful RPC fetch
             inc_account_fetches_success(pubkeys.len() as u64);
-            inc_account_fetches_found(found_count);
-            inc_account_fetches_not_found(not_found_count);
+            inc_account_fetches_found(fetch_origin, found_count);
+            inc_account_fetches_not_found(fetch_origin, not_found_count);
 
             if log_enabled!(log::Level::Trace) {
                 let pubkeys = pubkeys
@@ -1175,8 +1188,10 @@ mod test {
         };
 
         let pubkey = random_pubkey();
-        let remote_account =
-            remote_account_provider.try_get(pubkey).await.unwrap();
+        let remote_account = remote_account_provider
+            .try_get(pubkey, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
         assert!(!remote_account.is_found());
     }
 
@@ -1228,8 +1243,10 @@ mod test {
             )
         };
 
-        let remote_account =
-            remote_account_provider.try_get(pubkey).await.unwrap();
+        let remote_account = remote_account_provider
+            .try_get(pubkey, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
         let AccountAtSlot { account, slot } =
             rpc_client.get_account_at_slot(&pubkey).unwrap();
         assert_eq!(
@@ -1330,6 +1347,7 @@ mod test {
                     retry_interval_ms: 50,
                     min_context_slot: None,
                 }),
+                AccountFetchOrigin::GetAccount,
             )
             .await
             .unwrap();
@@ -1365,6 +1383,7 @@ mod test {
                     retry_interval_ms: 50,
                     min_context_slot: None,
                 }),
+                AccountFetchOrigin::GetAccount,
             )
             .await;
 
@@ -1402,6 +1421,7 @@ mod test {
                     retry_interval_ms: 50,
                     min_context_slot: Some(CURRENT_SLOT + 1),
                 }),
+                AccountFetchOrigin::GetAccount,
             )
             .await;
 
@@ -1443,6 +1463,7 @@ mod test {
                     retry_interval_ms: 50,
                     min_context_slot: Some(CURRENT_SLOT),
                 }),
+                AccountFetchOrigin::GetAccount,
             )
             .await;
 
@@ -1535,7 +1556,10 @@ mod test {
 
         // Add three accounts (up to limit)
         for pk in pubkeys {
-            provider.try_get(*pk).await.unwrap();
+            provider
+                .try_get(*pk, AccountFetchOrigin::GetAccount)
+                .await
+                .unwrap();
         }
 
         // No evictions should occur
@@ -1562,16 +1586,31 @@ mod test {
             setup_with_accounts(pubkeys, 3).await;
 
         // Fill cache: [1, 2, 3] (1 is least recently used)
-        provider.try_get(pubkey1).await.unwrap();
-        provider.try_get(pubkey2).await.unwrap();
-        provider.try_get(pubkey3).await.unwrap();
+        provider
+            .try_get(pubkey1, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
+        provider
+            .try_get(pubkey2, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
+        provider
+            .try_get(pubkey3, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
 
         // Access pubkey1 to make it more recently used: [2, 3, 1]
         // This should just promote, making order [2, 3, 1]
-        provider.try_get(pubkey1).await.unwrap();
+        provider
+            .try_get(pubkey1, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
 
         // Add pubkey4, should evict pubkey2 (now least recently used)
-        provider.try_get(pubkey4).await.unwrap();
+        provider
+            .try_get(pubkey4, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
 
         // Check channel received the evicted account
 
@@ -1579,7 +1618,10 @@ mod test {
         assert_eq!(removed_accounts, [pubkey2]);
 
         // Add pubkey5, should evict pubkey3 (now least recently used)
-        provider.try_get(pubkey5).await.unwrap();
+        provider
+            .try_get(pubkey5, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
 
         // Check channel received the second evicted account
         let removed_accounts = drain_removed_account_rx(&mut removed_rx);
@@ -1602,12 +1644,18 @@ mod test {
 
         // Fill cache to capacity (no evictions)
         for pk in pubkeys.iter().take(4) {
-            provider.try_get(*pk).await.unwrap();
+            provider
+                .try_get(*pk, AccountFetchOrigin::GetAccount)
+                .await
+                .unwrap();
         }
 
         // Add more accounts and verify evictions happen in LRU order
         for i in 4..7 {
-            provider.try_get(pubkeys[i]).await.unwrap();
+            provider
+                .try_get(pubkeys[i], AccountFetchOrigin::GetAccount)
+                .await
+                .unwrap();
             let expected_evicted = pubkeys[i - 4]; // Should evict the account added 4 steps ago
 
             // Verify the evicted account was sent over the channel
