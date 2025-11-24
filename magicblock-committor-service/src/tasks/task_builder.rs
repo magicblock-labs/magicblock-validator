@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use light_client::indexer::{
-    photon_indexer::PhotonIndexer, Indexer, IndexerError,
+    photon_indexer::PhotonIndexer, Indexer, IndexerError, IndexerRpcConfig,
 };
 use light_sdk::{
     error::LightSdkError,
@@ -129,7 +129,8 @@ impl TasksBuilder for TaskBuilderImpl {
             let mut compressed_results = vec![];
             for account in accounts {
                 compressed_results.push(
-                    get_compressed_data(&account.pubkey, photon_client).await,
+                    get_compressed_data(&account.pubkey, photon_client, None)
+                        .await,
                 );
             }
 
@@ -229,8 +230,12 @@ impl TasksBuilder for TaskBuilderImpl {
                         .ok_or(TaskBuilderError::PhotonClientNotFound)?;
                     for account in committed_accounts {
                         compressed_data.push(
-                            get_compressed_data(&account.pubkey, photon_client)
-                                .await?,
+                            get_compressed_data(
+                                &account.pubkey,
+                                photon_client,
+                                None,
+                            )
+                            .await?,
                         );
                     }
 
@@ -261,6 +266,7 @@ impl TasksBuilder for TaskBuilderImpl {
                                 get_compressed_data(
                                     &account.pubkey,
                                     photon_client,
+                                    None,
                                 )
                                 .await
                                 .ok(),
@@ -405,10 +411,11 @@ pub type TaskBuilderResult<T, E = TaskBuilderError> = Result<T, E>;
 pub(crate) async fn get_compressed_data(
     pubkey: &Pubkey,
     photon_client: &PhotonIndexer,
+    photon_config: Option<IndexerRpcConfig>,
 ) -> Result<CompressedData, TaskBuilderError> {
     let cda = derive_cda_from_pda(pubkey);
     let compressed_delegation_record = photon_client
-        .get_compressed_account(cda.to_bytes(), None)
+        .get_compressed_account(cda.to_bytes(), photon_config.clone())
         .await
         .map_err(TaskBuilderError::CompressedDataFetchError)?
         .value;
@@ -416,7 +423,7 @@ pub(crate) async fn get_compressed_data(
         .get_validity_proof(
             vec![compressed_delegation_record.hash],
             vec![],
-            None,
+            photon_config,
         )
         .await
         .map_err(TaskBuilderError::CompressedDataFetchError)?

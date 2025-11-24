@@ -2,7 +2,7 @@ use std::{collections::HashSet, ops::ControlFlow, sync::Arc, time::Duration};
 
 use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all, try_join_all};
-use light_client::indexer::photon_indexer::PhotonIndexer;
+use light_client::indexer::{photon_indexer::PhotonIndexer, IndexerRpcConfig};
 use log::{error, info};
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
@@ -68,6 +68,7 @@ impl DeliveryPreparator {
         strategy: &mut TransactionStrategy,
         persister: &Option<P>,
         photon_client: &Option<Arc<PhotonIndexer>>,
+        commit_slot: Option<u64>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures =
             strategy.optimized_tasks.iter_mut().map(|task| {
@@ -76,6 +77,7 @@ impl DeliveryPreparator {
                     task,
                     persister,
                     photon_client,
+                    commit_slot,
                 )
             });
 
@@ -99,6 +101,7 @@ impl DeliveryPreparator {
         task: &mut dyn BaseTask,
         persister: &Option<P>,
         photon_client: &Option<Arc<PhotonIndexer>>,
+        commit_slot: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let PreparationState::Required(preparation_task) =
             task.preparation_state()
@@ -150,9 +153,11 @@ impl DeliveryPreparator {
                 ))?;
             }
             PreparationTask::Compressed => {
-                // NOTE: indexer can take some time to catch update
-                // TODO(dode): avoid sleeping, use min slot instead
-                tokio::time::sleep(Duration::from_millis(1000)).await;
+                // Trying to fetch fresh data from the indexer
+                let photon_config = commit_slot.map(|slot| IndexerRpcConfig {
+                    slot,
+                    ..Default::default()
+                });
 
                 let delegated_account = task
                     .delegated_account()
@@ -161,9 +166,12 @@ impl DeliveryPreparator {
                     .as_ref()
                     .ok_or(InternalError::PhotonClientNotFound)?;
 
-                let Ok(compressed_data) =
-                    get_compressed_data(&delegated_account, photon_client)
-                        .await
+                let Ok(compressed_data) = get_compressed_data(
+                    &delegated_account,
+                    photon_client,
+                    photon_config,
+                )
+                .await
                 else {
                     error!("Failed to get compressed data");
                     return Err(InternalError::CompressedDataNotFound);
@@ -183,9 +191,16 @@ impl DeliveryPreparator {
         task: &mut Box<dyn BaseTask>,
         persister: &Option<P>,
         photon_client: &Option<Arc<PhotonIndexer>>,
+        commit_slot: Option<u64>,
     ) -> Result<(), InternalError> {
         let res = self
-            .prepare_task(authority, task.as_mut(), persister, photon_client)
+            .prepare_task(
+                authority,
+                task.as_mut(),
+                persister,
+                photon_client,
+                commit_slot,
+            )
             .await;
         match res {
             Err(InternalError::BufferExecutionError(
@@ -219,8 +234,14 @@ impl DeliveryPreparator {
             PreparationTask::Buffer(preparation_task),
         ))?;
 
-        self.prepare_task(authority, task.as_mut(), persister, photon_client)
-            .await
+        self.prepare_task(
+            authority,
+            task.as_mut(),
+            persister,
+            photon_client,
+            commit_slot,
+        )
+        .await
     }
 
     /// Initializes buffer account for future writes

@@ -636,6 +636,7 @@ where
         transaction_strategy: &mut TransactionStrategy,
         persister: &Option<P>,
         photon_client: &Option<Arc<PhotonIndexer>>,
+        commit_slot: Option<u64>,
     ) -> IntentExecutorResult<
         IntentExecutorResult<Signature, TransactionStrategyExecutionError>,
         TransactionPreparatorError,
@@ -648,6 +649,7 @@ where
                 transaction_strategy,
                 persister,
                 photon_client,
+                commit_slot,
             )
             .await?;
 

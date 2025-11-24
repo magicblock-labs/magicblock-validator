@@ -55,6 +55,7 @@ where
                     &mut transaction_strategy,
                     persister,
                     photon_client,
+                    None,
                 )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;

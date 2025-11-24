@@ -6,6 +6,7 @@ use std::{
 use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::{error, info, warn};
 use solana_pubkey::Pubkey;
+use solana_rpc_client_api::config::RpcTransactionConfig;
 
 use crate::{
     intent_executor::{
@@ -55,6 +56,7 @@ where
                     &mut commit_strategy,
                     persister,
                     photon_client,
+                    None,
                 )
                 .await
                 .map_err(IntentExecutorError::FailedCommitPreparationError)?;
@@ -104,6 +106,18 @@ where
             )
         })?;
 
+        // Fetching the slot at which the transaction was executed
+        // Task preparations requiring fresh data can use that info
+        let commit_slot = self
+            .rpc_client
+            .get_transaction(
+                &commit_signature,
+                Some(RpcTransactionConfig::default()),
+            )
+            .await
+            .map(|tx| tx.slot)
+            .ok();
+
         i = 0;
         let (finalize_result, last_finalize_strategy) = loop {
             i += 1;
@@ -114,6 +128,7 @@ where
                     &mut finalize_strategy,
                     persister,
                     photon_client,
+                    commit_slot,
                 )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
