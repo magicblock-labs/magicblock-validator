@@ -166,16 +166,12 @@ impl DeliveryPreparator {
                     .as_ref()
                     .ok_or(InternalError::PhotonClientNotFound)?;
 
-                let Ok(compressed_data) = get_compressed_data(
+                let compressed_data = get_compressed_data(
                     &delegated_account,
                     photon_client,
                     photon_config,
                 )
-                .await
-                else {
-                    error!("Failed to get compressed data");
-                    return Err(InternalError::CompressedDataNotFound);
-                };
+                .await?;
                 task.set_compressed_data(compressed_data);
             }
         }
