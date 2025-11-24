@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::RwLock,
+};
 
 use chrono::Utc;
 use magicblock_program::args::ScheduleTaskRequest;
@@ -6,6 +9,8 @@ use rusqlite::{params, Connection};
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
 
 use crate::errors::TaskSchedulerError;
+
+const DB_POISONED_MSG: &str = "Database connection is poisoned.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbTask {
@@ -53,7 +58,7 @@ pub struct FailedTask {
 }
 
 pub struct SchedulerDatabase {
-    conn: Connection,
+    conn: RwLock<Connection>,
 }
 
 impl SchedulerDatabase {
@@ -99,7 +104,9 @@ impl SchedulerDatabase {
             [],
         )?;
 
-        Ok(Self { conn })
+        Ok(Self {
+            conn: RwLock::new(conn),
+        })
     }
 
     pub fn insert_task(&self, task: &DbTask) -> Result<(), TaskSchedulerError> {
@@ -107,7 +114,7 @@ impl SchedulerDatabase {
         let authority_str = task.authority.to_string();
         let now = Utc::now().timestamp_millis();
 
-        self.conn.execute(
+        self.conn.write().expect(DB_POISONED_MSG).execute(
             "INSERT OR REPLACE INTO tasks 
              (id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -133,7 +140,7 @@ impl SchedulerDatabase {
     ) -> Result<(), TaskSchedulerError> {
         let now = Utc::now().timestamp_millis();
 
-        self.conn.execute(
+        self.conn.write().expect(DB_POISONED_MSG).execute(
             "UPDATE tasks 
              SET executions_left = executions_left - 1, 
                  last_execution_millis = ?,
@@ -150,7 +157,7 @@ impl SchedulerDatabase {
         task_id: u64,
         error: String,
     ) -> Result<(), TaskSchedulerError> {
-        self.conn.execute(
+        self.conn.write().expect(DB_POISONED_MSG).execute(
             "INSERT INTO failed_scheduling (timestamp, task_id, error) VALUES (?, ?, ?)",
             params![Utc::now().timestamp_millis(), task_id, error],
         )?;
@@ -163,7 +170,7 @@ impl SchedulerDatabase {
         task_id: u64,
         error: String,
     ) -> Result<(), TaskSchedulerError> {
-        self.conn.execute(
+        self.conn.write().expect(DB_POISONED_MSG).execute(
             "INSERT INTO failed_tasks (timestamp, task_id, error) VALUES (?, ?, ?)",
             params![Utc::now().timestamp_millis(), task_id, error],
         )?;
@@ -175,7 +182,7 @@ impl SchedulerDatabase {
         &self,
         task_id: u64,
     ) -> Result<(), TaskSchedulerError> {
-        self.conn.execute(
+        self.conn.write().expect(DB_POISONED_MSG).execute(
             "UPDATE tasks SET executions_left = 0 WHERE id = ?",
             [task_id],
         )?;
@@ -185,6 +192,8 @@ impl SchedulerDatabase {
 
     pub fn remove_task(&self, task_id: u64) -> Result<(), TaskSchedulerError> {
         self.conn
+            .write()
+            .expect(DB_POISONED_MSG)
             .execute("DELETE FROM tasks WHERE id = ?", [task_id])?;
 
         Ok(())
@@ -194,7 +203,8 @@ impl SchedulerDatabase {
         &self,
         task_id: u64,
     ) -> Result<Option<DbTask>, TaskSchedulerError> {
-        let mut stmt = self.conn.prepare(
+        let db = self.conn.write().expect(DB_POISONED_MSG);
+        let mut stmt = db.prepare(
             "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
              FROM tasks WHERE id = ?"
         )?;
@@ -230,7 +240,8 @@ impl SchedulerDatabase {
     }
 
     pub fn get_tasks(&self) -> Result<Vec<DbTask>, TaskSchedulerError> {
-        let mut stmt = self.conn.prepare(
+        let db = self.conn.write().expect(DB_POISONED_MSG);
+        let mut stmt = db.prepare(
             "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
              FROM tasks"
         )?;
@@ -271,7 +282,8 @@ impl SchedulerDatabase {
     }
 
     pub fn get_task_ids(&self) -> Result<Vec<u64>, TaskSchedulerError> {
-        let mut stmt = self.conn.prepare(
+        let db = self.conn.write().expect(DB_POISONED_MSG);
+        let mut stmt = db.prepare(
             "SELECT id 
              FROM tasks",
         )?;
@@ -284,7 +296,8 @@ impl SchedulerDatabase {
     pub fn get_failed_schedulings(
         &self,
     ) -> Result<Vec<FailedScheduling>, TaskSchedulerError> {
-        let mut stmt = self.conn.prepare(
+        let db = self.conn.write().expect(DB_POISONED_MSG);
+        let mut stmt = db.prepare(
             "SELECT * 
              FROM failed_scheduling",
         )?;
@@ -304,7 +317,8 @@ impl SchedulerDatabase {
     pub fn get_failed_tasks(
         &self,
     ) -> Result<Vec<FailedTask>, TaskSchedulerError> {
-        let mut stmt = self.conn.prepare(
+        let db = self.conn.write().expect(DB_POISONED_MSG);
+        let mut stmt = db.prepare(
             "SELECT * 
              FROM failed_tasks",
         )?;
