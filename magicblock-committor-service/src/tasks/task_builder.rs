@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures_util::{stream::FuturesUnordered, TryStreamExt};
 use light_client::indexer::{
     photon_indexer::PhotonIndexer, Indexer, IndexerError, IndexerRpcConfig,
 };
@@ -126,26 +127,26 @@ impl TasksBuilder for TaskBuilderImpl {
             let photon_client = photon_client
                 .as_ref()
                 .ok_or(TaskBuilderError::PhotonClientNotFound)?;
-            let mut compressed_results = vec![];
-            for account in accounts {
-                compressed_results.push(
-                    get_compressed_data(&account.pubkey, photon_client, None)
-                        .await,
-                );
-            }
+            let commit_ids = commit_ids.clone();
 
-            accounts.iter().zip(compressed_results).map(|(account, compressed_data)| {
-                let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                let compressed_data = compressed_data.expect("Compressed commit task must be provided with compressed data");
-                let task = ArgsTaskType::CompressedCommit(CompressedCommitTask {
-                    commit_id,
-                    allow_undelegation,
-                    committed_account: account.clone(),
-                    compressed_data
-                });
-                Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
+            accounts.iter().map(|account| {
+                let commit_ids = commit_ids.clone();
+                async move {
+                    let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
+                    let compressed_data = get_compressed_data(&account.pubkey, photon_client, None)
+                    .await?;
+                    let task = ArgsTaskType::CompressedCommit(CompressedCommitTask {
+                        commit_id,
+                        allow_undelegation,
+                        committed_account: account.clone(),
+                        compressed_data
+                    });
+                    Ok::<_, TaskBuilderError>(Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>)
+                }
             })
-            .collect()
+            .collect::<FuturesUnordered<_>>()
+            .try_collect()
+            .await?
         } else {
             accounts
             .iter()
