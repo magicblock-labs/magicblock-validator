@@ -320,8 +320,6 @@ async fn test_already_initialized_error_handled() {
 
 #[tokio::test]
 async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
-    use borsh::BorshDeserialize;
-
     let fixture = TestFixture::new().await;
     let preparator = fixture.create_delivery_preparator();
 
@@ -439,7 +437,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             .truncate(buf_b_data.len() - 5);
     }
 
-    // --- Step 4: re-prepare with the same logical tasks (same commit IDs, mutated data) ---
+    // --- Step 3: re-prepare with the same logical tasks (same commit IDs, mutated data) ---
     let mut strategy2 = TransactionStrategy {
         optimized_tasks: vec![
             {
