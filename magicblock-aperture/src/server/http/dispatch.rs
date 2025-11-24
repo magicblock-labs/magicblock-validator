@@ -113,6 +113,16 @@ impl HttpDispatcher {
                     }
                 }
             };
+            (@noret, $result:expr, $id: expr) => {
+                match $result {
+                    Ok(r) => r,
+                    Err(error) => {
+                        let mut resp = ResponseErrorPayload::encode($id, error);
+                        Self::set_access_control_headers(&mut resp);
+                        resp
+                    }
+                }
+            };
         }
 
         // Extract and parse the request body.
@@ -126,6 +136,9 @@ impl HttpDispatcher {
                 (response, Some(r.id))
             }
             RpcRequest::Multi(requests) => {
+                const COMA: u8 = b',';
+                const OPEN_BR: u8 = b'[';
+                const CLOSE_BR: u8 = b']';
                 let mut jobs = FuturesOrdered::new();
                 for mut r in requests {
                     let j = async {
@@ -134,15 +147,15 @@ impl HttpDispatcher {
                     };
                     jobs.push_back(j);
                 }
-                let mut body = vec![b'['];
+                let mut body = vec![OPEN_BR];
                 while let Some((response, request)) = jobs.next().await {
-                    let response = unwrap!(response, Some(&request.id));
+                    if body.len() != 1 {
+                        body.push(COMA);
+                    }
+                    let response = unwrap!(@noret, response, Some(&request.id));
                     body.extend_from_slice(&response.into_body().0);
-                    body.push(b',');
                 }
-                if let Some(b) = body.last_mut() {
-                    *b = b']'
-                }
+                body.push(CLOSE_BR);
                 (Ok(Response::new(JsonBody(body))), None)
             }
         };

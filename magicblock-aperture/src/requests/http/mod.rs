@@ -53,7 +53,8 @@ pub(crate) fn parse_body(body: Data) -> RpcResult<RpcRequest> {
         }
         Data::SingleChunk(slice) => slice.as_ref(),
         Data::MultiChunk(vec) => vec.as_ref(),
-    };
+    }
+    .trim_ascii_start();
     // Hacky/cheap way to detect single request vs an array of requests
     if body_bytes.first().map(|&b| b == b'{').unwrap_or_default() {
         json::from_slice(body_bytes).map(RpcRequest::Single)

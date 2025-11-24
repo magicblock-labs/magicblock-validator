@@ -57,6 +57,6 @@ async fn test_batch_requests() {
     let res2 = get_result(2);
     assert!(
         res2["result"].is_object(),
-        "getIdentity should return adn object"
+        "getIdentity should return an object"
     );
 }
