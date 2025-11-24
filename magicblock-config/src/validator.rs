@@ -35,7 +35,6 @@ pub struct ValidatorConfig {
     #[derive_env_var]
     #[clap_from_serde_skip] // Skip because it defaults to None
     #[arg(help = "The base fees to use for the validator.")]
-    #[serde(default = "default_base_fees")]
     pub base_fees: Option<u64>,
 
     /// Uses alpha2 country codes following https://en.wikipedia.org/wiki/ISO_3166-1
@@ -65,7 +64,7 @@ impl Default for ValidatorConfig {
             millis_per_slot: default_millis_per_slot(),
             sigverify: default_sigverify(),
             fqdn: default_fqdn(),
-            base_fees: default_base_fees(),
+            base_fees: None,
             country_code: default_country_code(),
             claim_fees_interval_secs: default_claim_fees_interval_secs(),
         }
@@ -81,10 +80,6 @@ fn default_sigverify() -> bool {
 }
 
 fn default_fqdn() -> Option<String> {
-    None
-}
-
-fn default_base_fees() -> Option<u64> {
     None
 }
 

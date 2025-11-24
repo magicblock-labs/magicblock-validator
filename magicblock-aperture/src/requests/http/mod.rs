@@ -10,7 +10,7 @@ use log::*;
 use magicblock_core::{
     link::transactions::SanitizeableTransaction, traits::AccountsBank,
 };
-use magicblock_metrics::metrics::ENSURE_ACCOUNTS_TIME;
+use magicblock_metrics::metrics::{AccountFetchOrigin, ENSURE_ACCOUNTS_TIME};
 use prelude::JsonBody;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -107,12 +107,12 @@ impl HttpDispatcher {
             .start_timer();
         let _ = self
             .chainlink
-            .ensure_accounts(&[*pubkey], None)
+            .ensure_accounts(&[*pubkey], None, AccountFetchOrigin::GetAccount)
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the account fails
                 // Log the error and return whatever is in the accounts db
-                warn!("Failed to ensure account {pubkey}: {e}");
+                debug!("Failed to ensure account {pubkey}: {e}");
             });
         self.accountsdb.get_account(pubkey)
     }
@@ -129,7 +129,11 @@ impl HttpDispatcher {
             .start_timer();
         let _ = self
             .chainlink
-            .ensure_accounts(pubkeys, None)
+            .ensure_accounts(
+                pubkeys,
+                None,
+                AccountFetchOrigin::GetMultipleAccounts,
+            )
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the accounts fails
@@ -270,6 +274,7 @@ pub(crate) mod get_identity;
 pub(crate) mod get_latest_blockhash;
 pub(crate) mod get_multiple_accounts;
 pub(crate) mod get_program_accounts;
+pub(crate) mod get_recent_performance_samples;
 pub(crate) mod get_signature_statuses;
 pub(crate) mod get_signatures_for_address;
 pub(crate) mod get_slot;

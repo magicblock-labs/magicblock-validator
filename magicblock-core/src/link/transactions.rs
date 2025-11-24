@@ -1,4 +1,5 @@
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
+use magicblock_magic_program_api::args::TaskRequest;
 use solana_program::message::{
     inner_instruction::InnerInstructionsList, SimpleAddressLoader,
 };
@@ -11,7 +12,7 @@ use solana_transaction::{
 use solana_transaction_context::TransactionReturnData;
 use solana_transaction_error::TransactionError;
 use tokio::sync::{
-    mpsc::{Receiver, Sender},
+    mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender},
     oneshot,
 };
 
@@ -29,6 +30,11 @@ pub type TransactionStatusTx = MpmcSender<TransactionStatus>;
 pub type TransactionToProcessRx = Receiver<ProcessableTransaction>;
 /// The sender end of the channel used to send new transactions to the scheduler for processing.
 type TransactionToProcessTx = Sender<ProcessableTransaction>;
+
+/// The receiver end of the channel used to send scheduled tasks (cranking)
+pub type ScheduledTasksRx = UnboundedReceiver<TaskRequest>;
+/// The sender end of the channel used to send scheduled tasks (cranking)
+pub type ScheduledTasksTx = UnboundedSender<TaskRequest>;
 
 /// A cloneable handle that provides a high-level API for
 /// submitting transactions to the processing pipeline.

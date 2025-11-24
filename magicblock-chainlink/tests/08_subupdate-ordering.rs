@@ -1,5 +1,5 @@
 use log::*;
-use magicblock_chainlink::testing::init_logger;
+use magicblock_chainlink::{testing::init_logger, AccountFetchOrigin};
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk::clock::Slot;
@@ -56,7 +56,14 @@ async fn test_subs_receive_out_of_order_updates() {
         .into(),
     );
 
-    chainlink.ensure_accounts(&[pubkey], None).await.unwrap();
+    chainlink
+        .ensure_accounts(
+            &[pubkey],
+            None,
+            AccountFetchOrigin::GetMultipleAccounts,
+        )
+        .await
+        .unwrap();
 
     let acc = cloner
         .get_account(&pubkey)
