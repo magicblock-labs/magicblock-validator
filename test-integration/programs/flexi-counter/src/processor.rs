@@ -631,7 +631,7 @@ fn process_schedule_commit_compressed(
 
     let ix = Instruction {
         program_id: *magic_program.key,
-        data: instruction_data.to_vec(),
+        data: instruction_data,
         accounts: account_metas,
     };
 
