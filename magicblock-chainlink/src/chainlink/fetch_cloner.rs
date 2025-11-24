@@ -677,7 +677,7 @@ where
 
         let (not_found, plain, owned_by_deleg, owned_by_deleg_compressed, programs) =
             accs.into_iter().zip(pubkeys).fold(
-                (vec![], vec![], vec![], vec![], vec![]),
+                (vec![], vec![], vec![], vec![]),
                 |(
                     mut not_found,
                     mut plain,

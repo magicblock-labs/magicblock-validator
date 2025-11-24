@@ -104,7 +104,7 @@ pub struct IntentExecutorImpl<T, F> {
 
 impl<T, F> IntentExecutorImpl<T, F>
 where
-    T: TransactionPreparator,
+    T: TransactionPreparator + Clone,
     F: TaskInfoFetcher,
 {
     pub fn new(
@@ -271,7 +271,6 @@ where
     }
 
     /// Starting execution from single stage
-    // TODO(edwin): introduce recursion stop value in case of some bug?
     pub async fn single_stage_execution_flow<P: IntentPersister>(
         &self,
         base_intent: ScheduledBaseIntent,
@@ -289,21 +288,7 @@ where
                 photon_client,
             )
             .await;
-
-        // Cleanup after intent
-        // Note: in some cases it maybe critical to execute cleanup synchronously
-        // Example: if commit nonces were invalid during execution
-        // next intent could use wrongly initiated buffers by current intent
-        let cleanup_futs = junk.iter().map(|to_cleanup| {
-            self.transaction_preparator.cleanup_for_strategy(
-                &self.authority,
-                &to_cleanup.optimized_tasks,
-                &to_cleanup.lookup_tables_keys,
-            )
-        });
-        if let Err(err) = try_join_all(cleanup_futs).await {
-            error!("Failed to cleanup after intent: {}", err);
-        }
+        self.spawn_cleanup_task(junk);
 
         res
     }
@@ -327,21 +312,7 @@ where
                 photon_client,
             )
             .await;
-
-        // Cleanup after intent
-        // Note: in some cases it maybe critical to execute cleanup synchronously
-        // Example: if commit nonces were invalid during execution
-        // next intent could use wrongly initiated buffers by current intent
-        let cleanup_futs = junk.iter().map(|to_cleanup| {
-            self.transaction_preparator.cleanup_for_strategy(
-                &self.authority,
-                &to_cleanup.optimized_tasks,
-                &to_cleanup.lookup_tables_keys,
-            )
-        });
-        if let Err(err) = try_join_all(cleanup_futs).await {
-            error!("Failed to cleanup after intent: {}", err);
-        }
+        self.spawn_cleanup_task(junk);
 
         res
     }
@@ -757,6 +728,31 @@ where
         .await
     }
 
+    /// Cleanup after intent
+    /// Note: in some cases it maybe critical to execute cleanup synchronously
+    /// Example: if commit nonces were invalid during execution
+    /// next intent could use wrongly initiated buffers by current intent
+    /// We assume that this case is highly unlikely since it would mean:
+    /// user redelegates amd reaches current commit id faster than we execute transactions below
+    fn spawn_cleanup_task(&self, junk: Vec<TransactionStrategy>) {
+        let authority = self.authority.insecure_clone();
+        let transaction_preparator = self.transaction_preparator.clone();
+        let cleanup_fut = async move {
+            let cleanup_futs = junk.iter().map(|to_cleanup| {
+                transaction_preparator.cleanup_for_strategy(
+                    &authority,
+                    &to_cleanup.optimized_tasks,
+                    &to_cleanup.lookup_tables_keys,
+                )
+            });
+
+            if let Err(err) = try_join_all(cleanup_futs).await {
+                error!("Failed to cleanup after intent: {}", err);
+            }
+        };
+        tokio::spawn(cleanup_fut);
+    }
+
     async fn intent_metrics(
         rpc_client: MagicblockRpcClient,
         execution_outcome: ExecutionOutput,
@@ -820,7 +816,7 @@ where
 #[async_trait]
 impl<T, C> IntentExecutor for IntentExecutorImpl<T, C>
 where
-    T: TransactionPreparator,
+    T: TransactionPreparator + Clone,
     C: TaskInfoFetcher,
 {
     /// Executes Message on Base layer
