@@ -234,9 +234,9 @@ pub fn schedule_commit_and_undelegate_cpi_twice(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiTwice(
+        ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiTwice(
             players.to_vec(),
         ),
         account_metas,

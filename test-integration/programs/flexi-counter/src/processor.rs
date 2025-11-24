@@ -60,10 +60,7 @@ pub fn process(
         if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
             return process_undelegate_request(accounts, data);
         } else if disc == EXTERNAL_UNDELEGATE_COMPRESSED_DISCRIMINATOR {
-            let args =
-                compressed_delegation_client::ExternalUndelegateArgs::try_from_slice(
-                    data,
-                )?;
+            let args = ExternalUndelegateArgs::try_from_slice(data)?;
             return process_external_undelegate_compressed(accounts, args);
         }
     }
