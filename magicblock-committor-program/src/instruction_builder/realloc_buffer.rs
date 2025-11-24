@@ -1,10 +1,10 @@
-use borsh::BorshSerialize;
 use solana_program::instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
 use crate::{
     consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
-    instruction::CommittorInstruction, pdas,
+    instruction::CommittorInstruction, instruction_builder::build_instruction,
+    pdas,
 };
 
 // -----------------
@@ -71,7 +71,6 @@ fn create_realloc_buffer_ix(
         commit_id.to_le_bytes().as_slice(),
     );
 
-    let program_id = crate::id();
     let ix = CommittorInstruction::ReallocBuffer {
         pubkey,
         buffer_account_size,
@@ -83,10 +82,5 @@ fn create_realloc_buffer_ix(
         AccountMeta::new(authority, true),
         AccountMeta::new(buffer_pda, false),
     ];
-    Instruction::new_with_bytes(
-        program_id,
-        &ix.try_to_vec()
-            .expect("Serialization of instruction should never fail"),
-        accounts,
-    )
+    build_instruction(ix, accounts)
 }
