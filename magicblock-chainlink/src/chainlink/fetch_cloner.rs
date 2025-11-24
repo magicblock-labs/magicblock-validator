@@ -12,7 +12,7 @@ use dlp::{
 };
 use log::*;
 use magicblock_core::traits::AccountsBank;
-use magicblock_metrics::metrics;
+use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk::system_program;
@@ -299,6 +299,7 @@ where
                 self,
                 pubkey,
                 account.remote_slot(),
+                AccountFetchOrigin::GetAccount,
             )
             .await
             {
@@ -367,6 +368,7 @@ where
                         pubkey,
                         delegation_record_pubkey,
                         account.remote_slot(),
+                        AccountFetchOrigin::GetAccount,
                     )
                     .await
                 {
@@ -498,6 +500,7 @@ where
         &self,
         account_pubkey: Pubkey,
         min_context_slot: u64,
+        fetch_origin: metrics::AccountFetchOrigin,
     ) -> Option<DelegationRecord> {
         let delegation_record_pubkey =
             delegation_record_pda_from_delegated_account(&account_pubkey);
@@ -513,6 +516,7 @@ where
                     min_context_slot: Some(min_context_slot),
                     ..Default::default()
                 }),
+                fetch_origin,
             )
             .await
         {
@@ -575,6 +579,7 @@ where
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
+        fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys = pubkeys
@@ -609,7 +614,7 @@ where
 
         let accs = self
             .remote_account_provider
-            .try_get_multi(pubkeys, mark_empty_if_not_found)
+            .try_get_multi(pubkeys, mark_empty_if_not_found, fetch_origin)
             .await?;
 
         trace!("Fetched {accs:?}");
@@ -750,6 +755,7 @@ where
                 self.task_to_fetch_with_delegation_record(
                     *pubkey,
                     effective_slot,
+                    fetch_origin,
                 ),
             );
         }
@@ -879,11 +885,14 @@ where
 
         let (loaded_programs, program_data_subs, errors) = {
             // For LoaderV3 accounts we fetch the program data account
-            let mut fetch_with_program_data_join_set = JoinSet::new();
             let (loaderv3_programs, single_account_programs): (Vec<_>, Vec<_>) =
                 programs
                     .into_iter()
                     .partition(|(_, acc, _)| acc.owner().eq(&LOADER_V3));
+
+            let mut pubkeys_to_fetch =
+                Vec::with_capacity(loaderv3_programs.len() * 2);
+            let mut batch_min_context_slot = min_context_slot;
 
             for (pubkey, _, account_slot) in &loaderv3_programs {
                 let effective_slot = if let Some(min_slot) = min_context_slot {
@@ -891,26 +900,89 @@ where
                 } else {
                     *account_slot
                 };
-                fetch_with_program_data_join_set.spawn(
-                    self.task_to_fetch_with_program_data(
-                        *pubkey,
-                        effective_slot,
-                    ),
+                batch_min_context_slot = Some(
+                    batch_min_context_slot.unwrap_or(0).max(effective_slot),
                 );
+
+                // We intentionally take the global max effective slot for the batch (not per-program)
+                // to enforce a consistent minimum slot across all LoaderV3 programs.
+                let program_data_pubkey =
+                    get_loaderv3_get_program_data_address(pubkey);
+                pubkeys_to_fetch.push(*pubkey);
+                pubkeys_to_fetch.push(program_data_pubkey);
             }
-            let joined = fetch_with_program_data_join_set.join_all().await;
-            let (mut errors, accounts_with_program_data) = joined
-                .into_iter()
-                .fold((vec![], vec![]), |(mut errors, mut successes), res| {
-                    match res {
-                        Ok(Ok(account_with_program_data)) => {
-                            successes.push(account_with_program_data)
+
+            let fetch_result = if !pubkeys_to_fetch.is_empty() {
+                self.fetch_count.fetch_add(
+                    pubkeys_to_fetch.len() as u64,
+                    Ordering::Relaxed,
+                );
+                self.remote_account_provider
+                    .try_get_multi_until_slots_match(
+                        &pubkeys_to_fetch,
+                        Some(MatchSlotsConfig {
+                            min_context_slot: batch_min_context_slot,
+                            ..Default::default()
+                        }),
+                        fetch_origin,
+                    )
+                    .await
+            } else {
+                Ok(vec![])
+            };
+
+            let (mut errors, accounts_with_program_data) = match fetch_result {
+                Ok(remote_accounts) => {
+                    if remote_accounts.len() != pubkeys_to_fetch.len() {
+                        (
+                            vec![ChainlinkError::ProgramAccountResolutionsFailed(
+                                format!(
+                                    "LoaderV3 fetch: expected {} accounts, got {}",
+                                    pubkeys_to_fetch.len(),
+                                    remote_accounts.len()
+                                )
+                            )],
+                            vec![],
+                        )
+                    } else {
+                        let mut successes = Vec::new();
+                        let mut errors = Vec::new();
+
+                        for (program_info, (pubkey_pair, account_pair)) in
+                            loaderv3_programs.into_iter().zip(
+                                pubkeys_to_fetch
+                                    .chunks(2)
+                                    .zip(remote_accounts.chunks(2)),
+                            )
+                        {
+                            if account_pair.len() != 2 {
+                                errors.push(ChainlinkError::ProgramAccountResolutionsFailed(
+                                    format!("LoaderV3 fetch: expected 2 accounts (program + data) per pair, got {}", account_pair.len())
+                                ));
+                                continue;
+                            }
+                            let (pubkey, _, _) = program_info;
+                            let program_data_pubkey = pubkey_pair[1];
+
+                            let account_program = account_pair[0].clone();
+                            let account_data = account_pair[1].clone();
+                            let result = Self::resolve_account_with_companion(
+                                &self.accounts_bank,
+                                pubkey,
+                                program_data_pubkey,
+                                account_program,
+                                account_data,
+                            );
+                            match result {
+                                Ok(res) => successes.push(res),
+                                Err(err) => errors.push(err),
+                            }
                         }
-                        Ok(Err(err)) => errors.push(err),
-                        Err(err) => errors.push(err.into()),
+                        (errors, successes)
                     }
-                    (errors, successes)
-                });
+                }
+                Err(err) => (vec![ChainlinkError::from(err)], vec![]),
+            };
             let mut loaded_programs = vec![];
 
             // Cancel subs for program data accounts
@@ -1061,6 +1133,7 @@ where
         &self,
         pubkey: &Pubkey,
         in_bank: &AccountSharedData,
+        fetch_origin: AccountFetchOrigin,
     ) -> bool {
         if in_bank.undelegating() {
             debug!("Fetching undelegating account {pubkey}. delegated={}, undelegating={}", in_bank.delegated(), in_bank.undelegating());
@@ -1068,6 +1141,7 @@ where
                 .fetch_and_parse_delegation_record(
                     *pubkey,
                     self.remote_account_provider.chain_slot(),
+                    fetch_origin,
                 )
                 .await;
             let delegated_on_chain = deleg_record.as_ref().is_some_and(|dr| {
@@ -1109,6 +1183,7 @@ where
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
+        fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         // We cannot clone blacklisted accounts, thus either they are already
         // in the bank (e.g. native programs) or they don't exist and the transaction
@@ -1137,6 +1212,7 @@ where
                     .should_refresh_undelegating_in_bank_account(
                         pubkey,
                         &account_in_bank,
+                        fetch_origin,
                     )
                     .await;
                 if should_refresh_undelegating {
@@ -1185,6 +1261,7 @@ where
                 &fetch_new,
                 mark_empty_if_not_found,
                 slot,
+                fetch_origin,
             )
             .await
         } else {
@@ -1240,6 +1317,7 @@ where
         &self,
         pubkey: Pubkey,
         slot: u64,
+        fetch_origin: AccountFetchOrigin,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let delegation_record_pubkey =
             delegation_record_pda_from_delegated_account(&pubkey);
@@ -1247,6 +1325,7 @@ where
             pubkey,
             delegation_record_pubkey,
             slot,
+            fetch_origin,
         )
     }
 
@@ -1254,34 +1333,42 @@ where
         &self,
         pubkey: Pubkey,
         slot: u64,
+        fetch_origin: AccountFetchOrigin,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let program_data_pubkey =
             get_loaderv3_get_program_data_address(&pubkey);
-        self.task_to_fetch_with_companion(pubkey, program_data_pubkey, slot)
+        self.task_to_fetch_with_companion(
+            pubkey,
+            program_data_pubkey,
+            slot,
+            fetch_origin,
+        )
     }
 
     fn task_to_fetch_with_companion(
         &self,
         pubkey: Pubkey,
-        delegation_record_pubkey: Pubkey,
+        companion_pubkey: Pubkey,
         slot: u64,
+        fetch_origin: AccountFetchOrigin,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let provider = self.remote_account_provider.clone();
         let bank = self.accounts_bank.clone();
         let fetch_count = self.fetch_count.clone();
         task::spawn(async move {
-            trace!("Fetching account {pubkey} with delegation record {delegation_record_pubkey} at slot {slot}");
+            trace!("Fetching account {pubkey} with companion {companion_pubkey} at slot {slot}");
 
             // Increment fetch counter for testing deduplication (2 accounts: pubkey + delegation_record_pubkey)
             fetch_count.fetch_add(2, Ordering::Relaxed);
 
             provider
                 .try_get_multi_until_slots_match(
-                    &[pubkey, delegation_record_pubkey],
+                    &[pubkey, companion_pubkey],
                     Some(MatchSlotsConfig {
-                            min_context_slot: Some(slot),
-                            ..Default::default()
-                        }),
+                        min_context_slot: Some(slot),
+                        ..Default::default()
+                    }),
+                    fetch_origin,
                 )
                 .await
                 // SAFETY: we always get two results here
@@ -1292,61 +1379,79 @@ where
                 })
                 .map_err(ChainlinkError::from)
                 .and_then(|(acc, deleg)| {
-                    use RemoteAccount::*;
-                    match (acc, deleg) {
-                        // Account not found even though we found it previously - this is invalid,
-                        // either way we cannot use it now
-                        (NotFound(_), NotFound(_)) |
-                        (NotFound(_), Found(_)) => Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                                pubkey
-                            )),
-                        (Found(acc), NotFound(_)) => {
-                            // Only account found without a delegation record, it is either invalid
-                            // or a delegation record itself.
-                            // Clone it as is (without changing the owner or flagging as delegated)
-                            match acc.account.resolved_account_shared_data(&*bank) {
-                                Some(account) =>
-                                    Ok(AccountWithCompanion {
-                                        pubkey,
-                                        account,
-                                        companion_pubkey: delegation_record_pubkey,
-                                        companion_account: None,
-                                     }),
-                                None => Err(
-                                    ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                                        pubkey
-                                    ),
-                                ),
-                            }
-                        }
-                        (Found(acc), Found(deleg)) => {
-                            // Found the delegation record, we include it so that the caller can
-                            // use it to add metadata to the account and use it for decision making
-                            let Some(deleg_account) =
-                                deleg.account.resolved_account_shared_data(&*bank)
-                            else {
-                                return Err(
-                                    ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                                    pubkey
-                                ));
-                            };
-                            let Some(account) = acc.account.resolved_account_shared_data(&*bank) else {
-                                return Err(
-                                    ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                                        pubkey
-                                    ),
-                                );
-                            };
-                            Ok(AccountWithCompanion {
-                                pubkey,
-                                account,
-                                companion_pubkey: delegation_record_pubkey,
-                                companion_account: Some(deleg_account),
-                             })
-                        },
-                    }
+                    Self::resolve_account_with_companion(
+                        &bank,
+                        pubkey,
+                        companion_pubkey,
+                        acc,
+                        deleg,
+                    )
                 })
         })
+    }
+
+    fn resolve_account_with_companion(
+        bank: &V,
+        pubkey: Pubkey,
+        companion_pubkey: Pubkey,
+        acc: RemoteAccount,
+        companion: RemoteAccount,
+    ) -> ChainlinkResult<AccountWithCompanion> {
+        use RemoteAccount::*;
+        match (acc, companion) {
+            // Account not found even though we found it previously - this is invalid,
+            // either way we cannot use it now
+            (NotFound(_), NotFound(_)) | (NotFound(_), Found(_)) => {
+                Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(pubkey))
+            }
+            (Found(acc), NotFound(_)) => {
+                // Only account found without a companion
+                // In case of delegation record fetch the account is either invalid
+                // or a delegation record itself.
+                // Clone it as is (without changing the owner or flagging as delegated)
+                match acc.account.resolved_account_shared_data(bank) {
+                    Some(account) => Ok(AccountWithCompanion {
+                        pubkey,
+                        account,
+                        companion_pubkey,
+                        companion_account: None,
+                    }),
+                    None => Err(
+                        ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
+                            pubkey,
+                        ),
+                    ),
+                }
+            }
+            (Found(acc), Found(comp)) => {
+                // Found the delegation record, we include it so that the caller can
+                // use it to add metadata to the account and use it for decision making
+                let Some(comp_account) =
+                    comp.account.resolved_account_shared_data(bank)
+                else {
+                    return Err(
+                        ChainlinkError::ResolvedCompanionAccountCouldNoLongerBeFound(
+                            companion_pubkey,
+                        ),
+                    );
+                };
+                let Some(account) =
+                    acc.account.resolved_account_shared_data(bank)
+                else {
+                    return Err(
+                        ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
+                            pubkey,
+                        ),
+                    );
+                };
+                Ok(AccountWithCompanion {
+                    pubkey,
+                    account,
+                    companion_pubkey,
+                    companion_account: Some(comp_account),
+                })
+            }
+        }
     }
 
     /// Check if an account is currently being watched (subscribed to) by the
@@ -1805,7 +1910,12 @@ mod tests {
             .await;
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -1838,7 +1948,12 @@ mod tests {
         .await;
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[non_existing_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[non_existing_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -1892,7 +2007,12 @@ mod tests {
 
         // Test fetch and clone
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -1964,7 +2084,12 @@ mod tests {
         );
 
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -2041,7 +2166,12 @@ mod tests {
             account_owner,
         );
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[deleg_record_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[deleg_record_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
         assert!(result.is_ok());
 
@@ -2050,7 +2180,12 @@ mod tests {
 
         // Fetch and clone the delegated account
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         assert!(result.is_ok());
@@ -2147,6 +2282,7 @@ mod tests {
                 ],
                 None,
                 None,
+                AccountFetchOrigin::GetAccount,
             )
             .await;
 
@@ -2249,6 +2385,7 @@ mod tests {
                 &[delegated_pubkey, invalid_delegated_pubkey],
                 None,
                 None,
+                AccountFetchOrigin::GetAccount,
             )
             .await;
 
@@ -2316,7 +2453,12 @@ mod tests {
         // Initially we should not be able to clone the account since we cannot
         // find a valid delegation record (up to date the same way the account is)
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -2332,7 +2474,12 @@ mod tests {
         // at the required slot then all is ok
         rpc_client.account_override_slot(&deleg_record_pubkey, CURRENT_SLOT);
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
         debug!("Test result after updating delegation record: {result:?}");
         assert!(result.is_ok());
@@ -2381,7 +2528,12 @@ mod tests {
         // Initially we should not be able to clone the account since the account
         // is stale (delegation record is up to date but account is behind)
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
 
         debug!("Test result: {result:?}");
@@ -2396,7 +2548,12 @@ mod tests {
         // After the RPC provider updates the account to the current slot
         rpc_client.account_override_slot(&account_pubkey, CURRENT_SLOT);
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
         debug!("Test result after updating account: {result:?}");
         assert!(result.is_ok());
@@ -2456,6 +2613,7 @@ mod tests {
                         &[account_pubkey],
                         None,
                         None,
+                        AccountFetchOrigin::GetAccount,
                     )
                     .await
             })
@@ -2524,6 +2682,7 @@ mod tests {
                         &[account_pubkey],
                         None,
                         None,
+                        AccountFetchOrigin::GetAccount,
                     )
                     .await
             })
@@ -2595,7 +2754,12 @@ mod tests {
         // Initially fetch and clone the delegated account
         // This should result in no active subscription since it's delegated to us
         let result = fetch_cloner
-            .fetch_and_clone_accounts(&[account_pubkey], None, None)
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
             .await;
         assert!(result.is_ok());
 
@@ -2682,7 +2846,12 @@ mod tests {
             let fetch_cloner = fetch_cloner.clone();
             tokio::spawn(async move {
                 fetch_cloner
-                    .fetch_and_clone_accounts_with_dedup(&accounts, None, None)
+                    .fetch_and_clone_accounts_with_dedup(
+                        &accounts,
+                        None,
+                        None,
+                        AccountFetchOrigin::GetAccount,
+                    )
                     .await
             })
         };
@@ -2767,6 +2936,7 @@ mod tests {
                 ],
                 Some(&[marked_non_existing_account_pubkey]),
                 None,
+                AccountFetchOrigin::GetAccount,
             )
             .await
             .expect("Fetch and clone failed");

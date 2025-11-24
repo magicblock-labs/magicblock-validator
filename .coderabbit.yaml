@@ -38,7 +38,7 @@ reviews:
     ignore_title_keywords: []
     labels: []
     drafts: false
-    base_branches: []
+    base_branches: [".*"]
     ignore_usernames: []
   finishing_touches:
     docstrings:
@@ -141,4 +141,4 @@ code_generation:
     path_instructions: []
 issue_enrichment:
   planning:
-    enabled: false
+    enabled: true

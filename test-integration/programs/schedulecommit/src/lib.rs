@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use borsh::{BorshDeserialize, BorshSerialize};
 use ephemeral_rollups_sdk::{
     consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
@@ -6,11 +8,14 @@ use ephemeral_rollups_sdk::{
     },
     ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
+use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     declare_id,
     entrypoint::{self, ProgramResult},
+    instruction::{AccountMeta, Instruction},
     msg,
+    program::invoke_signed,
     program_error::ProgramError,
     pubkey::Pubkey,
 };
@@ -22,6 +27,7 @@ use crate::{
         AllocateAndAssignAccountArgs,
     },
 };
+
 pub mod api;
 pub mod magicblock_program;
 mod utils;
@@ -89,6 +95,18 @@ pub enum ScheduleCommitInstruction {
     /// - **4.**   `[]`              System program
     ScheduleCommitAndUndelegateCpiModAfter(Vec<Pubkey>),
 
+    /// Same instruction input like [ScheduleCommitInstruction::ScheduleCommitCpi].
+    /// Behavior differs that it will commit and undelegate account twice
+    /// requested commit + undelegation.
+    ///
+    /// # Account references:
+    /// - **0.**   `[WRITE]`         Delegated account
+    /// - **1.**   `[]`              Delegation program
+    /// - **2.**   `[WRITE]`         Buffer account
+    /// - **3.**   `[WRITE]`         Payer
+    /// - **4.**   `[]`              System program
+    ScheduleCommitAndUndelegateCpiTwice(Vec<Pubkey>),
+
     /// Increases the count of a PDA of this program by one.
     /// This instruction can only run on the ephemeral after the account was
     /// delegated or on chain while it is undelegated.
@@ -143,6 +161,11 @@ pub fn process_instruction<'a>(
         ),
         ScheduleCommitAndUndelegateCpiModAfter(players) => {
             process_schedulecommit_and_undelegation_cpi_with_mod_after(
+                accounts, &players,
+            )
+        }
+        ScheduleCommitAndUndelegateCpiTwice(players) => {
+            process_schedulecommit_and_undelegation_cpi_twice(
                 accounts, &players,
             )
         }
@@ -428,6 +451,111 @@ fn process_schedulecommit_and_undelegation_cpi_with_mod_after(
         main_account
             .serialize(&mut &mut committee.try_borrow_mut_data()?.as_mut())?;
     }
+
+    Ok(())
+}
+
+pub fn create_schedule_commit_ix<'a, 'info>(
+    payer: &'a AccountInfo<'info>,
+    account_infos: &[&'a AccountInfo<'info>],
+    magic_context: &'a AccountInfo<'info>,
+    magic_program: &'a AccountInfo<'info>,
+) -> Instruction {
+    let mut account_metas = vec![
+        AccountMeta {
+            pubkey: *payer.key,
+            is_signer: true,
+            is_writable: true,
+        },
+        AccountMeta {
+            pubkey: *magic_context.key,
+            is_signer: false,
+            is_writable: true,
+        },
+    ];
+    account_metas.extend(account_infos.iter().map(|x| AccountMeta {
+        pubkey: *x.key,
+        is_signer: true,
+        is_writable: x.is_writable,
+    }));
+    Instruction::new_with_bincode(
+        *magic_program.key,
+        &MagicBlockInstruction::ScheduleCommitAndUndelegate,
+        account_metas,
+    )
+}
+
+// -----------------
+// process_schedulecommit_and_undelegation_cpi_with_mod_after
+// -----------------
+fn process_schedulecommit_and_undelegation_cpi_twice(
+    accounts: &[AccountInfo],
+    player_pubkeys: &[Pubkey],
+) -> Result<(), ProgramError> {
+    msg!("Processing process_schedulecommit_and_undelegation_cpi_twice instruction");
+
+    let accounts_iter = &mut accounts.iter();
+    let payer = next_account_info(accounts_iter)?;
+    let magic_context = next_account_info(accounts_iter)?;
+    let magic_program = next_account_info(accounts_iter)?;
+
+    let mut remaining = Vec::new();
+    for info in accounts_iter.by_ref() {
+        remaining.push(info.clone());
+    }
+
+    if remaining.len() != player_pubkeys.len() {
+        msg!(
+            "ERROR: player_pubkeys.len() != committes.len() | {} != {}",
+            player_pubkeys.len(),
+            remaining.len()
+        );
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    // Request the PDA accounts to be committed and undelegated
+    commit_and_undelegate_accounts(
+        payer,
+        remaining.iter().collect::<Vec<_>>(),
+        magic_context,
+        magic_program,
+    )?;
+
+    // All accounts that will be passed to the CPI
+    let mut account_infos = Vec::with_capacity(2 + remaining.len());
+    account_infos.push(payer.clone());
+    account_infos.push(magic_context.clone());
+    account_infos.extend(remaining.iter().cloned());
+
+    // Undelegate accounts 1 time
+    let ix = create_schedule_commit_ix(
+        payer,
+        remaining.iter().collect::<Vec<_>>().deref(),
+        magic_context,
+        magic_program,
+    );
+
+    let mut all_seeds: Vec<Vec<Vec<u8>>> =
+        Vec::with_capacity(player_pubkeys.len());
+    for pk in player_pubkeys {
+        let (_pda, bump) = pda_and_bump(pk);
+        let bump_arr = [bump];
+        let tmp_seeds = pda_seeds_with_bump(pk, &bump_arr);
+        let owned_seeds: Vec<Vec<u8>> =
+            tmp_seeds.iter().map(|s| s.to_vec()).collect();
+
+        all_seeds.push(owned_seeds);
+    }
+
+    let signer_seeds_vec: Vec<Vec<&[u8]>> = all_seeds
+        .iter()
+        .map(|seed_vec| seed_vec.iter().map(|s| s.as_slice()).collect())
+        .collect();
+    let signer_seed_slices: Vec<&[&[u8]]> =
+        signer_seeds_vec.iter().map(|v| v.as_slice()).collect();
+
+    // Attempt undelegation with same accounts 2 time
+    invoke_signed(&ix, &account_infos, &signer_seed_slices)?;
 
     Ok(())
 }

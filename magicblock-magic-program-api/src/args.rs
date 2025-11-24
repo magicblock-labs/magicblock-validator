@@ -13,7 +13,7 @@ pub struct ActionArgs {
 }
 
 impl ActionArgs {
-    pub fn default(data: Vec<u8>) -> Self {
+    pub fn new(data: Vec<u8>) -> Self {
         Self {
             escrow_index: 255,
             data,
