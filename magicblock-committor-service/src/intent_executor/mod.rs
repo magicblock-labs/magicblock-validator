@@ -160,7 +160,8 @@ where
         {
             Ok(strategy) => Ok(Some(strategy)),
             Err(TaskStrategistError::SignerError(err)) => Err(err),
-            Err(_) => Ok(None),
+            Err(TaskStrategistError::FailedToFitError)
+            | Err(TaskStrategistError::InconsistentTaskCompression) => Ok(None),
         }
     }
 
