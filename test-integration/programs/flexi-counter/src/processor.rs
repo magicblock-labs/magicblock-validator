@@ -339,13 +339,8 @@ fn process_add_and_schedule_commit(
     let magic_context_info = next_account_info(account_info_iter)?;
     let magic_program_info = next_account_info(account_info_iter)?;
 
-    if magic_context_info.key != &MAGIC_CONTEXT_ID {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    if magic_program_info.key != &MAGIC_PROGRAM_ID {
-        return Err(ProgramError::IncorrectProgramId);
-    }
+    assert_magic_context(magic_context_info)?;
+    assert_magic_program(magic_program_info)?;
 
     // Perform the add operation
     add(payer_info, counter_pda_info, count)?;
@@ -441,9 +436,7 @@ fn process_schedule_task(
     let payer_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
 
-    if magic_program_info.key != &MAGIC_PROGRAM_ID {
-        return Err(ProgramError::IncorrectProgramId);
-    }
+    assert_magic_program(magic_program_info)?;
 
     let (counter_pda, bump) = FlexiCounter::pda(payer_info.key);
     if counter_pda_info.key.ne(&counter_pda) {
@@ -501,9 +494,7 @@ fn process_cancel_task(
     let magic_program_info = next_account_info(account_info_iter)?;
     let payer_info = next_account_info(account_info_iter)?;
 
-    if magic_program_info.key != &MAGIC_PROGRAM_ID {
-        return Err(ProgramError::IncorrectProgramId);
-    }
+    assert_magic_program(magic_program_info)?;
 
     let ix_data = bincode::serialize(&MagicBlockInstruction::CancelTask {
         task_id: args.task_id,
@@ -613,13 +604,8 @@ fn process_schedule_commit_compressed(
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
-    if magic_context.key.ne(&MAGIC_CONTEXT_ID) {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    if magic_program.key.ne(&MAGIC_PROGRAM_ID) {
-        return Err(ProgramError::IncorrectProgramId);
-    }
+    assert_magic_context(magic_context)?;
+    assert_magic_program(magic_program)?;
 
     let (pda, _bump) = FlexiCounter::pda(payer.key);
     assert_keys_equal(counter.key, &pda, || {
@@ -690,5 +676,19 @@ fn process_external_undelegate_compressed(
         .borrow_mut()
         .copy_from_slice(&args.delegation_record.data);
 
+    Ok(())
+}
+
+fn assert_magic_context(account_info: &AccountInfo) -> ProgramResult {
+    if account_info.key != &MAGIC_CONTEXT_ID {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    Ok(())
+}
+
+fn assert_magic_program(account_info: &AccountInfo) -> ProgramResult {
+    if account_info.key != &MAGIC_PROGRAM_ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
     Ok(())
 }
