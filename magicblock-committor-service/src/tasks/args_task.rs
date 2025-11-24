@@ -40,8 +40,20 @@ impl From<ArgsTaskType> for ArgsTask {
 
 impl ArgsTask {
     pub fn new(task_type: ArgsTaskType) -> Self {
+        // Only prepare compressed tasks [`ArgsTaskType`] type
+        let preparation_state = match task_type {
+            ArgsTaskType::Commit(_)
+            | ArgsTaskType::Finalize(_)
+            | ArgsTaskType::Undelegate(_)
+            | ArgsTaskType::BaseAction(_) => PreparationState::NotNeeded,
+            ArgsTaskType::CompressedCommit(_)
+            | ArgsTaskType::CompressedFinalize(_)
+            | ArgsTaskType::CompressedUndelegate(_) => {
+                PreparationState::Required(PreparationTask::Compressed)
+            }
+        };
         Self {
-            preparation_state: PreparationState::NotNeeded,
+            preparation_state,
             task_type,
         }
     }
@@ -169,19 +181,8 @@ impl BaseTask for ArgsTask {
         }
     }
 
-    /// Only prepare compressed tasks [`ArgsTaskType`] type
     fn preparation_state(&self) -> &PreparationState {
-        match &self.task_type {
-            ArgsTaskType::Commit(_)
-            | ArgsTaskType::BaseAction(_)
-            | ArgsTaskType::Finalize(_)
-            | ArgsTaskType::Undelegate(_) => &self.preparation_state,
-            ArgsTaskType::CompressedCommit(_)
-            | ArgsTaskType::CompressedFinalize(_)
-            | ArgsTaskType::CompressedUndelegate(_) => {
-                &PreparationState::Required(PreparationTask::Compressed)
-            }
-        }
+        &self.preparation_state
     }
 
     fn switch_preparation_state(

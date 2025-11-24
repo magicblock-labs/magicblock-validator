@@ -728,10 +728,6 @@ impl IxtestContext {
             output_state_tree_index: packed_state_tree.output_tree_index,
         };
 
-        eprintln!("Account meta: {:?}", account_meta);
-        eprintln!("RPC result: {:?}", rpc_result);
-        eprintln!("Remaining accounts: {:?}", remaining_accounts);
-
         let (remaining_accounts_metas, _, _) =
             remaining_accounts.to_account_metas();
 
