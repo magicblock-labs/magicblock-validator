@@ -719,7 +719,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115e54d64eb62cdebad391c19efc9dce4981c690c85a33a12199d99bb9546fee"
 dependencies = [
  "borsh-derive 0.10.4",
- "hashbrown 0.13.2",
+ "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -2268,9 +2268,10 @@ dependencies = [
 
 [[package]]
 name = "guinea"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
+ "magicblock-magic-program-api 0.3.1",
  "serde",
  "solana-program",
 ]
@@ -2934,6 +2935,8 @@ dependencies = [
  "solana-transaction-status",
  "tempfile",
  "toml 0.8.23",
+ "ureq",
+ "url 2.5.4",
 ]
 
 [[package]]
@@ -3451,7 +3454,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "bincode",
@@ -3462,7 +3465,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-sdk",
@@ -3472,7 +3475,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -3485,7 +3488,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
@@ -3500,7 +3503,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "lmdb-rkv",
  "log",
@@ -3517,8 +3520,9 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
+ "arc-swap",
  "base64 0.21.7",
  "bincode",
  "bs58",
@@ -3565,7 +3569,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3586,7 +3590,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
@@ -3599,7 +3603,7 @@ dependencies = [
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e480fa2)",
  "solana-transaction",
  "tempfile",
  "thiserror 1.0.69",
@@ -3609,8 +3613,9 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "bincode",
  "env_logger 0.11.8",
@@ -3619,7 +3624,8 @@ dependencies = [
  "lru 0.16.0",
  "magicblock-core",
  "magicblock-delegation-program",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
+ "magicblock-metrics",
  "serde_json",
  "solana-account",
  "solana-account-decoder",
@@ -3642,7 +3648,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "borsh 1.5.7",
  "borsh-derive 1.5.7",
@@ -3656,7 +3662,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -3688,7 +3694,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bs58",
  "clap 4.5.41",
@@ -3707,11 +3713,11 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config-helpers"
-version = "0.2.3"
+version = "0.3.1"
 
 [[package]]
 name = "magicblock-config-macro"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "clap 4.5.41",
  "convert_case 0.8.0",
@@ -3723,11 +3729,11 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "flume",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "serde",
  "solana-account",
  "solana-account-decoder",
@@ -3764,7 +3770,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -3784,8 +3790,8 @@ dependencies = [
  "solana-measure",
  "solana-metrics",
  "solana-sdk",
- "solana-storage-proto 0.2.3",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-storage-proto 0.3.1",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e480fa2)",
  "solana-timings",
  "solana-transaction-status",
  "thiserror 1.0.69",
@@ -3806,7 +3812,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "serde",
@@ -3815,7 +3821,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "http-body-util",
  "hyper 1.6.0",
@@ -3829,7 +3835,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "log",
@@ -3852,7 +3858,7 @@ dependencies = [
  "solana-pubkey",
  "solana-rent-collector",
  "solana-sdk-ids",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e480fa2)",
  "solana-svm-transaction",
  "solana-system-program",
  "solana-transaction",
@@ -3863,12 +3869,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "lazy_static",
  "magicblock-core",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "magicblock-metrics",
  "num-derive",
  "num-traits",
@@ -3881,7 +3887,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "log",
  "solana-rpc-client",
@@ -3895,10 +3901,11 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "ed25519-dalek",
  "log",
+ "magicblock-metrics",
  "magicblock-rpc-client",
  "rand 0.8.5",
  "sha3",
@@ -3912,7 +3919,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "chrono",
@@ -3928,7 +3935,7 @@ dependencies = [
  "solana-program",
  "solana-pubsub-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e480fa2)",
  "solana-timings",
  "thiserror 1.0.69",
  "tokio",
@@ -3937,7 +3944,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "log",
@@ -3955,7 +3962,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "git-version",
  "rustc_version",
@@ -4844,7 +4851,7 @@ dependencies = [
  "bincode",
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "serde",
  "solana-program",
 ]
@@ -4868,6 +4875,7 @@ dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
  "magicblock-delegation-program",
+ "magicblock-magic-program-api 0.3.1",
  "solana-program",
 ]
 
@@ -5626,6 +5634,7 @@ version = "0.23.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7160e3e10bf4535308537f3c4e1641468cd0e485175d6163087c0393c7d46643"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -5823,7 +5832,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "magicblock-core",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "program-schedulecommit",
  "schedulecommit-client",
  "solana-program",
@@ -5839,7 +5848,7 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "magicblock-core",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "program-schedulecommit",
  "program-schedulecommit-security",
  "schedulecommit-client",
@@ -5922,10 +5931,11 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.219"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0e2c6ed6606019b4e29e69dbaba95b11854410e5347d525002456dbbb786b6"
+checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
+ "serde_core",
  "serde_derive",
 ]
 
@@ -5948,10 +5958,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_derive"
-version = "1.0.219"
+name = "serde_core"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b0276cf7f2c73365f7157c8123c21cd9a50fbbd844757af28ca1f5925fc2a00"
+checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
+dependencies = [
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6243,7 +6262,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=f454d4a#f454d4a67a1ca64b87002025868f5369428e1c54"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=5afcedc#5afcedca1bd1608594cfe6d8ecdedea0e0380b5a"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -8970,7 +8989,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "bs58",
@@ -9103,7 +9122,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2#11bbaf2249aeb16cec4111e86f2e18a0c45ff1f2"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e480fa2#e480fa202f0680476b51b2d41210667ffc241bf4"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -10471,7 +10490,7 @@ dependencies = [
 
 [[package]]
 name = "test-kit"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "env_logger 0.11.8",
  "guinea",
@@ -11187,6 +11206,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
+name = "ureq"
+version = "2.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
+dependencies = [
+ "base64 0.22.1",
+ "flate2",
+ "log",
+ "once_cell",
+ "rustls 0.23.28",
+ "rustls-pki-types",
+ "url 2.5.4",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
 name = "uriparse"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11449,6 +11484,24 @@ name = "webpki-roots"
 version = "0.25.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.4",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2878ef029c47c6e8cf779119f20fcf52bde7ad42a731b2a304bc221df17571e"
+dependencies = [
+ "rustls-pki-types",
+]
 
 [[package]]
 name = "which"

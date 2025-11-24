@@ -8,6 +8,7 @@ use dlp::{
 };
 use log::{error, warn};
 use lru::LruCache;
+use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
@@ -117,6 +118,7 @@ impl CacheTaskInfoFetcher {
             })
             .collect::<Vec<_>>();
 
+        metrics::inc_task_info_fetcher_a_count();
         let accounts_data = rpc_client
             .get_multiple_accounts(&pda_accounts, None)
             .await?;

@@ -12,6 +12,27 @@ pub struct ActionArgs {
     pub data: Vec<u8>,
 }
 
+impl ActionArgs {
+    pub fn new(data: Vec<u8>) -> Self {
+        Self {
+            escrow_index: 255,
+            data,
+        }
+    }
+    pub fn escrow_index(&self) -> u8 {
+        self.escrow_index
+    }
+
+    pub fn data(&self) -> &Vec<u8> {
+        &self.data
+    }
+
+    pub fn with_escrow_index(mut self, index: u8) -> Self {
+        self.escrow_index = index;
+        self
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct BaseActionArgs {
     pub args: ActionArgs,
@@ -108,4 +129,41 @@ pub struct ScheduleTaskArgs {
     pub execution_interval_millis: u64,
     pub iterations: u64,
     pub instructions: Vec<Instruction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TaskRequest {
+    Schedule(ScheduleTaskRequest),
+    Cancel(CancelTaskRequest),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScheduleTaskRequest {
+    /// Unique identifier for this task
+    pub id: u64,
+    /// Unsigned instructions to execute when triggered
+    pub instructions: Vec<Instruction>,
+    /// Authority that can modify or cancel this task
+    pub authority: Pubkey,
+    /// How frequently the task should be executed, in milliseconds
+    pub execution_interval_millis: u64,
+    /// Number of times this task will be executed
+    pub iterations: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CancelTaskRequest {
+    /// Unique identifier for the task to cancel
+    pub task_id: u64,
+    /// Authority that can cancel this task
+    pub authority: Pubkey,
+}
+
+impl TaskRequest {
+    pub fn id(&self) -> u64 {
+        match self {
+            Self::Schedule(request) => request.id,
+            Self::Cancel(request) => request.task_id,
+        }
+    }
 }

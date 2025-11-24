@@ -159,7 +159,11 @@ async fn test_get_epoch_info() {
         .expect("get_epoch_info request failed");
 
     assert_eq!(epoch_info.epoch, 0, "epoch should be 0");
-    assert_eq!(epoch_info.absolute_slot, 0, "absolute_slot should be 0");
+    assert_eq!(
+        epoch_info.absolute_slot,
+        env.latest_slot(),
+        "absolute_slot should be equal to env slot"
+    );
 }
 
 /// Verifies the mocked `getEpochSchedule` RPC method.
@@ -173,11 +177,10 @@ async fn test_get_epoch_schedule() {
         .expect("get_epoch_schedule request failed");
 
     assert_eq!(
-        schedule.slots_per_epoch,
-        u64::MAX,
-        "slots_per_epoch should be u64::MAX"
+        schedule.slots_per_epoch, 432_000,
+        "slots_per_epoch should be the same as solana's"
     );
-    assert!(schedule.warmup, "warmup should be true");
+    assert!(!schedule.warmup, "warmup should be false");
 }
 
 /// Verifies the mocked `getClusterNodes` RPC method.

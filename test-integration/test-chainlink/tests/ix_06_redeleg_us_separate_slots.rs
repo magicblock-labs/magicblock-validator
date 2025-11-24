@@ -5,9 +5,9 @@
 
 use log::*;
 use magicblock_chainlink::{
-    assert_cloned_as_delegated, assert_cloned_as_undelegated,
+    assert_cloned_as_delegated_with_retries, assert_cloned_as_undelegated,
     assert_not_subscribed, assert_subscribed_without_delegation_record,
-    testing::init_logger,
+    testing::init_logger, AccountFetchOrigin,
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::{ixtest_context::IxtestContext, sleep_ms};
@@ -33,15 +33,20 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {
     {
         info!("1. Account delegated to us");
 
-        ctx.chainlink.ensure_accounts(&pubkeys, None).await.unwrap();
+        ctx.chainlink
+            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
+        sleep_ms(1_500).await;
 
         // Account should be cloned as delegated
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
-        assert_cloned_as_delegated!(
+        assert_cloned_as_delegated_with_retries!(
             ctx.cloner,
             &[counter_pda],
             account.remote_slot(),
-            program_flexi_counter::id()
+            program_flexi_counter::id(),
+            30
         );
 
         // Accounts delegated to us should not be tracked via subscription
@@ -58,6 +63,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {
         );
 
         ctx.undelegate_counter(&counter_auth, false).await;
+        sleep_ms(1_500).await;
 
         // Account should be cloned as undelegated (owned by program again)
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
@@ -75,15 +81,16 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {
     {
         info!("3. Account redelegated to us - Would allow write");
         ctx.delegate_counter(&counter_auth).await;
-        sleep_ms(500).await;
+        sleep_ms(1_500).await;
 
         // Account should be cloned as delegated back to us
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
-        assert_cloned_as_delegated!(
+        assert_cloned_as_delegated_with_retries!(
             ctx.cloner,
             &[counter_pda],
             account.remote_slot(),
-            program_flexi_counter::id()
+            program_flexi_counter::id(),
+            30
         );
 
         // Accounts delegated to us should not be tracked via subscription

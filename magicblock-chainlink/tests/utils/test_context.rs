@@ -21,7 +21,7 @@ use magicblock_chainlink::{
         deleg::add_delegation_record_for,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
     },
-    Chainlink,
+    AccountFetchOrigin, Chainlink,
 };
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
@@ -105,6 +105,7 @@ impl TestContext {
             fetch_cloner,
             validator_pubkey,
             faucet_pubkey,
+            0,
         )
         .unwrap();
         Self {
@@ -197,7 +198,13 @@ impl TestContext {
         &self,
         pubkey: &Pubkey,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        self.chainlink.ensure_accounts(&[*pubkey], None).await
+        self.chainlink
+            .ensure_accounts(
+                &[*pubkey],
+                None,
+                AccountFetchOrigin::GetMultipleAccounts,
+            )
+            .await
     }
 
     /// Force undelegation of an account in the bank to mark it as such until

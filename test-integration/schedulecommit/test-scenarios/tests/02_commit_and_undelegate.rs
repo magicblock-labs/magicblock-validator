@@ -6,6 +6,7 @@ use integration_test_tools::{
 use log::*;
 use program_schedulecommit::api::{
     increase_count_instruction, schedule_commit_and_undelegate_cpi_instruction,
+    schedule_commit_and_undelegate_cpi_twice,
     schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
 };
 use schedulecommit_client::{
@@ -157,6 +158,54 @@ fn commit_and_undelegate_two_accounts(
                 ..Default::default()
             },
         );
+    debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
+    (ctx, *sig, tx_res)
+}
+
+fn commit_and_undelegate_two_accounts_twice() -> (
+    ScheduleCommitTestContext,
+    Signature,
+    Result<Signature, ClientError>,
+) {
+    let ctx = get_context_with_delegated_committees(2);
+    let ScheduleCommitTestContextFields {
+        payer_ephem: payer,
+        committees,
+        commitment,
+        ephem_client,
+        ..
+    } = ctx.fields();
+
+    let ix = schedule_commit_and_undelegate_cpi_twice(
+        payer.pubkey(),
+        magicblock_magic_program_api::id(),
+        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        &committees
+            .iter()
+            .map(|(player, _)| player.pubkey())
+            .collect::<Vec<_>>(),
+        &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
+    );
+
+    let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        ephem_blockhash,
+    );
+
+    let sig = tx.get_signature();
+    let tx_res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+
     debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
     (ctx, *sig, tx_res)
 }
@@ -514,6 +563,37 @@ fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
             .as_ref()
             .unwrap()
             .confirm_transaction(&scheduled_commmit_sent_sig)
+            .unwrap());
+        debug!("✅ Verified that not commit was scheduled since tx failed");
+    });
+}
+
+#[test]
+fn test_committing_and_undelegating_two_accounts_twice() {
+    run_test!({
+        let (ctx, sig, tx_res) = commit_and_undelegate_two_accounts_twice();
+        debug!(
+            "✅ Committed and undelegated accounts and tried to mod after {} '{:?}'",
+            sig, tx_res
+        );
+
+        // 1. Show we cannot use them in the ephemeral anymore
+        ctx.assert_ephemeral_transaction_error(
+            sig,
+            &tx_res,
+            "is required to be writable and delegated in order to be undelegated",
+        );
+        debug!("✅ Verified we could not increase counts in same tx that triggered undelegation in ephem");
+
+        // 2. Retrieve the signature of the scheduled commit sent
+        let logs = ctx.fetch_ephemeral_logs(sig).unwrap();
+        let scheduled_commmit_sent_sig =
+            extract_scheduled_commit_sent_signature_from_logs(&logs).unwrap();
+
+        // 3. Assert that the commit was not scheduled -> the transaction is not confirmed
+        debug!("Verifying that commit was not scheduled: {scheduled_commmit_sent_sig}");
+        assert!(!ctx
+            .confirm_transaction_ephem(&scheduled_commmit_sent_sig, None)
             .unwrap());
         debug!("✅ Verified that not commit was scheduled since tx failed");
     });

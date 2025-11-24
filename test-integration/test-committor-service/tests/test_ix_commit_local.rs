@@ -116,7 +116,6 @@ async fn commit_single_account(
     let (pubkey, mut account) =
         init_and_delegate_account_on_chain(&counter_auth, bytes as u64, None)
             .await;
-    account.owner = program_flexi_counter::id();
 
     let counter = FlexiCounter {
         label: "Counter".to_string(),
@@ -126,6 +125,7 @@ async fn commit_single_account(
     let mut data = to_vec(&counter).unwrap();
     data.resize(bytes, 0);
     account.data = data;
+    account.owner = program_flexi_counter::id();
 
     let account = CommittedAccount { pubkey, account };
     let base_intent = if undelegate {

@@ -16,7 +16,7 @@ use crate::{
     },
     schedule_transactions,
     utils::{
-        account_actions::set_account_owner_to_delegation_program,
+        account_actions::mark_account_as_undelegated,
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
             get_writable_with_idx,
@@ -133,14 +133,15 @@ pub(crate) fn process_schedule_commit(
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
         {
             if opts.request_undelegation {
-                // Since we need to modify the account during undelegation, we expect it to be writable
-                // We rely on invariant "writable means delegated"
+                // Check if account is writable and also undelegated
+                // SVM doesn't check delegated, so we need to do extra checks here
+                // Otherwise account could be undelegated twice
                 let acc_writable =
                     get_writable_with_idx(transaction_context, idx as u16)?;
-                if !acc_writable {
+                if !acc_writable || !acc.borrow().delegated() {
                     ic_msg!(
                         invoke_context,
-                        "ScheduleCommit ERR: account {} is required to be writable in order to be undelegated",
+                        "ScheduleCommit ERR: account {} is required to be writable and delegated in order to be undelegated",
                         acc_pubkey
                     );
                     return Err(InstructionError::ReadonlyDataModified);
@@ -198,10 +199,13 @@ pub(crate) fn process_schedule_commit(
             // that point
             // NOTE: this owner change only takes effect if the transaction which
             // includes this instruction succeeds.
-            set_account_owner_to_delegation_program(acc);
+            //
+            // We also set the undelegating flag on the account in order to detect
+            // undelegations for which we miss updates
+            mark_account_as_undelegated(acc);
             ic_msg!(
                 invoke_context,
-                "ScheduleCommit: account {} owner set to delegation program",
+                "ScheduleCommit: Marking account {} as undelegating",
                 acc_pubkey
             );
         }
