@@ -34,7 +34,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompressedData {
     pub hash: [u8; 32],
     pub compressed_delegation_record_bytes: Vec<u8>,

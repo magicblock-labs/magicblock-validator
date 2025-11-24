@@ -19,7 +19,6 @@ use crate::{
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
 
-#[derive(Clone)]
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<Box<dyn BaseTask>>,
     pub lookup_tables_keys: Vec<Pubkey>,
@@ -254,7 +253,7 @@ impl TaskStrategist {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq)]
 pub enum TaskStrategistError {
     #[error("Failed to fit in single TX")]
     FailedToFitError,
@@ -277,7 +276,10 @@ mod tests {
     use super::*;
     use crate::{
         persist::IntentPersisterImpl,
-        tasks::{BaseActionTask, CommitTask, TaskStrategy, UndelegateTask},
+        tasks::{
+            task_builder::CompressedData, BaseActionTask, CommitTask,
+            CompressedCommitTask, TaskStrategy, UndelegateTask,
+        },
     };
 
     // Helper to create a simple commit task
@@ -295,6 +297,28 @@ mod tests {
                     rent_epoch: 0,
                 },
             },
+        }))
+    }
+
+    // Helper to create a simple compressed commit task
+    fn create_test_compressed_commit_task(
+        commit_id: u64,
+        data_size: usize,
+    ) -> ArgsTask {
+        ArgsTask::new(ArgsTaskType::CompressedCommit(CompressedCommitTask {
+            commit_id,
+            allow_undelegation: false,
+            committed_account: CommittedAccount {
+                pubkey: Pubkey::new_unique(),
+                account: Account {
+                    lamports: 1000,
+                    data: vec![1; data_size],
+                    owner: system_program::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            },
+            compressed_data: CompressedData::default(),
         }))
     }
 
@@ -518,5 +542,25 @@ mod tests {
         // So had to switch to ALTs
         // As expected
         assert!(!strategy.lookup_tables_keys.is_empty());
+    }
+
+    #[test]
+    fn test_mixed_task_types_compressed() {
+        let validator = Pubkey::new_unique();
+        let tasks = vec![
+            Box::new(create_test_commit_task(1, 100)) as Box<dyn BaseTask>,
+            Box::new(create_test_compressed_commit_task(2, 100))
+                as Box<dyn BaseTask>,
+        ];
+
+        let Err(err) = TaskStrategist::build_strategy(
+            tasks,
+            &validator,
+            &None::<IntentPersisterImpl>,
+        ) else {
+            panic!("Should not build invalid strategy");
+        };
+
+        assert_eq!(err, TaskStrategistError::InconsistentTaskCompression);
     }
 }
