@@ -898,7 +898,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         let photon_client = self.photon_client.clone();
         let fetching_accounts = self.fetching_accounts.clone();
         let pubkeys = Arc::new(pubkeys);
-        let pubkeys = pubkeys.clone();
         let mark_empty_if_not_found =
             mark_empty_if_not_found.unwrap_or(&[]).to_vec();
         tokio::spawn(async move {
