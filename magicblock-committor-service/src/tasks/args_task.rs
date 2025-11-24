@@ -1,7 +1,10 @@
 use compressed_delegation_client::types::{CommitArgs, FinalizeArgs};
 use dlp::args::{CallHandlerArgs, CommitStateArgs};
 use solana_pubkey::Pubkey;
-use solana_sdk::instruction::{AccountMeta, Instruction};
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    system_program,
+};
 
 #[cfg(test)]
 use crate::tasks::TaskStrategy;
@@ -121,10 +124,10 @@ impl BaseTask for ArgsTask {
             }
             ArgsTaskType::CompressedUndelegate(value) => {
                 compressed_delegation_client::UndelegateBuilder::new()
-                    // .validator(*validator)
+                    .payer(*validator)
                     .delegated_account(value.delegated_account)
-                    // .owner_program(value.owner_program)
-                    // .rent_reimbursement(value.rent_reimbursement)
+                    .owner_program(value.owner_program)
+                    .system_program(system_program::ID)
                     .add_remaining_accounts(
                         &value.compressed_data.remaining_accounts,
                     )
