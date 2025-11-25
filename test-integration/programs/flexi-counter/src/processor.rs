@@ -663,7 +663,7 @@ fn process_external_undelegate_compressed(
             delegated_account.key,
             args.delegation_record
                 .lamports
-                .checked_sub(delegated_account.lamports())
+                .checked_sub(Rent::get()?.minimum_balance(0))
                 .ok_or(ProgramError::ArithmeticOverflow)?,
         ),
         &[payer.clone(), delegated_account.clone()],
