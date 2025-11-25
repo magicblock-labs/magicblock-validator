@@ -99,10 +99,10 @@ impl TaskSchedulerService {
         })
     }
 
-    pub fn start(
+    pub async fn start(
         mut self,
     ) -> TaskSchedulerResult<JoinHandle<TaskSchedulerResult<()>>> {
-        let tasks = self.db.get_tasks()?;
+        let tasks = self.db.get_tasks().await?;
         let now = chrono::Utc::now().timestamp_millis() as u64;
         debug!(
             "Task scheduler starting at {} with {} tasks",
@@ -122,17 +122,19 @@ impl TaskSchedulerService {
         Ok(tokio::spawn(async move { self.run().await }))
     }
 
-    fn process_request(
+    async fn process_request(
         &mut self,
         request: &TaskRequest,
     ) -> TaskSchedulerResult<ProcessingOutcome> {
         match request {
             TaskRequest::Schedule(schedule_request) => {
-                if let Err(e) = self.register_task(schedule_request) {
-                    self.db.insert_failed_scheduling(
-                        schedule_request.id,
-                        format!("{:?}", e),
-                    )?;
+                if let Err(e) = self.register_task(schedule_request).await {
+                    self.db
+                        .insert_failed_scheduling(
+                            schedule_request.id,
+                            format!("{:?}", e),
+                        )
+                        .await?;
                     error!(
                         "Failed to process schedule request {}: {}",
                         schedule_request.id, e
@@ -142,11 +144,15 @@ impl TaskSchedulerService {
                 }
             }
             TaskRequest::Cancel(cancel_request) => {
-                if let Err(e) = self.process_cancel_request(cancel_request) {
-                    self.db.insert_failed_scheduling(
-                        cancel_request.task_id,
-                        format!("{:?}", e),
-                    )?;
+                if let Err(e) =
+                    self.process_cancel_request(cancel_request).await
+                {
+                    self.db
+                        .insert_failed_scheduling(
+                            cancel_request.task_id,
+                            format!("{:?}", e),
+                        )
+                        .await?;
                     error!(
                         "Failed to process cancel request for task {}: {}",
                         cancel_request.task_id, e
@@ -160,11 +166,11 @@ impl TaskSchedulerService {
         Ok(ProcessingOutcome::Success)
     }
 
-    fn process_cancel_request(
+    async fn process_cancel_request(
         &mut self,
         cancel_request: &CancelTaskRequest,
     ) -> TaskSchedulerResult<()> {
-        let Some(task) = self.db.get_task(cancel_request.task_id)? else {
+        let Some(task) = self.db.get_task(cancel_request.task_id).await? else {
             // Task not found in the database, cleanup the queue
             self.remove_task_from_queue(cancel_request.task_id);
             return Ok(());
@@ -182,7 +188,7 @@ impl TaskSchedulerService {
         self.remove_task_from_queue(cancel_request.task_id);
 
         // Remove task from database
-        self.unregister_task(cancel_request.task_id)?;
+        self.unregister_task(cancel_request.task_id).await?;
 
         Ok(())
     }
@@ -211,19 +217,21 @@ impl TaskSchedulerService {
         }
 
         let current_time = chrono::Utc::now().timestamp_millis();
-        self.db.update_task_after_execution(task.id, current_time)?;
+        self.db
+            .update_task_after_execution(task.id, current_time)
+            .await?;
 
         Ok(())
     }
 
-    pub fn register_task(
+    pub async fn register_task(
         &mut self,
         task: impl Into<DbTask>,
     ) -> TaskSchedulerResult<()> {
         let task = task.into();
 
         // Check if the task already exists in the database
-        if let Some(db_task) = self.db.get_task(task.id)? {
+        if let Some(db_task) = self.db.get_task(task.id).await? {
             if db_task.authority != task.authority {
                 return Err(TaskSchedulerError::UnauthorizedReplacing(
                     task.id,
@@ -233,7 +241,7 @@ impl TaskSchedulerService {
             }
         }
 
-        self.db.insert_task(&task)?;
+        self.db.insert_task(&task).await?;
         self.task_queue
             .insert(task.clone(), Duration::from_millis(0));
         debug!("Registered task {} from context", task.id);
@@ -241,8 +249,11 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    pub fn unregister_task(&self, task_id: u64) -> TaskSchedulerResult<()> {
-        self.db.remove_task(task_id)?;
+    pub async fn unregister_task(
+        &self,
+        task_id: u64,
+    ) -> TaskSchedulerResult<()> {
+        self.db.remove_task(task_id).await?;
         debug!("Removed task {} from database", task_id);
 
         Ok(())
@@ -258,12 +269,12 @@ impl TaskSchedulerService {
                         error!("Failed to execute task {}: {}", task.id, e);
 
                         // If any instruction fails, the task is cancelled
-                        self.db.remove_task(task.id)?;
-                        self.db.insert_failed_task(task.id, format!("{:?}", e))?;
+                        self.db.remove_task(task.id).await?;
+                        self.db.insert_failed_task(task.id, format!("{:?}", e)).await?;
                     }
                 }
                 Some(task) = self.scheduled_tasks.recv() => {
-                    match self.process_request(&task) {
+                    match self.process_request(&task).await {
                         Ok(ProcessingOutcome::Success) => {}
                         Ok(ProcessingOutcome::Recoverable(e)) => {
                             warn!("Failed to process request ID={}: {e:?}", task.id());
