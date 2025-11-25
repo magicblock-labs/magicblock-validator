@@ -296,7 +296,7 @@ impl ScheduledCommitsProcessorImpl {
             .patched_errors
             .iter()
             .map(|err| {
-                info!("Patched intent, error was: {}", err);
+                info!("Patched intent: {}. error was: {}", intent_id, err);
                 err.to_string()
             })
             .collect();

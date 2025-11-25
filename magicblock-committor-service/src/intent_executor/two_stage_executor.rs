@@ -97,10 +97,7 @@ where
             )
             .await?;
             let cleanup = match flow {
-                ControlFlow::Continue(value) => {
-                    info!("Patched intent, error was: {:?}", execution_err);
-                    value
-                }
+                ControlFlow::Continue(value) => value,
                 ControlFlow::Break(()) => {
                     break Err(execution_err);
                 }
