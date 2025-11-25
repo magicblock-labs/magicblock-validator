@@ -1052,7 +1052,7 @@ fn validate_compressed_account(
                 account_pubkey,
                 data.data.len(),
                 expected_data.len(),
-                acc.lamports,
+                data.lamports,
                 expected_lamports
             );
         }
