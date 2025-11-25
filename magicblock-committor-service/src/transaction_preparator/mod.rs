@@ -44,7 +44,6 @@ pub trait TransactionPreparator: Send + Sync + 'static {
 /// [`TransactionPreparatorImpl`] first version of preparator
 /// It omits future commit_bundle/finalize_bundle logic
 /// It creates TXs using current per account commit/finalize
-#[derive(Clone)]
 pub struct TransactionPreparatorImpl {
     delivery_preparator: DeliveryPreparator,
     compute_budget_config: ComputeBudgetConfig,

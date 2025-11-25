@@ -39,7 +39,6 @@ use crate::{
     ComputeBudgetConfig,
 };
 
-#[derive(Clone)]
 pub struct DeliveryPreparator {
     rpc_client: MagicblockRpcClient,
     table_mania: TableMania,

@@ -790,7 +790,7 @@ where
 #[async_trait]
 impl<T, C> IntentExecutor for IntentExecutorImpl<T, C>
 where
-    T: TransactionPreparator + Clone,
+    T: TransactionPreparator,
     C: TaskInfoFetcher,
 {
     /// Executes Message on Base layer
