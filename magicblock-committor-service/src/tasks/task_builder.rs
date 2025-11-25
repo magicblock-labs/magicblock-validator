@@ -217,6 +217,33 @@ impl TasksBuilder for TaskBuilderImpl {
             }
         }
 
+        // Helper to get compressed data
+        async fn get_compressed_data_for_accounts(
+            is_compressed: bool,
+            committed_accounts: &[CommittedAccount],
+            photon_client: &Option<Arc<PhotonIndexer>>,
+        ) -> TaskBuilderResult<Vec<Option<CompressedData>>> {
+            if is_compressed {
+                let mut compressed_data = vec![];
+                let photon_client = photon_client
+                    .as_ref()
+                    .ok_or(TaskBuilderError::PhotonClientNotFound)?;
+                for account in committed_accounts {
+                    compressed_data.push(Some(
+                        get_compressed_data(
+                            &account.pubkey,
+                            photon_client,
+                            None,
+                        )
+                        .await?,
+                    ));
+                }
+                Ok(compressed_data)
+            } else {
+                Ok(vec![None; committed_accounts.len()])
+            }
+        }
+
         // Helper to process commit types
         async fn process_commit(
             commit: &CommitType,
@@ -224,62 +251,37 @@ impl TasksBuilder for TaskBuilderImpl {
             is_compressed: bool,
         ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
             match commit {
-                CommitType::Standalone(committed_accounts) if is_compressed => {
-                    let mut compressed_data = vec![];
-                    let photon_client = photon_client
-                        .as_ref()
-                        .ok_or(TaskBuilderError::PhotonClientNotFound)?;
-                    for account in committed_accounts {
-                        compressed_data.push(
-                            get_compressed_data(
-                                &account.pubkey,
-                                photon_client,
-                                None,
-                            )
-                            .await?,
-                        );
-                    }
-
+                CommitType::Standalone(committed_accounts) => {
                     Ok(committed_accounts
                         .iter()
-                        .zip(compressed_data)
+                        .zip(
+                            get_compressed_data_for_accounts(
+                                is_compressed,
+                                committed_accounts,
+                                photon_client,
+                            )
+                            .await?,
+                        )
                         .map(|(account, compressed_data)| {
-                            finalize_task(account, Some(compressed_data))
+                            finalize_task(account, compressed_data)
                         })
                         .collect())
                 }
-                CommitType::Standalone(accounts) => Ok(accounts
-                    .iter()
-                    .map(|account| finalize_task(account, None))
-                    .collect()),
                 CommitType::WithBaseActions {
                     committed_accounts,
                     base_actions,
                     ..
                 } => {
-                    let mut compressed_data = vec![];
-                    for account in committed_accounts {
-                        if is_compressed {
-                            let photon_client = photon_client.as_ref().ok_or(
-                                TaskBuilderError::PhotonClientNotFound,
-                            )?;
-                            compressed_data.push(
-                                get_compressed_data(
-                                    &account.pubkey,
-                                    photon_client,
-                                    None,
-                                )
-                                .await
-                                .ok(),
-                            );
-                        } else {
-                            compressed_data.push(None);
-                        }
-                    }
-
                     let mut tasks = committed_accounts
                         .iter()
-                        .zip(compressed_data)
+                        .zip(
+                            get_compressed_data_for_accounts(
+                                is_compressed,
+                                committed_accounts,
+                                photon_client,
+                            )
+                            .await?,
+                        )
                         .map(|(account, compressed_data)| {
                             finalize_task(account, compressed_data)
                         })
