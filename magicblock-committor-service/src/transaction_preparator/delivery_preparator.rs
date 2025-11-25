@@ -230,7 +230,7 @@ impl DeliveryPreparator {
             res => return res,
         }
 
-        // Prepare cleanup task
+        // Prepare buffer cleanup task
         let PreparationState::Required(PreparationTask::Buffer(
             preparation_task,
         )) = task.preparation_state().clone()

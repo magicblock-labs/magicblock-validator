@@ -196,7 +196,7 @@ impl BaseTask for ArgsTask {
         if !matches!(new_state, PreparationState::NotNeeded) {
             Err(BaseTaskError::PreparationStateTransitionError)
         } else {
-            // Do nothing
+            self.preparation_state = new_state;
             Ok(())
         }
     }
