@@ -263,7 +263,7 @@ where
         match err {
             TransactionStrategyExecutionError::CommitIDError(_, _) => {
                 // Unexpected error in Two Stage commit
-                error!("Unexpected error in two stage commit flow: {}", err);
+                error!("Unexpected error in two stage finalize flow: {}", err);
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::ActionsError(_, _) => {
