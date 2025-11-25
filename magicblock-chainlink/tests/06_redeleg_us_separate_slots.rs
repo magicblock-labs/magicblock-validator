@@ -189,7 +189,7 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots_compressed() {
         let undelegated_acc = account_shared_with_owner_and_slot(
             &acc.account,
             program_pubkey,
-            rpc_client.get_slot(),
+            slot,
         );
         photon_client.add_account(pubkey, Account::default(), slot);
         let updated = ctx
