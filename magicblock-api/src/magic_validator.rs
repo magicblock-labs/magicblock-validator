@@ -689,7 +689,7 @@ impl MagicValidator {
             .take()
             .expect("task_scheduler should be initialized");
         tokio::spawn(async move {
-            let join_handle = match task_scheduler.start() {
+            let join_handle = match task_scheduler.start().await {
                 Ok(join_handle) => join_handle,
                 Err(err) => {
                     error!("Failed to start task scheduler: {:?}", err);

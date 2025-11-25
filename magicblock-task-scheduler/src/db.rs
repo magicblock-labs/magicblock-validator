@@ -8,8 +8,6 @@ use tokio::sync::Mutex;
 
 use crate::errors::TaskSchedulerError;
 
-const DB_POISONED_MSG: &str = "Database connection is poisoned.";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbTask {
     /// Unique identifier for this task
