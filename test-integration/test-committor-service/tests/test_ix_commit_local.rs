@@ -1066,7 +1066,7 @@ fn validate_compressed_account(
                 } else {
                     "undelegated"
                 },
-                acc.owner,
+                data.owner,
                 expected_owner,
             );
         }
