@@ -229,7 +229,7 @@ where
             }
         };
 
-        // Even if failed - dump commit into junk
+        // Even if failed - dump finalize into junk
         self.inner.junk.push(self.state.finalize_strategy);
         let finalize_signature = finalize_result.map_err(|err| {
             IntentExecutorError::from_finalize_execution_error(
