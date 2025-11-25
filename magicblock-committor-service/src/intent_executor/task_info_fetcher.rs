@@ -408,6 +408,11 @@ impl TaskInfoFetcherError {
             Self::MetadataNotFoundError(_) => None,
             Self::InvalidAccountDataError(_) => None,
             Self::MagicBlockRpcClientError(err) => err.signature(),
+            Self::IndexerError(_) => None,
+            Self::NoCompressedAccount(_) => None,
+            Self::NoCompressedData(_) => None,
+            Self::DeserializeError(_) => None,
+            Self::LightRpcError(_) => None,
         }
     }
 }

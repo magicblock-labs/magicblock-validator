@@ -412,6 +412,13 @@ impl TaskBuilderError {
         match self {
             Self::CommitTasksBuildError(err) => err.signature(),
             Self::FinalizedTasksBuildError(err) => err.signature(),
+            Self::CompressedDataFetchError(_) => None,
+            Self::LightSdkError(_) => None,
+            Self::MissingStateTrees => None,
+            Self::MissingAddress => None,
+            Self::MissingCompressedData => None,
+            Self::PhotonClientNotFound => None,
+            Self::TaskStrategistError(_) => None,
         }
     }
 }

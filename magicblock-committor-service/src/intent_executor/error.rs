@@ -131,7 +131,8 @@ impl IntentExecutorError {
             } => commit_signature.map(|el| (el, *finalize_signature)),
             IntentExecutorError::EmptyIntentError
             | IntentExecutorError::FailedToFitError
-            | IntentExecutorError::SignerError(_) => None,
+            | IntentExecutorError::SignerError(_)
+            | IntentExecutorError::InconsistentTaskCompression => None,
         }
     }
 }
