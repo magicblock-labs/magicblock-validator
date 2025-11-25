@@ -8,10 +8,7 @@ use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_subscribed, assert_remain_undelegating,
     assert_subscribed_without_delegation_record,
-    testing::{
-        accounts::account_shared_with_owner, deleg::add_delegation_record_for,
-        init_logger,
-    },
+    testing::{deleg::add_delegation_record_for, init_logger},
     AccountFetchOrigin,
 };
 use solana_account::Account;
@@ -227,9 +224,10 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots_compressed() {
             compressed_account.clone().into(),
             slot,
         );
-        let delegated_acc = account_shared_with_owner(
+        let delegated_acc = account_shared_with_owner_and_slot(
             &Account::default(),
             compressed_delegation_client::id(),
+            slot,
         );
         let updated = ctx
             .send_and_receive_account_update(
