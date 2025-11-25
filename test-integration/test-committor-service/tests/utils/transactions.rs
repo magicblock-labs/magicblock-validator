@@ -342,8 +342,11 @@ pub async fn init_and_delegate_compressed_account_on_chain(
             },
         )
         .await
-        .inspect_err(|_err| {
-            error!("Failed to delegate, signature: {:?}", tx.signatures[0])
+        .inspect_err(|err| {
+            error!(
+                "Failed to delegate: {err:?}, signature: {:?}",
+                tx.signatures[0]
+            )
         })
         .expect("Failed to delegate");
 
