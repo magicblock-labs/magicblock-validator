@@ -538,7 +538,7 @@ async fn test_commit_5_compressed_accounts_100bytes_bundle_size_2_undelegate_all
 ) {
     commit_5_compressed_accounts_100bytes(
         2,
-        expect_strategies(&[(CommitStrategy::Args, 2)]),
+        expect_strategies(&[(CommitStrategy::Args, 5)]),
         CommitAccountMode::CompressedCommitAndUndelegate,
     )
     .await;
