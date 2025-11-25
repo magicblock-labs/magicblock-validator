@@ -4125,7 +4125,7 @@ dependencies = [
  "magicblock-version",
  "parking_lot 0.12.4",
  "rand 0.9.1",
- "reqwest",
+ "reqwest 0.11.27",
  "scc",
  "serde",
  "solana-account",

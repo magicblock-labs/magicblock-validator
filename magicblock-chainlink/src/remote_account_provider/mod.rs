@@ -1194,6 +1194,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             .get_multiple_accounts(&pubkeys, Some(min_context_slot))
             .await
             .unwrap();
+
+        // TODO: we should retry if the slot is not high enough
+        assert!(slot >= min_context_slot);
+
         let remote_accounts = compressed_accounts
             .into_iter()
             .map(|acc_opt| match acc_opt {
