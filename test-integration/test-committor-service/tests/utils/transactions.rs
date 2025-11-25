@@ -84,7 +84,7 @@ macro_rules! get_compressed_account {
                 .get_compressed_account($address, None)
                 .await
                 .ok()
-                .and_then(|acc| Some(acc.value.clone()));
+                .map(|acc| acc.value.clone());
             if let Some(acc) = acc {
                 if $predicate(&acc, remaining_tries) {
                     break acc;
