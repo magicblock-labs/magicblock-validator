@@ -167,7 +167,8 @@ async fn commit_single_account(
             )
             .await
         }
-        _ => {
+        CommitAccountMode::CompressedCommit
+        | CommitAccountMode::CompressedCommitAndUndelegate => {
             let (pubkey, _hash, account) =
                 init_and_delegate_compressed_account_on_chain(&counter_auth)
                     .await;
