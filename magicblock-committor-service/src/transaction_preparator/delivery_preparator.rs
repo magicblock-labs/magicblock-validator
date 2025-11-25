@@ -83,7 +83,7 @@ impl DeliveryPreparator {
                     persister,
                     photon_client,
                     commit_slot,
-                )
+                );
                 timer.stop_and_record();
 
                 res

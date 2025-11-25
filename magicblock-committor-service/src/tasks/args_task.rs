@@ -310,6 +310,11 @@ impl LabelValue for ArgsTask {
             ArgsTaskType::BaseAction(_) => "args_action",
             ArgsTaskType::Finalize(_) => "args_finalize",
             ArgsTaskType::Undelegate(_) => "args_undelegate",
+            ArgsTaskType::CompressedCommit(_) => "args_compressed_commit",
+            ArgsTaskType::CompressedFinalize(_) => "args_compressed_finalize",
+            ArgsTaskType::CompressedUndelegate(_) => {
+                "args_compressed_undelegate"
+            }
         }
     }
 }
