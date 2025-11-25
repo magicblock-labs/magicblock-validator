@@ -19,7 +19,7 @@ use magicblock_program::magic_scheduled_base_intent::{
     UndelegateType,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::instruction::AccountMeta;
+use solana_sdk::{instruction::AccountMeta, signature::Signature};
 
 use crate::{
     intent_executor::task_info_fetcher::{
@@ -405,6 +405,15 @@ pub enum TaskBuilderError {
     PhotonClientNotFound,
     #[error("TaskStrategistError: {0}")]
     TaskStrategistError(#[from] TaskStrategistError),
+}
+
+impl TaskBuilderError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::CommitTasksBuildError(err) => err.signature(),
+            Self::FinalizedTasksBuildError(err) => err.signature(),
+        }
+    }
 }
 
 pub type TaskBuilderResult<T, E = TaskBuilderError> = Result<T, E>;

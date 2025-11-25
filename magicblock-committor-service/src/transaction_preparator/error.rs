@@ -1,7 +1,10 @@
-use solana_sdk::signer::SignerError;
+use solana_sdk::{signature::Signature, signer::SignerError};
 use thiserror::Error;
 
-use crate::tasks::task_strategist::TaskStrategistError;
+use crate::{
+    tasks::task_strategist::TaskStrategistError,
+    transaction_preparator::delivery_preparator::DeliveryPreparatorError,
+};
 
 #[derive(Error, Debug)]
 pub enum TransactionPreparatorError {
@@ -12,9 +15,16 @@ pub enum TransactionPreparatorError {
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
     #[error("DeliveryPreparationError: {0}")]
-    DeliveryPreparationError(
-        #[from] crate::transaction_preparator::delivery_preparator::Error,
-    ),
+    DeliveryPreparationError(#[from] DeliveryPreparatorError),
+}
+
+impl TransactionPreparatorError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::DeliveryPreparationError(err) => err.signature(),
+            _ => None,
+        }
+    }
 }
 
 impl From<TaskStrategistError> for TransactionPreparatorError {

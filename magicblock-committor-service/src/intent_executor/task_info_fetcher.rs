@@ -21,6 +21,7 @@ use magicblock_core::compression::derive_cda_from_pda;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
+use solana_sdk::signature::Signature;
 
 const NUM_FETCH_RETRIES: NonZeroUsize =
     unsafe { NonZeroUsize::new_unchecked(5) };
@@ -399,6 +400,16 @@ pub enum TaskInfoFetcherError {
     NoCompressedData(Pubkey),
     #[error("CompressedAccountDataDeserializeError: {0}")]
     DeserializeError(#[from] std::io::Error),
+}
+
+impl TaskInfoFetcherError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::MetadataNotFoundError(_) => None,
+            Self::InvalidAccountDataError(_) => None,
+            Self::MagicBlockRpcClientError(err) => err.signature(),
+        }
+    }
 }
 
 pub type TaskInfoFetcherResult<T, E = TaskInfoFetcherError> = Result<T, E>;

@@ -107,6 +107,33 @@ impl IntentExecutorError {
             }
         }
     }
+
+    pub fn signatures(&self) -> Option<(Signature, Option<Signature>)> {
+        match self {
+            IntentExecutorError::CpiLimitError(_, signature)
+            | IntentExecutorError::ActionsError(_, signature)
+            | IntentExecutorError::CommitIDError(_, signature)
+            | IntentExecutorError::UndelegationError(_, signature)
+            | IntentExecutorError::FailedToCommitError { signature, err: _ } => {
+                signature.map(|el| (el, None))
+            }
+            IntentExecutorError::FailedCommitPreparationError(err)
+            | IntentExecutorError::FailedFinalizePreparationError(err) => {
+                err.signature().map(|el| (el, None))
+            }
+            IntentExecutorError::TaskBuilderError(err) => {
+                err.signature().map(|el| (el, None))
+            }
+            IntentExecutorError::FailedToFinalizeError {
+                err: _,
+                commit_signature,
+                finalize_signature,
+            } => commit_signature.map(|el| (el, *finalize_signature)),
+            IntentExecutorError::EmptyIntentError
+            | IntentExecutorError::FailedToFitError
+            | IntentExecutorError::SignerError(_) => None,
+        }
+    }
 }
 
 impl metrics::LabelValue for IntentExecutorError {
