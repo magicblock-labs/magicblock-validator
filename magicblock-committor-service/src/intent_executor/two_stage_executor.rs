@@ -1,6 +1,6 @@
 use std::ops::ControlFlow;
 
-use log::{error, info, warn};
+use log::{error, warn};
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 
