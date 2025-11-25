@@ -132,6 +132,9 @@ where
     /// Accounts that should never be debounced, namely the clock sysvar account
     /// which we use to track the latest remote slot.
     never_debounce: HashSet<Pubkey>,
+
+    /// Number of clients that must confirm a subscription for it to be considered active.
+    required_subscription_confirmations: usize,
 }
 
 // Parameters for the long-running forwarder loop, grouped to avoid
@@ -193,6 +196,10 @@ where
 
         let clients = Self::spawn_reconnectors(clients);
 
+        let required_subscription_confirmations = {
+            let n = clients.len();
+            cmp::max(1, (n * 2) / 3)
+        };
         let me = Self {
             clients,
             out_tx,
@@ -203,6 +210,7 @@ where
             debounce_detection_window,
             debounce_states: debounce_states.clone(),
             never_debounce,
+            required_subscription_confirmations,
         };
 
         // Spawn background tasks
@@ -584,9 +592,12 @@ where
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        AccountSubscriptionTask::Subscribe(pubkey)
-            .process(self.clients.clone())
-            .await
+        AccountSubscriptionTask::Subscribe(
+            pubkey,
+            self.required_subscription_confirmations,
+        )
+        .process(self.clients.clone())
+        .await
     }
 
     async fn unsubscribe(
