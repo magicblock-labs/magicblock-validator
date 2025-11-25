@@ -509,6 +509,15 @@ pub enum TransactionSendError {
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
 }
 
+impl TransactionSendError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::MagicBlockRpcClientError(err) => err.signature(),
+            _ => None,
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum BufferExecutionError {
     #[error("AccountAlreadyInitializedError: {0}")]
@@ -518,6 +527,15 @@ pub enum BufferExecutionError {
     ),
     #[error("TransactionSendError: {0}")]
     TransactionSendError(#[from] TransactionSendError),
+}
+
+impl BufferExecutionError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::AccountAlreadyInitializedError(_, signature) => *signature,
+            Self::TransactionSendError(err) => err.signature(),
+        }
+    }
 }
 
 impl From<MagicBlockRpcClientError> for BufferExecutionError {
@@ -550,6 +568,7 @@ impl InternalError {
     pub fn signature(&self) -> Option<Signature> {
         match self {
             Self::MagicBlockRpcClientError(err) => err.signature(),
+            Self::BufferExecutionError(err) => err.signature(),
             _ => None,
         }
     }

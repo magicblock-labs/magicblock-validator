@@ -468,7 +468,7 @@ where
         (commit_strategy, finalize_strategy, to_cleanup)
     }
 
-    /// Handles actions error, stripping away actions
+    /// Handles undelegation error, stripping away actions
     /// Returns [`TransactionStrategy`] to be cleaned up
     fn handle_undelegation_error(
         &self,

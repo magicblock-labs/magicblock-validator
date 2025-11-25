@@ -16,7 +16,8 @@ use crate::{
     utils::accounts::get_instruction_pubkey_with_idx, validator,
 };
 
-/// Code emitted if Intent failed to execute on base chain
+/// Error code returned when an intent execution failed.
+/// This indicates the intent could not be successfully executed despite patching attempts.
 const INTENT_FAILED_CODE: u32 = 0x7461636F;
 
 #[derive(Default, Debug, Clone)]
