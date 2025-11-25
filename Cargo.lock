@@ -3990,6 +3990,7 @@ dependencies = [
  "magicblock-api",
  "magicblock-config",
  "magicblock-version",
+ "num_cpus",
  "solana-sdk",
  "tokio",
 ]
