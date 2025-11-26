@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use solana_pubkey::Pubkey;
 
 /// Tracks and provides the current set of subscribed accounts.
@@ -6,9 +8,14 @@ use solana_pubkey::Pubkey;
 /// to remain decoupled from the specific implementation (e.g., LRU cache).
 /// The reconnect logic queries this tracker to determine which accounts to
 /// resubscribe when a client reconnects after being disconnected.
+///
+/// Implementors must return a set (no duplicates) of currently subscribed
+/// accounts.
 pub trait SubscribedAccountsTracker: Send + Sync + 'static {
-    /// Returns the list of pubkeys that are currently subscribed to.
-    fn subscribed_accounts(&self) -> Vec<Pubkey>;
+    /// Returns the set of pubkeys that are currently subscribed to.
+    ///
+    /// Each pubkey appears at most once in the returned set.
+    fn subscribed_accounts(&self) -> HashSet<Pubkey>;
 }
 
 #[cfg(test)]
@@ -19,6 +26,9 @@ pub mod mock {
 
     /// A simple mock implementation for testing that allows setting
     /// subscriptions before reconnect operations.
+    ///
+    /// The stored subscriptions should be unique to comply with the
+    /// `SubscribedAccountsTracker` trait contract.
     pub struct MockSubscribedAccountsTracker {
         subscriptions: Mutex<Vec<Pubkey>>,
     }
@@ -37,8 +47,8 @@ pub mod mock {
     }
 
     impl SubscribedAccountsTracker for MockSubscribedAccountsTracker {
-        fn subscribed_accounts(&self) -> Vec<Pubkey> {
-            self.subscriptions.lock().unwrap().clone()
+        fn subscribed_accounts(&self) -> HashSet<Pubkey> {
+            self.subscriptions.lock().unwrap().iter().copied().collect()
         }
     }
 }

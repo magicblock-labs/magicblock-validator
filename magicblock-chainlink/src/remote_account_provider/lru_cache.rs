@@ -148,8 +148,12 @@ impl AccountsLruCache {
 }
 
 impl SubscribedAccountsTracker for AccountsLruCache {
-    fn subscribed_accounts(&self) -> Vec<Pubkey> {
-        self.pubkeys()
+    fn subscribed_accounts(&self) -> HashSet<Pubkey> {
+        let subs = self
+            .subscribed_accounts
+            .lock()
+            .expect("subscribed_accounts lock poisoned");
+        subs.iter().map(|(k, _)| *k).collect()
     }
 }
 

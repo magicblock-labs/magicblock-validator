@@ -304,7 +304,7 @@ where
         // during disconnect/abort.
         let subs = accounts_tracker.subscribed_accounts();
 
-        match client.resub_multiple(&subs).await {
+        match client.resub_multiple(subs).await {
             Err(err) => {
                 debug!(
                     "Failed to resubscribe accounts after reconnect: {:?}",
