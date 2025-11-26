@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use dlp::pda::ephemeral_balance_pda_from_payer;
@@ -269,12 +272,16 @@ Kept: {} delegated, {} blacklisted",
         // Mark *all* pubkeys as empty-if-not-found
         let mark_empty_if_not_found = Some(pubkeys.as_slice());
 
+        // Extract programs from transaction instructions for metrics
+        let program_ids = extract_program_ids_from_transaction(tx);
+
         // Ensure accounts
         let res = self
             .ensure_accounts(
                 &pubkeys,
                 mark_empty_if_not_found,
                 AccountFetchOrigin::SendTransaction,
+                Some(&program_ids),
             )
             .await?;
 
@@ -315,6 +322,7 @@ Kept: {} delegated, {} blacklisted",
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(FetchAndCloneResult::default());
@@ -324,6 +332,7 @@ Kept: {} delegated, {} blacklisted",
             pubkeys,
             mark_empty_if_not_found,
             fetch_origin,
+            program_ids,
         )
         .await
     }
@@ -336,6 +345,7 @@ Kept: {} delegated, {} blacklisted",
         &self,
         pubkeys: &[Pubkey],
         fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys = pubkeys
@@ -353,7 +363,13 @@ Kept: {} delegated, {} blacklisted",
                 .collect());
         };
         let _ = self
-            .fetch_accounts_common(fetch_cloner, pubkeys, None, fetch_origin)
+            .fetch_accounts_common(
+                fetch_cloner,
+                pubkeys,
+                None,
+                fetch_origin,
+                program_ids,
+            )
             .await?;
 
         let accounts = pubkeys
@@ -369,6 +385,7 @@ Kept: {} delegated, {} blacklisted",
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys_str = pubkeys
@@ -399,6 +416,7 @@ Kept: {} delegated, {} blacklisted",
                 mark_empty_if_not_found,
                 None,
                 fetch_origin,
+                program_ids,
             )
             .await?;
         trace!("Fetched and cloned accounts: {result:?}");
@@ -442,4 +460,20 @@ Kept: {} delegated, {} blacklisted",
             .map(|provider| provider.is_watching(pubkey))
             .unwrap_or(false)
     }
+}
+
+// -----------------
+// Helper Functions
+// -----------------
+
+/// Extracts all unique program IDs from a transaction's instructions.
+fn extract_program_ids_from_transaction(
+    tx: &SanitizedTransaction,
+) -> Vec<Pubkey> {
+    let program_ids = tx
+        .message()
+        .program_instructions_iter()
+        .map(|(program_id, _)| *program_id)
+        .collect::<HashSet<_>>();
+    program_ids.into_iter().collect()
 }

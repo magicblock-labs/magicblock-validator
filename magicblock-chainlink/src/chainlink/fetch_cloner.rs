@@ -574,6 +574,7 @@ where
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys = pubkeys
@@ -608,7 +609,12 @@ where
 
         let accs = self
             .remote_account_provider
-            .try_get_multi(pubkeys, mark_empty_if_not_found, fetch_origin)
+            .try_get_multi(
+                pubkeys,
+                mark_empty_if_not_found,
+                fetch_origin,
+                program_ids,
+            )
             .await?;
 
         trace!("Fetched {accs:?}");
@@ -1164,6 +1170,7 @@ where
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         // We cannot clone blacklisted accounts, thus either they are already
         // in the bank (e.g. native programs) or they don't exist and the transaction
@@ -1242,6 +1249,7 @@ where
                 mark_empty_if_not_found,
                 slot,
                 fetch_origin,
+                program_ids,
             )
             .await
         } else {
@@ -1888,6 +1896,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -1926,6 +1935,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -1985,6 +1995,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2062,6 +2073,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2144,6 +2156,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
         assert!(result.is_ok());
@@ -2158,6 +2171,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2256,6 +2270,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2359,6 +2374,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2431,6 +2447,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2452,6 +2469,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
         debug!("Test result after updating delegation record: {result:?}");
@@ -2506,6 +2524,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2526,6 +2545,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
         debug!("Test result after updating account: {result:?}");
@@ -2587,6 +2607,7 @@ mod tests {
                         None,
                         None,
                         AccountFetchOrigin::GetAccount,
+                        None,
                     )
                     .await
             })
@@ -2656,6 +2677,7 @@ mod tests {
                         None,
                         None,
                         AccountFetchOrigin::GetAccount,
+                        None,
                     )
                     .await
             })
@@ -2732,6 +2754,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
         assert!(result.is_ok());
@@ -2824,6 +2847,7 @@ mod tests {
                         None,
                         None,
                         AccountFetchOrigin::GetAccount,
+                        None,
                     )
                     .await
             })
@@ -2910,6 +2934,7 @@ mod tests {
                 Some(&[marked_non_existing_account_pubkey]),
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await
             .expect("Fetch and clone failed");
