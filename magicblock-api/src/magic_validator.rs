@@ -4,6 +4,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    thread,
     time::Duration,
 };
 
@@ -75,7 +76,7 @@ use solana_sdk::{
     signature::Keypair,
     signer::Signer,
 };
-use tokio::task::JoinHandle;
+use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -134,7 +135,7 @@ pub struct MagicValidator {
     committor_service: Option<Arc<CommittorService>>,
     scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
     chainlink: Arc<ChainlinkImpl>,
-    rpc_handle: JoinHandle<()>,
+    rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
     block_udpate_tx: BlockUpdateTx,
@@ -327,7 +328,16 @@ impl MagicValidator {
             token.clone(),
         )
         .await?;
-        let rpc_handle = tokio::spawn(rpc.run());
+        let rpc_handle = thread::spawn(move || {
+            let workers = (num_cpus::get() / 2 - 1).max(1);
+            let runtime = Builder::new_multi_thread()
+                .worker_threads(workers)
+                .enable_all()
+                .thread_name("rpc-worker")
+                .build()
+                .expect("failed to bulid async runtime for rpc service");
+            runtime.block_on(rpc.run());
+        });
 
         let task_scheduler_db_path =
             SchedulerDatabase::path(ledger.ledger_path().parent().expect(
@@ -761,10 +771,10 @@ impl MagicValidator {
         self.accountsdb.flush();
 
         // we have two memory mapped databases, flush them to disk before exitting
-        if let Err(err) = self.ledger.shutdown(false) {
+        if let Err(err) = self.ledger.shutdown(true) {
             error!("Failed to shutdown ledger: {:?}", err);
         }
-        let _ = self.rpc_handle.await;
+        let _ = self.rpc_handle.join();
     }
 
     pub fn ledger(&self) -> &Ledger {

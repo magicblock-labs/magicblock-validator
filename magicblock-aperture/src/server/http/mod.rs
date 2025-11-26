@@ -104,6 +104,7 @@ impl HttpServer {
             let builder = conn::auto::Builder::new(TokioExecutor::new());
             let connection = builder.serve_connection(io, handler);
             tokio::pin!(connection);
+            let mut terminating = false;
 
             // This loop manages the connection's lifecycle.
             loop {
@@ -115,8 +116,9 @@ impl HttpServer {
                     }
                     // If the cancellation token is triggered, initiate a graceful shutdown
                     // of the Hyper connection.
-                    _ = cancel.cancelled() => {
+                    _ = cancel.cancelled(), if !terminating => {
                         connection.as_mut().graceful_shutdown();
+                        terminating = true;
                     }
                 }
             }

@@ -1,11 +1,13 @@
-use std::{cmp::min, sync::Arc, time::Duration};
+use std::{
+    cmp::min,
+    sync::Arc,
+    thread::{self, JoinHandle},
+    time::Duration,
+};
 
 use log::{error, info, warn};
 use solana_measure::measure::Measure;
-use tokio::{
-    task::{JoinError, JoinHandle},
-    time::interval,
-};
+use tokio::{runtime::Builder, time::interval};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -72,7 +74,7 @@ impl LedgerTrunctationWorker {
                     }
 
                     info!("Ledger size: {current_size}");
-                    if let Err(err) = self.truncate(current_size).await {
+                    if let Err(err) = self.truncate(current_size) {
                         error!("Failed to truncate ledger!: {:?}", err);
                     }
                 }
@@ -80,14 +82,13 @@ impl LedgerTrunctationWorker {
         }
     }
 
-    pub async fn truncate(&self, current_ledger_size: u64) -> LedgerResult<()> {
+    pub fn truncate(&self, current_ledger_size: u64) -> LedgerResult<()> {
         if current_ledger_size > self.ledger_size {
-            self.truncate_fat_ledger(current_ledger_size).await?;
+            self.truncate_fat_ledger(current_ledger_size)?;
         } else {
             match self.estimate_truncation_range(current_ledger_size)? {
                 Some((from_slot, to_slot)) => {
                     Self::truncate_slot_range(&self.ledger, from_slot, to_slot)
-                        .await
                 }
                 None => warn!("Could not estimate truncation range"),
             }
@@ -97,7 +98,7 @@ impl LedgerTrunctationWorker {
     }
 
     /// Truncates ledger that is over desired size
-    pub async fn truncate_fat_ledger(
+    pub fn truncate_fat_ledger(
         &self,
         current_ledger_size: u64,
     ) -> LedgerResult<()> {
@@ -136,7 +137,7 @@ impl LedgerTrunctationWorker {
             // We will still compact
             error!("Failed to flush: {}", err);
         }
-        Self::compact_slot_range(&self.ledger, 0, truncate_to_slot).await;
+        Self::compact_slot_range(&self.ledger, 0, truncate_to_slot);
 
         Ok(())
     }
@@ -186,7 +187,7 @@ impl LedgerTrunctationWorker {
 
     /// Utility function for splitting truncation into smaller chunks
     /// Cleans slots [from_slot; to_slot] inclusive range
-    pub async fn truncate_slot_range(
+    pub fn truncate_slot_range(
         ledger: &Arc<Ledger>,
         from_slot: u64,
         to_slot: u64,
@@ -204,42 +205,36 @@ impl LedgerTrunctationWorker {
         );
 
         let ledger_copy = ledger.clone();
-        let delete_handle = tokio::task::spawn_blocking(move || {
-            (from_slot..=to_slot)
-                .step_by(SINGLE_TRUNCATION_LIMIT)
-                .for_each(|cur_from_slot| {
-                    let num_slots_to_truncate = min(
-                        to_slot - cur_from_slot + 1,
-                        SINGLE_TRUNCATION_LIMIT as u64,
+        (from_slot..=to_slot)
+            .step_by(SINGLE_TRUNCATION_LIMIT)
+            .for_each(|cur_from_slot| {
+                let num_slots_to_truncate = min(
+                    to_slot - cur_from_slot + 1,
+                    SINGLE_TRUNCATION_LIMIT as u64,
+                );
+                let truncate_to_slot =
+                    cur_from_slot + num_slots_to_truncate - 1;
+
+                if let Err(err) = ledger_copy
+                    .delete_slot_range(cur_from_slot, truncate_to_slot)
+                {
+                    warn!(
+                        "Failed to truncate slots {}-{}: {}",
+                        cur_from_slot, truncate_to_slot, err
                     );
-                    let truncate_to_slot =
-                        cur_from_slot + num_slots_to_truncate - 1;
+                }
+            });
 
-                    if let Err(err) = ledger_copy
-                        .delete_slot_range(cur_from_slot, truncate_to_slot)
-                    {
-                        warn!(
-                            "Failed to truncate slots {}-{}: {}",
-                            cur_from_slot, truncate_to_slot, err
-                        );
-                    }
-                });
-
-            // Flush memtables with tombstones prior to compaction
-            if let Err(err) = ledger_copy.flush() {
-                error!("Failed to flush ledger: {err}");
-            }
-        });
-        if let Err(err) = delete_handle.await {
-            error!("Ledger delete task cancelled: {err}");
+        // Flush memtables with tombstones prior to compaction
+        if let Err(err) = ledger_copy.flush() {
+            error!("Failed to flush ledger: {err}");
         }
-
-        Self::compact_slot_range(ledger, from_slot, to_slot).await;
+        Self::compact_slot_range(ledger, from_slot, to_slot);
     }
 
     /// Synchronous utility function that triggers and awaits compaction on all the columns
     /// Compacts [from_slot; to_slot] inclusing ramge
-    pub async fn compact_slot_range(
+    pub fn compact_slot_range(
         ledger: &Arc<Ledger>,
         from_slot: u64,
         to_slot: u64,
@@ -255,35 +250,29 @@ impl LedgerTrunctationWorker {
         // separate thread
         let mut measure = Measure::start("Manual compaction");
         let ledger = ledger.clone();
-        let compaction = tokio::task::spawn_blocking(move || {
-            ledger.compact_slot_range_cf::<Blocktime>(
-                Some(from_slot),
-                Some(to_slot + 1),
-            );
-            ledger.compact_slot_range_cf::<Blockhash>(
-                Some(from_slot),
-                Some(to_slot + 1),
-            );
-            ledger.compact_slot_range_cf::<PerfSamples>(
-                Some(from_slot),
-                Some(to_slot + 1),
-            );
-            ledger.compact_slot_range_cf::<SlotSignatures>(
-                Some((from_slot, u32::MIN)),
-                Some((to_slot + 1, u32::MAX)),
-            );
-            ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
-            ledger.compact_slot_range_cf::<Transaction>(None, None);
-            ledger.compact_slot_range_cf::<TransactionMemos>(None, None);
-            ledger.compact_slot_range_cf::<AddressSignatures>(None, None);
-        });
+        ledger.compact_slot_range_cf::<Blocktime>(
+            Some(from_slot),
+            Some(to_slot + 1),
+        );
+        ledger.compact_slot_range_cf::<Blockhash>(
+            Some(from_slot),
+            Some(to_slot + 1),
+        );
+        ledger.compact_slot_range_cf::<PerfSamples>(
+            Some(from_slot),
+            Some(to_slot + 1),
+        );
+        ledger.compact_slot_range_cf::<SlotSignatures>(
+            Some((from_slot, u32::MIN)),
+            Some((to_slot + 1, u32::MAX)),
+        );
+        ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
+        ledger.compact_slot_range_cf::<Transaction>(None, None);
+        ledger.compact_slot_range_cf::<TransactionMemos>(None, None);
+        ledger.compact_slot_range_cf::<AddressSignatures>(None, None);
 
         measure.stop();
-        if let Err(error) = compaction.await {
-            error!("compaction aborted: {error}");
-        } else {
-            info!("Manual compaction took: {measure}");
-        }
+        info!("Manual compaction took: {measure}");
     }
 }
 
@@ -330,7 +319,13 @@ impl LedgerTruncator {
                 self.ledger_size,
                 cancellation_token.clone(),
             );
-            let worker_handle = tokio::spawn(worker.run());
+            let worker_handle = thread::spawn(move || {
+                let runtime = Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("failed to build runtime for truncator");
+                runtime.block_on(worker.run());
+            });
 
             self.state = ServiceState::Running(WorkerController {
                 cancellation_token,
@@ -352,23 +347,16 @@ impl LedgerTruncator {
         }
     }
 
-    pub async fn join(mut self) -> Result<(), LedgerTruncatorError> {
+    pub fn join(mut self) -> thread::Result<()> {
         if matches!(self.state, ServiceState::Running(_)) {
             self.stop();
         }
 
         if let ServiceState::Stopped(worker_handle) = self.state {
-            worker_handle.await?;
-            Ok(())
+            worker_handle.join()
         } else {
             warn!("LedgerTruncator was not running, nothing to stop");
             Ok(())
         }
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum LedgerTruncatorError {
-    #[error("Failed to join worker: {0}")]
-    JoinError(#[from] JoinError),
 }
