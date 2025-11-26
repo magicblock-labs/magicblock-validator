@@ -74,7 +74,8 @@ impl TestContext {
                 false, // disable subscription metrics
             )
             .unwrap();
-            let subscribed_accounts = create_test_lru_cache_with_config(&config);
+            let subscribed_accounts =
+                create_test_lru_cache_with_config(&config);
 
             let remote_account_provider =
                 RemoteAccountProvider::try_from_clients_and_mode(
