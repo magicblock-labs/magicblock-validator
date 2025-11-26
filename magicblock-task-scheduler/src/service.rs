@@ -119,7 +119,7 @@ impl TaskSchedulerService {
             self.task_queue_keys.insert(task_id, key);
         }
 
-        Ok(tokio::spawn(async move { self.run().await }))
+        Ok(tokio::spawn(self.run()))
     }
 
     fn process_request(
@@ -248,7 +248,7 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    pub async fn run(&mut self) -> TaskSchedulerResult<()> {
+    pub async fn run(mut self) -> TaskSchedulerResult<()> {
         loop {
             select! {
                 Some(task) = self.task_queue.next() => {

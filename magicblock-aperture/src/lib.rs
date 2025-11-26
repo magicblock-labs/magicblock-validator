@@ -1,4 +1,5 @@
 use error::RpcError;
+use log::*;
 use magicblock_config::RpcConfig;
 use magicblock_core::link::DispatchEndpoints;
 use processor::EventProcessor;
@@ -32,9 +33,9 @@ impl JsonRpcServer {
         // Start up an event processor task, which will handle forwarding of any validator
         // originating event to client subscribers, or use them to update server's caches
         //
-        // NOTE: currently we only start 1 instance, but it
+        // NOTE: currently we only start 2 instances, but it
         // can be scaled to more if that becomes a bottleneck
-        EventProcessor::start(&state, dispatch, 1, cancel.clone());
+        EventProcessor::start(&state, dispatch, 2, cancel.clone());
 
         // initialize HTTP and Websocket servers
         let websocket = {
@@ -47,10 +48,12 @@ impl JsonRpcServer {
 
     /// Run JSON-RPC server indefinitely, until cancel token is used to signal shut down
     pub async fn run(self) {
+        info!("Running JSON-RPC server");
         tokio::join! {
             self.http.run(),
             self.websocket.run()
         };
+        info!("JSON-RPC server has shutdown");
     }
 }
 
