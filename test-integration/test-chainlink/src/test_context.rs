@@ -20,6 +20,7 @@ use magicblock_chainlink::{
         cloner_stub::ClonerStub,
         deleg::add_delegation_record_for,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
+        utils::{create_test_lru_cache, create_test_lru_cache_with_config},
     },
     Chainlink,
 };
@@ -73,12 +74,15 @@ impl TestContext {
                 false, // disable subscription metrics
             )
             .unwrap();
+            let subscribed_accounts = create_test_lru_cache_with_config(&config);
+
             let remote_account_provider =
                 RemoteAccountProvider::try_from_clients_and_mode(
                     rpc_client.clone(),
                     pubsub_client.clone(),
                     tx,
                     &config,
+                    subscribed_accounts,
                 )
                 .await;
 

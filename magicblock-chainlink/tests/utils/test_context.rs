@@ -20,6 +20,7 @@ use magicblock_chainlink::{
         cloner_stub::ClonerStub,
         deleg::add_delegation_record_for,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
+        utils::{create_test_lru_cache, create_test_lru_cache_with_config},
     },
     AccountFetchOrigin, Chainlink,
 };
@@ -67,14 +68,20 @@ impl TestContext {
         let faucet_pubkey = Pubkey::new_unique();
         let (fetch_cloner, remote_account_provider) = {
             let (tx, rx) = tokio::sync::mpsc::channel(100);
+            let config =
+                RemoteAccountProviderConfig::default_with_lifecycle_mode(
+                    lifecycle_mode,
+                );
+            let subscribed_accounts =
+                create_test_lru_cache_with_config(&config);
+
             let remote_account_provider =
                 RemoteAccountProvider::try_from_clients_and_mode(
                     rpc_client.clone(),
                     pubsub_client.clone(),
                     tx,
-                    &RemoteAccountProviderConfig::default_with_lifecycle_mode(
-                        lifecycle_mode,
-                    ),
+                    &config,
+                    subscribed_accounts,
                 )
                 .await;
 

@@ -6,6 +6,8 @@ use magicblock_metrics::metrics::inc_evicted_accounts_count;
 use solana_pubkey::Pubkey;
 use solana_sdk::sysvar;
 
+use crate::submux::SubscribedAccountsTracker;
+
 /// A simple wrapper around [lru::LruCache].
 /// When an account is evicted from the cache due to a new one being added,
 /// it will return that evicted account's Pubkey as well as sending it via
@@ -124,6 +126,10 @@ impl AccountsLruCache {
         subs.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn never_evicted_accounts(&self) -> Vec<Pubkey> {
         self.accounts_to_never_evict.iter().cloned().collect()
     }
@@ -138,6 +144,12 @@ impl AccountsLruCache {
             .lock()
             .expect("subscribed_accounts lock poisoned");
         subs.iter().map(|(k, _)| *k).collect()
+    }
+}
+
+impl SubscribedAccountsTracker for AccountsLruCache {
+    fn subscribed_accounts(&self) -> Vec<Pubkey> {
+        self.pubkeys()
     }
 }
 
