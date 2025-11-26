@@ -7,7 +7,7 @@ use prometheus::{
 };
 pub use types::{
     AccountClone, AccountCommit, AccountFetchOrigin, LabelValue, Outcome,
-    ProgramAlias, ProgramFetchResult,
+    ProgramFetchResult,
 };
 
 mod types;
