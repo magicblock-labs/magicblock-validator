@@ -26,8 +26,8 @@ pub use self::debounce_state::DebounceState;
 mod subscription_task;
 pub use self::subscription_task::AccountSubscriptionTask;
 
-mod subsribed_accounts_tracker;
-pub use self::subsribed_accounts_tracker::SubscribedAccountsTracker;
+mod subscribed_accounts_tracker;
+pub use self::subscribed_accounts_tracker::SubscribedAccountsTracker;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DebounceConfig {
@@ -677,7 +677,7 @@ mod tests {
     use super::*;
     use crate::{
         remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
-        submux::subsribed_accounts_tracker::mock::MockSubscribedAccountsTracker,
+        submux::subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker,
         testing::{init_logger, utils::sleep_ms},
     };
 
@@ -699,7 +699,7 @@ mod tests {
             })
             .collect();
         let tracker = Arc::new(
-            subsribed_accounts_tracker::mock::MockSubscribedAccountsTracker::new(
+            subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker::new(
                 vec![],
             ),
         );
@@ -718,7 +718,7 @@ mod tests {
             })
             .collect();
         let tracker = Arc::new(
-            subsribed_accounts_tracker::mock::MockSubscribedAccountsTracker::new(
+            subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker::new(
                 vec![],
             ),
         );
