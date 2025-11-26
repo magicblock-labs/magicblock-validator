@@ -43,7 +43,7 @@ async fn ixtest_read_multiple_accounts_not_exceeding_capacity() {
         setup(subscribed_accounts_lru_capacity, pubkeys_len).await;
 
     ctx.chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
         .await
         .unwrap();
 
@@ -75,11 +75,21 @@ async fn ixtest_read_multiple_accounts_exceeding_capacity() {
     // will be removed, but since they haven't been added yet that does nothing and
     // they get still added later right after. Therefore here we go in steps:
     ctx.chainlink
-        .ensure_accounts(&pubkeys[0..4], None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(
+            &pubkeys[0..4],
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
         .await
         .unwrap();
     ctx.chainlink
-        .ensure_accounts(&pubkeys[4..8], None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(
+            &pubkeys[4..8],
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
         .await
         .unwrap();
 
