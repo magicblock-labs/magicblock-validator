@@ -882,7 +882,7 @@ mod tests {
         assert!(committee_account.confined());
         assert!(
             committee_account.delegated(),
-            "Confined account remain delegated"
+            "Confined account should remain delegated"
         );
 
         // Create ScheduleCommit instruction with confined committee
