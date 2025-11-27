@@ -176,7 +176,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots_compressed() {
     // 3. Account redelegated to us (separate slot) - writes allowed again
     {
         info!("3. Account redelegated to us - Would allow write");
-        ctx.delegate_counter(&counter_auth).await;
+        ctx.delegate_compressed_counter(&counter_auth, true).await;
         sleep_ms(500).await;
 
         // Account should be cloned as delegated back to us
