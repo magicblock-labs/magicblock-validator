@@ -932,6 +932,10 @@ mod tests {
         // Assert that the confined account remains delegated
         let committee_dos_account = accounts_data.get(&committee_dos).unwrap();
         assert!(
+            committee_dos_account.confined(),
+            "Confined account should remain confined"
+        );
+        assert!(
             committee_dos_account.delegated(),
             "Confined account should remain delegated"
         );
