@@ -657,6 +657,7 @@ fn process_external_undelegate_compressed(
     }
 
     // Refund account
+    // NOTE: assumes the delegated account owned by the cdlp has 0 data
     invoke(
         &system_instruction::transfer(
             payer.key,
