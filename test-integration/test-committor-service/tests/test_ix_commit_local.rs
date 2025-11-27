@@ -861,6 +861,7 @@ async fn ix_commit_local(
                 );
 
                 let address = derive_cda_from_pda(&account.pubkey);
+                // NOTE: defaults to 10 retry
                 let compressed_account = photon_indexer
                     .get_compressed_account(address.to_bytes(), None)
                     .await
