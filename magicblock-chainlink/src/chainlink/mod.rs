@@ -161,7 +161,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 blacklisted.fetch_add(1, Ordering::Relaxed);
                 return false;
             }
-            if pubkey.eq(&pubkey!("5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc")){
+            if pubkey
+                .eq(&pubkey!("5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc"))
+            {
                 return true;
             }
             // Undelegating accounts are normally also delegated, but if that ever changes
