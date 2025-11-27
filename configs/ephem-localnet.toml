@@ -4,15 +4,17 @@ lifecycle = "ephemeral"
 commit = { frequency-millis = 50_000 }
 
 [accounts.db]
+# path to root directory where database files are stored
+directory = "/tmp/accounts-db/adb"
 # size of the main storage, we have to preallocate in advance
-# it's advised to set this value based on formula 1KB * N * 3, 
-# where N is the number of accounts expected to be stored in 
+# it's advised to set this value based on formula 1KB * N * 3,
+# where N is the number of accounts expected to be stored in
 # database, e.g. for million accounts this would be 3GB
 db-size = 1048576000 # 1GB
 # minimal indivisible unit of addressing in main storage
 # offsets are calculated in terms of blocks
 block-size = "block256" # possible values block128 | block256 | block512
-# size of index file, we have to preallocate, 
+# size of index file, we have to preallocate,
 # can be as low as 1% of main storage size, but setting it to higher values won't hurt
 index-map-size = 20485760
 # max number of snapshots to keep around
@@ -23,13 +25,6 @@ snapshot-frequency = 1024
 [rpc]
 addr = "0.0.0.0"
 port = 8899
-
-[ledger]
-resume-strategy = { kind = "replay" }
-path = "/Users/edwinpaco/Documents/work/MagicBlock/magicblock-validator/test-ledger"
-# 30 GiB
-# size = 32212254720
-size = 21474836480
 
 [validator]
 millis-per-slot = 50
