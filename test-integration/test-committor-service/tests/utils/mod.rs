@@ -21,6 +21,7 @@ pub async fn sleep_millis(millis: u64) {
 /// https://github.com/magicblock-labs/delegation-program/blob/7fc0ae9a59e48bea5b046b173ea0e34fd433c3c7/tests/fixtures/accounts.rs#L46
 /// It is compiled in as the authority for the validator vault when we build via
 /// `cargo build-sbf --features=unit_test_config`
+#[allow(dead_code)]
 pub fn get_validator_auth() -> Keypair {
     const VALIDATOR_AUTHORITY: [u8; 64] = [
         251, 62, 129, 184, 107, 49, 62, 184, 1, 147, 178, 128, 185, 157, 247,
@@ -32,6 +33,7 @@ pub fn get_validator_auth() -> Keypair {
     Keypair::from_bytes(&VALIDATOR_AUTHORITY).unwrap()
 }
 
+#[allow(dead_code)]
 pub fn ensure_validator_authority() -> Keypair {
     static ONCE: Once = Once::new();
 

@@ -17,7 +17,7 @@ use magicblock_ledger::{LatestBlock, Ledger};
 use magicblock_magic_program_api as magic_program;
 use magicblock_metrics::metrics;
 use magicblock_program::{instruction_utils::InstructionUtils, MagicContext};
-use solana_sdk::account::ReadableAccount;
+use solana_account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;

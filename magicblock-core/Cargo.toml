@@ -9,11 +9,13 @@ edition.workspace = true
 
 [dependencies]
 bincode = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-
-tokio = { workspace = true }
+compressed-delegation-client = { workspace = true }
 flume = { workspace = true }
-
+light-sdk = { workspace = true }
+light-compressed-account = { workspace = true }
+magicblock-delegation-program = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-hash = { workspace = true }
@@ -24,4 +26,4 @@ solana-transaction = { workspace = true }
 solana-transaction-context = { workspace = true }
 solana-transaction-error = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
-magicblock-magic-program-api = { workspace = true }
+tokio = { workspace = true }

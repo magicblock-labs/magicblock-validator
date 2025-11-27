@@ -1,0 +1,28 @@
+[package]
+name = "compressed-delegation-client"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+serde = ["dep:serde"]
+anchor = []
+anchor-idl-build = []
+fetch = []
+
+[dependencies]
+borsh = { workspace = true }
+light-compressed-account = { workspace = true }
+light-hasher = { workspace = true }
+light-sdk = { workspace = true }
+light-sdk-types = { workspace = true }
+serde = { workspace = true, optional = true }
+solana-account-info = { workspace = true }
+solana-cpi = { workspace = true }
+solana-instruction = { workspace = true }
+solana-program-error = { workspace = true }
+solana-pubkey = { workspace = true }

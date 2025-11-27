@@ -22,9 +22,31 @@ use crate::{
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<Box<dyn BaseTask>>,
     pub lookup_tables_keys: Vec<Pubkey>,
+    pub compressed: bool,
 }
 
 impl TransactionStrategy {
+    pub fn try_new(
+        optimized_tasks: Vec<Box<dyn BaseTask>>,
+        lookup_tables_keys: Vec<Pubkey>,
+    ) -> Result<Self, TaskStrategistError> {
+        let compressed = optimized_tasks
+            .iter()
+            .fold(None, |state, task| match state {
+                None => Some(Ok(task.is_compressed())),
+                Some(Ok(state)) if state != task.is_compressed() => {
+                    Some(Err(TaskStrategistError::InconsistentTaskCompression))
+                }
+                Some(Ok(state)) => Some(Ok(state)),
+                Some(Err(err)) => Some(Err(err)),
+            })
+            .unwrap_or(Ok(false))?;
+        Ok(Self {
+            optimized_tasks,
+            lookup_tables_keys,
+            compressed,
+        })
+    }
     /// In case old strategy used ALTs recalculate old value
     /// NOTE: this can be used when full revaluation is unnecessary, like:
     /// some tasks were reset, number of tasks didn't increase
@@ -68,10 +90,7 @@ impl TaskStrategist {
                     .for_each(|task| task.visit(&mut persistor_visitor));
             }
 
-            Ok(TransactionStrategy {
-                optimized_tasks: tasks,
-                lookup_tables_keys: vec![],
-            })
+            TransactionStrategy::try_new(tasks, vec![])
         }
         // In case task optimization didn't work
         // attempt using lookup tables for all keys involved in tasks
@@ -90,10 +109,7 @@ impl TaskStrategist {
             // Get lookup table keys
             let lookup_tables_keys =
                 Self::collect_lookup_table_keys(validator, &tasks);
-            Ok(TransactionStrategy {
-                optimized_tasks: tasks,
-                lookup_tables_keys,
-            })
+            TransactionStrategy::try_new(tasks, lookup_tables_keys)
         } else {
             Err(TaskStrategistError::FailedToFitError)
         }
@@ -154,7 +170,7 @@ impl TaskStrategist {
     /// Returns size of tx after optimizations
     fn optimize_strategy(
         tasks: &mut [Box<dyn BaseTask>],
-    ) -> Result<usize, SignerError> {
+    ) -> Result<usize, TaskStrategistError> {
         // Get initial transaction size
         let calculate_tx_length = |tasks: &[Box<dyn BaseTask>]| {
             match TransactionUtils::assemble_tasks_tx(
@@ -165,7 +181,7 @@ impl TaskStrategist {
             ) {
                 Ok(tx) => Ok(serialize_and_encode_base64(&tx).len()),
                 Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
-                Err(TaskStrategistError::SignerError(err)) => Err(err),
+                Err(err) => Err(err),
             }
         };
 
@@ -237,12 +253,14 @@ impl TaskStrategist {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq)]
 pub enum TaskStrategistError {
     #[error("Failed to fit in single TX")]
     FailedToFitError,
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
+    #[error("Inconsistent task compression")]
+    InconsistentTaskCompression,
 }
 
 pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
@@ -258,7 +276,10 @@ mod tests {
     use super::*;
     use crate::{
         persist::IntentPersisterImpl,
-        tasks::{BaseActionTask, CommitTask, TaskStrategy, UndelegateTask},
+        tasks::{
+            task_builder::CompressedData, BaseActionTask, CommitTask,
+            CompressedCommitTask, TaskStrategy, UndelegateTask,
+        },
     };
 
     // Helper to create a simple commit task
@@ -276,6 +297,28 @@ mod tests {
                     rent_epoch: 0,
                 },
             },
+        }))
+    }
+
+    // Helper to create a simple compressed commit task
+    fn create_test_compressed_commit_task(
+        commit_id: u64,
+        data_size: usize,
+    ) -> ArgsTask {
+        ArgsTask::new(ArgsTaskType::CompressedCommit(CompressedCommitTask {
+            commit_id,
+            allow_undelegation: false,
+            committed_account: CommittedAccount {
+                pubkey: Pubkey::new_unique(),
+                account: Account {
+                    lamports: 1000,
+                    data: vec![1; data_size],
+                    owner: system_program::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            },
+            compressed_data: CompressedData::default(),
         }))
     }
 
@@ -499,5 +542,25 @@ mod tests {
         // So had to switch to ALTs
         // As expected
         assert!(!strategy.lookup_tables_keys.is_empty());
+    }
+
+    #[test]
+    fn test_mixed_task_types_compressed() {
+        let validator = Pubkey::new_unique();
+        let tasks = vec![
+            Box::new(create_test_commit_task(1, 100)) as Box<dyn BaseTask>,
+            Box::new(create_test_compressed_commit_task(2, 100))
+                as Box<dyn BaseTask>,
+        ];
+
+        let Err(err) = TaskStrategist::build_strategy(
+            tasks,
+            &validator,
+            &None::<IntentPersisterImpl>,
+        ) else {
+            panic!("Should not build invalid strategy");
+        };
+
+        assert_eq!(err, TaskStrategistError::InconsistentTaskCompression);
     }
 }

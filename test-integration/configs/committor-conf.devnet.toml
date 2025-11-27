@@ -32,6 +32,10 @@ sigverify = true
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 path = "../schedulecommit/elfs/dlp.so"
 
+[[program]]
+id = "DEL2rPzhFaS5qzo8XY9ZNxSzuunWueySq3p2dxJfwPbT"
+path = "../programs/compressed_delegation/compressed_delegation.so"
+
 # NOTE: `cargo build-sbf` needs to run from the root to build the program
 [[program]]
 id = "ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq"

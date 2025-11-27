@@ -1,7 +1,10 @@
 use solana_program::instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-use crate::{instruction::CommittorInstruction, pdas};
+use crate::{
+    instruction::CommittorInstruction, instruction_builder::build_instruction,
+    pdas,
+};
 
 // -----------------
 // create_write_ix
@@ -33,7 +36,6 @@ pub fn create_write_ix(args: CreateWriteIxArgs) -> Instruction {
         commit_id.to_le_bytes().as_slice(),
     );
 
-    let program_id = crate::id();
     let ix = CommittorInstruction::Write {
         pubkey,
         commit_id,
@@ -47,5 +49,5 @@ pub fn create_write_ix(args: CreateWriteIxArgs) -> Instruction {
         AccountMeta::new(chunks_pda, false),
         AccountMeta::new(buffer_pda, false),
     ];
-    Instruction::new_with_borsh(program_id, &ix, accounts)
+    build_instruction(ix, accounts)
 }

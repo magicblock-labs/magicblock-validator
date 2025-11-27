@@ -7,13 +7,15 @@ use std::{
     },
 };
 
+use borsh::BorshDeserialize;
+use compressed_delegation_client::CompressedDelegationRecord;
 use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use log::*;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk::system_program;
 use tokio::{
@@ -30,6 +32,7 @@ use crate::{
     },
     cloner::{errors::ClonerResult, Cloner},
     remote_account_provider::{
+        photon_client::PhotonClient,
         program_account::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
             LOADER_V1, LOADER_V3,
@@ -43,15 +46,16 @@ use crate::{
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
 
 #[derive(Clone)]
-pub struct FetchCloner<T, U, V, C>
+pub struct FetchCloner<T, U, V, C, P>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     /// The RemoteAccountProvider to fetch accounts from
-    remote_account_provider: Arc<RemoteAccountProvider<T, U>>,
+    remote_account_provider: Arc<RemoteAccountProvider<T, U, P>>,
     /// Tracks pending account fetch requests to avoid duplicate fetches in parallel
     /// Once an account is fetched and cloned into the bank, it's removed from here
     pending_requests: Arc<Mutex<HashMap<Pubkey, RemoteAccountRequests>>>,
@@ -128,16 +132,17 @@ impl fmt::Display for FetchAndCloneResult {
     }
 }
 
-impl<T, U, V, C> FetchCloner<T, U, V, C>
+impl<T, U, V, C, P> FetchCloner<T, U, V, C, P>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     /// Create FetchCloner with subscription updates properly connected
     pub fn new(
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
         validator_pubkey: Pubkey,
@@ -344,8 +349,10 @@ where
         let ForwardedSubscriptionUpdate { pubkey, account } = update;
         let owned_by_delegation_program =
             account.is_owned_by_delegation_program();
+        let owned_by_compressed_delegation_program =
+            account.is_owned_by_compressed_delegation_program();
 
-        if let Some(account) = account.fresh_account() {
+        if let Some(mut account) = account.fresh_account().cloned() {
             // If the account is owned by the delegation program we need to resolve
             // its true owner and determine if it is delegated to us
             if owned_by_delegation_program {
@@ -457,6 +464,61 @@ where
                         error!("failed to fetch delegation record for {pubkey}: {err}. not cloning account.");
                         (None, None)
                     }
+                }
+            } else if owned_by_compressed_delegation_program {
+                // If the account is compressed, the delegation record is in the account itself
+                let delegation_record =
+                    match CompressedDelegationRecord::try_from_slice(
+                        account.data(),
+                    ) {
+                        Ok(delegation_record) => Some(delegation_record),
+                        Err(_err) => {
+                            info!("Failed to parse compressed delegation record for {pubkey} directly from the data. Fetching from photon instead.");
+                            if let Some(acc) = self
+                                .remote_account_provider
+                                .try_get(pubkey, AccountFetchOrigin::GetAccount)
+                                .await
+                                .map(|acc| acc.fresh_account().cloned())
+                                .ok()
+                                .flatten()
+                            {
+                                match CompressedDelegationRecord::try_from_slice(
+                                    acc.data(),
+                                ) {
+                                    Ok(delegation_record) => {
+                                        Some(delegation_record)
+                                    }
+                                    Err(_) => None,
+                                }
+                            } else {
+                                None
+                            }
+                        }
+                    };
+
+                if let Some(delegation_record) = delegation_record {
+                    account.set_compressed(true);
+                    account.set_owner(delegation_record.owner);
+                    account.set_data(delegation_record.data);
+                    account.set_lamports(delegation_record.lamports);
+
+                    let is_delegated_to_us =
+                        delegation_record.authority.eq(&self.validator_pubkey);
+                    account.set_delegated(is_delegated_to_us);
+
+                    // TODO(dode): commit frequency ms is not supported for compressed delegation records
+                    (
+                        Some(account),
+                        Some(DelegationRecord {
+                            authority: delegation_record.authority,
+                            owner: delegation_record.owner,
+                            delegation_slot: delegation_record.delegation_slot,
+                            lamports: delegation_record.lamports,
+                            commit_frequency_ms: 0,
+                        }),
+                    )
+                } else {
+                    (None, None)
                 }
             } else {
                 // Accounts not owned by the delegation program can be cloned as is
@@ -619,13 +681,14 @@ where
 
         trace!("Fetched {accs:?}");
 
-        let (not_found, plain, owned_by_deleg, programs) =
+        let (not_found, plain, owned_by_deleg, owned_by_deleg_compressed, programs) =
             accs.into_iter().zip(pubkeys).fold(
-                (vec![], vec![], vec![], vec![]),
+                (vec![], vec![], vec![], vec![], vec![]),
                 |(
                     mut not_found,
                     mut plain,
                     mut owned_by_deleg,
+                    mut owned_by_deleg_compressed,
                     mut programs,
                 ),
                  (acc, &pubkey)| {
@@ -646,7 +709,16 @@ where
                                             account_shared_data,
                                             slot,
                                         ));
-                                    } else if account_shared_data.executable() {
+                                    } else if account_shared_data
+                                    .owner()
+                                    .eq(&compressed_delegation_client::id())
+                                {
+                                    owned_by_deleg_compressed.push((
+                                        pubkey,
+                                        account_shared_data,
+                                        slot,
+                                    ));
+                                } else if account_shared_data.executable() {
                                         // We don't clone native loader programs.
                                         // They should not pass the blacklist in the first place,
                                         // but in case a new native program is introduced we don't want
@@ -679,7 +751,7 @@ where
                             };
                         }
                     }
-                    (not_found, plain, owned_by_deleg, programs)
+                    (not_found, plain, owned_by_deleg, owned_by_deleg_compressed, programs)
                 },
             );
 
@@ -694,12 +766,16 @@ where
                 .iter()
                 .map(|(pubkey, _, slot)| (pubkey.to_string(), *slot))
                 .collect::<Vec<_>>();
+            let owned_by_deleg_compressed = owned_by_deleg_compressed
+                .iter()
+                .map(|(pubkey, _, slot)| (pubkey.to_string(), *slot))
+                .collect::<Vec<_>>();
             let programs = programs
                 .iter()
                 .map(|(p, _, _)| p.to_string())
                 .collect::<Vec<_>>();
             trace!(
-                "Fetched accounts: \nnot_found:      {not_found:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?}\nprograms:       {programs:?}",
+                "Fetched accounts: \nnot_found:      {not_found:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?} \nowned_by_deleg_compressed: {owned_by_deleg_compressed:?} \nprograms:       {programs:?}",
             );
         }
 
@@ -805,6 +881,31 @@ where
             let mut record_subs =
                 Vec::with_capacity(accounts_fully_resolved.len());
             let mut accounts_to_clone = plain;
+            accounts_to_clone.extend(
+                owned_by_deleg_compressed.into_iter().filter_map(
+                    |(pubkey, mut account, _)| {
+                        let Ok(delegation_record) =
+                            CompressedDelegationRecord::try_from_slice(
+                                account.data(),
+                            ) else {
+                                error!("Failed to deserialize compressed delegation record for {pubkey}");
+                                return None;
+                            };
+
+                        if delegation_record
+                            .authority
+                            .eq(&self.validator_pubkey)
+                        {
+                            account.set_delegated(true);
+                        } else {
+                            account.set_delegated(false);
+                        }
+                        account.set_data(delegation_record.data);
+                        account.set_owner(delegation_record.owner);
+                        Some((pubkey, account))
+                    },
+                ),
+            );
 
             // Now process the accounts (this can fail without affecting unsubscription)
             for AccountWithCompanion {
@@ -1606,8 +1707,12 @@ impl fmt::Display for CancelStrategy {
     }
 }
 
-async fn cancel_subs<T: ChainRpcClient, U: ChainPubsubClient>(
-    provider: &Arc<RemoteAccountProvider<T, U>>,
+async fn cancel_subs<
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    P: PhotonClient,
+>(
+    provider: &Arc<RemoteAccountProvider<T, U, P>>,
     strategy: CancelStrategy,
 ) {
     if strategy.is_empty() {
@@ -1695,6 +1800,7 @@ mod tests {
                 add_delegation_record_for, add_invalid_delegation_record_for,
             },
             init_logger,
+            photon_client_mock::PhotonClientMock,
             rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
             utils::{create_test_lru_cache, random_pubkey},
         },
@@ -1707,6 +1813,7 @@ mod tests {
                 ChainPubsubClientMock,
                 AccountsBankStub,
                 ClonerStub,
+                PhotonClientMock,
             >,
         >,
         mpsc::Sender<ForwardedSubscriptionUpdate>,
@@ -1762,7 +1869,11 @@ mod tests {
 
     struct FetcherTestCtx {
         remote_account_provider: Arc<
-            RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+            RemoteAccountProvider<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                PhotonClientMock,
+            >,
         >,
         accounts_bank: Arc<AccountsBankStub>,
         rpc_client: crate::testing::rpc_client_mock::ChainRpcClientMock,
@@ -1774,6 +1885,7 @@ mod tests {
                 ChainPubsubClientMock,
                 AccountsBankStub,
                 ClonerStub,
+                PhotonClientMock,
             >,
         >,
         #[allow(unused)]
@@ -1815,6 +1927,7 @@ mod tests {
             RemoteAccountProvider::new(
                 rpc_client,
                 pubsub_client,
+                None::<PhotonClientMock>,
                 forward_tx,
                 &config,
                 subscribed_accounts,
@@ -1843,7 +1956,11 @@ mod tests {
     /// Returns (FetchCloner, subscription_sender) for simulating subscription updates in tests
     fn init_fetch_cloner(
         remote_account_provider: Arc<
-            RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+            RemoteAccountProvider<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                PhotonClientMock,
+            >,
         >,
         bank: &Arc<AccountsBankStub>,
         validator_pubkey: Pubkey,
@@ -2595,20 +2712,21 @@ mod tests {
 
         // Use a shared FetchCloner to test deduplication
         // Helper function to spawn a fetch_and_clone task with shared FetchCloner
-        let spawn_fetch_task = |fetch_cloner: &Arc<FetchCloner<_, _, _, _>>| {
-            let fetch_cloner = fetch_cloner.clone();
-            tokio::spawn(async move {
-                fetch_cloner
-                    .fetch_and_clone_accounts_with_dedup(
-                        &[account_pubkey],
-                        None,
-                        None,
-                        AccountFetchOrigin::GetAccount,
-                        None,
-                    )
-                    .await
-            })
-        };
+        let spawn_fetch_task =
+            |fetch_cloner: &Arc<FetchCloner<_, _, _, _, _>>| {
+                let fetch_cloner = fetch_cloner.clone();
+                tokio::spawn(async move {
+                    fetch_cloner
+                        .fetch_and_clone_accounts_with_dedup(
+                            &[account_pubkey],
+                            None,
+                            None,
+                            AccountFetchOrigin::GetAccount,
+                            None,
+                        )
+                        .await
+                })
+            };
 
         let fetch_cloner = Arc::new(fetch_cloner);
 

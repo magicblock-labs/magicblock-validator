@@ -1,7 +1,12 @@
-use std::ops::{ControlFlow, Deref};
+use std::{
+    ops::{ControlFlow, Deref},
+    sync::Arc,
+};
 
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::{error, info, warn};
 use solana_pubkey::Pubkey;
+use solana_rpc_client_api::config::RpcTransactionConfig;
 
 use crate::{
     intent_executor::{
@@ -37,6 +42,7 @@ where
         mut finalize_strategy: TransactionStrategy,
         junk: &mut Vec<TransactionStrategy>,
         persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         const RECURSION_CEILING: u8 = 10;
 
@@ -46,7 +52,12 @@ where
 
             // Prepare & execute message
             let execution_result = self
-                .prepare_and_execute_strategy(&mut commit_strategy, persister)
+                .prepare_and_execute_strategy(
+                    &mut commit_strategy,
+                    persister,
+                    photon_client,
+                    None,
+                )
                 .await
                 .map_err(IntentExecutorError::FailedCommitPreparationError)?;
             let execution_err = match execution_result {
@@ -95,13 +106,30 @@ where
             )
         })?;
 
+        // Fetching the slot at which the transaction was executed
+        // Task preparations requiring fresh data can use that info
+        let commit_slot = self
+            .rpc_client
+            .get_transaction(
+                &commit_signature,
+                Some(RpcTransactionConfig::default()),
+            )
+            .await
+            .map(|tx| tx.slot)
+            .ok();
+
         i = 0;
         let (finalize_result, last_finalize_strategy) = loop {
             i += 1;
 
             // Prepare & execute message
             let execution_result = self
-                .prepare_and_execute_strategy(&mut finalize_strategy, persister)
+                .prepare_and_execute_strategy(
+                    &mut finalize_strategy,
+                    persister,
+                    photon_client,
+                    commit_slot,
+                )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
             let execution_err = match execution_result {
