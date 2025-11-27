@@ -1138,27 +1138,10 @@ where
                 .await;
 
             if deleg_record.is_none() {
-                // We perform a lightweight check (or full fetch) to see if account exists.
-                // Since we might fetch it later anyway, this is double work if it exists.
-                // But this path is only for undelegating accounts with no delegation record.
-                match self
-                    .remote_account_provider
-                    .try_get(*pubkey, fetch_origin)
-                    .await
-                {
-                    Ok(RemoteAccount::NotFound(_)) => {
-                        debug!(
-                            "Account {pubkey} marked as undelegating is closed on \
-                             chain. Refreshing as empty."
-                        );
-                        return RefreshDecision::YesAndMarkEmptyIfNotFound;
-                    }
-                    Err(e) => {
-                        warn!("Failed to check existence for undelegating account {pubkey} from {fetch_origin:?}: {e}\
-                            Proceeding with normal undelegation check.");
-                    }
-                    _ => {}
-                }
+                // If there is no delegation record then it is possible that the account itself
+                // does not exist either.
+                // In that case we need to refresh it as empty to clear the undelegation state.
+                return RefreshDecision::YesAndMarkEmptyIfNotFound;
             }
 
             let delegated_on_chain = deleg_record.as_ref().is_some_and(|dr| {
