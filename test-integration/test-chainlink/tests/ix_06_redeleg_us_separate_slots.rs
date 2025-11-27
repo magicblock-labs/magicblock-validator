@@ -12,7 +12,7 @@ use magicblock_chainlink::{
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::{ixtest_context::IxtestContext, sleep_ms};
 
-const RETRIES: u8 = 30;
+const RETRIES: usize = 30;
 
 #[tokio::test]
 async fn ixtest_undelegate_redelegate_to_us_in_separate_slots() {
