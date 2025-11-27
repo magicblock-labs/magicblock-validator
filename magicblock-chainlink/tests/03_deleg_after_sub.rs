@@ -59,6 +59,7 @@ async fn test_deleg_after_subscribe_case2() {
                 &[pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
+                None,
             )
             .await
             .unwrap();
@@ -88,6 +89,7 @@ async fn test_deleg_after_subscribe_case2() {
                 &[pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
+                None,
             )
             .await
             .unwrap();

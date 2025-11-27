@@ -41,6 +41,7 @@ async fn test_write_non_existing_account() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -72,6 +73,7 @@ async fn test_existing_account_undelegated() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -108,6 +110,7 @@ async fn test_existing_account_missing_delegation_record() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -149,6 +152,7 @@ async fn test_write_existing_account_valid_delegation_record() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -194,6 +198,7 @@ async fn test_write_existing_account_other_authority() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -249,6 +254,7 @@ async fn test_write_undelegating_account_undelegated_to_other_validator() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -297,6 +303,7 @@ async fn test_write_undelegating_account_still_being_undelegated() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -340,6 +347,7 @@ async fn test_write_existing_account_invalid_delegation_record() {
             &[pubkey],
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await;
     debug!("res: {res:?}");

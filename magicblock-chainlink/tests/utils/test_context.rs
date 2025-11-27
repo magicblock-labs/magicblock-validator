@@ -193,7 +193,6 @@ impl TestContext {
         );
     }
 
-    #[allow(dead_code)]
     pub async fn ensure_account(
         &self,
         pubkey: &Pubkey,
@@ -203,6 +202,7 @@ impl TestContext {
                 &[*pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
+                None,
             )
             .await
     }
