@@ -1141,16 +1141,23 @@ where
                 // We perform a lightweight check (or full fetch) to see if account exists.
                 // Since we might fetch it later anyway, this is double work if it exists.
                 // But this path is only for undelegating accounts with no delegation record.
-                if let Ok(RemoteAccount::NotFound(_)) = self
+                match self
                     .remote_account_provider
                     .try_get(*pubkey, fetch_origin)
                     .await
                 {
-                    debug!(
-                        "Account {pubkey} marked as undelegating is closed on \
-                         chain. Refreshing as empty."
-                    );
-                    return RefreshDecision::YesAndMarkEmptyIfNotFound;
+                    Ok(RemoteAccount::NotFound(_)) => {
+                        debug!(
+                            "Account {pubkey} marked as undelegating is closed on \
+                             chain. Refreshing as empty."
+                        );
+                        return RefreshDecision::YesAndMarkEmptyIfNotFound;
+                    }
+                    Err(e) => {
+                        warn!("Failed to check existence for undelegating account {pubkey} from {fetch_origin:?}: {e}\
+                            Proceeding with normal undelegation check.");
+                    }
+                    _ => {}
                 }
             }
 
