@@ -10,7 +10,7 @@ use log::*;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
-use solana_pubkey::Pubkey;
+use solana_pubkey::{pubkey, Pubkey};
 use solana_sdk::{
     commitment_config::CommitmentConfig, transaction::SanitizedTransaction,
 };
@@ -160,6 +160,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             if blacklisted_accounts.contains(pubkey) {
                 blacklisted.fetch_add(1, Ordering::Relaxed);
                 return false;
+            }
+            if pubkey.eq(&pubkey!("5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc")){
+                return true;
             }
             // Undelegating accounts are normally also delegated, but if that ever changes
             // we want to make sure we never remove an account of which we aren't sure
