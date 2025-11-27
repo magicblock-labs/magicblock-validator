@@ -381,11 +381,9 @@ async fn test_compressed_delegation_record_delegated() {
         owner,
         CURRENT_SLOT,
     );
-    photon_client.add_account(
-        pubkey,
-        compressed_account.clone().into(),
-        CURRENT_SLOT,
-    );
+    photon_client
+        .add_account(pubkey, compressed_account.clone().into(), CURRENT_SLOT)
+        .await;
 
     let pubkeys = [pubkey];
     let res = chainlink
@@ -393,6 +391,7 @@ async fn test_compressed_delegation_record_delegated() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -423,11 +422,9 @@ async fn test_compressed_delegation_record_delegated_to_other() {
         owner,
         CURRENT_SLOT,
     );
-    photon_client.add_account(
-        pubkey,
-        compressed_account.clone().into(),
-        CURRENT_SLOT,
-    );
+    photon_client
+        .add_account(pubkey, compressed_account.clone().into(), CURRENT_SLOT)
+        .await;
 
     let pubkeys = [pubkey];
     let res = chainlink
@@ -435,6 +432,7 @@ async fn test_compressed_delegation_record_delegated_to_other() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -466,11 +464,9 @@ async fn test_compressed_delegation_record_delegated_shadows_pda() {
         owner,
         CURRENT_SLOT,
     );
-    photon_client.add_account(
-        pubkey,
-        compressed_account.clone().into(),
-        CURRENT_SLOT,
-    );
+    photon_client
+        .add_account(pubkey, compressed_account.clone().into(), CURRENT_SLOT)
+        .await;
     rpc_client.add_account(pubkey, Account::default());
 
     let pubkeys = [pubkey];
@@ -479,6 +475,7 @@ async fn test_compressed_delegation_record_delegated_shadows_pda() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -501,7 +498,9 @@ async fn test_compressed_account_undelegated() {
     } = setup(CURRENT_SLOT).await;
 
     let pubkey = Pubkey::new_unique();
-    photon_client.add_account(pubkey, Account::default(), CURRENT_SLOT);
+    photon_client
+        .add_account(pubkey, Account::default(), CURRENT_SLOT)
+        .await;
 
     let pubkeys = [pubkey];
     let res = chainlink
@@ -509,6 +508,7 @@ async fn test_compressed_account_undelegated() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();

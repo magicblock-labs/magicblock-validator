@@ -113,6 +113,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_same_slot_compressed() {
                 &pubkeys,
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
+                None,
             )
             .await
             .unwrap();
@@ -143,6 +144,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_same_slot_compressed() {
                 &pubkeys,
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
+                None,
             )
             .await
             .unwrap();

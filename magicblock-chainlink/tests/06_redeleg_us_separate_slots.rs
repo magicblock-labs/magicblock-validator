@@ -149,11 +149,9 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots_compressed() {
             program_pubkey,
             slot,
         );
-        photon_client.add_account(
-            pubkey,
-            compressed_account.clone().into(),
-            slot,
-        );
+        photon_client
+            .add_account(pubkey, compressed_account.clone().into(), slot)
+            .await;
 
         let delegated_acc = account_shared_with_owner_and_slot(
             &acc,
@@ -191,7 +189,9 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots_compressed() {
             program_pubkey,
             slot,
         );
-        photon_client.add_account(pubkey, Account::default(), slot);
+        photon_client
+            .add_account(pubkey, Account::default(), slot)
+            .await;
         let updated = ctx
             .send_and_receive_account_update(
                 pubkey,
@@ -219,11 +219,9 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots_compressed() {
             program_pubkey,
             slot,
         );
-        photon_client.add_account(
-            pubkey,
-            compressed_account.clone().into(),
-            slot,
-        );
+        photon_client
+            .add_account(pubkey, compressed_account.clone().into(), slot)
+            .await;
         let delegated_acc = account_shared_with_owner_and_slot(
             &Account::default(),
             compressed_delegation_client::id(),
@@ -243,6 +241,7 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots_compressed() {
                 &[pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
+                None,
             )
             .await
             .unwrap();

@@ -157,6 +157,7 @@ async fn test_deleg_after_subscribe_case2_compressed() {
                 &[pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
+                None,
             )
             .await
             .unwrap();
@@ -186,6 +187,7 @@ async fn test_deleg_after_subscribe_case2_compressed() {
                 &[pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
+                None,
             )
             .await
             .unwrap();
@@ -207,11 +209,9 @@ async fn test_deleg_after_subscribe_case2_compressed() {
             program_pubkey,
             slot,
         );
-        photon_client.add_account(
-            pubkey,
-            compressed_account.clone().into(),
-            slot,
-        );
+        photon_client
+            .add_account(pubkey, compressed_account.clone().into(), slot)
+            .await;
         let updated = ctx
             .send_and_receive_account_update(
                 pubkey,
@@ -226,6 +226,7 @@ async fn test_deleg_after_subscribe_case2_compressed() {
                 &[pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
+                None,
             )
             .await
             .unwrap();

@@ -2722,7 +2722,7 @@ mod tests {
                             None,
                             None,
                             AccountFetchOrigin::GetAccount,
-                            None
+                            None,
                         )
                         .await
                 })

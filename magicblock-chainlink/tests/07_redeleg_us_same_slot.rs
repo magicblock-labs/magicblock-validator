@@ -148,11 +148,9 @@ async fn test_undelegate_redelegate_to_us_in_same_slot_compressed() {
             program_pubkey,
             slot,
         );
-        photon_client.add_account(
-            pubkey,
-            compressed_account.clone().into(),
-            slot,
-        );
+        photon_client
+            .add_account(pubkey, compressed_account.clone().into(), slot)
+            .await;
 
         // Transaction to read
         // Fetch account - see it's owned by DP, fetch delegation record, clone account as delegated
@@ -185,11 +183,9 @@ async fn test_undelegate_redelegate_to_us_in_same_slot_compressed() {
             program_pubkey,
             slot,
         );
-        photon_client.add_account(
-            pubkey,
-            compressed_account.clone().into(),
-            slot,
-        );
+        photon_client
+            .add_account(pubkey, compressed_account.clone().into(), slot)
+            .await;
 
         let acc = rpc_client.get_account_at_slot(&pubkey).unwrap();
         let delegated_acc = account_shared_with_owner_and_slot(
@@ -212,6 +208,7 @@ async fn test_undelegate_redelegate_to_us_in_same_slot_compressed() {
                 &[pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
+                None,
             )
             .await
             .unwrap();

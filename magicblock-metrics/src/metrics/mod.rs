@@ -245,7 +245,7 @@ lazy_static::lazy_static! {
         ),
         &["origin"],
     ).unwrap();
-  
+
     pub static ref PER_PROGRAM_ACCOUNT_FETCH_STATS: IntCounterVec = IntCounterVec::new(
         Opts::new(
             "per_program_account_fetch_stats",

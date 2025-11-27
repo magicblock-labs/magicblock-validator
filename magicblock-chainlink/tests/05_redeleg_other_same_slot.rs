@@ -136,11 +136,9 @@ async fn test_undelegate_redelegate_to_other_in_same_slot_compressed() {
             slot,
         );
         rpc_client.add_account(pubkey, acc.clone());
-        photon_client.add_account(
-            pubkey,
-            compressed_account.clone().into(),
-            slot,
-        );
+        photon_client
+            .add_account(pubkey, compressed_account.clone().into(), slot)
+            .await;
 
         // Transaction to read/write would be ok
         // Fetch account - see it's owned by DP, fetch delegation record, clone account as delegated
@@ -173,11 +171,9 @@ async fn test_undelegate_redelegate_to_other_in_same_slot_compressed() {
             program_pubkey,
             slot,
         );
-        photon_client.add_account(
-            pubkey,
-            compressed_account.clone().into(),
-            slot,
-        );
+        photon_client
+            .add_account(pubkey, compressed_account.clone().into(), slot)
+            .await;
         // Update account to be delegated on chain and send a sub update
         let acc = rpc_client.get_account_at_slot(&pubkey).unwrap();
         let delegated_acc = account_shared_with_owner(

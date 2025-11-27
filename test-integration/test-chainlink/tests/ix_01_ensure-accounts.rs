@@ -119,6 +119,7 @@ async fn ixtest_write_existing_account_compressed() {
             &pubkeys,
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();

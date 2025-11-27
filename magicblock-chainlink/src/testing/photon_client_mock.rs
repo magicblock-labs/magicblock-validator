@@ -1,14 +1,11 @@
-#![cfg(any(test, feature = "dev-context"))]
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use magicblock_core::compression::derive_cda_from_pda;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_sdk::clock::Slot;
+use tokio::sync::RwLock;
 
 use crate::{
     remote_account_provider::{
@@ -19,24 +16,32 @@ use crate::{
 
 #[derive(Clone, Default)]
 pub struct PhotonClientMock {
-    accounts: Arc<Mutex<HashMap<Pubkey, AccountAtSlot>>>,
+    accounts: Arc<RwLock<HashMap<Pubkey, AccountAtSlot>>>,
 }
 
 impl PhotonClientMock {
     pub fn new() -> Self {
         Self {
-            accounts: Arc::new(Mutex::new(HashMap::new())),
+            accounts: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub fn add_account(&self, pubkey: Pubkey, account: Account, slot: Slot) {
+    pub async fn add_account(
+        &self,
+        pubkey: Pubkey,
+        account: Account,
+        slot: Slot,
+    ) {
         let cda = derive_cda_from_pda(&pubkey);
-        let mut accounts = self.accounts.lock().unwrap();
+        let mut accounts = self.accounts.write().await;
         accounts.insert(cda, AccountAtSlot { account, slot });
     }
 
-    pub fn add_acounts(&self, new_accounts: HashMap<Pubkey, AccountAtSlot>) {
-        let mut accounts = self.accounts.lock().unwrap();
+    pub async fn add_acounts(
+        &self,
+        new_accounts: HashMap<Pubkey, AccountAtSlot>,
+    ) {
+        let mut accounts = self.accounts.write().await;
         for (pubkey, account_at_slot) in new_accounts {
             let cda = derive_cda_from_pda(&pubkey);
             accounts.insert(cda, account_at_slot);
@@ -52,8 +57,7 @@ impl PhotonClient for PhotonClientMock {
         min_context_slot: Option<Slot>,
     ) -> RemoteAccountProviderResult<Option<(Account, Slot)>> {
         let cda = derive_cda_from_pda(pubkey);
-        let accounts = self.accounts.lock().unwrap();
-        if let Some(account_at_slot) = accounts.get(&cda) {
+        if let Some(account_at_slot) = self.accounts.read().await.get(&cda) {
             if let Some(min_slot) = min_context_slot {
                 if account_at_slot.slot < min_slot {
                     return Ok(None);
