@@ -1681,10 +1681,9 @@ mod tests {
         accounts_bank::mock::AccountsBankStub,
         assert_not_cloned, assert_not_subscribed, assert_subscribed,
         assert_subscribed_without_delegation_record,
-        config::LifecycleMode,
         remote_account_provider::{
             chain_pubsub_client::mock::ChainPubsubClientMock,
-            config::RemoteAccountProviderConfig, RemoteAccountProvider,
+            RemoteAccountProvider,
         },
         testing::{
             accounts::{
@@ -1697,7 +1696,7 @@ mod tests {
             },
             init_logger,
             rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
-            utils::random_pubkey,
+            utils::{create_test_lru_cache, random_pubkey},
         },
     };
 
@@ -1810,17 +1809,15 @@ mod tests {
         let rpc_client_clone = rpc_client.clone();
 
         let (forward_tx, forward_rx) = mpsc::channel(1_000);
+        let (subscribed_accounts, config) = create_test_lru_cache(1000);
+
         let remote_account_provider = Arc::new(
             RemoteAccountProvider::new(
                 rpc_client,
                 pubsub_client,
                 forward_tx,
-                &RemoteAccountProviderConfig::try_new_with_metrics(
-                    1000,
-                    LifecycleMode::Ephemeral,
-                    false,
-                )
-                .unwrap(),
+                &config,
+                subscribed_accounts,
             )
             .await
             .unwrap(),
