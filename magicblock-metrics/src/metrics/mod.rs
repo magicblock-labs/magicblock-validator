@@ -212,6 +212,40 @@ lazy_static::lazy_static! {
     )
     .unwrap();
 
+    // Account fetch results from Photon (Compressed)
+    pub static ref COMPRESSED_ACCOUNT_FETCHES_SUCCESS_COUNT: IntCounter =
+        IntCounter::new(
+            "compressed_account_fetches_success_count",
+            "Total number of successful network compressed account fetches",
+        )
+        .unwrap();
+
+    pub static ref COMPRESSED_ACCOUNT_FETCHES_FAILED_COUNT: IntCounter =
+        IntCounter::new(
+            "compressed_account_fetches_failed_count",
+            "Total number of failed network compressed account fetches \
+             (RPC errors)",
+        )
+        .unwrap();
+
+    pub static ref COMPRESSED_ACCOUNT_FETCHES_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new(
+            "compressed_account_fetches_found_count",
+            "Total number of network compressed account fetches that found an account",
+        ),
+        &["origin"],
+    )
+    .unwrap();
+
+    pub static ref COMPRESSED_ACCOUNT_FETCHES_NOT_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new(
+            "compressed_account_fetches_not_found_count",
+            "Total number of network compressed account fetches where account was not found",
+        ),
+        &["origin"],
+    )
+    .unwrap();
+
     pub static ref UNDELEGATION_REQUESTED_COUNT: IntCounter =
         IntCounter::new(
             "undelegation_requested_count",
@@ -373,6 +407,10 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_FAILED_COUNT);
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
+        register!(COMPRESSED_ACCOUNT_FETCHES_SUCCESS_COUNT);
+        register!(COMPRESSED_ACCOUNT_FETCHES_FAILED_COUNT);
+        register!(COMPRESSED_ACCOUNT_FETCHES_FOUND_COUNT);
+        register!(COMPRESSED_ACCOUNT_FETCHES_NOT_FOUND_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(UNSTUCK_UNDELEGATION_COUNT);
@@ -551,6 +589,32 @@ pub fn inc_account_fetches_not_found(
     count: u64,
 ) {
     ACCOUNT_FETCHES_NOT_FOUND_COUNT
+        .with_label_values(&[fetch_origin.value()])
+        .inc_by(count);
+}
+
+pub fn inc_compressed_account_fetches_success(count: u64) {
+    COMPRESSED_ACCOUNT_FETCHES_SUCCESS_COUNT.inc_by(count);
+}
+
+pub fn inc_compressed_account_fetches_failed(count: u64) {
+    COMPRESSED_ACCOUNT_FETCHES_FAILED_COUNT.inc_by(count);
+}
+
+pub fn inc_compressed_account_fetches_found(
+    fetch_origin: AccountFetchOrigin,
+    count: u64,
+) {
+    COMPRESSED_ACCOUNT_FETCHES_FOUND_COUNT
+        .with_label_values(&[fetch_origin.value()])
+        .inc_by(count);
+}
+
+pub fn inc_compressed_account_fetches_not_found(
+    fetch_origin: AccountFetchOrigin,
+    count: u64,
+) {
+    COMPRESSED_ACCOUNT_FETCHES_NOT_FOUND_COUNT
         .with_label_values(&[fetch_origin.value()])
         .inc_by(count);
 }

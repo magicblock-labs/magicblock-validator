@@ -47,13 +47,14 @@ pub mod program_account;
 mod remote_account;
 
 pub use chain_pubsub_actor::SubscriptionUpdate;
-use magicblock_metrics::{
-    metrics,
-    metrics::{
-        inc_account_fetches_failed, inc_account_fetches_found,
-        inc_account_fetches_not_found, inc_account_fetches_success,
-        set_monitored_accounts_count, AccountFetchOrigin,
-    },
+use magicblock_metrics::metrics::{
+    self, inc_account_fetches_failed, inc_account_fetches_found,
+    inc_account_fetches_not_found, inc_account_fetches_success,
+    inc_compressed_account_fetches_failed,
+    inc_compressed_account_fetches_found,
+    inc_compressed_account_fetches_not_found,
+    inc_compressed_account_fetches_success, set_monitored_accounts_count,
+    AccountFetchOrigin,
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
@@ -934,25 +935,44 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 ));
             }
 
-            let (remote_accounts_results, found_count, not_found_count) = join_set
+            let (
+                remote_accounts_results,
+                found_count,
+                not_found_count,
+                compressed_found_count,
+                compressed_not_found_count,
+            ) = join_set
                 .join_all()
                 .await
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .fold(
-                    (vec![], 0, 0),
+                    (vec![], 0, 0, 0, 0),
                     |(
                         remote_accounts_results,
                         found_count,
                         not_found_count,
+                        compressed_found_count,
+                        compressed_not_found_count,
                     ),
                      (accs, found_cnt, not_found_cnt)| {
-                        (
-                            [remote_accounts_results, vec![accs]].concat(),
-                            found_count + found_cnt,
-                            not_found_count + not_found_cnt,
-                        )
+                        match &accs {
+                            FetchedRemoteAccounts::Rpc(_) => (
+                                [remote_accounts_results, vec![accs]].concat(),
+                                found_count + found_cnt,
+                                not_found_count + not_found_cnt,
+                                compressed_found_count,
+                                compressed_not_found_count,
+                            ),
+                            FetchedRemoteAccounts::Compressed(_) => (
+                                [remote_accounts_results, vec![accs]].concat(),
+                                found_count,
+                                not_found_count,
+                                compressed_found_count + found_cnt,
+                                compressed_not_found_count + not_found_cnt,
+                            ),
+                        }
                     },
                 );
             let remote_accounts = Self::consolidate_fetched_remote_accounts(
@@ -964,6 +984,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             inc_account_fetches_success(pubkeys.len() as u64);
             inc_account_fetches_found(fetch_origin, found_count);
             inc_account_fetches_not_found(fetch_origin, not_found_count);
+
+            // Update metrics for successful compressed fetch
+            inc_compressed_account_fetches_success(
+                compressed_found_count as u64,
+            );
+            inc_compressed_account_fetches_found(
+                fetch_origin,
+                compressed_found_count,
+            );
+            inc_compressed_account_fetches_not_found(
+                fetch_origin,
+                compressed_not_found_count,
+            );
 
             if log_enabled!(log::Level::Trace) {
                 trace!(
@@ -1196,7 +1229,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
     ) -> RemoteAccountProviderResult<(FetchedRemoteAccounts, u64, u64)> {
         let (compressed_accounts, slot) = photon_client
             .get_multiple_accounts(&pubkeys, Some(min_context_slot))
-            .await?;
+            .await
+            .inspect_err(|err| {
+                error!("Error fetching compressed accounts: {err:?}");
+                inc_compressed_account_fetches_failed(pubkeys.len() as u64);
+            })?;
 
         // TODO: we should retry if the slot is not high enough
         assert!(slot >= min_context_slot);
@@ -1212,7 +1249,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 None => RemoteAccount::NotFound(slot),
             })
             .collect::<Vec<_>>();
-        Ok((FetchedRemoteAccounts::Compressed(remote_accounts), 0, 0))
+        Ok((
+            FetchedRemoteAccounts::Compressed(remote_accounts),
+            pubkeys.len() as u64,
+            0,
+        ))
     }
 
     fn consolidate_fetched_remote_accounts(
