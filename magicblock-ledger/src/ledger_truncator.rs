@@ -254,7 +254,7 @@ impl LedgerTrunctationWorker {
     }
 
     /// Synchronous utility function that triggers and awaits compaction on all the columns
-    /// Compacts [from_slot; to_slot] inclusing ramge
+    /// Compacts [from_slot; to_slot] inclusive range
     pub fn compact_slot_range(
         ledger: &Arc<Ledger>,
         from_slot: u64,
@@ -268,7 +268,8 @@ impl LedgerTrunctationWorker {
             return;
         }
         if cancellation_token.is_cancelled() {
-            info!("Validator is shutting down - skipping manual compaction")
+            info!("Validator is shutting down - skipping manual compaction");
+            return;
         }
 
         info!(
