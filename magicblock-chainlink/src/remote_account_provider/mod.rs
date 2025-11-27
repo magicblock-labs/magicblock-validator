@@ -934,8 +934,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 ));
             }
 
-            let (remote_accounts_results, found_count, not_found_count) =
-                join_set.join_all().await.into_iter().fold(
+            let (remote_accounts_results, found_count, not_found_count) = join_set
+                .join_all()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .fold(
                     (vec![], 0, 0),
                     |(
                         remote_accounts_results,
@@ -993,6 +998,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     let _ = request.send(Ok(remote_account.clone()));
                 }
             }
+            Ok::<(), RemoteAccountProviderError>(())
         });
     }
 
@@ -1002,7 +1008,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         fetching_accounts: Arc<FetchingAccounts>,
         mark_empty_if_not_found: Vec<Pubkey>,
         min_context_slot: u64,
-    ) -> (FetchedRemoteAccounts, u64, u64) {
+    ) -> RemoteAccountProviderResult<(FetchedRemoteAccounts, u64, u64)> {
         const MAX_RETRIES: u64 = 10;
 
         let rpc_client = rpc_client.clone();
@@ -1174,26 +1180,23 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     }
                 })
                 .collect(), found_count, not_found_count))
-            }).await.unwrap().unwrap();
-        // TODO: @@@ unwrap
+            }).await??;
 
-        (
+        Ok((
             FetchedRemoteAccounts::Rpc(remote_accounts),
             found_count,
             not_found_count,
-        )
+        ))
     }
 
     async fn fetch_from_photon(
         photon_client: P,
         pubkeys: Arc<Vec<Pubkey>>,
         min_context_slot: u64,
-    ) -> (FetchedRemoteAccounts, u64, u64) {
-        // TODO: @@@ unwrap and/or retry
+    ) -> RemoteAccountProviderResult<(FetchedRemoteAccounts, u64, u64)> {
         let (compressed_accounts, slot) = photon_client
             .get_multiple_accounts(&pubkeys, Some(min_context_slot))
-            .await
-            .unwrap();
+            .await?;
 
         // TODO: we should retry if the slot is not high enough
         assert!(slot >= min_context_slot);
@@ -1209,7 +1212,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 None => RemoteAccount::NotFound(slot),
             })
             .collect::<Vec<_>>();
-        (FetchedRemoteAccounts::Compressed(remote_accounts), 0, 0)
+        Ok((FetchedRemoteAccounts::Compressed(remote_accounts), 0, 0))
     }
 
     fn consolidate_fetched_remote_accounts(
