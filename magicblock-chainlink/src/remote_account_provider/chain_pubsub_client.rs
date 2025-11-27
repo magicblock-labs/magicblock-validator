@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     mem,
     sync::{Arc, Mutex},
     time::Duration,
@@ -148,7 +149,7 @@ pub trait ReconnectableClient {
     /// Re-subscribes to multiple accounts after a reconnection.
     async fn resub_multiple(
         &self,
-        pubkeys: &[Pubkey],
+        pubkeys: HashSet<Pubkey>,
     ) -> RemoteAccountProviderResult<()>;
 }
 
@@ -267,9 +268,9 @@ impl ReconnectableClient for ChainPubsubClientImpl {
 
     async fn resub_multiple(
         &self,
-        pubkeys: &[Pubkey],
+        pubkeys: HashSet<Pubkey>,
     ) -> RemoteAccountProviderResult<()> {
-        for &pubkey in pubkeys {
+        for pubkey in pubkeys {
             self.subscribe(pubkey).await?;
             // Don't spam the RPC provider - for 5,000 accounts we would take 250 secs = ~4 minutes
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -443,7 +444,7 @@ pub mod mock {
 
         async fn resub_multiple(
             &self,
-            pubkeys: &[Pubkey],
+            pubkeys: HashSet<Pubkey>,
         ) -> RemoteAccountProviderResult<()> {
             // Simulate transient resubscription failures
             {
@@ -458,7 +459,7 @@ pub mod mock {
                     );
                 }
             }
-            for &pubkey in pubkeys {
+            for pubkey in pubkeys {
                 self.subscribe(pubkey).await?;
                 // keep it small; tests shouldn't take long
                 tokio::time::sleep(Duration::from_millis(10)).await;
