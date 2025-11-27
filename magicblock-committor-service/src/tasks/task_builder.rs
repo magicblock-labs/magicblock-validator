@@ -475,9 +475,8 @@ pub(crate) async fn get_compressed_data(
         compressed_delegation_record_bytes: compressed_delegation_record
             .data
             .ok_or(TaskBuilderError::MissingCompressedData)?
-            .data
-            .clone(),
-        remaining_accounts: remaining_accounts.to_account_metas().0.clone(),
+            .data,
+        remaining_accounts: remaining_accounts.to_account_metas().0,
         account_meta,
         proof: proof_result.proof,
     })
