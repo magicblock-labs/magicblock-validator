@@ -16,7 +16,7 @@ pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 use log::*;
-use lru_cache::AccountsLruCache;
+pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
 use solana_account::Account;
@@ -47,14 +47,19 @@ pub mod program_account;
 mod remote_account;
 
 pub use chain_pubsub_actor::SubscriptionUpdate;
-use magicblock_metrics::metrics::{
-    self, inc_account_fetches_failed, inc_account_fetches_found,
-    inc_account_fetches_not_found, inc_account_fetches_success,
-    inc_compressed_account_fetches_failed,
-    inc_compressed_account_fetches_found,
-    inc_compressed_account_fetches_not_found,
-    inc_compressed_account_fetches_success, set_monitored_accounts_count,
-    AccountFetchOrigin,
+use magicblock_metrics::{
+    metrics,
+    metrics::{
+      inc_account_fetches_failed, inc_account_fetches_found,
+      inc_account_fetches_not_found, inc_account_fetches_success,
+      inc_compressed_account_fetches_failed,
+      inc_compressed_account_fetches_found,
+      inc_compressed_account_fetches_not_found,
+      inc_compressed_account_fetches_success,
+      inc_per_program_account_fetch_stats,
+      set_monitored_accounts_count, AccountFetchOrigin, 
+      ProgramFetchResult
+    }
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
@@ -206,6 +211,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         photon_client: Option<P>,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
+        lrucache_subscribed_accounts: Arc<AccountsLruCache>,
     ) -> ChainlinkResult<Option<RemoteAccountProvider<T, U, P>>> {
         if config.lifecycle_mode().needs_remote_account_provider() {
             Ok(Some(
@@ -215,6 +221,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     photon_client,
                     subscription_forwarder,
                     config,
+                    lrucache_subscribed_accounts,
                 )
                 .await?,
             ))
@@ -304,21 +311,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         photon_client: Option<P>,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
+        lrucache_subscribed_accounts: Arc<AccountsLruCache>,
     ) -> RemoteAccountProviderResult<Self> {
         let (removed_account_tx, removed_account_rx) =
             tokio::sync::mpsc::channel(100);
-        let subscribed_accounts = Arc::new(AccountsLruCache::new({
-            // SAFETY: NonZeroUsize::new only returns None if the value is 0.
-            // RemoteAccountProviderConfig can only be constructed with
-            // capacity > 0
-            let cap = config.subscribed_accounts_lru_capacity();
-            NonZeroUsize::new(cap).expect("non-zero capacity")
-        }));
 
         let active_subscriptions_updater =
             if config.enable_subscription_metrics() {
                 Some(Self::start_active_subscriptions_updater(
-                    subscribed_accounts.clone(),
+                    lrucache_subscribed_accounts.clone(),
                     Arc::new(pubsub_client.clone()),
                 ))
             } else {
@@ -333,7 +334,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             chain_slot: Arc::<AtomicU64>::default(),
             last_update_slot: Arc::<AtomicU64>::default(),
             received_updates_count: Arc::<AtomicU64>::default(),
-            lrucache_subscribed_accounts: subscribed_accounts.clone(),
+            lrucache_subscribed_accounts,
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
@@ -420,7 +421,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 }
             }
         }
-        let submux = SubMuxClient::new(pubsubs, None);
+
+        let subscribed_accounts = Arc::new(AccountsLruCache::new({
+            // SAFETY: NonZeroUsize::new only returns None if the value is 0.
+            // RemoteAccountProviderConfig can only be constructed with
+            // capacity > 0
+            let cap = config.subscribed_accounts_lru_capacity();
+            NonZeroUsize::new(cap).expect("non-zero capacity")
+        }));
+
+        let submux =
+            SubMuxClient::new(pubsubs, subscribed_accounts.clone(), None);
 
         RemoteAccountProvider::<
             ChainRpcClientImpl,
@@ -432,6 +443,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             photon_client,
             subscription_forwarder,
             config,
+            subscribed_accounts,
         )
         .await
     }
@@ -566,7 +578,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         pubkey: Pubkey,
         fetch_origin: AccountFetchOrigin,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey], None, fetch_origin)
+        self.try_get_multi(&[pubkey], None, fetch_origin, None)
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
@@ -583,8 +595,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
 
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
-        let remote_accounts =
-            self.try_get_multi(pubkeys, None, fetch_origin).await?;
+        let remote_accounts = self
+            .try_get_multi(pubkeys, None, fetch_origin, None)
+            .await?;
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
             config.as_ref().and_then(|c| c.min_context_slot),
@@ -607,7 +620,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     self.chain_slot()
                 );
             }
-            self.fetch(pubkeys.to_vec(), None, self.chain_slot(), fetch_origin);
+            self.fetch(
+                pubkeys.to_vec(),
+                None,
+                self.chain_slot(),
+                fetch_origin,
+                None,
+            );
         }
 
         // 3. Wait for the slots to match
@@ -627,8 +646,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     pubkey_slots
                 );
             }
-            let remote_accounts =
-                self.try_get_multi(pubkeys, None, fetch_origin).await?;
+            let remote_accounts = self
+                .try_get_multi(pubkeys, None, fetch_origin, None)
+                .await?;
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
                 config.min_context_slot,
@@ -679,6 +699,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
             return Ok(vec![]);
@@ -718,6 +739,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             mark_empty_if_not_found,
             min_context_slot,
             fetch_origin,
+            program_ids,
         );
 
         // Wait for all accounts to resolve (either from fetch or subscription override)
@@ -910,6 +932,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         mark_empty_if_not_found: Option<&[Pubkey]>,
         min_context_slot: u64,
         fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) {
         let rpc_client = self.rpc_client.clone();
         let photon_client = self.photon_client.clone();
@@ -917,6 +940,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         let pubkeys = Arc::new(pubkeys);
         let mark_empty_if_not_found =
             mark_empty_if_not_found.unwrap_or(&[]).to_vec();
+        let program_ids = program_ids.map(|ids| ids.to_vec());
         tokio::spawn(async move {
             let mut join_set = JoinSet::new();
             join_set.spawn(Self::fetch_from_rpc(
@@ -997,6 +1021,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 fetch_origin,
                 compressed_not_found_count,
             );
+          
+            // Record per-program metrics if programs were provided
+            if let Some(program_ids) = &program_ids {
+                for program_id in program_ids {
+                    if found_count > 0 {
+                        inc_per_program_account_fetch_stats(
+                            &program_id.to_string(),
+                            ProgramFetchResult::Found,
+                            found_count,
+                        );
+                    }
+                    if not_found_count > 0 {
+                        inc_per_program_account_fetch_stats(
+                            &program_id.to_string(),
+                            ProgramFetchResult::NotFound,
+                            not_found_count,
+                        );
+                    }
+                }
+            }
 
             if log_enabled!(log::Level::Trace) {
                 trace!(
@@ -1055,6 +1099,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 let mut fetching = fetching_accounts.lock().unwrap();
                 error!("{error_msg}");
                 inc_account_fetches_failed(pubkeys.len() as u64);
+                if let Some(program_ids) = &program_ids {
+                    for program_id in program_ids {
+                        inc_per_program_account_fetch_stats(
+                            &program_id.to_string(),
+                            ProgramFetchResult::Failed,
+                            pubkeys.len() as u64,
+                        );
+                    }
+                }
+
                 for pubkey in &*pubkeys {
                     // Update metrics
                     // Remove pending requests and send error
@@ -1429,6 +1483,7 @@ mod test {
             },
             utils::random_pubkey,
         },
+        utils::{create_test_lru_cache, random_pubkey},
     };
 
     #[tokio::test]
@@ -1443,18 +1498,15 @@ mod test {
             let pubsub_client =
                 chain_pubsub_client::mock::ChainPubsubClientMock::new(tx, rx);
             let (fwd_tx, _fwd_rx) = mpsc::channel(100);
-            let config = RemoteAccountProviderConfig::try_new_with_metrics(
-                1000,
-                LifecycleMode::Ephemeral,
-                false,
-            )
-            .unwrap();
+            let (subscribed_accounts, config) = create_test_lru_cache(1000);
+
             RemoteAccountProvider::new(
                 rpc_client,
                 pubsub_client,
                 None::<PhotonClientImpl>,
                 fwd_tx,
                 &config,
+                subscribed_accounts,
             )
             .await
             .unwrap()
@@ -1496,19 +1548,16 @@ mod test {
             (
                 {
                     let (fwd_tx, _fwd_rx) = mpsc::channel(100);
-                    let config =
-                        RemoteAccountProviderConfig::try_new_with_metrics(
-                            1000,
-                            LifecycleMode::Ephemeral,
-                            false,
-                        )
-                        .unwrap();
+                    let (subscribed_accounts, config) =
+                        create_test_lru_cache(1000);
+
                     RemoteAccountProvider::new(
                         rpc_client.clone(),
                         pubsub_client,
                         None::<PhotonClientImpl>,
                         fwd_tx,
                         &config,
+                        subscribed_accounts,
                     )
                     .await
                     .unwrap()
@@ -1582,12 +1631,8 @@ mod test {
         let pubsub_client = ChainPubsubClientMock::new(tx, rx);
 
         let (forward_tx, forward_rx) = mpsc::channel(100);
-        let config = RemoteAccountProviderConfig::try_new_with_metrics(
-            1000,
-            LifecycleMode::Ephemeral,
-            false,
-        )
-        .unwrap();
+        let (subscribed_accounts, config) = create_test_lru_cache(1000);
+
         (
             RemoteAccountProvider::new(
                 rpc_client,
@@ -1595,6 +1640,7 @@ mod test {
                 None::<PhotonClientMock>,
                 forward_tx,
                 &config,
+                subscribed_accounts,
             )
             .await
             .unwrap(),
@@ -1793,17 +1839,16 @@ mod test {
         let pubsub_client = ChainPubsubClientMock::new(tx, rx);
 
         let (forward_tx, forward_rx) = mpsc::channel(100);
+        let (subscribed_accounts, config) =
+            create_test_lru_cache(accounts_capacity);
+
         let provider = RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
             None::<PhotonClientMock>,
             forward_tx,
-            &RemoteAccountProviderConfig::try_new_with_metrics(
-                accounts_capacity,
-                LifecycleMode::Ephemeral,
-                false,
-            )
-            .unwrap(),
+            &config,
+            subscribed_accounts,
         )
         .await
         .unwrap();

@@ -7,6 +7,7 @@ use prometheus::{
 };
 pub use types::{
     AccountClone, AccountCommit, AccountFetchOrigin, LabelValue, Outcome,
+    ProgramFetchResult,
 };
 
 mod types;
@@ -243,6 +244,14 @@ lazy_static::lazy_static! {
             "Total number of network compressed account fetches where account was not found",
         ),
         &["origin"],
+    ).unwrap();
+  
+    pub static ref PER_PROGRAM_ACCOUNT_FETCH_STATS: IntCounterVec = IntCounterVec::new(
+        Opts::new(
+            "per_program_account_fetch_stats",
+            "Per-program account fetch statistics (failed/found/not_found)",
+        ),
+        &["program", "result"],
     )
     .unwrap();
 
@@ -411,6 +420,7 @@ pub(crate) fn register() {
         register!(COMPRESSED_ACCOUNT_FETCHES_FAILED_COUNT);
         register!(COMPRESSED_ACCOUNT_FETCHES_FOUND_COUNT);
         register!(COMPRESSED_ACCOUNT_FETCHES_NOT_FOUND_COUNT);
+        register!(PER_PROGRAM_ACCOUNT_FETCH_STATS);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(UNSTUCK_UNDELEGATION_COUNT);
@@ -616,6 +626,16 @@ pub fn inc_compressed_account_fetches_not_found(
 ) {
     COMPRESSED_ACCOUNT_FETCHES_NOT_FOUND_COUNT
         .with_label_values(&[fetch_origin.value()])
+        .inc_by(count);
+}
+
+pub fn inc_per_program_account_fetch_stats(
+    program_id: &str,
+    result: ProgramFetchResult,
+    count: u64,
+) {
+    PER_PROGRAM_ACCOUNT_FETCH_STATS
+        .with_label_values(&[program_id, result.value()])
         .inc_by(count);
 }
 

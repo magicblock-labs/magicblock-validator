@@ -21,8 +21,9 @@ use magicblock_chainlink::{
         deleg::add_delegation_record_for,
         photon_client_mock::PhotonClientMock,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
+        utils::{create_test_lru_cache, create_test_lru_cache_with_config},
     },
-    Chainlink,
+    AccountFetchOrigin, Chainlink,
 };
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
@@ -82,6 +83,9 @@ impl TestContext {
                 false, // disable subscription metrics
             )
             .unwrap();
+            let subscribed_accounts =
+                create_test_lru_cache_with_config(&config);
+
             let remote_account_provider =
                 RemoteAccountProvider::try_from_clients_and_mode(
                     rpc_client.clone(),
@@ -89,6 +93,7 @@ impl TestContext {
                     Some(photon_indexer.clone()),
                     tx,
                     &config,
+                    subscribed_accounts,
                 )
                 .await;
 
@@ -216,7 +221,8 @@ impl TestContext {
             .ensure_accounts(
                 &[*pubkey],
                 None,
-                magicblock_chainlink::AccountFetchOrigin::GetAccount,
+                AccountFetchOrigin::GetAccount,
+                None,
             )
             .await
     }
