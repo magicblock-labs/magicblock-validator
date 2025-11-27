@@ -224,21 +224,24 @@ impl TasksBuilder for TaskBuilderImpl {
             photon_client: &Option<Arc<PhotonIndexer>>,
         ) -> TaskBuilderResult<Vec<Option<CompressedData>>> {
             if is_compressed {
-                let mut compressed_data = vec![];
                 let photon_client = photon_client
                     .as_ref()
                     .ok_or(TaskBuilderError::PhotonClientNotFound)?;
-                for account in committed_accounts {
-                    compressed_data.push(Some(
-                        get_compressed_data(
-                            &account.pubkey,
-                            photon_client,
-                            None,
-                        )
-                        .await?,
-                    ));
-                }
-                Ok(compressed_data)
+                committed_accounts
+                    .iter()
+                    .map(|account| async {
+                        Ok(Some(
+                            get_compressed_data(
+                                &account.pubkey,
+                                photon_client,
+                                None,
+                            )
+                            .await?,
+                        ))
+                    })
+                    .collect::<FuturesUnordered<_>>()
+                    .try_collect()
+                    .await
             } else {
                 Ok(vec![None; committed_accounts.len()])
             }
