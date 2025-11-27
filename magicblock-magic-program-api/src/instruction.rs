@@ -119,6 +119,7 @@ pub struct AccountModification {
     // https://github.com/magicblock-labs/magicblock-validator/issues/580
     pub rent_epoch: Option<u64>,
     pub delegated: Option<bool>,
+    pub confined: Option<bool>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -131,4 +132,5 @@ pub struct AccountModificationForInstruction {
     // https://github.com/magicblock-labs/magicblock-validator/issues/580
     pub rent_epoch: Option<u64>,
     pub delegated: Option<bool>,
+    pub confined: Option<bool>,
 }
