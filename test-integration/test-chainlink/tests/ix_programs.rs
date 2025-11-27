@@ -437,7 +437,7 @@ async fn ixtest_clone_memo_v1_loader_program() {
     let pubkeys = [MEMOV1];
 
     ctx.chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
         .await
         .unwrap();
 
@@ -465,7 +465,7 @@ async fn ixtest_clone_memo_v2_loader_program() {
     let pubkeys = [MEMOV2];
 
     ctx.chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
         .await
         .unwrap();
 
@@ -494,7 +494,7 @@ async fn ixtest_clone_mini_v2_loader_program() {
     let pubkeys = [MINIV2];
 
     ctx.chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
         .await
         .unwrap();
 
@@ -521,7 +521,7 @@ async fn ixtest_clone_mini_v3_loader_program() {
     let pubkeys = [MINIV3];
 
     ctx.chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
         .await
         .unwrap();
 
@@ -573,7 +573,7 @@ async fn ixtest_clone_mini_v4_loader_program() {
     let pubkeys = [prog_kp.pubkey()];
 
     ctx.chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
         .await
         .unwrap();
 
@@ -601,7 +601,7 @@ async fn ixtest_clone_multiple_programs_v1_v2_v3() {
     let pubkeys = [MEMOV1, MEMOV2, MINIV3];
 
     ctx.chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
         .await
         .unwrap();
 

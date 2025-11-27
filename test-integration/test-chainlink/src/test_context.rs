@@ -21,7 +21,7 @@ use magicblock_chainlink::{
         deleg::add_delegation_record_for,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
     },
-    Chainlink,
+    AccountFetchOrigin, Chainlink,
 };
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
@@ -206,7 +206,8 @@ impl TestContext {
             .ensure_accounts(
                 &[*pubkey],
                 None,
-                magicblock_chainlink::AccountFetchOrigin::GetAccount,
+                AccountFetchOrigin::GetAccount,
+                None,
             )
             .await
     }
