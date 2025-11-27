@@ -407,15 +407,17 @@ where
                                         delegation_record.owner
                                     );
                                 }
+                                let is_confined = delegation_record
+                                    .authority
+                                    .eq(&Pubkey::default());
                                 let is_delegated_to_us = delegation_record
                                     .authority
-                                    .eq(&self.validator_pubkey) ||
-                                    // TODO(thlorenz): @ once the delegation program supports
-                                    // delegating to specific authority we need to remove the below
-                                    delegation_record.authority.eq(&Pubkey::default());
+                                    .eq(&self.validator_pubkey)
+                                    || is_confined;
 
                                 account
                                     .set_owner(delegation_record.owner)
+                                    .set_confined(is_confined)
                                     .set_delegated(is_delegated_to_us);
 
                                 // For accounts delegated to us, always unsubscribe from the delegated account
