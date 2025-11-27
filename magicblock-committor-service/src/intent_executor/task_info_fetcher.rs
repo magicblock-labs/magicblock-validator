@@ -102,11 +102,11 @@ impl CacheTaskInfoFetcher {
                     return err
                 }
                 Err(TaskInfoFetcherError::LightRpcError(err)) => {
-                    // TODO(edwin0: RPC error handlings should be more robust
+                    // TODO(edwin): RPC error handlings should be more robust
                     last_err = TaskInfoFetcherError::LightRpcError(err)
                 }
                 Err(TaskInfoFetcherError::IndexerError(err)) => {
-                    // TODO(edwin0: RPC error handlings should be more robust
+                    // TODO(edwin): RPC error handlings should be more robust
                     last_err = TaskInfoFetcherError::IndexerError(err)
                 }
                 Err(TaskInfoFetcherError::MagicBlockRpcClientError(err)) => {
@@ -115,11 +115,11 @@ impl CacheTaskInfoFetcher {
                         TaskInfoFetcherError::MagicBlockRpcClientError(err)
                 }
                 Err(TaskInfoFetcherError::NoCompressedData(err)) => {
-                    // TODO(edwin0: RPC error handlings should be more robust
+                    // TODO(edwin): RPC error handlings should be more robust
                     last_err = TaskInfoFetcherError::NoCompressedData(err)
                 }
                 Err(TaskInfoFetcherError::NoCompressedAccount(err)) => {
-                    // TODO(edwin0: RPC error handlings should be more robust
+                    // TODO(edwin): RPC error handlings should be more robust
                     last_err = TaskInfoFetcherError::NoCompressedAccount(err)
                 }
             }
