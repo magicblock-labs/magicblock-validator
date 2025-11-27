@@ -224,6 +224,13 @@ git = "https://github.com/magicblock-labs/magicblock-svm.git"
 rev = "e480fa2"
 features = ["dev-context-only-utils"]
 
+[workspace.dependencies.rocksdb]
+# Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
+# when also using the bzip2 crate
+version = "0.22.0"
+default-features = false
+features = ["lz4"]
+
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
@@ -231,3 +238,5 @@ features = ["dev-context-only-utils"]
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "5afcedc" }
 solana-storage-proto = { path = "./storage-proto" }
 solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "e480fa2" }
+# TODO(edwin): remove once solana version is raise to 2.3
+rocksdb = { git = "https://github.com/rust-rocksdb/rust-rocksdb.git", rev = "3525109" }

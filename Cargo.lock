@@ -11991,3 +11991,8 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "rocksdb"
+version = "0.23.0"
+source = "git+https://github.com/rust-rocksdb/rust-rocksdb.git?rev=3525109#3525109490bcdf66565e5d22ff8a19fdd7240bba"
