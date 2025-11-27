@@ -93,6 +93,7 @@ impl ChainlinkCloner {
             data: Some(account.data().to_owned()),
             executable: Some(account.executable()),
             delegated: Some(account.delegated()),
+            confined: Some(account.confined()),
         };
         InstructionUtils::modify_accounts(
             vec![account_modification],
@@ -191,6 +192,7 @@ impl ChainlinkCloner {
                         &validator_kp.pubkey(),
                     );
 
+                // Programs aren't marked as confined since they are also never delegated
                 let pre_deploy_mod_instruction = {
                     let pre_deploy_mods = vec![AccountModification {
                         pubkey: program_id,
@@ -198,6 +200,7 @@ impl ChainlinkCloner {
                         owner: Some(loader_v4::id()),
                         executable: Some(true),
                         data: Some(pre_deploy_loader_state),
+                        confined: Some(false),
                         ..Default::default()
                     }];
                     InstructionUtils::modify_accounts_instruction(
@@ -209,6 +212,7 @@ impl ChainlinkCloner {
                     let post_deploy_mods = vec![AccountModification {
                         pubkey: program_id,
                         data: Some(post_deploy_loader_state),
+                        confined: Some(false),
                         ..Default::default()
                     }];
                     InstructionUtils::modify_accounts_instruction(

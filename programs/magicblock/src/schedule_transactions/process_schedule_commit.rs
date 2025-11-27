@@ -131,6 +131,16 @@ pub(crate) fn process_schedule_commit(
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
+
+        if acc.borrow().confined() {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: account {} is confined and cannot be committed",
+                acc_pubkey
+            );
+            return Err(InstructionError::InvalidAccountData);
+        }
+
         {
             if opts.request_undelegation {
                 // Check if account is writable and also undelegated
