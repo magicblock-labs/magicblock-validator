@@ -491,12 +491,10 @@ where
         account: &mut ResolvedAccountSharedData,
         delegation_record: &DelegationRecord,
     ) {
-        let is_confined =
-            delegation_record.authority.eq(&Pubkey::default());
-        let is_delegated_to_us = delegation_record
-            .authority
-            .eq(&self.validator_pubkey)
-            || is_confined;
+        let is_confined = delegation_record.authority.eq(&Pubkey::default());
+        let is_delegated_to_us =
+            delegation_record.authority.eq(&self.validator_pubkey)
+                || is_confined;
 
         account
             .set_owner(delegation_record.owner)
@@ -3029,16 +3027,16 @@ mod tests {
         add_delegation_record_for(
             &rpc_client,
             account1_pubkey,
-            validator_pubkey, // Authority
-            account_owner,    // Owner
+            validator_pubkey,
+            account_owner,
         );
 
         // Add delegation record for Account 2 (Authority = Default/System)
         add_delegation_record_for(
             &rpc_client,
             account2_pubkey,
-            Pubkey::default(), // Authority
-            account_owner,     // Owner
+            Pubkey::default(),
+            account_owner,
         );
 
         // Fetch and clone both accounts
@@ -3053,7 +3051,7 @@ mod tests {
             .await
             .expect("Failed to fetch and clone accounts");
 
-        // Verify Account 1
+        // Verify not confined Account
         let cloned_account1 = accounts_bank
             .get_account(&account1_pubkey)
             .expect("Account 1 not found");
@@ -3064,7 +3062,7 @@ mod tests {
         );
         assert_eq!(cloned_account1.owner(), &account_owner);
 
-        // Verify Account 2
+        // Verify confined Account
         let cloned_account2 = accounts_bank
             .get_account(&account2_pubkey)
             .expect("Account 2 not found");
