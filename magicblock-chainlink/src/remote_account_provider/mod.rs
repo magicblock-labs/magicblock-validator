@@ -1268,7 +1268,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             error!("BUG: Fetched accounts length mismatch: pubkeys {}, rpc {}, compressed {:?}",
                 pubkeys.len(), rpc_accounts.len(),
                 compressed_accounts.as_ref().map(|c| c.len()));
-            return vec![];
+            return rpc_accounts;
         }
 
         use RemoteAccount::*;
