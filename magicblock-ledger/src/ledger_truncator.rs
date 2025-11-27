@@ -1,5 +1,6 @@
 use std::{
     cmp::min,
+    ops::ControlFlow,
     sync::Arc,
     thread::{self, JoinHandle},
     time::Duration,
@@ -87,9 +88,12 @@ impl LedgerTrunctationWorker {
             self.truncate_fat_ledger(current_ledger_size)?;
         } else {
             match self.estimate_truncation_range(current_ledger_size)? {
-                Some((from_slot, to_slot)) => {
-                    Self::truncate_slot_range(&self.ledger, from_slot, to_slot)
-                }
+                Some((from_slot, to_slot)) => Self::truncate_slot_range(
+                    &self.ledger,
+                    from_slot,
+                    to_slot,
+                    self.cancellation_token.clone(),
+                ),
                 None => warn!("Could not estimate truncation range"),
             }
         }
@@ -137,7 +141,12 @@ impl LedgerTrunctationWorker {
             // We will still compact
             error!("Failed to flush: {}", err);
         }
-        Self::compact_slot_range(&self.ledger, 0, truncate_to_slot);
+        Self::compact_slot_range(
+            &self.ledger,
+            0,
+            truncate_to_slot,
+            self.cancellation_token.clone(),
+        );
 
         Ok(())
     }
@@ -191,6 +200,7 @@ impl LedgerTrunctationWorker {
         ledger: &Arc<Ledger>,
         from_slot: u64,
         to_slot: u64,
+        cancellation_token: CancellationToken,
     ) {
         // In order not to torture RocksDB's WriteBatch we split large tasks into chunks
         const SINGLE_TRUNCATION_LIMIT: usize = 300;
@@ -207,7 +217,11 @@ impl LedgerTrunctationWorker {
         let ledger_copy = ledger.clone();
         (from_slot..=to_slot)
             .step_by(SINGLE_TRUNCATION_LIMIT)
-            .for_each(|cur_from_slot| {
+            .try_for_each(|cur_from_slot| {
+                if cancellation_token.is_cancelled() {
+                    return ControlFlow::Break(());
+                }
+
                 let num_slots_to_truncate = min(
                     to_slot - cur_from_slot + 1,
                     SINGLE_TRUNCATION_LIMIT as u64,
@@ -223,13 +237,20 @@ impl LedgerTrunctationWorker {
                         cur_from_slot, truncate_to_slot, err
                     );
                 }
+
+                ControlFlow::Continue(())
             });
 
         // Flush memtables with tombstones prior to compaction
         if let Err(err) = ledger_copy.flush() {
             error!("Failed to flush ledger: {err}");
         }
-        Self::compact_slot_range(ledger, from_slot, to_slot);
+        Self::compact_slot_range(
+            ledger,
+            from_slot,
+            to_slot,
+            cancellation_token,
+        );
     }
 
     /// Synchronous utility function that triggers and awaits compaction on all the columns
@@ -238,41 +259,89 @@ impl LedgerTrunctationWorker {
         ledger: &Arc<Ledger>,
         from_slot: u64,
         to_slot: u64,
+        cancellation_token: CancellationToken,
     ) {
+        use crate::compact_cf_or_return;
+
         if to_slot < from_slot {
             warn!("LedgerTruncator: Nani2?");
             return;
         }
+        if cancellation_token.is_cancelled() {
+            info!("Validator is shutting down - skipping manual compaction")
+        }
 
-        // Compaction can be run concurrently for different cf
-        // but it utilizes rocksdb threads, in order not to drain
-        // our tokio rt threads, we split offload the effort to a
-        // separate thread
-        let mut measure = Measure::start("Manual compaction");
-        let ledger = ledger.clone();
-        ledger.compact_slot_range_cf::<Blocktime>(
-            Some(from_slot),
-            Some(to_slot + 1),
+        info!(
+            "LedgerTruncator: compacting slot range [{from_slot}; {to_slot}]"
         );
-        ledger.compact_slot_range_cf::<Blockhash>(
-            Some(from_slot),
-            Some(to_slot + 1),
-        );
-        ledger.compact_slot_range_cf::<PerfSamples>(
-            Some(from_slot),
-            Some(to_slot + 1),
-        );
-        ledger.compact_slot_range_cf::<SlotSignatures>(
-            Some((from_slot, u32::MIN)),
-            Some((to_slot + 1, u32::MAX)),
-        );
-        ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
-        ledger.compact_slot_range_cf::<Transaction>(None, None);
-        ledger.compact_slot_range_cf::<TransactionMemos>(None, None);
-        ledger.compact_slot_range_cf::<AddressSignatures>(None, None);
 
-        measure.stop();
-        info!("Manual compaction took: {measure}");
+        struct CompactionMeasure {
+            measure: Measure,
+        }
+        impl Drop for CompactionMeasure {
+            fn drop(&mut self) {
+                self.measure.stop();
+                info!("Manual compaction took: {}", self.measure);
+            }
+        }
+
+        let _measure = CompactionMeasure {
+            measure: Measure::start("Manual compaction"),
+        };
+
+        let start = from_slot;
+        let end = to_slot + 1;
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            start,
+            end,
+            Blocktime
+        );
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            start,
+            end,
+            Blockhash
+        );
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            start,
+            end,
+            PerfSamples
+        );
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            (Some((from_slot, u32::MIN)), Some((to_slot + 1, u32::MAX))),
+            SlotSignatures
+        );
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            (None, None),
+            TransactionStatus
+        );
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            (None, None),
+            Transaction
+        );
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            (None, None),
+            TransactionMemos
+        );
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            (None, None),
+            AddressSignatures
+        );
     }
 }
 
@@ -359,4 +428,28 @@ impl LedgerTruncator {
             Ok(())
         }
     }
+}
+
+#[macro_export]
+macro_rules! compact_cf_or_return {
+    ($ledger:expr, $token:expr, $from:expr, $to:expr, $cf:ty) => {{
+        $ledger.compact_slot_range_cf::<$cf>(Some($from), Some($to));
+        if $token.is_cancelled() {
+            info!(
+                "Validator shutting down - stopping compaction after {}",
+                <$cf as $crate::database::columns::ColumnName>::NAME
+            );
+            return;
+        }
+    }};
+    ($ledger:expr, $token:expr, ($from:expr, $to:expr), $cf:ty) => {{
+        $ledger.compact_slot_range_cf::<$cf>($from, $to);
+        if $token.is_cancelled() {
+            info!(
+                "Validator shutting down - stopping compaction after {}",
+                <$cf as $crate::database::columns::ColumnName>::NAME
+            );
+            return;
+        }
+    }};
 }
