@@ -922,6 +922,12 @@ mod tests {
             .get_mut(&committee_dos)
             .unwrap()
             .set_confined(true);
+        // Assert that the confined account remains delegated
+        let committee_dos_account = accounts_data.get(&committee_dos).unwrap();
+        assert!(
+            committee_dos_account.is_delegated(),
+            "Confined account should remain delegated"
+        );
 
         let ix = InstructionUtils::schedule_commit_instruction(
             &payer.pubkey(),
