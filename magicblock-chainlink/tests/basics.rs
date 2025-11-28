@@ -50,6 +50,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
             &[pubkey],
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -62,6 +63,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
             &[pubkey],
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -105,6 +107,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
             &[pubkey],
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();
@@ -120,6 +123,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
             &[pubkey],
             None,
             AccountFetchOrigin::GetMultipleAccounts,
+            None,
         )
         .await
         .unwrap();

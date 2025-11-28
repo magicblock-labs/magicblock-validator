@@ -95,8 +95,9 @@ impl DeliveryPreparator {
         let (res1, res2) = join(task_preparations, alts_preparations).await;
         res1.into_iter()
             .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::FailedToPrepareBufferAccounts)?;
-        let lookup_tables = res2.map_err(Error::FailedToCreateALTError)?;
+            .map_err(DeliveryPreparatorError::FailedToPrepareBufferAccounts)?;
+        let lookup_tables =
+            res2.map_err(DeliveryPreparatorError::FailedToCreateALTError)?;
 
         Ok(lookup_tables)
     }
@@ -547,12 +548,31 @@ pub enum InternalError {
     BaseTaskError(#[from] BaseTaskError),
 }
 
+impl InternalError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::MagicBlockRpcClientError(err) => err.signature(),
+            _ => None,
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum DeliveryPreparatorError {
     #[error("FailedToPrepareBufferAccounts: {0}")]
     FailedToPrepareBufferAccounts(#[source] InternalError),
     #[error("FailedToCreateALTError: {0}")]
     FailedToCreateALTError(#[source] InternalError),
 }
 
-pub type DeliveryPreparatorResult<T, E = Error> = Result<T, E>;
+impl DeliveryPreparatorError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::FailedToCreateALTError(err)
+            | Self::FailedToPrepareBufferAccounts(err) => err.signature(),
+        }
+    }
+}
+
+pub type DeliveryPreparatorResult<T, E = DeliveryPreparatorError> =
+    Result<T, E>;

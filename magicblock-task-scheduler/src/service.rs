@@ -45,7 +45,7 @@ pub struct TaskSchedulerService {
     /// Queue of tasks to execute
     task_queue: DelayQueue<DbTask>,
     /// Map of task IDs to their corresponding keys in the task queue
-    task_queue_keys: HashMap<u64, Key>,
+    task_queue_keys: HashMap<i64, Key>,
     /// Counter used to make each transaction unique
     tx_counter: AtomicU64,
     /// Token used to cancel the task scheduler
@@ -103,7 +103,7 @@ impl TaskSchedulerService {
         mut self,
     ) -> TaskSchedulerResult<JoinHandle<TaskSchedulerResult<()>>> {
         let tasks = self.db.get_tasks().await?;
-        let now = chrono::Utc::now().timestamp_millis() as u64;
+        let now = chrono::Utc::now().timestamp_millis();
         debug!(
             "Task scheduler starting at {} with {} tasks",
             now,
@@ -112,14 +112,15 @@ impl TaskSchedulerService {
         for task in tasks {
             let next_execution =
                 task.last_execution_millis + task.execution_interval_millis;
-            let timeout =
-                Duration::from_millis(next_execution.saturating_sub(now));
+            let timeout = Duration::from_millis(
+                next_execution.saturating_sub(now) as u64,
+            );
             let task_id = task.id;
             let key = self.task_queue.insert(task, timeout);
             self.task_queue_keys.insert(task_id, key);
         }
 
-        Ok(tokio::spawn(async move { self.run().await }))
+        Ok(tokio::spawn(self.run()))
     }
 
     async fn process_request(
@@ -211,7 +212,7 @@ impl TaskSchedulerService {
             };
             let key = self.task_queue.insert(
                 new_task,
-                Duration::from_millis(task.execution_interval_millis),
+                Duration::from_millis(task.execution_interval_millis as u64),
             );
             self.task_queue_keys.insert(task.id, key);
         }
@@ -251,7 +252,7 @@ impl TaskSchedulerService {
 
     pub async fn unregister_task(
         &self,
-        task_id: u64,
+        task_id: i64,
     ) -> TaskSchedulerResult<()> {
         self.db.remove_task(task_id).await?;
         debug!("Removed task {} from database", task_id);
@@ -259,7 +260,7 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    pub async fn run(&mut self) -> TaskSchedulerResult<()> {
+    pub async fn run(mut self) -> TaskSchedulerResult<()> {
         loop {
             select! {
                 Some(task) = self.task_queue.next() => {
@@ -294,7 +295,7 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    fn remove_task_from_queue(&mut self, task_id: u64) {
+    fn remove_task_from_queue(&mut self, task_id: i64) {
         if let Some(key) = self.task_queue_keys.remove(&task_id) {
             self.task_queue.remove(&key);
         }

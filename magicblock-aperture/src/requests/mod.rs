@@ -15,6 +15,11 @@ pub(crate) struct JsonRequest<M> {
     /// An optional array of positional parameter values for the method.
     pub(crate) params: Option<Array>,
 }
+/// Represents either a single JSON-RPC request or a batch of multiple requests.
+pub enum RpcRequest {
+    Single(JsonHttpRequest),
+    Multi(Vec<JsonHttpRequest>),
+}
 
 impl<M> JsonRequest<M> {
     /// A helper method to get a mutable reference to the

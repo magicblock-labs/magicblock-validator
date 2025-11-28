@@ -1,6 +1,5 @@
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
-use magicblock_program::ID as MAGIC_PROGRAM_ID;
 use magicblock_task_scheduler::SchedulerDatabase;
 use program_flexi_counter::{
     instruction::{create_cancel_task_ix, create_schedule_task_ix},
@@ -29,7 +28,7 @@ fn test_schedule_error() {
         validator
     );
 
-    create_delegated_counter(&ctx, &payer, &mut validator);
+    create_delegated_counter(&ctx, &payer, &mut validator, 0);
 
     // Noop tx to make sure the noop program is cloned
     let ephem_blockhash = send_noop_tx(&ctx, &payer, &mut validator);
@@ -43,7 +42,6 @@ fn test_schedule_error() {
             &mut Transaction::new_signed_with_payer(
                 &[create_schedule_task_ix(
                     payer.pubkey(),
-                    MAGIC_PROGRAM_ID,
                     task_id,
                     execution_interval_millis,
                     iterations,
@@ -129,11 +127,7 @@ fn test_schedule_error() {
     let sig = expect!(
         ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
-                &[create_cancel_task_ix(
-                    payer.pubkey(),
-                    MAGIC_PROGRAM_ID,
-                    task_id,
-                )],
+                &[create_cancel_task_ix(payer.pubkey(), task_id,)],
                 Some(&payer.pubkey()),
                 &[&payer],
                 ephem_blockhash,
