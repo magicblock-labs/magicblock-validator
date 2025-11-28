@@ -32,13 +32,7 @@ solana-transaction-status = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
-
-[dependencies.rocksdb]
-# Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
-# when also using the bzip2 crate
-version = "0.22.0"
-default-features = false
-features = ["lz4"]
+rocksdb = { workspace = true, default-features = false, features = ["lz4"]}
 
 [dev-dependencies]
 tempfile = { workspace = true }
