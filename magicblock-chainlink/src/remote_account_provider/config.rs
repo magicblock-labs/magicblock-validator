@@ -1,5 +1,6 @@
+use magicblock_config::config::LifecycleMode;
+
 use super::{RemoteAccountProviderError, RemoteAccountProviderResult};
-use crate::config::LifecycleMode;
 
 // TODO(thlorenz): make configurable
 // Tracked: https://github.com/magicblock-labs/magicblock-validator/issues/577

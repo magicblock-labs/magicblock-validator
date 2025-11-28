@@ -3,7 +3,7 @@ use std::{
 };
 
 use lmdb::Transaction;
-use magicblock_config::{AccountsDbConfig, BlockSize, TEST_SNAPSHOT_FREQUENCY};
+use magicblock_config::config::{AccountsDbConfig, BlockSize};
 use solana_pubkey::Pubkey;
 
 use super::{AccountsDbIndex, Allocation};
@@ -404,11 +404,11 @@ fn test_byte_pack_unpack_macro() {
 // ==============================================================
 
 fn setup() -> IndexTestEnv {
-    let config = AccountsDbConfig::temp_for_tests(TEST_SNAPSHOT_FREQUENCY);
+    let config = AccountsDbConfig::default();
     let directory = tempfile::tempdir()
         .expect("failed to create temp directory for index tests")
         .keep();
-    let index = AccountsDbIndex::new(config.index_map_size, &directory)
+    let index = AccountsDbIndex::new(config.index_size, &directory)
         .expect("failed to create accountsdb index in temp dir");
     IndexTestEnv { index, directory }
 }

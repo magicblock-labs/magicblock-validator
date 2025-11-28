@@ -61,6 +61,7 @@ mod event_processor {
         env.advance_slot();
         let node_context = NodeContext {
             identity: env.payer.pubkey(),
+            blocktime: 50,
             ..Default::default()
         };
         let state = SharedState::new(
@@ -68,7 +69,6 @@ mod event_processor {
             env.accountsdb.clone(),
             env.ledger.clone(),
             Arc::new(chainlink(&env.accountsdb)),
-            50,
         );
         let cancel = CancellationToken::new();
         EventProcessor::start(&state, &env.dispatch, 1, cancel);

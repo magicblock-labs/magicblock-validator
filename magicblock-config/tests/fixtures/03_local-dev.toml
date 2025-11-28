@@ -1,5 +1,0 @@
-# Programs are automatically cloned from devnet.
-# All others are expected to be there or need to be created as part of the transactions.
-[accounts]
-remote.cluster = "devnet"
-lifecycle = "programs-replica"

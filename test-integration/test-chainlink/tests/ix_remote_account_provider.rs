@@ -1,6 +1,5 @@
 use log::{debug, info};
 use magicblock_chainlink::{
-    config::LifecycleMode,
     remote_account_provider::{
         chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
@@ -17,6 +16,7 @@ use magicblock_chainlink::{
     },
     AccountFetchOrigin,
 };
+use magicblock_config::config::LifecycleMode;
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig, request::RpcError,
 };

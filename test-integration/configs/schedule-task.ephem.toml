@@ -1,20 +1,11 @@
-[accounts]
-remote.url = "http://0.0.0.0:7799"
+remote = { http = "http://0.0.0.0:7799", ws = "ws://0.0.0.0:7800" }
 lifecycle = "ephemeral"
-commit = { frequency-millis = 9_000_000_000_000, compute-unit-price = 1_000_000 }
+commit = { compute-unit-price = 1_000_000 }
+listen = "0.0.0.0:8899"
 
 [ledger]
-resume-strategy = { kind = "reset" }
-
-[validator]
-millis-per-slot = 50
-sigverify = true
-
-[rpc]
-port = 8899
-
-[geyser-grpc]
-port = 10001
+reset = true
+block-time = "50ms"
 
 [task-scheduler]
 reset = true

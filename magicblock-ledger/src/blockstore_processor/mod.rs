@@ -1,7 +1,6 @@
-use std::{str::FromStr, sync::Arc};
+use std::str::FromStr;
 
 use log::{Level::Trace, *};
-use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::transactions::{
     SanitizeableTransaction, TransactionSchedulerHandle,
 };
@@ -148,21 +147,14 @@ async fn replay_blocks(
 /// at which the validator should continue processing (last processed slot + 1).
 pub async fn process_ledger(
     ledger: &Ledger,
-    accountsdb: &Arc<AccountsDb>,
+    full_process_starting_slot: Slot,
     transaction_scheduler: TransactionSchedulerHandle,
     max_age: u64,
 ) -> LedgerResult<u64> {
-    // NOTE:
-    // accountsdb was rolled back to max_slot (via ensure_at_most) during init
-    // so the returned slot here is guaranteed to be equal or less than the
-    // slot from `ledger.get_max_blockhash`
-    let full_process_starting_slot = accountsdb.slot();
-
     // Since transactions may refer to blockhashes that were present when they
     // ran initially we ensure that they are present during replay as well
-    let blockhashes_only_starting_slot = (full_process_starting_slot > max_age)
-        .then(|| full_process_starting_slot - max_age)
-        .unwrap_or_default();
+    let blockhashes_only_starting_slot =
+        full_process_starting_slot.saturating_sub(max_age);
     debug!(
         "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
         blockhashes_only_starting_slot, full_process_starting_slot
@@ -176,6 +168,5 @@ pub async fn process_ledger(
         transaction_scheduler,
     )
     .await?;
-    accountsdb.set_slot(slot);
     Ok(slot)
 }
