@@ -74,6 +74,12 @@ struct AccountWithCompanion {
     companion_account: Option<ResolvedAccountSharedData>,
 }
 
+enum RefreshDecision {
+    No,
+    Yes,
+    YesAndMarkEmptyIfNotFound,
+}
+
 #[derive(Debug, Default)]
 pub struct FetchAndCloneResult {
     pub not_found_on_chain: Vec<(Pubkey, u64)>,
@@ -574,6 +580,7 @@ where
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys = pubkeys
@@ -608,7 +615,12 @@ where
 
         let accs = self
             .remote_account_provider
-            .try_get_multi(pubkeys, mark_empty_if_not_found, fetch_origin)
+            .try_get_multi(
+                pubkeys,
+                mark_empty_if_not_found,
+                fetch_origin,
+                program_ids,
+            )
             .await?;
 
         trace!("Fetched {accs:?}");
@@ -1114,7 +1126,7 @@ where
         pubkey: &Pubkey,
         in_bank: &AccountSharedData,
         fetch_origin: AccountFetchOrigin,
-    ) -> bool {
+    ) -> RefreshDecision {
         if in_bank.undelegating() {
             debug!("Fetching undelegating account {pubkey}. delegated={}, undelegating={}", in_bank.delegated(), in_bank.undelegating());
             let deleg_record = self
@@ -1124,6 +1136,14 @@ where
                     fetch_origin,
                 )
                 .await;
+
+            if deleg_record.is_none() {
+                // If there is no delegation record then it is possible that the account itself
+                // does not exist either.
+                // In that case we need to refresh it as empty to clear the undelegation state.
+                return RefreshDecision::YesAndMarkEmptyIfNotFound;
+            }
+
             let delegated_on_chain = deleg_record.as_ref().is_some_and(|dr| {
                 dr.authority.eq(&self.validator_pubkey)
                     || dr.authority.eq(&Pubkey::default())
@@ -1138,14 +1158,14 @@ where
                 debug!(
                     "Account {pubkey} marked as undelegating will be overridden since undelegation completed"
                 );
-                return true;
+                return RefreshDecision::Yes;
             }
         } else if in_bank.owner().eq(&dlp::id()) {
             debug!(
                 "Account {pubkey} owned by deleg program not marked as undelegating"
             );
         }
-        false
+        RefreshDecision::No
     }
 
     /// Fetch and clone accounts with request deduplication to avoid parallel fetches of the same account.
@@ -1164,6 +1184,7 @@ where
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         // We cannot clone blacklisted accounts, thus either they are already
         // in the bank (e.g. native programs) or they don't exist and the transaction
@@ -1184,25 +1205,35 @@ where
         let mut await_pending = vec![];
         let mut fetch_new = vec![];
         let mut in_bank = vec![];
+        let mut extra_mark_empty = vec![];
         for pubkey in pubkeys.iter() {
             if let Some(account_in_bank) =
                 self.accounts_bank.get_account(pubkey)
             {
-                let should_refresh_undelegating = self
+                let decision = self
                     .should_refresh_undelegating_in_bank_account(
                         pubkey,
                         &account_in_bank,
                         fetch_origin,
                     )
                     .await;
-                if should_refresh_undelegating {
-                    debug!("Account {pubkey} completed undelegation which we missed and is fetched again");
-                    metrics::inc_unstuck_undelegation_count();
-                }
-                if !should_refresh_undelegating {
-                    // Account is in bank and subscribed correctly - no fetch needed
-                    trace!("Account {pubkey} found in bank in valid state, no fetch needed");
-                    in_bank.push(*pubkey);
+
+                match decision {
+                    RefreshDecision::Yes
+                    | RefreshDecision::YesAndMarkEmptyIfNotFound => {
+                        debug!("Account {pubkey} completed undelegation which we missed and is fetched again");
+                        metrics::inc_unstuck_undelegation_count();
+                        if let RefreshDecision::YesAndMarkEmptyIfNotFound =
+                            decision
+                        {
+                            extra_mark_empty.push(*pubkey);
+                        }
+                    }
+                    RefreshDecision::No => {
+                        // Account is in bank and subscribed correctly - no fetch needed
+                        trace!("Account {pubkey} found in bank in valid state, no fetch needed");
+                        in_bank.push(*pubkey);
+                    }
                 }
             }
         }
@@ -1237,11 +1268,22 @@ where
         // If we have accounts to fetch, delegate to the existing implementation
         // but notify all pending requests when done
         let result = if !fetch_new.is_empty() {
+            let mut all_mark_empty = mark_empty_if_not_found
+                .map(|x| x.to_vec())
+                .unwrap_or_default();
+            all_mark_empty.extend(extra_mark_empty);
+            let mark_empty_ref = if all_mark_empty.is_empty() {
+                None
+            } else {
+                Some(all_mark_empty.as_slice())
+            };
+
             self.fetch_and_clone_accounts(
                 &fetch_new,
-                mark_empty_if_not_found,
+                mark_empty_ref,
                 slot,
                 fetch_origin,
+                program_ids,
             )
             .await
         } else {
@@ -1673,10 +1715,9 @@ mod tests {
         accounts_bank::mock::AccountsBankStub,
         assert_not_cloned, assert_not_subscribed, assert_subscribed,
         assert_subscribed_without_delegation_record,
-        config::LifecycleMode,
         remote_account_provider::{
             chain_pubsub_client::mock::ChainPubsubClientMock,
-            config::RemoteAccountProviderConfig, RemoteAccountProvider,
+            RemoteAccountProvider,
         },
         testing::{
             accounts::{
@@ -1689,7 +1730,7 @@ mod tests {
             },
             init_logger,
             rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
-            utils::random_pubkey,
+            utils::{create_test_lru_cache, random_pubkey},
         },
     };
 
@@ -1802,17 +1843,15 @@ mod tests {
         let rpc_client_clone = rpc_client.clone();
 
         let (forward_tx, forward_rx) = mpsc::channel(1_000);
+        let (subscribed_accounts, config) = create_test_lru_cache(1000);
+
         let remote_account_provider = Arc::new(
             RemoteAccountProvider::new(
                 rpc_client,
                 pubsub_client,
                 forward_tx,
-                &RemoteAccountProviderConfig::try_new_with_metrics(
-                    1000,
-                    LifecycleMode::Ephemeral,
-                    false,
-                )
-                .unwrap(),
+                &config,
+                subscribed_accounts,
             )
             .await
             .unwrap(),
@@ -1888,6 +1927,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -1926,6 +1966,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -1985,6 +2026,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2062,6 +2104,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2144,6 +2187,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
         assert!(result.is_ok());
@@ -2158,6 +2202,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2256,6 +2301,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2359,6 +2405,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2431,6 +2478,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2452,6 +2500,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
         debug!("Test result after updating delegation record: {result:?}");
@@ -2506,6 +2555,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
 
@@ -2526,6 +2576,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
         debug!("Test result after updating account: {result:?}");
@@ -2587,6 +2638,7 @@ mod tests {
                         None,
                         None,
                         AccountFetchOrigin::GetAccount,
+                        None,
                     )
                     .await
             })
@@ -2656,6 +2708,7 @@ mod tests {
                         None,
                         None,
                         AccountFetchOrigin::GetAccount,
+                        None,
                     )
                     .await
             })
@@ -2732,6 +2785,7 @@ mod tests {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await;
         assert!(result.is_ok());
@@ -2824,6 +2878,7 @@ mod tests {
                         None,
                         None,
                         AccountFetchOrigin::GetAccount,
+                        None,
                     )
                     .await
             })
@@ -2910,6 +2965,7 @@ mod tests {
                 Some(&[marked_non_existing_account_pubkey]),
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
             )
             .await
             .expect("Fetch and clone failed");
@@ -2946,6 +3002,72 @@ mod tests {
         assert_subscribed_without_delegation_record!(
             remote_account_provider,
             &[&marked_non_existing_account_pubkey]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fetch_and_clone_undelegating_account_that_is_closed_on_chain()
+    {
+        init_logger();
+        let validator_pubkey = random_pubkey();
+        let account_pubkey = random_pubkey();
+        let account_owner = random_pubkey();
+        const CURRENT_SLOT: u64 = 100;
+
+        // The account exists in the bank (undelegating) but is closed on chain
+        let account_in_bank = Account {
+            lamports: 1_000_000,
+            data: vec![1, 2, 3, 4],
+            owner: account_owner,
+            executable: false,
+            rent_epoch: 0,
+        };
+
+        // Setup with NO accounts on chain
+        let FetcherTestCtx {
+            accounts_bank,
+            fetch_cloner,
+            remote_account_provider,
+            ..
+        } = setup(
+            std::iter::empty::<(Pubkey, Account)>(),
+            CURRENT_SLOT,
+            validator_pubkey,
+        )
+        .await;
+
+        // Insert account into bank and mark as undelegating
+        accounts_bank
+            .insert(account_pubkey, AccountSharedData::from(account_in_bank));
+        accounts_bank.set_undelegating(&account_pubkey, true);
+
+        // Fetch and clone - should detect closed account and clone empty account
+        let result = fetch_cloner
+            .fetch_and_clone_accounts_with_dedup(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await;
+
+        debug!("Test result: {result:?}");
+        assert!(result.is_ok());
+
+        // Account should be replaced with empty account in bank
+        let cloned_account = accounts_bank.get_account(&account_pubkey);
+        assert!(cloned_account.is_some());
+        let cloned_account = cloned_account.unwrap();
+
+        assert_eq!(cloned_account.lamports(), 0);
+        assert!(cloned_account.data().is_empty());
+        assert_eq!(*cloned_account.owner(), system_program::id());
+
+        // Should be subscribed
+        assert_subscribed_without_delegation_record!(
+            remote_account_provider,
+            &[&account_pubkey]
         );
     }
 }

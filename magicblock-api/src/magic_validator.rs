@@ -761,6 +761,9 @@ impl MagicValidator {
             error!("Failed to shutdown ledger: {:?}", err);
         }
         let _ = self.rpc_handle.join();
+        if let Err(err) = self.ledger_truncator.join() {
+            error!("Ledger truncator did not gracefully exit: {:?}", err);
+        }
     }
 
     pub fn ledger(&self) -> &Ledger {

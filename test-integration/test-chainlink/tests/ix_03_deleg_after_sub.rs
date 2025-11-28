@@ -23,7 +23,12 @@ async fn ixtest_deleg_after_subscribe_case2() {
         info!("1. Initially the account does not exist");
         let res = ctx
             .chainlink
-            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+            .ensure_accounts(
+                &pubkeys,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
             .await
             .unwrap();
 
@@ -38,7 +43,12 @@ async fn ixtest_deleg_after_subscribe_case2() {
         ctx.init_counter(&counter_auth).await;
 
         ctx.chainlink
-            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+            .ensure_accounts(
+                &pubkeys,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
             .await
             .unwrap();
 
@@ -62,7 +72,12 @@ async fn ixtest_deleg_after_subscribe_case2() {
         let deleg_record_pubkey = ctx.delegation_record_pubkey(&counter_pda);
 
         ctx.chainlink
-            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+            .ensure_accounts(
+                &pubkeys,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
             .await
             .unwrap();
 

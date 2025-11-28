@@ -115,7 +115,12 @@ impl HttpDispatcher {
             .start_timer();
         let _ = self
             .chainlink
-            .ensure_accounts(&[*pubkey], None, AccountFetchOrigin::GetAccount)
+            .ensure_accounts(
+                &[*pubkey],
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the account fails
@@ -141,6 +146,7 @@ impl HttpDispatcher {
                 pubkeys,
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
+                None,
             )
             .await
             .inspect_err(|e| {

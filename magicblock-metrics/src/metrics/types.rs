@@ -115,3 +115,36 @@ where
         }
     }
 }
+
+// -----------------
+// ProgramFetchResult
+// -----------------
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramFetchResult {
+    Failed,
+    Found,
+    NotFound,
+}
+
+impl ProgramFetchResult {
+    pub fn as_str(&self) -> &str {
+        use ProgramFetchResult::*;
+        match self {
+            Failed => "failed",
+            Found => "found",
+            NotFound => "not_found",
+        }
+    }
+}
+
+impl fmt::Display for ProgramFetchResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for ProgramFetchResult {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}

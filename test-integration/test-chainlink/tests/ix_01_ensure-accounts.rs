@@ -19,7 +19,7 @@ async fn ixtest_write_non_existing_account() {
     let pubkeys = [pubkey];
     let res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
         .await
         .unwrap();
     debug!("res: {res:?}");
@@ -44,7 +44,7 @@ async fn ixtest_write_existing_account_undelegated() {
     let pubkeys = [counter_auth.pubkey()];
     let res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
         .await
         .unwrap();
     debug!("res: {res:?}");
@@ -74,7 +74,7 @@ async fn ixtest_write_existing_account_valid_delegation_record() {
 
     let res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
         .await
         .unwrap();
     debug!("res: {res:?}");
