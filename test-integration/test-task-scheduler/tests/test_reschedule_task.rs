@@ -12,6 +12,7 @@ use solana_sdk::{
 use test_task_scheduler::{
     create_delegated_counter, send_noop_tx, setup_validator,
 };
+use tokio::runtime::Runtime;
 
 #[test]
 fn test_reschedule_task() {
@@ -103,8 +104,10 @@ fn test_reschedule_task() {
 
     // Check that the task was scheduled in the database
     let db = expect!(SchedulerDatabase::new(db_path), validator);
+    let runtime = expect!(Runtime::new(), validator);
 
-    let failed_scheduling = expect!(db.get_failed_schedulings(), validator);
+    let failed_scheduling =
+        expect!(runtime.block_on(db.get_failed_schedulings()), validator);
     assert_eq!(
         failed_scheduling.len(),
         0,
@@ -113,7 +116,8 @@ fn test_reschedule_task() {
         failed_scheduling,
     );
 
-    let failed_tasks = expect!(db.get_failed_tasks(), validator);
+    let failed_tasks =
+        expect!(runtime.block_on(db.get_failed_tasks()), validator);
     assert_eq!(
         failed_tasks.len(),
         0,
@@ -122,11 +126,12 @@ fn test_reschedule_task() {
         failed_tasks
     );
 
-    let tasks = expect!(db.get_task_ids(), validator);
+    let tasks = expect!(runtime.block_on(db.get_task_ids()), validator);
     assert_eq!(tasks.len(), 1, cleanup(&mut validator));
 
     let task = expect!(
-        db.get_task(task_id)
+        runtime
+            .block_on(db.get_task(task_id))
             .ok()
             .flatten()
             .ok_or(anyhow::anyhow!("Task not found")),
@@ -184,7 +189,7 @@ fn test_reschedule_task() {
     expect!(ctx.wait_for_delta_slot_ephem(5), validator);
 
     // Check that the task was cancelled
-    let tasks = expect!(db.get_task_ids(), validator);
+    let tasks = expect!(runtime.block_on(db.get_task_ids()), validator);
     assert_eq!(tasks.len(), 0, cleanup(&mut validator));
 
     cleanup(&mut validator);

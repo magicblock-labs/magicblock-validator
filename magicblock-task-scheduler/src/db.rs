@@ -4,6 +4,7 @@ use chrono::Utc;
 use magicblock_program::args::ScheduleTaskRequest;
 use rusqlite::{params, Connection};
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
+use tokio::sync::Mutex;
 
 use crate::errors::TaskSchedulerError;
 
@@ -55,7 +56,7 @@ pub struct FailedTask {
 }
 
 pub struct SchedulerDatabase {
-    conn: Connection,
+    conn: Mutex<Connection>,
 }
 
 impl SchedulerDatabase {
@@ -101,15 +102,20 @@ impl SchedulerDatabase {
             [],
         )?;
 
-        Ok(Self { conn })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
-    pub fn insert_task(&self, task: &DbTask) -> Result<(), TaskSchedulerError> {
+    pub async fn insert_task(
+        &self,
+        task: &DbTask,
+    ) -> Result<(), TaskSchedulerError> {
         let instructions_bin = bincode::serialize(&task.instructions)?;
         let authority_str = task.authority.to_string();
         let now = Utc::now().timestamp_millis();
 
-        self.conn.execute(
+        self.conn.lock().await.execute(
             "INSERT OR REPLACE INTO tasks 
              (id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -128,14 +134,14 @@ impl SchedulerDatabase {
         Ok(())
     }
 
-    pub fn update_task_after_execution(
+    pub async fn update_task_after_execution(
         &self,
         task_id: i64,
         last_execution: i64,
     ) -> Result<(), TaskSchedulerError> {
         let now = Utc::now().timestamp_millis();
 
-        self.conn.execute(
+        self.conn.lock().await.execute(
             "UPDATE tasks 
              SET executions_left = executions_left - 1, 
                  last_execution_millis = ?,
@@ -147,12 +153,12 @@ impl SchedulerDatabase {
         Ok(())
     }
 
-    pub fn insert_failed_scheduling(
+    pub async fn insert_failed_scheduling(
         &self,
         task_id: i64,
         error: String,
     ) -> Result<(), TaskSchedulerError> {
-        self.conn.execute(
+        self.conn.lock().await.execute(
             "INSERT INTO failed_scheduling (timestamp, task_id, error) VALUES (?, ?, ?)",
             params![Utc::now().timestamp_millis(), task_id, error],
         )?;
@@ -160,12 +166,12 @@ impl SchedulerDatabase {
         Ok(())
     }
 
-    pub fn insert_failed_task(
+    pub async fn insert_failed_task(
         &self,
         task_id: i64,
         error: String,
     ) -> Result<(), TaskSchedulerError> {
-        self.conn.execute(
+        self.conn.lock().await.execute(
             "INSERT INTO failed_tasks (timestamp, task_id, error) VALUES (?, ?, ?)",
             params![Utc::now().timestamp_millis(), task_id, error],
         )?;
@@ -173,11 +179,11 @@ impl SchedulerDatabase {
         Ok(())
     }
 
-    pub fn unschedule_task(
+    pub async fn unschedule_task(
         &self,
         task_id: i64,
     ) -> Result<(), TaskSchedulerError> {
-        self.conn.execute(
+        self.conn.lock().await.execute(
             "UPDATE tasks SET executions_left = 0 WHERE id = ?",
             [task_id],
         )?;
@@ -185,18 +191,24 @@ impl SchedulerDatabase {
         Ok(())
     }
 
-    pub fn remove_task(&self, task_id: i64) -> Result<(), TaskSchedulerError> {
+    pub async fn remove_task(
+        &self,
+        task_id: i64,
+    ) -> Result<(), TaskSchedulerError> {
         self.conn
+            .lock()
+            .await
             .execute("DELETE FROM tasks WHERE id = ?", [task_id])?;
 
         Ok(())
     }
 
-    pub fn get_task(
+    pub async fn get_task(
         &self,
         task_id: i64,
     ) -> Result<Option<DbTask>, TaskSchedulerError> {
-        let mut stmt = self.conn.prepare(
+        let db = self.conn.lock().await;
+        let mut stmt = db.prepare(
             "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
              FROM tasks WHERE id = ?"
         )?;
@@ -231,8 +243,9 @@ impl SchedulerDatabase {
         Ok(rows.next().transpose()?)
     }
 
-    pub fn get_tasks(&self) -> Result<Vec<DbTask>, TaskSchedulerError> {
-        let mut stmt = self.conn.prepare(
+    pub async fn get_tasks(&self) -> Result<Vec<DbTask>, TaskSchedulerError> {
+        let db = self.conn.lock().await;
+        let mut stmt = db.prepare(
             "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
              FROM tasks"
         )?;
@@ -272,8 +285,9 @@ impl SchedulerDatabase {
         Ok(tasks)
     }
 
-    pub fn get_task_ids(&self) -> Result<Vec<i64>, TaskSchedulerError> {
-        let mut stmt = self.conn.prepare(
+    pub async fn get_task_ids(&self) -> Result<Vec<i64>, TaskSchedulerError> {
+        let db = self.conn.lock().await;
+        let mut stmt = db.prepare(
             "SELECT id 
              FROM tasks",
         )?;
@@ -283,10 +297,11 @@ impl SchedulerDatabase {
         Ok(rows.collect::<Result<Vec<i64>, rusqlite::Error>>()?)
     }
 
-    pub fn get_failed_schedulings(
+    pub async fn get_failed_schedulings(
         &self,
     ) -> Result<Vec<FailedScheduling>, TaskSchedulerError> {
-        let mut stmt = self.conn.prepare(
+        let db = self.conn.lock().await;
+        let mut stmt = db.prepare(
             "SELECT * 
              FROM failed_scheduling",
         )?;
@@ -303,10 +318,11 @@ impl SchedulerDatabase {
         Ok(rows.collect::<Result<Vec<FailedScheduling>, rusqlite::Error>>()?)
     }
 
-    pub fn get_failed_tasks(
+    pub async fn get_failed_tasks(
         &self,
     ) -> Result<Vec<FailedTask>, TaskSchedulerError> {
-        let mut stmt = self.conn.prepare(
+        let db = self.conn.lock().await;
+        let mut stmt = db.prepare(
             "SELECT * 
              FROM failed_tasks",
         )?;
