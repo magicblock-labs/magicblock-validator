@@ -23,6 +23,7 @@ use crate::{
         },
         instruction_utils::InstructionUtils,
     },
+    validator::validator_authority_id,
     MagicContext,
 };
 
@@ -139,10 +140,12 @@ fn schedule_commit(
     let parent_program_id = Some(&first_committee_owner);
 
     // Assert all accounts are delegated, owned by invoking program OR are signers
+    // Also works if the validator authority is a signer
     // NOTE: we don't require PDAs to be signers as in our case verifying that the
     // program owning the PDAs invoked us via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
+    let val_id = validator_authority_id();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
@@ -175,6 +178,7 @@ fn schedule_commit(
             let acc_owner = *acc.borrow().owner();
             if parent_program_id != Some(&acc_owner)
                 && !signers.contains(acc_pubkey)
+                && !signers.contains(&val_id)
             {
                 return match parent_program_id {
                     None => {
@@ -187,7 +191,7 @@ fn schedule_commit(
                     Some(parent_id) => {
                         ic_msg!(
                             invoke_context,
-                                "ScheduleCommit ERR: account {} needs to be owned by the invoking program {} or be a signer to be committed, but is owned by {}",
+                                "ScheduleCommit ERR: account {} needs to be owned by the invoking program {}, be a signer, or ix must be signed by the validator to be committed, but is owned by {}",
                                 acc_pubkey, parent_id, acc_owner
                             );
                         Err(InstructionError::InvalidAccountOwner)

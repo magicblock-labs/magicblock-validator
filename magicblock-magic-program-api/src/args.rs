@@ -125,9 +125,9 @@ impl<'a> From<&AccountInfo<'a>> for ShortAccountMeta {
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct ScheduleTaskArgs {
-    pub task_id: u64,
-    pub execution_interval_millis: u64,
-    pub iterations: u64,
+    pub task_id: i64,
+    pub execution_interval_millis: i64,
+    pub iterations: i64,
     pub instructions: Vec<Instruction>,
 }
 
@@ -140,27 +140,27 @@ pub enum TaskRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ScheduleTaskRequest {
     /// Unique identifier for this task
-    pub id: u64,
+    pub id: i64,
     /// Unsigned instructions to execute when triggered
     pub instructions: Vec<Instruction>,
     /// Authority that can modify or cancel this task
     pub authority: Pubkey,
     /// How frequently the task should be executed, in milliseconds
-    pub execution_interval_millis: u64,
+    pub execution_interval_millis: i64,
     /// Number of times this task will be executed
-    pub iterations: u64,
+    pub iterations: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CancelTaskRequest {
     /// Unique identifier for the task to cancel
-    pub task_id: u64,
+    pub task_id: i64,
     /// Authority that can cancel this task
     pub authority: Pubkey,
 }
 
 impl TaskRequest {
-    pub fn id(&self) -> u64 {
+    pub fn id(&self) -> i64 {
         match self {
             Self::Schedule(request) => request.id,
             Self::Cancel(request) => request.task_id,

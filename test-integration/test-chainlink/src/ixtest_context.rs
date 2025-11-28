@@ -19,7 +19,7 @@ use light_sdk::instruction::{PackedAccounts, SystemAccountMetaConfig};
 use log::*;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
-    cloner::Cloner,
+    cloner::{AccountCloneRequest, Cloner},
     config::{ChainlinkConfig, LifecycleMode},
     fetch_cloner::FetchCloner,
     native_program_accounts,
@@ -135,7 +135,11 @@ impl IxtestContext {
             );
             for pubkey in native_programs {
                 cloner
-                    .clone_account(pubkey, program_stub.clone())
+                    .clone_account(AccountCloneRequest {
+                        pubkey,
+                        account: program_stub.clone(),
+                        commit_frequency_ms: None,
+                    })
                     .await
                     .unwrap();
             }

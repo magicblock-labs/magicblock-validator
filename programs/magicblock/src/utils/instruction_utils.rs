@@ -257,7 +257,7 @@ impl InstructionUtils {
     ) -> Instruction {
         let mut account_metas = vec![AccountMeta::new(*payer, true)];
         for account in accounts {
-            account_metas.push(AccountMeta::new_readonly(*account, true));
+            account_metas.push(AccountMeta::new_readonly(*account, false));
         }
 
         Instruction::new_with_bincode(
@@ -272,7 +272,7 @@ impl InstructionUtils {
     // -----------------
     pub fn cancel_task(
         authority: &Keypair,
-        task_id: u64,
+        task_id: i64,
         recent_blockhash: Hash,
     ) -> Transaction {
         let ix = Self::cancel_task_instruction(&authority.pubkey(), task_id);
@@ -281,7 +281,7 @@ impl InstructionUtils {
 
     pub fn cancel_task_instruction(
         authority: &Pubkey,
-        task_id: u64,
+        task_id: i64,
     ) -> Instruction {
         let account_metas = vec![AccountMeta::new(*authority, true)];
 

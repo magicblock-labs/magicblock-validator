@@ -30,7 +30,7 @@ use crate::{
         account_still_undelegating_on_chain::account_still_undelegating_on_chain,
         blacklisted_accounts::blacklisted_accounts,
     },
-    cloner::{errors::ClonerResult, Cloner},
+    cloner::{errors::ClonerResult, AccountCloneRequest, Cloner},
     remote_account_provider::{
         photon_client::PhotonClient,
         program_account::{
@@ -270,8 +270,14 @@ where
                     if account.executable() {
                         self.handle_executable_sub_update(pubkey, account)
                             .await;
-                    } else if let Err(err) =
-                        self.cloner.clone_account(pubkey, account).await
+                    } else if let Err(err) = self
+                        .cloner
+                        .clone_account(AccountCloneRequest {
+                            pubkey,
+                            account,
+                            commit_frequency_ms: None,
+                        })
+                        .await
                     {
                         error!(
                             "Failed to clone account {pubkey} into bank: {err}"
@@ -745,10 +751,11 @@ where
                                             );
                                         }
                                     } else {
-                                        plain.push((
+                                        plain.push(AccountCloneRequest {
                                             pubkey,
-                                            account_shared_data,
-                                        ));
+                                            account: account_shared_data,
+                                            commit_frequency_ms: None,
+                                        });
                                     }
                                 }
                                 ResolvedAccount::Bank((pubkey, slot)) => {
@@ -766,8 +773,10 @@ where
                 .iter()
                 .map(|(pubkey, slot)| (pubkey.to_string(), *slot))
                 .collect::<Vec<_>>();
-            let plain =
-                plain.iter().map(|(p, _)| p.to_string()).collect::<Vec<_>>();
+            let plain = plain
+                .iter()
+                .map(|p| p.pubkey.to_string())
+                .collect::<Vec<_>>();
             let owned_by_deleg = owned_by_deleg
                 .iter()
                 .map(|(pubkey, _, slot)| (pubkey.to_string(), *slot))
@@ -924,7 +933,9 @@ where
                 record_subs.push(delegation_record_pubkey);
 
                 // If the account is delegated we set the owner and delegation state
-                if let Some(delegation_record_data) = delegation_record {
+                let commit_frequency_ms = if let Some(delegation_record_data) =
+                    delegation_record
+                {
                     // NOTE: failing here is fine when resolving all accounts for a transaction
                     // since if something is off we better not run it anyways
                     // However we may consider a different behavior when user is getting
@@ -965,12 +976,21 @@ where
                     account
                         .set_owner(delegation_record.owner)
                         .set_delegated(is_delegated_to_us);
+                    if is_delegated_to_us {
+                        Some(delegation_record.commit_frequency_ms)
+                    } else {
+                        None
+                    }
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.remote_slot()));
-                }
-                accounts_to_clone
-                    .push((pubkey, account.into_account_shared_data()));
+                    None
+                };
+                accounts_to_clone.push(AccountCloneRequest {
+                    pubkey,
+                    account: account.into_account_shared_data(),
+                    commit_frequency_ms,
+                });
             }
 
             (accounts_to_clone, record_subs)
@@ -1150,16 +1170,18 @@ where
 
         // Cancel new subs for accounts we don't clone
         let acc_subs = pubkeys.iter().filter(|pubkey| {
-            !accounts_to_clone.iter().any(|(p, _)| p.eq(pubkey))
+            !accounts_to_clone
+                .iter()
+                .any(|request| request.pubkey.eq(pubkey))
                 && !loaded_programs.iter().any(|p| p.program_id.eq(pubkey))
         });
 
         // Cancel subs for delegated accounts (accounts we clone but don't need to watch)
         let delegated_acc_subs: HashSet<Pubkey> = accounts_to_clone
             .iter()
-            .filter_map(|(pubkey, account)| {
-                if account.delegated() {
-                    Some(*pubkey)
+            .filter_map(|request| {
+                if request.account.delegated() {
+                    Some(request.pubkey)
                 } else {
                     None
                 }
@@ -1183,20 +1205,18 @@ where
         .await;
 
         let mut join_set = JoinSet::new();
-        for acc in accounts_to_clone {
-            let (pubkey, account) = acc;
+        for request in accounts_to_clone {
             if log::log_enabled!(log::Level::Trace) {
                 trace!(
-                    "Cloning account: {pubkey} (remote slot {}, owner: {})",
-                    account.remote_slot(),
-                    account.owner()
+                    "Cloning account: {} (remote slot {}, owner: {})",
+                    request.pubkey,
+                    request.account.remote_slot(),
+                    request.account.owner()
                 );
             };
 
             let cloner = self.cloner.clone();
-            join_set.spawn(async move {
-                cloner.clone_account(pubkey, account).await
-            });
+            join_set.spawn(async move { cloner.clone_account(request).await });
         }
 
         for acc in loaded_programs {
@@ -1640,7 +1660,14 @@ where
             "Auto-airdropping {} lamports to new/empty account {}",
             lamports, pubkey
         );
-        let _sig = self.cloner.clone_account(pubkey, account).await?;
+        let _sig = self
+            .cloner
+            .clone_account(AccountCloneRequest {
+                pubkey,
+                account,
+                commit_frequency_ms: None,
+            })
+            .await?;
         Ok(())
     }
 }
