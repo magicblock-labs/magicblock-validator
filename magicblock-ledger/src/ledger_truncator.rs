@@ -6,6 +6,10 @@ use std::{
 };
 
 use log::{error, info, warn};
+use magicblock_metrics::metrics::{
+    observe_ledger_truncator_delete, start_ledger_truncator_compaction_timer,
+    HistogramTimer,
+};
 use solana_measure::measure::Measure;
 use tokio::{runtime::Builder, time::interval};
 use tokio_util::sync::CancellationToken;
@@ -159,21 +163,23 @@ impl LedgerTrunctationWorker {
         from_slot: u64,
         to_slot: u64,
     ) -> LedgerResult<()> {
-        let start = from_slot;
-        let end = to_slot + 1;
-        ledger.delete_range_cf::<Blockhash>(start, end)?;
-        ledger.delete_range_cf::<Blocktime>(start, end)?;
-        ledger.delete_range_cf::<PerfSamples>(start, end)?;
+        observe_ledger_truncator_delete(|| {
+            let start = from_slot;
+            let end = to_slot + 1;
+            ledger.delete_range_cf::<Blockhash>(start, end)?;
+            ledger.delete_range_cf::<Blocktime>(start, end)?;
+            ledger.delete_range_cf::<PerfSamples>(start, end)?;
 
-        // Can cheaply delete SlotSignatures as well
-        // NOTE: we need to clean (to_slot, u32::MAX)
-        // since range is exclusive at the end we use (to_slot + 1, 0)
-        ledger.delete_range_cf::<SlotSignatures>(
-            (from_slot, 0),
-            (to_slot + 1, 0),
-        )?;
+            // Can cheaply delete SlotSignatures as well
+            // NOTE: we need to clean (to_slot, u32::MAX)
+            // since range is exclusive at the end we use (to_slot + 1, 0)
+            ledger.delete_range_cf::<SlotSignatures>(
+                (from_slot, 0),
+                (to_slot + 1, 0),
+            )?;
 
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Returns range to truncate [from_slot, to_slot]
@@ -278,16 +284,19 @@ impl LedgerTrunctationWorker {
 
         struct CompactionMeasure {
             measure: Measure,
+            _histogram_timer: HistogramTimer,
         }
         impl Drop for CompactionMeasure {
             fn drop(&mut self) {
                 self.measure.stop();
+                // histogram_timer - records on HistogramTimer::drop
                 info!("Manual compaction took: {}", self.measure);
             }
         }
 
         let _measure = CompactionMeasure {
             measure: Measure::start("Manual compaction"),
+            _histogram_timer: start_ledger_truncator_compaction_timer(),
         };
 
         let start = from_slot;

@@ -20,6 +20,7 @@ prost = { workspace = true }
 serde = { workspace = true }
 magicblock-accounts-db = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-metrics = { workspace = true }
 scc = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-measure = { workspace = true }

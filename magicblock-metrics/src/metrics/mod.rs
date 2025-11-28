@@ -108,6 +108,16 @@ lazy_static::lazy_static! {
             vec![10.0, 30.0, (30 * 60) as f64, (60 * 60) as f64, (3 * 60 * 60) as f64 ]
         ),
     ).unwrap();
+    pub static ref LEDGER_TRUNCATOR_DELETE_SECONDS: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "ledger_truncator_delete_seconds",
+            "Time taken to compact rocksdb columns"
+        )
+        .buckets(
+            vec![0.1, 1.0, 5.0, 10.0, 30.0]
+        ),
+    ).unwrap();
+
 
     // -----------------
     // Accounts
@@ -366,6 +376,7 @@ pub(crate) fn register() {
         register!(LEDGER_ACCOUNT_MOD_DATA_GAUGE);
         register!(LEDGER_COLUMNS_COUNT_DURATION_SECONDS);
         register!(LEDGER_TRUNCATOR_COMPACTION_SECONDS);
+        register!(LEDGER_TRUNCATOR_DELETE_SECONDS);
         register!(ACCOUNTS_SIZE_GAUGE);
         register!(ACCOUNTS_COUNT_GAUGE);
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
@@ -466,6 +477,10 @@ where
 
 pub fn start_ledger_truncator_compaction_timer() -> HistogramTimer {
     LEDGER_TRUNCATOR_COMPACTION_SECONDS.start_timer()
+}
+
+pub fn observe_ledger_truncator_delete<T, F: FnOnce() -> T>(f: F) -> T {
+    LEDGER_TRUNCATOR_DELETE_SECONDS.observe_closure_duration(f)
 }
 
 pub fn set_accounts_size(value: i64) {

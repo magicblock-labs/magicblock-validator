@@ -3783,6 +3783,7 @@ dependencies = [
  "log",
  "magicblock-accounts-db",
  "magicblock-core",
+ "magicblock-metrics",
  "num-format",
  "num_cpus",
  "prost",
