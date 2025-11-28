@@ -91,6 +91,7 @@ impl TransactionExecutor {
             ExecutionRecordingConfig::new_single_setting(true);
         let config = Box::new(TransactionProcessingConfig {
             recording_config,
+            limit_to_load_programs: true,
             ..Default::default()
         });
         let this = Self {
