@@ -47,9 +47,6 @@ impl LedgerTrunctationWorker {
     }
 
     pub async fn run(self) {
-        self.ledger
-            .initialize_lowest_cleanup_slot()
-            .expect("Lowest cleanup slot initialization");
         let mut interval = interval(self.truncation_time_interval);
         loop {
             tokio::select! {
@@ -88,7 +85,7 @@ impl LedgerTrunctationWorker {
         } else {
             match self.estimate_truncation_range(current_ledger_size)? {
                 Some((from_slot, to_slot)) => {
-                    Self::truncate_slot_range(&self.ledger, from_slot, to_slot)
+                    Self::truncate_slot_range(&self.ledger, from_slot, to_slot)?
                 }
                 None => warn!("Could not estimate truncation range"),
             }
@@ -98,6 +95,7 @@ impl LedgerTrunctationWorker {
     }
 
     /// Truncates ledger that is over desired size
+    /// We rely on present `CompactionFilter` to delete all data
     pub fn truncate_fat_ledger(
         &self,
         current_ledger_size: u64,
@@ -132,12 +130,39 @@ impl LedgerTrunctationWorker {
             "Fat truncation: truncating up to(inclusive): {}",
             truncate_to_slot
         );
+
         self.ledger.set_lowest_cleanup_slot(truncate_to_slot);
+        Self::delete_slots(&self.ledger, 0, truncate_to_slot)?;
+
         if let Err(err) = self.ledger.flush() {
             // We will still compact
             error!("Failed to flush: {}", err);
         }
         Self::compact_slot_range(&self.ledger, 0, truncate_to_slot);
+        Ok(())
+    }
+
+    /// Inserts tombstones in slot-ordered columns for range [from; to] inclusive
+    /// This is a cheap operation since delete_range inserts one range tombstone
+    /// NOTE: this doesn't cover all the columns, we rely on CompactionFilter to clean the rest
+    fn delete_slots(
+        ledger: &Arc<Ledger>,
+        from_slot: u64,
+        to_slot: u64,
+    ) -> LedgerResult<()> {
+        let start = from_slot;
+        let end = to_slot + 1;
+        ledger.delete_range_cf::<Blockhash>(start, end)?;
+        ledger.delete_range_cf::<Blocktime>(start, end)?;
+        ledger.delete_range_cf::<PerfSamples>(start, end)?;
+
+        // Can cheaply delete SlotSignatures as well
+        // NOTE: we need to clean (to_slot, u32::MAX)
+        // since range is exclusive at the end we use (to_slot + 1, 0)
+        ledger.delete_range_cf::<SlotSignatures>(
+            (from_slot, 0),
+            (to_slot + 1, 0),
+        )?;
 
         Ok(())
     }
@@ -187,49 +212,30 @@ impl LedgerTrunctationWorker {
 
     /// Utility function for splitting truncation into smaller chunks
     /// Cleans slots [from_slot; to_slot] inclusive range
+    /// We rely on present `CompactionFilter` to delete all data
     pub fn truncate_slot_range(
         ledger: &Arc<Ledger>,
         from_slot: u64,
         to_slot: u64,
-    ) {
-        // In order not to torture RocksDB's WriteBatch we split large tasks into chunks
-        const SINGLE_TRUNCATION_LIMIT: usize = 300;
-
+    ) -> LedgerResult<()> {
         if to_slot < from_slot {
             warn!("LedgerTruncator: Nani?");
-            return;
+            return Ok(());
         }
 
         info!(
             "LedgerTruncator: truncating slot range [{from_slot}; {to_slot}]"
         );
 
-        let ledger_copy = ledger.clone();
-        (from_slot..=to_slot)
-            .step_by(SINGLE_TRUNCATION_LIMIT)
-            .for_each(|cur_from_slot| {
-                let num_slots_to_truncate = min(
-                    to_slot - cur_from_slot + 1,
-                    SINGLE_TRUNCATION_LIMIT as u64,
-                );
-                let truncate_to_slot =
-                    cur_from_slot + num_slots_to_truncate - 1;
-
-                if let Err(err) = ledger_copy
-                    .delete_slot_range(cur_from_slot, truncate_to_slot)
-                {
-                    warn!(
-                        "Failed to truncate slots {}-{}: {}",
-                        cur_from_slot, truncate_to_slot, err
-                    );
-                }
-            });
+        ledger.set_lowest_cleanup_slot(to_slot);
+        Self::delete_slots(ledger, from_slot, to_slot)?;
 
         // Flush memtables with tombstones prior to compaction
-        if let Err(err) = ledger_copy.flush() {
+        if let Err(err) = ledger.flush() {
             error!("Failed to flush ledger: {err}");
         }
         Self::compact_slot_range(ledger, from_slot, to_slot);
+        Ok(())
     }
 
     /// Synchronous utility function that triggers and awaits compaction on all the columns
@@ -264,7 +270,7 @@ impl LedgerTrunctationWorker {
         );
         ledger.compact_slot_range_cf::<SlotSignatures>(
             Some((from_slot, u32::MIN)),
-            Some((to_slot + 1, u32::MAX)),
+            Some((to_slot + 1, 0)),
         );
         ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
         ledger.compact_slot_range_cf::<Transaction>(None, None);
