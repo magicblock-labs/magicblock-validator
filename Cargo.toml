@@ -238,5 +238,5 @@ features = ["lz4"]
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "5afcedc" }
 solana-storage-proto = { path = "./storage-proto" }
 solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "e480fa2" }
-# TODO(edwin): remove once solana version is raise to 2.3
-rocksdb = { git = "https://github.com/rust-rocksdb/rust-rocksdb.git", rev = "3525109" }
+# TODO(edwin): remove once solana version is raised to 2.3
+rocksdb = { git = "https://github.com/rust-rocksdb/rust-rocksdb.git", rev = "d4e9e16" }
