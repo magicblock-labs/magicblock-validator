@@ -13,7 +13,7 @@ on:
 jobs:
   build:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: extra-large
+    runs-on: ubuntu-latest-m
     name: Build Project
     steps:
       - name: Checkout this magicblock-validator
@@ -49,7 +49,7 @@ jobs:
 
   run_integration_tests:
     needs: build
-    runs-on: extra-large
+    runs-on: ubuntu-latest-m
     strategy:
       matrix:
         batch_tests:
