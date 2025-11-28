@@ -33,6 +33,13 @@ pub fn init_account_instruction(
 }
 
 pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
+    init_payer_escrow_with_validator(payer, None)
+}
+
+pub fn init_payer_escrow_with_validator(
+    payer: Pubkey,
+    validator: Option<Pubkey>,
+) -> [Instruction; 2] {
     let top_up_ix = dlp::instruction_builder::top_up_ephemeral_balance(
         payer,
         payer,
@@ -47,7 +54,7 @@ pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
             delegate_args: DelegateArgs {
                 commit_frequency_ms: 0,
                 seeds: vec![],
-                validator: None,
+                validator,
             },
         },
     );
