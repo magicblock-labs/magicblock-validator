@@ -174,6 +174,7 @@ impl Ledger {
         let (slot, blockhash) = ledger.get_max_blockhash()?;
         let time = ledger.get_block_time(slot)?.unwrap_or_default();
         ledger.latest_block.store(slot, blockhash, time);
+        ledger.initialize_lowest_cleanup_slot()?;
 
         Ok(ledger)
     }
@@ -1214,6 +1215,14 @@ impl Ledger {
         } else {
             self.db.set_oldest_slot(new_lowest_cleanup_slot + 1);
         }
+    }
+
+    pub fn delete_range_cf<C: Column + ColumnName>(
+        &self,
+        from: C::Index,
+        to: C::Index,
+    ) -> LedgerResult<()> {
+        self.db.column::<C>().delete_range(from, to)
     }
 
     /// Permanently removes ledger data for slots in the inclusive range `[from_slot, to_slot]`.
