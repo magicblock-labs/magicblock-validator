@@ -89,7 +89,7 @@ impl LedgerTrunctationWorker {
                     from_slot,
                     to_slot,
                     self.cancellation_token.clone(),
-                ),
+                )?,
                 None => warn!("Could not estimate truncation range"),
             }
         }
@@ -227,7 +227,7 @@ impl LedgerTrunctationWorker {
         from_slot: u64,
         to_slot: u64,
         cancellation_token: CancellationToken,
-    ) {
+    ) -> LedgerResult<()> {
         if to_slot < from_slot {
             warn!("LedgerTruncator: Nani?");
             return Ok(());
