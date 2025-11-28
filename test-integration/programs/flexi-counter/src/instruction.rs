@@ -19,16 +19,16 @@ pub struct DelegateArgs {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct ScheduleArgs {
-    pub task_id: u64,
-    pub execution_interval_millis: u64,
-    pub iterations: u64,
+    pub task_id: i64,
+    pub execution_interval_millis: i64,
+    pub iterations: i64,
     pub error: bool,
     pub signer: bool,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct CancelArgs {
-    pub task_id: u64,
+    pub task_id: i64,
 }
 
 pub const MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
@@ -272,6 +272,13 @@ pub fn create_mul_ix(payer: Pubkey, multiplier: u8) -> Instruction {
 }
 
 pub fn create_delegate_ix(payer: Pubkey) -> Instruction {
+    create_delegate_ix_with_commit_frequency_ms(payer, 0)
+}
+
+pub fn create_delegate_ix_with_commit_frequency_ms(
+    payer: Pubkey,
+    commit_frequency_ms: u32,
+) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = FlexiCounter::pda(&payer);
 
@@ -290,7 +297,7 @@ pub fn create_delegate_ix(payer: Pubkey) -> Instruction {
 
     let args = DelegateArgs {
         valid_until: i64::MAX,
-        commit_frequency_ms: 1_000_000_000,
+        commit_frequency_ms,
     };
 
     Instruction::new_with_borsh(
@@ -414,20 +421,18 @@ pub fn create_intent_ix(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn create_schedule_task_ix(
     payer: Pubkey,
-    magic_program: Pubkey,
-    task_id: u64,
-    execution_interval_millis: u64,
-    iterations: u64,
+    task_id: i64,
+    execution_interval_millis: i64,
+    iterations: i64,
     error: bool,
     signer: bool,
 ) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = FlexiCounter::pda(&payer);
     let accounts = vec![
-        AccountMeta::new_readonly(magic_program, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
         AccountMeta::new(payer, true),
         AccountMeta::new(pda, false),
     ];
@@ -444,14 +449,10 @@ pub fn create_schedule_task_ix(
     )
 }
 
-pub fn create_cancel_task_ix(
-    payer: Pubkey,
-    magic_program: Pubkey,
-    task_id: u64,
-) -> Instruction {
+pub fn create_cancel_task_ix(payer: Pubkey, task_id: i64) -> Instruction {
     let program_id = &crate::id();
     let accounts = vec![
-        AccountMeta::new_readonly(magic_program, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
         AccountMeta::new(payer, true),
     ];
     Instruction::new_with_borsh(
