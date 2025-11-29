@@ -91,15 +91,10 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
                 }
             };
 
-            let id = match &execution_result {
-                Ok(value) => value.id,
-                Err(err) => err.0,
-            };
-
             let sender = if let Some(sender) = pending_message
                 .lock()
                 .expect(POISONED_MUTEX_MSG)
-                .remove(&id)
+                .remove(&execution_result.id)
             {
                 sender
             } else {

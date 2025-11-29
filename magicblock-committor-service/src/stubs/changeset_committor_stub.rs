@@ -17,9 +17,7 @@ use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 
 use crate::{
     error::CommittorServiceResult,
-    intent_execution_manager::{
-        BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
-    },
+    intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput,
     persist::{CommitStatusRow, IntentPersisterImpl, MessageSignatures},
     service_ext::{BaseIntentCommitorExtResult, BaseIntentCommittorExt},
@@ -199,15 +197,14 @@ impl BaseIntentCommittorExt for ChangesetCommittorStub {
         self.schedule_base_intent(base_intents.clone()).await??;
         let res = base_intents
             .into_iter()
-            .map(|message| {
-                Ok(ExecutionOutputWrapper {
-                    id: message.inner.id,
-                    output: ExecutionOutput::TwoStage {
-                        commit_signature: Signature::new_unique(),
-                        finalize_signature: Signature::new_unique(),
-                    },
-                    trigger_type: TriggerType::OnChain,
-                })
+            .map(|message| BroadcastedIntentExecutionResult {
+                id: message.inner.id,
+                inner: Ok(ExecutionOutput::TwoStage {
+                    commit_signature: Signature::new_unique(),
+                    finalize_signature: Signature::new_unique(),
+                }),
+                patched_errors: Arc::new(vec![]),
+                trigger_type: TriggerType::OnChain,
             })
             .collect::<Vec<_>>();
 

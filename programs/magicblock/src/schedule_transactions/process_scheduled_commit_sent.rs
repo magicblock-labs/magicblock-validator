@@ -16,6 +16,10 @@ use crate::{
     utils::accounts::get_instruction_pubkey_with_idx, validator,
 };
 
+/// Error code returned when an intent execution failed.
+/// This indicates the intent could not be successfully executed despite patching attempts.
+const INTENT_FAILED_CODE: u32 = 0x7461636F;
+
 #[derive(Default, Debug, Clone)]
 pub struct SentCommit {
     pub message_id: u64,
@@ -27,6 +31,7 @@ pub struct SentCommit {
     pub excluded_pubkeys: Vec<Pubkey>,
     pub requested_undelegation: bool,
     pub error_message: Option<String>,
+    pub patched_errors: Vec<String>,
 }
 
 /// This is a printable version of the SentCommit struct.
@@ -42,6 +47,7 @@ struct SentCommitPrintable {
     excluded_pubkeys: String,
     requested_undelegation: bool,
     error_message: Option<String>,
+    patched_errors: Vec<String>,
 }
 
 impl From<SentCommit> for SentCommitPrintable {
@@ -70,6 +76,7 @@ impl From<SentCommit> for SentCommitPrintable {
                 .join(", "),
             requested_undelegation: commit.requested_undelegation,
             error_message: commit.error_message,
+            patched_errors: commit.patched_errors,
         }
     }
 }
@@ -213,15 +220,26 @@ pub fn process_scheduled_commit_sent(
         ic_msg!(invoke_context, "ScheduledCommitSent requested undelegation",);
     }
 
+    for (idx, error) in commit.patched_errors.iter().enumerate() {
+        ic_msg!(
+            invoke_context,
+            "ScheduledCommitSent patched error[{}]: {}",
+            idx,
+            error
+        );
+    }
+
     if let Some(error_message) = commit.error_message {
         ic_msg!(
             invoke_context,
             "ScheduledCommitSent error message: {}",
             error_message
         );
-    }
 
-    Ok(())
+        Err(InstructionError::Custom(INTENT_FAILED_CODE))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -257,6 +275,7 @@ mod tests {
             excluded_pubkeys: Default::default(),
             requested_undelegation: false,
             error_message: None,
+            patched_errors: vec![],
         }
     }
 
