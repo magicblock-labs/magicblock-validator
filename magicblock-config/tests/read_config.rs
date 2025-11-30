@@ -142,7 +142,6 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
     env::set_var("CLONE_AUTO_AIRDROP_LAMPORTS", "123");
     env::set_var("TASK_SCHEDULER_RESET", "true");
-    env::set_var("TASK_SCHEDULER_MILLIS_PER_TICK", "1000");
 
     let config = parse_config_with_file(&config_file_dir);
 
@@ -202,10 +201,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 },
                 system_metrics_tick_interval_secs: 10,
             },
-            task_scheduler: TaskSchedulerConfig {
-                reset: true,
-                millis_per_tick: 1000,
-            },
+            task_scheduler: TaskSchedulerConfig { reset: true },
         }
     );
 

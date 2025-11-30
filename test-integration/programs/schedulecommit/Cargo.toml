@@ -8,6 +8,7 @@ borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
 solana-program = { workspace = true }
 magicblock-delegation-program = { workspace = true }
+magicblock_magic_program_api = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -16,3 +17,5 @@ crate-type = ["cdylib", "lib"]
 no-entrypoint = []
 cpi = ["no-entrypoint"]
 default = []
+custom-heap = []
+custom-panic = []

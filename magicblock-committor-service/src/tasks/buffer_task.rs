@@ -1,5 +1,6 @@
 use dlp::args::CommitStateFromBufferArgs;
 use magicblock_committor_program::Chunks;
+use magicblock_metrics::metrics::LabelValue;
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::Instruction;
 
@@ -138,5 +139,13 @@ impl BaseTask for BufferTask {
 
         commit_task.commit_id = commit_id;
         self.preparation_state = Self::preparation_required(&self.task_type)
+    }
+}
+
+impl LabelValue for BufferTask {
+    fn value(&self) -> &str {
+        match self.task_type {
+            BufferTaskType::Commit(_) => "buffer_commit",
+        }
     }
 }

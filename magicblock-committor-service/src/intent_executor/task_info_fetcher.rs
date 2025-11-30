@@ -8,8 +8,10 @@ use dlp::{
 };
 use log::{error, warn};
 use lru::LruCache;
+use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
+use solana_sdk::signature::Signature;
 
 const NUM_FETCH_RETRIES: NonZeroUsize =
     unsafe { NonZeroUsize::new_unchecked(5) };
@@ -116,6 +118,7 @@ impl CacheTaskInfoFetcher {
             })
             .collect::<Vec<_>>();
 
+        metrics::inc_task_info_fetcher_a_count();
         let accounts_data = rpc_client
             .get_multiple_accounts(&pda_accounts, None)
             .await?;
@@ -272,6 +275,16 @@ pub enum TaskInfoFetcherError {
     InvalidAccountDataError(Pubkey),
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+}
+
+impl TaskInfoFetcherError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::MetadataNotFoundError(_) => None,
+            Self::InvalidAccountDataError(_) => None,
+            Self::MagicBlockRpcClientError(err) => err.signature(),
+        }
+    }
 }
 
 pub type TaskInfoFetcherResult<T, E = TaskInfoFetcherError> = Result<T, E>;

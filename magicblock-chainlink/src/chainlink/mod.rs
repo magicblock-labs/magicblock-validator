@@ -1,10 +1,17 @@
-use std::sync::Arc;
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
 use log::*;
 use magicblock_core::traits::AccountsBank;
+use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk::{
@@ -23,6 +30,7 @@ use crate::{
     submux::SubMuxClient,
 };
 
+mod account_still_undelegating_on_chain;
 mod blacklisted_accounts;
 pub mod config;
 pub mod errors;
@@ -50,6 +58,9 @@ pub struct Chainlink<
 
     validator_id: Pubkey,
     faucet_id: Pubkey,
+
+    /// If > 0, automatically airdrop this many lamports to feepayers when they are new/empty
+    auto_airdrop_lamports: u64,
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
@@ -60,6 +71,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
+        auto_airdrop_lamports: u64,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
@@ -77,9 +89,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             removed_accounts_sub,
             validator_id: validator_pubkey,
             faucet_id: faucet_pubkey,
+            auto_airdrop_lamports,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn try_new_from_endpoints(
         endpoints: &[Endpoint],
         commitment: CommitmentConfig,
@@ -88,6 +102,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
         config: ChainlinkConfig,
+        auto_airdrop_lamports: u64,
     ) -> ChainlinkResult<
         Chainlink<
             ChainRpcClientImpl,
@@ -126,6 +141,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             fetch_cloner,
             validator_pubkey,
             faucet_pubkey,
+            auto_airdrop_lamports,
         )
     }
 
@@ -136,15 +152,63 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub fn reset_accounts_bank(&self) {
         let blacklisted_accounts =
             blacklisted_accounts(&self.validator_id, &self.faucet_id);
+
+        let delegated_only = AtomicU64::new(0);
+        let undelegating = AtomicU64::new(0);
+        let blacklisted = AtomicU64::new(0);
+        let remaining = AtomicU64::new(0);
+        let remaining_empty = AtomicU64::new(0);
+
         let removed = self.accounts_bank.remove_where(|pubkey, account| {
-            (!account.delegated()
-                // This fixes the edge-case of accounts that were in the process of
-                // being undelegated but never completed while the validator was running
-                || account.owner().eq(&dlp::id()))
-                && !blacklisted_accounts.contains(pubkey)
+            if blacklisted_accounts.contains(pubkey) {
+                blacklisted.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
+            // Undelegating accounts are normally also delegated, but if that ever changes
+            // we want to make sure we never remove an account of which we aren't sure
+            // if the undelegation completed on chain or not.
+            if account.delegated() || account.undelegating() {
+                if account.undelegating() {
+                    undelegating.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    delegated_only.fetch_add(1, Ordering::Relaxed);
+                }
+                return false;
+            }
+            trace!(
+                "Removing non-delegated, non-DLP-owned account: {pubkey} {:#?}",
+                account
+            );
+            remaining.fetch_add(1, Ordering::Relaxed);
+            if account.lamports() == 0
+                && account.owner().ne(&solana_sdk::feature::id())
+            {
+                remaining_empty.fetch_add(1, Ordering::Relaxed);
+            }
+            true
         });
 
-        debug!("Removed {removed} non-delegated accounts");
+        let non_empty = remaining
+            .load(Ordering::Relaxed)
+            .saturating_sub(remaining_empty.load(Ordering::Relaxed));
+
+        let delegated_only = delegated_only.into_inner();
+        let undelegating = undelegating.into_inner();
+
+        info!(
+            "Removed {removed} accounts from bank:
+{} non-delegated non-blacklisted, no-feature non-empty.
+{} non-delegated non-blacklisted empty
+{} delegated not undelegating
+{} delegated and undelegating
+Kept: {} delegated, {} blacklisted",
+            non_empty,
+            remaining_empty.into_inner(),
+            delegated_only,
+            undelegating,
+            delegated_only + undelegating,
+            blacklisted.into_inner()
+        );
     }
 
     fn subscribe_account_removals(
@@ -191,31 +255,63 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .copied()
             .collect::<Vec<_>>();
         let feepayer = tx.message().fee_payer();
-        // In the case of transactions we need to clone the feepayer account
-        let clone_escrow = {
-            // If the fee payer account is in the bank we only clone the balance
-            // escrow account if the fee payer is not delegated
-            // If it is not in the bank we include it just in case, it is fine
-            // if it doesn't exist and once we cloned the feepayer account itself
-            // and it turns out to be delegated, then we will avoid cloning the
-            // escrow account next time
-            self.accounts_bank
-                .get_account(feepayer)
-                .is_none_or(|a| !a.delegated())
-        };
 
-        let mark_empty_if_not_found = if clone_escrow {
+        // Determine if we need to clone the escrow account for the feepayer
+        let clone_escrow = self
+            .accounts_bank
+            .get_account(feepayer)
+            .is_none_or(|a| !a.delegated());
+
+        // If cloning escrow, add the balance PDA
+        if clone_escrow {
             let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
             trace!("Adding balance PDA {balance_pda} for feepayer {feepayer}");
             pubkeys.push(balance_pda);
-            vec![balance_pda]
-        } else {
-            vec![]
-        };
-        let mark_empty_if_not_found = (!mark_empty_if_not_found.is_empty())
-            .then(|| &mark_empty_if_not_found[..]);
-        self.ensure_accounts(&pubkeys, mark_empty_if_not_found)
-            .await
+        }
+
+        // Mark *all* pubkeys as empty-if-not-found
+        let mark_empty_if_not_found = Some(pubkeys.as_slice());
+
+        // Extract programs from transaction instructions for metrics
+        let program_ids = extract_program_ids_from_transaction(tx);
+
+        // Ensure accounts
+        let res = self
+            .ensure_accounts(
+                &pubkeys,
+                mark_empty_if_not_found,
+                AccountFetchOrigin::SendTransaction,
+                Some(&program_ids),
+            )
+            .await?;
+
+        // Best-effort auto airdrop for fee payer if configured
+        if self.auto_airdrop_lamports > 0 {
+            if let Some(fetch_cloner) = self.fetch_cloner() {
+                let lamports = self
+                    .accounts_bank
+                    .get_account(feepayer)
+                    .map(|a| a.lamports())
+                    .unwrap_or(0);
+
+                if lamports == 0 {
+                    if let Err(err) = fetch_cloner
+                        .airdrop_account_if_empty(
+                            *feepayer,
+                            self.auto_airdrop_lamports,
+                        )
+                        .await
+                    {
+                        warn!(
+                            "Auto airdrop for feepayer {} failed: {:?}",
+                            feepayer, err
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(res)
     }
 
     /// Same as fetch accounts, but does not return the accounts, just
@@ -225,6 +321,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
+        fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(FetchAndCloneResult::default());
@@ -233,6 +331,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             fetch_cloner,
             pubkeys,
             mark_empty_if_not_found,
+            fetch_origin,
+            program_ids,
         )
         .await
     }
@@ -244,6 +344,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub async fn fetch_accounts(
         &self,
         pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys = pubkeys
@@ -261,7 +363,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 .collect());
         };
         let _ = self
-            .fetch_accounts_common(fetch_cloner, pubkeys, None)
+            .fetch_accounts_common(
+                fetch_cloner,
+                pubkeys,
+                None,
+                fetch_origin,
+                program_ids,
+            )
             .await?;
 
         let accounts = pubkeys
@@ -276,6 +384,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         fetch_cloner: &FetchCloner<T, U, V, C>,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
+        fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if log::log_enabled!(log::Level::Trace) {
             let pubkeys_str = pubkeys
@@ -283,7 +393,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 .map(|p| p.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            trace!("Fetching accounts: {pubkeys_str}");
+            let mark_empty_str = mark_empty_if_not_found
+                .map(|keys| {
+                    keys.iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            trace!("Fetching accounts: {pubkeys_str}, mark_empty_if_not_found: {mark_empty_str}");
         }
         Self::promote_accounts(
             fetch_cloner,
@@ -297,6 +415,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 pubkeys,
                 mark_empty_if_not_found,
                 None,
+                fetch_origin,
+                program_ids,
             )
             .await?;
         trace!("Fetched and cloned accounts: {result:?}");
@@ -311,7 +431,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         &self,
         pubkey: Pubkey,
     ) -> ChainlinkResult<()> {
-        trace!("Undelegation requested for account: {pubkey}");
+        debug!("Undelegation requested for account: {pubkey}");
+
+        magicblock_metrics::metrics::inc_undelegation_requested();
 
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(());
@@ -321,7 +443,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         // once it's undelegated
         fetch_cloner.subscribe_to_account(&pubkey).await?;
 
-        trace!("Successfully subscribed to account {pubkey} for undelegation tracking");
+        debug!("Successfully subscribed to account {pubkey} for undelegation tracking");
         Ok(())
     }
 
@@ -338,4 +460,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .map(|provider| provider.is_watching(pubkey))
             .unwrap_or(false)
     }
+}
+
+// -----------------
+// Helper Functions
+// -----------------
+
+/// Extracts all unique program IDs from a transaction's instructions.
+fn extract_program_ids_from_transaction(
+    tx: &SanitizedTransaction,
+) -> Vec<Pubkey> {
+    let program_ids = tx
+        .message()
+        .program_instructions_iter()
+        .map(|(program_id, _)| *program_id)
+        .collect::<HashSet<_>>();
+    program_ids.into_iter().collect()
 }

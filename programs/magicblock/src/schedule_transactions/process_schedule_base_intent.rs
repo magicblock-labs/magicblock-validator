@@ -14,7 +14,7 @@ use crate::{
     },
     schedule_transactions::check_magic_context_id,
     utils::{
-        account_actions::set_account_owner_to_delegation_program,
+        account_actions::mark_account_as_undelegated,
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
@@ -129,7 +129,6 @@ pub(crate) fn process_schedule_base_intent(
         } else {
             None
         };
-
     let scheduled_intent = ScheduledBaseIntent::try_new(
         args,
         intent_id,
@@ -138,14 +137,21 @@ pub(crate) fn process_schedule_base_intent(
         &construction_context,
     )?;
 
-    if let Some(undelegated_accounts_ref) = undelegated_accounts_ref {
-        // Change owner to dlp
+    let mut undelegated_pubkeys = vec![];
+    if let Some(undelegated_accounts_ref) = undelegated_accounts_ref.as_ref() {
+        // Change owner to dlp and set undelegating flag
         // Once account is undelegated we need to make it immutable in our validator.
-        undelegated_accounts_ref
-            .into_iter()
-            .for_each(|(_, account_ref)| {
-                set_account_owner_to_delegation_program(account_ref);
-            });
+        for (pubkey, account_ref) in undelegated_accounts_ref.iter() {
+            undelegated_pubkeys.push(pubkey.to_string());
+            mark_account_as_undelegated(account_ref);
+        }
+    }
+    if !undelegated_pubkeys.is_empty() {
+        ic_msg!(
+            invoke_context,
+            "Scheduling undelegation for accounts: {}",
+            undelegated_pubkeys.join(", ")
+        );
     }
 
     let action_sent_signature =

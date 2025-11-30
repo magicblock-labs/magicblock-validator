@@ -4,7 +4,8 @@ use magicblock_chainlink::{
     remote_account_provider::{
         chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
-        config::RemoteAccountProviderConfig, Endpoint, RemoteAccountProvider,
+        config::RemoteAccountProviderConfig, Endpoint,
+        ForwardedSubscriptionUpdate, RemoteAccountProvider,
         RemoteAccountUpdateSource,
     },
     submux::SubMuxClient,
@@ -14,6 +15,7 @@ use magicblock_chainlink::{
         get_remote_account_update_sources, init_logger, random_pubkey,
         sleep_ms, PUBSUB_URL, RPC_URL,
     },
+    AccountFetchOrigin,
 };
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig, request::RpcError,
@@ -21,38 +23,51 @@ use solana_rpc_client_api::{
 use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::sync::mpsc;
 
-async fn init_remote_account_provider() -> RemoteAccountProvider<
-    ChainRpcClientImpl,
-    SubMuxClient<ChainPubsubClientImpl>,
-> {
-    let (fwd_tx, _fwd_rx) = mpsc::channel(100);
+async fn init_remote_account_provider() -> (
+    RemoteAccountProvider<
+        ChainRpcClientImpl,
+        SubMuxClient<ChainPubsubClientImpl>,
+    >,
+    mpsc::Receiver<ForwardedSubscriptionUpdate>,
+) {
+    let (fwd_tx, fwd_rx) = mpsc::channel(100);
     let endpoints = [Endpoint {
         rpc_url: RPC_URL.to_string(),
         pubsub_url: PUBSUB_URL.to_string(),
     }];
-    RemoteAccountProvider::<
-        ChainRpcClientImpl,
-        SubMuxClient<ChainPubsubClientImpl>,
-    >::try_new_from_urls(
-        &endpoints,
-        CommitmentConfig::confirmed(),
-        fwd_tx,
-        &RemoteAccountProviderConfig::default_with_lifecycle_mode(
-            LifecycleMode::Ephemeral,
-        ),
+    (
+        RemoteAccountProvider::<
+            ChainRpcClientImpl,
+            SubMuxClient<ChainPubsubClientImpl>,
+        >::try_new_from_urls(
+            &endpoints,
+            CommitmentConfig::confirmed(),
+            fwd_tx,
+            &RemoteAccountProviderConfig::try_new_with_metrics(
+                1000,
+                LifecycleMode::Ephemeral,
+                false,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap(),
+        fwd_rx,
     )
-    .await
-    .unwrap()
 }
 
 #[tokio::test]
 async fn ixtest_get_non_existing_account() {
     init_logger();
 
-    let remote_account_provider = init_remote_account_provider().await;
+    let (remote_account_provider, _fwd_rx) =
+        init_remote_account_provider().await;
 
     let pubkey = random_pubkey();
-    let remote_account = remote_account_provider.try_get(pubkey).await.unwrap();
+    let remote_account = remote_account_provider
+        .try_get(pubkey, AccountFetchOrigin::GetAccount)
+        .await
+        .unwrap();
     assert!(!remote_account.is_found());
 }
 
@@ -60,7 +75,8 @@ async fn ixtest_get_non_existing_account() {
 async fn ixtest_existing_account_for_future_slot() {
     init_logger();
 
-    let remote_account_provider = init_remote_account_provider().await;
+    let (remote_account_provider, _fwd_rx) =
+        init_remote_account_provider().await;
 
     let pubkey = random_pubkey();
     let rpc_client = remote_account_provider.rpc_client();
@@ -95,15 +111,18 @@ async fn ixtest_existing_account_for_future_slot() {
 async fn ixtest_get_existing_account_for_valid_slot() {
     init_logger();
 
-    let remote_account_provider = init_remote_account_provider().await;
+    let (remote_account_provider, _fwd_rx) =
+        init_remote_account_provider().await;
 
     let pubkey = random_pubkey();
     let rpc_client = remote_account_provider.rpc_client();
 
     {
         // Fetching immediately does not return the account yet
-        let remote_account =
-            remote_account_provider.try_get(pubkey).await.unwrap();
+        let remote_account = remote_account_provider
+            .try_get(pubkey, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
         assert!(!remote_account.is_found());
     }
 
@@ -119,8 +138,10 @@ async fn ixtest_get_existing_account_for_valid_slot() {
     {
         // After waiting for a bit the subscription update came in
         let cs = current_slot(rpc_client).await;
-        let remote_account =
-            remote_account_provider.try_get(pubkey).await.unwrap();
+        let remote_account = remote_account_provider
+            .try_get(pubkey, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap();
         assert!(remote_account.is_found());
         assert!(remote_account.slot() >= cs);
         assert_eq!(remote_account.fresh_lamports().unwrap(), 2_000_000);
@@ -131,7 +152,8 @@ async fn ixtest_get_existing_account_for_valid_slot() {
 async fn ixtest_get_multiple_accounts_for_valid_slot() {
     init_logger();
 
-    let remote_account_provider = init_remote_account_provider().await;
+    let (remote_account_provider, _fwd_rx) =
+        init_remote_account_provider().await;
 
     let (pubkey1, pubkey2, pubkey3, pubkey4) = (
         random_pubkey(),
@@ -141,17 +163,16 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
     );
     let rpc_client = remote_account_provider.rpc_client();
 
-    airdrop(rpc_client, &pubkey1, 1_000_000).await;
-    airdrop(rpc_client, &pubkey2, 2_000_000).await;
-    airdrop(rpc_client, &pubkey3, 3_000_000).await;
-
     let all_pubkeys = vec![pubkey1, pubkey2, pubkey3, pubkey4];
 
     {
-        // Fetching immediately does not return the accounts yet
-        // They are updated via subscriptions instead
         let remote_accounts = remote_account_provider
-            .try_get_multi(&all_pubkeys, None)
+            .try_get_multi(
+                &all_pubkeys,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
             .await
             .unwrap();
 
@@ -168,13 +189,22 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
         );
     }
 
+    airdrop(rpc_client, &pubkey1, 1_000_000).await;
+    airdrop(rpc_client, &pubkey2, 2_000_000).await;
+    airdrop(rpc_client, &pubkey3, 3_000_000).await;
+
     sleep_ms(500).await;
     await_next_slot(rpc_client).await;
 
     {
         // Fetching after a bit
         let remote_accounts = remote_account_provider
-            .try_get_multi(&all_pubkeys, None)
+            .try_get_multi(
+                &all_pubkeys,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
             .await
             .unwrap();
         let remote_lamports =
@@ -203,7 +233,12 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
     {
         // Fetching after a bit
         let remote_accounts = remote_account_provider
-            .try_get_multi(&all_pubkeys, None)
+            .try_get_multi(
+                &all_pubkeys,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
             .await
             .unwrap();
         let remote_lamports =

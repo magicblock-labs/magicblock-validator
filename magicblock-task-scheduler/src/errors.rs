@@ -21,7 +21,7 @@ pub enum TaskSchedulerError {
     Rpc(#[from] solana_rpc_client_api::client_error::ClientError),
 
     #[error("Task not found: {0}")]
-    TaskNotFound(u64),
+    TaskNotFound(i64),
 
     #[error(transparent)]
     Transaction(#[from] solana_sdk::transaction::TransactionError),
@@ -42,5 +42,5 @@ pub enum TaskSchedulerError {
     ContextDeserialization(Vec<u8>),
 
     #[error("Task {0} already exists and is owned by {1}, not {2}")]
-    UnauthorizedReplacing(u64, String, String),
+    UnauthorizedReplacing(i64, String, String),
 }

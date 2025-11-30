@@ -24,7 +24,7 @@ pub struct SingleStageExecutor<'a, T, F> {
 
 impl<'a, T, F> SingleStageExecutor<'a, T, F>
 where
-    T: TransactionPreparator,
+    T: TransactionPreparator + Clone,
     F: TaskInfoFetcher,
 {
     pub fn new(executor: &'a IntentExecutorImpl<T, F>) -> Self {
@@ -173,6 +173,13 @@ where
                         transaction_strategy,
                     )
                     .await?;
+                Ok(ControlFlow::Continue(to_cleanup))
+            }
+            TransactionStrategyExecutionError::UndelegationError(_, _) => {
+                // Here we patch strategy for it to be retried in next iteration
+                // & we also record data that has to be cleaned up after patch
+                let to_cleanup =
+                    self.handle_undelegation_error(transaction_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _) => {

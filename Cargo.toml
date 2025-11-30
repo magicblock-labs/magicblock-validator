@@ -40,7 +40,7 @@ resolver = "2"
 
 [workspace.package]
 # Solana Version (2.2.x)
-version = "0.2.3"
+version = "0.3.1"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
@@ -61,7 +61,7 @@ byteorder = "1.5.0"
 cargo-lock = "10.0.0"
 chrono = "0.4"
 clap = "4.5.40"
-console-subscriber = "0.2.0"
+console-subscriber = "0.5.0"
 const_format = "0.2.34"
 convert_case = "0.8.0"
 crossbeam-channel = "0.5.11"
@@ -90,7 +90,7 @@ jsonrpc-pubsub = "18.0.0"
 jsonrpc-ws-server = "18.0.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
-log = { version = "0.4.20", features = ["release_max_level_info"] }
+log = { version = "0.4.20" }
 lru = "0.16.0"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
@@ -140,6 +140,7 @@ protobuf-src = "1.1"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10.0"
+reqwest = "0.11"
 # bundled sqlite 3.44
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 rustc_version = "0.4"
@@ -149,7 +150,7 @@ serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "f454d4a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "5afcedc" }
 solana-account-decoder = { version = "2.2" }
 solana-accounts-db = { version = "2.2" }
 solana-account-decoder-client-types = { version = "2.2" }
@@ -218,13 +219,13 @@ vergen = "8.3.1"
 
 [workspace.dependencies.solana-svm]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "11bbaf2"
+rev = "86c2cb0f"
 features = ["dev-context-only-utils"]
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "f454d4a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "5afcedc" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "11bbaf2" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "86c2cb0f" }

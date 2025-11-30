@@ -84,15 +84,8 @@ pub enum MagicBlockInstruction {
     /// - **0.** `[WRITE, SIGNER]` Task authority
     /// - **1.** `[WRITE]`         Task context account
     CancelTask {
-        task_id: u64,
+        task_id: i64,
     },
-
-    /// Process all tasks
-    ///
-    /// # Account references
-    /// - **0.** `[SIGNER]`         Validator authority
-    /// - **1.** `[WRITE]`          Task context account
-    ProcessTasks,
 
     /// Disables the executable check, needed to modify the data of a program
     /// in preparation to deploying it via LoaderV4 and to modify its authority.

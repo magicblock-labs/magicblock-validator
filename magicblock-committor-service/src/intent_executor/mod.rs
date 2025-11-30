@@ -102,7 +102,7 @@ pub struct IntentExecutorImpl<T, F> {
 
 impl<T, F> IntentExecutorImpl<T, F>
 where
-    T: TransactionPreparator,
+    T: TransactionPreparator + Clone,
     F: TaskInfoFetcher,
 {
     pub fn new(
@@ -253,7 +253,6 @@ where
     }
 
     /// Starting execution from single stage
-    // TODO(edwin): introduce recursion stop value in case of some bug?
     pub async fn single_stage_execution_flow<P: IntentPersister>(
         &self,
         base_intent: ScheduledBaseIntent,
@@ -264,21 +263,7 @@ where
         let res = SingleStageExecutor::new(self)
             .execute(base_intent, transaction_strategy, &mut junk, persister)
             .await;
-
-        // Cleanup after intent
-        // Note: in some cases it maybe critical to execute cleanup synchronously
-        // Example: if commit nonces were invalid during execution
-        // next intent could use wrongly initiated buffers by current intent
-        let cleanup_futs = junk.iter().map(|to_cleanup| {
-            self.transaction_preparator.cleanup_for_strategy(
-                &self.authority,
-                &to_cleanup.optimized_tasks,
-                &to_cleanup.lookup_tables_keys,
-            )
-        });
-        if let Err(err) = try_join_all(cleanup_futs).await {
-            error!("Failed to cleanup after intent: {}", err);
-        }
+        self.spawn_cleanup_task(junk);
 
         res
     }
@@ -300,21 +285,7 @@ where
                 persister,
             )
             .await;
-
-        // Cleanup after intent
-        // Note: in some cases it maybe critical to execute cleanup synchronously
-        // Example: if commit nonces were invalid during execution
-        // next intent could use wrongly initiated buffers by current intent
-        let cleanup_futs = junk.iter().map(|to_cleanup| {
-            self.transaction_preparator.cleanup_for_strategy(
-                &self.authority,
-                &to_cleanup.optimized_tasks,
-                &to_cleanup.lookup_tables_keys,
-            )
-        });
-        if let Err(err) = try_join_all(cleanup_futs).await {
-            error!("Failed to cleanup after intent: {}", err);
-        }
+        self.spawn_cleanup_task(junk);
 
         res
     }
@@ -445,6 +416,35 @@ where
         (commit_strategy, finalize_strategy, to_cleanup)
     }
 
+    /// Handles actions error, stripping away actions
+    /// Returns [`TransactionStrategy`] to be cleaned up
+    fn handle_undelegation_error(
+        &self,
+        strategy: &mut TransactionStrategy,
+    ) -> TransactionStrategy {
+        let position = strategy
+            .optimized_tasks
+            .iter()
+            .position(|el| el.task_type() == TaskType::Undelegate);
+
+        if let Some(position) = position {
+            // Remove everything after undelegation including post undelegation actions
+            let removed_task =
+                strategy.optimized_tasks.drain(position..).collect();
+            let old_alts =
+                strategy.dummy_revaluate_alts(&self.authority.pubkey());
+            TransactionStrategy {
+                optimized_tasks: removed_task,
+                lookup_tables_keys: old_alts,
+            }
+        } else {
+            TransactionStrategy {
+                optimized_tasks: vec![],
+                lookup_tables_keys: vec![],
+            }
+        }
+    }
+
     /// Shared helper for sending transactions
     async fn send_prepared_message(
         &self,
@@ -520,7 +520,8 @@ where
             }
             Err(IntentExecutorError::CommitIDError(_, _))
             | Err(IntentExecutorError::ActionsError(_, _))
-            | Err(IntentExecutorError::CpiLimitError(_, _)) => None,
+            | Err(IntentExecutorError::CpiLimitError(_, _))
+            | Err(IntentExecutorError::UndelegationError(_, _)) => None,
             Err(IntentExecutorError::EmptyIntentError)
             | Err(IntentExecutorError::FailedToFitError)
             | Err(IntentExecutorError::TaskBuilderError(_))
@@ -678,6 +679,31 @@ where
         .await
     }
 
+    /// Cleanup after intent
+    /// Note: in some cases it maybe critical to execute cleanup synchronously
+    /// Example: if commit nonces were invalid during execution
+    /// next intent could use wrongly initiated buffers by current intent
+    /// We assume that this case is highly unlikely since it would mean:
+    /// user redelegates amd reaches current commit id faster than we execute transactions below
+    fn spawn_cleanup_task(&self, junk: Vec<TransactionStrategy>) {
+        let authority = self.authority.insecure_clone();
+        let transaction_preparator = self.transaction_preparator.clone();
+        let cleanup_fut = async move {
+            let cleanup_futs = junk.iter().map(|to_cleanup| {
+                transaction_preparator.cleanup_for_strategy(
+                    &authority,
+                    &to_cleanup.optimized_tasks,
+                    &to_cleanup.lookup_tables_keys,
+                )
+            });
+
+            if let Err(err) = try_join_all(cleanup_futs).await {
+                error!("Failed to cleanup after intent: {}", err);
+            }
+        };
+        tokio::spawn(cleanup_fut);
+    }
+
     async fn intent_metrics(
         rpc_client: MagicblockRpcClient,
         execution_outcome: ExecutionOutput,
@@ -741,7 +767,7 @@ where
 #[async_trait]
 impl<T, C> IntentExecutor for IntentExecutorImpl<T, C>
 where
-    T: TransactionPreparator,
+    T: TransactionPreparator + Clone,
     C: TaskInfoFetcher,
 {
     /// Executes Message on Base layer
@@ -758,6 +784,8 @@ where
         let result = self.execute_inner(base_intent, &persister).await;
         if let Some(pubkeys) = pubkeys {
             // Reset TaskInfoFetcher, as cache could become invalid
+            // NOTE: if undelegation was removed - we still reset
+            // We assume its safe since all consecutive commits will fail
             if result.is_err() || is_undelegate {
                 self.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
             }

@@ -141,6 +141,7 @@ fn spawn_transfer_thread(
     })
 }
 
+#[ignore = "We are still evaluating escrow functionality that allows anything except just paying fees"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_multiple_transfers_from_multiple_escrows_in_parallel() {
     init_logger!();
@@ -235,6 +236,7 @@ async fn test_multiple_transfers_from_multiple_escrows_in_parallel() {
 //       that we can run multiple transactions in paralle.
 //       We should move this test once we implement the proper parallel transaction
 //       executor
+#[ignore = "We are still evaluating escrow functionality that allows anything except just paying fees"]
 #[test]
 fn test_multiple_transfers_from_same_escrow_different_amounts_in_parallel() {
     init_logger!();

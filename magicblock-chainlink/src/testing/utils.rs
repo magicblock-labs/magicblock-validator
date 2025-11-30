@@ -1,12 +1,18 @@
 #![cfg(any(test, feature = "dev-context"))]
 #![allow(dead_code)]
+use std::{num::NonZeroUsize, sync::Arc};
+
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{signature::Keypair, signer::Signer};
 
 use crate::{
     accounts_bank::mock::AccountsBankStub,
-    remote_account_provider::{RemoteAccount, RemoteAccountUpdateSource},
+    config::LifecycleMode,
+    remote_account_provider::{
+        config::RemoteAccountProviderConfig, AccountsLruCache, RemoteAccount,
+        RemoteAccountUpdateSource,
+    },
 };
 
 pub const PUBSUB_URL: &str = "ws://localhost:7800";
@@ -94,4 +100,24 @@ pub fn dump_remote_account_update_source(
     for (pk, source) in accs.iter() {
         log::info!("{pk}: {source:?}");
     }
+}
+
+pub fn create_test_lru_cache(
+    capacity: usize,
+) -> (Arc<AccountsLruCache>, RemoteAccountProviderConfig) {
+    let config = RemoteAccountProviderConfig::try_new_with_metrics(
+        capacity,
+        LifecycleMode::Ephemeral,
+        false,
+    )
+    .unwrap();
+    (create_test_lru_cache_with_config(&config), config)
+}
+
+pub fn create_test_lru_cache_with_config(
+    config: &RemoteAccountProviderConfig,
+) -> Arc<AccountsLruCache> {
+    Arc::new(AccountsLruCache::new(
+        NonZeroUsize::new(config.subscribed_accounts_lru_capacity()).unwrap(),
+    ))
 }

@@ -1,3 +1,4 @@
+use core::str;
 use std::{mem::size_of, ops::Range};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -10,7 +11,7 @@ use log::*;
 use magicblock_core::{
     link::transactions::SanitizeableTransaction, traits::AccountsBank,
 };
-use magicblock_metrics::metrics::ENSURE_ACCOUNTS_TIME;
+use magicblock_metrics::metrics::{AccountFetchOrigin, ENSURE_ACCOUNTS_TIME};
 use prelude::JsonBody;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -19,7 +20,7 @@ use solana_transaction::{
 };
 use solana_transaction_status::UiTransactionEncoding;
 
-use super::JsonHttpRequest;
+use super::RpcRequest;
 use crate::{
     error::RpcError, server::http::dispatch::HttpDispatcher, RpcResult,
 };
@@ -45,15 +46,22 @@ impl Data {
 }
 
 /// Deserializes the raw request body bytes into a structured `JsonHttpRequest`.
-pub(crate) fn parse_body(body: Data) -> RpcResult<JsonHttpRequest> {
+pub(crate) fn parse_body(body: Data) -> RpcResult<RpcRequest> {
     let body_bytes = match &body {
         Data::Empty => {
             return Err(RpcError::invalid_request("missing request body"))
         }
         Data::SingleChunk(slice) => slice.as_ref(),
         Data::MultiChunk(vec) => vec.as_ref(),
-    };
-    json::from_slice(body_bytes).map_err(Into::into)
+    }
+    .trim_ascii_start();
+    // Hacky/cheap way to detect single request vs an array of requests
+    if body_bytes.first().map(|&b| b == b'{').unwrap_or_default() {
+        json::from_slice(body_bytes).map(RpcRequest::Single)
+    } else {
+        json::from_slice(body_bytes).map(RpcRequest::Multi)
+    }
+    .map_err(Into::into)
 }
 
 /// Asynchronously reads all data from an HTTP request body, correctly handling chunked transfers.
@@ -107,12 +115,17 @@ impl HttpDispatcher {
             .start_timer();
         let _ = self
             .chainlink
-            .ensure_accounts(&[*pubkey], None)
+            .ensure_accounts(
+                &[*pubkey],
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the account fails
                 // Log the error and return whatever is in the accounts db
-                warn!("Failed to ensure account {pubkey}: {e}");
+                debug!("Failed to ensure account {pubkey}: {e}");
             });
         self.accountsdb.get_account(pubkey)
     }
@@ -129,7 +142,12 @@ impl HttpDispatcher {
             .start_timer();
         let _ = self
             .chainlink
-            .ensure_accounts(pubkeys, None)
+            .ensure_accounts(
+                pubkeys,
+                None,
+                AccountFetchOrigin::GetMultipleAccounts,
+                None,
+            )
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the accounts fails
@@ -270,6 +288,7 @@ pub(crate) mod get_identity;
 pub(crate) mod get_latest_blockhash;
 pub(crate) mod get_multiple_accounts;
 pub(crate) mod get_program_accounts;
+pub(crate) mod get_recent_performance_samples;
 pub(crate) mod get_signature_statuses;
 pub(crate) mod get_signatures_for_address;
 pub(crate) mod get_slot;
