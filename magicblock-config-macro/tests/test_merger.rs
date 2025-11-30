@@ -161,10 +161,11 @@ fn pretty_print(tokens: proc_macro2::TokenStream) -> String {
     match syn::parse_file(&code) {
         Ok(file) => prettyplease::unparse(&file),
         // Fallback to simple normalization if parsing fails
-        Err(_) => code.split_whitespace()
+        Err(_) => code
+            .split_whitespace()
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>()
-            .join(" ")
+            .join(" "),
     }
 }
 
