@@ -5,10 +5,11 @@ use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, AccountsDbConfig, AllowedProgram,
     BlockSize, CommitStrategyConfig, EphemeralConfig, LedgerConfig,
     LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
-    MetricsConfig, MetricsServiceConfig, PrepareLookupTables, ProgramConfig,
-    RemoteCluster, RemoteConfig, RpcConfig, TaskSchedulerConfig,
+    MagicBlockConfig, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
+    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, TaskSchedulerConfig,
     ValidatorConfig,
 };
+
 use solana_pubkey::pubkey;
 use url::Url;
 
@@ -324,4 +325,30 @@ account-hydration-concurrency = 20
             .account_hydration_concurrency,
         20
     );
+}
+
+#[test]
+fn test_cli_reset_flag() {
+    let args = vec!["magicblock-validator".to_string(), "--reset".to_string()];
+
+    let config = MagicBlockConfig::try_parse_config_from_arg(&args)
+        .expect("Failed to parse args");
+
+    assert!(matches!(
+        config.config.ledger.resume_strategy_config.kind,
+        LedgerResumeStrategyType::Reset
+    ));
+}
+
+#[test]
+fn test_cli_no_reset_flag() {
+    let args = vec!["magicblock-validator".to_string()];
+
+    let config = MagicBlockConfig::try_parse_config_from_arg(&args)
+        .expect("Failed to parse args");
+
+    assert!(!matches!(
+        config.config.ledger.resume_strategy_config.kind,
+        LedgerResumeStrategyType::Reset
+    ));
 }

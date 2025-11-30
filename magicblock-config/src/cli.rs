@@ -4,7 +4,7 @@ use clap::{Error, Parser};
 use magicblock_config_helpers::Merge;
 use solana_keypair::Keypair;
 
-use crate::EphemeralConfig;
+use crate::{EphemeralConfig, LedgerResumeStrategyType};
 
 #[derive(Debug, Clone, Parser)]
 pub struct MagicBlockConfig {
@@ -19,6 +19,9 @@ pub struct MagicBlockConfig {
         default_value_t = default_keypair()
     )]
     pub validator_keypair: String,
+
+    #[arg(long, help = "Reset the test ledger before starting the validator")]
+    pub reset: bool,
 
     #[command(flatten)]
     pub config: EphemeralConfig,
@@ -58,6 +61,11 @@ impl MagicBlockConfig {
         };
 
         self.config.merge(config);
+
+        if self.reset {
+            self.config.ledger.resume_strategy_config.kind =
+                LedgerResumeStrategyType::Reset
+        }
 
         self
     }
