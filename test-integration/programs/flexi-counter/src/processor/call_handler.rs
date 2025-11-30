@@ -99,6 +99,7 @@ pub fn process_undelegate_action_handler(
 #[allow(dead_code)]
 fn process_redelegation_call_handler<'a, 'b>(
     accounts: &[AccountInfo],
+    validator: Option<solana_program::pubkey::Pubkey>,
 ) -> ProgramResult
 where
     'a: 'b,
@@ -128,7 +129,7 @@ where
         // Could be passed in CallHandlerArgs::data
         DelegateConfig {
             commit_frequency_ms: 1000,
-            validator: None,
+            validator,
         },
     )?;
 

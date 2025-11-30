@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts,
     validator::start_magicblock_validator_with_config_struct,
