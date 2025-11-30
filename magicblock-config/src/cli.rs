@@ -20,7 +20,7 @@ pub struct MagicBlockConfig {
     )]
     pub validator_keypair: String,
 
-    #[arg(long, help = "Reset the test ledger before starting the validator")]
+    #[arg(long, help = "Clear the existing ledger before starting the validator")]
     pub reset: bool,
 
     #[command(flatten)]
