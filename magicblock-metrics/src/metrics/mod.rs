@@ -111,7 +111,7 @@ lazy_static::lazy_static! {
     pub static ref LEDGER_TRUNCATOR_DELETE_SECONDS: Histogram = Histogram::with_opts(
         HistogramOpts::new(
             "ledger_truncator_delete_seconds",
-            "Time taken to compact rocksdb columns"
+            "Time taken to delete rocksdb slot ranges"
         )
         .buckets(
             vec![0.1, 1.0, 5.0, 10.0, 30.0]
