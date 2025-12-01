@@ -299,7 +299,7 @@ impl ChainPubsubActor {
         ) {
             let _ = response.send(Ok(())).inspect_err(|err| {
                 warn!(
-                    "[client_id={client_id}]  Failed to send msg ack: {err:?}"
+                    "[client_id={client_id}] Failed to send msg ack: {err:?}"
                 );
             });
         }
@@ -346,7 +346,7 @@ impl ChainPubsubActor {
                         .get(&pubkey)
                 {
                     cancellation_token.cancel();
-                    let _ = response.send(Ok(()));
+                    send_ok(response, client_id);
                 } else {
                     let _ = response
                         .send(Err(RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
