@@ -14,7 +14,10 @@ use solana_pubkey::Pubkey;
 use solana_pubsub_client::nonblocking::pubsub_client::{
     PubsubClient, PubsubClientResult,
 };
-use solana_rpc_client_api::{config::RpcAccountInfoConfig, response::Response};
+use solana_rpc_client_api::{
+    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    response::{Response, RpcKeyedAccount},
+};
 use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::{
     sync::{mpsc, oneshot, Mutex as AsyncMutex},
@@ -31,6 +34,10 @@ use super::{
 type UnsubscribeFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
 type SubscribeResult = PubsubClientResult<(
     BoxStream<'static, Response<UiAccount>>,
+    UnsubscribeFn,
+)>;
+type ProgramSubscribeResult = PubsubClientResult<(
+    BoxStream<'static, Response<RpcKeyedAccount>>,
     UnsubscribeFn,
 )>;
 
@@ -74,6 +81,29 @@ impl PubSubConnection {
             mem::transmute::<
                 BoxStream<'_, Response<UiAccount>>,
                 BoxStream<'static, Response<UiAccount>>,
+            >(stream)
+        };
+        Ok((stream, unsub))
+    }
+
+    pub async fn program_subscribe(
+        &self,
+        program_id: &Pubkey,
+        config: RpcProgramAccountsConfig,
+    ) -> ProgramSubscribeResult {
+        let client = self.client.load();
+        let config = Some(config.clone());
+        let (stream, unsub) =
+            client.program_subscribe(program_id, config).await?;
+
+        // SAFETY:
+        // the returned stream depends on the used client, which is only ever dropped
+        // if the connection has been terminated, at which point the stream is useless
+        // and will be discarded as well, thus it's safe lifetime extension to 'static
+        let stream = unsafe {
+            mem::transmute::<
+                BoxStream<'_, Response<RpcKeyedAccount>>,
+                BoxStream<'static, Response<RpcKeyedAccount>>,
             >(stream)
         };
         Ok((stream, unsub))
