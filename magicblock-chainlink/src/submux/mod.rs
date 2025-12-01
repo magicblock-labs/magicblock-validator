@@ -135,9 +135,11 @@ where
     /// Accounts that should never be debounced, namely the clock sysvar account
     /// which we use to track the latest remote slot.
     never_debounce: HashSet<Pubkey>,
-
     /// Number of clients that must confirm a subscription for it to be considered active.
     required_subscription_confirmations: usize,
+    #[allow(dead_code)]
+    /// Map of program account subscriptions we are holding inside the pubsub clients
+    program_subs: Arc<Mutex<HashSet<Pubkey>>>,
 }
 
 // Parameters for the long-running forwarder loop, grouped to avoid
@@ -219,6 +221,7 @@ where
             debounce_states: debounce_states.clone(),
             never_debounce,
             required_subscription_confirmations,
+            program_subs: Default::default(),
         };
 
         // Spawn background tasks
