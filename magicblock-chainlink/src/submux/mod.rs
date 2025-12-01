@@ -616,9 +616,14 @@ where
 
     async fn subscribe_program(
         &self,
-        _program_id: Pubkey,
+        program_id: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        Ok(())
+        AccountSubscriptionTask::SubscribeProgram(
+            program_id,
+            self.required_subscription_confirmations,
+        )
+        .process(self.clients.clone())
+        .await
     }
 
     async fn unsubscribe(
