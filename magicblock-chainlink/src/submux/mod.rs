@@ -26,6 +26,9 @@ pub use self::debounce_state::DebounceState;
 mod subscription_task;
 pub use self::subscription_task::AccountSubscriptionTask;
 
+mod subscribed_accounts_tracker;
+pub use self::subscribed_accounts_tracker::SubscribedAccountsTracker;
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DebounceConfig {
     /// The deduplication window in milliseconds. If None, defaults to
@@ -132,6 +135,9 @@ where
     /// Accounts that should never be debounced, namely the clock sysvar account
     /// which we use to track the latest remote slot.
     never_debounce: HashSet<Pubkey>,
+
+    /// Number of clients that must confirm a subscription for it to be considered active.
+    required_subscription_confirmations: usize,
 }
 
 // Parameters for the long-running forwarder loop, grouped to avoid
@@ -150,12 +156,14 @@ impl<T> SubMuxClient<T>
 where
     T: ChainPubsubClient + ReconnectableClient,
 {
-    pub fn new(
+    pub fn new<U: SubscribedAccountsTracker>(
         clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
+        subscribed_accounts_tracker: Arc<U>,
         dedupe_window_millis: Option<u64>,
     ) -> Self {
         Self::new_with_debounce(
             clients,
+            subscribed_accounts_tracker,
             DebounceConfig {
                 dedupe_window_millis,
                 ..DebounceConfig::default()
@@ -163,15 +171,17 @@ where
         )
     }
 
-    pub fn new_with_debounce(
+    pub fn new_with_debounce<U: SubscribedAccountsTracker>(
         clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
+        subscribed_accounts_tracker: Arc<U>,
         config: DebounceConfig,
     ) -> Self {
-        Self::new_with_config(clients, config)
+        Self::new_with_config(clients, subscribed_accounts_tracker, config)
     }
 
-    pub fn new_with_config(
+    pub fn new_with_config<U: SubscribedAccountsTracker>(
         clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
+        subscribed_accounts_tracker: Arc<U>,
         config: DebounceConfig,
     ) -> Self {
         let (out_tx, out_rx) = mpsc::channel(SUBMUX_OUT_CHANNEL_SIZE);
@@ -191,8 +201,13 @@ where
         let never_debounce: HashSet<Pubkey> =
             vec![solana_sdk::sysvar::clock::ID].into_iter().collect();
 
-        let clients = Self::spawn_reconnectors(clients);
+        let clients =
+            Self::spawn_reconnectors(clients, subscribed_accounts_tracker);
 
+        let required_subscription_confirmations = {
+            let n = clients.len();
+            cmp::max(1, (n * 2) / 3)
+        };
         let me = Self {
             clients,
             out_tx,
@@ -203,6 +218,7 @@ where
             debounce_detection_window,
             debounce_states: debounce_states.clone(),
             never_debounce,
+            required_subscription_confirmations,
         };
 
         // Spawn background tasks
@@ -214,15 +230,15 @@ where
     // -----------------
     // Reconnection
     // -----------------
-    fn spawn_reconnectors(
+    fn spawn_reconnectors<U: SubscribedAccountsTracker>(
         clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
+        subscribed_accounts_tracker: Arc<U>,
     ) -> Vec<Arc<T>> {
-        let clients_only = clients
-            .iter()
-            .map(|(c, _)| c.clone())
-            .collect::<Vec<Arc<T>>>();
+        let mut clients_only = Vec::with_capacity(clients.len());
         for (client, mut abort_rx) in clients.into_iter() {
-            let clients_clone = clients_only.clone();
+            clients_only.push(client.clone());
+            let subscribed_accounts_tracker =
+                subscribed_accounts_tracker.clone();
             tokio::spawn(async move {
                 while abort_rx.recv().await.is_some() {
                     // Drain any duplicate abort signals to coalesce reconnect attempts
@@ -233,7 +249,7 @@ where
                     );
                     Self::reconnect_client_with_backoff(
                         client.clone(),
-                        clients_clone.clone(),
+                        subscribed_accounts_tracker.clone(),
                     )
                     .await;
                 }
@@ -242,9 +258,9 @@ where
         clients_only
     }
 
-    async fn reconnect_client_with_backoff(
+    async fn reconnect_client_with_backoff<U: SubscribedAccountsTracker>(
         client: Arc<T>,
-        all_clients: Vec<Arc<T>>,
+        accounts_tracker: Arc<U>,
     ) {
         fn fib_with_max(n: u64) -> u64 {
             let (mut a, mut b) = (0u64, 1u64);
@@ -258,7 +274,7 @@ where
         let mut attempt = 0;
         loop {
             attempt += 1;
-            if Self::reconnect_client(client.clone(), &all_clients).await {
+            if Self::reconnect_client(client.clone(), &accounts_tracker).await {
                 debug!(
                     "Successfully reconnected client after {} attempts",
                     attempt
@@ -275,17 +291,20 @@ where
         }
     }
 
-    async fn reconnect_client(client: Arc<T>, all_clients: &[Arc<T>]) -> bool {
+    async fn reconnect_client<U: SubscribedAccountsTracker>(
+        client: Arc<T>,
+        accounts_tracker: &Arc<U>,
+    ) -> bool {
         if let Err(err) = client.try_reconnect().await {
             debug!("Failed to reconnect client: {:?}", err);
             return false;
         }
-        // Resubscribe all existing subscriptions sourced from still connected clients
-        // NOTE: that new subscriptions are already received now as well since the
-        // client marked itself as connected and is no longer blocking subscriptions
-        // See [ChainPubsubActor::handle_msg] and  [ChainPubsubActor::try_reconnect]
-        let subs = Self::get_subscriptions(all_clients);
-        match client.resub_multiple(&subs).await {
+        // Resubscribe all accounts from the authoritative tracker.
+        // This ensures subscriptions are restored even if all clients lost their state
+        // during disconnect/abort.
+        let subs = accounts_tracker.subscribed_accounts();
+
+        match client.resub_multiple(subs).await {
             Err(err) => {
                 debug!(
                     "Failed to resubscribe accounts after reconnect: {:?}",
@@ -584,9 +603,12 @@ where
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        AccountSubscriptionTask::Subscribe(pubkey)
-            .process(self.clients.clone())
-            .await
+        AccountSubscriptionTask::Subscribe(
+            pubkey,
+            self.required_subscription_confirmations,
+        )
+        .process(self.clients.clone())
+        .await
     }
 
     async fn unsubscribe(
@@ -655,6 +677,7 @@ mod tests {
     use super::*;
     use crate::{
         remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
+        submux::subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker,
         testing::{init_logger, utils::sleep_ms},
     };
 
@@ -675,7 +698,12 @@ mod tests {
                 (c, abort_rx)
             })
             .collect();
-        SubMuxClient::new(client_tuples, dedupe_window_millis)
+        let tracker = Arc::new(
+            subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker::new(
+                vec![],
+            ),
+        );
+        SubMuxClient::new(client_tuples, tracker, dedupe_window_millis)
     }
 
     fn new_submux_client_with_debounce(
@@ -689,11 +717,17 @@ mod tests {
                 (c, abort_rx)
             })
             .collect();
-        SubMuxClient::new_with_debounce(client_tuples, config)
+        let tracker = Arc::new(
+            subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker::new(
+                vec![],
+            ),
+        );
+        SubMuxClient::new_with_debounce(client_tuples, tracker, config)
     }
 
     fn new_submux_with_abort(
         clients: Vec<Arc<ChainPubsubClientMock>>,
+        subs: Vec<Pubkey>,
         dedupe_window_millis: Option<u64>,
     ) -> (SubMuxClient<ChainPubsubClientMock>, Vec<mpsc::Sender<()>>) {
         let mut abort_senders = Vec::new();
@@ -705,8 +739,9 @@ mod tests {
                 (c, abort_rx)
             })
             .collect();
+        let tracker = Arc::new(MockSubscribedAccountsTracker::new(subs));
         (
-            SubMuxClient::new(client_tuples, dedupe_window_millis),
+            SubMuxClient::new(client_tuples, tracker, dedupe_window_millis),
             abort_senders,
         )
     }
@@ -1280,13 +1315,14 @@ mod tests {
         let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
+        let pk = Pubkey::new_unique();
         let (mux, aborts) = new_submux_with_abort(
             vec![client1.clone(), client2.clone()],
+            vec![pk],
             Some(100),
         );
         let mut mux_rx = mux.take_updates();
 
-        let pk = Pubkey::new_unique();
         mux.subscribe(pk).await.unwrap();
 
         // Baseline: client1 update arrives
@@ -1337,13 +1373,14 @@ mod tests {
         let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
+        let pk = Pubkey::new_unique();
         let (mux, aborts) = new_submux_with_abort(
             vec![client1.clone(), client2.clone()],
+            vec![pk],
             Some(100),
         );
         let mut mux_rx = mux.take_updates();
 
-        let pk = Pubkey::new_unique();
         mux.subscribe(pk).await.unwrap();
 
         // Prepare: first resubscribe attempt will fail

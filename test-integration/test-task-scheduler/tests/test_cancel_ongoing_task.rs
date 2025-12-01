@@ -1,6 +1,5 @@
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
-use magicblock_program::ID as MAGIC_PROGRAM_ID;
 use magicblock_task_scheduler::SchedulerDatabase;
 use program_flexi_counter::{
     instruction::{create_cancel_task_ix, create_schedule_task_ix},
@@ -13,6 +12,7 @@ use solana_sdk::{
 use test_task_scheduler::{
     create_delegated_counter, send_noop_tx, setup_validator,
 };
+use tokio::runtime::Runtime;
 
 #[test]
 fn test_cancel_ongoing_task() {
@@ -27,7 +27,7 @@ fn test_cancel_ongoing_task() {
         validator
     );
 
-    create_delegated_counter(&ctx, &payer, &mut validator);
+    create_delegated_counter(&ctx, &payer, &mut validator, 0);
 
     // Noop tx to make sure the noop program is cloned
     let ephem_blockhash = send_noop_tx(&ctx, &payer, &mut validator);
@@ -41,7 +41,6 @@ fn test_cancel_ongoing_task() {
             &mut Transaction::new_signed_with_payer(
                 &[create_schedule_task_ix(
                     payer.pubkey(),
-                    MAGIC_PROGRAM_ID,
                     task_id,
                     execution_interval_millis,
                     iterations,
@@ -77,11 +76,7 @@ fn test_cancel_ongoing_task() {
     let sig = expect!(
         ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
-                &[create_cancel_task_ix(
-                    payer.pubkey(),
-                    MAGIC_PROGRAM_ID,
-                    task_id,
-                )],
+                &[create_cancel_task_ix(payer.pubkey(), task_id,)],
                 Some(&payer.pubkey()),
                 &[&payer],
                 ephem_blockhash,
@@ -109,8 +104,10 @@ fn test_cancel_ongoing_task() {
 
     // Check that the task was cancelled
     let db = expect!(SchedulerDatabase::new(db_path), validator);
+    let runtime = expect!(Runtime::new(), validator);
 
-    let failed_scheduling = expect!(db.get_failed_schedulings(), validator);
+    let failed_scheduling =
+        expect!(runtime.block_on(db.get_failed_schedulings()), validator);
     assert_eq!(
         failed_scheduling.len(),
         0,
@@ -119,7 +116,8 @@ fn test_cancel_ongoing_task() {
         failed_scheduling,
     );
 
-    let failed_tasks = expect!(db.get_failed_tasks(), validator);
+    let failed_tasks =
+        expect!(runtime.block_on(db.get_failed_tasks()), validator);
     assert_eq!(
         failed_tasks.len(),
         0,
@@ -128,7 +126,7 @@ fn test_cancel_ongoing_task() {
         failed_tasks
     );
 
-    let tasks = expect!(db.get_task_ids(), validator);
+    let tasks = expect!(runtime.block_on(db.get_task_ids()), validator);
     assert_eq!(
         tasks.len(),
         0,
@@ -137,7 +135,7 @@ fn test_cancel_ongoing_task() {
         tasks
     );
 
-    let task = expect!(db.get_task(task_id), validator);
+    let task = expect!(runtime.block_on(db.get_task(task_id)), validator);
     assert!(task.is_none(), cleanup(&mut validator));
 
     // Check that the counter was incremented but not as much as the number of executions
@@ -150,7 +148,7 @@ fn test_cancel_ongoing_task() {
     let counter =
         expect!(FlexiCounter::try_decode(&counter_account.data), validator);
     assert!(
-        counter.count < iterations,
+        counter.count < iterations as u64,
         cleanup(&mut validator),
         "counter.count: {}",
         counter.count,
