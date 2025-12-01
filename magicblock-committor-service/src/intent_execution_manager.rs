@@ -4,9 +4,7 @@ pub mod intent_scheduler;
 
 use std::sync::Arc;
 
-pub use intent_execution_engine::{
-    BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
-};
+pub use intent_execution_engine::BroadcastedIntentExecutionResult;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
