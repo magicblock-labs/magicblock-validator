@@ -4,9 +4,7 @@ pub mod intent_scheduler;
 
 use std::sync::Arc;
 
-pub use intent_execution_engine::{
-    BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
-};
+pub use intent_execution_engine::BroadcastedIntentExecutionResult;
 use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;

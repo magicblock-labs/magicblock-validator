@@ -917,7 +917,11 @@ where
                         }
                         account.set_data(delegation_record.data);
                         account.set_owner(delegation_record.owner);
-                        Some((pubkey, account))
+                        Some(AccountCloneRequest {
+                            pubkey,
+                            account,
+                            commit_frequency_ms: None,
+                        })
                     },
                 ),
             );

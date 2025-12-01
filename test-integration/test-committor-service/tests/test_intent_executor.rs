@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    mem,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -17,7 +18,8 @@ use magicblock_committor_service::{
     intent_executor::{
         error::TransactionStrategyExecutionError,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
-        ExecutionOutput, IntentExecutor, IntentExecutorImpl,
+        ExecutionOutput, IntentExecutionResult, IntentExecutor,
+        IntentExecutorImpl,
     },
     persist::IntentPersisterImpl,
     tasks::{
@@ -342,7 +344,7 @@ async fn test_commit_id_error_recovery() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        mut intent_executor,
         task_info_fetcher,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
@@ -367,9 +369,22 @@ async fn test_commit_id_error_recovery() {
     let res = intent_executor
         .execute(intent, None::<IntentPersisterImpl>)
         .await;
+    let IntentExecutionResult {
+        inner: res,
+        patched_errors,
+    } = res;
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
 
+    assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
+    let commit_id_error = patched_errors.into_iter().next().unwrap();
+    assert!(matches!(
+        commit_id_error,
+        TransactionStrategyExecutionError::CommitIDError(_, _)
+    ));
+
+    // Cleanup succeeds
+    assert!(intent_executor.cleanup().await.is_ok());
     let commit_ids_by_pk: HashMap<_, _> = [&committed_account]
         .iter()
         .map(|el| {
@@ -380,7 +395,6 @@ async fn test_commit_id_error_recovery() {
         })
         .collect();
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
     verify(
         &fixture.table_mania,
         fixture.rpc_client.get_inner(),
@@ -397,7 +411,7 @@ async fn test_undelegation_error_recovery() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        mut intent_executor,
         task_info_fetcher: _,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
@@ -418,10 +432,24 @@ async fn test_undelegation_error_recovery() {
     let res = intent_executor
         .execute(intent, None::<IntentPersisterImpl>)
         .await;
+    let IntentExecutionResult {
+        inner: res,
+        patched_errors,
+    } = res;
+
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+    assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // Assert errors patched
+    let undelegation_error = patched_errors.into_iter().next().unwrap();
+    assert!(matches!(
+        undelegation_error,
+        TransactionStrategyExecutionError::UndelegationError(_, _)
+    ));
+
+    // Cleanup succeeds
+    assert!(intent_executor.cleanup().await.is_ok());
     verify(
         &fixture.table_mania,
         fixture.rpc_client.get_inner(),
@@ -438,7 +466,7 @@ async fn test_action_error_recovery() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        mut intent_executor,
         task_info_fetcher: _,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
@@ -467,8 +495,21 @@ async fn test_action_error_recovery() {
     let res = intent_executor
         .execute(scheduled_intent, None::<IntentPersisterImpl>)
         .await;
+    let IntentExecutionResult {
+        inner: res,
+        patched_errors,
+    } = res;
+
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+    assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
+
+    // Assert errors patched
+    let action_error = patched_errors.into_iter().next().unwrap();
+    assert!(matches!(
+        action_error,
+        TransactionStrategyExecutionError::ActionsError(_, _)
+    ));
 
     verify_committed_accounts_state(
         fixture.rpc_client.get_inner(),
@@ -490,7 +531,7 @@ async fn test_commit_id_and_action_errors_recovery() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        mut intent_executor,
         task_info_fetcher,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
@@ -523,11 +564,34 @@ async fn test_commit_id_and_action_errors_recovery() {
         });
 
     let scheduled_intent = create_scheduled_intent(base_intent);
+    // Execute intent
     let res = intent_executor
         .execute(scheduled_intent, None::<IntentPersisterImpl>)
         .await;
+    let IntentExecutionResult {
+        inner: res,
+        patched_errors,
+    } = res;
+
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+    assert_eq!(patched_errors.len(), 2, "Only 2 patches expected");
+
+    // Assert errors patched
+    let mut iter = patched_errors.into_iter();
+    let commit_id_error = iter.next().unwrap();
+    let actions_error = iter.next().unwrap();
+    assert!(matches!(
+        commit_id_error,
+        TransactionStrategyExecutionError::CommitIDError(_, _)
+    ));
+    assert!(matches!(
+        actions_error,
+        TransactionStrategyExecutionError::ActionsError(_, _)
+    ));
+
+    // Cleanup succeeds
+    assert!(intent_executor.cleanup().await.is_ok());
 
     verify_committed_accounts_state(
         fixture.rpc_client.get_inner(),
@@ -550,7 +614,7 @@ async fn test_cpi_limits_error_recovery() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        mut intent_executor,
         task_info_fetcher,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
@@ -578,7 +642,7 @@ async fn test_cpi_limits_error_recovery() {
             account.data = to_vec(&data).unwrap();
             CommittedAccount {
                 pubkey: FlexiCounter::pda(&counter.pubkey()).0,
-                account: account.clone(),
+                account,
             }
         })
         .collect();
@@ -609,7 +673,8 @@ async fn test_cpi_limits_error_recovery() {
         }
     ));
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // Cleanup after intent
+    assert!(intent_executor.cleanup().await.is_ok());
     let commit_ids_by_pk: HashMap<_, _> = committed_accounts
         .iter()
         .map(|el| {
@@ -619,6 +684,7 @@ async fn test_cpi_limits_error_recovery() {
             )
         })
         .collect();
+
     verify(
         &fixture.table_mania,
         fixture.rpc_client.get_inner(),
@@ -637,7 +703,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        mut intent_executor,
         task_info_fetcher,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
@@ -709,12 +775,13 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         )
         .await;
 
-    println!("{:?}", res);
+    let patched_errors = mem::take(&mut intent_executor.patched_errors);
     // We expect recovery to succeed by splitting into two stages (commit, then finalize)
     assert!(
         res.is_ok(),
         "Expected recovery from CommitID, Actions, and CpiLimit errors"
     );
+    assert_eq!(patched_errors.len(), 3, "Only 3 patches expected");
     assert!(matches!(
         res.unwrap(),
         ExecutionOutput::TwoStage {
@@ -723,7 +790,26 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         }
     ));
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    let mut iter = patched_errors.into_iter();
+    let commit_id_error = iter.next().unwrap();
+    let cpi_limit_err = iter.next().unwrap();
+    let action_error = iter.next().unwrap();
+
+    assert!(matches!(
+        commit_id_error,
+        TransactionStrategyExecutionError::CommitIDError(_, _)
+    ));
+    assert!(matches!(
+        cpi_limit_err,
+        TransactionStrategyExecutionError::CpiLimitError(_, _)
+    ));
+    assert!(matches!(
+        action_error,
+        TransactionStrategyExecutionError::ActionsError(_, _)
+    ));
+
+    // Cleanup after intent
+    assert!(intent_executor.cleanup().await.is_ok());
     let commit_ids_by_pk: HashMap<_, _> = committed_accounts
         .iter()
         .map(|el| {

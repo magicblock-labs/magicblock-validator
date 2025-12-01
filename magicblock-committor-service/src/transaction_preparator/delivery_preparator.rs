@@ -42,7 +42,6 @@ use crate::{
     ComputeBudgetConfig,
 };
 
-#[derive(Clone)]
 pub struct DeliveryPreparator {
     rpc_client: MagicblockRpcClient,
     table_mania: TableMania,
@@ -500,7 +499,7 @@ impl DeliveryPreparator {
         authority: &Keypair,
         tasks: &[Box<dyn BaseTask>],
         lookup_table_keys: &[Pubkey],
-    ) -> DeliveryPreparatorResult<(), InternalError> {
+    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         self.table_mania
             .release_pubkeys(&HashSet::from_iter(
                 lookup_table_keys.iter().cloned(),
@@ -551,7 +550,6 @@ impl DeliveryPreparator {
         join_all(close_futs)
             .await
             .into_iter()
-            .map(|res| res.map_err(InternalError::from))
             .inspect(|res| {
                 if let Err(err) = res {
                     error!("Failed to cleanup buffers: {}", err);
@@ -571,6 +569,15 @@ pub enum TransactionSendError {
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
 }
 
+impl TransactionSendError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::MagicBlockRpcClientError(err) => err.signature(),
+            _ => None,
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum BufferExecutionError {
     #[error("AccountAlreadyInitializedError: {0}")]
@@ -580,6 +587,15 @@ pub enum BufferExecutionError {
     ),
     #[error("TransactionSendError: {0}")]
     TransactionSendError(#[from] TransactionSendError),
+}
+
+impl BufferExecutionError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::AccountAlreadyInitializedError(_, signature) => *signature,
+            Self::TransactionSendError(err) => err.signature(),
+        }
+    }
 }
 
 impl From<MagicBlockRpcClientError> for BufferExecutionError {
@@ -624,6 +640,7 @@ impl InternalError {
     pub fn signature(&self) -> Option<Signature> {
         match self {
             Self::MagicBlockRpcClientError(err) => err.signature(),
+            Self::BufferExecutionError(err) => err.signature(),
             _ => None,
         }
     }

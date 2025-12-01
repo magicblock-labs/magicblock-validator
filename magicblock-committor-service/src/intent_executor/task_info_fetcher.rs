@@ -229,7 +229,7 @@ impl CacheTaskInfoFetcher {
             .map_err(TaskInfoFetcherError::IndexerError)?
             .value;
 
-        metrics::inc_task_info_fetcher_b_count();
+        metrics::inc_task_info_fetcher_compressed_count();
 
         let compressed_delegation_records = compressed_accounts
             .items
