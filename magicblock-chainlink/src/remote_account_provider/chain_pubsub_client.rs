@@ -151,6 +151,10 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()>;
+    async fn subscribe_program(
+        &self,
+        program_id: Pubkey,
+    ) -> RemoteAccountProviderResult<()>;
     async fn unsubscribe(
         &self,
         pubkey: Pubkey,
@@ -245,6 +249,13 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
             .inspect_err(|err| {
                 warn!("ChainPubsubClientImpl::subscribe - RecvError occurred while awaiting subscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", pubkey);
             })?
+    }
+
+    async fn subscribe_program(
+        &self,
+        _program_id: Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
+        Ok(())
     }
 
     async fn unsubscribe(
@@ -428,6 +439,13 @@ pub mod mock {
                 self.subscribed_pubkeys.lock().unwrap();
             subscribed_pubkeys.insert(pubkey);
             Ok(())
+        }
+
+        async fn subscribe_program(
+            &self,
+            _program_id: Pubkey,
+        ) -> RemoteAccountProviderResult<()> {
+            unimplemented!("Not used in tests")
         }
 
         async fn unsubscribe(

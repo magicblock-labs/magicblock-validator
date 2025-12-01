@@ -518,6 +518,7 @@ impl ChainPubsubActor {
                 .remove(&pubkey);
         });
     }
+    #[allow(clippy::too_many_arguments)]
     async fn add_program_sub(
         pubkey: Pubkey,
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,

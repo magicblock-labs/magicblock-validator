@@ -614,6 +614,13 @@ where
         .await
     }
 
+    async fn subscribe_program(
+        &self,
+        _program_id: Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
+        Ok(())
+    }
+
     async fn unsubscribe(
         &self,
         pubkey: Pubkey,
