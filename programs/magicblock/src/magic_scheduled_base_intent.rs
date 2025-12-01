@@ -356,8 +356,8 @@ impl CommitType {
             let owner = *account_shared.owner();
             validate_commit_schedule_rights(
                 &context.invoke_context,
-                pubkey,
                 &owner,
+                pubkey,
                 context.parent_program_id.as_ref(),
                 context.signers,
             )

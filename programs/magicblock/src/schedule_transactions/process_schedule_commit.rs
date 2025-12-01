@@ -160,8 +160,8 @@ pub(crate) fn process_schedule_commit(
             let acc_owner = *acc.borrow().owner();
             validate_commit_schedule_rights(
                 &invoke_context,
-                acc_pubkey,
                 &acc_owner,
+                acc_pubkey,
                 parent_program_id,
                 &signers,
             )?;
