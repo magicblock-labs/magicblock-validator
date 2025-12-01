@@ -137,7 +137,6 @@ where
     never_debounce: HashSet<Pubkey>,
     /// Number of clients that must confirm a subscription for it to be considered active.
     required_subscription_confirmations: usize,
-    #[allow(dead_code)]
     /// Map of program account subscriptions we are holding inside the pubsub clients
     program_subs: Arc<Mutex<HashSet<Pubkey>>>,
 }
@@ -203,8 +202,13 @@ where
         let never_debounce: HashSet<Pubkey> =
             vec![solana_sdk::sysvar::clock::ID].into_iter().collect();
 
-        let clients =
-            Self::spawn_reconnectors(clients, subscribed_accounts_tracker);
+        let program_subs: Arc<Mutex<HashSet<Pubkey>>> = Default::default();
+
+        let clients = Self::spawn_reconnectors(
+            clients,
+            subscribed_accounts_tracker,
+            program_subs.clone(),
+        );
 
         let required_subscription_confirmations = {
             let n = clients.len();
@@ -221,7 +225,7 @@ where
             debounce_states: debounce_states.clone(),
             never_debounce,
             required_subscription_confirmations,
-            program_subs: Default::default(),
+            program_subs,
         };
 
         // Spawn background tasks
@@ -236,12 +240,14 @@ where
     fn spawn_reconnectors<U: SubscribedAccountsTracker>(
         clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
         subscribed_accounts_tracker: Arc<U>,
+        program_subs: Arc<Mutex<HashSet<Pubkey>>>,
     ) -> Vec<Arc<T>> {
         let mut clients_only = Vec::with_capacity(clients.len());
         for (client, mut abort_rx) in clients.into_iter() {
             clients_only.push(client.clone());
             let subscribed_accounts_tracker =
                 subscribed_accounts_tracker.clone();
+            let program_subs = program_subs.clone();
             tokio::spawn(async move {
                 while abort_rx.recv().await.is_some() {
                     // Drain any duplicate abort signals to coalesce reconnect attempts
@@ -253,6 +259,7 @@ where
                     Self::reconnect_client_with_backoff(
                         client.clone(),
                         subscribed_accounts_tracker.clone(),
+                        program_subs.clone(),
                     )
                     .await;
                 }
@@ -264,6 +271,7 @@ where
     async fn reconnect_client_with_backoff<U: SubscribedAccountsTracker>(
         client: Arc<T>,
         accounts_tracker: Arc<U>,
+        program_subs: Arc<Mutex<HashSet<Pubkey>>>,
     ) {
         fn fib_with_max(n: u64) -> u64 {
             let (mut a, mut b) = (0u64, 1u64);
@@ -277,7 +285,13 @@ where
         let mut attempt = 0;
         loop {
             attempt += 1;
-            if Self::reconnect_client(client.clone(), &accounts_tracker).await {
+            if Self::reconnect_client(
+                client.clone(),
+                &accounts_tracker,
+                &program_subs,
+            )
+            .await
+            {
                 debug!(
                     "Successfully reconnected client after {} attempts",
                     attempt
@@ -297,6 +311,7 @@ where
     async fn reconnect_client<U: SubscribedAccountsTracker>(
         client: Arc<T>,
         accounts_tracker: &Arc<U>,
+        program_subs: &Arc<Mutex<HashSet<Pubkey>>>,
     ) -> bool {
         if let Err(err) = client.try_reconnect().await {
             debug!("Failed to reconnect client: {:?}", err);
@@ -305,18 +320,27 @@ where
         // Resubscribe all accounts from the authoritative tracker.
         // This ensures subscriptions are restored even if all clients lost their state
         // during disconnect/abort.
-        let subs = accounts_tracker.subscribed_accounts();
+        let account_subs = accounts_tracker.subscribed_accounts();
 
-        match client.resub_multiple(subs).await {
-            Err(err) => {
-                debug!(
-                    "Failed to resubscribe accounts after reconnect: {:?}",
-                    err
-                );
-                false
-            }
-            Ok(_) => true,
+        if let Err(err) = client.resub_multiple(account_subs).await {
+            debug!("Failed to resubscribe accounts after reconnect: {:?}", err);
+            return false;
         }
+
+        // Resubscribe all program subscriptions
+        let programs: HashSet<Pubkey> =
+            program_subs.lock().unwrap().iter().copied().collect();
+        for program_id in programs {
+            if let Err(err) = client.subscribe_program(program_id).await {
+                debug!(
+                    "Failed to resubscribe program {} after reconnect: {:?}",
+                    program_id, err
+                );
+                return false;
+            }
+        }
+
+        true
     }
 
     fn spawn_dedup_pruner(&self) {
@@ -618,6 +642,17 @@ where
         &self,
         program_id: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
+        // Check if we already have this program subscription
+        {
+            let mut subs = self.program_subs.lock().unwrap();
+            if subs.contains(&program_id) {
+                warn!("Program subscription already exists for {}", program_id);
+                return Ok(());
+            }
+            // Add to program_subs before subscribing to clients
+            subs.insert(program_id);
+        }
+
         AccountSubscriptionTask::SubscribeProgram(
             program_id,
             self.required_subscription_confirmations,
