@@ -11,7 +11,7 @@ use crate::{
     },
     transaction_preparator::{
         delivery_preparator::{
-            DeliveryPreparator, DeliveryPreparatorResult, InternalError,
+            BufferExecutionError, DeliveryPreparator, DeliveryPreparatorResult,
         },
         error::PreparatorResult,
     },
@@ -38,13 +38,12 @@ pub trait TransactionPreparator: Send + Sync + 'static {
         authority: &Keypair,
         tasks: &[Box<dyn BaseTask>],
         lookup_table_keys: &[Pubkey],
-    ) -> DeliveryPreparatorResult<(), InternalError>;
+    ) -> DeliveryPreparatorResult<(), BufferExecutionError>;
 }
 
 /// [`TransactionPreparatorImpl`] first version of preparator
 /// It omits future commit_bundle/finalize_bundle logic
 /// It creates TXs using current per account commit/finalize
-#[derive(Clone)]
 pub struct TransactionPreparatorImpl {
     delivery_preparator: DeliveryPreparator,
     compute_budget_config: ComputeBudgetConfig,
@@ -114,7 +113,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         authority: &Keypair,
         tasks: &[Box<dyn BaseTask>],
         lookup_table_keys: &[Pubkey],
-    ) -> DeliveryPreparatorResult<(), InternalError> {
+    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         self.delivery_preparator
             .cleanup(authority, tasks, lookup_table_keys)
             .await
