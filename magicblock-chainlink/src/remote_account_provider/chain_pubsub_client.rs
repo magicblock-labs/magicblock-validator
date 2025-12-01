@@ -253,9 +253,20 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
     async fn subscribe_program(
         &self,
-        _program_id: Pubkey,
+        program_id: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        Ok(())
+        let (tx, rx) = oneshot::channel();
+        self.actor
+            .send_msg(ChainPubsubActorMessage::ProgramSubscribe {
+                pubkey: program_id,
+                response: tx,
+            })
+            .await?;
+
+        rx.await
+            .inspect_err(|err| {
+                warn!("ChainPubsubClientImpl::subscribe_program - RecvError occurred while awaiting subscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", program_id);
+            })?
     }
 
     async fn unsubscribe(
