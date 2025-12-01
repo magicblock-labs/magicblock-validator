@@ -1217,12 +1217,16 @@ impl Ledger {
         }
     }
 
-    pub fn delete_range_cf<C: Column + ColumnName>(
+    pub fn delete_range_cf<C>(
         &self,
         from: C::Index,
         to: C::Index,
-    ) -> LedgerResult<()> {
-        self.db.column::<C>().delete_range(from, to)
+    ) -> LedgerResult<()>
+    where
+        C: Column + ColumnName,
+        Self: HasColumn<C>,
+    {
+        <Ledger as HasColumn<C>>::column(self).delete_range(from, to)
     }
 
     pub fn compact_slot_range_cf<C: Column + ColumnName>(
@@ -1273,6 +1277,33 @@ impl Ledger {
         self.latest_block.load().blockhash
     }
 }
+
+pub trait HasColumn<C>
+where
+    C: Column + ColumnName,
+{
+    fn column(&self) -> &LedgerColumn<C>;
+}
+
+macro_rules! impl_has_column {
+    ($cf_ty:ident, $field:ident) => {
+        impl HasColumn<cf::$cf_ty> for Ledger {
+            fn column(&self) -> &LedgerColumn<cf::$cf_ty> {
+                &self.$field
+            }
+        }
+    };
+}
+
+impl_has_column!(TransactionStatus, transaction_status_cf);
+impl_has_column!(AddressSignatures, address_signatures_cf);
+impl_has_column!(SlotSignatures, slot_signatures_cf);
+impl_has_column!(Blocktime, blocktime_cf);
+impl_has_column!(Blockhash, blockhash_cf);
+impl_has_column!(Transaction, transaction_cf);
+impl_has_column!(TransactionMemos, transaction_memos_cf);
+impl_has_column!(PerfSamples, perf_samples_cf);
+impl_has_column!(AccountModDatas, account_mod_datas_cf);
 
 // -----------------
 // Tests
