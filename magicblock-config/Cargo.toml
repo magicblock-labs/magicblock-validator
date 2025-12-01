@@ -9,15 +9,20 @@ edition.workspace = true
 
 [dependencies]
 bs58 = { workspace = true }
-clap = { workspace = true, features = ["derive", "env"] }
+clap = { workspace = true, features = ["derive"] }
+derive_more = { workspace = true, features = ["display", "from_str", "deref"] }
+figment = { workspace = true, features = ["toml", "env"] }
+humantime = { workspace = true }
+isocountry = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-solana-pubkey = { workspace = true }
-solana-keypair = { workspace = true }
-thiserror = { workspace = true }
+serde_with = { workspace = true }
 toml = { workspace = true }
 url = { workspace = true, features = ["serde"] }
-strum = { workspace = true, features = ["derive"] }
-magicblock-chainlink = { workspace = true }
-magicblock-config-helpers = { workspace = true }
-magicblock-config-macro = { workspace = true }
-isocountry = { workspace = true }
+
+solana-pubkey = { workspace = true }
+solana-keypair = { workspace = true }
+solana-signer = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+serial_test = { workspace = true }

@@ -6,7 +6,6 @@ use integration_test_tools::{
     validator::cleanup,
 };
 use log::*;
-use magicblock_config::LedgerResumeStrategy;
 use program_flexi_counter::{
     instruction::{create_add_ix, create_mul_ix},
     state::FlexiCounter,
@@ -68,10 +67,7 @@ fn write(
         setup_validator_with_local_remote_and_resume_strategy(
             ledger_path,
             None,
-            LedgerResumeStrategy::Reset {
-                slot: 0,
-                keep_accounts: false,
-            },
+            true,
             true,
             &LoadedAccounts::with_delegation_program_test_authority(),
         );
@@ -204,13 +200,8 @@ fn write(
 }
 
 fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
-    let (_, mut validator, ctx) = setup_offline_validator(
-        ledger_path,
-        None,
-        Some(SLOT_MS),
-        LedgerResumeStrategy::Resume { replay: true },
-        true,
-    );
+    let (_, mut validator, ctx) =
+        setup_offline_validator(ledger_path, None, Some(SLOT_MS), false, true);
 
     let counter1_decoded = fetch_counter_ephem(&ctx, payer1, &mut validator);
     assert_eq!(

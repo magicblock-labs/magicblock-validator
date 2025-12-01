@@ -5,7 +5,6 @@ use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, unwrap, validator::cleanup,
 };
 use log::*;
-use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
@@ -84,13 +83,8 @@ fn read_ledger(
     transfer_sig1: Option<&Signature>,
 ) -> Child {
     // Launch another validator reusing ledger
-    let (_, mut validator, ctx) = setup_offline_validator(
-        ledger_path,
-        None,
-        None,
-        LedgerResumeStrategy::Resume { replay: true },
-        false,
-    );
+    let (_, mut validator, ctx) =
+        setup_offline_validator(ledger_path, None, None, false, false);
 
     let acc = expect!(
         expect!(ctx.try_ephem_client(), validator).get_account(pubkey2),

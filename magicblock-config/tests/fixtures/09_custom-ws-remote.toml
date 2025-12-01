@@ -1,3 +1,0 @@
-[accounts]
-remote.url = "http://localhost:8899"
-remote.ws-url = ["ws://localhost:9001"]
