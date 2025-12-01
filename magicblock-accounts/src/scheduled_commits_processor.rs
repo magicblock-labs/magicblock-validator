@@ -4,7 +4,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
@@ -16,9 +16,7 @@ use magicblock_chainlink::{
     Chainlink,
 };
 use magicblock_committor_service::{
-    intent_execution_manager::{
-        BroadcastedIntentExecutionResult, ExecutionOutputWrapper,
-    },
+    intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput,
     types::{ScheduledBaseIntentWrapper, TriggerType},
     BaseIntentCommittor, CommittorService,
@@ -92,7 +90,7 @@ impl ScheduledCommitsProcessorImpl {
     fn preprocess_intent(
         &self,
         mut base_intent: ScheduledBaseIntent,
-    ) -> (ScheduledBaseIntentWrapper, Vec<Pubkey>, Vec<Pubkey>) {
+    ) -> (ScheduledBaseIntentWrapper, Vec<Pubkey>) {
         let is_undelegate = base_intent.is_undelegate();
         let Some(committed_accounts) = base_intent.get_committed_accounts_mut()
         else {
@@ -100,43 +98,37 @@ impl ScheduledCommitsProcessorImpl {
                 inner: base_intent,
                 trigger_type: TriggerType::OnChain,
             };
-            return (intent, vec![], vec![]);
+            return (intent, vec![]);
         };
 
-        let mut excluded_pubkeys = vec![];
-        let mut pubkeys_being_undelegated = vec![];
-        // Retains only account that are valid to be committed (all delegated ones)
-        committed_accounts.retain_mut(|account| {
-            let pubkey = account.pubkey;
-            let acc = self.accounts_bank.get_account(&pubkey);
-            match acc {
-                Some(acc) => {
-                    if acc.delegated() {
-                        if is_undelegate {
-                            pubkeys_being_undelegated.push(pubkey);
-                        }
-                        true
-                    } else {
-                        excluded_pubkeys.push(pubkey);
-                        false
-                    }
+        // dump undelegated pubkeys
+        let pubkeys_being_undelegated: Vec<_> = committed_accounts
+            .iter()
+            .inspect(|account| {
+                let pubkey = account.pubkey;
+                if self.accounts_bank.get_account(&pubkey).is_none() {
+                    // This doesn't affect intent validity
+                    // We assume that intent is correct at the moment of scheduling
+                    // All the checks are performed by runtime & magic-program at the moment of scheduling
+                    // This log could be a sign of eviction or a bug in implementation
+                    info!("Account got evicted from AccountsDB after intent was scheduled!");
                 }
-                None => {
-                    warn!(
-                        "Account {} not found in AccountsDb, skipping from commit",
-                        pubkey
-                    );
-                    false
+            })
+            .filter_map(|account| {
+                if is_undelegate {
+                    Some(account.pubkey)
+                } else {
+                    None
                 }
-            }
-        });
+            })
+            .collect();
 
         let intent = ScheduledBaseIntentWrapper {
             inner: base_intent,
             trigger_type: TriggerType::OnChain,
         };
 
-        (intent, excluded_pubkeys, pubkeys_being_undelegated)
+        (intent, pubkeys_being_undelegated)
     }
 
     async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
@@ -241,79 +233,56 @@ impl ScheduledCommitsProcessorImpl {
                 continue;
             };
 
-            match execution_result {
-                Ok(value) => {
-                    Self::process_intent_result(
-                        intent_id,
-                        &internal_transaction_scheduler,
-                        value,
-                        intent_meta,
-                    )
-                    .await;
-                }
-                Err((_, _, err)) => {
-                    match err.as_ref() {
-                        &magicblock_committor_service::intent_executor::error::IntentExecutorError::EmptyIntentError => {
-                            warn!("Empty intent was scheduled!");
-                            Self::process_empty_intent(
-                                intent_id,
-                                &internal_transaction_scheduler,
-                                intent_meta
-                            ).await;
-                        }
-                        _ => {
-                            error!(
-                                "Failed to commit in slot: {}, blockhash: {}. {:?}",
-                                intent_meta.slot, intent_meta.blockhash, err
-                            );
-                        }
-                    }
-                }
-            }
+            Self::process_intent_result(
+                intent_id,
+                &internal_transaction_scheduler,
+                execution_result,
+                intent_meta,
+            )
+            .await;
         }
     }
 
     async fn process_intent_result(
         intent_id: u64,
         internal_transaction_scheduler: &TransactionSchedulerHandle,
-        execution_outcome: ExecutionOutputWrapper,
+        result: BroadcastedIntentExecutionResult,
         mut intent_meta: ScheduledBaseIntentMeta,
     ) {
-        let chain_signatures = match execution_outcome.output {
-            ExecutionOutput::SingleStage(signature) => vec![signature],
-            ExecutionOutput::TwoStage {
-                commit_signature,
-                finalize_signature,
-            } => vec![commit_signature, finalize_signature],
+        let error_message = result
+            .as_ref()
+            .err()
+            .map(|(_, _, err)| format!("{:?}", err));
+        let chain_signatures = match result {
+            Ok(execution_outcome) => match execution_outcome.output {
+                ExecutionOutput::SingleStage(signature) => vec![signature],
+                ExecutionOutput::TwoStage {
+                    commit_signature,
+                    finalize_signature,
+                } => vec![commit_signature, finalize_signature],
+            },
+            Err((_, _, err)) => {
+                error!(
+                    "Failed to commit in slot: {}, blockhash: {}. {:?}",
+                    intent_meta.slot, intent_meta.blockhash, err
+                );
+                err.signatures()
+                    .map(|(commit, finalize)| {
+                        finalize
+                            .map(|finalize| vec![commit, finalize])
+                            .unwrap_or(vec![commit])
+                    })
+                    .unwrap_or(vec![])
+            }
         };
         let intent_sent_transaction =
             std::mem::take(&mut intent_meta.intent_sent_transaction);
-        let sent_commit =
-            Self::build_sent_commit(intent_id, chain_signatures, intent_meta);
-        register_scheduled_commit_sent(sent_commit);
-        match internal_transaction_scheduler
-            .execute(intent_sent_transaction)
-            .await
-        {
-            Ok(signature) => debug!(
-                "Signaled sent commit with internal signature: {:?}",
-                signature
-            ),
-            Err(err) => {
-                error!("Failed to signal sent commit via transaction: {}", err);
-            }
-        }
-    }
-
-    async fn process_empty_intent(
-        intent_id: u64,
-        internal_transaction_scheduler: &TransactionSchedulerHandle,
-        mut intent_meta: ScheduledBaseIntentMeta,
-    ) {
-        let intent_sent_transaction =
-            std::mem::take(&mut intent_meta.intent_sent_transaction);
-        let sent_commit =
-            Self::build_sent_commit(intent_id, vec![], intent_meta);
+        let sent_commit = Self::build_sent_commit(
+            intent_id,
+            chain_signatures,
+            intent_meta,
+            error_message,
+        );
         register_scheduled_commit_sent(sent_commit);
         match internal_transaction_scheduler
             .execute(intent_sent_transaction)
@@ -333,6 +302,7 @@ impl ScheduledCommitsProcessorImpl {
         intent_id: u64,
         chain_signatures: Vec<Signature>,
         intent_meta: ScheduledBaseIntentMeta,
+        error_message: Option<String>,
     ) -> SentCommit {
         SentCommit {
             message_id: intent_id,
@@ -341,8 +311,9 @@ impl ScheduledCommitsProcessorImpl {
             payer: intent_meta.payer,
             chain_signatures,
             included_pubkeys: intent_meta.included_pubkeys,
-            excluded_pubkeys: intent_meta.excluded_pubkeys,
+            excluded_pubkeys: vec![],
             requested_undelegation: intent_meta.requested_undelegation,
+            error_message,
         }
     }
 }
@@ -350,14 +321,14 @@ impl ScheduledCommitsProcessorImpl {
 #[async_trait]
 impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
     async fn process(&self) -> ScheduledCommitsProcessorResult<()> {
-        let scheduled_base_intent =
+        let scheduled_base_intents =
             self.transaction_scheduler.take_scheduled_actions();
 
-        if scheduled_base_intent.is_empty() {
+        if scheduled_base_intents.is_empty() {
             return Ok(());
         }
 
-        let intents = scheduled_base_intent
+        let intents = scheduled_base_intents
             .into_iter()
             .map(|intent| self.preprocess_intent(intent));
 
@@ -368,10 +339,10 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
             let mut pubkeys_being_undelegated = HashSet::new();
 
             let intents = intents
-                .map(|(intent, excluded_pubkeys, undelegated)| {
+                .map(|(intent, undelegated)| {
                     intent_metas.insert(
                         intent.id,
-                        ScheduledBaseIntentMeta::new(&intent, excluded_pubkeys),
+                        ScheduledBaseIntentMeta::new(&intent),
                     );
                     pubkeys_being_undelegated.extend(undelegated);
 
@@ -409,16 +380,12 @@ struct ScheduledBaseIntentMeta {
     blockhash: Hash,
     payer: Pubkey,
     included_pubkeys: Vec<Pubkey>,
-    excluded_pubkeys: Vec<Pubkey>,
     intent_sent_transaction: Transaction,
     requested_undelegation: bool,
 }
 
 impl ScheduledBaseIntentMeta {
-    fn new(
-        intent: &ScheduledBaseIntent,
-        excluded_pubkeys: Vec<Pubkey>,
-    ) -> Self {
+    fn new(intent: &ScheduledBaseIntent) -> Self {
         Self {
             slot: intent.slot,
             blockhash: intent.blockhash,
@@ -426,7 +393,6 @@ impl ScheduledBaseIntentMeta {
             included_pubkeys: intent
                 .get_committed_pubkeys()
                 .unwrap_or_default(),
-            excluded_pubkeys,
             intent_sent_transaction: intent.action_sent_transaction.clone(),
             requested_undelegation: intent.is_undelegate(),
         }

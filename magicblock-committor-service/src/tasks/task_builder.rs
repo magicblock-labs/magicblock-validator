@@ -7,6 +7,7 @@ use magicblock_program::magic_scheduled_base_intent::{
     UndelegateType,
 };
 use solana_pubkey::Pubkey;
+use solana_sdk::signature::Signature;
 
 use crate::{
     intent_executor::task_info_fetcher::{
@@ -204,6 +205,15 @@ pub enum TaskBuilderError {
     CommitTasksBuildError(#[source] TaskInfoFetcherError),
     #[error("FinalizedTasksBuildError: {0}")]
     FinalizedTasksBuildError(#[source] TaskInfoFetcherError),
+}
+
+impl TaskBuilderError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::CommitTasksBuildError(err) => err.signature(),
+            Self::FinalizedTasksBuildError(err) => err.signature(),
+        }
+    }
 }
 
 pub type TaskBuilderResult<T, E = TaskBuilderError> = Result<T, E>;

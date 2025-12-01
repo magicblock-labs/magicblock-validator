@@ -57,6 +57,7 @@ pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
 
 pub fn delegate_account_cpi_instruction(
     payer: Pubkey,
+    validator: Option<Pubkey>,
     player: Pubkey,
 ) -> Instruction {
     let program_id = crate::id();
@@ -65,6 +66,7 @@ pub fn delegate_account_cpi_instruction(
     let args = DelegateCpiArgs {
         valid_until: i64::MAX,
         commit_frequency_ms: 1_000_000_000,
+        validator,
         player,
     };
 
@@ -212,6 +214,32 @@ pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
     Instruction::new_with_borsh(
         program_id,
         &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(
+            players.to_vec(),
+        ),
+        account_metas,
+    )
+}
+
+pub fn schedule_commit_and_undelegate_cpi_twice(
+    payer: Pubkey,
+    magic_program_id: Pubkey,
+    magic_context_id: Pubkey,
+    players: &[Pubkey],
+    committees: &[Pubkey],
+) -> Instruction {
+    let program_id = crate::id();
+    let mut account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(magic_context_id, false),
+        AccountMeta::new_readonly(magic_program_id, false),
+    ];
+    for committee in committees {
+        account_metas.push(AccountMeta::new(*committee, false));
+    }
+
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiTwice(
             players.to_vec(),
         ),
         account_metas,

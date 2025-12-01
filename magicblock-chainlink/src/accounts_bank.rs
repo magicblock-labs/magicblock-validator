@@ -51,6 +51,7 @@ pub mod mock {
         }
 
         pub fn undelegate(&self, pubkey: &Pubkey) -> &Self {
+            self.set_undelegating(pubkey, true);
             self.set_delegated(pubkey, false)
         }
 
@@ -62,6 +63,21 @@ pub mod mock {
             //       we do here.
             //       See programs/magicblock/src/schedule_transactions/process_schedule_commit.rs :172
             self.set_owner(pubkey, dlp::id()).undelegate(pubkey);
+        }
+
+        pub fn set_undelegating(
+            &self,
+            pubkey: &Pubkey,
+            undelegating: bool,
+        ) -> &Self {
+            trace!("Set account {pubkey} undelegating={undelegating}");
+            let mut accounts = self.accounts.lock().unwrap();
+            if let Some(account) = accounts.get_mut(pubkey) {
+                account.set_undelegating(undelegating);
+            } else {
+                panic!("Account not found in bank: {pubkey}");
+            }
+            self
         }
 
         #[allow(dead_code)]

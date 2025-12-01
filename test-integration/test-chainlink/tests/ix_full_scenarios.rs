@@ -6,6 +6,7 @@ use magicblock_chainlink::{
     assert_subscribed_without_loaderv3_program_data_account,
     remote_account_provider::program_account::RemoteProgramLoader,
     testing::{init_logger, utils::random_pubkey},
+    AccountFetchOrigin,
 };
 use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_pubkey::Pubkey;
@@ -161,8 +162,15 @@ async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
     // Initially the new_pubkey does not exist on chain so it will be returned as None
     {
         let (fetched_pubkeys, fetched_strs) = {
-            let fetched_accounts =
-                ctx.chainlink.fetch_accounts(&all_pubkeys).await.unwrap();
+            let fetched_accounts = ctx
+                .chainlink
+                .fetch_accounts(
+                    &all_pubkeys,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+                .unwrap();
             let mut fetched_pubkeys = all_pubkeys
                 .iter()
                 .zip(fetched_accounts.iter())
@@ -206,8 +214,15 @@ async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
         sleep_ms(500).await;
 
         let (fetched_pubkeys, fetched_strs) = {
-            let fetched_accounts =
-                ctx.chainlink.fetch_accounts(&all_pubkeys).await.unwrap();
+            let fetched_accounts = ctx
+                .chainlink
+                .fetch_accounts(
+                    &all_pubkeys,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+                .unwrap();
             let mut fetched_pubkeys = all_pubkeys
                 .iter()
                 .zip(fetched_accounts.iter())

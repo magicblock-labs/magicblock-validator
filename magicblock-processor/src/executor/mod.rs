@@ -5,7 +5,8 @@ use magicblock_accounts_db::{AccountsDb, StWLock};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
     transactions::{
-        TransactionProcessingMode, TransactionStatusTx, TransactionToProcessRx,
+        ScheduledTasksTx, TransactionProcessingMode, TransactionStatusTx,
+        TransactionToProcessRx,
     },
 };
 use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
@@ -50,11 +51,17 @@ pub(super) struct TransactionExecutor {
     transaction_tx: TransactionStatusTx,
     /// A channel to send out account state updates after processing.
     accounts_tx: AccountUpdateTx,
+    /// A channel to send scheduled (crank) tasks created by transactions.
+    tasks_tx: ScheduledTasksTx,
     /// A back-channel to notify the `TransactionScheduler` that this worker is ready for more work.
     ready_tx: Sender<ExecutorId>,
     /// A read lock held during a slot's processing to synchronize with critical global
     /// operations like `AccountsDb` snapshots.
     sync: StWLock,
+    /// Hacky temporary solution to allow automatic airdrops, the flag
+    /// is tightly contolled and will be removed in the nearest future
+    /// True when auto airdrop for fee payers is enabled (auto_airdrop_lamports > 0).
+    is_auto_airdrop_lamports_enabled: bool,
 }
 
 impl TransactionExecutor {
@@ -85,6 +92,7 @@ impl TransactionExecutor {
             ExecutionRecordingConfig::new_single_setting(true);
         let config = Box::new(TransactionProcessingConfig {
             recording_config,
+            limit_to_load_programs: true,
             ..Default::default()
         });
         let this = Self {
@@ -100,6 +108,9 @@ impl TransactionExecutor {
             ready_tx,
             accounts_tx: state.account_update_tx.clone(),
             transaction_tx: state.transaction_status_tx.clone(),
+            tasks_tx: state.tasks_tx.clone(),
+            is_auto_airdrop_lamports_enabled: state
+                .is_auto_airdrop_lamports_enabled,
         };
 
         this.processor.fill_missing_sysvar_cache_entries(&this);

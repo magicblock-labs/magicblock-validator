@@ -74,7 +74,7 @@ rayon = "1.10.0"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "f454d4a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "5afcedc" }
 solana-loader-v2-interface = "2.2"
 solana-loader-v3-interface = "4.0"
 solana-loader-v4-interface = "2.1"
@@ -97,6 +97,8 @@ test-ledger-restore = { path = "./test-ledger-restore" }
 test-kit = { path = "../test-kit" }
 tokio = "1.0"
 toml = "0.8.13"
+ureq = "2.9.6"
+url = "2.5.0"
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency
@@ -104,4 +106,4 @@ toml = "0.8.13"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "f454d4a" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "5afcedc" }

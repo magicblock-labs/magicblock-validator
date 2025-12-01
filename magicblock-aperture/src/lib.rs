@@ -1,4 +1,5 @@
 use error::RpcError;
+use log::*;
 use magicblock_config::RpcConfig;
 use magicblock_core::link::DispatchEndpoints;
 use processor::EventProcessor;
@@ -47,10 +48,12 @@ impl JsonRpcServer {
 
     /// Run JSON-RPC server indefinitely, until cancel token is used to signal shut down
     pub async fn run(self) {
+        info!("Running JSON-RPC server");
         tokio::join! {
             self.http.run(),
             self.websocket.run()
         };
+        info!("JSON-RPC server has shutdown");
     }
 }
 

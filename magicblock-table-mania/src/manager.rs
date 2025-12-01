@@ -8,6 +8,7 @@ use std::{
 };
 
 use log::*;
+use magicblock_metrics::metrics;
 use magicblock_rpc_client::MagicblockRpcClient;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
@@ -526,6 +527,7 @@ impl TableMania {
                 .join(", ");
 
             loop {
+                metrics::inc_table_mania_a_count();
                 // Fetch the tables from chain
                 let remote_table_accs = self
                     .rpc_client

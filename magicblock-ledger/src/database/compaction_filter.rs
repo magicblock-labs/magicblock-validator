@@ -7,7 +7,6 @@ use std::{
     },
 };
 
-use log::trace;
 use rocksdb::{
     compaction_filter::CompactionFilter,
     compaction_filter_factory::{
@@ -82,21 +81,17 @@ pub(crate) struct PurgedSlotFilter<C: Column + ColumnName> {
 impl<C: Column + ColumnName> CompactionFilter for PurgedSlotFilter<C> {
     fn filter(
         &mut self,
-        level: u32,
+        _level: u32,
         key: &[u8],
         _value: &[u8],
     ) -> CompactionDecision {
         use rocksdb::CompactionDecision::*;
-        trace!("CompactionFilter: triggered!");
+        if C::keep_all_on_compaction() {
+            return Keep;
+        }
 
         let slot_in_key = C::slot(C::index(key));
         if slot_in_key < self.oldest_slot {
-            trace!(
-                "CompactionFilter: removing key. level: {}, slot: {}",
-                level,
-                slot_in_key
-            );
-
             // It is safe to delete this key
             // since those slots were truncated anyway
             Remove

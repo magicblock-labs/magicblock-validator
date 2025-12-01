@@ -7,9 +7,9 @@ use std::{
 };
 
 use bincode::{deserialize, serialize};
-use log::{error, warn};
+use log::warn;
 use prost::Message;
-use rocksdb::{properties as RocksProperties, ColumnFamily};
+use rocksdb::{properties as RocksProperties, CStrLike, ColumnFamily};
 use serde::de::DeserializeOwned;
 
 use super::{
@@ -228,7 +228,7 @@ where
     /// [here](https://github.com/facebook/rocksdb/blob/08809f5e6cd9cc4bc3958dd4d59457ae78c76660/include/rocksdb/db.h#L654-L689).
     pub fn get_int_property(
         &self,
-        name: &'static std::ffi::CStr,
+        name: impl CStrLike,
     ) -> Result<i64, LedgerError> {
         self.backend.get_int_property_cf(self.handle(), name)
     }
@@ -277,23 +277,45 @@ where
         self.backend.flush_cf(self.handle())
     }
 
+    #[inline(always)]
+    fn is_sequential_cf<T: ColumnName>() -> bool {
+        matches!(
+            T::NAME,
+            crate::database::columns::Blocktime::NAME
+                | crate::database::columns::Blockhash::NAME
+                | crate::database::columns::PerfSamples::NAME
+                | crate::database::columns::AccountModDatas::NAME
+        )
+    }
+
+    /// Initialize value when current one is `DIRTY_VALUE`
+    /// Value isn't set if current doesn't equal `DIRTY_VALUE`
+    fn init_column_count_cache(&self) -> LedgerResult<()> {
+        let count = if Self::is_sequential_cf::<C>() {
+            get_column_count_sequential_column(self)? as i64
+        } else {
+            get_column_count_complex_column(self)? as i64
+        };
+
+        // We can ignore error here since it means value already initialized
+        let _ = self.entry_counter.compare_exchange(
+            DIRTY_COUNT,
+            count,
+            Ordering::AcqRel,
+            Ordering::Relaxed,
+        );
+
+        Ok(())
+    }
+
     pub fn count_column_using_cache(&self) -> LedgerResult<i64> {
         let cached = self.entry_counter.load(Ordering::Relaxed);
         if cached != DIRTY_COUNT {
-            return Ok(cached);
+            Ok(cached)
+        } else {
+            self.init_column_count_cache()?;
+            Ok(self.entry_counter.load(Ordering::Acquire))
         }
-
-        self
-            .iter(IteratorMode::Start)
-            .map(Iterator::count)
-            .map(|val| if val > i64::MAX as usize {
-                // NOTE: this value is only used for metrics/diagnostics and
-                // aside from the fact that we will never encounter this case,
-                // it is good enough to return i64::MAX
-                error!("Column {} count is too large: {} for metrics, returning max.", C::NAME, val);
-                i64::MAX
-            } else { val as i64 })
-            .inspect(|updated| self.entry_counter.store(*updated, Ordering::Relaxed))
     }
 
     /// Increases entries counter if it's not [`DIRTY_COUNT`]
@@ -538,6 +560,38 @@ where
             C::try_current_index(&key).ok().map(|index| (index, value))
         })
     }
+}
+
+/// When column key format is sequentially incremented key, like: `SlotColumn`
+/// We can simplify extraction of count by calculating `LastKey - FirstKey + 1`
+fn get_column_count_sequential_column<C: Column + ColumnName>(
+    ledger_column: &LedgerColumn<C>,
+) -> LedgerResult<u64> {
+    let last_key = ledger_column.iter(IteratorMode::End)?.next();
+    let start_key = ledger_column.iter(IteratorMode::Start)?.next();
+    let count = match (start_key, last_key) {
+        (Some((start_key, _)), Some((last_key, _))) => {
+            let last_slot = C::slot(last_key);
+            let start_slot = C::slot(start_key);
+
+            last_slot - start_slot + 1
+        }
+        // Empty ColumnFamily
+        _ => 0,
+    };
+
+    Ok(count)
+}
+
+/// For complex columns, like: `AddressSignatures`
+/// We get column count using rocksdb's "estimate-num-keys" proprty
+/// Due to properies of how we use DB this value shall be ~correct on start
+fn get_column_count_complex_column<C: Column + ColumnName>(
+    ledger_column: &LedgerColumn<C>,
+) -> LedgerResult<u64> {
+    const ESTIMATE_NUM_KEYS: &str = "rocksdb.estimate-num-keys";
+
+    Ok(ledger_column.get_int_property(ESTIMATE_NUM_KEYS)? as u64)
 }
 
 /// Increases entries counter if it's not [`DIRTY_COUNT`]

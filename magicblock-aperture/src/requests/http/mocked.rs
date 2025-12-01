@@ -9,12 +9,15 @@
 //! returning default or empty responses, rather than 'method not found' errors.
 
 use magicblock_core::link::blocks::BlockHash;
+use magicblock_metrics::metrics::TRANSACTION_COUNT;
 use solana_account_decoder::parse_token::UiTokenAmount;
 use solana_rpc_client_api::response::{
     RpcBlockCommitment, RpcContactInfo, RpcSnapshotSlotInfo, RpcSupply,
+    RpcVoteAccountStatus,
 };
 
 use super::prelude::*;
+const SLOTS_IN_EPOCH: u64 = 432_000;
 
 impl HttpDispatcher {
     /// Handles the `getSlotLeader` RPC request.
@@ -37,7 +40,8 @@ impl HttpDispatcher {
         &self,
         request: &JsonRequest,
     ) -> HandlerResult {
-        Ok(ResponsePayload::encode_no_context(&request.id, 0))
+        let count = TRANSACTION_COUNT.get();
+        Ok(ResponsePayload::encode_no_context(&request.id, count))
     }
 
     /// Handles the `getSlotLeaders` RPC request.
@@ -161,13 +165,15 @@ impl HttpDispatcher {
         &self,
         request: &JsonRequest,
     ) -> HandlerResult {
+        let slot = self.blocks.block_height();
+        let transaction_count = self.ledger.count_transactions()?;
         let info = json::json! {{
-            "epoch": 0,
-            "slotIndex": 0,
-            "slotsInEpoch": u64::MAX,
-            "absoluteSlot": 0,
-            "blockHeight": 0,
-            "transactionCount": Some(0),
+            "epoch": slot / SLOTS_IN_EPOCH,
+            "slotIndex": slot % SLOTS_IN_EPOCH,
+            "slotsInEpoch": SLOTS_IN_EPOCH,
+            "absoluteSlot": slot,
+            "blockHeight": slot,
+            "transactionCount": Some(transaction_count),
         }};
         Ok(ResponsePayload::encode_no_context(&request.id, info))
     }
@@ -182,8 +188,8 @@ impl HttpDispatcher {
             "firstNormalEpoch": 0,
             "firstNormalSlot": 0,
             "leaderScheduleSlotOffset": 0,
-            "slotsPerEpoch": u64::MAX,
-            "warmup": true
+            "slotsPerEpoch": SLOTS_IN_EPOCH,
+            "warmup": false
         }};
         Ok(ResponsePayload::encode_no_context(&request.id, schedule))
     }
@@ -225,5 +231,16 @@ impl HttpDispatcher {
             feature_set: None,
         };
         Ok(ResponsePayload::encode_no_context(&request.id, [info]))
+    }
+
+    pub(crate) fn get_vote_accounts(
+        &self,
+        request: &JsonRequest,
+    ) -> HandlerResult {
+        let status = RpcVoteAccountStatus {
+            current: Vec::new(),
+            delinquent: Vec::new(),
+        };
+        Ok(ResponsePayload::encode_no_context(&request.id, status))
     }
 }

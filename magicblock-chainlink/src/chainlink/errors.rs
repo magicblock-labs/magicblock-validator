@@ -18,7 +18,7 @@ pub enum ChainlinkError {
     #[error("Cloner error: {0}")]
     ClonerError(#[from] crate::cloner::errors::ClonerError),
 
-    #[error("Delegation could not be decoded: {0} ({1:?})")]
+    #[error("Delegation record could not be decoded: {0} ({1:?})")]
     InvalidDelegationRecord(Pubkey, ProgramError),
 
     #[error("Failed to resolve one or more accounts {0} when getting delegation records")]
@@ -26,6 +26,9 @@ pub enum ChainlinkError {
 
     #[error("Failed to find account that was just resolved {0}")]
     ResolvedAccountCouldNoLongerBeFound(Pubkey),
+
+    #[error("Failed to find companion account that was just resolved {0}")]
+    ResolvedCompanionAccountCouldNoLongerBeFound(Pubkey),
 
     #[error("Failed to subscribe to account {0}: {1:?}")]
     FailedToSubscribeToAccount(Pubkey, RemoteAccountProviderError),

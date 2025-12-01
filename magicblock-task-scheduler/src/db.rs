@@ -1,40 +1,56 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
+use magicblock_program::args::ScheduleTaskRequest;
 use rusqlite::{params, Connection};
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
 
 use crate::errors::TaskSchedulerError;
 
+/// Represents a task in the database
+/// Uses i64 for all timestamps and IDs to avoid overflows
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbTask {
     /// Unique identifier for this task
-    pub id: u64,
+    pub id: i64,
     /// Instructions to execute when triggered
     pub instructions: Vec<Instruction>,
     /// Authority that can modify or cancel this task
     pub authority: Pubkey,
     /// How frequently the task should be executed, in milliseconds
-    pub execution_interval_millis: u64,
+    pub execution_interval_millis: i64,
     /// Number of times this task still needs to be executed.
-    pub executions_left: u64,
+    pub executions_left: i64,
     /// Timestamp of the last execution of this task in milliseconds since UNIX epoch
-    pub last_execution_millis: u64,
+    pub last_execution_millis: i64,
+}
+
+impl<'a> From<&'a ScheduleTaskRequest> for DbTask {
+    fn from(task: &'a ScheduleTaskRequest) -> Self {
+        Self {
+            id: task.id,
+            instructions: task.instructions.clone(),
+            authority: task.authority,
+            execution_interval_millis: task.execution_interval_millis,
+            executions_left: task.iterations,
+            last_execution_millis: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct FailedScheduling {
-    pub id: u64,
-    pub timestamp: u64,
-    pub task_id: u64,
+    pub id: i64,
+    pub timestamp: i64,
+    pub task_id: i64,
     pub error: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct FailedTask {
-    pub id: u64,
-    pub timestamp: u64,
-    pub task_id: u64,
+    pub id: i64,
+    pub timestamp: i64,
+    pub task_id: i64,
     pub error: String,
 }
 
@@ -114,7 +130,7 @@ impl SchedulerDatabase {
 
     pub fn update_task_after_execution(
         &self,
-        task_id: u64,
+        task_id: i64,
         last_execution: i64,
     ) -> Result<(), TaskSchedulerError> {
         let now = Utc::now().timestamp_millis();
@@ -133,7 +149,7 @@ impl SchedulerDatabase {
 
     pub fn insert_failed_scheduling(
         &self,
-        task_id: u64,
+        task_id: i64,
         error: String,
     ) -> Result<(), TaskSchedulerError> {
         self.conn.execute(
@@ -146,7 +162,7 @@ impl SchedulerDatabase {
 
     pub fn insert_failed_task(
         &self,
-        task_id: u64,
+        task_id: i64,
         error: String,
     ) -> Result<(), TaskSchedulerError> {
         self.conn.execute(
@@ -159,7 +175,7 @@ impl SchedulerDatabase {
 
     pub fn unschedule_task(
         &self,
-        task_id: u64,
+        task_id: i64,
     ) -> Result<(), TaskSchedulerError> {
         self.conn.execute(
             "UPDATE tasks SET executions_left = 0 WHERE id = ?",
@@ -169,7 +185,7 @@ impl SchedulerDatabase {
         Ok(())
     }
 
-    pub fn remove_task(&self, task_id: u64) -> Result<(), TaskSchedulerError> {
+    pub fn remove_task(&self, task_id: i64) -> Result<(), TaskSchedulerError> {
         self.conn
             .execute("DELETE FROM tasks WHERE id = ?", [task_id])?;
 
@@ -178,7 +194,7 @@ impl SchedulerDatabase {
 
     pub fn get_task(
         &self,
-        task_id: u64,
+        task_id: i64,
     ) -> Result<Option<DbTask>, TaskSchedulerError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
@@ -256,7 +272,7 @@ impl SchedulerDatabase {
         Ok(tasks)
     }
 
-    pub fn get_task_ids(&self) -> Result<Vec<u64>, TaskSchedulerError> {
+    pub fn get_task_ids(&self) -> Result<Vec<i64>, TaskSchedulerError> {
         let mut stmt = self.conn.prepare(
             "SELECT id 
              FROM tasks",
@@ -264,7 +280,7 @@ impl SchedulerDatabase {
 
         let rows = stmt.query_map([], |row| row.get(0))?;
 
-        Ok(rows.collect::<Result<Vec<u64>, rusqlite::Error>>()?)
+        Ok(rows.collect::<Result<Vec<i64>, rusqlite::Error>>()?)
     }
 
     pub fn get_failed_schedulings(

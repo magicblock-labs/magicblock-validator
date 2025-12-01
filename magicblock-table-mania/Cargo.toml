@@ -14,6 +14,7 @@ doctest = false
 ed25519-dalek = { workspace = true }
 log = { workspace = true }
 magicblock-rpc-client = { workspace = true }
+magicblock-metrics = { workspace = true }
 rand = { workspace = true }
 sha3 = { workspace = true }
 solana-pubkey = { workspace = true }

@@ -37,7 +37,7 @@ use crate::{
         },
         schedule_intent::process_create_intent,
     },
-    state::FlexiCounter,
+    state::{FlexiCounter, FAIL_UNDELEGATION_CODE, FAIL_UNDELEGATION_LABEL},
     utils::assert_keys_equal,
 };
 
@@ -395,6 +395,16 @@ fn process_undelegate_request(
         system_program,
         account_seeds,
     )?;
+
+    {
+        let data = delegated_account.data.borrow();
+        if let Ok(counter) = FlexiCounter::deserialize(&mut data.as_ref()) {
+            if counter.label == FAIL_UNDELEGATION_LABEL {
+                return Err(ProgramError::Custom(FAIL_UNDELEGATION_CODE));
+            }
+        }
+    };
+
     Ok(())
 }
 
@@ -407,7 +417,6 @@ fn process_schedule_task(
     let account_info_iter = &mut accounts.iter();
     let _magic_program_info = next_account_info(account_info_iter)?;
     let payer_info = next_account_info(account_info_iter)?;
-    let task_context_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
 
     let (counter_pda, bump) = FlexiCounter::pda(payer_info.key);
@@ -443,18 +452,13 @@ fn process_schedule_task(
         &ix_data,
         vec![
             AccountMeta::new(*payer_info.key, true),
-            AccountMeta::new(*task_context_info.key, false),
             AccountMeta::new(*counter_pda_info.key, true),
         ],
     );
 
     invoke_signed(
         &ix,
-        &[
-            payer_info.clone(),
-            task_context_info.clone(),
-            counter_pda_info.clone(),
-        ],
+        &[payer_info.clone(), counter_pda_info.clone()],
         &[&seeds],
     )?;
 
@@ -470,7 +474,6 @@ fn process_cancel_task(
     let account_info_iter = &mut accounts.iter();
     let _magic_program_info = next_account_info(account_info_iter)?;
     let payer_info = next_account_info(account_info_iter)?;
-    let task_context_info = next_account_info(account_info_iter)?;
 
     let ix_data = bincode::serialize(&MagicBlockInstruction::CancelTask {
         task_id: args.task_id,
@@ -483,13 +486,10 @@ fn process_cancel_task(
     let ix = Instruction::new_with_bytes(
         MAGIC_PROGRAM_ID,
         &ix_data,
-        vec![
-            AccountMeta::new(*payer_info.key, true),
-            AccountMeta::new(*task_context_info.key, false),
-        ],
+        vec![AccountMeta::new(*payer_info.key, true)],
     );
 
-    invoke(&ix, &[payer_info.clone(), task_context_info.clone()])?;
+    invoke(&ix, &[payer_info.clone()])?;
 
     Ok(())
 }

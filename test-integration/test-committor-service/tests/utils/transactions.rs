@@ -127,6 +127,7 @@ pub async fn tx_logs_contain(
 pub async fn init_and_delegate_account_on_chain(
     counter_auth: &Keypair,
     bytes: u64,
+    label: Option<String>,
 ) -> (Pubkey, Account) {
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
 
@@ -142,7 +143,7 @@ pub async fn init_and_delegate_account_on_chain(
         delegate: delegate_ix,
         pda,
         rent_excempt,
-    } = init_account_and_delegate_ixs(counter_auth.pubkey(), bytes);
+    } = init_account_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
 
     let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
     // 1. Init account

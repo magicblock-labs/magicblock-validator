@@ -8,7 +8,7 @@ use std::{
 };
 
 use rocksdb::{
-    AsColumnFamilyRef, ColumnFamily, DBIterator, DBPinnableSlice,
+    AsColumnFamilyRef, CStrLike, ColumnFamily, DBIterator, DBPinnableSlice,
     DBRawIterator, FlushOptions, IteratorMode as RocksIteratorMode, LiveFile,
     Options, WriteBatch as RWriteBatch, DB,
 };
@@ -237,7 +237,7 @@ impl Rocks {
     pub fn get_int_property_cf(
         &self,
         cf: &ColumnFamily,
-        name: &'static std::ffi::CStr,
+        name: impl CStrLike,
     ) -> LedgerResult<i64> {
         match self.db.property_int_value_cf(cf, name) {
             Ok(Some(value)) => Ok(value.try_into().unwrap()),
