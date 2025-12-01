@@ -183,6 +183,7 @@ impl ChainPubsubActor {
             .lock()
             .unwrap()
             .drain()
+            .chain(self.program_subs.lock().unwrap().drain())
             .collect::<Vec<_>>();
         for (_, sub) in subs {
             sub.cancellation_token.cancel();
