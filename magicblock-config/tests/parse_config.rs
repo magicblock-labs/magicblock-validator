@@ -9,7 +9,6 @@ use magicblock_config::{
     ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, TaskSchedulerConfig,
     ValidatorConfig,
 };
-
 use solana_pubkey::pubkey;
 use url::Url;
 
