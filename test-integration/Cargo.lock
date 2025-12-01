@@ -3605,7 +3605,7 @@ dependencies = [
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e480fa2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=86c2cb0f)",
  "solana-transaction",
  "tempfile",
  "thiserror 1.0.69",
@@ -3795,7 +3795,7 @@ dependencies = [
  "solana-metrics",
  "solana-sdk",
  "solana-storage-proto 0.3.1",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e480fa2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=86c2cb0f)",
  "solana-timings",
  "solana-transaction-status",
  "thiserror 1.0.69",
@@ -3862,7 +3862,7 @@ dependencies = [
  "solana-pubkey",
  "solana-rent-collector",
  "solana-sdk-ids",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e480fa2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=86c2cb0f)",
  "solana-svm-transaction",
  "solana-system-program",
  "solana-transaction",
@@ -3939,7 +3939,7 @@ dependencies = [
  "solana-program",
  "solana-pubsub-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e480fa2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=86c2cb0f)",
  "solana-timings",
  "thiserror 1.0.69",
  "tokio",
@@ -9126,7 +9126,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e480fa2#e480fa202f0680476b51b2d41210667ffc241bf4"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=86c2cb0f#86c2cb0f2d92c6e92757e951a8f27757fef3aaea"
 dependencies = [
  "ahash 0.8.12",
  "log",
