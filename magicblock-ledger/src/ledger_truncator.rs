@@ -1,6 +1,6 @@
 use std::{
     cmp::min,
-    sync::Arc,
+    sync::{atomic::Ordering, Arc},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -15,11 +15,15 @@ use tokio::{runtime::Builder, time::interval};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    database::columns::{
-        AddressSignatures, Blockhash, Blocktime, PerfSamples, SlotSignatures,
-        Transaction, TransactionMemos, TransactionStatus,
+    database::{
+        columns,
+        columns::{
+            AddressSignatures, Blockhash, Blocktime, PerfSamples,
+            SlotSignatures, Transaction, TransactionMemos, TransactionStatus,
+        },
     },
     errors::LedgerResult,
+    store::api::HasColumn,
     Ledger,
 };
 
@@ -167,8 +171,28 @@ impl LedgerTrunctationWorker {
             let start = from_slot;
             let end = to_slot + 1;
             ledger.delete_range_cf::<Blockhash>(start, end)?;
+            <Ledger as HasColumn<Blockhash>>::with_column(
+                ledger.as_ref(),
+                |column| {
+                    column.try_decrease_entry_counter(end - start);
+                },
+            );
+
             ledger.delete_range_cf::<Blocktime>(start, end)?;
+            <Ledger as HasColumn<Blocktime>>::with_column(
+                ledger.as_ref(),
+                |column| {
+                    column.try_decrease_entry_counter(end - start);
+                },
+            );
+
             ledger.delete_range_cf::<PerfSamples>(start, end)?;
+            <Ledger as HasColumn<PerfSamples>>::with_column(
+                ledger.as_ref(),
+                |column| {
+                    column.try_decrease_entry_counter(end - start);
+                },
+            );
 
             // Can cheaply delete SlotSignatures as well
             // NOTE: we need to clean (to_slot, u32::MAX)
@@ -177,6 +201,26 @@ impl LedgerTrunctationWorker {
                 (from_slot, 0),
                 (to_slot + 1, 0),
             )?;
+
+            // Reset counters for other columns
+            // where we can't know how many el-ts gets deleted
+            macro_rules! reset_entry_counter {
+                ($ledger:expr, $cf_ty:ty $(,)?) => {
+                    <Ledger as HasColumn<$cf_ty>>::with_column(
+                        $ledger.as_ref(),
+                        |column| {
+                            column
+                                .entry_counter
+                                .store(columns::DIRTY_COUNT, Ordering::Relaxed);
+                        },
+                    );
+                };
+            }
+            reset_entry_counter!(ledger, SlotSignatures);
+            reset_entry_counter!(ledger, TransactionStatus);
+            reset_entry_counter!(ledger, AddressSignatures);
+            reset_entry_counter!(ledger, Transaction);
+            reset_entry_counter!(ledger, TransactionMemos);
 
             Ok(())
         })

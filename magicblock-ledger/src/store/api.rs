@@ -1283,6 +1283,12 @@ where
     C: Column + ColumnName,
 {
     fn column(&self) -> &LedgerColumn<C>;
+    fn with_column<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&LedgerColumn<C>) -> R,
+    {
+        f(self.column())
+    }
 }
 
 macro_rules! impl_has_column {
