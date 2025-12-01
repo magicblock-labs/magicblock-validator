@@ -34,9 +34,7 @@ runs:
       sudo apt-get update
       sudo apt-get install -y \
         libudev-dev \
-        llvm-dev \
-        libclang-dev \
-        clang
+        libclang-dev
 
   - uses: Swatinem/rust-cache@v2
     with:
