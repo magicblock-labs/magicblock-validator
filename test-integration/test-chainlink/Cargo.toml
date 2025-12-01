@@ -15,6 +15,7 @@ light-sdk = { workspace = true, features = ["v2"] }
 log = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-chainlink = { workspace = true }
+magicblock-config = { workspace = true }
 magicblock-delegation-program = { workspace = true }
 program-mini = { workspace = true, features = ["no-entrypoint"] }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }

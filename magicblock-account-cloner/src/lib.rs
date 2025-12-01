@@ -19,7 +19,7 @@ use magicblock_committor_service::{
     error::{CommittorServiceError, CommittorServiceResult},
     BaseIntentCommittor, CommittorService,
 };
-use magicblock_config::{AccountsCloneConfig, PrepareLookupTables};
+use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_ledger::LatestBlock;
 use magicblock_magic_program_api::instruction::AccountModification;
@@ -54,7 +54,7 @@ pub use account_cloner::*;
 
 pub struct ChainlinkCloner {
     changeset_committor: Option<Arc<CommittorService>>,
-    clone_config: AccountsCloneConfig,
+    config: ChainLinkConfig,
     tx_scheduler: TransactionSchedulerHandle,
     accounts_db: Arc<AccountsDb>,
     block: LatestBlock,
@@ -63,14 +63,14 @@ pub struct ChainlinkCloner {
 impl ChainlinkCloner {
     pub fn new(
         changeset_committor: Option<Arc<CommittorService>>,
-        clone_config: AccountsCloneConfig,
+        config: ChainLinkConfig,
         tx_scheduler: TransactionSchedulerHandle,
         accounts_db: Arc<AccountsDb>,
         block: LatestBlock,
     ) -> Self {
         Self {
             changeset_committor,
-            clone_config,
+            config,
             tx_scheduler,
             accounts_db,
             block,
@@ -292,9 +292,7 @@ impl ChainlinkCloner {
         // Allow the committer service to reserve pubkeys in lookup tables
         // that could be needed when we commit this account
         if let Some(committor) = self.changeset_committor.as_ref() {
-            if self.clone_config.prepare_lookup_tables
-                == PrepareLookupTables::Always
-            {
+            if self.config.prepare_lookup_tables {
                 let committor = committor.clone();
                 tokio::spawn(async move {
                     match Self::map_committor_request_result(

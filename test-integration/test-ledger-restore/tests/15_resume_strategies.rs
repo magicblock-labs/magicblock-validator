@@ -5,7 +5,6 @@ use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
 use log::*;
-use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
@@ -22,41 +21,23 @@ use test_ledger_restore::{
 fn test_restore_ledger_resume_strategy_reset_all() {
     init_logger!();
 
-    test_resume_strategy(LedgerResumeStrategy::Reset {
-        slot: 1000,
-        keep_accounts: false,
-    });
-}
-
-#[test]
-fn test_restore_ledger_resume_strategy_reset_keep_accounts() {
-    init_logger!();
-    test_resume_strategy(LedgerResumeStrategy::Reset {
-        slot: 1000,
-        keep_accounts: true,
-    });
+    test_resume_strategy(true);
 }
 
 #[test]
 fn test_restore_ledger_resume_strategy_resume_with_replay() {
     init_logger!();
-    test_resume_strategy(LedgerResumeStrategy::Resume { replay: true });
+    test_resume_strategy(false);
 }
 
-#[test]
-fn test_restore_ledger_resume_strategy_resume_without_replay() {
-    init_logger!();
-    test_resume_strategy(LedgerResumeStrategy::Resume { replay: false });
-}
-
-pub fn test_resume_strategy(strategy: LedgerResumeStrategy) {
+pub fn test_resume_strategy(reset: bool) {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let mut kp = Keypair::new();
 
     let (mut validator, slot, signature) = write(&ledger_path, &mut kp);
     validator.kill().unwrap();
 
-    let mut validator = read(&ledger_path, &kp, &signature, slot, strategy);
+    let mut validator = read(&ledger_path, &kp, &signature, slot, reset);
     validator.kill().unwrap();
 }
 
@@ -143,15 +124,15 @@ pub fn read(
     kp: &Keypair,
     signature: &Signature,
     slot: u64,
-    strategy: LedgerResumeStrategy,
+    reset: bool,
 ) -> Child {
-    debug!("✅ Reading ledger with strategy: {:?}", strategy);
+    debug!("✅ Reading ledger with reset: {:?}", reset);
 
     let (_, mut validator, ctx) =
         setup_validator_with_local_remote_and_resume_strategy(
             ledger_path,
             None,
-            strategy.clone(),
+            reset,
             false,
             &Default::default(),
         );
@@ -161,15 +142,12 @@ pub fn read(
 
     // For Resume strategy, verify we're at or beyond the saved slot
     // For Reset strategy, we just continue from where we were
-    let target_slot = match strategy {
-        LedgerResumeStrategy::Resume { .. } => slot,
-        LedgerResumeStrategy::Reset { .. } => 0,
-    };
+    let target_slot = if !reset { slot } else { 0 };
     assert!(
         validator_slot >= target_slot,
         cleanup(&mut validator),
-        "{:?}: {} < {}",
-        strategy,
+        "reset={}: {} < {}",
+        reset,
         validator_slot,
         target_slot
     );
@@ -183,16 +161,16 @@ pub fn read(
     // For Reset strategies, accounts are cloned fresh from chain with original balance
     let lamports =
         expect!(ctx.fetch_ephem_account_balance(&kp.pubkey()), validator);
-    use LedgerResumeStrategy::*;
-    let expected_lamports = match strategy {
-        Resume { .. } => 1_111_011, // 1_111_111 - 100 (transfer)
-        Reset { keep_accounts, .. } if keep_accounts => 1_111_011, // 1_111_111 - 100 (transfer)
-        Reset { .. } => 1_111_111, // Fresh clone from chain
+
+    let expected_lamports = if !reset {
+        1_111_011 // 1_111_111 - 100 (transfer)
+    } else {
+        1_111_111 // Fresh clone from chain
     };
     assert_eq!(
         lamports, expected_lamports,
         cleanup(&mut validator),
-        "{:?}: Account balance should reflect strategy", strategy
+        "reset={}: Account balance should reflect strategy", reset
     );
     debug!(
         "✅ Verified balance {} lamports for {} (expected: {})",
@@ -205,17 +183,16 @@ pub fn read(
     let tx_result = ctx.get_transaction_ephem(signature);
     let tx_not_found = tx_result.is_err();
     assert!(
-        tx_not_found == strategy.is_removing_ledger(),
+        tx_not_found == reset,
         cleanup(&mut validator),
-        "{:?} (removing ledger: {}, tx_not_found: {})",
-        strategy,
-        strategy.is_removing_ledger(),
+        "reset={} (removing ledger: {}, tx_not_found: {})",
+        reset,
+        reset,
         tx_not_found
     );
     debug!(
         "✅ Verified transaction state (removing ledger: {}, tx_not_found: {})",
-        strategy.is_removing_ledger(),
-        tx_not_found
+        reset, tx_not_found
     );
 
     validator

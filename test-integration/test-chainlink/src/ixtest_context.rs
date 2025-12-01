@@ -20,7 +20,7 @@ use log::*;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
     cloner::{AccountCloneRequest, Cloner},
-    config::{ChainlinkConfig, LifecycleMode},
+    config::ChainlinkConfig,
     fetch_cloner::FetchCloner,
     native_program_accounts,
     remote_account_provider::{
@@ -41,6 +41,7 @@ use magicblock_chainlink::{
     },
     Chainlink,
 };
+use magicblock_config::config::LifecycleMode;
 use magicblock_core::compression::derive_cda_from_pda;
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::AccountSharedData;

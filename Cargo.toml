@@ -14,8 +14,6 @@ members = [
   "magicblock-committor-program",
   "magicblock-committor-service",
   "magicblock-config",
-  "magicblock-config-helpers",
-  "magicblock-config-macro",
   "magicblock-core",
   "magicblock-aperture",
   "magicblock-magic-program-api",
@@ -66,12 +64,14 @@ console-subscriber = "0.5.0"
 const_format = "0.2.34"
 convert_case = "0.8.0"
 crossbeam-channel = "0.5.11"
+derive_more = "2.0"
 dyn-clone = "1.0.20"
 ed25519-dalek = "1.0.1"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"
 fastwebsockets = "0.10"
 fd-lock = "4.0.2"
+figment = "0.10"
 flume = "0.11"
 fs_extra = "1.3.0"
 futures = "0.3"
@@ -79,6 +79,7 @@ futures-util = "0.3.30"
 git-version = "0.3.9"
 hostname = "0.4.0"
 http-body-util = "0.1.3"
+humantime = { version = "1.1", package = "humantime-serde" }
 hyper = "1.6.0"
 hyper-util = "0.1.15"
 isocountry = "0.3.2"
@@ -155,6 +156,8 @@ semver = "1.0.22"
 serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
+serde_with = "3.16"
+serial_test = "3.2"
 sha3 = "0.10.8"
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "5afcedc" }
 solana-account-info = { version = "2.2" }

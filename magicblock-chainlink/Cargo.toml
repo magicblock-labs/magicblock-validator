@@ -14,6 +14,7 @@ futures-util = { workspace = true }
 light-client = { workspace = true }
 log = { workspace = true }
 lru = { workspace = true }
+magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }

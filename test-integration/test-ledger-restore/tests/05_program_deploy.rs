@@ -10,7 +10,6 @@ use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
     workspace_paths::TestProgramPaths,
 };
-use magicblock_config::LedgerResumeStrategy;
 use program_flexi_counter::{
     instruction::{create_add_ix, create_init_ix, create_mul_ix},
     state::FlexiCounter,
@@ -63,16 +62,8 @@ fn write(
 ) -> (Child, u64) {
     let authority = read_authority_pubkey(flexi_counter_paths);
 
-    let (_, mut validator, ctx) = setup_offline_validator(
-        ledger_path,
-        None,
-        None,
-        LedgerResumeStrategy::Reset {
-            slot: 0,
-            keep_accounts: false,
-        },
-        false,
-    );
+    let (_, mut validator, ctx) =
+        setup_offline_validator(ledger_path, None, None, true, false);
 
     expect!(ctx.wait_for_slot_ephem(1), validator);
 
@@ -129,13 +120,8 @@ fn write(
 }
 
 fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
-    let (_, mut validator, ctx) = setup_offline_validator(
-        ledger_path,
-        None,
-        None,
-        LedgerResumeStrategy::Resume { replay: true },
-        false,
-    );
+    let (_, mut validator, ctx) =
+        setup_offline_validator(ledger_path, None, None, false, false);
 
     let counter_decoded = fetch_counter_ephem(&ctx, payer, &mut validator);
     assert_eq!(

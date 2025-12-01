@@ -1,6 +1,6 @@
 use std::{
     fs,
-    net::TcpStream,
+    net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{self, Child},
     thread::sleep,
@@ -8,7 +8,7 @@ use std::{
 };
 
 use magicblock_config::{
-    EphemeralConfig, MetricsConfig, ProgramConfig, RpcConfig,
+    config::LoadableProgram, types::BindAddress, ValidatorParams,
 };
 use random_port::{PortPicker, Protocol};
 use tempfile::TempDir;
@@ -60,7 +60,7 @@ pub fn start_magic_block_validator_with_config(
         .arg("--")
         .arg(config_path)
         .env("RUST_LOG_STYLE", rust_log_style)
-        .env("VALIDATOR_KEYPAIR", keypair_base58.clone())
+        .env("MBV_VALIDATOR__KEYPAIR", keypair_base58.clone())
         .current_dir(root_dir);
 
     eprintln!("Starting validator with {:?}", command);
@@ -263,21 +263,17 @@ fn resolve_port() -> u16 {
 /// run in parallel.
 /// Then uses that config to start the validator.
 pub fn start_magicblock_validator_with_config_struct(
-    config: EphemeralConfig,
+    config: ValidatorParams,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Option<process::Child>, u16) {
-    let port = resolve_port();
-    let config = EphemeralConfig {
-        rpc: RpcConfig {
-            port,
-            ..config.rpc.clone()
-        },
-        metrics: MetricsConfig {
-            enabled: false,
-            ..config.metrics.clone()
-        },
-        ..config.clone()
-    };
+    let rpc_port = resolve_port();
+    let metrics_port = resolve_port();
+
+    let mut config = config.clone();
+    config.listen = BindAddress(SocketAddr::new(config.listen.ip(), rpc_port));
+    config.metrics.address =
+        BindAddress(SocketAddr::new(config.metrics.address.ip(), metrics_port));
+
     let workspace_dir = resolve_workspace_dir();
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
     let release = std::env::var("RELEASE").is_ok();
@@ -303,28 +299,23 @@ pub fn start_magicblock_validator_with_config_struct(
             loaded_chain_accounts,
             release,
         ),
-        port,
+        rpc_port,
     )
 }
 
 pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
-    config: EphemeralConfig,
+    config: ValidatorParams,
     loaded_chain_accounts: &LoadedAccounts,
     default_tmpdir: TempDir,
     temp_dir: PathBuf,
 ) -> (TempDir, Option<process::Child>, u16) {
-    let port = resolve_port();
-    let config = EphemeralConfig {
-        rpc: RpcConfig {
-            port,
-            ..config.rpc.clone()
-        },
-        metrics: MetricsConfig {
-            enabled: false,
-            ..config.metrics.clone()
-        },
-        ..config.clone()
-    };
+    let rpc_port = resolve_port();
+    let metrics_port = resolve_port();
+
+    let mut config = config.clone();
+    config.listen = BindAddress(SocketAddr::new(config.listen.ip(), rpc_port));
+    config.metrics.address =
+        BindAddress(SocketAddr::new(config.metrics.address.ip(), metrics_port));
 
     let workspace_dir = resolve_workspace_dir();
     let release = std::env::var("RELEASE").is_ok();
@@ -350,7 +341,7 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
             loaded_chain_accounts,
             release,
         ),
-        port,
+        rpc_port,
     )
 }
 
@@ -377,18 +368,19 @@ pub fn resolve_workspace_dir() -> PathBuf {
 }
 
 pub fn resolve_programs(
-    programs: Option<Vec<ProgramConfig>>,
-) -> Vec<ProgramConfig> {
+    programs: Option<Vec<LoadableProgram>>,
+) -> Vec<LoadableProgram> {
     programs
         .map(|programs| {
             programs
                 .into_iter()
-                .map(|program| ProgramConfig {
+                .map(|program| LoadableProgram {
                     id: program.id,
                     path: path_relative_to_workspace(&format!(
                         "target/deploy/{}",
-                        program.path
-                    )),
+                        program.path.display()
+                    ))
+                    .into(),
                 })
                 .collect()
         })
