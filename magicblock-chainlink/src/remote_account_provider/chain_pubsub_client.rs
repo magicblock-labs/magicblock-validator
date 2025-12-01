@@ -456,7 +456,16 @@ pub mod mock {
             &self,
             _program_id: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
-            unimplemented!("Not used in tests")
+            if !*self.connected.lock().unwrap() {
+                return Err(
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        "mock: subscribe_program while disconnected"
+                            .to_string(),
+                    ),
+                );
+            }
+            // Program subscriptions don't track individual accounts in the mock
+            Ok(())
         }
 
         async fn unsubscribe(
