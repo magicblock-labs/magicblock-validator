@@ -542,7 +542,7 @@ pub(crate) fn validate_commit_schedule_rights(
             Some(parent_id) => {
                 ic_msg!(
                     invoke_context,
-                    "ScheduleCommit ERR: account {} must be owned by {} or be a signer, but is owned by {}",
+                    "ScheduleCommit ERR: account {} needs to be owned by the invoking program {}, be a signer, or ix must be signed by the validator to be committed, but is owned by {}",
                     committee_pubkey, parent_id, committee_owner
                 );
                 Err(InstructionError::InvalidAccountOwner)
