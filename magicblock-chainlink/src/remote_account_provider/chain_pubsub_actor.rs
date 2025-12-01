@@ -601,10 +601,10 @@ impl ChainPubsubActor {
                     }
                     update = update_stream.next() => {
                         if let Some(rpc_response) = update {
-                            let pubkey = rpc_response.value.pubkey.parse::<Pubkey>().map(|_| {
-                                warn!("[client_id={client_id}] Received invalid pubkey in program subscription update: {}", rpc_response.value.pubkey);
-                                Pubkey::new_unique()
-                            });
+                            let pubkey = rpc_response.value.pubkey
+                                .parse::<Pubkey>().inspect_err(|err| {
+                                    warn!("[client_id={client_id}] Received invalid pubkey in program subscription update: {} {:?}", rpc_response.value.pubkey, err);
+                                });
                             if let Ok(pubkey) = pubkey {
                                 if subs.lock().expect("subscriptions lock poisoned").contains_key(&pubkey) {
                                     let _ = subscription_updates_sender.send(SubscriptionUpdate {
