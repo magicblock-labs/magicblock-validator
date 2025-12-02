@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, path::PathBuf};
 
 use agave_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoV3,
@@ -20,7 +20,7 @@ pub(crate) struct GeyserPluginManager {
 
 impl GeyserPluginManager {
     pub(crate) unsafe fn new(
-        configs: &[String],
+        configs: &[PathBuf],
     ) -> Result<Self, GeyserPluginError> {
         let mut plugins = Vec::with_capacity(configs.len());
         let mut _libs = Vec::with_capacity(configs.len());
@@ -62,7 +62,7 @@ impl GeyserPluginManager {
             })?;
             let plugin_raw: *mut dyn GeyserPlugin = create_plugin();
             let mut plugin: Box<dyn GeyserPlugin> = Box::from_raw(plugin_raw);
-            plugin.on_load(file_path, false)?;
+            plugin.on_load(&file_path.to_string_lossy(), false)?;
             plugin.notify_end_of_startup()?;
             plugins.push(plugin);
             _libs.push(lib);

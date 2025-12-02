@@ -6,6 +6,7 @@ use log::{error, info};
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
 };
+use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
     utils::{
         decide_rpc_error_flow, map_magicblock_client_error,
@@ -38,7 +39,6 @@ use crate::{
     ComputeBudgetConfig,
 };
 
-#[derive(Clone)]
 pub struct DeliveryPreparator {
     rpc_client: MagicblockRpcClient,
     table_mania: TableMania,
@@ -66,19 +66,37 @@ impl DeliveryPreparator {
         persister: &Option<P>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures =
-            strategy.optimized_tasks.iter_mut().map(|task| {
-                self.prepare_task_handling_errors(authority, task, persister)
+            strategy.optimized_tasks.iter_mut().map(|task| async move {
+                let timer =
+                    metrics::observe_committor_intent_task_preparation_time(
+                        task.as_ref(),
+                    );
+                let res = self
+                    .prepare_task_handling_errors(authority, task, persister)
+                    .await;
+                timer.stop_and_record();
+
+                res
             });
 
         let task_preparations = join_all(preparation_futures);
-        let alts_preparations =
-            self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys);
+        let alts_preparations = async {
+            let timer =
+                metrics::observe_committor_intent_alt_preparation_time();
+            let res = self
+                .prepare_lookup_tables(authority, &strategy.lookup_tables_keys)
+                .await;
+            timer.stop_and_record();
+
+            res
+        };
 
         let (res1, res2) = join(task_preparations, alts_preparations).await;
         res1.into_iter()
             .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::FailedToPrepareBufferAccounts)?;
-        let lookup_tables = res2.map_err(Error::FailedToCreateALTError)?;
+            .map_err(DeliveryPreparatorError::FailedToPrepareBufferAccounts)?;
+        let lookup_tables =
+            res2.map_err(DeliveryPreparatorError::FailedToCreateALTError)?;
 
         Ok(lookup_tables)
     }
@@ -215,11 +233,16 @@ impl DeliveryPreparator {
             })
             .collect::<Vec<_>>();
 
-        // Initialization & reallocs
-        for instructions in preparation_instructions {
-            self.send_ixs_with_retry(&instructions, authority, 5)
-                .await?;
-        }
+        // Initialization
+        self.send_ixs_with_retry(&preparation_instructions[0], authority, 5)
+            .await?;
+
+        // Reallocs can be performed in parallel
+        let preparation_futs =
+            preparation_instructions.iter().skip(1).map(|instructions| {
+                self.send_ixs_with_retry(instructions, authority, 5)
+            });
+        try_join_all(preparation_futs).await?;
 
         Ok(())
     }
@@ -416,7 +439,7 @@ impl DeliveryPreparator {
         authority: &Keypair,
         tasks: &[Box<dyn BaseTask>],
         lookup_table_keys: &[Pubkey],
-    ) -> DeliveryPreparatorResult<(), InternalError> {
+    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         self.table_mania
             .release_pubkeys(&HashSet::from_iter(
                 lookup_table_keys.iter().cloned(),
@@ -467,7 +490,6 @@ impl DeliveryPreparator {
         join_all(close_futs)
             .await
             .into_iter()
-            .map(|res| res.map_err(InternalError::from))
             .inspect(|res| {
                 if let Err(err) = res {
                     error!("Failed to cleanup buffers: {}", err);
@@ -487,6 +509,15 @@ pub enum TransactionSendError {
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
 }
 
+impl TransactionSendError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::MagicBlockRpcClientError(err) => err.signature(),
+            _ => None,
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum BufferExecutionError {
     #[error("AccountAlreadyInitializedError: {0}")]
@@ -496,6 +527,15 @@ pub enum BufferExecutionError {
     ),
     #[error("TransactionSendError: {0}")]
     TransactionSendError(#[from] TransactionSendError),
+}
+
+impl BufferExecutionError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::AccountAlreadyInitializedError(_, signature) => *signature,
+            Self::TransactionSendError(err) => err.signature(),
+        }
+    }
 }
 
 impl From<MagicBlockRpcClientError> for BufferExecutionError {
@@ -524,12 +564,32 @@ pub enum InternalError {
     BaseTaskError(#[from] BaseTaskError),
 }
 
+impl InternalError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::MagicBlockRpcClientError(err) => err.signature(),
+            Self::BufferExecutionError(err) => err.signature(),
+            _ => None,
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum DeliveryPreparatorError {
     #[error("FailedToPrepareBufferAccounts: {0}")]
     FailedToPrepareBufferAccounts(#[source] InternalError),
     #[error("FailedToCreateALTError: {0}")]
     FailedToCreateALTError(#[source] InternalError),
 }
 
-pub type DeliveryPreparatorResult<T, E = Error> = Result<T, E>;
+impl DeliveryPreparatorError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::FailedToCreateALTError(err)
+            | Self::FailedToPrepareBufferAccounts(err) => err.signature(),
+        }
+    }
+}
+
+pub type DeliveryPreparatorResult<T, E = DeliveryPreparatorError> =
+    Result<T, E>;

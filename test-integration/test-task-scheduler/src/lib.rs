@@ -1,4 +1,4 @@
-use std::process::Child;
+use std::{process::Child, time::Duration};
 
 use integration_test_tools::{
     expect,
@@ -11,11 +11,20 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategyConfig,
-    LedgerResumeStrategyType, LifecycleMode, RemoteCluster, RemoteConfig,
-    TaskSchedulerConfig, ValidatorConfig,
+    config::{
+        accounts::AccountsDbConfig, ledger::LedgerConfig,
+        scheduler::TaskSchedulerConfig, validator::ValidatorConfig,
+        LifecycleMode,
+    },
+    types::{
+        network::{Remote, RemoteCluster},
+        StorageDirectory,
+    },
+    ValidatorParams,
 };
-use program_flexi_counter::instruction::{create_delegate_ix, create_init_ix};
+use program_flexi_counter::instruction::{
+    create_delegate_ix_with_commit_frequency_ms, create_init_ix,
+};
 use solana_sdk::{
     hash::Hash, instruction::Instruction, pubkey::Pubkey, signature::Keypair,
     signer::Signer, transaction::Transaction,
@@ -29,36 +38,24 @@ pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;
 
 pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
-    let accounts_config = AccountsConfig {
-        lifecycle: LifecycleMode::Ephemeral,
-        remote: RemoteConfig {
-            cluster: RemoteCluster::Custom,
-            url: Some(IntegrationTestContext::url_chain().try_into().unwrap()),
-            ws_url: Some(vec![IntegrationTestContext::ws_url_chain()
-                .try_into()
-                .unwrap()]),
-        },
-        ..Default::default()
-    };
 
-    let config = EphemeralConfig {
-        accounts: accounts_config,
-        task_scheduler: TaskSchedulerConfig {
-            reset: true,
-            millis_per_tick: TASK_SCHEDULER_TICK_MILLIS,
-        },
+    let config = ValidatorParams {
+        lifecycle: LifecycleMode::Ephemeral,
+        remote: RemoteCluster::Single(Remote::Disjointed {
+            http: IntegrationTestContext::url_chain().parse().unwrap(),
+            ws: IntegrationTestContext::ws_url_chain().parse().unwrap(),
+        }),
+        accountsdb: AccountsDbConfig::default(),
+        task_scheduler: TaskSchedulerConfig { reset: true },
         validator: ValidatorConfig {
-            millis_per_slot: TASK_SCHEDULER_TICK_MILLIS,
             ..Default::default()
         },
         ledger: LedgerConfig {
-            resume_strategy_config: LedgerResumeStrategyConfig {
-                kind: LedgerResumeStrategyType::Reset,
-                ..Default::default()
-            },
-            path: temp_dir.to_string_lossy().to_string(),
+            reset: true,
+            block_time: Duration::from_millis(TASK_SCHEDULER_TICK_MILLIS),
             ..Default::default()
         },
+        storage: StorageDirectory(temp_dir.clone()),
         ..Default::default()
     };
     let (default_tmpdir_config, Some(mut validator), port) =
@@ -83,6 +80,7 @@ pub fn create_delegated_counter(
     ctx: &IntegrationTestContext,
     payer: &Keypair,
     validator: &mut Child,
+    commit_frequency_ms: u32,
 ) {
     // Initialize the counter
     let blockhash = expect!(
@@ -112,7 +110,10 @@ pub fn create_delegated_counter(
     expect!(
         ctx.send_transaction_chain(
             &mut Transaction::new_signed_with_payer(
-                &[create_delegate_ix(payer.pubkey())],
+                &[create_delegate_ix_with_commit_frequency_ms(
+                    payer.pubkey(),
+                    commit_frequency_ms
+                )],
                 Some(&payer.pubkey()),
                 &[&payer],
                 blockhash,

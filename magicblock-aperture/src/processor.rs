@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use log::{info, warn};
+use magicblock_config::config::ApertureConfig;
 use magicblock_core::link::{
     accounts::AccountUpdateRx, blocks::BlockUpdateRx,
     transactions::TransactionStatusRx, DispatchEndpoints,
@@ -35,7 +36,7 @@ pub(crate) struct EventProcessor {
     /// A handle to the global database of RPC subscriptions.
     subscriptions: SubscriptionsDb,
     /// A handle to the global cache of transaction statuses. This serves two purposes:
-    /// 1. To provide a 75-second (~187 slots) window to prevent transaction replay.
+    /// 1. To provide a 75-second (~187 solana slots) window to prevent transaction replay.
     /// 2. To serve `getSignatureStatuses` RPC requests efficiently without querying the ledger.
     transactions: TransactionsCache,
     /// A handle to the global cache of recently produced blocks. This serves several purposes:
@@ -58,7 +59,7 @@ impl EventProcessor {
     fn new(
         channels: &DispatchEndpoints,
         state: &SharedState,
-        plugins: &[String],
+        plugins: &[PathBuf],
     ) -> ApertureResult<Self> {
         // SAFETY:
         // Geyser plugin system works with the FFI, and is inherently unsafe,
@@ -88,29 +89,37 @@ impl EventProcessor {
     /// * `instances` - The number of concurrent worker tasks to spawn.
     /// * `cancel` - The token used for graceful shutdown.
     pub(crate) fn start(
+        config: &ApertureConfig,
         state: &SharedState,
         channels: &DispatchEndpoints,
-        instances: usize,
         cancel: CancellationToken,
-        plugins: &[String],
     ) -> ApertureResult<()> {
-        for id in 0..instances {
-            let processor = EventProcessor::new(channels, state, plugins)?;
+        for id in 0..config.event_processors {
+            let processor =
+                EventProcessor::new(channels, state, &config.geyser_plugins)?;
             tokio::spawn(processor.run(id, cancel.clone()));
         }
         Ok(())
     }
 
     /// The main event processing loop for a single worker instance.
-    ///
-    /// This function listens on all event channels concurrently and processes messages
-    /// as they arrive. The `tokio::select!` macro is biased to prioritize account
-    /// processing, as it is typically the most frequent and time-sensitive event.
     async fn run(self, id: usize, cancel: CancellationToken) {
         info!("event processor {id} is running");
         loop {
             tokio::select! {
                 biased;
+
+                // Process a new block.
+                Ok(latest) = self.block_update_rx.recv_async() => {
+                    // Notify subscribers waiting on slot updates.
+                    self.subscriptions.send_slot(latest.meta.slot);
+                    // Notify registered geyser plugins (if any) of the latest slot.
+                    let _ = self.geyser.notify_slot(latest.meta.slot).inspect_err(|e| {
+                        warn!("Geyser slot update error: {e}");
+                    });
+                    // Update the global blocks cache with the latest block.
+                    self.blocks.set_latest(latest);
+                }
 
                 // Process a new account state update.
                 Ok(state) = self.account_update_rx.recv_async() => {
@@ -146,19 +155,6 @@ impl EventProcessor {
                     };
                     self.transactions.push(status.signature, Some(result));
                 }
-
-                // Process a new block.
-                Ok(latest) = self.block_update_rx.recv_async() => {
-                    // Notify subscribers waiting on slot updates.
-                    self.subscriptions.send_slot(latest.meta.slot);
-                    // Notify registered geyser plugins (if any) of the latest slot.
-                    let _ = self.geyser.notify_slot(latest.meta.slot).inspect_err(|e| {
-                        warn!("Geyser slot update error: {e}");
-                    });
-                    // Update the global blocks cache with the latest block.
-                    self.blocks.set_latest(latest);
-                }
-
                 // Listen for the cancellation signal to gracefully shut down.
                 _ = cancel.cancelled() => {
                     break;

@@ -1,11 +1,11 @@
-use std::{path::Path, sync::Arc};
+use std::{collections::HashSet, path::Path, sync::Arc};
 
 use error::AccountsDbError;
 use index::{
     iterator::OffsetPubkeyIter, utils::AccountOffsetFinder, AccountsDbIndex,
 };
 use log::{error, warn};
-use magicblock_config::AccountsDbConfig;
+use magicblock_config::config::AccountsDbConfig;
 use magicblock_core::traits::AccountsBank;
 use parking_lot::RwLock;
 use snapshot::SnapshotEngine;
@@ -47,12 +47,17 @@ impl AccountsDb {
         let directory = directory.join(format!("{ACCOUNTSDB_DIR}/main"));
         let lock = StWLock::default();
 
+        if config.reset && std::fs::exists(&directory)? {
+            std::fs::remove_dir_all(&directory).inspect_err(log_err!(
+                "failed to reset accountsdb root directory"
+            ))?;
+        }
         std::fs::create_dir_all(&directory).inspect_err(log_err!(
             "ensuring existence of accountsdb directory"
         ))?;
         let storage = AccountsStorage::new(config, &directory)
             .inspect_err(log_err!("storage creation"))?;
-        let index = AccountsDbIndex::new(config.index_map_size, &directory)
+        let index = AccountsDbIndex::new(config.index_size, &directory)
             .inspect_err(log_err!("index creation"))?;
         let snapshot_engine =
             SnapshotEngine::new(directory, config.max_snapshots as usize)
@@ -356,7 +361,7 @@ impl AccountsBank for AccountsDb {
             .iter_all()
             .filter(|(pk, acc)| predicate(pk, acc))
             .map(|(pk, _)| pk)
-            .collect::<Vec<_>>();
+            .collect::<HashSet<_>>();
         let removed = to_remove.len();
         for pk in to_remove {
             self.remove_account(&pk);

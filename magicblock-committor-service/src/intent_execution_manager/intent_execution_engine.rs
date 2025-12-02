@@ -1,4 +1,5 @@
 use std::{
+    ops::Deref,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -21,9 +22,12 @@ use crate::{
         IntentExecutionManagerError,
     },
     intent_executor::{
-        error::{IntentExecutorError, IntentExecutorResult},
+        error::{
+            IntentExecutorError, IntentExecutorResult,
+            TransactionStrategyExecutionError,
+        },
         intent_executor_factory::IntentExecutorFactory,
-        ExecutionOutput, IntentExecutor,
+        ExecutionOutput, IntentExecutionResult, IntentExecutor,
     },
     persist::IntentPersister,
     types::{ScheduledBaseIntentWrapper, TriggerType},
@@ -33,17 +37,40 @@ const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 /// Max number of executors that can send messages in parallel to Base layer
 const MAX_EXECUTORS: u8 = 50;
 
+pub type PatchedErrors = Vec<TransactionStrategyExecutionError>;
+
 #[derive(Clone, Debug)]
-pub struct ExecutionOutputWrapper {
+pub struct BroadcastedIntentExecutionResult {
+    pub inner: Result<ExecutionOutput, Arc<IntentExecutorError>>,
     pub id: u64,
-    pub output: ExecutionOutput,
     pub trigger_type: TriggerType,
+    pub patched_errors: Arc<PatchedErrors>,
 }
 
-pub type BroadcastedError = (u64, TriggerType, Arc<IntentExecutorError>);
+impl BroadcastedIntentExecutionResult {
+    fn new(
+        id: u64,
+        trigger_type: TriggerType,
+        execution_result: IntentExecutionResult,
+    ) -> Self {
+        let inner = execution_result.inner.map_err(Arc::new);
+        let patched_errors = execution_result.patched_errors.into();
+        Self {
+            id,
+            trigger_type,
+            patched_errors,
+            inner,
+        }
+    }
+}
 
-pub type BroadcastedIntentExecutionResult =
-    IntentExecutorResult<ExecutionOutputWrapper, BroadcastedError>;
+impl Deref for BroadcastedIntentExecutionResult {
+    type Target = Result<ExecutionOutput, Arc<IntentExecutorError>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
 
 /// Struct that exposes only `subscribe` method of `broadcast::Sender` for better isolation
 pub struct ResultSubscriber(
@@ -238,7 +265,7 @@ where
 
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit
     async fn execute(
-        executor: E,
+        mut executor: E,
         persister: Option<P>,
         intent: ScheduledBaseIntentWrapper,
         inner_scheduler: Arc<Mutex<IntentScheduler>>,
@@ -246,31 +273,23 @@ where
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
         let instant = Instant::now();
-        let result = executor
-            .execute(intent.inner.clone(), persister)
-            .await
-            .inspect_err(|err| {
-                error!(
-                    "Failed to execute BaseIntent. id: {}. {}",
-                    intent.id, err
-                )
-            });
 
-        // Metrics
-        Self::execution_metrics(instant.elapsed(), &intent, &result);
+        // Execute an Intent
+        let result = executor.execute(intent.inner.clone(), persister).await;
+        let _ = result.inner.as_ref().inspect_err(|err| {
+            error!("Failed to execute BaseIntent. id: {}. {}", intent.id, err)
+        });
 
-        let result = result
-            .map(|output| ExecutionOutputWrapper {
-                id: intent.id,
-                trigger_type: intent.trigger_type,
-                output,
-            })
-            .map_err(|err| {
-                (intent.inner.id, intent.trigger_type, Arc::new(err))
-            });
+        // Record metrics after execution
+        Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
 
         // Broadcast result to subscribers
-        if let Err(err) = result_sender.send(result) {
+        let broadcasted_result = BroadcastedIntentExecutionResult::new(
+            intent.id,
+            intent.trigger_type,
+            result,
+        );
+        if let Err(err) = result_sender.send(broadcasted_result) {
             warn!("No result listeners of intent execution: {}", err);
         }
 
@@ -284,6 +303,18 @@ where
             .complete(&intent.inner)
             .expect("Valid completion of previously scheduled message");
 
+        tokio::spawn(async move {
+            // Cleanup after intent
+            // Note: in some cases it maybe critical to execute cleanup synchronously
+            // Example: if commit nonces were invalid during execution
+            // next intent could use wrongly initiated buffers by current intent
+            // We assume that this case is highly unlikely since it would mean:
+            // user redelegates amd reaches current commit id faster than we execute transactions below
+            if let Err(err) = executor.cleanup().await {
+                error!("Failed to cleanup after intent: {}", err);
+            }
+        });
+
         // Free worker
         drop(execution_permit);
     }
@@ -294,7 +325,7 @@ where
         intent: &ScheduledBaseIntentWrapper,
         result: &IntentExecutorResult<ExecutionOutput>,
     ) {
-        const EXECUTION_TIME_THRESHOLD: f64 = 2.0;
+        const EXECUTION_TIME_THRESHOLD: f64 = 5.0;
 
         let intent_execution_secs = execution_time.as_secs_f64();
         metrics::observe_committor_intent_execution_time_histogram(
@@ -309,12 +340,8 @@ where
         // Loki alerts
         if intent_execution_secs >= EXECUTION_TIME_THRESHOLD {
             info!(
-                "Intent took too long to execute: {}s. {}",
-                intent_execution_secs,
-                result
-                    .as_ref()
-                    .map(|_| "succeeded".to_string())
-                    .unwrap_or_else(|err| format!("{err:?}"))
+                "Intent took too long to execute: {}s. {:?}",
+                intent_execution_secs, result
             );
         } else {
             trace!("Seconds took to execute intent: {}", intent_execution_secs);
@@ -345,7 +372,10 @@ mod tests {
     use async_trait::async_trait;
     use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
     use solana_pubkey::{pubkey, Pubkey};
-    use solana_sdk::{signature::Signature, signer::SignerError};
+    use solana_sdk::{
+        signature::Signature, signer::SignerError,
+        transaction::TransactionError,
+    };
     use tokio::{sync::mpsc, time::sleep};
 
     use super::*;
@@ -354,11 +384,12 @@ mod tests {
             db::{DummyDB, DB},
             intent_scheduler::create_test_intent,
         },
-        intent_executor::error::{
-            IntentExecutorError as ExecutorError, IntentExecutorResult,
-            InternalError,
+        intent_executor::{
+            error::{IntentExecutorError as ExecutorError, InternalError},
+            IntentExecutionResult,
         },
         persist::IntentPersisterImpl,
+        transaction_preparator::delivery_preparator::BufferExecutionError,
     };
 
     type MockIntentExecutionEngine = IntentExecutionEngine<
@@ -406,8 +437,7 @@ mod tests {
         // Verify the message was processed
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_ok());
-        let output = result.unwrap();
-        assert_eq!(output.id, 1);
+        assert_eq!(result.id, 1);
     }
 
     #[tokio::test]
@@ -427,12 +457,12 @@ mod tests {
         // First message should be processed immediately
         let result1 = result_receiver.recv().await.unwrap();
         assert!(result1.is_ok());
-        assert_eq!(result1.unwrap().id, 1);
+        assert_eq!(result1.id, 1);
 
         // Second message should be processed after first completes
         let result2 = result_receiver.recv().await.unwrap();
         assert!(result2.is_ok());
-        assert_eq!(result2.unwrap().id, 2);
+        assert_eq!(result2.id, 2);
     }
 
     #[tokio::test]
@@ -450,14 +480,16 @@ mod tests {
 
         // Verify the failure was properly reported
         let result = result_receiver.recv().await.unwrap();
-        let Err((id, trigger_type, err)) = result else {
-            panic!();
-        };
-        assert_eq!(id, 1);
-        assert_eq!(trigger_type, TriggerType::OffChain);
+        assert!(result.inner.is_err());
+        assert_eq!(result.id, 1);
+        assert_eq!(result.trigger_type, TriggerType::OffChain);
         assert_eq!(
-            err.to_string(),
-            "FailedToCommitError: SignerError: custom error: oops"
+            result.patched_errors[0].to_string(),
+            "User supplied actions are ill-formed: Attempt to debit an account but found no record of a prior credit.. None"
+        );
+        assert_eq!(
+            result.inner.unwrap_err().to_string(),
+            "FailedToCommitError: InternalError: SignerError: custom error: oops"
         );
     }
 
@@ -479,7 +511,7 @@ mod tests {
         // Verify the message from DB was processed
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().id, 1);
+        assert_eq!(result.id, 1);
     }
 
     /// Tests multiple blocking messages being sent at the same time
@@ -513,7 +545,7 @@ mod tests {
             let result = result_receiver.recv().await.unwrap();
             assert!(result.is_ok());
             // Tasks are blocking so will complete sequentially
-            assert_eq!(result.unwrap().id, completed as u64);
+            assert_eq!(result.id, completed as u64);
             completed += 1;
         }
 
@@ -581,7 +613,7 @@ mod tests {
             assert!(result.is_ok());
 
             // Message has to be present in set
-            let id = result.unwrap().id;
+            let id = result.id;
             assert!(received_ids.remove(&id));
 
             completed += 1;
@@ -741,32 +773,49 @@ mod tests {
     #[async_trait]
     impl IntentExecutor for MockIntentExecutor {
         async fn execute<P: IntentPersister>(
-            &self,
+            &mut self,
             _base_intent: ScheduledBaseIntent,
             _persister: Option<P>,
-        ) -> IntentExecutorResult<ExecutionOutput> {
+        ) -> IntentExecutionResult {
             self.on_task_started();
 
             // Simulate some work
             sleep(Duration::from_millis(50)).await;
 
             let result = if self.should_fail {
-                Err(ExecutorError::FailedToCommitError {
-                    err: InternalError::SignerError(SignerError::Custom(
-                        "oops".to_string(),
-                    )),
-                    signature: None,
-                })
+                IntentExecutionResult {
+                    inner: Err(ExecutorError::FailedToCommitError {
+                        err: TransactionStrategyExecutionError::InternalError(
+                            InternalError::SignerError(SignerError::Custom(
+                                "oops".to_string(),
+                            )),
+                        ),
+                        signature: None,
+                    }),
+                    patched_errors: vec![
+                        TransactionStrategyExecutionError::ActionsError(
+                            TransactionError::AccountNotFound,
+                            None,
+                        ),
+                    ],
+                }
             } else {
-                Ok(ExecutionOutput::TwoStage {
-                    commit_signature: Signature::default(),
-                    finalize_signature: Signature::default(),
-                })
+                IntentExecutionResult {
+                    inner: Ok(ExecutionOutput::TwoStage {
+                        commit_signature: Signature::default(),
+                        finalize_signature: Signature::default(),
+                    }),
+                    patched_errors: vec![],
+                }
             };
 
             self.on_task_finished();
 
             result
+        }
+
+        async fn cleanup(self) -> Result<(), BufferExecutionError> {
+            Ok(())
         }
     }
 }

@@ -46,9 +46,23 @@ fn test_cloning_unescrowed_payer_that_is_escrowed_later() {
         &delegated_kp.pubkey(),
         LAMPORTS_PER_SOL / 2,
     );
-    let (_sig, _found) = ctx
+    let (sig, _found) = ctx
         .send_and_confirm_instructions_with_payer_ephem(&[ix], &non_escrowed_kp)
         .unwrap();
+    let tx = ctx
+        .get_transaction_ephem(&sig)
+        .expect("failed to fetch transaction ephem");
+    let err = tx.transaction.meta.unwrap().err;
+    assert!(
+        err.is_some(),
+        "should fail since feepayer is not escrowed yet"
+    );
+    debug!("Initial transaction error: {:#?}", err);
+    assert_eq!(
+        err.unwrap().to_string(),
+        "This account may not be used to pay transaction fees",
+        "unescrowed payer cannot be writable"
+    );
 
     // When it completes we should see an empty escrow inside the validator
     let (escrow_pda, acc) = get_escrow_pda_ephem(&ctx, &non_escrowed_kp);

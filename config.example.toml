@@ -1,0 +1,237 @@
+# ==============================================================================
+# MagicBlock Validator Configuration
+# ==============================================================================
+# This file serves as a reference for all available configuration options.
+# ALL FIELDS ARE OPTIONAL. If removed, the "Default" value listed in the 
+# comments will be used.
+#
+# CONFIGURATION PRECEDENCE (Highest to Lowest):
+# 1. CLI Arguments      (e.g. --basefee 500)
+# 2. Environment Vars   (e.g. MBV_VALIDATOR__BASEFEE=500)
+# 3. TOML Config File   (this file)
+# 4. System Defaults
+#
+# ENVIRONMENT VARIABLES:
+# Prefix: MBV_
+# Splitter: Double underscore (__) denotes hierarchy depth.
+# Naming:   Field names use UPPER_SNAKE_CASE.
+# Example:  [ledger] block-time -> MBV_LEDGER__BLOCK_TIME
+# ==============================================================================
+
+# --- Core Settings ---
+
+# The operational mode of the validator.
+# Default: "ephemeral"
+# Options:
+# - "ephemeral":       Clone accounts on demand; writes only to delegated accounts.
+# - "replica":         Clone all accounts; writes to all accounts.
+# - "programs-replica": Clone program accounts; writes to all accounts.
+# - "offline":         Clone no accounts; writes to all accounts.
+# CLI: --lifecycle <MODE>
+# Env: MBV_LIFECYCLE
+lifecycle = "ephemeral"
+
+# Remote cluster to connect to for state/programs.
+# Default: "devnet"
+#
+# This field supports multiple formats:
+# 1. Simple string or alias:
+#    remote = "devnet"
+#    remote = "https://api.mainnet-beta.solana.com"
+#
+# 2. Separate HTTP and WebSocket endpoints (Map format):
+#    remote = { http = "https://api.devnet.solana.com", ws = "wss://api.devnet.solana.com" }
+#
+# 3. Multiple remotes for failover/redundancy (Array format):
+#    remote = [
+#      "devnet",
+#      { http = "http://localhost:8899", ws = "ws://localhost:8900" }
+#    ]
+#
+# CLI: -r, --remote <URL_OR_ALIAS>
+# Env: MBV_REMOTE
+remote = "devnet"
+
+# Root directory for application storage (ledger, accountsdb, snapshots).
+# Default: "magicblock-test-storage" (created in current working directory)
+# CLI: --storage <PATH>
+# Env: MBV_STORAGE
+storage = "magicblock-test-storage"
+
+
+[metrics]
+# Network address to bind the metrics service to.
+# Default: "127.0.0.1:9090"
+# Env: MBV_METRICS__ADDRESS
+address = "127.0.0.1:9090"
+
+# Frequency at which to collect metrics. Supports humantime (e.g. "30s", "1m").
+# Default: "30s"
+# Env: MBV_METRICS__COLLECT_FREQUENCY
+collect-frequency = "30s"
+
+# ==============================================================================
+# Validator Identity & Fees
+# ==============================================================================
+[validator]
+# The minimum fee (in lamports) required to process a transaction.
+# Default: 0
+# CLI: --basefee <UINT>
+# Env: MBV_VALIDATOR__BASEFEE
+basefee = 0
+
+# The validator's identity keypair in Base58 format.
+# Default: A pre-generated devnet keypair
+# CLI: -k, --keypair <BASE58>
+# Env: MBV_VALIDATOR__KEYPAIR
+keypair = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ"
+
+[aperture]
+# Network address to bind the main JSON RPC service to.
+# Websocket bind address is derived by incrementing the port
+# Default: "127.0.0.1:8899"
+# CLI: -l, --listen <ADDR>
+# Env: MBV_APERTURE__LISTEN
+listen = "127.0.0.1:8899"
+
+# Number of event processor tasks to handle state updates
+# Greater number might improve the performance of websocket
+# and/or geyser plugins if there are enough idle CPU cores 
+# Default: 1
+# CLI: --event-processors <COUNT>
+# Env: MBV_APERTURE__EVENT_PROCESSORS
+event-processors = 1
+
+# List of paths to geyser json configuration files
+# Default: empty list (no plugins)
+geyser-plugins = []
+
+# ==============================================================================
+# Chain Commitment Strategy (ER -> BASE)
+# ==============================================================================
+[commit]
+# The compute unit price (in micro-lamports) applied to commit transactions.
+# Default: 1_000_000
+# Env: MBV_COMMIT__COMPUTE_UNIT_PRICE
+compute-unit-price = 1_000_000
+
+# ==============================================================================
+# Accounts Database
+# ==============================================================================
+[accountsdb]
+# Total size (in bytes) allocated for the memory-mapped accounts file.
+# Default: 104,857,600 (100 MB)
+# Env: MBV_ACCOUNTSDB__DATABASE_SIZE
+database-size = 104_857_600
+
+# Block size for storage allocation.
+# Default: "block256"
+# Options: "block128", "block256", "block512"
+# Env: MBV_ACCOUNTSDB__BLOCK_SIZE
+block-size = "block256"
+
+# Size (in bytes) allocated for the accounts index.
+# Default: 16,777,216 (16 MB)
+# Env: MBV_ACCOUNTSDB__INDEX_SIZE
+index-size = 16_777_216
+
+# Maximum number of historical snapshots to keep on disk.
+# Default: 4
+# Env: MBV_ACCOUNTSDB__MAX_SNAPSHOTS
+max-snapshots = 4
+
+# How often (in slots) to take a snapshot of the database.
+# Default: 1024
+# Env: MBV_ACCOUNTSDB__SNAPSHOT_FREQUENCY
+snapshot-frequency = 1024
+
+# If true, wipes the accounts database on every startup.
+# Default: false
+# Env: MBV_ACCOUNTSDB__RESET
+reset = false
+
+# ==============================================================================
+# Ledger & Block Production
+# ==============================================================================
+[ledger]
+# Target duration for a block slot. Supports humantime (e.g. "400ms", "1s").
+# Default: "400ms"
+# Env: MBV_LEDGER__BLOCK_TIME
+block-time = "400ms"
+
+# Upper hard threshold for the max size of the ledger (in bytes).
+# Ledger truncation logic kicks in when disk usage approaches this limit.
+# Default: 536_870_912 (512 MB)
+# Env: MBV_LEDGER__SIZE
+size = 536_870_912
+
+# Whether to verify that the ledger on disk belongs to the configured keypair.
+# Default: true
+# Env: MBV_LEDGER__VERIFY_KEYPAIR
+verify-keypair = true
+
+# If true, deletes the existing ledger directory on startup.
+# Default: false
+# Env: MBV_LEDGER__RESET
+reset = false
+
+# ==============================================================================
+# Chainlink (cloning pipeline)
+# ==============================================================================
+[chainlink]
+# If true, creates and initializes Address Lookup Tables for oracle feeds.
+# Default: false
+# Env: MBV_CHAINLINK__PREPARE_LOOKUP_TABLES
+prepare-lookup-tables = false
+
+# Amount of lamports to automatically airdrop to empty feepayer accounts on startup.
+# Default: 0
+# Env: MBV_CHAINLINK__AUTO_AIRDROP_LAMPORTS
+auto-airdrop-lamports = 0
+
+# Maximum number of accounts to monitor for price updates.
+# Default: 0
+# Env: MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS
+max-monitored-accounts = 1000
+
+# ==============================================================================
+# On-Chain Registration (Optional)
+# ==============================================================================
+# Used only if the validator registers itself on-chain.
+# This section is optional. To disable, just remove/comment the section
+
+[chain-operation]
+# ISO 3166-1 alpha-2 country code (e.g. "US", "DE").
+# Env: MBV_CHAIN_OPERATION__COUNTRY_CODE
+country-code = "US"
+
+# Fully Qualified Domain Name where this validator is reachable.
+# Env: MBV_CHAIN_OPERATION__FQDN
+fqdn = "https://validator.example.com"
+
+# How often to claim accrued fees from the chain (e.g. "24h").
+# Env: MBV_CHAIN_OPERATION__CLAIM_FEES_FREQUENCY
+claim-fees-frequency = "24h"
+
+# ==============================================================================
+# Internal Task Scheduler
+# ==============================================================================
+[task-scheduler]
+# If true, clears all pending scheduled tasks on startup.
+# Default: false
+# Env: MBV_TASK_SCHEDULER__RESET
+reset = false
+
+# ==============================================================================
+# Pre-loaded Programs
+# ==============================================================================
+# You can specify multiple programs to load at startup.
+# Default: Empty list
+
+[[programs]]
+id = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+path = "./libs/spl_token.so"
+
+[[programs]]
+id = "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
+path = "./libs/spl_memo.so"

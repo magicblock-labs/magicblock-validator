@@ -4,7 +4,6 @@ use cleanass::assert_eq;
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
-use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     rent::Rent,
@@ -125,13 +124,8 @@ fn write(
 }
 
 fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
-    let (_, mut validator, ctx) = setup_offline_validator(
-        ledger_path,
-        None,
-        Some(SLOT_MS),
-        LedgerResumeStrategy::Resume { replay: true },
-        false,
-    );
+    let (_, mut validator, ctx) =
+        setup_offline_validator(ledger_path, None, Some(SLOT_MS), false, false);
 
     for keypair in keypairs {
         let acc = expect!(

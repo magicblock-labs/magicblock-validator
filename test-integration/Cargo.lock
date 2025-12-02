@@ -483,6 +483,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a89cbf775b137e9b968e67227ef7f775587cde3fd31b0d8599dbd0f598a48340"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1166,15 +1175,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
-name = "convert_case"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
-dependencies = [
- "unicode-segmentation",
-]
-
-[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1354,9 +1354,9 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.20.11"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee"
+checksum = "9cdf337090841a411e2a7f3deb9187445851f91b309c0c0a29e05f74a00a48c0"
 dependencies = [
  "darling_core",
  "darling_macro",
@@ -1364,9 +1364,9 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.20.11"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e"
+checksum = "1247195ecd7e3c85f83c8d2a366e4210d588e802133e1e355180a9870b517ea4"
 dependencies = [
  "fnv",
  "ident_case",
@@ -1378,9 +1378,9 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.20.11"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
+checksum = "d38308df82d1080de0afee5d069fa14b0326a88c14f15c5ccda35b4a6c414c81"
 dependencies = [
  "darling_core",
  "quote",
@@ -1428,6 +1428,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c9e6a11ca8224451684bc0d7d5a7adbf8f2fd6887261a1cfc3c0432f9d4068e"
 dependencies = [
  "powerfmt",
+ "serde",
 ]
 
 [[package]]
@@ -1453,11 +1454,32 @@ version = "0.99.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6edb4b64a43d977b8e99788fe3a04d483834fba1215a7e02caa415b626497f7f"
 dependencies = [
- "convert_case 0.4.0",
+ "convert_case",
  "proc-macro2",
  "quote",
  "rustc_version",
  "syn 2.0.104",
+]
+
+[[package]]
+name = "derive_more"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
+dependencies = [
+ "derive_more-impl",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+ "unicode-xid",
 ]
 
 [[package]]
@@ -1898,6 +1920,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
+name = "figment"
+version = "0.10.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cb01cd46b0cf372153850f4c6c272d9cbea2da513e07538405148f95bd789f3"
+dependencies = [
+ "atomic",
+ "pear",
+ "serde",
+ "toml 0.8.23",
+ "uncased",
+ "version_check",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2268,9 +2304,10 @@ dependencies = [
 
 [[package]]
 name = "guinea"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
+ "magicblock-magic-program-api 0.3.1",
  "serde",
  "solana-program",
 ]
@@ -2418,6 +2455,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "hidapi"
 version = "2.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2548,6 +2591,16 @@ name = "humantime"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b112acc8b3adf4b107a8ec20977da0273a8c386765a3ec0229bd500a1443f9f"
+
+[[package]]
+name = "humantime-serde"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57a3db5ea5923d99402c94e9feb261dc5ee9b4efa158b0315f788cf549cc200c"
+dependencies = [
+ "humantime",
+ "serde",
+]
 
 [[package]]
 name = "hyper"
@@ -2869,6 +2922,7 @@ checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
 dependencies = [
  "autocfg",
  "hashbrown 0.12.3",
+ "serde",
 ]
 
 [[package]]
@@ -2880,6 +2934,7 @@ dependencies = [
  "equivalent",
  "hashbrown 0.15.4",
  "rayon",
+ "serde",
 ]
 
 [[package]]
@@ -2894,6 +2949,12 @@ dependencies = [
  "unit-prefix",
  "web-time",
 ]
+
+[[package]]
+name = "inlinable_string"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8fae54786f62fb2918dcfae3d568594e50eb9b5c25bf04371af6fe7516452fb"
 
 [[package]]
 name = "inout"
@@ -2934,6 +2995,8 @@ dependencies = [
  "solana-transaction-status",
  "tempfile",
  "toml 0.8.23",
+ "ureq",
+ "url 2.5.4",
 ]
 
 [[package]]
@@ -3063,7 +3126,7 @@ version = "18.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2b99d4207e2a04fb4581746903c2bb7eb376f88de9c699d0f3e10feeac0cd3a"
 dependencies = [
- "derive_more",
+ "derive_more 0.99.20",
  "futures 0.3.31",
  "jsonrpc-core",
  "jsonrpc-pubsub",
@@ -3451,7 +3514,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "bincode",
@@ -3462,9 +3525,11 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "magicblock-program",
  "magicblock-rpc-client",
+ "rand 0.8.5",
+ "solana-instruction",
  "solana-sdk",
  "thiserror 1.0.69",
  "tokio",
@@ -3472,7 +3537,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -3485,7 +3550,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
@@ -3500,7 +3565,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "lmdb-rkv",
  "log",
@@ -3517,8 +3582,9 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
+ "arc-swap",
  "base64 0.21.7",
  "bincode",
  "bs58",
@@ -3565,7 +3631,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3586,7 +3652,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
@@ -3599,7 +3665,7 @@ dependencies = [
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=86c2cb0f)",
  "solana-transaction",
  "tempfile",
  "thiserror 1.0.69",
@@ -3609,17 +3675,20 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "bincode",
  "env_logger 0.11.8",
  "futures-util",
  "log",
  "lru 0.16.0",
+ "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
+ "magicblock-metrics",
  "serde_json",
  "solana-account",
  "solana-account-decoder",
@@ -3632,6 +3701,7 @@ dependencies = [
  "solana-rpc-client-api",
  "solana-sdk",
  "solana-sdk-ids",
+ "solana-signer",
  "solana-system-interface",
  "solana-transaction-error",
  "thiserror 1.0.69",
@@ -3642,7 +3712,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "borsh 1.5.7",
  "borsh-derive 1.5.7",
@@ -3656,7 +3726,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -3688,46 +3758,30 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bs58",
  "clap 4.5.41",
+ "derive_more 2.0.1",
+ "figment",
+ "humantime-serde",
  "isocountry",
- "magicblock-chainlink",
- "magicblock-config-helpers",
- "magicblock-config-macro",
  "serde",
+ "serde_with",
  "solana-keypair",
  "solana-pubkey",
- "strum",
- "thiserror 1.0.69",
+ "solana-signer",
  "toml 0.8.23",
  "url 2.5.4",
 ]
 
 [[package]]
-name = "magicblock-config-helpers"
-version = "0.2.3"
-
-[[package]]
-name = "magicblock-config-macro"
-version = "0.2.3"
-dependencies = [
- "clap 4.5.41",
- "convert_case 0.8.0",
- "proc-macro2",
- "quote",
- "serde",
- "syn 2.0.104",
-]
-
-[[package]]
 name = "magicblock-core"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "flume",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "serde",
  "solana-account",
  "solana-account-decoder",
@@ -3764,7 +3818,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -3772,7 +3826,6 @@ dependencies = [
  "fs_extra",
  "libc",
  "log",
- "magicblock-accounts-db",
  "magicblock-core",
  "num-format",
  "num_cpus",
@@ -3784,8 +3837,8 @@ dependencies = [
  "solana-measure",
  "solana-metrics",
  "solana-sdk",
- "solana-storage-proto 0.2.3",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-storage-proto 0.3.1",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=86c2cb0f)",
  "solana-timings",
  "solana-transaction-status",
  "thiserror 1.0.69",
@@ -3806,7 +3859,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "serde",
@@ -3815,7 +3868,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "http-body-util",
  "hyper 1.6.0",
@@ -3829,7 +3882,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "log",
@@ -3852,7 +3905,7 @@ dependencies = [
  "solana-pubkey",
  "solana-rent-collector",
  "solana-sdk-ids",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=86c2cb0f)",
  "solana-svm-transaction",
  "solana-system-program",
  "solana-transaction",
@@ -3863,12 +3916,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "lazy_static",
  "magicblock-core",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "magicblock-metrics",
  "num-derive",
  "num-traits",
@@ -3881,7 +3934,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "log",
  "solana-rpc-client",
@@ -3895,10 +3948,11 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "ed25519-dalek",
  "log",
+ "magicblock-metrics",
  "magicblock-rpc-client",
  "rand 0.8.5",
  "sha3",
@@ -3912,7 +3966,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "chrono",
@@ -3928,7 +3982,7 @@ dependencies = [
  "solana-program",
  "solana-pubsub-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=86c2cb0f)",
  "solana-timings",
  "thiserror 1.0.69",
  "tokio",
@@ -3937,11 +3991,10 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "log",
- "magicblock-config",
  "magicblock-delegation-program",
  "magicblock-program",
  "magicblock-rpc-client",
@@ -3955,7 +4008,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "git-version",
  "rustc_version",
@@ -4574,6 +4627,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "pear"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdeeaa00ce488657faba8ebf44ab9361f9365a97bd39ffb8a60663f57ff4b467"
+dependencies = [
+ "inlinable_string",
+ "pear_codegen",
+ "yansi",
+]
+
+[[package]]
+name = "pear_codegen"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4bab5b985dc082b345f812b7df84e1bef27e7207b39e448439ba8bd69c93f147"
+dependencies = [
+ "proc-macro2",
+ "proc-macro2-diagnostics",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "pem"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4838,13 +4914,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro2-diagnostics"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af066a9c399a26e020ada66a034357a868728e72cd426f3adcd35f80d88d88c8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+ "version_check",
+ "yansi",
+]
+
+[[package]]
 name = "program-flexi-counter"
 version = "0.0.0"
 dependencies = [
  "bincode",
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "serde",
  "solana-program",
 ]
@@ -4868,6 +4957,7 @@ dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
  "magicblock-delegation-program",
+ "magicblock-magic-program-api 0.3.1",
  "solana-program",
 ]
 
@@ -5626,6 +5716,7 @@ version = "0.23.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7160e3e10bf4535308537f3c4e1641468cd0e485175d6163087c0393c7d46643"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -5823,7 +5914,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "magicblock-core",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "program-schedulecommit",
  "schedulecommit-client",
  "solana-program",
@@ -5839,12 +5930,36 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "magicblock-core",
- "magicblock-magic-program-api 0.2.3",
+ "magicblock-magic-program-api 0.3.1",
  "program-schedulecommit",
  "program-schedulecommit-security",
  "schedulecommit-client",
  "solana-rpc-client-api",
  "solana-sdk",
+]
+
+[[package]]
+name = "schemars"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cd191f9397d57d581cddd31014772520aa448f65ef991055d7f61582c65165f"
+dependencies = [
+ "dyn-clone",
+ "ref-cast",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "schemars"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9558e172d4e8533736ba97870c4b2cd63f84b382a3d6eb063da41b91cce17289"
+dependencies = [
+ "dyn-clone",
+ "ref-cast",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5922,10 +6037,11 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.219"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0e2c6ed6606019b4e29e69dbaba95b11854410e5347d525002456dbbb786b6"
+checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
+ "serde_core",
  "serde_derive",
 ]
 
@@ -5948,10 +6064,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_derive"
-version = "1.0.219"
+name = "serde_core"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b0276cf7f2c73365f7157c8123c21cd9a50fbbd844757af28ca1f5925fc2a00"
+checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
+dependencies = [
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5960,14 +6085,15 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.140"
+version = "1.0.145"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20068b6e96dc6c9bd23e01df8827e6c7e1f2fddd43c21810382803c136b99373"
+checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
 dependencies = [
  "itoa",
  "memchr",
  "ryu",
  "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -5993,20 +6119,28 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.14.0"
+version = "3.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2c45cd61fefa9db6f254525d46e392b852e0e61d9a1fd36e5bd183450a556d5"
+checksum = "10574371d41b0d9b2cff89418eda27da52bcaff2cc8741db26382a77c29131f1"
 dependencies = [
- "serde",
- "serde_derive",
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "indexmap 1.9.3",
+ "indexmap 2.10.0",
+ "schemars 0.9.0",
+ "schemars 1.1.0",
+ "serde_core",
+ "serde_json",
  "serde_with_macros",
+ "time",
 ]
 
 [[package]]
 name = "serde_with_macros"
-version = "3.14.0"
+version = "3.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de90945e6565ce0d9a25098082ed4ee4002e047cb59892c318d66821e14bb30f"
+checksum = "08a72d8216842fdd57820dc78d840bef99248e35fb2554ff923319e60f2d686b"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -6243,7 +6377,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=f454d4a#f454d4a67a1ca64b87002025868f5369428e1c54"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=5afcedc#5afcedca1bd1608594cfe6d8ecdedea0e0380b5a"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -8970,7 +9104,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "bs58",
@@ -9103,7 +9237,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=11bbaf2#11bbaf2249aeb16cec4111e86f2e18a0c45ff1f2"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=86c2cb0f#86c2cb0f2d92c6e92757e951a8f27757fef3aaea"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -10420,6 +10554,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "magicblock-chainlink",
+ "magicblock-config",
  "magicblock-delegation-program",
  "program-flexi-counter",
  "program-mini",
@@ -10471,7 +10606,7 @@ dependencies = [
 
 [[package]]
 name = "test-kit"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "env_logger 0.11.8",
  "guinea",
@@ -11099,6 +11234,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
 
 [[package]]
+name = "uncased"
+version = "0.9.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1b88fcfe09e89d3866a5c11019378088af2d24c3fbd4f0543f96b479ec90697"
+dependencies = [
+ "version_check",
+]
+
+[[package]]
 name = "unicase"
 version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11124,12 +11268,6 @@ checksum = "5033c97c4262335cded6d6fc3e5c18ab755e1a3dc96376350f3d8e9f009ad956"
 dependencies = [
  "tinyvec",
 ]
-
-[[package]]
-name = "unicode-segmentation"
-version = "1.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6ccf251212114b54433ec949fd6a7841275f9ada20dddd2f29e9ceea4501493"
 
 [[package]]
 name = "unicode-width"
@@ -11185,6 +11323,22 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+
+[[package]]
+name = "ureq"
+version = "2.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
+dependencies = [
+ "base64 0.22.1",
+ "flate2",
+ "log",
+ "once_cell",
+ "rustls 0.23.28",
+ "rustls-pki-types",
+ "url 2.5.4",
+ "webpki-roots 0.26.11",
+]
 
 [[package]]
 name = "uriparse"
@@ -11449,6 +11603,24 @@ name = "webpki-roots"
 version = "0.25.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.4",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2878ef029c47c6e8cf779119f20fcf52bde7ad42a731b2a304bc221df17571e"
+dependencies = [
+ "rustls-pki-types",
+]
 
 [[package]]
 name = "which"
@@ -11974,6 +12146,12 @@ dependencies = [
  "libc",
  "rustix 1.0.7",
 ]
+
+[[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yoke"

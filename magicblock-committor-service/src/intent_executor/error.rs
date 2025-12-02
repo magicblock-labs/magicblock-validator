@@ -38,12 +38,6 @@ impl InternalError {
 pub enum IntentExecutorError {
     #[error("EmptyIntentError")]
     EmptyIntentError,
-    #[error("User supplied actions are ill-formed: {0}. {:?}", .1)]
-    ActionsError(#[source] TransactionError, Option<Signature>),
-    #[error("Accounts committed with an invalid Commit id: {0}. {:?}", .1)]
-    CommitIDError(#[source] TransactionError, Option<Signature>),
-    #[error("Max instruction trace length exceeded: {0}. {:?}", .1)]
-    CpiLimitError(#[source] TransactionError, Option<Signature>),
     #[error("Failed to fit in single TX")]
     FailedToFitError,
     #[error("SignerError: {0}")]
@@ -54,13 +48,13 @@ pub enum IntentExecutorError {
     #[error("FailedToCommitError: {err}")]
     FailedToCommitError {
         #[source]
-        err: InternalError,
+        err: TransactionStrategyExecutionError,
         signature: Option<Signature>,
     },
     #[error("FailedToFinalizeError: {err}")]
     FailedToFinalizeError {
         #[source]
-        err: InternalError,
+        err: TransactionStrategyExecutionError,
         commit_signature: Option<Signature>,
         finalize_signature: Option<Signature>,
     },
@@ -71,32 +65,48 @@ pub enum IntentExecutorError {
 }
 
 impl IntentExecutorError {
-    pub fn is_cpi_limit_error(&self) -> bool {
-        matches!(self, IntentExecutorError::CpiLimitError(_, _))
+    pub fn from_commit_execution_error(
+        error: TransactionStrategyExecutionError,
+    ) -> IntentExecutorError {
+        let signature = error.signature();
+        IntentExecutorError::FailedToCommitError {
+            err: error,
+            signature,
+        }
     }
 
-    pub fn from_strategy_execution_error<F>(
+    pub fn from_finalize_execution_error(
         error: TransactionStrategyExecutionError,
-        converter: F,
-    ) -> IntentExecutorError
-    where
-        F: FnOnce(InternalError) -> IntentExecutorError,
-    {
-        match error {
-            TransactionStrategyExecutionError::ActionsError(err, signature) => {
-                IntentExecutorError::ActionsError(err, signature)
+        commit_signature: Option<Signature>,
+    ) -> IntentExecutorError {
+        let finalize_signature = error.signature();
+        IntentExecutorError::FailedToFinalizeError {
+            err: error,
+            commit_signature,
+            finalize_signature,
+        }
+    }
+
+    pub fn signatures(&self) -> Option<(Signature, Option<Signature>)> {
+        match self {
+            IntentExecutorError::FailedToCommitError { signature, err: _ } => {
+                signature.map(|el| (el, None))
             }
-            TransactionStrategyExecutionError::CpiLimitError(
-                err,
-                signature,
-            ) => IntentExecutorError::CpiLimitError(err, signature),
-            TransactionStrategyExecutionError::CommitIDError(
-                err,
-                signature,
-            ) => IntentExecutorError::CommitIDError(err, signature),
-            TransactionStrategyExecutionError::InternalError(err) => {
-                converter(err)
+            IntentExecutorError::FailedCommitPreparationError(err)
+            | IntentExecutorError::FailedFinalizePreparationError(err) => {
+                err.signature().map(|el| (el, None))
             }
+            IntentExecutorError::TaskBuilderError(err) => {
+                err.signature().map(|el| (el, None))
+            }
+            IntentExecutorError::FailedToFinalizeError {
+                err: _,
+                commit_signature,
+                finalize_signature,
+            } => commit_signature.map(|el| (el, *finalize_signature)),
+            IntentExecutorError::EmptyIntentError
+            | IntentExecutorError::FailedToFitError
+            | IntentExecutorError::SignerError(_) => None,
         }
     }
 }
@@ -104,9 +114,14 @@ impl IntentExecutorError {
 impl metrics::LabelValue for IntentExecutorError {
     fn value(&self) -> &str {
         match self {
-            IntentExecutorError::ActionsError(_, _) => "actions_failed",
-            IntentExecutorError::CpiLimitError(_, _) => "cpi_limit_failed",
-            IntentExecutorError::CommitIDError(_, _) => "commit_nonce_failed",
+            IntentExecutorError::FailedToCommitError { err, signature: _ } => {
+                err.value()
+            }
+            IntentExecutorError::FailedToFinalizeError {
+                err,
+                commit_signature: _,
+                finalize_signature: _,
+            } => err.value(),
             _ => "failed",
         }
     }
@@ -117,6 +132,8 @@ impl metrics::LabelValue for IntentExecutorError {
 pub enum TransactionStrategyExecutionError {
     #[error("User supplied actions are ill-formed: {0}. {:?}", .1)]
     ActionsError(#[source] TransactionError, Option<Signature>),
+    #[error("Invalid undelegation: {0}. {:?}", .1)]
+    UndelegationError(#[source] TransactionError, Option<Signature>),
     #[error("Accounts committed with an invalid Commit id: {0}. {:?}", .1)]
     CommitIDError(#[source] TransactionError, Option<Signature>),
     #[error("Max instruction trace length exceeded: {0}. {:?}", .1)]
@@ -132,6 +149,20 @@ impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
 }
 
 impl TransactionStrategyExecutionError {
+    pub fn is_cpi_limit_error(&self) -> bool {
+        matches!(self, Self::CpiLimitError(_, _))
+    }
+
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::InternalError(err) => err.signature(),
+            Self::CommitIDError(_, signature)
+            | Self::ActionsError(_, signature)
+            | Self::UndelegationError(_, signature)
+            | Self::CpiLimitError(_, signature) => *signature,
+        }
+    }
+
     /// Convert [`TransactionError`] into known errors that can be handled
     /// Otherwise return original [`TransactionError`]
     /// [`TransactionStrategyExecutionError`]
@@ -146,14 +177,6 @@ impl TransactionStrategyExecutionError {
             dlp::error::DlpError::NonceOutOfOrder as u32;
 
         match err {
-            // Filter CommitIdError by custom error code
-            transaction_err @ TransactionError::InstructionError(
-                _,
-                InstructionError::Custom(NONCE_OUT_OF_ORDER),
-            ) => Ok(TransactionStrategyExecutionError::CommitIDError(
-                transaction_err,
-                signature,
-            )),
             // Some tx may use too much CPIs and we can handle it in certain cases
             transaction_err @ TransactionError::InstructionError(
                 _,
@@ -162,25 +185,45 @@ impl TransactionStrategyExecutionError {
                 transaction_err,
                 signature,
             )),
-            // Filter ActionError, we can attempt recovery by stripping away actions
-            transaction_err @ TransactionError::InstructionError(index, _) => {
+            // Map per-task InstructionError into CommitID / Actions / Undelegation errors when possible
+            TransactionError::InstructionError(index, instruction_err) => {
+                let tx_err_helper = |instruction_err| -> TransactionError {
+                    TransactionError::InstructionError(index, instruction_err)
+                };
                 let Some(action_index) = index.checked_sub(OFFSET) else {
-                    return Err(transaction_err);
+                    return Err(tx_err_helper(instruction_err));
                 };
 
-                // If index corresponds to an Action -> ActionsError; otherwise -> InternalError.
-                if matches!(
-                    tasks
-                        .get(action_index as usize)
-                        .map(|task| task.task_type()),
-                    Some(TaskType::Action)
-                ) {
-                    Ok(TransactionStrategyExecutionError::ActionsError(
-                        transaction_err,
+                let Some(task_type) = tasks
+                    .get(action_index as usize)
+                    .map(|task| task.task_type())
+                else {
+                    return Err(tx_err_helper(instruction_err));
+                };
+
+                match (task_type, instruction_err) {
+                    (
+                        TaskType::Commit,
+                        InstructionError::Custom(NONCE_OUT_OF_ORDER),
+                    ) => Ok(TransactionStrategyExecutionError::CommitIDError(
+                        tx_err_helper(InstructionError::Custom(
+                            NONCE_OUT_OF_ORDER,
+                        )),
                         signature,
-                    ))
-                } else {
-                    Err(transaction_err)
+                    )),
+                    (TaskType::Action, instruction_err) => {
+                        Ok(TransactionStrategyExecutionError::ActionsError(
+                            tx_err_helper(instruction_err),
+                            signature,
+                        ))
+                    }
+                    (TaskType::Undelegate, instruction_err) => Ok(
+                        TransactionStrategyExecutionError::UndelegationError(
+                            tx_err_helper(instruction_err),
+                            signature,
+                        ),
+                    ),
+                    (_, instruction_err) => Err(tx_err_helper(instruction_err)),
                 }
             }
             // This means transaction failed to other reasons that we don't handle - propagate
@@ -191,6 +234,18 @@ impl TransactionStrategyExecutionError {
                 );
                 Err(err)
             }
+        }
+    }
+}
+
+impl metrics::LabelValue for TransactionStrategyExecutionError {
+    fn value(&self) -> &str {
+        match self {
+            Self::ActionsError(_, _) => "actions_failed",
+            Self::CpiLimitError(_, _) => "cpi_limit_failed",
+            Self::CommitIDError(_, _) => "commit_nonce_failed",
+            Self::UndelegationError(_, _) => "undelegation_failed",
+            _ => "failed",
         }
     }
 }

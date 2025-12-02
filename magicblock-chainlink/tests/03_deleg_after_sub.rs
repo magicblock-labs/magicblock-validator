@@ -4,6 +4,7 @@ use magicblock_chainlink::{
     assert_not_cloned, assert_not_subscribed,
     assert_subscribed_without_delegation_record,
     testing::{deleg::add_delegation_record_for, init_logger},
+    AccountFetchOrigin,
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -53,7 +54,15 @@ async fn test_deleg_after_subscribe_case2() {
         info!("1. Initially the account does not exist");
         assert_not_cloned!(cloner, &[pubkey]);
 
-        chainlink.ensure_accounts(&[pubkey], None).await.unwrap();
+        chainlink
+            .ensure_accounts(
+                &[pubkey],
+                None,
+                AccountFetchOrigin::GetMultipleAccounts,
+                None,
+            )
+            .await
+            .unwrap();
         assert_not_cloned!(cloner, &[pubkey]);
     }
 
@@ -75,7 +84,15 @@ async fn test_deleg_after_subscribe_case2() {
             .await;
         assert!(!updated);
 
-        chainlink.ensure_accounts(&[pubkey], None).await.unwrap();
+        chainlink
+            .ensure_accounts(
+                &[pubkey],
+                None,
+                AccountFetchOrigin::GetMultipleAccounts,
+                None,
+            )
+            .await
+            .unwrap();
         assert_cloned_as_undelegated!(cloner, &[pubkey], slot, program_pubkey);
         assert_subscribed_without_delegation_record!(&chainlink, &[&pubkey]);
     }

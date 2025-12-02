@@ -1,6 +1,16 @@
+use core::str;
 use std::{convert::Infallible, sync::Arc};
 
-use hyper::{body::Incoming, Method, Request, Response};
+use futures::{stream::FuturesOrdered, StreamExt};
+use hyper::{
+    body::Incoming,
+    header::{
+        HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS,
+        ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
+        ACCESS_CONTROL_MAX_AGE,
+    },
+    Method, Request, Response,
+};
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
     transactions::TransactionSchedulerHandle, DispatchEndpoints,
@@ -14,7 +24,7 @@ use crate::{
     requests::{
         http::{extract_bytes, parse_body, HandlerResult},
         payload::ResponseErrorPayload,
-        JsonHttpRequest,
+        JsonHttpRequest, RpcRequest,
     },
     state::{
         blocks::BlocksCache, transactions::TransactionsCache, ChainlinkImpl,
@@ -86,7 +96,9 @@ impl HttpDispatcher {
         request: Request<Incoming>,
     ) -> Result<Response<JsonBody>, Infallible> {
         if request.method() == Method::OPTIONS {
-            return Self::handle_cors_preflight();
+            let mut response = Response::new(JsonBody::from(""));
+            Self::set_access_control_headers(&mut response);
+            return Ok(response);
         }
         // A local macro to simplify error handling. If a Result is an Err,
         // it immediately formats it into a JSON-RPC error response and returns.
@@ -95,7 +107,19 @@ impl HttpDispatcher {
                 match $result {
                     Ok(r) => r,
                     Err(error) => {
-                        return Ok(ResponseErrorPayload::encode($id, error));
+                        let mut resp = ResponseErrorPayload::encode($id, error);
+                        Self::set_access_control_headers(&mut resp);
+                        return Ok(resp);
+                    }
+                }
+            };
+            (@noret, $result:expr, $id: expr) => {
+                match $result {
+                    Ok(r) => r,
+                    Err(error) => {
+                        let mut resp = ResponseErrorPayload::encode($id, error);
+                        Self::set_access_control_headers(&mut resp);
+                        resp
                     }
                 }
             };
@@ -103,11 +127,42 @@ impl HttpDispatcher {
 
         // Extract and parse the request body.
         let body = unwrap!(extract_bytes(request).await, None);
-        let mut request = unwrap!(parse_body(body), None);
+        let request = unwrap!(parse_body(body), None);
+
         // Resolve the handler for request and process it
-        let response = self.process(&mut request).await;
-        // Handle any errors from the execution stage
-        let response = unwrap!(response, Some(&request.id));
+        let (response, id) = match request {
+            RpcRequest::Single(mut r) => {
+                let response = self.process(&mut r).await;
+                (response, Some(r.id))
+            }
+            RpcRequest::Multi(requests) => {
+                const COMA: u8 = b',';
+                const OPEN_BR: u8 = b'[';
+                const CLOSE_BR: u8 = b']';
+                let mut jobs = FuturesOrdered::new();
+                for mut r in requests {
+                    let j = async {
+                        let response = self.process(&mut r).await;
+                        (response, r)
+                    };
+                    jobs.push_back(j);
+                }
+                let mut body = vec![OPEN_BR];
+                while let Some((response, request)) = jobs.next().await {
+                    if body.len() != 1 {
+                        body.push(COMA);
+                    }
+                    let response = unwrap!(@noret, response, Some(&request.id));
+                    body.extend_from_slice(&response.into_body().0);
+                }
+                body.push(CLOSE_BR);
+                (Ok(Response::new(JsonBody(body))), None)
+            }
+        };
+
+        // Handle any errors from the handling stage
+        let mut response = unwrap!(response, id.as_ref());
+        Self::set_access_control_headers(&mut response);
         Ok(response)
     }
 
@@ -119,6 +174,7 @@ impl HttpDispatcher {
         let _timer = RPC_REQUEST_HANDLING_TIME
             .with_label_values(&[method])
             .start_timer();
+
         match request.method {
             GetAccountInfo => self.get_account_info(request).await,
             GetBalance => self.get_balance(request).await,
@@ -141,6 +197,9 @@ impl HttpDispatcher {
             GetLatestBlockhash => self.get_latest_blockhash(request),
             GetMultipleAccounts => self.get_multiple_accounts(request).await,
             GetProgramAccounts => self.get_program_accounts(request),
+            GetRecentPerformanceSamples => {
+                self.get_recent_performance_samples(request)
+            }
             GetSignatureStatuses => self.get_signature_statuses(request),
             GetSignaturesForAddress => self.get_signatures_for_address(request),
             GetSlot => self.get_slot(request),
@@ -161,6 +220,7 @@ impl HttpDispatcher {
             GetTransaction => self.get_transaction(request),
             GetTransactionCount => self.get_transaction_count(request),
             GetVersion => self.get_version(request),
+            GetVoteAccounts => self.get_vote_accounts(request),
             IsBlockhashValid => self.is_blockhash_valid(request),
             MinimumLedgerSlot => self.get_first_available_block(request),
             RequestAirdrop => self.request_airdrop(request).await,
@@ -169,24 +229,16 @@ impl HttpDispatcher {
         }
     }
 
-    /// Handles CORS preflight OPTIONS requests.
-    ///
-    /// Responds with a `200 OK` and the necessary `Access-Control-*` headers to
-    /// authorize subsequent `POST` requests from any origin (e.g. explorers)
-    fn handle_cors_preflight() -> Result<Response<JsonBody>, Infallible> {
-        use hyper::header::{
-            ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-            ACCESS_CONTROL_ALLOW_ORIGIN,
-        };
+    /// Set CORS/Access control related headers (required by explorers/web apps)
+    fn set_access_control_headers(response: &mut Response<JsonBody>) {
+        static HV: fn(&'static str) -> HeaderValue =
+            |v| HeaderValue::from_static(v);
 
-        let response = Response::builder()
-            .header(ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-            .header(ACCESS_CONTROL_ALLOW_METHODS, "POST, OPTIONS")
-            .header(ACCESS_CONTROL_ALLOW_HEADERS, "*")
-            .body(JsonBody::from(""))
-            // SAFETY: This is safe with static, valid headers
-            .expect("Building CORS response failed");
+        let headers = response.headers_mut();
 
-        Ok(response)
+        headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, HV("*"));
+        headers.insert(ACCESS_CONTROL_ALLOW_METHODS, HV("POST, OPTIONS, GET"));
+        headers.insert(ACCESS_CONTROL_ALLOW_HEADERS, HV("*"));
+        headers.insert(ACCESS_CONTROL_MAX_AGE, HV("86400"));
     }
 }

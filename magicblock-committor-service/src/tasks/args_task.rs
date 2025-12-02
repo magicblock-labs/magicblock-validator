@@ -1,4 +1,5 @@
 use dlp::args::{CallHandlerArgs, CommitStateArgs};
+use magicblock_metrics::metrics::LabelValue;
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 
@@ -163,5 +164,16 @@ impl BaseTask for ArgsTask {
         };
 
         commit_task.commit_id = commit_id;
+    }
+}
+
+impl LabelValue for ArgsTask {
+    fn value(&self) -> &str {
+        match self.task_type {
+            ArgsTaskType::Commit(_) => "args_commit",
+            ArgsTaskType::BaseAction(_) => "args_action",
+            ArgsTaskType::Finalize(_) => "args_finalize",
+            ArgsTaskType::Undelegate(_) => "args_undelegate",
+        }
     }
 }

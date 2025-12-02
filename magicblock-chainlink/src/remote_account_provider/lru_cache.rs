@@ -2,8 +2,11 @@ use std::{collections::HashSet, num::NonZeroUsize, sync::Mutex};
 
 use log::*;
 use lru::LruCache;
+use magicblock_metrics::metrics::inc_evicted_accounts_count;
 use solana_pubkey::Pubkey;
 use solana_sdk::sysvar;
+
+use crate::submux::SubscribedAccountsTracker;
 
 /// A simple wrapper around [lru::LruCache].
 /// When an account is evicted from the cache due to a new one being added,
@@ -79,6 +82,7 @@ impl AccountsLruCache {
             .map(|(evicted_pubkey, _)| evicted_pubkey);
 
         if let Some(evicted_pubkey) = evicted {
+            inc_evicted_accounts_count();
             debug_assert_ne!(
                 evicted_pubkey, pubkey,
                 "Should not evict the same pubkey that we added"
@@ -112,6 +116,44 @@ impl AccountsLruCache {
         } else {
             false
         }
+    }
+
+    pub fn len(&self) -> usize {
+        let subs = self
+            .subscribed_accounts
+            .lock()
+            .expect("subscribed_accounts lock poisoned");
+        subs.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn never_evicted_accounts(&self) -> Vec<Pubkey> {
+        self.accounts_to_never_evict.iter().cloned().collect()
+    }
+
+    pub fn can_evict(&self, pubkey: &Pubkey) -> bool {
+        !self.accounts_to_never_evict.contains(pubkey)
+    }
+
+    pub fn pubkeys(&self) -> Vec<Pubkey> {
+        let subs = self
+            .subscribed_accounts
+            .lock()
+            .expect("subscribed_accounts lock poisoned");
+        subs.iter().map(|(k, _)| *k).collect()
+    }
+}
+
+impl SubscribedAccountsTracker for AccountsLruCache {
+    fn subscribed_accounts(&self) -> HashSet<Pubkey> {
+        let subs = self
+            .subscribed_accounts
+            .lock()
+            .expect("subscribed_accounts lock poisoned");
+        subs.iter().map(|(k, _)| *k).collect()
     }
 }
 
@@ -236,5 +278,15 @@ mod tests {
 
             assert_eq!(evicted, Some(expected_evicted));
         }
+    }
+
+    #[test]
+    fn test_never_evicted_accounts() {
+        let capacity = NonZeroUsize::new(3).unwrap();
+        let cache = AccountsLruCache::new(capacity);
+
+        let never_evicted = cache.never_evicted_accounts();
+        // Should contain at least the clock sysvar
+        assert!(never_evicted.contains(&sysvar::clock::id()));
     }
 }

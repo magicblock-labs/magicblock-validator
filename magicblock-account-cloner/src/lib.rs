@@ -9,7 +9,7 @@ use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     cloner::{
         errors::{ClonerError, ClonerResult},
-        Cloner,
+        AccountCloneRequest, Cloner,
     },
     remote_account_provider::program_account::{
         DeployableV4Program, LoadedProgram, RemoteProgramLoader,
@@ -19,20 +19,27 @@ use magicblock_committor_service::{
     error::{CommittorServiceError, CommittorServiceResult},
     BaseIntentCommittor, CommittorService,
 };
-use magicblock_config::{AccountsCloneConfig, PrepareLookupTables};
+use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_ledger::LatestBlock;
 use magicblock_magic_program_api::instruction::AccountModification;
 use magicblock_program::{
-    instruction_utils::InstructionUtils, validator::validator_authority,
+    args::ScheduleTaskArgs,
+    instruction::MagicBlockInstruction,
+    instruction_utils::InstructionUtils,
+    validator::{validator_authority, validator_authority_id},
+    MAGIC_CONTEXT_PUBKEY,
 };
+use solana_instruction::Instruction;
 use solana_sdk::{
-    account::{AccountSharedData, ReadableAccount},
+    account::ReadableAccount,
     hash::Hash,
+    instruction::AccountMeta,
     loader_v4,
     pubkey::Pubkey,
     rent::Rent,
     signature::{Signature, Signer},
+    signer::SignerError,
     transaction::Transaction,
 };
 use tokio::sync::oneshot;
@@ -47,7 +54,7 @@ pub use account_cloner::*;
 
 pub struct ChainlinkCloner {
     changeset_committor: Option<Arc<CommittorService>>,
-    clone_config: AccountsCloneConfig,
+    config: ChainLinkConfig,
     tx_scheduler: TransactionSchedulerHandle,
     accounts_db: Arc<AccountsDb>,
     block: LatestBlock,
@@ -56,14 +63,14 @@ pub struct ChainlinkCloner {
 impl ChainlinkCloner {
     pub fn new(
         changeset_committor: Option<Arc<CommittorService>>,
-        clone_config: AccountsCloneConfig,
+        config: ChainLinkConfig,
         tx_scheduler: TransactionSchedulerHandle,
         accounts_db: Arc<AccountsDb>,
         block: LatestBlock,
     ) -> Self {
         Self {
             changeset_committor,
-            clone_config,
+            config,
             tx_scheduler,
             accounts_db,
             block,
@@ -81,23 +88,63 @@ impl ChainlinkCloner {
 
     fn transaction_to_clone_regular_account(
         &self,
-        pubkey: &Pubkey,
-        account: &AccountSharedData,
+        request: &AccountCloneRequest,
         recent_blockhash: Hash,
-    ) -> Transaction {
+    ) -> Result<Transaction, SignerError> {
         let account_modification = AccountModification {
-            pubkey: *pubkey,
-            lamports: Some(account.lamports()),
-            owner: Some(*account.owner()),
-            rent_epoch: Some(account.rent_epoch()),
-            data: Some(account.data().to_owned()),
-            executable: Some(account.executable()),
-            delegated: Some(account.delegated()),
+            pubkey: request.pubkey,
+            lamports: Some(request.account.lamports()),
+            owner: Some(*request.account.owner()),
+            rent_epoch: Some(request.account.rent_epoch()),
+            data: Some(request.account.data().to_owned()),
+            executable: Some(request.account.executable()),
+            delegated: Some(request.account.delegated()),
         };
-        InstructionUtils::modify_accounts(
-            vec![account_modification],
-            recent_blockhash,
-        )
+
+        let modify_ix = InstructionUtils::modify_accounts_instruction(vec![
+            account_modification,
+        ]);
+        // Defined positive commit frequency means commits should be scheduled
+        let ixs = match request.commit_frequency_ms {
+            Some(commit_frequency_ms) if commit_frequency_ms > 0 => {
+                // The task ID is randomly generated to avoid conflicts with other tasks
+                // TODO: remove once the program handles generating tasks instead of the client
+                // https://github.com/magicblock-labs/magicblock-validator/issues/625
+                let task_id = rand::random();
+                let schedule_commit_ix = Instruction::new_with_bincode(
+                    magicblock_program::ID,
+                    &MagicBlockInstruction::ScheduleCommit,
+                    vec![
+                        AccountMeta::new(validator_authority_id(), true),
+                        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+                        AccountMeta::new_readonly(request.pubkey, false),
+                    ],
+                );
+                let crank_commits_ix =
+                    InstructionUtils::schedule_task_instruction(
+                        &validator_authority_id(),
+                        ScheduleTaskArgs {
+                            task_id,
+                            execution_interval_millis: commit_frequency_ms
+                                as i64,
+                            iterations: i64::MAX,
+                            instructions: vec![schedule_commit_ix.clone()],
+                        },
+                        &[
+                            request.pubkey,
+                            MAGIC_CONTEXT_PUBKEY,
+                            validator_authority_id(),
+                        ],
+                    );
+                vec![modify_ix, crank_commits_ix]
+            }
+            _ => vec![modify_ix],
+        };
+
+        let mut tx =
+            Transaction::new_with_payer(&ixs, Some(&validator_authority_id()));
+        tx.try_sign(&[&validator_authority()], recent_blockhash)?;
+        Ok(tx)
     }
 
     /// Creates a transaction to clone the given program into the validator.
@@ -173,12 +220,15 @@ impl ChainlinkCloner {
                 // Create and initialize the program account in retracted state
                 // and then deploy it and finally set the authority to match the
                 // one on chain
+                let slot = self.accounts_db.slot();
                 let DeployableV4Program {
                     pre_deploy_loader_state,
                     deploy_instruction,
                     post_deploy_loader_state,
-                } = program
-                    .try_into_deploy_data_and_ixs_v4(validator_kp.pubkey())?;
+                } = program.try_into_deploy_data_and_ixs_v4(
+                    slot,
+                    validator_kp.pubkey(),
+                )?;
 
                 let lamports = Rent::default()
                     .minimum_balance(pre_deploy_loader_state.len());
@@ -241,9 +291,7 @@ impl ChainlinkCloner {
         // Allow the committer service to reserve pubkeys in lookup tables
         // that could be needed when we commit this account
         if let Some(committor) = self.changeset_committor.as_ref() {
-            if self.clone_config.prepare_lookup_tables
-                == PrepareLookupTables::Always
-            {
+            if self.config.prepare_lookup_tables {
                 let committor = committor.clone();
                 tokio::spawn(async move {
                     match Self::map_committor_request_result(
@@ -316,20 +364,22 @@ impl ChainlinkCloner {
 impl Cloner for ChainlinkCloner {
     async fn clone_account(
         &self,
-        pubkey: Pubkey,
-        account: AccountSharedData,
+        request: AccountCloneRequest,
     ) -> ClonerResult<Signature> {
         let recent_blockhash = self.block.load().blockhash;
-        let tx = self.transaction_to_clone_regular_account(
-            &pubkey,
-            &account,
-            recent_blockhash,
-        );
-        if account.delegated() {
-            self.maybe_prepare_lookup_tables(pubkey, *account.owner());
+        let tx = self
+            .transaction_to_clone_regular_account(&request, recent_blockhash)?;
+        if request.account.delegated() {
+            self.maybe_prepare_lookup_tables(
+                request.pubkey,
+                *request.account.owner(),
+            );
         }
         self.send_transaction(tx).await.map_err(|err| {
-            ClonerError::FailedToCloneRegularAccount(pubkey, Box::new(err))
+            ClonerError::FailedToCloneRegularAccount(
+                request.pubkey,
+                Box::new(err),
+            )
         })
     }
 

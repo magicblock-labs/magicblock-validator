@@ -9,9 +9,6 @@ pub enum ApiError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("Config error: {0}")]
-    ConfigError(#[from] magicblock_config::errors::ConfigError),
-
     #[error("Aperture service error: {0}")]
     Aperture(#[from] magicblock_aperture::error::ApertureError),
 

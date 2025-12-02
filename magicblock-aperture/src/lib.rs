@@ -1,5 +1,7 @@
-use error::{ApertureError, RpcError};
-use magicblock_config::ApertureConfig;
+use error::ApertureError;
+use error::RpcError;
+use log::*;
+use magicblock_config::config::aperture::ApertureConfig;
 use magicblock_core::link::DispatchEndpoints;
 use processor::EventProcessor;
 use server::{http::HttpServer, websocket::WebsocketServer};
@@ -18,13 +20,7 @@ pub async fn initialize_aperture(
 ) -> ApertureResult<JsonRpcServer> {
     // Start up an event processor tasks, which will handle forwarding of any validator
     // originating event to client subscribers, or use them to update server's caches
-    EventProcessor::start(
-        &state,
-        dispatch,
-        config.event_processors,
-        cancel.clone(),
-        &config.geyser_plugins,
-    )?;
+    EventProcessor::start(config, &state, dispatch, cancel.clone())?;
     let server = JsonRpcServer::new(config, state, dispatch, cancel).await?;
     Ok(server)
 }
@@ -37,16 +33,16 @@ pub struct JsonRpcServer {
 
 impl JsonRpcServer {
     /// Create a new instance of JSON-RPC server, hooked into validator via dispatch channels
-    pub async fn new(
+    async fn new(
         config: &ApertureConfig,
         state: SharedState,
         dispatch: &DispatchEndpoints,
         cancel: CancellationToken,
     ) -> ApertureResult<Self> {
         // try to bind to socket before spawning anything (handy in tests)
-        let mut addr = config.socket_addr();
+        let mut addr = config.listen.0;
         let http = TcpListener::bind(addr).await.map_err(RpcError::internal)?;
-        addr.set_port(config.port + 1);
+        addr.set_port(addr.port() + 1);
         let ws = TcpListener::bind(addr).await.map_err(RpcError::internal)?;
 
         // initialize HTTP and Websocket servers
@@ -60,10 +56,12 @@ impl JsonRpcServer {
 
     /// Run JSON-RPC server indefinitely, until cancel token is used to signal shut down
     pub async fn run(self) {
+        info!("Running JSON-RPC server");
         tokio::join! {
             self.http.run(),
             self.websocket.run()
         };
+        info!("JSON-RPC server has shutdown");
     }
 }
 

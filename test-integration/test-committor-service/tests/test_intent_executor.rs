@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    mem,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -16,7 +17,8 @@ use magicblock_committor_service::{
     intent_executor::{
         error::TransactionStrategyExecutionError,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
-        ExecutionOutput, IntentExecutor, IntentExecutorImpl,
+        ExecutionOutput, IntentExecutionResult, IntentExecutor,
+        IntentExecutorImpl,
     },
     persist::IntentPersisterImpl,
     tasks::{
@@ -35,7 +37,8 @@ use magicblock_program::{
 };
 use magicblock_table_mania::TableMania;
 use program_flexi_counter::{
-    instruction::FlexiCounterInstruction, state::FlexiCounter,
+    instruction::FlexiCounterInstruction,
+    state::{FlexiCounter, FAIL_UNDELEGATION_LABEL},
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -117,7 +120,7 @@ async fn test_commit_id_error_parsing() {
         task_info_fetcher,
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
-    let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
+    let (counter_auth, account) = setup_counter(COUNTER_SIZE, None).await;
     let intent = create_intent(
         vec![CommittedAccount {
             pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
@@ -158,6 +161,55 @@ async fn test_commit_id_error_parsing() {
 }
 
 #[tokio::test]
+async fn test_undelegation_error_parsing() {
+    const COUNTER_SIZE: u64 = 70;
+    const EXPECTED_ERR_MSG: &str = "Invalid undelegation: Error processing Instruction 4: custom program error: 0x7a.";
+
+    let TestEnv {
+        fixture,
+        intent_executor,
+        task_info_fetcher,
+        pre_test_tablemania_state: _,
+    } = TestEnv::setup().await;
+
+    // Create counter that will force undelegation to fail
+    let (counter_auth, account) =
+        setup_counter(COUNTER_SIZE, Some(FAIL_UNDELEGATION_LABEL.to_string()))
+            .await;
+    let intent = create_intent(
+        vec![CommittedAccount {
+            pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
+            account,
+        }],
+        true,
+    );
+
+    let mut transaction_strategy = single_flow_transaction_strategy(
+        &fixture.authority.pubkey(),
+        &task_info_fetcher,
+        &intent,
+    )
+    .await;
+    let execution_result = intent_executor
+        .prepare_and_execute_strategy(
+            &mut transaction_strategy,
+            &None::<IntentPersisterImpl>,
+        )
+        .await;
+    assert!(execution_result.is_ok(), "Preparation is expected to pass!");
+
+    // Verify that we got UndelegationError
+    let execution_result = execution_result.unwrap();
+    assert!(execution_result.is_err());
+    let err = execution_result.unwrap_err();
+    assert!(matches!(
+        err,
+        TransactionStrategyExecutionError::UndelegationError(_, _)
+    ));
+    assert!(err.to_string().contains(EXPECTED_ERR_MSG));
+}
+
+#[tokio::test]
 async fn test_action_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
     const EXPECTED_ERR_MSG: &str = "User supplied actions are ill-formed: Error processing Instruction 5: Program arithmetic overflowed";
@@ -169,7 +221,7 @@ async fn test_action_error_parsing() {
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
 
-    let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
+    let (counter_auth, account) = setup_counter(COUNTER_SIZE, None).await;
     setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
         .await;
 
@@ -230,7 +282,7 @@ async fn test_cpi_limits_error_parsing() {
     } = TestEnv::setup().await;
 
     let counters = (0..COUNTER_NUM).map(|_| async {
-        let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
+        let (counter_auth, account) = setup_counter(COUNTER_SIZE, None).await;
         setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
             .await;
 
@@ -280,14 +332,15 @@ async fn test_commit_id_error_recovery() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        mut intent_executor,
         task_info_fetcher,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
     let counter_auth = Keypair::new();
     let (pubkey, mut account) =
-        init_and_delegate_account_on_chain(&counter_auth, COUNTER_SIZE).await;
+        init_and_delegate_account_on_chain(&counter_auth, COUNTER_SIZE, None)
+            .await;
 
     account.owner = program_flexi_counter::id();
     let committed_account = CommittedAccount { pubkey, account };
@@ -304,9 +357,22 @@ async fn test_commit_id_error_recovery() {
     let res = intent_executor
         .execute(intent, None::<IntentPersisterImpl>)
         .await;
+    let IntentExecutionResult {
+        inner: res,
+        patched_errors,
+    } = res;
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
 
+    assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
+    let commit_id_error = patched_errors.into_iter().next().unwrap();
+    assert!(matches!(
+        commit_id_error,
+        TransactionStrategyExecutionError::CommitIDError(_, _)
+    ));
+
+    // Cleanup succeeds
+    assert!(intent_executor.cleanup().await.is_ok());
     let commit_ids_by_pk: HashMap<_, _> = [&committed_account]
         .iter()
         .map(|el| {
@@ -316,10 +382,66 @@ async fn test_commit_id_error_recovery() {
             )
         })
         .collect();
+
     verify(
         &fixture.table_mania,
         fixture.rpc_client.get_inner(),
         &commit_ids_by_pk,
+        &pre_test_tablemania_state,
+        &[committed_account],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_undelegation_error_recovery() {
+    const COUNTER_SIZE: u64 = 70;
+
+    let TestEnv {
+        fixture,
+        mut intent_executor,
+        task_info_fetcher: _,
+        pre_test_tablemania_state,
+    } = TestEnv::setup().await;
+
+    let counter_auth = Keypair::new();
+    let (pubkey, mut account) = init_and_delegate_account_on_chain(
+        &counter_auth,
+        COUNTER_SIZE,
+        Some(FAIL_UNDELEGATION_LABEL.to_string()),
+    )
+    .await;
+
+    account.owner = program_flexi_counter::id();
+    let committed_account = CommittedAccount { pubkey, account };
+    let intent = create_intent(vec![committed_account.clone()], true);
+
+    // Execute intent
+    let res = intent_executor
+        .execute(intent, None::<IntentPersisterImpl>)
+        .await;
+    let IntentExecutionResult {
+        inner: res,
+        patched_errors,
+    } = res;
+
+    assert!(res.is_ok());
+    assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+    assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
+
+    // Assert errors patched
+    let undelegation_error = patched_errors.into_iter().next().unwrap();
+    assert!(matches!(
+        undelegation_error,
+        TransactionStrategyExecutionError::UndelegationError(_, _)
+    ));
+
+    // Cleanup succeeds
+    assert!(intent_executor.cleanup().await.is_ok());
+    verify(
+        &fixture.table_mania,
+        fixture.rpc_client.get_inner(),
+        &HashMap::new(),
         &pre_test_tablemania_state,
         &[committed_account],
     )
@@ -332,14 +454,14 @@ async fn test_action_error_recovery() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        mut intent_executor,
         task_info_fetcher: _,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
     let payer = setup_payer(fixture.rpc_client.get_inner()).await;
     let (counter_pubkey, mut account) =
-        init_and_delegate_account_on_chain(&payer, COUNTER_SIZE).await;
+        init_and_delegate_account_on_chain(&payer, COUNTER_SIZE, None).await;
 
     account.owner = program_flexi_counter::id();
     let committed_account = CommittedAccount {
@@ -361,14 +483,29 @@ async fn test_action_error_recovery() {
     let res = intent_executor
         .execute(scheduled_intent, None::<IntentPersisterImpl>)
         .await;
+    let IntentExecutionResult {
+        inner: res,
+        patched_errors,
+    } = res;
+
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+    assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
+
+    // Assert errors patched
+    let action_error = patched_errors.into_iter().next().unwrap();
+    assert!(matches!(
+        action_error,
+        TransactionStrategyExecutionError::ActionsError(_, _)
+    ));
 
     verify_committed_accounts_state(
         fixture.rpc_client.get_inner(),
         &[committed_account],
     )
     .await;
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
     verify_table_mania_released(
         &fixture.table_mania,
         &pre_test_tablemania_state,
@@ -382,14 +519,14 @@ async fn test_commit_id_and_action_errors_recovery() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        mut intent_executor,
         task_info_fetcher,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
     let payer = setup_payer(fixture.rpc_client.get_inner()).await;
     let (counter_pubkey, mut account) =
-        init_and_delegate_account_on_chain(&payer, COUNTER_SIZE).await;
+        init_and_delegate_account_on_chain(&payer, COUNTER_SIZE, None).await;
 
     account.owner = program_flexi_counter::id();
     let committed_account = CommittedAccount {
@@ -415,17 +552,42 @@ async fn test_commit_id_and_action_errors_recovery() {
         });
 
     let scheduled_intent = create_scheduled_intent(base_intent);
+    // Execute intent
     let res = intent_executor
         .execute(scheduled_intent, None::<IntentPersisterImpl>)
         .await;
+    let IntentExecutionResult {
+        inner: res,
+        patched_errors,
+    } = res;
+
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+    assert_eq!(patched_errors.len(), 2, "Only 2 patches expected");
+
+    // Assert errors patched
+    let mut iter = patched_errors.into_iter();
+    let commit_id_error = iter.next().unwrap();
+    let actions_error = iter.next().unwrap();
+    assert!(matches!(
+        commit_id_error,
+        TransactionStrategyExecutionError::CommitIDError(_, _)
+    ));
+    assert!(matches!(
+        actions_error,
+        TransactionStrategyExecutionError::ActionsError(_, _)
+    ));
+
+    // Cleanup succeeds
+    assert!(intent_executor.cleanup().await.is_ok());
 
     verify_committed_accounts_state(
         fixture.rpc_client.get_inner(),
         &[committed_account],
     )
     .await;
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
     verify_table_mania_released(
         &fixture.table_mania,
         &pre_test_tablemania_state,
@@ -440,13 +602,13 @@ async fn test_cpi_limits_error_recovery() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        mut intent_executor,
         task_info_fetcher,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
     let counters = (0..COUNTER_NUM).map(|_| async {
-        let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
+        let (counter_auth, account) = setup_counter(COUNTER_SIZE, None).await;
         setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
             .await;
 
@@ -468,7 +630,7 @@ async fn test_cpi_limits_error_recovery() {
             account.data = to_vec(&data).unwrap();
             CommittedAccount {
                 pubkey: FlexiCounter::pda(&counter.pubkey()).0,
-                account: account.clone(),
+                account,
             }
         })
         .collect();
@@ -498,6 +660,8 @@ async fn test_cpi_limits_error_recovery() {
         }
     ));
 
+    // Cleanup after intent
+    assert!(intent_executor.cleanup().await.is_ok());
     let commit_ids_by_pk: HashMap<_, _> = committed_accounts
         .iter()
         .map(|el| {
@@ -507,6 +671,7 @@ async fn test_cpi_limits_error_recovery() {
             )
         })
         .collect();
+
     verify(
         &fixture.table_mania,
         fixture.rpc_client.get_inner(),
@@ -525,7 +690,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        mut intent_executor,
         task_info_fetcher,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
@@ -533,7 +698,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
     // We also craft unique on-chain data so we can verify post-commit state exactly.
     let counters = (0..COUNTER_NUM).map(|_| async {
-        let (counter_auth, account) = setup_counter(COUNTER_SIZE).await;
+        let (counter_auth, account) = setup_counter(COUNTER_SIZE, None).await;
         setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
             .await;
         (counter_auth, account)
@@ -596,12 +761,13 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         )
         .await;
 
-    println!("{:?}", res);
+    let patched_errors = mem::take(&mut intent_executor.patched_errors);
     // We expect recovery to succeed by splitting into two stages (commit, then finalize)
     assert!(
         res.is_ok(),
         "Expected recovery from CommitID, Actions, and CpiLimit errors"
     );
+    assert_eq!(patched_errors.len(), 3, "Only 3 patches expected");
     assert!(matches!(
         res.unwrap(),
         ExecutionOutput::TwoStage {
@@ -610,6 +776,26 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         }
     ));
 
+    let mut iter = patched_errors.into_iter();
+    let commit_id_error = iter.next().unwrap();
+    let cpi_limit_err = iter.next().unwrap();
+    let action_error = iter.next().unwrap();
+
+    assert!(matches!(
+        commit_id_error,
+        TransactionStrategyExecutionError::CommitIDError(_, _)
+    ));
+    assert!(matches!(
+        cpi_limit_err,
+        TransactionStrategyExecutionError::CpiLimitError(_, _)
+    ));
+    assert!(matches!(
+        action_error,
+        TransactionStrategyExecutionError::ActionsError(_, _)
+    ));
+
+    // Cleanup after intent
+    assert!(intent_executor.cleanup().await.is_ok());
     let commit_ids_by_pk: HashMap<_, _> = committed_accounts
         .iter()
         .map(|el| {
@@ -728,10 +914,14 @@ async fn setup_payer_with_keypair(
     );
 }
 
-async fn setup_counter(counter_bytes: u64) -> (Keypair, Account) {
+async fn setup_counter(
+    counter_bytes: u64,
+    label: Option<String>,
+) -> (Keypair, Account) {
     let counter_auth = Keypair::new();
     let (_, mut account) =
-        init_and_delegate_account_on_chain(&counter_auth, counter_bytes).await;
+        init_and_delegate_account_on_chain(&counter_auth, counter_bytes, label)
+            .await;
 
     account.owner = program_flexi_counter::id();
     (counter_auth, account)

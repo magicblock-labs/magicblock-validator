@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use blocks::BlocksCache;
+use blocks::{BlocksCache, LastCachedBlock};
 use cache::ExpiringCache;
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
@@ -61,6 +61,8 @@ pub struct NodeContext {
     pub base_fee: u64,
     /// Runtime features activated for this node (used to compute fees)
     pub featureset: Arc<FeatureSet>,
+    /// Block production time in milliseconds
+    pub blocktime: u64,
 }
 
 impl SharedState {
@@ -78,15 +80,18 @@ impl SharedState {
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
         chainlink: Arc<ChainlinkImpl>,
-        blocktime: u64,
     ) -> Self {
         const TRANSACTIONS_CACHE_TTL: Duration = Duration::from_secs(75);
-        let latest = ledger.latest_block().clone();
+        let block = ledger.latest_block().load();
+        let latest = LastCachedBlock {
+            blockhash: block.blockhash,
+            slot: block.slot,
+        };
         Self {
-            context,
             accountsdb,
             transactions: ExpiringCache::new(TRANSACTIONS_CACHE_TTL).into(),
-            blocks: BlocksCache::new(blocktime, latest).into(),
+            blocks: BlocksCache::new(context.blocktime, latest).into(),
+            context,
             ledger,
             chainlink,
             subscriptions: Default::default(),

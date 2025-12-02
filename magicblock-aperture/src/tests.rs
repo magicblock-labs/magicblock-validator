@@ -27,6 +27,8 @@ use crate::{
     EventProcessor,
 };
 
+const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
+
 /// A test helper to create a unique WebSocket connection channel pair.
 fn ws_channel() -> (WsConnectionChannel, Receiver<Bytes>) {
     static CHAN_ID: AtomicU32 = AtomicU32::new(0);
@@ -42,11 +44,14 @@ fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
         None,
         Pubkey::new_unique(),
         Pubkey::new_unique(),
+        0,
     )
     .expect("Failed to create Chainlink")
 }
 
 mod event_processor {
+    use magicblock_config::config::ApertureConfig;
+
     use super::*;
     use crate::state::NodeContext;
 
@@ -58,6 +63,7 @@ mod event_processor {
         env.advance_slot();
         let node_context = NodeContext {
             identity: env.payer.pubkey(),
+            blocktime: 50,
             ..Default::default()
         };
         let state = SharedState::new(
@@ -65,10 +71,10 @@ mod event_processor {
             env.accountsdb.clone(),
             env.ledger.clone(),
             Arc::new(chainlink(&env.accountsdb)),
-            50,
         );
         let cancel = CancellationToken::new();
-        EventProcessor::start(&state, &env.dispatch, 1, cancel, &[])
+        let config = ApertureConfig::default();
+        EventProcessor::start(&config, &state, &env.dispatch, cancel)
             .expect("failed to start an event processor");
         env.advance_slot();
         (state, env)
@@ -100,7 +106,9 @@ mod event_processor {
     #[tokio::test]
     async fn test_account_update() {
         let (state, env) = setup();
-        let acc = env.create_account_with_config(1, 1, guinea::ID).pubkey();
+        let acc = env
+            .create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID)
+            .pubkey();
         let (tx, mut rx) = ws_channel();
 
         // Subscribe to both the specific account and the program that owns it.
@@ -140,7 +148,9 @@ mod event_processor {
     #[tokio::test]
     async fn test_transaction_update() {
         let (state, env) = setup();
-        let acc = env.create_account_with_config(1, 42, guinea::ID).pubkey();
+        let acc = env
+            .create_account_with_config(LAMPORTS_PER_SOL, 42, guinea::ID)
+            .pubkey();
         let (tx, mut rx) = ws_channel();
 
         let ix = Instruction::new_with_bincode(
@@ -201,7 +211,9 @@ mod event_processor {
         let (state, env) = setup();
 
         // Test multiple subscriptions to the same ACCOUNT.
-        let acc1 = env.create_account_with_config(1, 1, guinea::ID).pubkey();
+        let acc1 = env
+            .create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID)
+            .pubkey();
         let (acc_tx1, mut acc_rx1) = ws_channel();
         let (acc_tx2, mut acc_rx2) = ws_channel();
 
@@ -227,7 +239,9 @@ mod event_processor {
         assert_receives_update(&mut acc_rx2, "second account subscriber").await;
 
         // Test multiple subscriptions to the same PROGRAM.
-        let acc2 = env.create_account_with_config(1, 1, guinea::ID).pubkey();
+        let acc2 = env
+            .create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID)
+            .pubkey();
         let (prog_tx1, mut prog_rx1) = ws_channel();
         let (prog_tx2, mut prog_rx2) = ws_channel();
         let prog_encoder = ProgramAccountEncoder {

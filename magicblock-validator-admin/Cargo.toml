@@ -12,9 +12,7 @@ anyhow = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
-# magicblock-accounts = { workspace = true }
 
-magicblock-config = { workspace = true }
 magicblock-delegation-program = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }

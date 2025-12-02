@@ -21,6 +21,7 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 
 # containers
+arc-swap = { workspace = true }
 scc = { workspace = true }
 
 # sync
@@ -71,5 +72,6 @@ thiserror = { workspace = true }
 [dev-dependencies]
 rand = "0.9"
 test-kit = { workspace = true }
+reqwest = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-pubsub-client = { workspace = true }

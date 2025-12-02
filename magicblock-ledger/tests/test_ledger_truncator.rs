@@ -66,7 +66,7 @@ async fn test_truncator_not_purged_size() {
     ledger_truncator.start();
     tokio::time::sleep(Duration::from_millis(10)).await;
     ledger_truncator.stop();
-    assert!(ledger_truncator.join().await.is_ok());
+    assert!(ledger_truncator.join().is_ok());
 
     // Not truncated due to final_slot 0
     verify_transactions_state(&ledger, 0, &signatures, true);
@@ -93,7 +93,7 @@ async fn test_truncator_non_empty_ledger() {
     tokio::time::sleep(TEST_TRUNCATION_TIME_INTERVAL).await;
 
     ledger_truncator.stop();
-    assert!(ledger_truncator.join().await.is_ok());
+    assert!(ledger_truncator.join().is_ok());
 
     let cleanup_slot = ledger.get_lowest_cleanup_slot();
     assert_ne!(ledger.get_lowest_cleanup_slot(), 0);
@@ -153,7 +153,7 @@ async fn test_truncator_with_tx_spammer() {
 
     // Stop truncator assuming that complete after sleep
     ledger_truncator.stop();
-    assert!(ledger_truncator.join().await.is_ok());
+    assert!(ledger_truncator.join().is_ok());
 
     assert_eq!(
         ledger.get_lowest_cleanup_slot(),
@@ -192,5 +192,5 @@ async fn test_with_1gb_db() {
     tokio::time::sleep(Duration::from_secs(1)).await;
     ledger_truncator.stop();
 
-    ledger_truncator.join().await.unwrap();
+    ledger_truncator.join().unwrap();
 }

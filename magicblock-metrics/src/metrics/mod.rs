@@ -5,7 +5,10 @@ use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
     IntGauge, IntGaugeVec, Opts, Registry,
 };
-pub use types::{AccountClone, AccountCommit, LabelValue, Outcome};
+pub use types::{
+    AccountClone, AccountCommit, AccountFetchOrigin, LabelValue, Outcome,
+    ProgramFetchResult,
+};
 
 mod types;
 
@@ -38,7 +41,7 @@ lazy_static::lazy_static! {
 
 
     static ref CACHED_CLONE_OUTPUTS_COUNT: IntGauge = IntGauge::new(
-        "magicblock_account_cloner_cached_outputs",
+        "magicblock_account_cloner_cached_outputs_count",
         "Number of cloned accounts in the RemoteAccountClonerWorker"
     )
     .unwrap();
@@ -47,7 +50,7 @@ lazy_static::lazy_static! {
     // Ledger
     // -----------------
     static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "ledger_size", "Ledger size in Bytes",
+        "ledger_size_gauge", "Ledger size in Bytes",
     ).unwrap();
     static ref LEDGER_BLOCK_TIMES_GAUGE: IntGauge = IntGauge::new(
         "ledger_blocktimes_gauge", "Ledger Blocktimes Gauge",
@@ -101,29 +104,24 @@ lazy_static::lazy_static! {
     // Accounts
     // -----------------
     static ref ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "accounts_size", "Size of persisted accounts (in bytes) currently on disk",
+        "accounts_size_gauge", "Size of persisted accounts (in bytes) currently on disk",
     ).unwrap();
 
     static ref ACCOUNTS_COUNT_GAUGE: IntGauge = IntGauge::new(
-        "accounts_count", "Number of accounts currently in the database",
+        "accounts_count_gauge", "Number of accounts currently in the database",
     ).unwrap();
 
 
     static ref PENDING_ACCOUNT_CLONES_GAUGE: IntGauge = IntGauge::new(
-        "pending_account_clones", "Total number of account clone requests still in memory",
+        "pending_account_clones_gauge", "Total number of account clone requests still in memory",
     ).unwrap();
 
     static ref MONITORED_ACCOUNTS_GAUGE: IntGauge = IntGauge::new(
-        "monitored_accounts", "number of undelegated accounts, being monitored via websocket",
+        "monitored_accounts_gauge", "number of undelegated accounts, being monitored via websocket",
     ).unwrap();
 
-    static ref SUBSCRIPTIONS_COUNT_GAUGE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("subscriptions_count", "number of active account subscriptions"),
-        &["shard"],
-    ).unwrap();
-
-    static ref EVICTED_ACCOUNTS_COUNT: IntGauge = IntGauge::new(
-        "evicted_accounts", "number of accounts forcefully removed from monitored list and database",
+    static ref EVICTED_ACCOUNTS_COUNT: IntCounter = IntCounter::new(
+        "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
 
     // -----------------
@@ -167,7 +165,7 @@ lazy_static::lazy_static! {
     ).unwrap();
 
     pub static ref TRANSACTION_SKIP_PREFLIGHT: IntCounter = IntCounter::new(
-        "transaction_skip_preflight", "Count of transactions that skipped the preflight check",
+        "transaction_skip_preflight_count", "Count of transactions that skipped the preflight check",
     ).unwrap();
 
     pub static ref RPC_REQUESTS_COUNT: IntCounterVec = IntCounterVec::new(
@@ -180,10 +178,79 @@ lazy_static::lazy_static! {
         &["name"],
     ).unwrap();
 
+    // Account fetch results from network (RPC)
+    pub static ref ACCOUNT_FETCHES_SUCCESS_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_success_count",
+            "Total number of successful network \
+             account fetches",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_FAILED_COUNT: IntCounter =
+        IntCounter::new(
+            "account_fetches_failed_count",
+            "Total number of failed network account fetches \
+             (RPC errors)",
+        )
+        .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new(
+            "account_fetches_found_count",
+            "Total number of network account fetches that found an account",
+        ),
+        &["origin"],
+    )
+    .unwrap();
+
+    pub static ref ACCOUNT_FETCHES_NOT_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new(
+            "account_fetches_not_found_count",
+            "Total number of network account fetches where account was not found",
+        ),
+        &["origin"],
+    )
+    .unwrap();
+
+    pub static ref PER_PROGRAM_ACCOUNT_FETCH_STATS: IntCounterVec = IntCounterVec::new(
+        Opts::new(
+            "per_program_account_fetch_stats",
+            "Per-program account fetch statistics (failed/found/not_found)",
+        ),
+        &["program", "result"],
+    )
+    .unwrap();
+
+    pub static ref UNDELEGATION_REQUESTED_COUNT: IntCounter =
+        IntCounter::new(
+            "undelegation_requested_count",
+            "Total number of undelegation requests received",
+        )
+        .unwrap();
+
+    pub static ref UNDELEGATION_COMPLETED_COUNT: IntCounter =
+        IntCounter::new(
+            "undelegation_completed_count",
+            "Total number of completed undelegations detected",
+        )
+        .unwrap();
+
+    pub static ref UNSTUCK_UNDELEGATION_COUNT: IntCounter =
+        IntCounter::new(
+            "unstuck_undelegation_count",
+            "Total number of undelegating accounts found to be already undelegated on chain",
+        )
+        .unwrap();
+
 
     // -----------------
     // Transaction Execution
     // -----------------
+    pub static ref TRANSACTION_COUNT: IntCounter = IntCounter::new(
+        "transaction_count", "Total number of executed transactions"
+    ).unwrap();
+
     pub static ref FAILED_TRANSACTIONS_COUNT: IntCounter = IntCounter::new(
         "failed_transactions_count", "Total number of failed transactions"
     ).unwrap();
@@ -192,6 +259,10 @@ lazy_static::lazy_static! {
     // -----------------
     // CommittorService
     // -----------------
+    static ref COMMITTOR_INTENTS_COUNT: IntCounter = IntCounter::new(
+        "committor_intents_count", "Total number of scheduled committor intents"
+    ).unwrap();
+
     static ref COMMITTOR_INTENTS_BACKLOG_COUNT: IntGauge = IntGauge::new(
         "committor_intent_backlog_count", "Number of intents in backlog",
     ).unwrap();
@@ -217,7 +288,46 @@ lazy_static::lazy_static! {
     ).unwrap();
 
     static ref COMMITTOR_INTENT_CU_USAGE: IntGauge = IntGauge::new(
-        "committor_intent_cu_usage", "Compute units used for Intent"
+        "committor_intent_cu_usage_gauge", "Compute units used for Intent"
+    ).unwrap();
+
+    // GetMultiplAccount investigation
+    static ref REMOTE_ACCOUNT_PROVIDER_A_COUNT: IntCounter = IntCounter::new(
+        "remote_account_provider_a_count", "Get mupltiple account count"
+    ).unwrap();
+
+    static ref TASK_INFO_FETCHER_A_COUNT: IntCounter = IntCounter::new(
+        "task_info_fetcher_a_count", "Get mupltiple account count"
+    ).unwrap();
+
+    static ref TABLE_MANIA_A_COUNT: IntCounter =  IntCounter::new(
+        "table_mania_a_count", "Get mupltiple account count"
+    ).unwrap();
+
+    static ref TABLE_MANIA_CLOSED_A_COUNT: IntCounter = IntCounter::new(
+        "table_mania_closed_a_count", "Get account counter"
+    ).unwrap();
+
+
+    static ref COMMITTOR_INTENT_TASK_PREPARATION_TIME: HistogramVec = HistogramVec::new(
+        HistogramOpts::new(
+            "committor_intent_task_preparation_time",
+            "Time in seconds spent on task preparation"
+        )
+        .buckets(
+            vec![0.1, 1.0, 2.0, 3.0, 5.0]
+        ),
+        &["task_type"],
+    ).unwrap();
+
+    static ref COMMITTOR_INTENT_ALT_PREPARATION_TIME: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "committor_intent_alt_preparation_time",
+            "Time in seconds spent on ALTs preparation"
+        )
+        .buckets(
+            vec![1.0, 3.0, 5.0, 10.0, 15.0, 17.0, 20.0]
+        ),
     ).unwrap();
 }
 
@@ -250,20 +360,34 @@ pub(crate) fn register() {
         register!(ACCOUNTS_COUNT_GAUGE);
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
-        register!(SUBSCRIPTIONS_COUNT_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
+        register!(COMMITTOR_INTENTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
         register!(COMMITTOR_EXECUTORS_BUSY_COUNT);
         register!(COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM);
         register!(COMMITTOR_INTENT_CU_USAGE);
+        register!(COMMITTOR_INTENT_TASK_PREPARATION_TIME);
+        register!(COMMITTOR_INTENT_ALT_PREPARATION_TIME);
         register!(ENSURE_ACCOUNTS_TIME);
         register!(RPC_REQUEST_HANDLING_TIME);
         register!(TRANSACTION_PROCESSING_TIME);
         register!(TRANSACTION_SKIP_PREFLIGHT);
         register!(RPC_REQUESTS_COUNT);
         register!(RPC_WS_SUBSCRIPTIONS_COUNT);
+        register!(ACCOUNT_FETCHES_SUCCESS_COUNT);
+        register!(ACCOUNT_FETCHES_FAILED_COUNT);
+        register!(ACCOUNT_FETCHES_FOUND_COUNT);
+        register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
+        register!(PER_PROGRAM_ACCOUNT_FETCH_STATS);
+        register!(UNDELEGATION_REQUESTED_COUNT);
+        register!(UNDELEGATION_COMPLETED_COUNT);
+        register!(UNSTUCK_UNDELEGATION_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
+        register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
+        register!(TASK_INFO_FETCHER_A_COUNT);
+        register!(TABLE_MANIA_A_COUNT);
+        register!(TABLE_MANIA_CLOSED_A_COUNT);
     });
 }
 
@@ -273,12 +397,6 @@ pub fn inc_slot() {
 
 pub fn set_cached_clone_outputs_count(count: usize) {
     CACHED_CLONE_OUTPUTS_COUNT.set(count as i64);
-}
-
-pub fn set_subscriptions_count(count: usize, shard: &str) {
-    SUBSCRIPTIONS_COUNT_GAUGE
-        .with_label_values(&[shard])
-        .set(count as i64);
 }
 
 pub fn set_ledger_size(size: u64) {
@@ -356,11 +474,23 @@ pub fn ensure_accounts_end(timer: HistogramTimer) {
     timer.stop_and_record();
 }
 
-pub fn adjust_monitored_accounts_count(count: usize) {
+/// Sets the absolute number of monitored accounts.
+///
+/// This metric reflects the current total count of accounts being monitored.
+/// Callers must pass the total number of monitored accounts, not a delta.
+pub fn set_monitored_accounts_count(count: usize) {
     MONITORED_ACCOUNTS_GAUGE.set(count as i64);
 }
 pub fn inc_evicted_accounts_count() {
     EVICTED_ACCOUNTS_COUNT.inc();
+}
+
+pub fn inc_committor_intents_count() {
+    COMMITTOR_INTENTS_COUNT.inc()
+}
+
+pub fn inc_committor_intents_count_by(by: u64) {
+    COMMITTOR_INTENTS_COUNT.inc_by(by)
 }
 
 pub fn set_committor_intents_backlog_count(value: i64) {
@@ -392,4 +522,79 @@ pub fn observe_committor_intent_execution_time_histogram(
 
 pub fn set_commmittor_intent_cu_usage(value: i64) {
     COMMITTOR_INTENT_CU_USAGE.set(value)
+}
+
+pub fn observe_committor_intent_task_preparation_time<
+    L: LabelValue + ?Sized,
+>(
+    task_type: &L,
+) -> HistogramTimer {
+    COMMITTOR_INTENT_TASK_PREPARATION_TIME
+        .with_label_values(&[task_type.value()])
+        .start_timer()
+}
+
+pub fn observe_committor_intent_alt_preparation_time() -> HistogramTimer {
+    COMMITTOR_INTENT_ALT_PREPARATION_TIME.start_timer()
+}
+
+pub fn inc_account_fetches_success(count: u64) {
+    ACCOUNT_FETCHES_SUCCESS_COUNT.inc_by(count);
+}
+
+pub fn inc_account_fetches_failed(count: u64) {
+    ACCOUNT_FETCHES_FAILED_COUNT.inc_by(count);
+}
+
+pub fn inc_account_fetches_found(fetch_origin: AccountFetchOrigin, count: u64) {
+    ACCOUNT_FETCHES_FOUND_COUNT
+        .with_label_values(&[fetch_origin.value()])
+        .inc_by(count);
+}
+
+pub fn inc_account_fetches_not_found(
+    fetch_origin: AccountFetchOrigin,
+    count: u64,
+) {
+    ACCOUNT_FETCHES_NOT_FOUND_COUNT
+        .with_label_values(&[fetch_origin.value()])
+        .inc_by(count);
+}
+
+pub fn inc_per_program_account_fetch_stats(
+    program_id: &str,
+    result: ProgramFetchResult,
+    count: u64,
+) {
+    PER_PROGRAM_ACCOUNT_FETCH_STATS
+        .with_label_values(&[program_id, result.value()])
+        .inc_by(count);
+}
+
+pub fn inc_undelegation_requested() {
+    UNDELEGATION_REQUESTED_COUNT.inc();
+}
+
+pub fn inc_undelegation_completed() {
+    UNDELEGATION_COMPLETED_COUNT.inc();
+}
+
+pub fn inc_unstuck_undelegation_count() {
+    UNSTUCK_UNDELEGATION_COUNT.inc();
+}
+
+pub fn inc_remote_account_provider_a_count() {
+    REMOTE_ACCOUNT_PROVIDER_A_COUNT.inc()
+}
+
+pub fn inc_task_info_fetcher_a_count() {
+    TASK_INFO_FETCHER_A_COUNT.inc()
+}
+
+pub fn inc_table_mania_a_count() {
+    TABLE_MANIA_A_COUNT.inc()
+}
+
+pub fn inc_table_mania_close_a_count() {
+    TABLE_MANIA_CLOSED_A_COUNT.inc()
 }
