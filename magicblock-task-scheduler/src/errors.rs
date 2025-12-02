@@ -10,7 +10,9 @@ pub enum TaskSchedulerError {
 
     #[error(transparent)]
     Pubsub(
-        Box<solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError>,
+        Box<
+            solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
+        >,
     ),
 
     #[error(transparent)]

@@ -13,8 +13,7 @@ use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 
-const NUM_FETCH_RETRIES: NonZeroUsize =
-    NonZeroUsize::new(5).unwrap();
+const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
 
 #[async_trait]
@@ -51,8 +50,7 @@ pub struct CacheTaskInfoFetcher {
 
 impl CacheTaskInfoFetcher {
     pub fn new(rpc_client: MagicblockRpcClient) -> Self {
-        const CACHE_SIZE: NonZeroUsize =
-            NonZeroUsize::new(1000).unwrap();
+        const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 
         Self {
             rpc_client,

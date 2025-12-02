@@ -124,8 +124,12 @@ impl From<magicblock_chainlink::errors::ChainlinkError> for ApiError {
     }
 }
 
-impl From<magicblock_committor_service::error::CommittorServiceError> for ApiError {
-    fn from(e: magicblock_committor_service::error::CommittorServiceError) -> Self {
+impl From<magicblock_committor_service::error::CommittorServiceError>
+    for ApiError
+{
+    fn from(
+        e: magicblock_committor_service::error::CommittorServiceError,
+    ) -> Self {
         Self::CommittorServiceError(Box::new(e))
     }
 }

@@ -76,7 +76,9 @@ pub enum MagicBlockRpcClientError {
     SentTransactionError(TransactionError, Signature),
 }
 
-impl From<solana_rpc_client_api::client_error::Error> for MagicBlockRpcClientError {
+impl From<solana_rpc_client_api::client_error::Error>
+    for MagicBlockRpcClientError
+{
     fn from(e: solana_rpc_client_api::client_error::Error) -> Self {
         Self::RpcClientError(Box::new(e))
     }
@@ -245,10 +247,9 @@ impl MagicblockRpcClient {
     pub async fn get_latest_blockhash(
         &self,
     ) -> MagicBlockRpcClientResult<Hash> {
-        self.client
-            .get_latest_blockhash()
-            .await
-            .map_err(|e| MagicBlockRpcClientError::GetLatestBlockhash(Box::new(e)))
+        self.client.get_latest_blockhash().await.map_err(|e| {
+            MagicBlockRpcClientError::GetLatestBlockhash(Box::new(e))
+        })
     }
 
     pub async fn get_slot(&self) -> MagicBlockRpcClientResult<Slot> {
@@ -403,7 +404,9 @@ impl MagicblockRpcClient {
             .client
             .send_transaction_with_config(tx, SEND_TRANSACTION_CONFIG)
             .await
-            .map_err(|e| MagicBlockRpcClientError::SendTransaction(Box::new(e)))?;
+            .map_err(|e| {
+                MagicBlockRpcClientError::SendTransaction(Box::new(e))
+            })?;
 
         let MagicBlockSendTransactionConfig::SendAndConfirm {
             wait_for_processed_level,

@@ -7,7 +7,9 @@ pub type RemoteAccountProviderResult<T> =
 #[derive(Debug, Error)]
 pub enum RemoteAccountProviderError {
     #[error("Pubsub client error: {0}")]
-    PubsubClientError(Box<solana_pubsub_client::pubsub_client::PubsubClientError>),
+    PubsubClientError(
+        Box<solana_pubsub_client::pubsub_client::PubsubClientError>,
+    ),
 
     #[error(transparent)]
     JoinError(#[from] tokio::task::JoinError),

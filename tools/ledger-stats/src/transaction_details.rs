@@ -54,12 +54,16 @@ pub(crate) fn print_transaction_details(
         status_meta.pre_token_balances.as_ref().map_or_else(
             || "None".to_string(),
             |b| {
-                if b.is_empty() { "None".to_string() } else { {
-                    b.iter()
-                        .map(|b| b.ui_token_amount.amount.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" | ")
-                } }
+                if b.is_empty() {
+                    "None".to_string()
+                } else {
+                    {
+                        b.iter()
+                            .map(|b| b.ui_token_amount.amount.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    }
+                }
             },
         );
 
@@ -67,24 +71,32 @@ pub(crate) fn print_transaction_details(
         status_meta.post_token_balances.as_ref().map_or_else(
             || "None".to_string(),
             |b| {
-                if b.is_empty() { "None".to_string() } else { {
-                    b.iter()
-                        .map(|b| b.ui_token_amount.amount.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" | ")
-                } }
+                if b.is_empty() {
+                    "None".to_string()
+                } else {
+                    {
+                        b.iter()
+                            .map(|b| b.ui_token_amount.amount.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    }
+                }
             },
         );
 
     let rewards = status_meta.rewards.as_ref().map_or_else(
         || "None".to_string(),
         |r| {
-            if r.is_empty() { "None".to_string() } else { {
-                r.iter()
-                    .map(|r| r.lamports.to_formatted_string(&Locale::en))
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            } }
+            if r.is_empty() {
+                "None".to_string()
+            } else {
+                {
+                    r.iter()
+                        .map(|r| r.lamports.to_formatted_string(&Locale::en))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                }
+            }
         },
     );
 
