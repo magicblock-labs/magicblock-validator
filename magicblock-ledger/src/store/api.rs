@@ -174,6 +174,7 @@ impl Ledger {
         let (slot, blockhash) = ledger.get_max_blockhash()?;
         let time = ledger.get_block_time(slot)?.unwrap_or_default();
         ledger.latest_block.store(slot, blockhash, time);
+        ledger.initialize_lowest_cleanup_slot()?;
 
         Ok(ledger)
     }
@@ -1216,112 +1217,16 @@ impl Ledger {
         }
     }
 
-    /// Permanently removes ledger data for slots in the inclusive range `[from_slot, to_slot]`.
-    /// # Note:
-    /// - This is a destructive operation that cannot be undone
-    /// - Requires exclusive access to the lowest cleanup slot tracker
-    /// - All deletions are atomic (either all succeed or none do)
-    pub fn delete_slot_range(
+    pub fn delete_range_cf<C>(
         &self,
-        from_slot: Slot,
-        to_slot: Slot,
-    ) -> LedgerResult<()> {
-        self.set_lowest_cleanup_slot(to_slot);
-
-        let mut batch = self.db.batch();
-        let num_deleted_slots = to_slot + 1 - from_slot;
-        self.blocktime_cf.delete_range_in_batch(
-            &mut batch,
-            from_slot,
-            to_slot + 1,
-        );
-        self.blockhash_cf.delete_range_in_batch(
-            &mut batch,
-            from_slot,
-            to_slot + 1,
-        );
-        self.perf_samples_cf.delete_range_in_batch(
-            &mut batch,
-            from_slot,
-            to_slot + 1,
-        );
-
-        let mut slot_signatures_deleted = 0;
-        let mut transaction_status_deleted = 0;
-        let mut transactions_deleted = 0;
-        let mut transaction_memos_deleted = 0;
-        let mut address_signatures_deleted = 0;
-        self.slot_signatures_cf
-            .iter(IteratorMode::From(
-                (from_slot, u32::MIN),
-                IteratorDirection::Forward,
-            ))?
-            .take_while(|((slot, _), _)| slot <= &to_slot)
-            .try_for_each(|((slot, transaction_index), raw_signature)| {
-                self.slot_signatures_cf
-                    .delete_in_batch(&mut batch, (slot, transaction_index));
-                slot_signatures_deleted += 1;
-
-                let signature = Signature::try_from(raw_signature.as_ref())?;
-                self.transaction_status_cf
-                    .delete_in_batch(&mut batch, (signature, slot));
-                transaction_status_deleted += 1;
-
-                self.transaction_cf
-                    .delete_in_batch(&mut batch, (signature, slot));
-                transactions_deleted += 1;
-
-                self.transaction_memos_cf
-                    .delete_in_batch(&mut batch, (signature, slot));
-                transaction_memos_deleted += 1;
-
-                let transaction = self
-                    .transaction_cf
-                    .get_protobuf((signature, slot))?
-                    .map(VersionedTransaction::from)
-                    .ok_or(LedgerError::TransactionNotFound)?;
-
-                transaction.message.static_account_keys().iter().for_each(
-                    |address| {
-                        self.address_signatures_cf.delete_in_batch(
-                            &mut batch,
-                            (*address, slot, transaction_index, signature),
-                        );
-                        address_signatures_deleted += 1;
-                    },
-                );
-
-                // TODO(edwin): add AccountModData cleanup
-                Ok::<_, LedgerError>(())
-            })?;
-
-        self.db.write(batch)?;
-
-        self.blocktime_cf
-            .try_decrease_entry_counter(num_deleted_slots);
-        self.blockhash_cf
-            .try_decrease_entry_counter(num_deleted_slots);
-        self.perf_samples_cf
-            .try_decrease_entry_counter(num_deleted_slots);
-        self.slot_signatures_cf
-            .try_decrease_entry_counter(slot_signatures_deleted);
-        self.transaction_status_cf
-            .try_decrease_entry_counter(transaction_status_deleted);
-        self.transaction_cf
-            .try_decrease_entry_counter(transactions_deleted);
-        self.transaction_memos_cf
-            .try_decrease_entry_counter(transaction_memos_deleted);
-        self.address_signatures_cf
-            .try_decrease_entry_counter(address_signatures_deleted);
-
-        // To not spend time querying DB for value we set drop the counter
-        // This shouldn't happen very often due to rarity of actual truncations.
-        self.transaction_successful_status_count
-            .store(DIRTY_COUNT, Ordering::Release);
-        self.transaction_failed_status_count
-            .store(DIRTY_COUNT, Ordering::Release);
-
-        Ok(())
+        from: C::Index,
+        to: C::Index,
+    ) -> LedgerResult<()>
+    where
+        C: Column + ColumnName,
+        Self: HasColumn<C>,
+    {
+        <Ledger as HasColumn<C>>::column(self).delete_range(from, to)
     }
 
     pub fn compact_slot_range_cf<C: Column + ColumnName>(
@@ -1372,6 +1277,39 @@ impl Ledger {
         self.latest_block.load().blockhash
     }
 }
+
+pub trait HasColumn<C>
+where
+    C: Column + ColumnName,
+{
+    fn column(&self) -> &LedgerColumn<C>;
+    fn with_column<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&LedgerColumn<C>) -> R,
+    {
+        f(self.column())
+    }
+}
+
+macro_rules! impl_has_column {
+    ($cf_ty:ident, $field:ident) => {
+        impl HasColumn<cf::$cf_ty> for Ledger {
+            fn column(&self) -> &LedgerColumn<cf::$cf_ty> {
+                &self.$field
+            }
+        }
+    };
+}
+
+impl_has_column!(TransactionStatus, transaction_status_cf);
+impl_has_column!(AddressSignatures, address_signatures_cf);
+impl_has_column!(SlotSignatures, slot_signatures_cf);
+impl_has_column!(Blocktime, blocktime_cf);
+impl_has_column!(Blockhash, blockhash_cf);
+impl_has_column!(Transaction, transaction_cf);
+impl_has_column!(TransactionMemos, transaction_memos_cf);
+impl_has_column!(PerfSamples, perf_samples_cf);
+impl_has_column!(AccountModDatas, account_mod_datas_cf);
 
 // -----------------
 // Tests
@@ -2473,91 +2411,5 @@ mod tests {
                 .infos[0];
             assert_eq!(sig_info_dos.memo, Some("Test Dos Memo".to_string()));
         }
-    }
-
-    #[test]
-    fn test_truncate_slots() {
-        let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let store = Ledger::open(ledger_path.path()).unwrap();
-
-        // Create test data
-        let slots_to_delete = [10, 15];
-        let slots_to_preserve = [20];
-        let test_data: Vec<_> = slots_to_delete
-            .iter()
-            .chain(slots_to_preserve.iter())
-            .map(|&slot| {
-                let sig = Signature::new_unique();
-                let (tx, sanitized) =
-                    create_confirmed_transaction(slot, 5, Some(100), None);
-                (sig, slot, tx, sanitized)
-            })
-            .collect();
-
-        // Write data to ledger
-        test_data.iter().for_each(|(sig, slot, tx, sanitized)| {
-            store
-                .write_transaction(
-                    *sig,
-                    *slot,
-                    sanitized.clone(),
-                    tx.tx_with_meta.get_status_meta().unwrap(),
-                )
-                .unwrap();
-            store.write_block(*slot, 100, Hash::new_unique()).unwrap();
-            store
-                .write_transaction_memos(
-                    sig,
-                    *slot,
-                    format!("Memo for slot {}", slot),
-                )
-                .unwrap();
-        });
-
-        // Truncate slots 10-15 (should remove first two entries)
-        assert!(store
-            .delete_slot_range(
-                *slots_to_delete.first().unwrap(),
-                *slots_to_delete.last().unwrap()
-            )
-            .is_ok());
-
-        // Consistency checks
-        let (to_delete, to_preserve) =
-            test_data.split_at(slots_to_delete.len());
-        to_delete.iter().for_each(|(sig, slot, _, _)| {
-            assert!(store
-                .transaction_cf
-                .get_protobuf((*sig, *slot))
-                .unwrap()
-                .is_none());
-            assert!(store
-                .transaction_status_cf
-                .get_protobuf((*sig, *slot))
-                .unwrap()
-                .is_none());
-            assert!(store.blocktime_cf.get(*slot).unwrap().is_none());
-            assert!(store
-                .read_transaction_memos(*sig, *slot)
-                .unwrap()
-                .is_none());
-        });
-        to_preserve.iter().for_each(|(sig, slot, _, _)| {
-            assert!(store
-                .transaction_cf
-                .get_protobuf((*sig, *slot))
-                .unwrap()
-                .is_some());
-            assert!(store
-                .transaction_status_cf
-                .get_protobuf((*sig, *slot))
-                .unwrap()
-                .is_some());
-            assert!(store.blocktime_cf.get(*slot).unwrap().is_some());
-            assert_eq!(
-                store.read_transaction_memos(*sig, *slot).unwrap(),
-                Some(format!("Memo for slot {}", slot))
-            );
-        });
     }
 }

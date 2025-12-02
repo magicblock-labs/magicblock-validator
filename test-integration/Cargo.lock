@@ -3827,6 +3827,7 @@ dependencies = [
  "libc",
  "log",
  "magicblock-core",
+ "magicblock-metrics",
  "num-format",
  "num_cpus",
  "prost",
@@ -6377,7 +6378,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=5afcedc#5afcedca1bd1608594cfe6d8ecdedea0e0380b5a"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=1beed4c#1beed4c0bc368bc0bed819fbdf551d1a4bf00001"
 dependencies = [
  "bincode",
  "qualifier_attr",
