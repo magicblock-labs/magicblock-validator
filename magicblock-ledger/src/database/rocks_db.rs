@@ -121,6 +121,16 @@ impl Rocks {
         Ok(())
     }
 
+    pub fn delete_range_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &ColumnFamily,
+        from: K,
+        to: K,
+    ) -> LedgerResult<()> {
+        self.db.delete_range_cf(cf, from, to)?;
+        Ok(())
+    }
+
     /// Delete files whose slot range is within \[`from`, `to`\].
     pub fn delete_file_in_range_cf(
         &self,
