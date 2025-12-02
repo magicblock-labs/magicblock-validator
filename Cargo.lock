@@ -658,7 +658,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "proc-macro2",
@@ -1023,7 +1023,6 @@ checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
 dependencies = [
  "glob",
  "libc",
- "libloading 0.8.8",
 ]
 
 [[package]]
@@ -3305,16 +3304,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libloading"
-version = "0.8.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
-dependencies = [
- "cfg-if 1.0.1",
- "windows-targets 0.53.2",
-]
-
-[[package]]
 name = "libm"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3333,9 +3322,8 @@ dependencies = [
 
 [[package]]
 name = "librocksdb-sys"
-version = "0.16.0+8.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce3d60bc059831dc1c83903fb45c103f75db65c5a7bf22272764d9cc683e348c"
+version = "0.17.1+9.9.3"
+source = "git+https://github.com/rust-rocksdb/rust-rocksdb.git?rev=d4e9e16#d4e9e16bcada0627a8a2fed9332f0a7374b14ace"
 dependencies = [
  "bindgen",
  "bzip2-sys",
@@ -3674,7 +3662,7 @@ dependencies = [
  "crossbeam-channel",
  "fd-lock",
  "itertools 0.14.0",
- "libloading 0.7.4",
+ "libloading",
  "log",
  "magic-domain-program",
  "magicblock-account-cloner",
@@ -5663,8 +5651,7 @@ dependencies = [
 [[package]]
 name = "rocksdb"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bd13e55d6d7b8cd0ea569161127567cd587676c99f4472f779a0279aa60a7a7"
+source = "git+https://github.com/rust-rocksdb/rust-rocksdb.git?rev=d4e9e16#d4e9e16bcada0627a8a2fed9332f0a7374b14ace"
 dependencies = [
  "libc",
  "librocksdb-sys",
