@@ -354,7 +354,7 @@ impl CommitType {
 
             // Validate committed account was scheduled by valid authority
             let owner = *account_shared.owner();
-            validate_commit_schedule_rights(
+            validate_commit_schedule_permissions(
                 &context.invoke_context,
                 &owner,
                 pubkey,
@@ -509,7 +509,7 @@ impl UndelegateType {
     }
 }
 
-/// Validate that a committee account has the right to be committed.
+/// Validate that a committee account has a permission to be committed.
 ///
 /// Invariants:
 /// - The account must be owned by the parent program *or*
@@ -519,7 +519,7 @@ impl UndelegateType {
 /// If none of the above holds, returns `InvalidInstructionData` when
 /// the parent program id cannot be determined, or `InvalidAccountOwner`
 /// when the owner does not match the invoking program.
-pub(crate) fn validate_commit_schedule_rights(
+pub(crate) fn validate_commit_schedule_permissions(
     invoke_context: &&mut InvokeContext,
     committee_owner: &Pubkey,
     committee_pubkey: &Pubkey,

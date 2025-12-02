@@ -11,7 +11,7 @@ use solana_sdk::{
 
 use crate::{
     magic_scheduled_base_intent::{
-        validate_commit_schedule_rights, CommitAndUndelegate, CommitType,
+        validate_commit_schedule_permissions, CommitAndUndelegate, CommitType,
         CommittedAccount, MagicBaseIntent, ScheduledBaseIntent, UndelegateType,
     },
     schedule_transactions,
@@ -158,7 +158,7 @@ pub(crate) fn process_schedule_commit(
 
             // Validate committed account was scheduled by valid authority
             let acc_owner = *acc.borrow().owner();
-            validate_commit_schedule_rights(
+            validate_commit_schedule_permissions(
                 &invoke_context,
                 &acc_owner,
                 acc_pubkey,
