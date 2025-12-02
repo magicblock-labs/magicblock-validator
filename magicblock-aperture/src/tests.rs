@@ -50,6 +50,8 @@ fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
 }
 
 mod event_processor {
+    use magicblock_config::config::ApertureConfig;
+
     use super::*;
     use crate::state::NodeContext;
 
@@ -71,7 +73,9 @@ mod event_processor {
             Arc::new(chainlink(&env.accountsdb)),
         );
         let cancel = CancellationToken::new();
-        EventProcessor::start(&state, &env.dispatch, 1, cancel);
+        let config = ApertureConfig::default();
+        EventProcessor::start(&config, &state, &env.dispatch, cancel)
+            .expect("failed to start an event processor");
         env.advance_slot();
         (state, env)
     }

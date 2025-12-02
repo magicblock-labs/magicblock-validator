@@ -1,9 +1,10 @@
-//! A layered configuration library for the MagicBlock validator.
-
 use std::{ffi::OsString, fmt::Display, path::PathBuf};
 
 use clap::Parser;
-use config::{cli::CliParams, metrics::MetricsConfig, LifecycleMode};
+use config::{
+    aperture::ApertureConfig, cli::CliParams, metrics::MetricsConfig,
+    LifecycleMode,
+};
 use figment::{
     providers::{Env, Format, Serialized, Toml},
     value::Uncased,
@@ -24,7 +25,7 @@ use crate::{
         CommittorConfig, LedgerConfig, LoadableProgram, TaskSchedulerConfig,
         ValidatorConfig,
     },
-    types::{BindAddress, RemoteCluster},
+    types::RemoteCluster,
 };
 
 /// Top-level configuration, assembled from multiple sources.
@@ -43,14 +44,14 @@ pub struct ValidatorParams {
     /// Root directory for application storage.
     pub storage: StorageDirectory,
 
-    /// Primary listen address for the main RPC service.
-    pub listen: BindAddress,
-
     /// Listen address for the metrics endpoint.
     pub metrics: MetricsConfig,
 
     /// Validator-specific arguments.
     pub validator: ValidatorConfig,
+
+    /// Aperture-specific configuration.
+    pub aperture: ApertureConfig,
 
     // --- File-Only Configuration ---
     pub commit: CommittorConfig,
@@ -90,7 +91,6 @@ impl ValidatorParams {
 
         // 5. Merge CLI "Overlay" (Highest Priority)
         figment = figment.merge(Serialized::from(&cli, Profile::Default));
-
         figment.extract()
     }
 }

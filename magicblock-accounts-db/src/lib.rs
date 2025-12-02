@@ -246,7 +246,7 @@ impl AccountsDb {
     pub fn set_slot(self: &Arc<Self>, slot: u64) {
         self.storage.set_slot(slot);
 
-        if 0 != slot % self.snapshot_frequency {
+        if slot % self.snapshot_frequency != 0 {
             return;
         }
         let this = self.clone();

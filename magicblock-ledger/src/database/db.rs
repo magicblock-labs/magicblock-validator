@@ -102,11 +102,11 @@ impl Database {
     }
 
     #[inline]
-    pub fn raw_iterator_cf(&self, cf: &ColumnFamily) -> DBRawIterator {
+    pub fn raw_iterator_cf(&self, cf: &ColumnFamily) -> DBRawIterator<'_> {
         self.backend.raw_iterator_cf(cf)
     }
 
-    pub fn batch(&self) -> WriteBatch {
+    pub fn batch(&self) -> WriteBatch<'_> {
         let write_batch = self.backend.batch();
         let map = columns()
             .into_iter()

@@ -124,7 +124,7 @@ pub fn print_accounts(
         });
         all.into_iter()
             .filter(|acc| {
-                if !owner.map_or(true, |owner| acc.owner.eq(&owner)) {
+                if !owner.is_none_or(|owner| acc.owner.eq(&owner)) {
                     return false;
                 }
                 if filters.contains(&FilterAccounts::Executable)

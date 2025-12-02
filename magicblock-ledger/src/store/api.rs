@@ -207,7 +207,7 @@ impl Ledger {
     fn check_lowest_cleanup_slot(
         &self,
         slot: Slot,
-    ) -> LedgerResult<std::sync::RwLockReadGuard<Slot>> {
+    ) -> LedgerResult<std::sync::RwLockReadGuard<'_, Slot>> {
         // lowest_cleanup_slot is the last slot that was not cleaned up by LedgerCleanupService
         let lowest_cleanup_slot = self
             .lowest_cleanup_slot
@@ -229,7 +229,7 @@ impl Ledger {
     /// consistency with slot-based delete_range.
     fn ensure_lowest_cleanup_slot(
         &self,
-    ) -> (std::sync::RwLockReadGuard<Slot>, Slot) {
+    ) -> (std::sync::RwLockReadGuard<'_, Slot>, Slot) {
         let lowest_cleanup_slot = self
             .lowest_cleanup_slot
             .read()

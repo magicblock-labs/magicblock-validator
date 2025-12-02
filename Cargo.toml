@@ -46,6 +46,7 @@ license = "Business Source License 1.1"
 edition = "2021"
 
 [workspace.dependencies]
+agave-geyser-plugin-interface = { version = "2.2" }
 anyhow = "1.0.86"
 arc-swap = { version = "1.7" }
 assert_matches = "1.5.0"
@@ -83,13 +84,8 @@ hyper = "1.6.0"
 hyper-util = "0.1.15"
 isocountry = "0.3.2"
 itertools = "0.14"
-jsonrpc-core = "18.0.0"
-jsonrpc-core-client = "18.0.0"
-jsonrpc-derive = "18.0.0"
-jsonrpc-http-server = "18.0.0"
-jsonrpc-pubsub = "18.0.0"
-jsonrpc-ws-server = "18.0.0"
 lazy_static = "1.4.0"
+libloading = "0.8"
 libc = "0.2.153"
 log = { version = "0.4.20" }
 lru = "0.16.0"
@@ -111,7 +107,6 @@ magicblock-delegation-program = { git = "https://github.com/magicblock-labs/dele
   "no-entrypoint",
 ] }
 magicblock-aperture = { path = "./magicblock-aperture" }
-magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-metrics = { path = "./magicblock-metrics" }
 magicblock-processor = { path = "./magicblock-processor" }
