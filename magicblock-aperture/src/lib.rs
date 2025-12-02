@@ -1,5 +1,4 @@
-use error::ApertureError;
-use error::RpcError;
+use error::{ApertureError, RpcError};
 use log::*;
 use magicblock_config::config::aperture::ApertureConfig;
 use magicblock_core::link::DispatchEndpoints;

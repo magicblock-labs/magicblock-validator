@@ -59,7 +59,8 @@ impl BufferWriteChunkBudget {
                 .checked_mul(bytes_count)
                 .unwrap_or(u32::MAX as usize),
         )
-        .unwrap_or(u32::MAX).saturating_add(self.base_budget)
+        .unwrap_or(u32::MAX)
+        .saturating_add(self.base_budget)
     }
 
     pub fn instructions(&self, bytes_count: usize) -> Vec<Instruction> {
