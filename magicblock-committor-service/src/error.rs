@@ -41,12 +41,12 @@ pub enum CommittorServiceError {
 
     #[error("Failed to send init changeset account: {0} ({0:?})")]
     FailedToSendInitChangesetAccount(
-        solana_rpc_client_api::client_error::Error,
+        Box<solana_rpc_client_api::client_error::Error>,
     ),
 
     #[error("Failed to confirm init changeset account: {0} ({0:?})")]
     FailedToConfirmInitChangesetAccount(
-        solana_rpc_client_api::client_error::Error,
+        Box<solana_rpc_client_api::client_error::Error>,
     ),
     #[error("Init transaction '{0}' was not confirmed")]
     InitChangesetAccountNotConfirmed(String),

@@ -81,7 +81,7 @@ async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
     let latest_blockhash = rpc_client
         .get_latest_blockhash()
         .await
-        .map_err(MagicBlockRpcClientError::GetLatestBlockhash)?;
+        .map_err(|e| MagicBlockRpcClientError::GetLatestBlockhash(Box::new(e)))?;
 
     let tx = Transaction::new_signed_with_payer(
         &[ix],
@@ -93,7 +93,7 @@ async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
     rpc_client
         .send_and_confirm_transaction(&tx)
         .await
-        .map_err(MagicBlockRpcClientError::SendTransaction)?;
+        .map_err(|e| MagicBlockRpcClientError::SendTransaction(Box::new(e)))?;
 
     info!("Successfully claimed validator fees");
 
