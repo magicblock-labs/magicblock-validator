@@ -1,6 +1,5 @@
 use std::{collections::HashSet, ops::ControlFlow, time::Duration};
 
-use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all, try_join_all};
 use log::{error, info};
 use magicblock_committor_program::{
@@ -16,7 +15,6 @@ use magicblock_rpc_client::{
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
 use magicblock_table_mania::{error::TableManiaError, TableMania};
-use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
@@ -67,28 +65,20 @@ impl DeliveryPreparator {
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures =
             strategy.optimized_tasks.iter_mut().map(|task| async move {
-                let timer =
+                let _timer =
                     metrics::observe_committor_intent_task_preparation_time(
                         task.as_ref(),
                     );
-                let res = self
-                    .prepare_task_handling_errors(authority, task, persister)
-                    .await;
-                timer.stop_and_record();
-
-                res
+                self.prepare_task_handling_errors(authority, task, persister)
+                    .await
             });
 
         let task_preparations = join_all(preparation_futures);
         let alts_preparations = async {
-            let timer =
+            let _timer =
                 metrics::observe_committor_intent_alt_preparation_time();
-            let res = self
-                .prepare_lookup_tables(authority, &strategy.lookup_tables_keys)
-                .await;
-            timer.stop_and_record();
-
-            res
+            self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys)
+                .await
         };
 
         let (res1, res2) = join(task_preparations, alts_preparations).await;
@@ -247,30 +237,22 @@ impl DeliveryPreparator {
         Ok(())
     }
 
+    /// Fills up initialized buffer
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
         preparation_task: &PreparationTask,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
-        let chunks_pda = preparation_task.chunks_pda(&authority_pubkey);
         let write_instructions =
             preparation_task.write_instructions(&authority_pubkey);
 
-        let chunks = if let Some(account) =
-            self.rpc_client.get_account(&chunks_pda).await?
-        {
-            Ok(Chunks::try_from_slice(account.data())?)
-        } else {
-            error!(
-                "Chunks PDA does not exist for writing. pda: {}",
-                chunks_pda
-            );
-            Err(InternalError::ChunksPDAMissingError(chunks_pda))
-        }?;
-
-        self.write_missing_chunks(authority, &chunks, &write_instructions)
-            .await
+        self.write_missing_chunks(
+            authority,
+            &preparation_task.chunks,
+            &write_instructions,
+        )
+        .await
     }
 
     /// Extract & write missing chunks asynchronously

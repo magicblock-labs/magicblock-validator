@@ -7,7 +7,7 @@ pub mod two_stage_executor;
 use std::{mem, ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use futures_util::future::try_join_all;
+use futures_util::future::{join, try_join_all};
 use log::{trace, warn};
 use magicblock_metrics::metrics;
 use magicblock_program::{
@@ -191,17 +191,17 @@ where
             );
         }
 
-        // Build tasks for commit stage
-        let commit_tasks = TaskBuilderImpl::commit_tasks(
-            &self.task_info_fetcher,
-            &base_intent,
-            persister,
-        )
-        .await?;
-
         let committed_pubkeys = match base_intent.get_committed_pubkeys() {
             Some(value) => value,
             None => {
+                // Build tasks for commit stage
+                let commit_tasks = TaskBuilderImpl::commit_tasks(
+                    &self.task_info_fetcher,
+                    &base_intent,
+                    persister,
+                )
+                .await?;
+
                 // Standalone actions executed in single stage
                 let strategy = TaskStrategist::build_strategy(
                     commit_tasks,
@@ -218,11 +218,22 @@ where
             }
         };
 
-        let finalize_tasks = TaskBuilderImpl::finalize_tasks(
+        // Build tasks for commit stage
+        let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
             &self.task_info_fetcher,
             &base_intent,
-        )
-        .await?;
+            persister,
+        );
+        let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
+            &self.task_info_fetcher,
+            &base_intent,
+        );
+
+        // Build commit & finalize tasks in parallel
+        let (commit_tasks, finalize_tasks) =
+            join(commit_tasks_fut, finalize_tasks_fut).await;
+        let commit_tasks = commit_tasks?;
+        let finalize_tasks = finalize_tasks?;
 
         // See if we can squeeze them in one tx
         if let Some(single_tx_strategy) = Self::try_unite_tasks(
