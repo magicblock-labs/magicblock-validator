@@ -17,8 +17,8 @@ impl HttpDispatcher {
         // the generic `parse_params!` helper to keep the logic simple and
         // avoid tuple unpacking for this custom method.
         let params = request.params()?;
-        // We expect exactly one positional parameter: the account pubkey.
-        let value = params.pop().ok_or_else(|| {
+        // We expect the *first* positional parameter to be the account pubkey.
+        let value = params.first().cloned().ok_or_else(|| {
             RpcError::invalid_params("missing pubkey parameter")
         })?;
         let pubkey_bytes: Serde32Bytes =
