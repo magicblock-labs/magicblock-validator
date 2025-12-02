@@ -50,6 +50,7 @@ impl BpfUpgradableProgramModifications {
                 executable: Some(false),
                 rent_epoch: Some(u64::MAX),
                 delegated: Some(false),
+                confined: Some(false),
             }
         };
 
@@ -69,6 +70,7 @@ impl BpfUpgradableProgramModifications {
                 executable: Some(true),
                 rent_epoch: Some(u64::MAX),
                 delegated: Some(false),
+                confined: Some(false),
             }
         };
 
