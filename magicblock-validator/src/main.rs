@@ -73,7 +73,7 @@ async fn run() {
             std::process::exit(1);
         }
     };
-    info!("Starting validator with config:\n{}", mb_config.config);
+    info!("Starting validator with config:\n{:#?}", config);
     const WS_PORT_OFFSET: u16 = 1;
     let rpc_port = config.listen.port();
     let ws_port = rpc_port + WS_PORT_OFFSET; // WebSocket port is typically RPC port + 1
