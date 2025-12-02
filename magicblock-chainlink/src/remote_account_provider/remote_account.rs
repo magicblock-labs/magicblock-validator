@@ -109,6 +109,23 @@ impl ResolvedAccountSharedData {
         self
     }
 
+    pub fn confined(&self) -> bool {
+        use ResolvedAccountSharedData::*;
+        match self {
+            Fresh(account) => account.confined(),
+            Bank(account) => account.confined(),
+        }
+    }
+
+    pub fn set_confined(&mut self, confined: bool) -> &mut Self {
+        use ResolvedAccountSharedData::*;
+        match self {
+            Fresh(account) => account.set_confined(confined),
+            Bank(account) => account.set_confined(confined),
+        }
+        self
+    }
+
     pub fn set_remote_slot(&mut self, remote_slot: Slot) -> &mut Self {
         use ResolvedAccountSharedData::*;
         match self {
