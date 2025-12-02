@@ -1,6 +1,6 @@
 use error::RpcError;
 use log::*;
-use magicblock_config::RpcConfig;
+use magicblock_config::types::BindAddress;
 use magicblock_core::link::DispatchEndpoints;
 use processor::EventProcessor;
 use server::{http::HttpServer, websocket::WebsocketServer};
@@ -19,15 +19,15 @@ pub struct JsonRpcServer {
 impl JsonRpcServer {
     /// Create a new instance of JSON-RPC server, hooked into validator via dispatch channels
     pub async fn new(
-        config: &RpcConfig,
+        address: BindAddress,
         state: SharedState,
         dispatch: &DispatchEndpoints,
         cancel: CancellationToken,
     ) -> RpcResult<Self> {
         // try to bind to socket before spawning anything (handy in tests)
-        let mut addr = config.socket_addr();
+        let mut addr = address.0;
         let http = TcpListener::bind(addr).await.map_err(RpcError::internal)?;
-        addr.set_port(config.port + 1);
+        addr.set_port(addr.port() + 1);
         let ws = TcpListener::bind(addr).await.map_err(RpcError::internal)?;
 
         // Start up an event processor task, which will handle forwarding of any validator

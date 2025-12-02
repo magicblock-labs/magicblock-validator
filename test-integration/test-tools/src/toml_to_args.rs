@@ -7,32 +7,25 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct Config {
-    accounts: AccountsConfig,
-    #[serde(default)]
-    rpc: Rpc,
-    #[serde(default)]
-    program: Vec<Program>,
-}
-
-#[derive(Deserialize)]
-struct AccountsConfig {
     remote: RemoteConfig,
+    listen: String,
+    #[serde(default)]
+    programs: Vec<Program>,
 }
 
 #[derive(Deserialize)]
-struct RemoteConfig {
-    cluster: Option<String>,
-    url: Option<String>,
+#[serde(untagged)]
+enum RemoteConfig {
+    Url(String),
+    Complex { http: String },
 }
 
-#[derive(Deserialize)]
-struct Rpc {
-    port: u16,
-}
-
-impl Default for Rpc {
-    fn default() -> Self {
-        Rpc { port: 8899 }
+impl RemoteConfig {
+    fn url(&self) -> String {
+        match self {
+            RemoteConfig::Url(s) => s.clone(),
+            RemoteConfig::Complex { http } => http.clone(),
+        }
     }
 }
 
@@ -63,10 +56,12 @@ pub fn config_to_args(
     let config = parse_config(config_path);
     let program_loader = program_loader.unwrap_or_default();
 
+    let port = config.listen.split(':').nth(1).unwrap_or("8899");
+
     let mut args = vec![
         "--log".to_string(),
         "--rpc-port".to_string(),
-        config.rpc.port.to_string(),
+        port.to_string(),
         "-r".to_string(),
         "--limit-ledger-size".to_string(),
         "10000".to_string(),
@@ -76,50 +71,39 @@ pub fn config_to_args(
         .parent()
         .expect("Failed to get parent directory of config file");
 
-    for program in config.program {
-        match program.path.as_str() {
-            "<remote>" => {
-                args.push("--clone".into());
-                args.push(program.id);
-            }
-            path => {
-                if program_loader == ProgramLoader::UpgradeableProgram {
-                    args.push("--upgradeable-program".to_string());
-                } else {
-                    args.push("--bpf-program".to_string());
-                }
+    for program in config.programs {
+        if program_loader == ProgramLoader::UpgradeableProgram {
+            args.push("--upgradeable-program".to_string());
+        } else {
+            args.push("--bpf-program".to_string());
+        }
 
-                args.push(program.id);
+        args.push(program.id);
 
-                let resolved_full_config_path =
-                    config_dir.join(path).canonicalize().unwrap();
-                args.push(
-                    resolved_full_config_path.to_str().unwrap().to_string(),
-                );
+        let resolved_full_config_path =
+            config_dir.join(&program.path).canonicalize().unwrap();
+        args.push(resolved_full_config_path.to_str().unwrap().to_string());
 
-                if program_loader == ProgramLoader::UpgradeableProgram {
-                    if let Some(auth) = program.auth {
-                        args.push(auth);
-                    } else {
-                        args.push("none".to_string());
-                    }
-                }
+        if program_loader == ProgramLoader::UpgradeableProgram {
+            if let Some(auth) = program.auth {
+                args.push(auth);
+            } else {
+                args.push("none".to_string());
             }
         }
     }
     args.push("--url".into());
-    args.push(
-        config
-            .accounts
-            .remote
-            .cluster
-            .unwrap_or_else(|| config.accounts.remote.url.unwrap()),
-    );
+    args.push(config.remote.url());
 
     args
 }
 
 pub fn rpc_port_from_config(config_path: &PathBuf) -> u16 {
     let config = parse_config(config_path);
-    config.rpc.port
+    config
+        .listen
+        .split(':')
+        .nth(1)
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8899)
 }

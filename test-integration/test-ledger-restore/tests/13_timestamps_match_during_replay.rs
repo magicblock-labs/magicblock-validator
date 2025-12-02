@@ -6,7 +6,6 @@ use integration_test_tools::{
     validator::cleanup,
 };
 use log::*;
-use magicblock_config::LedgerResumeStrategy;
 use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
@@ -97,13 +96,8 @@ fn write(ledger_path: &Path) -> (Child, u64, Signature, i64, Keypair) {
 fn read(ledger_path: &Path, signature: Signature, block_time: i64) -> Child {
     // Measure time
     let start = std::time::Instant::now();
-    let (_, mut validator, ctx) = setup_offline_validator(
-        ledger_path,
-        None,
-        None,
-        LedgerResumeStrategy::Resume { replay: true },
-        false,
-    );
+    let (_, mut validator, ctx) =
+        setup_offline_validator(ledger_path, None, None, false, false);
     debug!("✅ Validator started in {:?}", start.elapsed());
 
     let restored_block_time = expect!(

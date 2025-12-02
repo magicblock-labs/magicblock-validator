@@ -68,7 +68,6 @@ mod event_processor {
             env.accountsdb.clone(),
             env.ledger.clone(),
             Arc::new(chainlink(&env.accountsdb)),
-            50,
         );
         let cancel = CancellationToken::new();
         EventProcessor::start(&state, &env.dispatch, 1, cancel);
