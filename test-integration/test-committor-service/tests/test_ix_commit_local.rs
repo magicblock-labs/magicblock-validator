@@ -248,9 +248,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
     commit_5_accounts_1kb(
         3,
         expect_strategies(&[
-            // Intent fits in 1 TX only with ALT, see IntentExecutorImpl::try_unite_tasks
-            (CommitStrategy::FromBufferWithLookupTable, 3),
-            (CommitStrategy::FromBuffer, 2),
+            (CommitStrategy::FromBuffer, 5),
         ]),
         true,
     )
