@@ -226,6 +226,9 @@ impl HttpDispatcher {
             RequestAirdrop => self.request_airdrop(request).await,
             SendTransaction => self.send_transaction(request).await,
             SimulateTransaction => self.simulate_transaction(request).await,
+            GetRoutes => self.get_routes(request),
+            GetBlockhashForAccounts => self.get_blockhash_for_accounts(request),
+            GetDelegationStatus => self.get_delegation_status(request).await,
         }
     }
 

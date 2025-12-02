@@ -302,3 +302,8 @@ pub(crate) mod mocked;
 pub(crate) mod request_airdrop;
 pub(crate) mod send_transaction;
 pub(crate) mod simulate_transaction;
+
+// Magic Router compatibility methods.
+pub(crate) mod get_blockhash_for_accounts;
+pub(crate) mod get_delegation_status;
+pub(crate) mod get_routes;
