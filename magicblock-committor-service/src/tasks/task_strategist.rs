@@ -369,17 +369,51 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, CommittedAccount, ProgramArgs,
     };
     use solana_account::Account;
+    use solana_pubkey::Pubkey;
     use solana_sdk::system_program;
 
     use super::*;
     use crate::{
+        intent_execution_manager::intent_scheduler::create_test_intent,
+        intent_executor::task_info_fetcher::{
+            ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+        },
         persist::IntentPersisterImpl,
-        tasks::{BaseActionTask, CommitTask, TaskStrategy, UndelegateTask},
+        tasks::{
+            task_builder::{TaskBuilderImpl, TasksBuilder},
+            BaseActionTask, CommitTask, TaskStrategy, UndelegateTask,
+        },
     };
+
+    struct MockInfoFetcher;
+    #[async_trait::async_trait]
+    impl TaskInfoFetcher for MockInfoFetcher {
+        async fn fetch_next_commit_ids(
+            &self,
+            pubkeys: &[Pubkey],
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+        }
+
+        async fn fetch_rent_reimbursements(
+            &self,
+            pubkeys: &[Pubkey],
+        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
+        }
+
+        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
+            Some(0)
+        }
+
+        fn reset(&self, _: ResetType) {}
+    }
 
     // Helper to create a simple commit task
     fn create_test_commit_task(commit_id: u64, data_size: usize) -> ArgsTask {
@@ -619,5 +653,106 @@ mod tests {
         // So had to switch to ALTs
         // As expected
         assert!(!strategy.lookup_tables_keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_build_single_stage_mode() {
+        let pubkey = [Pubkey::new_unique()];
+        let intent = create_test_intent(0, &pubkey, false);
+
+        let info_fetcher = Arc::new(MockInfoFetcher);
+        let commit_task = TaskBuilderImpl::commit_tasks(
+            &info_fetcher,
+            &intent,
+            &None::<IntentPersisterImpl>,
+        )
+        .await
+        .unwrap();
+        let finalize_task =
+            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+                .await
+                .unwrap();
+
+        let execution_mode = TaskStrategist::build_execution_strategy(
+            commit_task,
+            finalize_task,
+            &Pubkey::new_unique(),
+            &None::<IntentPersisterImpl>,
+        )
+        .expect("Execution mode created");
+
+        let StrategyExecutionMode::SingleStage(value) = execution_mode else {
+            panic!("Unexpected execution mode");
+        };
+        assert!(!value.uses_alts());
+    }
+
+    #[tokio::test]
+    async fn test_build_two_stage_mode_no_alts() {
+        let pubkeys: [_; 3] = std::array::from_fn(|_| Pubkey::new_unique());
+        let intent = create_test_intent(0, &pubkeys, true);
+
+        let info_fetcher = Arc::new(MockInfoFetcher);
+        let commit_task = TaskBuilderImpl::commit_tasks(
+            &info_fetcher,
+            &intent,
+            &None::<IntentPersisterImpl>,
+        )
+        .await
+        .unwrap();
+        let finalize_task =
+            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+                .await
+                .unwrap();
+
+        let execution_mode = TaskStrategist::build_execution_strategy(
+            commit_task,
+            finalize_task,
+            &Pubkey::new_unique(),
+            &None::<IntentPersisterImpl>,
+        )
+        .expect("Execution mode created");
+
+        let StrategyExecutionMode::TwoStage {
+            commit_stage,
+            finalize_stage,
+        } = execution_mode
+        else {
+            panic!("Unexpected execution mode");
+        };
+        assert!(!commit_stage.uses_alts());
+        assert!(!finalize_stage.uses_alts());
+    }
+
+    #[tokio::test]
+    async fn test_build_single_stage_mode_with_alts() {
+        let pubkeys: [_; 8] = std::array::from_fn(|_| Pubkey::new_unique());
+        let intent = create_test_intent(0, &pubkeys, false);
+
+        let info_fetcher = Arc::new(MockInfoFetcher);
+        let commit_task = TaskBuilderImpl::commit_tasks(
+            &info_fetcher,
+            &intent,
+            &None::<IntentPersisterImpl>,
+        )
+        .await
+        .unwrap();
+        let finalize_task =
+            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+                .await
+                .unwrap();
+
+        let execution_mode = TaskStrategist::build_execution_strategy(
+            commit_task,
+            finalize_task,
+            &Pubkey::new_unique(),
+            &None::<IntentPersisterImpl>,
+        )
+        .expect("Execution mode created");
+
+        let StrategyExecutionMode::SingleStage(value) = execution_mode else {
+            panic!("Unexpected execution mode");
+        };
+        assert!(value.uses_alts());
     }
 }
