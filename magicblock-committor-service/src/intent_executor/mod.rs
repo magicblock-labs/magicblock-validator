@@ -26,7 +26,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_sdk::{
     message::VersionedMessage,
-    signature::{Keypair, Signature, Signer, SignerError},
+    signature::{Keypair, Signature, Signer},
     transaction::VersionedTransaction,
 };
 
@@ -45,7 +45,7 @@ use crate::{
     tasks::{
         task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_strategist::{
-            TaskStrategist, TaskStrategistError, TransactionStrategy,
+            StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
         task_visitors::utility_visitor::TaskVisitorUtils,
         BaseTask, TaskType,
@@ -137,40 +137,6 @@ where
         }
     }
 
-    /// Checks if it is possible to unite Commit & Finalize stages in 1 transaction
-    /// Returns corresponding `TransactionStrategy` if possible, otherwise `None`
-    fn try_unite_tasks<P: IntentPersister>(
-        commit_tasks: &[Box<dyn BaseTask>],
-        finalize_task: &[Box<dyn BaseTask>],
-        authority: &Pubkey,
-        persister: &Option<P>,
-    ) -> Result<Option<TransactionStrategy>, SignerError> {
-        const MAX_UNITED_TASKS_LEN: usize = 22;
-
-        // We can unite in 1 tx a lot of commits
-        // but then there's a possibility of hitting CPI limit, aka
-        // MaxInstructionTraceLengthExceeded error.
-        // So we limit tasks len with 22 total tasks
-        // In case this fails as well, it will be retried with TwoStage approach
-        // on retry, once retries are introduced
-        if commit_tasks.len() + finalize_task.len() > MAX_UNITED_TASKS_LEN {
-            return Ok(None);
-        }
-
-        // Clone tasks since strategies applied to united case maybe suboptimal for regular one
-        let mut commit_tasks = commit_tasks.to_owned();
-        let finalize_task = finalize_task.to_owned();
-
-        // Unite tasks to attempt running as single tx
-        commit_tasks.extend(finalize_task);
-        match TaskStrategist::build_strategy(commit_tasks, authority, persister)
-        {
-            Ok(strategy) => Ok(Some(strategy)),
-            Err(TaskStrategistError::FailedToFitError) => Ok(None),
-            Err(TaskStrategistError::SignerError(err)) => Err(err),
-        }
-    }
-
     async fn execute_inner<P: IntentPersister>(
         &mut self,
         base_intent: ScheduledBaseIntent,
@@ -218,66 +184,52 @@ where
             }
         };
 
-        // Build tasks for commit stage
-        let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
-            &self.task_info_fetcher,
-            &base_intent,
-            persister,
-        );
-        let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
-            &self.task_info_fetcher,
-            &base_intent,
-        );
+        // Build tasks for commit & finalize stages
+        let (commit_tasks, finalize_tasks) = {
+            let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
+                &self.task_info_fetcher,
+                &base_intent,
+                persister,
+            );
+            let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
+                &self.task_info_fetcher,
+                &base_intent,
+            );
+            let (commit_tasks, finalize_tasks) =
+                join(commit_tasks_fut, finalize_tasks_fut).await;
 
-        // Build commit & finalize tasks in parallel
-        let (commit_tasks, finalize_tasks) =
-            join(commit_tasks_fut, finalize_tasks_fut).await;
-        let commit_tasks = commit_tasks?;
-        let finalize_tasks = finalize_tasks?;
+            (commit_tasks?, finalize_tasks?)
+        };
 
-        // See if we can squeeze them in one tx
-        if let Some(single_tx_strategy) = Self::try_unite_tasks(
-            &commit_tasks,
-            &finalize_tasks,
+        // Build execution strategy
+        match TaskStrategist::build_execution_strategy(
+            commit_tasks,
+            finalize_tasks,
             &self.authority.pubkey(),
             persister,
         )? {
-            trace!("Executing intent in single stage");
-            let output = self
-                .single_stage_execution_flow(
+            StrategyExecutionMode::SingleStage(strategy) => {
+                trace!("Executing intent in single stage");
+                self.single_stage_execution_flow(
                     base_intent,
-                    single_tx_strategy,
+                    strategy,
                     persister,
                 )
-                .await?;
-
-            Ok(output)
-        } else {
-            // Build strategy for Commit stage
-            let commit_strategy = TaskStrategist::build_strategy(
-                commit_tasks,
-                &self.authority.pubkey(),
-                persister,
-            )?;
-
-            // Build strategy for Finalize stage
-            let finalize_strategy = TaskStrategist::build_strategy(
-                finalize_tasks,
-                &self.authority.pubkey(),
-                persister,
-            )?;
-
-            trace!("Executing intent in two stages");
-            let output = self
-                .two_stage_execution_flow(
+                .await
+            }
+            StrategyExecutionMode::TwoStage {
+                commit_stage,
+                finalize_stage,
+            } => {
+                trace!("Executing intent in two stages");
+                self.two_stage_execution_flow(
                     &committed_pubkeys,
-                    commit_strategy,
-                    finalize_strategy,
+                    commit_stage,
+                    finalize_stage,
                     persister,
                 )
-                .await?;
-
-            Ok(output)
+                .await
+            }
         }
     }
 
