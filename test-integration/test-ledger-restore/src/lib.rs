@@ -12,9 +12,18 @@ use integration_test_tools::{
 };
 use log::*;
 use magicblock_config::{
-    AccountsConfig, EphemeralConfig, LedgerConfig, LedgerResumeStrategy,
-    LifecycleMode, ProgramConfig, RemoteCluster, RemoteConfig,
-    TaskSchedulerConfig, ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES,
+    config::{
+        accounts::AccountsDbConfig, ledger::LedgerConfig,
+        scheduler::TaskSchedulerConfig, validator::ValidatorConfig,
+        LifecycleMode, LoadableProgram,
+    },
+    consts::DEFAULT_LEDGER_BLOCK_TIME_MS,
+    types::{
+        crypto::SerdePubkey,
+        network::{Remote, RemoteCluster},
+        StorageDirectory,
+    },
+    ValidatorParams,
 };
 use program_flexi_counter::{
     instruction::{create_delegate_ix, create_init_ix},
@@ -42,36 +51,36 @@ pub const FLEXI_COUNTER_PUBKEY: Pubkey =
 
 pub fn setup_offline_validator(
     ledger_path: &Path,
-    programs: Option<Vec<ProgramConfig>>,
+    programs: Option<Vec<LoadableProgram>>,
     millis_per_slot: Option<u64>,
-    resume_strategy: LedgerResumeStrategy,
+    reset_ledger: bool,
     skip_keypair_match_check: bool,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let mut accounts_config = AccountsConfig {
-        lifecycle: LifecycleMode::Offline,
+    let accountsdb_config = AccountsDbConfig {
+        snapshot_frequency: SNAPSHOT_FREQUENCY,
         ..Default::default()
     };
-    accounts_config.db.snapshot_frequency = SNAPSHOT_FREQUENCY;
 
-    let validator_config = millis_per_slot
-        .map(|ms| ValidatorConfig {
-            millis_per_slot: ms,
-            ..Default::default()
-        })
-        .unwrap_or_default();
+    let validator_config = ValidatorConfig::default();
 
     let programs = resolve_programs(programs);
 
-    let config = EphemeralConfig {
+    let config = ValidatorParams {
         ledger: LedgerConfig {
-            resume_strategy_config: resume_strategy.into(),
-            skip_keypair_match_check,
-            path: ledger_path.display().to_string(),
-            size: DEFAULT_LEDGER_SIZE_BYTES,
+            reset: reset_ledger,
+            verify_keypair: !skip_keypair_match_check,
+            block_time: millis_per_slot
+                .map(Duration::from_millis)
+                .unwrap_or_else(|| {
+                    Duration::from_millis(DEFAULT_LEDGER_BLOCK_TIME_MS)
+                }),
+            ..Default::default()
         },
-        accounts: accounts_config.clone(),
+        accountsdb: accountsdb_config.clone(),
         programs,
         validator: validator_config,
+        lifecycle: LifecycleMode::Offline,
+        storage: StorageDirectory(ledger_path.to_path_buf()),
         ..Default::default()
     };
     let (default_tmpdir_config, Some(mut validator), port) =
@@ -96,23 +105,15 @@ pub fn setup_offline_validator(
 /// and the local remote.
 pub fn setup_validator_with_local_remote(
     ledger_path: &Path,
-    programs: Option<Vec<ProgramConfig>>,
+    programs: Option<Vec<LoadableProgram>>,
     reset: bool,
     skip_keypair_match_check: bool,
     loaded_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let resume_strategy = if reset {
-        LedgerResumeStrategy::Reset {
-            slot: 0,
-            keep_accounts: false,
-        }
-    } else {
-        LedgerResumeStrategy::Resume { replay: true }
-    };
     setup_validator_with_local_remote_and_resume_strategy(
         ledger_path,
         programs,
-        resume_strategy,
+        reset,
         skip_keypair_match_check,
         loaded_accounts,
     )
@@ -125,34 +126,33 @@ pub fn setup_validator_with_local_remote(
 /// and the local remote.
 pub fn setup_validator_with_local_remote_and_resume_strategy(
     ledger_path: &Path,
-    programs: Option<Vec<ProgramConfig>>,
-    resume_strategy: LedgerResumeStrategy,
+    programs: Option<Vec<LoadableProgram>>,
+    reset_ledger: bool,
     skip_keypair_match_check: bool,
     loaded_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let mut accounts_config = AccountsConfig {
-        lifecycle: LifecycleMode::Ephemeral,
-        remote: RemoteConfig {
-            cluster: RemoteCluster::Custom,
-            url: Some(IntegrationTestContext::url_chain().try_into().unwrap()),
-            ws_url: None,
-        },
+    let accountsdb_config = AccountsDbConfig {
+        snapshot_frequency: SNAPSHOT_FREQUENCY,
+        reset: reset_ledger,
         ..Default::default()
     };
-    accounts_config.db.snapshot_frequency = SNAPSHOT_FREQUENCY;
 
     let programs = resolve_programs(programs);
 
-    let config = EphemeralConfig {
+    let config = ValidatorParams {
         ledger: LedgerConfig {
-            resume_strategy_config: resume_strategy.into(),
-            skip_keypair_match_check,
-            path: ledger_path.display().to_string(),
-            size: DEFAULT_LEDGER_SIZE_BYTES,
+            reset: reset_ledger,
+            verify_keypair: !skip_keypair_match_check,
+            ..Default::default()
         },
-        accounts: accounts_config.clone(),
+        accountsdb: accountsdb_config.clone(),
         programs,
         task_scheduler: TaskSchedulerConfig { reset: true },
+        lifecycle: LifecycleMode::Ephemeral,
+        remote: RemoteCluster::Single(Remote::Unified(
+            IntegrationTestContext::url_chain().parse().unwrap(),
+        )),
+        storage: StorageDirectory(ledger_path.to_path_buf()),
         ..Default::default()
     };
     // Fund validator on chain
@@ -472,10 +472,10 @@ pub fn assert_counter_commits_on_chain(
 // -----------------
 // Configs
 // -----------------
-pub fn get_programs_with_flexi_counter() -> Vec<ProgramConfig> {
-    vec![ProgramConfig {
-        id: FLEXI_COUNTER_ID.try_into().unwrap(),
-        path: "program_flexi_counter.so".to_string(),
+pub fn get_programs_with_flexi_counter() -> Vec<LoadableProgram> {
+    vec![LoadableProgram {
+        id: SerdePubkey(FLEXI_COUNTER_PUBKEY),
+        path: "program_flexi_counter.so".into(),
     }]
 }
 
