@@ -16,8 +16,6 @@ use solana_sdk::{
     system_program,
 };
 
-const DEFAULT_LAMPORTS_PER_SIGNATURE: u64 = 0;
-
 // Default amount received by the validator
 const VALIDATOR_LAMPORTS: u64 = 42;
 
@@ -29,7 +27,7 @@ pub struct GenesisConfigInfo {
 pub fn create_genesis_config_with_leader(
     mint_lamports: u64,
     validator_pubkey: &Pubkey,
-    lamports_per_signature: Option<u64>,
+    lamports_per_signature: u64,
 ) -> GenesisConfigInfo {
     let mint_keypair = Keypair::new();
 
@@ -40,8 +38,7 @@ pub fn create_genesis_config_with_leader(
         VALIDATOR_LAMPORTS,
         FeeRateGovernor {
             target_lamports_per_signature: 0,
-            lamports_per_signature: lamports_per_signature
-                .unwrap_or(DEFAULT_LAMPORTS_PER_SIGNATURE),
+            lamports_per_signature,
             target_signatures_per_slot: 0,
             ..FeeRateGovernor::default()
         },

@@ -3,7 +3,6 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use log::*;
-use magicblock_config::PrepareLookupTables;
 use serial_test::file_serial;
 use test_config::{
     count_lookup_table_transactions_on_chain, delegate_and_clone,
@@ -11,9 +10,7 @@ use test_config::{
 };
 use test_kit::init_logger;
 
-fn lookup_table_interaction(
-    config: PrepareLookupTables,
-) -> (usize, usize, usize) {
+fn lookup_table_interaction(config: bool) -> (usize, usize, usize) {
     let lookup_table_tx_count_before =
         count_lookup_table_transactions_on_chain(
             &IntegrationTestContext::try_new_chain_only().unwrap(),
@@ -63,7 +60,7 @@ fn test_clone_config_never() {
         lookup_table_tx_count_before,
         lookup_table_tx_count_after_start,
         lookup_table_tx_count_after_clone,
-    ) = lookup_table_interaction(PrepareLookupTables::Never);
+    ) = lookup_table_interaction(false);
 
     debug!(
         "Lookup table tx count before: {}, after start: {}, after clone: {}",
@@ -93,7 +90,7 @@ fn test_clone_config_always() {
         lookup_table_tx_count_before,
         lookup_table_tx_count_after_start,
         lookup_table_tx_count_after_clone,
-    ) = lookup_table_interaction(PrepareLookupTables::Always);
+    ) = lookup_table_interaction(true);
 
     debug!(
         "Lookup table tx count before: {}, after start: {}, after clone: {}",
