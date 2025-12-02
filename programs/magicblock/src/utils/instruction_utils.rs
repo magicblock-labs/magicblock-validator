@@ -223,6 +223,7 @@ impl InstructionUtils {
                     rent_epoch: account_modification.rent_epoch,
                     delegated: account_modification.delegated,
                     compressed: account_modification.compressed,
+                    confined: account_modification.confined,
                 };
             account_mods.insert(
                 account_modification.pubkey,
