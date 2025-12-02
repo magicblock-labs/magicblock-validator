@@ -244,6 +244,7 @@ fn init_and_delegate_player(
     (player, player_pda)
 }
 
+#[allow(clippy::result_large_err)]
 fn schedule_commit_tx(
     ctx: &IntegrationTestContext,
     payer: &Keypair,

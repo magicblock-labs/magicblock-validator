@@ -86,7 +86,7 @@ pub fn allocate_account_and_assign_owner(
             size.try_into().unwrap(),
         ),
         // 0. `[WRITE, SIGNER]` New account
-        &[account_info.clone()],
+        std::slice::from_ref(account_info),
         &[signer_seeds],
     )?;
 
@@ -95,7 +95,7 @@ pub fn allocate_account_and_assign_owner(
     invoke_signed(
         &system_instruction::assign(account_info.key, owner),
         // 0. `[WRITE, SIGNER]` Assigned account public key
-        &[account_info.clone()],
+        std::slice::from_ref(account_info),
         &[signer_seeds],
     )?;
 

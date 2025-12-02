@@ -16,6 +16,7 @@ use solana_sdk::{
 
 use crate::conversions::stringify_simulation_result;
 
+#[allow(clippy::result_large_err)]
 pub fn send_and_confirm_instructions_with_payer(
     rpc_client: &solana_rpc_client::rpc_client::RpcClient,
     ixs: &[Instruction],
@@ -35,6 +36,7 @@ pub fn send_and_confirm_instructions_with_payer(
         .map(|confirmed| (sig, confirmed))
 }
 
+#[allow(clippy::result_large_err)]
 pub fn send_instructions_with_payer(
     rpc_client: &RpcClient,
     ixs: &[Instruction],
@@ -47,6 +49,7 @@ pub fn send_instructions_with_payer(
     Ok((sig, tx))
 }
 
+#[allow(clippy::result_large_err)]
 pub fn send_transaction(
     rpc_client: &RpcClient,
     tx: &mut Transaction,
@@ -65,6 +68,7 @@ pub fn send_transaction(
     Ok(sig)
 }
 
+#[allow(clippy::result_large_err)]
 pub fn send_and_confirm_transaction(
     rpc_client: &RpcClient,
     tx: &mut Transaction,
@@ -76,6 +80,7 @@ pub fn send_and_confirm_transaction(
         .map(|confirmed| (sig, confirmed))
 }
 
+#[allow(clippy::result_large_err)]
 pub fn confirm_transaction(
     sig: &Signature,
     rpc_client: &RpcClient,

@@ -97,7 +97,7 @@ impl Chunks {
         &mut self,
         offset: usize,
     ) -> Result<(), ChunksError> {
-        if !offset.is_multiple_of(self.chunk_size as usize) {
+        if offset % self.chunk_size as usize != 0 {
             Err(ChunksError::InvalidOffsetError(offset, self.chunk_size))
         } else {
             let idx = offset / self.chunk_size as usize;
@@ -112,7 +112,7 @@ impl Chunks {
         &self,
         offset: usize,
     ) -> Result<bool, ChunksError> {
-        if !offset.is_multiple_of(self.chunk_size as usize) {
+        if offset % self.chunk_size as usize != 0 {
             return Err(ChunksError::InvalidOffsetError(
                 offset,
                 self.chunk_size,
