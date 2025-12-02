@@ -13,8 +13,6 @@ members = [
   "magicblock-committor-program",
   "magicblock-committor-service",
   "magicblock-config",
-  "magicblock-config-helpers",
-  "magicblock-config-macro",
   "magicblock-core",
   "magicblock-aperture",
   "magicblock-magic-program-api",
@@ -58,20 +56,21 @@ borsh = { version = "1.5.1", features = ["derive", "unstable__schema"] }
 borsh-derive = "1.5.1"
 bs58 = "0.5.1"
 byteorder = "1.5.0"
-cargo-expand = "1"
 cargo-lock = "10.0.0"
 chrono = "0.4"
 clap = "4.5.40"
-console-subscriber = "0.2.0"
+console-subscriber = "0.5.0"
 const_format = "0.2.34"
 convert_case = "0.8.0"
 crossbeam-channel = "0.5.11"
+derive_more = "2.0"
 dyn-clone = "1.0.20"
 ed25519-dalek = "1.0.1"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"
 fastwebsockets = "0.10"
 fd-lock = "4.0.2"
+figment = "0.10"
 flume = "0.11"
 fs_extra = "1.3.0"
 futures = "0.3"
@@ -79,6 +78,7 @@ futures-util = "0.3.30"
 git-version = "0.3.9"
 hostname = "0.4.0"
 http-body-util = "0.1.3"
+humantime = { version = "1.1", package = "humantime-serde" }
 hyper = "1.6.0"
 hyper-util = "0.1.15"
 isocountry = "0.3.2"
@@ -93,7 +93,6 @@ lazy_static = "1.4.0"
 libc = "0.2.153"
 log = { version = "0.4.20" }
 lru = "0.16.0"
-macrotest = "1"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
 magicblock-accounts = { path = "./magicblock-accounts" }
@@ -151,6 +150,8 @@ semver = "1.0.22"
 serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
+serde_with = "3.16"
+serial_test = "3.2"
 sha3 = "0.10.8"
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "1beed4c" }
 solana-account-decoder = { version = "2.2" }
@@ -221,7 +222,7 @@ vergen = "8.3.1"
 
 [workspace.dependencies.solana-svm]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "e480fa2"
+rev = "86c2cb0f"
 features = ["dev-context-only-utils"]
 
 [patch.crates-io]
@@ -230,4 +231,4 @@ features = ["dev-context-only-utils"]
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "1beed4c" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "e480fa2" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "86c2cb0f" }

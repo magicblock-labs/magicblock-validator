@@ -6,7 +6,7 @@ use std::{
 
 use futures_util::StreamExt;
 use log::*;
-use magicblock_config::TaskSchedulerConfig;
+use magicblock_config::config::TaskSchedulerConfig;
 use magicblock_core::link::transactions::{
     ScheduledTasksRx, TransactionSchedulerHandle,
 };
@@ -45,7 +45,7 @@ pub struct TaskSchedulerService {
     /// Queue of tasks to execute
     task_queue: DelayQueue<DbTask>,
     /// Map of task IDs to their corresponding keys in the task queue
-    task_queue_keys: HashMap<u64, Key>,
+    task_queue_keys: HashMap<i64, Key>,
     /// Counter used to make each transaction unique
     tx_counter: AtomicU64,
     /// Token used to cancel the task scheduler
@@ -99,11 +99,11 @@ impl TaskSchedulerService {
         })
     }
 
-    pub fn start(
+    pub async fn start(
         mut self,
     ) -> TaskSchedulerResult<JoinHandle<TaskSchedulerResult<()>>> {
-        let tasks = self.db.get_tasks()?;
-        let now = chrono::Utc::now().timestamp_millis() as u64;
+        let tasks = self.db.get_tasks().await?;
+        let now = chrono::Utc::now().timestamp_millis();
         debug!(
             "Task scheduler starting at {} with {} tasks",
             now,
@@ -112,8 +112,9 @@ impl TaskSchedulerService {
         for task in tasks {
             let next_execution =
                 task.last_execution_millis + task.execution_interval_millis;
-            let timeout =
-                Duration::from_millis(next_execution.saturating_sub(now));
+            let timeout = Duration::from_millis(
+                next_execution.saturating_sub(now) as u64,
+            );
             let task_id = task.id;
             let key = self.task_queue.insert(task, timeout);
             self.task_queue_keys.insert(task_id, key);
@@ -122,17 +123,19 @@ impl TaskSchedulerService {
         Ok(tokio::spawn(self.run()))
     }
 
-    fn process_request(
+    async fn process_request(
         &mut self,
         request: &TaskRequest,
     ) -> TaskSchedulerResult<ProcessingOutcome> {
         match request {
             TaskRequest::Schedule(schedule_request) => {
-                if let Err(e) = self.register_task(schedule_request) {
-                    self.db.insert_failed_scheduling(
-                        schedule_request.id,
-                        format!("{:?}", e),
-                    )?;
+                if let Err(e) = self.register_task(schedule_request).await {
+                    self.db
+                        .insert_failed_scheduling(
+                            schedule_request.id,
+                            format!("{:?}", e),
+                        )
+                        .await?;
                     error!(
                         "Failed to process schedule request {}: {}",
                         schedule_request.id, e
@@ -142,11 +145,15 @@ impl TaskSchedulerService {
                 }
             }
             TaskRequest::Cancel(cancel_request) => {
-                if let Err(e) = self.process_cancel_request(cancel_request) {
-                    self.db.insert_failed_scheduling(
-                        cancel_request.task_id,
-                        format!("{:?}", e),
-                    )?;
+                if let Err(e) =
+                    self.process_cancel_request(cancel_request).await
+                {
+                    self.db
+                        .insert_failed_scheduling(
+                            cancel_request.task_id,
+                            format!("{:?}", e),
+                        )
+                        .await?;
                     error!(
                         "Failed to process cancel request for task {}: {}",
                         cancel_request.task_id, e
@@ -160,11 +167,11 @@ impl TaskSchedulerService {
         Ok(ProcessingOutcome::Success)
     }
 
-    fn process_cancel_request(
+    async fn process_cancel_request(
         &mut self,
         cancel_request: &CancelTaskRequest,
     ) -> TaskSchedulerResult<()> {
-        let Some(task) = self.db.get_task(cancel_request.task_id)? else {
+        let Some(task) = self.db.get_task(cancel_request.task_id).await? else {
             // Task not found in the database, cleanup the queue
             self.remove_task_from_queue(cancel_request.task_id);
             return Ok(());
@@ -182,7 +189,7 @@ impl TaskSchedulerService {
         self.remove_task_from_queue(cancel_request.task_id);
 
         // Remove task from database
-        self.unregister_task(cancel_request.task_id)?;
+        self.unregister_task(cancel_request.task_id).await?;
 
         Ok(())
     }
@@ -205,25 +212,27 @@ impl TaskSchedulerService {
             };
             let key = self.task_queue.insert(
                 new_task,
-                Duration::from_millis(task.execution_interval_millis),
+                Duration::from_millis(task.execution_interval_millis as u64),
             );
             self.task_queue_keys.insert(task.id, key);
         }
 
         let current_time = chrono::Utc::now().timestamp_millis();
-        self.db.update_task_after_execution(task.id, current_time)?;
+        self.db
+            .update_task_after_execution(task.id, current_time)
+            .await?;
 
         Ok(())
     }
 
-    pub fn register_task(
+    pub async fn register_task(
         &mut self,
         task: impl Into<DbTask>,
     ) -> TaskSchedulerResult<()> {
         let task = task.into();
 
         // Check if the task already exists in the database
-        if let Some(db_task) = self.db.get_task(task.id)? {
+        if let Some(db_task) = self.db.get_task(task.id).await? {
             if db_task.authority != task.authority {
                 return Err(TaskSchedulerError::UnauthorizedReplacing(
                     task.id,
@@ -233,7 +242,7 @@ impl TaskSchedulerService {
             }
         }
 
-        self.db.insert_task(&task)?;
+        self.db.insert_task(&task).await?;
         self.task_queue
             .insert(task.clone(), Duration::from_millis(0));
         debug!("Registered task {} from context", task.id);
@@ -241,8 +250,11 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    pub fn unregister_task(&self, task_id: u64) -> TaskSchedulerResult<()> {
-        self.db.remove_task(task_id)?;
+    pub async fn unregister_task(
+        &self,
+        task_id: i64,
+    ) -> TaskSchedulerResult<()> {
+        self.db.remove_task(task_id).await?;
         debug!("Removed task {} from database", task_id);
 
         Ok(())
@@ -258,12 +270,12 @@ impl TaskSchedulerService {
                         error!("Failed to execute task {}: {}", task.id, e);
 
                         // If any instruction fails, the task is cancelled
-                        self.db.remove_task(task.id)?;
-                        self.db.insert_failed_task(task.id, format!("{:?}", e))?;
+                        self.db.remove_task(task.id).await?;
+                        self.db.insert_failed_task(task.id, format!("{:?}", e)).await?;
                     }
                 }
                 Some(task) = self.scheduled_tasks.recv() => {
-                    match self.process_request(&task) {
+                    match self.process_request(&task).await {
                         Ok(ProcessingOutcome::Success) => {}
                         Ok(ProcessingOutcome::Recoverable(e)) => {
                             warn!("Failed to process request ID={}: {e:?}", task.id());
@@ -283,7 +295,7 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    fn remove_task_from_queue(&mut self, task_id: u64) {
+    fn remove_task_from_queue(&mut self, task_id: i64) {
         if let Some(key) = self.task_queue_keys.remove(&task_id) {
             self.task_queue.remove(&key);
         }

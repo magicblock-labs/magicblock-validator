@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, path::PathBuf};
 
 use log::*;
 use solana_account::{AccountSharedData, WritableAccount};
@@ -15,11 +15,13 @@ impl TransactionSchedulerState {
     /// Loads BPF upgradeable programs from file paths directly into the `AccountsDb`.
     pub fn load_upgradeable_programs(
         &self,
-        progs: &[(Pubkey, String)],
+        progs: &[(Pubkey, PathBuf)],
     ) -> Result<(), Box<dyn Error>> {
         debug!("Loading programs from files: {:#?}", progs);
         for (id, path) in progs {
-            let elf = std::fs::read(path)?;
+            let elf = std::fs::read(path).map_err(|err| {
+                format!("Failed to read program file for {id}: {err}")
+            })?;
             self.add_program(id, &elf)?;
         }
         Ok(())

@@ -2,6 +2,7 @@
 
 use std::{
     hash::Hash,
+    net::SocketAddr,
     os::fd::AsFd,
     sync::{
         atomic::{AtomicU16, Ordering},
@@ -16,7 +17,7 @@ use magicblock_aperture::{
     state::{ChainlinkImpl, NodeContext, SharedState},
     JsonRpcServer,
 };
-use magicblock_config::RpcConfig;
+use magicblock_config::types::BindAddress;
 use magicblock_core::{
     link::accounts::LockedAccount, traits::AccountsBank, Slot,
 };
@@ -91,36 +92,40 @@ impl RpcTestEnv {
 
         // Try to find a free port, this is handy when using nextest
         // where each test needs to run in a separate process.
-        let (server, config) = loop {
+        let (server, socket) = loop {
             let port: u16 = rand::random_range(7000..u16::MAX - 1);
             let node_context = NodeContext {
                 identity: execution.payer.pubkey(),
                 faucet: Some(faucet.insecure_clone()),
                 base_fee: Self::BASE_FEE,
                 featureset: Default::default(),
+                blocktime: BLOCK_TIME_MS,
             };
             let state = SharedState::new(
                 node_context,
                 execution.accountsdb.clone(),
                 execution.ledger.clone(),
                 chainlink(&execution.accountsdb),
-                BLOCK_TIME_MS,
             );
             let cancel = CancellationToken::new();
-            let addr = "0.0.0.0".parse().unwrap();
-            let config = RpcConfig { addr, port };
-            let server =
-                JsonRpcServer::new(&config, state, &execution.dispatch, cancel)
-                    .await;
+            let addr = "127.0.0.1".parse().unwrap();
+            let socket = SocketAddr::new(addr, port);
+            let server = JsonRpcServer::new(
+                BindAddress(socket),
+                state,
+                &execution.dispatch,
+                cancel,
+            )
+            .await;
             if let Ok(server) = server {
-                break (server, config);
+                break (server, socket);
             }
         };
 
         tokio::spawn(server.run());
 
-        let rpc_url = format!("http://{}:{}", config.addr, config.port);
-        let pubsub_url = format!("ws://{}:{}", config.addr, config.port + 1);
+        let rpc_url = format!("http://{socket}");
+        let pubsub_url = format!("ws://{}:{}", socket.ip(), socket.port() + 1);
 
         let rpc = RpcClient::new(rpc_url);
         let pubsub = PubsubClient::new(&pubsub_url)

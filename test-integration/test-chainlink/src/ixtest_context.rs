@@ -6,8 +6,8 @@ use integration_test_tools::dlp_interface;
 use log::*;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
-    cloner::Cloner,
-    config::{ChainlinkConfig, LifecycleMode},
+    cloner::{AccountCloneRequest, Cloner},
+    config::ChainlinkConfig,
     fetch_cloner::FetchCloner,
     native_program_accounts,
     remote_account_provider::{
@@ -23,6 +23,7 @@ use magicblock_chainlink::{
     testing::cloner_stub::ClonerStub,
     Chainlink,
 };
+use magicblock_config::config::LifecycleMode;
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -100,7 +101,11 @@ impl IxtestContext {
             );
             for pubkey in native_programs {
                 cloner
-                    .clone_account(pubkey, program_stub.clone())
+                    .clone_account(AccountCloneRequest {
+                        pubkey,
+                        account: program_stub.clone(),
+                        commit_frequency_ms: None,
+                    })
                     .await
                     .unwrap();
             }
