@@ -19,6 +19,7 @@ num-format = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-metrics = { workspace = true }
 scc = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-measure = { workspace = true }

@@ -254,6 +254,15 @@ where
         write_batch.delete::<C>(key);
     }
 
+    pub fn delete_range(
+        &self,
+        from: C::Index,
+        to: C::Index,
+    ) -> LedgerResult<()> {
+        self.backend
+            .delete_range_cf(self.handle(), C::key(from), C::key(to))
+    }
+
     pub fn delete_range_in_batch(
         &self,
         write_batch: &mut WriteBatch,
