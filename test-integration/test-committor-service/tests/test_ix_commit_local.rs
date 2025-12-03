@@ -247,9 +247,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
 async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
     commit_5_accounts_1kb(
         3,
-        expect_strategies(&[
-            (CommitStrategy::FromBuffer, 5),
-        ]),
+        expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
         true,
     )
     .await;

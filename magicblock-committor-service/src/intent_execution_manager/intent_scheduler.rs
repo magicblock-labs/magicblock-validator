@@ -731,7 +731,8 @@ pub(crate) fn create_test_intent(
     is_undelegate: bool,
 ) -> ScheduledBaseIntentWrapper {
     use magicblock_program::magic_scheduled_base_intent::{
-        CommitType, CommittedAccount, MagicBaseIntent,
+        CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
+        ScheduledBaseIntent, UndelegateType,
     };
     use solana_account::Account;
     use solana_sdk::{hash::Hash, transaction::Transaction};
