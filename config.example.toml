@@ -209,8 +209,8 @@ reset = false
 
 # The minimum interval between task executions, in milliseconds.
 # Default: 10
-# Env: MBV_TASK_SCHEDULER__MIN_INTERVAL_MILLIS
-min-interval-millis = 10
+# Env: MBV_TASK_SCHEDULER__MIN_INTERVAL
+min-interval = "10ms"
 
 # ==============================================================================
 # Pre-loaded Programs
