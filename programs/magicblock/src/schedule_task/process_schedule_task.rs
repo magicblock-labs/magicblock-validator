@@ -220,7 +220,7 @@ mod test {
 
         let args = ScheduleTaskArgs {
             task_id: 1,
-            execution_interval_millis: 10,
+            execution_interval_millis: min_task_scheduler_interval(),
             iterations: 1,
             instructions: vec![create_simple_ix()],
         };
@@ -242,7 +242,7 @@ mod test {
 
         let args = ScheduleTaskArgs {
             task_id: 1,
-            execution_interval_millis: 10,
+            execution_interval_millis: min_task_scheduler_interval(),
             iterations: 1,
             instructions: vec![create_complex_ix(&pdas, writable, signer)],
         };
@@ -374,7 +374,7 @@ mod test {
         );
         process_instruction(
             &ix.data,
-            transaction_accounts.clone(),
+            transaction_accounts,
             ix.accounts,
             Err(InstructionError::InvalidInstructionData),
         );
