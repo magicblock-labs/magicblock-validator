@@ -129,10 +129,13 @@ impl ScheduledCommitsProcessorImpl {
         (intent, pubkeys_being_undelegated)
     }
 
-    async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
+    async fn process_undelegation_requests(
+        chainlink: Arc<ChainlinkImpl>,
+        pubkeys: Vec<Pubkey>,
+    ) {
         let mut join_set = task::JoinSet::new();
         for pubkey in pubkeys.into_iter() {
-            let chainlink = self.chainlink.clone();
+            let chainlink = chainlink.clone();
             join_set.spawn(async move {
                 (pubkey, chainlink.undelegation_requested(pubkey).await)
             });
@@ -354,8 +357,10 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
             )
         };
 
-        self.process_undelegation_requests(pubkeys_being_undelegated)
-            .await;
+        tokio::spawn(Self::process_undelegation_requests(
+            self.chainlink.clone(),
+            pubkeys_being_undelegated,
+        ));
         self.committor.schedule_base_intent(intents).await??;
         Ok(())
     }
