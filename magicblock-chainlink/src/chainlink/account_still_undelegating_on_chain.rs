@@ -15,7 +15,7 @@ use solana_pubkey::Pubkey;
 /// - `pubkey`: the account pubkey
 /// - `is_delegated_on_chain`: whether the account is currently delegated to us on chain
 /// - `remote_slot_in_bank`: the chain slot at which we last fetched and cloned state
-///                  of the account in our bank
+///   of the account in our bank
 /// - `delegation_record`: the delegation record associated with the account in our bank, if found
 /// - `validator_auth`: the validator authority pubkey
 /// - returns `true` if the account is still undelegating, `false` otherwise.

@@ -1,3 +1,5 @@
+#![allow(clippy::manual_is_multiple_of)]
+
 use solana_pubkey::declare_id;
 pub mod consts;
 pub mod error;
