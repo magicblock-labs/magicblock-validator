@@ -207,8 +207,9 @@ claim-fees-frequency = "24h"
 # Env: MBV_TASK_SCHEDULER__RESET
 reset = false
 
-# The minimum interval between task executions, in milliseconds.
-# Default: 10
+# The minimum interval between task executions.
+# Supports humantime (e.g. "10ms", "1s").
+# Default: "10ms"
 # Env: MBV_TASK_SCHEDULER__MIN_INTERVAL
 min-interval = "10ms"
 
