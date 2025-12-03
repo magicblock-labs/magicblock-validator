@@ -1291,13 +1291,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 inc_compressed_account_fetches_failed(pubkeys.len() as u64);
             })?;
 
-        // TODO: we should retry if the slot is not high enough
-        if slot < min_context_slot {
-            return Err(RemoteAccountProviderError::FailedFetchingAccounts(
-                format!("slot {slot} < min_context_slot {min_context_slot}"),
-            ));
-        }
-
         let remote_accounts = compressed_accounts
             .into_iter()
             .map(|acc_opt| match acc_opt {
