@@ -60,11 +60,12 @@ pub(crate) fn process_schedule_task(
     }
 
     // Enforce minimal execution interval
-    if args.execution_interval_millis < min_task_scheduler_interval() {
+    let min_interval = min_task_scheduler_interval();
+    if args.execution_interval_millis < min_interval {
         ic_msg!(
             invoke_context,
             "ScheduleTask ERR: execution interval must be at least {} milliseconds",
-            min_task_scheduler_interval()
+            min_interval
         );
         return Err(InstructionError::InvalidInstructionData);
     }
