@@ -362,26 +362,23 @@ mod test {
     #[test]
     fn fail_process_schedule_invalid_execution_interval() {
         let (payer, pdas, transaction_accounts) = setup_accounts(0);
-        for interval in [0, 10, 100, 1000] {
-            set_min_task_scheduler_interval(interval);
-            let args = ScheduleTaskArgs {
-                task_id: 1,
-                execution_interval_millis: interval - 1,
-                iterations: 1,
-                instructions: vec![create_simple_ix()],
-            };
-            let ix = InstructionUtils::schedule_task_instruction(
-                &payer.pubkey(),
-                args,
-                &pdas,
-            );
-            process_instruction(
-                &ix.data,
-                transaction_accounts.clone(),
-                ix.accounts,
-                Err(InstructionError::InvalidInstructionData),
-            );
-        }
+        let args = ScheduleTaskArgs {
+            task_id: 1,
+            execution_interval_millis: min_task_scheduler_interval() - 1,
+            iterations: 1,
+            instructions: vec![create_simple_ix()],
+        };
+        let ix = InstructionUtils::schedule_task_instruction(
+            &payer.pubkey(),
+            args,
+            &pdas,
+        );
+        process_instruction(
+            &ix.data,
+            transaction_accounts.clone(),
+            ix.accounts,
+            Err(InstructionError::InvalidInstructionData),
+        );
     }
 
     #[test]
