@@ -946,7 +946,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 min_context_slot,
                 program_ids.clone(),
             ));
-            if let Some(photon_client) = photon_client {
+            if let Some(ref photon_client) = photon_client {
                 let photon_client = photon_client.clone();
                 join_set.spawn(Self::fetch_from_photon(
                     photon_client,
@@ -1004,16 +1004,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             inc_account_fetches_found(fetch_origin, found_count);
             inc_account_fetches_not_found(fetch_origin, not_found_count);
 
-            // Update metrics for successful compressed fetch
-            inc_compressed_account_fetches_success(pubkeys.len() as u64);
-            inc_compressed_account_fetches_found(
-                fetch_origin,
-                compressed_found_count,
-            );
-            inc_compressed_account_fetches_not_found(
-                fetch_origin,
-                compressed_not_found_count,
-            );
+            if photon_client.is_some() {
+                // Update metrics for successful compressed fetch
+                inc_compressed_account_fetches_success(pubkeys.len() as u64);
+                inc_compressed_account_fetches_found(
+                    fetch_origin,
+                    compressed_found_count,
+                );
+                inc_compressed_account_fetches_not_found(
+                    fetch_origin,
+                    compressed_not_found_count,
+                );
+            }
 
             // Record per-program metrics if programs were provided
             if let Some(program_ids) = &program_ids {
