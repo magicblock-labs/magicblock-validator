@@ -397,6 +397,10 @@ impl DeliveryPreparator {
         lookup_table_keys: &[Pubkey],
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>, InternalError>
     {
+        if lookup_table_keys.is_empty() {
+            return Ok(vec![]);
+        }
+
         let pubkeys = HashSet::from_iter(lookup_table_keys.iter().copied());
         self.table_mania
             .reserve_pubkeys(authority, &pubkeys)
