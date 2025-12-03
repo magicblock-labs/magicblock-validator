@@ -7,8 +7,9 @@ use std::{
 use futures_util::StreamExt;
 use log::*;
 use magicblock_config::config::TaskSchedulerConfig;
-use magicblock_core::link::transactions::{
-    ScheduledTasksRx, TransactionSchedulerHandle,
+use magicblock_core::{
+    link::transactions::{ScheduledTasksRx, TransactionSchedulerHandle},
+    NOOP_PROGRAM_ID,
 };
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
@@ -16,8 +17,8 @@ use magicblock_program::{
     validator::{validator_authority, validator_authority_id},
 };
 use solana_sdk::{
-    instruction::Instruction, message::Message, pubkey::Pubkey,
-    signature::Signature, transaction::Transaction,
+    instruction::Instruction, message::Message, signature::Signature,
+    transaction::Transaction,
 };
 use tokio::{select, task::JoinHandle, time::Duration};
 use tokio_util::{
@@ -29,9 +30,6 @@ use crate::{
     db::{DbTask, SchedulerDatabase},
     errors::{TaskSchedulerError, TaskSchedulerResult},
 };
-
-const NOOP_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
 pub struct TaskSchedulerService {
     /// Database for persisting tasks

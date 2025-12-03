@@ -43,7 +43,7 @@ use magicblock_core::{
     link::{
         blocks::BlockUpdateTx, link, transactions::TransactionSchedulerHandle,
     },
-    Slot,
+    Slot, NOOP_PROGRAM_ID,
 };
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
@@ -230,6 +230,17 @@ impl MagicValidator {
                 > 0,
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
+        txn_scheduler_state
+            .add_program(
+                &NOOP_PROGRAM_ID,
+                include_bytes!("../../programs/noop/noop.so"),
+            )
+            .map_err(|err| {
+                ApiError::FailedToLoadProgramsIntoBank(format!(
+                    "Noop program: {:?}",
+                    err
+                ))
+            })?;
         txn_scheduler_state
             .load_upgradeable_programs(&programs_to_load(&config.programs))
             .map_err(|err| {

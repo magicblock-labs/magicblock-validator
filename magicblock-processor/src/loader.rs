@@ -28,7 +28,7 @@ impl TransactionSchedulerState {
     }
 
     /// Creates and stores the accounts for a BPF upgradeable program.
-    fn add_program(
+    pub fn add_program(
         &self,
         id: &Pubkey,
         elf: &[u8],

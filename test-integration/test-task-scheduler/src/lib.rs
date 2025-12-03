@@ -26,8 +26,8 @@ use program_flexi_counter::instruction::{
     create_delegate_ix_with_commit_frequency_ms, create_init_ix,
 };
 use solana_sdk::{
-    hash::Hash, instruction::Instruction, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    pubkey::Pubkey, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
 use tempfile::TempDir;
 
@@ -125,37 +125,4 @@ pub fn create_delegated_counter(
 
     // Wait for account to be delegated
     expect!(ctx.wait_for_delta_slot_ephem(10), validator);
-}
-
-pub fn send_noop_tx(
-    ctx: &IntegrationTestContext,
-    payer: &Keypair,
-    validator: &mut Child,
-) -> Hash {
-    // Noop tx to make sure the noop program is cloned
-    let ephem_blockhash = expect!(
-        ctx.try_ephem_client().and_then(|client| client
-            .get_latest_blockhash()
-            .map_err(|e| anyhow::anyhow!(
-                "Failed to get latest blockhash: {}",
-                e
-            ))),
-        validator
-    );
-    let noop_instruction =
-        Instruction::new_with_bytes(NOOP_PROGRAM_ID, &[0], vec![]);
-    expect!(
-        ctx.send_transaction_ephem(
-            &mut Transaction::new_signed_with_payer(
-                &[noop_instruction],
-                Some(&payer.pubkey()),
-                &[&payer],
-                ephem_blockhash,
-            ),
-            &[payer]
-        ),
-        validator
-    );
-
-    ephem_blockhash
 }

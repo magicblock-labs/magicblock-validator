@@ -143,6 +143,7 @@ pub(crate) fn process_schedule_task(
 
 #[cfg(test)]
 mod test {
+    use magicblock_core::NOOP_PROGRAM_ID;
     use magicblock_magic_program_api::instruction::MagicBlockInstruction;
     use solana_sdk::{
         account::AccountSharedData,
@@ -154,9 +155,7 @@ mod test {
 
     use super::*;
     use crate::{
-        test_utils::{
-            process_instruction, COUNTER_PROGRAM_ID, NOOP_PROGRAM_ID,
-        },
+        test_utils::{process_instruction, COUNTER_PROGRAM_ID},
         utils::instruction_utils::InstructionUtils,
         validator::generate_validator_authority_if_needed,
     };
