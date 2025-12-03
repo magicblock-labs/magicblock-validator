@@ -10,7 +10,8 @@ use crate::consts;
 pub struct TaskSchedulerConfig {
     /// If true, clears all pending scheduled tasks on startup.
     pub reset: bool,
-    /// The minimum interval between task executions, in milliseconds.
+    /// The minimum interval between task executions.
+    /// Supports humantime (e.g. "10ms", "1s").
     #[serde(with = "humantime")]
     pub min_interval: Duration,
 }
