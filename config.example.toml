@@ -207,6 +207,11 @@ claim-fees-frequency = "24h"
 # Env: MBV_TASK_SCHEDULER__RESET
 reset = false
 
+# The minimum frequency for a task to be executed, in milliseconds.
+# Default: 10
+# Env: MBV_TASK_SCHEDULER__MIN_FREQUENCY_MILLIS
+min-frequency-millis = 10
+
 # ==============================================================================
 # Pre-loaded Programs
 # ==============================================================================

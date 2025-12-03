@@ -34,3 +34,6 @@ pub const DEFAULT_LEDGER_SIZE: u64 = 100 * 1024 * 1024 * 1024; // 100 GB
 // Metrics Defaults
 pub const DEFAULT_METRICS_ADDR: &str = "0.0.0.0:9000";
 pub const DEFAULT_METRICS_COLLECT_FREQUENCY_SEC: u64 = 30;
+
+// Task Scheduler Defaults
+pub const DEFAULT_TASK_SCHEDULER_MIN_FREQUENCY_MILLIS: i64 = 10;

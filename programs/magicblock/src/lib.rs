@@ -3,6 +3,7 @@ mod magic_context;
 mod mutate_accounts;
 mod schedule_task;
 mod schedule_transactions;
+pub mod task_scheduler_frequency;
 mod toggle_executable_check;
 pub use magic_context::MagicContext;
 pub mod magic_scheduled_base_intent;

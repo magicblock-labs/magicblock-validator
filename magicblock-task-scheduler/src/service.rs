@@ -13,6 +13,7 @@ use magicblock_core::link::transactions::{
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
     args::{CancelTaskRequest, TaskRequest},
+    task_scheduler_frequency::set_min_task_scheduler_frequency,
     validator::{validator_authority, validator_authority_id},
 };
 use solana_sdk::{
@@ -72,6 +73,7 @@ impl TaskSchedulerService {
         block: LatestBlock,
         token: CancellationToken,
     ) -> Result<Self, TaskSchedulerError> {
+        set_min_task_scheduler_frequency(config.min_frequency_millis);
         if config.reset {
             match std::fs::remove_file(path) {
                 Ok(_) => {}

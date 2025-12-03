@@ -46,7 +46,10 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
             ws: IntegrationTestContext::ws_url_chain().parse().unwrap(),
         }),
         accountsdb: AccountsDbConfig::default(),
-        task_scheduler: TaskSchedulerConfig { reset: true },
+        task_scheduler: TaskSchedulerConfig {
+            reset: true,
+            ..Default::default()
+        },
         validator: ValidatorConfig {
             ..Default::default()
         },

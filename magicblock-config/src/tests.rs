@@ -461,6 +461,7 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     // Task scheduler reset should be false
     assert!(!config.task_scheduler.reset);
+    assert_eq!(config.task_scheduler.min_frequency_millis, 10);
 
     // The example file has the programs section with 2 entries
     assert_eq!(
@@ -514,6 +515,7 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
         // --- Task Scheduler ---
         EnvVarGuard::new("MBV_TASK_SCHEDULER__RESET", "true"),
+        EnvVarGuard::new("MBV_TASK_SCHEDULER__MIN_FREQUENCY_MILLIS", "99"),
         // --- Chain Operation (Optional Section) ---
         // Figment can instantiate optional structs if their fields are present
         EnvVarGuard::new("MBV_CHAIN_OPERATION__COUNTRY_CODE", "DE"),
@@ -567,6 +569,7 @@ fn test_env_vars_full_coverage() {
 
     // Task Scheduler
     assert!(config.task_scheduler.reset);
+    assert_eq!(config.task_scheduler.min_frequency_millis, 99);
 
     // Chain Operation
     // Verify the optional struct was created and populated

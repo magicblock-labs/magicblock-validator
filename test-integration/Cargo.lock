@@ -3921,6 +3921,7 @@ version = "0.3.1"
 dependencies = [
  "bincode",
  "lazy_static",
+ "magicblock-config",
  "magicblock-core",
  "magicblock-magic-program-api 0.3.1",
  "magicblock-metrics",
