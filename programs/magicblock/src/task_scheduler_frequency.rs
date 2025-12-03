@@ -4,8 +4,9 @@ use lazy_static::lazy_static;
 use magicblock_config::consts;
 
 lazy_static! {
-    static ref MIN_TASK_SCHEDULER_INTERVAL: AtomicI64 =
-        AtomicI64::new(consts::DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS);
+    static ref MIN_TASK_SCHEDULER_INTERVAL: AtomicI64 = AtomicI64::new(
+        consts::DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS as i64
+    );
 }
 
 pub fn min_task_scheduler_interval() -> i64 {

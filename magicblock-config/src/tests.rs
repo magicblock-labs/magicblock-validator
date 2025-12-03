@@ -1,4 +1,7 @@
-use std::{ffi::OsString, fs::File, io::Write, path::PathBuf, str::FromStr};
+use std::{
+    ffi::OsString, fs::File, io::Write, path::PathBuf, str::FromStr,
+    time::Duration,
+};
 
 use isocountry::CountryCode;
 use serial_test::{parallel, serial};
@@ -461,7 +464,10 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     // Task scheduler reset should be false
     assert!(!config.task_scheduler.reset);
-    assert_eq!(config.task_scheduler.min_interval_millis, 10);
+    assert_eq!(
+        config.task_scheduler.min_interval,
+        Duration::from_millis(10)
+    );
 
     // The example file has the programs section with 2 entries
     assert_eq!(
@@ -569,7 +575,10 @@ fn test_env_vars_full_coverage() {
 
     // Task Scheduler
     assert!(config.task_scheduler.reset);
-    assert_eq!(config.task_scheduler.min_interval_millis, 99);
+    assert_eq!(
+        config.task_scheduler.min_interval,
+        Duration::from_millis(99)
+    );
 
     // Chain Operation
     // Verify the optional struct was created and populated

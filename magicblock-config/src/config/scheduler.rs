@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 use crate::consts;
@@ -9,15 +11,17 @@ pub struct TaskSchedulerConfig {
     /// If true, clears all pending scheduled tasks on startup.
     pub reset: bool,
     /// The minimum interval between task executions, in milliseconds.
-    pub min_interval_millis: i64,
+    #[serde(with = "humantime")]
+    pub min_interval: Duration,
 }
 
 impl Default for TaskSchedulerConfig {
     fn default() -> Self {
         Self {
             reset: false,
-            min_interval_millis:
+            min_interval: Duration::from_millis(
                 consts::DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS,
+            ),
         }
     }
 }

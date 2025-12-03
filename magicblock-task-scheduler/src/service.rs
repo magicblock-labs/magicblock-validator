@@ -73,7 +73,7 @@ impl TaskSchedulerService {
         block: LatestBlock,
         token: CancellationToken,
     ) -> Result<Self, TaskSchedulerError> {
-        set_min_task_scheduler_interval(config.min_interval_millis);
+        set_min_task_scheduler_interval(config.min_interval.as_millis() as i64);
         if config.reset {
             match std::fs::remove_file(path) {
                 Ok(_) => {}

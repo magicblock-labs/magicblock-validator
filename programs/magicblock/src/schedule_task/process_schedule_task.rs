@@ -154,7 +154,6 @@ mod test {
 
     use super::*;
     use crate::{
-        task_scheduler_frequency::set_min_task_scheduler_interval,
         test_utils::{
             process_instruction, COUNTER_PROGRAM_ID, NOOP_PROGRAM_ID,
         },
