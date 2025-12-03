@@ -9,7 +9,7 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
 
 use crate::{
-    task_scheduler_frequency::min_task_scheduler_frequency,
+    task_scheduler_frequency::min_task_scheduler_interval,
     utils::accounts::get_instruction_pubkey_with_idx,
     validator::validator_authority_id,
 };
@@ -60,11 +60,11 @@ pub(crate) fn process_schedule_task(
     }
 
     // Enforce minimal execution interval
-    if args.execution_interval_millis < min_task_scheduler_frequency() {
+    if args.execution_interval_millis < min_task_scheduler_interval() {
         ic_msg!(
             invoke_context,
             "ScheduleTask ERR: execution interval must be at least {} milliseconds",
-            min_task_scheduler_frequency()
+            min_task_scheduler_interval()
         );
         return Err(InstructionError::InvalidInstructionData);
     }
@@ -153,7 +153,7 @@ mod test {
 
     use super::*;
     use crate::{
-        task_scheduler_frequency::set_min_task_scheduler_frequency,
+        task_scheduler_frequency::set_min_task_scheduler_interval,
         test_utils::{
             process_instruction, COUNTER_PROGRAM_ID, NOOP_PROGRAM_ID,
         },
@@ -361,11 +361,11 @@ mod test {
     #[test]
     fn fail_process_schedule_invalid_execution_interval() {
         let (payer, pdas, transaction_accounts) = setup_accounts(0);
-        for frequency in [0, 10, 100, 1000] {
-            set_min_task_scheduler_frequency(frequency);
+        for interval in [0, 10, 100, 1000] {
+            set_min_task_scheduler_interval(interval);
             let args = ScheduleTaskArgs {
                 task_id: 1,
-                execution_interval_millis: frequency - 1,
+                execution_interval_millis: interval - 1,
                 iterations: 1,
                 instructions: vec![create_simple_ix()],
             };

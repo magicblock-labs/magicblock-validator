@@ -8,16 +8,16 @@ use crate::consts;
 pub struct TaskSchedulerConfig {
     /// If true, clears all pending scheduled tasks on startup.
     pub reset: bool,
-    /// The minimum frequency for a task to be executed, in milliseconds.
-    pub min_frequency_millis: i64,
+    /// The minimum interval between task executions, in milliseconds.
+    pub min_interval_millis: i64,
 }
 
 impl Default for TaskSchedulerConfig {
     fn default() -> Self {
         Self {
             reset: false,
-            min_frequency_millis:
-                consts::DEFAULT_TASK_SCHEDULER_MIN_FREQUENCY_MILLIS,
+            min_interval_millis:
+                consts::DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS,
         }
     }
 }
