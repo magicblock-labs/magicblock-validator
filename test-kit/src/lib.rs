@@ -18,7 +18,7 @@ use magicblock_core::{
         DispatchEndpoints,
     },
     traits::AccountsBank,
-    Slot,
+    Slot, NOOP_PROGRAM_ID,
 };
 use magicblock_ledger::Ledger;
 use magicblock_processor::{
@@ -36,9 +36,6 @@ pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
-
-const NOOP_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
 /// A simulated validator backend for integration tests.
 ///
@@ -139,7 +136,7 @@ impl ExecutionTestEnv {
         scheduler_state
             .load_upgradeable_programs(&[(
                 NOOP_PROGRAM_ID,
-                "../test-integration/programs/noop/noop.so".into(),
+                "../programs/noop/noop.so".into(),
             )])
             .expect("failed to load test programs into test env");
 

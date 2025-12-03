@@ -26,13 +26,9 @@ use program_flexi_counter::instruction::{
     create_delegate_ix_with_commit_frequency_ms, create_init_ix,
 };
 use solana_sdk::{
-    pubkey::Pubkey, signature::Keypair, signer::Signer,
-    transaction::Transaction,
+    signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use tempfile::TempDir;
-
-pub const NOOP_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
 pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;
 
