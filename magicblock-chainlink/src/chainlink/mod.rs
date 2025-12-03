@@ -219,7 +219,31 @@ Kept: {} delegated, {} blacklisted",
 
         task::spawn(async move {
             while let Some(pubkey) = removed_accounts_rx.recv().await {
-                accounts_bank.remove_account(&pubkey);
+                accounts_bank.remove_account_conditionally(
+                    &pubkey,
+                    |account| {
+                        // Accounts that are still undelegating need to be kept in the bank
+                        // until the undelegation completes on chain.
+                        // Otherwise we might loose data in case the undelegation fails to
+                        // complete.
+                        // Another issue we avoid this way is that an account update received
+                        // before the account completes undelegation would overwrite the in-bank
+                        // account and thus also set unedelegating to false.
+                        let undelegating = account.undelegating();
+                        let delegated = account.delegated();
+                        if !undelegating && !delegated {
+                            trace!(
+                                "Removing unsubscribed account '{pubkey}' from bank"
+                            );
+                            true
+                        } else {
+                            debug!(
+                                "Keeping unsubscribed account {pubkey} in bank undelegating = {undelegating}, delegated = {delegated}"
+                            );
+                            false
+                        }
+                    },
+                );
             }
             warn!("Removed accounts channel closed, stopping subscription");
         })
