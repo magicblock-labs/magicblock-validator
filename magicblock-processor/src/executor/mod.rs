@@ -21,7 +21,8 @@ use solana_svm::transaction_processor::{
 use tokio::{runtime::Builder, sync::mpsc::Sender};
 
 use crate::{
-    builtins::BUILTINS, scheduler::state::TransactionSchedulerState, WorkerId,
+    builtins::BUILTINS,
+    scheduler::{locks::ExecutorId, state::TransactionSchedulerState},
 };
 
 /// A dedicated, single-threaded worker responsible for processing transactions using
@@ -31,7 +32,7 @@ use crate::{
 /// executors can be spawned to process transactions in parallel.
 pub(super) struct TransactionExecutor {
     /// A unique identifier for this worker instance.
-    id: WorkerId,
+    id: ExecutorId,
     /// A handle to the global accounts database for reading and writing account state.
     accountsdb: Arc<AccountsDb>,
     /// A handle to the global ledger for writing committed transaction history.
@@ -53,7 +54,7 @@ pub(super) struct TransactionExecutor {
     /// A channel to send scheduled (crank) tasks created by transactions.
     tasks_tx: ScheduledTasksTx,
     /// A back-channel to notify the `TransactionScheduler` that this worker is ready for more work.
-    ready_tx: Sender<WorkerId>,
+    ready_tx: Sender<ExecutorId>,
     /// A read lock held during a slot's processing to synchronize with critical global
     /// operations like `AccountsDb` snapshots.
     sync: StWLock,
@@ -70,10 +71,10 @@ impl TransactionExecutor {
     /// with a globally shared one. This allows updates made by one executor to be immediately
     /// visible to all others, preventing redundant program loads.
     pub(super) fn new(
-        id: WorkerId,
+        id: ExecutorId,
         state: &TransactionSchedulerState,
         rx: TransactionToProcessRx,
-        ready_tx: Sender<WorkerId>,
+        ready_tx: Sender<ExecutorId>,
         programs_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     ) -> Self {
         let slot = state.accountsdb.slot();
@@ -184,7 +185,8 @@ impl TransactionExecutor {
                         }
                     }
                     // Notify the scheduler that this worker is ready for another transaction.
-                    let _ = self.ready_tx.send(self.id).await;
+                    // NOTE: the channel is guaranteed to have enough capacity to push into.
+                    let _ = self.ready_tx.try_send(self.id);
                 }
                 // When a new block is produced, transition to the new slot.
                 _ = block_updated.recv() => {

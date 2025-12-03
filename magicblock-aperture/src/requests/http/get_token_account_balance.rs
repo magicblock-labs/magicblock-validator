@@ -1,7 +1,10 @@
 use std::mem::size_of;
 
 use solana_account::AccountSharedData;
-use solana_account_decoder::parse_token::UiTokenAmount;
+use solana_account_decoder::{
+    parse_account_data::SplTokenAdditionalDataV2,
+    parse_token::token_amount_to_ui_amount_v3,
+};
 
 use super::{
     prelude::*, MINT_DECIMALS_OFFSET, SPL_MINT_RANGE, SPL_TOKEN_AMOUNT_RANGE,
@@ -58,13 +61,14 @@ impl HttpDispatcher {
             u64::from_le_bytes(buffer)
         };
 
-        let ui_amount = (token_amount as f64) / 10f64.powi(decimals as i32);
-        let ui_token_amount = UiTokenAmount {
-            amount: token_amount.to_string(),
-            ui_amount: Some(ui_amount),
-            ui_amount_string: ui_amount.to_string(),
-            decimals,
-        };
+        let ui_token_amount = token_amount_to_ui_amount_v3(
+            token_amount,
+            &SplTokenAdditionalDataV2 {
+                decimals,
+                interest_bearing_config: None,
+                scaled_ui_amount_config: None,
+            },
+        );
 
         let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, ui_token_amount, slot))
