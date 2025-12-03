@@ -36,17 +36,6 @@ impl PhotonClientMock {
         let mut accounts = self.accounts.write().await;
         accounts.insert(cda, AccountAtSlot { account, slot });
     }
-
-    pub async fn add_acounts(
-        &self,
-        new_accounts: HashMap<Pubkey, AccountAtSlot>,
-    ) {
-        let mut accounts = self.accounts.write().await;
-        for (pubkey, account_at_slot) in new_accounts {
-            let cda = derive_cda_from_pda(&pubkey);
-            accounts.insert(cda, account_at_slot);
-        }
-    }
 }
 
 #[async_trait]

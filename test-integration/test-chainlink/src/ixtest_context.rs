@@ -36,7 +36,6 @@ use magicblock_chainlink::{
     submux::SubMuxClient,
     testing::{
         cloner_stub::ClonerStub,
-        photon_client_mock::PhotonClientMock,
         utils::{PHOTON_URL, RPC_URL},
     },
     Chainlink,
