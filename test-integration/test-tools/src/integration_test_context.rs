@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
@@ -718,7 +720,6 @@ impl IntegrationTestContext {
         )
     }
 
-    #[allow(clippy::result_large_err)]
     pub fn send_transaction_ephem_with_preflight(
         &self,
         tx: &mut Transaction,
@@ -735,7 +736,6 @@ impl IntegrationTestContext {
         )
     }
 
-    #[allow(clippy::result_large_err)]
     pub fn send_transaction_chain(
         &self,
         tx: &mut Transaction,
@@ -752,7 +752,6 @@ impl IntegrationTestContext {
         )
     }
 
-    #[allow(clippy::result_large_err)]
     pub fn send_instructions_with_payer_chain(
         &self,
         ixs: &[Instruction],
@@ -854,7 +853,6 @@ impl IntegrationTestContext {
         })
     }
 
-    #[allow(clippy::result_large_err)]
     pub fn send_transaction(
         rpc_client: &RpcClient,
         tx: &mut Transaction,
@@ -876,7 +874,6 @@ impl IntegrationTestContext {
         Ok(sig)
     }
 
-    #[allow(clippy::result_large_err)]
     pub fn send_instructions_with_payer(
         rpc_client: &RpcClient,
         ixs: &[Instruction],
@@ -888,7 +885,6 @@ impl IntegrationTestContext {
         Self::send_transaction(rpc_client, &mut tx, &[payer])
     }
 
-    #[allow(clippy::result_large_err)]
     pub fn send_and_confirm_transaction(
         rpc_client: &RpcClient,
         tx: &mut Transaction,
@@ -900,7 +896,6 @@ impl IntegrationTestContext {
             .map(|confirmed| (sig, confirmed))
     }
 
-    #[allow(clippy::result_large_err)]
     pub fn send_and_confirm_instructions_with_payer(
         &self,
         rpc_client: &RpcClient,
