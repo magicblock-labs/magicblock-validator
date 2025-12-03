@@ -599,7 +599,7 @@ impl IxtestContext {
                 .args(CommitArgs {
                     current_compressed_delegated_account_data:
                         compressed_account.data.unwrap().data.to_vec(),
-                    new_data: FlexiCounter::new("undecompressed".to_string())
+                    new_data: FlexiCounter::new("COUNTER".to_string())
                         .try_to_vec()
                         .unwrap(),
                     account_meta,

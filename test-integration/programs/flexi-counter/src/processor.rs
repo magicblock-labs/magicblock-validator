@@ -650,25 +650,35 @@ fn process_external_undelegate_compressed(
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
-    let (pda, _bump) = FlexiCounter::pda(payer.key);
+    let (pda, bump) = FlexiCounter::pda(payer.key);
     if &pda != delegated_account.key {
         msg!("Invalid seeds: {:?} != {:?}", pda, delegated_account.key);
         return Err(ProgramError::InvalidSeeds);
     }
 
-    // Refund account
-    // NOTE: assumes the delegated account owned by the cdlp has 0 data
-    invoke(
-        &system_instruction::transfer(
-            payer.key,
-            delegated_account.key,
-            args.delegation_record
-                .lamports
-                .checked_sub(Rent::get()?.minimum_balance(0))
-                .ok_or(ProgramError::ArithmeticOverflow)?,
-        ),
-        &[payer.clone(), delegated_account.clone()],
-    )?;
+    // Reset lamports
+    if args.delegation_record.lamports > delegated_account.lamports() {
+        invoke(
+            &system_instruction::transfer(
+                payer.key,
+                delegated_account.key,
+                args.delegation_record.lamports - delegated_account.lamports(),
+            ),
+            &[payer.clone(), delegated_account.clone()],
+        )?;
+    } else {
+        let bump = &[bump];
+        let seeds = FlexiCounter::seeds_with_bump(payer.key, bump);
+        invoke_signed(
+            &system_instruction::transfer(
+                delegated_account.key,
+                payer.key,
+                delegated_account.lamports() - args.delegation_record.lamports,
+            ),
+            &[delegated_account.clone(), payer.clone()],
+            &[&seeds],
+        )?;
+    }
 
     // Reset data
     delegated_account.realloc(args.delegation_record.data.len(), false)?;
