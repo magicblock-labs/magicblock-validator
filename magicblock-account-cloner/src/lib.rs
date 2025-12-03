@@ -108,9 +108,11 @@ impl ChainlinkCloner {
         ]);
         // Defined positive commit frequency means commits should be scheduled
         let ixs = match request.commit_frequency_ms {
+            // Commit frequencies above u32::MAX used to mean "no commits", this preserves that behavior
             Some(commit_frequency_ms)
                 if commit_frequency_ms
-                    >= min_task_scheduler_interval() as u64 =>
+                    >= min_task_scheduler_interval() as u64
+                    && commit_frequency_ms < u32::MAX.into() =>
             {
                 // The task ID is randomly generated to avoid conflicts with other tasks
                 // TODO: remove once the program handles generating tasks instead of the client
