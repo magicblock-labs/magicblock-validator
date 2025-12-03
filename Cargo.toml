@@ -38,7 +38,7 @@ resolver = "2"
 
 [workspace.package]
 # Solana Version (2.2.x)
-version = "0.3.1"
+version = "0.4.1"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
@@ -222,7 +222,7 @@ vergen = "8.3.1"
 
 [workspace.dependencies.solana-svm]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "86c2cb0f"
+rev = "6f74a99"
 features = ["dev-context-only-utils"]
 
 [patch.crates-io]
@@ -231,4 +231,4 @@ features = ["dev-context-only-utils"]
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "1beed4c" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "86c2cb0f" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "6f74a99" }
