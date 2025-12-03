@@ -186,7 +186,7 @@ fn schedule_commit_cpi_instruction_impl(
 
     let cpi_args = ScheduleCommitCpiArgs {
         players: players.to_vec(),
-        modify_accounts: true,
+        modify_accounts: false,
         undelegate: args.undelegate,
         commit_payer: args.commit_payer,
     };
@@ -255,6 +255,17 @@ pub fn increase_count_instruction(committee: Pubkey) -> Instruction {
         account_metas,
     )
 }
+
+pub fn set_count_instruction(committee: Pubkey, count: u64) -> Instruction {
+    let program_id = crate::id();
+    let account_metas = vec![AccountMeta::new(committee, false)];
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::SetCount(count),
+        account_metas,
+    )
+}
+
 
 // -----------------
 // PDA
