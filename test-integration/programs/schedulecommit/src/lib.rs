@@ -627,16 +627,7 @@ fn process_undelegate_request(
                     return Err(ProgramError::Custom(111));
                 }
             }
-            Err(err) => msg!("Failed to delegate: {:?}", err),
-        }
-        match MainAccount::deserialize(&mut data.as_ref()) {
-            Ok(counter) => {
-                msg!("counter: {:?}", counter);
-                if counter.count == FAIL_UNDELEGATION_COUNT {
-                    return Err(ProgramError::Custom(111));
-                }
-            }
-            Err(err) => msg!("Failed to de: {:?}", err),
+            Err(err) => msg!("Failed to deserialize: {:?}", err),
         }
     };
     Ok(())
