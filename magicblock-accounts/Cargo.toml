@@ -22,7 +22,6 @@ magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
-magicblock-processor = { workspace = true }
 magicblock-program = { workspace = true }
 
 solana-rpc-client = { workspace = true }
