@@ -21,5 +21,6 @@ solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 solana-sdk-ids = { workspace = true }
 solana-system-interface = { workspace = true }
+spl-token = { workspace = true }
 integration-test-tools = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
