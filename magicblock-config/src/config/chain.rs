@@ -42,7 +42,7 @@ pub struct ChainOperationConfig {
 
 /// Configuration for ChainLink (Cloning/BaseChain synchronization)
 #[derive(Deserialize, Serialize, Debug, Default, Clone)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ChainLinkConfig {
     /// If true, initializes address lookup tables for oracle accounts.
     pub prepare_lookup_tables: bool,
@@ -52,4 +52,8 @@ pub struct ChainLinkConfig {
 
     /// The maximum number of non-delegated accounts to track simultaneously for updates.
     pub max_monitored_accounts: usize,
+
+    /// When true, confined accounts are removed during accounts bank reset.
+    /// Default: false. Can be overridden via env var MBV_CHAINLINK__REMOVE_CONFINED_ACCOUNTS
+    pub remove_confined_accounts: bool,
 }

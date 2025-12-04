@@ -146,6 +146,7 @@ impl IxtestContext {
             validator_kp.pubkey(),
             faucet_kp.pubkey(),
             0,
+            false,
         )
         .unwrap();
 

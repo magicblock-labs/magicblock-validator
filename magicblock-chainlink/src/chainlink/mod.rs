@@ -61,6 +61,9 @@ pub struct Chainlink<
 
     /// If > 0, automatically airdrop this many lamports to feepayers when they are new/empty
     auto_airdrop_lamports: u64,
+
+    /// If true, remove confined accounts during bank reset
+    remove_confined_accounts: bool,
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
@@ -72,6 +75,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
         auto_airdrop_lamports: u64,
+        remove_confined_accounts: bool,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
@@ -90,6 +94,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             validator_id: validator_pubkey,
             faucet_id: faucet_pubkey,
             auto_airdrop_lamports,
+            remove_confined_accounts,
         })
     }
 
@@ -142,6 +147,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             validator_pubkey,
             faucet_pubkey,
             auto_airdrop_lamports,
+            config.remove_confined_accounts,
         )
     }
 
@@ -164,7 +170,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 blacklisted.fetch_add(1, Ordering::Relaxed);
                 return false;
             }
-            if account.confined() {
+            if self.remove_confined_accounts && account.confined() {
                 return true;
             }
             // Undelegating accounts are normally also delegated, but if that ever changes

@@ -115,6 +115,7 @@ impl TestContext {
             validator_pubkey,
             faucet_pubkey,
             0,
+            false,
         )
         .unwrap();
         Self {
