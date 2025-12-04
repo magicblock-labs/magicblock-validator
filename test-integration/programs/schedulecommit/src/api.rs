@@ -266,7 +266,6 @@ pub fn set_count_instruction(committee: Pubkey, count: u64) -> Instruction {
     )
 }
 
-
 // -----------------
 // PDA
 // -----------------
