@@ -418,15 +418,15 @@ impl Ledger {
     /// the provided args.
     ///
     /// * `highest_slot` - Highest slot to consider for the search inclusive.
-    ///                    Any signatures with a slot higher than this will be ignored.
-    ///                    In the original implementation this allows ignoring signatures
-    ///                    that haven't reached a specific commitment level yet.
-    ///                    For us it will be the current slot in most cases.
-    ///                    The slot determined for `before` overrides this when provided
+    ///   Any signatures with a slot higher than this will be ignored.
+    ///   In the original implementation this allows ignoring signatures
+    ///   that haven't reached a specific commitment level yet.
+    ///   For us it will be the current slot in most cases.
+    ///   The slot determined for `before` overrides this when provided
     /// - *`upper_limit_signature`* - start searching backwards from this transaction
-    ///     signature. If not provided the search starts from the top of the highest_slot
+    ///   signature. If not provided the search starts from the top of the highest_slot
     /// - *`lower_limit_signature`* - search backwards until this transaction signature,
-    ///     if found before limit is reached
+    ///   if found before limit is reached
     /// - *`limit`* -  maximum number of signatures to return (max: 1000)
     ///
     /// ## Example
@@ -852,7 +852,7 @@ impl Ledger {
     /// * `signature` - Signature of the transaction
     /// * `slot` - Slot at which the transaction was confirmed
     /// * `transaction` - Transaction to be written, we take a SanititizedTransaction here
-    ///                   since that is what we provide Geyser as well
+    ///   since that is what we provide Geyser as well
     /// * `status` - status of the transaction
     pub fn write_transaction(
         &self,
@@ -1046,7 +1046,7 @@ impl Ledger {
     ///
     /// - `iterator_mode` - The iterator mode to use for the search, defaults to [`IteratorMode::Start`]
     /// - `success` - If true, only successful transactions are returned,
-    ///               otherwise only failed ones
+    ///   otherwise only failed ones
     pub fn iter_transaction_statuses(
         &self,
         iterator_mode: Option<IteratorMode<(Signature, Slot)>>,

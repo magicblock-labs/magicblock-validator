@@ -184,7 +184,7 @@ mod test {
     use super::*;
 
     impl Chunks {
-        pub(super) fn iter(&self) -> ChunksIter {
+        pub(super) fn iter(&self) -> ChunksIter<'_> {
             ChunksIter {
                 chunks: self,
                 idx: 0,

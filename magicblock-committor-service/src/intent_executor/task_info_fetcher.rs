@@ -272,7 +272,13 @@ pub enum TaskInfoFetcherError {
     #[error("InvalidAccountDataError for: {0}")]
     InvalidAccountDataError(Pubkey),
     #[error("MagicBlockRpcClientError: {0}")]
-    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+    MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
+}
+
+impl From<MagicBlockRpcClientError> for TaskInfoFetcherError {
+    fn from(e: MagicBlockRpcClientError) -> Self {
+        Self::MagicBlockRpcClientError(Box::new(e))
+    }
 }
 
 impl TaskInfoFetcherError {

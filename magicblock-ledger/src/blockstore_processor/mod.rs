@@ -56,7 +56,7 @@ async fn replay_blocks(
             break;
         };
         if log::log_enabled!(Level::Info)
-            && slot % PROGRESS_REPORT_INTERVAL == 0
+            && slot.is_multiple_of(PROGRESS_REPORT_INTERVAL)
         {
             info!(
                 "Processing block: {}/{}",
