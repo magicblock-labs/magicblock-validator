@@ -65,7 +65,7 @@ pub fn delegate_account_cpi_instruction(
 
     let args = DelegateCpiArgs {
         valid_until: i64::MAX,
-        commit_frequency_ms: u32::MAX,
+        commit_frequency_ms: 0,
         validator,
         player,
     };
