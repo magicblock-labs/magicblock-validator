@@ -61,7 +61,13 @@ pub enum ScheduledCommitsProcessorError {
     #[error("RecvError: {0}")]
     RecvError(#[from] RecvError),
     #[error("CommittorSerivceError")]
-    CommittorSerivceError(#[from] CommittorServiceError),
+    CommittorSerivceError(Box<CommittorServiceError>),
+}
+
+impl From<CommittorServiceError> for ScheduledCommitsProcessorError {
+    fn from(e: CommittorServiceError) -> Self {
+        Self::CommittorSerivceError(Box::new(e))
+    }
 }
 
 pub type ScheduledCommitsProcessorResult<

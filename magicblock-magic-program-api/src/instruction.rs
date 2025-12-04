@@ -26,7 +26,7 @@ pub enum MagicBlockInstruction {
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
     /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
-    ///                              the scheduled commits
+    ///   the scheduled commits
     /// - **2..n** `[]`              Accounts to be committed
     ScheduleCommit,
 
@@ -43,7 +43,7 @@ pub enum MagicBlockInstruction {
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
     /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
-    ///                              the scheduled commits
+    ///   the scheduled commits
     /// - **2..n** `[]`              Accounts to be committed and undelegated
     ScheduleCommitAndUndelegate,
 

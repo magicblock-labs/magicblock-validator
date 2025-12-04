@@ -346,7 +346,7 @@ impl DeliveryPreparator {
                     TransactionSendError::MagicBlockRpcClientError(err) => {
                         map_magicblock_client_error(
                             &self.transaction_error_mapper,
-                            err,
+                            *err,
                         )
                     }
                     err => BufferExecutionError::TransactionSendError(err),
@@ -506,7 +506,13 @@ pub enum TransactionSendError {
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
     #[error("MagicBlockRpcClientError: {0}")]
-    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+    MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
+}
+
+impl From<MagicBlockRpcClientError> for TransactionSendError {
+    fn from(e: MagicBlockRpcClientError) -> Self {
+        Self::MagicBlockRpcClientError(Box::new(e))
+    }
 }
 
 impl TransactionSendError {
@@ -541,7 +547,7 @@ impl BufferExecutionError {
 impl From<MagicBlockRpcClientError> for BufferExecutionError {
     fn from(value: MagicBlockRpcClientError) -> Self {
         Self::TransactionSendError(
-            TransactionSendError::MagicBlockRpcClientError(value),
+            TransactionSendError::MagicBlockRpcClientError(Box::new(value)),
         )
     }
 }
@@ -557,11 +563,17 @@ pub enum InternalError {
     #[error("TableManiaError: {0}")]
     TableManiaError(#[from] TableManiaError),
     #[error("MagicBlockRpcClientError: {0}")]
-    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+    MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
     #[error("BufferExecutionError: {0}")]
     BufferExecutionError(#[from] BufferExecutionError),
     #[error("BaseTaskError: {0}")]
     BaseTaskError(#[from] BaseTaskError),
+}
+
+impl From<MagicBlockRpcClientError> for InternalError {
+    fn from(e: MagicBlockRpcClientError) -> Self {
+        Self::MagicBlockRpcClientError(Box::new(e))
+    }
 }
 
 impl InternalError {
