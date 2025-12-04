@@ -116,11 +116,11 @@ pub enum ScheduleCommitInstruction {
     /// - **0.** `[WRITE]` PDA Account to increase count of
     IncreaseCount,
 
-    /// Sets the count of a PDA of this program by one.
+    /// Sets the count of a PDA of this program to the provided arbitrary u64 value.
     /// This instruction can only run on the ephemeral after the account was
     /// delegated or on chain while it is undelegated.
     /// # Account references:
-    /// - **0.** `[WRITE]` PDA Account to increase count of
+    /// - **0.** `[WRITE]` PDA Account to write the counter to set to the supplied value
     SetCount(u64),
     // This is invoked by the delegation program when we request to undelegate
     // accounts.
