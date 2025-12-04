@@ -21,12 +21,26 @@ impl Default for BindAddress {
 }
 
 impl BindAddress {
+    fn as_connect_addr(&self) -> SocketAddr {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+        match self.0.ip() {
+            IpAddr::V4(ip) if ip.is_unspecified() => {
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), self.0.port())
+            }
+            IpAddr::V6(ip) if ip.is_unspecified() => {
+                SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), self.0.port())
+            }
+            _ => self.0,
+        }
+    }
+
     pub fn http(&self) -> String {
-        format!("http://{}", self.0)
+        format!("http://{}", self.as_connect_addr())
     }
 
     pub fn websocket(&self) -> String {
-        format!("ws://{}", self.0)
+        format!("ws://{}", self.as_connect_addr())
     }
 }
 
