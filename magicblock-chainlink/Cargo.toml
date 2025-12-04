@@ -7,6 +7,7 @@ edition.workspace = true
 arc-swap = "1.7"
 async-trait = { workspace = true }
 bincode = { workspace = true }
+env_logger = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 lru = { workspace = true }
@@ -15,7 +16,6 @@ magicblock-core = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-delegation-program = { workspace = true }
-serde_json = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-account-decoder-client-types = { workspace = true }
