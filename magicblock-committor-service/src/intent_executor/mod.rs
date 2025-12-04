@@ -651,7 +651,7 @@ where
                     InternalError::MagicBlockRpcClientError(err) => {
                         map_magicblock_client_error(
                             &self.transaction_error_mapper,
-                            err,
+                            *err,
                         )
                     }
                     err => {

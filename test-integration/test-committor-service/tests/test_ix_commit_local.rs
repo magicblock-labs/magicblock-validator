@@ -704,7 +704,7 @@ fn validate_account(
     let matches_undelegation = acc.owner().eq(&expected_owner);
     let matches_all = matches_data && matches_undelegation;
 
-    if !matches_all && remaining_tries % 4 == 0 {
+    if !matches_all && remaining_tries.is_multiple_of(4) {
         if !matches_data {
             trace!(
                 "Account ({}) data {} != {} || {} != {}",
