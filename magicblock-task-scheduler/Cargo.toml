@@ -12,14 +12,11 @@ bincode = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
-# magicblock-accounts = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-program = { workspace = true }
-magicblock-processor = { workspace = true }
 rusqlite = { workspace = true }
-solana-svm = { workspace = true }
 solana-timings = { workspace = true }
 serde = { workspace = true }
 solana-sdk = { workspace = true }

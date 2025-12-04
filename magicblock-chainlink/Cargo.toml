@@ -7,7 +7,6 @@ edition.workspace = true
 arc-swap = "1.7"
 async-trait = { workspace = true }
 bincode = { workspace = true }
-env_logger = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 lru = { workspace = true }
