@@ -8,8 +8,6 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-bincode = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
 
 tokio = { workspace = true, features = ["sync"] }
 flume = { workspace = true }

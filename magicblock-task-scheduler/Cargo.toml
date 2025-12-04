@@ -17,8 +17,6 @@ magicblock-config = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-program = { workspace = true }
 rusqlite = { workspace = true }
-solana-timings = { workspace = true }
-serde = { workspace = true }
 solana-sdk = { workspace = true }
 solana-program = { workspace = true }
 solana-pubsub-client = { workspace = true }
@@ -31,5 +29,3 @@ magicblock-magic-program-api = { workspace = true }
 test-kit = { workspace = true }
 guinea = { workspace = true }
 solana-account = { workspace = true }
-solana-pubkey = { workspace = true }
-solana-signature = { workspace = true }
