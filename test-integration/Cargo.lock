@@ -3539,6 +3539,7 @@ dependencies = [
  "solana-program",
  "solana-pubkey",
  "solana-pubsub-client",
+ "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-signature",
  "solana-transaction",
