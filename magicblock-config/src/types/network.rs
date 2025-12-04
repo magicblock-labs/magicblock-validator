@@ -21,6 +21,16 @@ impl Default for BindAddress {
     }
 }
 
+impl BindAddress {
+    pub fn http(&self) -> String {
+        format!("http://{}", self.0)
+    }
+
+    pub fn websocket(&self) -> String {
+        format!("ws://{}", self.0)
+    }
+}
+
 /// A connection to one or more remote clusters (e.g., "devnet").
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "kebab-case", untagged)]
