@@ -168,9 +168,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 if pubkey.eq(&pubkey!(
                     "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc"
                 )) || pubkey.eq(&pubkey!(
-                    "4Ya1jtRpz4svxyfqiHuGVZiuaZsesFdGF6Xi5UBWTnsZ,"
+                    "4Ya1jtRpz4svxyfqiHuGVZiuaZsesFdGF6Xi5UBWTnsZ"
                 )) || pubkey.eq(&pubkey!(
-                    "3quKEGFREcDCUdsAQKknjMApvsVept6eAEj3NaMRkDVR,"
+                    "3quKEGFREcDCUdsAQKknjMApvsVept6eAEj3NaMRkDVR"
                 )) {
                     return true;
                 }
