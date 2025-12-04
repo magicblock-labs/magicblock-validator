@@ -27,7 +27,6 @@ use magicblock_program::{
     args::ScheduleTaskArgs,
     instruction::MagicBlockInstruction,
     instruction_utils::InstructionUtils,
-    task_scheduler_frequency::min_task_scheduler_interval,
     validator::{validator_authority, validator_authority_id},
     MAGIC_CONTEXT_PUBKEY,
 };
@@ -108,12 +107,7 @@ impl ChainlinkCloner {
         ]);
         // Defined positive commit frequency means commits should be scheduled
         let ixs = match request.commit_frequency_ms {
-            // Commit frequencies above u32::MAX used to mean "no commits", this preserves that behavior
-            Some(commit_frequency_ms)
-                if commit_frequency_ms
-                    >= min_task_scheduler_interval() as u64
-                    && commit_frequency_ms < u32::MAX.into() =>
-            {
+            Some(commit_frequency_ms) => {
                 // The task ID is randomly generated to avoid conflicts with other tasks
                 // TODO: remove once the program handles generating tasks instead of the client
                 // https://github.com/magicblock-labs/magicblock-validator/issues/625

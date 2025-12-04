@@ -9,7 +9,6 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
 
 use crate::{
-    task_scheduler_frequency::min_task_scheduler_interval,
     utils::accounts::get_instruction_pubkey_with_idx,
     validator::validator_authority_id,
 };
@@ -57,17 +56,6 @@ pub(crate) fn process_schedule_task(
             payer_pubkey
         );
         return Err(InstructionError::MissingRequiredSignature);
-    }
-
-    // Enforce minimal execution interval
-    let min_interval = min_task_scheduler_interval();
-    if args.execution_interval_millis < min_interval {
-        ic_msg!(
-            invoke_context,
-            "ScheduleTask ERR: execution interval must be at least {} milliseconds",
-            min_interval
-        );
-        return Err(InstructionError::InvalidInstructionData);
     }
 
     // Enforce minimal number of iterations
@@ -220,7 +208,7 @@ mod test {
 
         let args = ScheduleTaskArgs {
             task_id: 1,
-            execution_interval_millis: min_task_scheduler_interval(),
+            execution_interval_millis: 10,
             iterations: 1,
             instructions: vec![create_simple_ix()],
         };
@@ -242,7 +230,7 @@ mod test {
 
         let args = ScheduleTaskArgs {
             task_id: 1,
-            execution_interval_millis: min_task_scheduler_interval(),
+            execution_interval_millis: 10,
             iterations: 1,
             instructions: vec![create_complex_ix(&pdas, writable, signer)],
         };
@@ -344,28 +332,6 @@ mod test {
             execution_interval_millis: 1000,
             iterations: 1,
             instructions: vec![],
-        };
-        let ix = InstructionUtils::schedule_task_instruction(
-            &payer.pubkey(),
-            args,
-            &pdas,
-        );
-        process_instruction(
-            &ix.data,
-            transaction_accounts,
-            ix.accounts,
-            Err(InstructionError::InvalidInstructionData),
-        );
-    }
-
-    #[test]
-    fn fail_process_schedule_invalid_execution_interval() {
-        let (payer, pdas, transaction_accounts) = setup_accounts(0);
-        let args = ScheduleTaskArgs {
-            task_id: 1,
-            execution_interval_millis: min_task_scheduler_interval() - 1,
-            iterations: 1,
-            instructions: vec![create_simple_ix()],
         };
         let ix = InstructionUtils::schedule_task_instruction(
             &payer.pubkey(),
