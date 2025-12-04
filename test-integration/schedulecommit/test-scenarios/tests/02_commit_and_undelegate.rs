@@ -617,7 +617,7 @@ fn test_committing_after_failed_undelegation() {
             panic!("Unexpected num of committees");
         };
 
-        let set_counter = |counter| {
+        let set_counter = |counter, expect_failure| {
             let ix = set_count_instruction(*committee_pda, counter);
             let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
             let tx = Transaction::new_signed_with_payer(
@@ -626,7 +626,6 @@ fn test_committing_after_failed_undelegation() {
                 &[&payer],
                 ephem_blockhash,
             );
-            let sig = tx.get_signature();
             let tx_res = ephem_client
                 .send_and_confirm_transaction_with_spinner_and_config(
                     &tx,
@@ -637,18 +636,25 @@ fn test_committing_after_failed_undelegation() {
                     },
                 );
 
-            debug!("set_counter sigs: {:?}", sig);
-            if let Err(err) = tx_res {
-                panic!("failed to set counter: {:?}", err);
+            match tx_res {
+                Ok(sig) if expect_failure => {
+                    panic!("Expected failure when setting counter to {} with sig {}", counter, sig);
+                }
+                Ok(sig) => {
+                    debug!("set_counter sigs: {:?}", sig);
+                    let res = ctx.confirm_transaction_ephem(&sig, None);
+                    assert!(res.unwrap());
+                }
+                Err(err) if !expect_failure => {
+                    panic!("Did not expect failure when setting counter to {} ({:?}", counter, err);
+                }
+                _ => {}
             }
-            assert!(ctx.confirm_transaction_ephem(&sig, None).unwrap());
         };
-
-        std::thread::sleep(std::time::Duration::from_secs(5));
 
         // Set counter to FAIL_UNDELEGATION_COUNT so undelegation fails
         // NOTE: undelegation will get patched so as result account will be only committed
-        set_counter(FAIL_UNDELEGATION_COUNT);
+        set_counter(FAIL_UNDELEGATION_COUNT, false);
 
         // Commit & Undelegate
         {
@@ -696,19 +702,6 @@ fn test_committing_after_failed_undelegation() {
                 .unwrap());
         }
 
-        std::thread::sleep(std::time::Duration::from_secs(5));
-
-        let _ = ctx.fetch_ephem_account(*committee_pda);
-        set_counter(2222);
-        debug!(
-            "payer:    {} \n \
-               committee: {committee_pda}",
-            payer.pubkey()
-        );
-
-        // We can continue using account on ER!!!
-        // for i in 0..10 {
-        //     set_counter(i);
-        // }
+        set_counter(2222, true);
     });
 }
