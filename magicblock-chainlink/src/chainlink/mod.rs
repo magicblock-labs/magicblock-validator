@@ -13,7 +13,7 @@ use log::*;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
-use solana_pubkey::Pubkey;
+use solana_pubkey::{Pubkey, pubkey};
 use solana_sdk::{
     commitment_config::CommitmentConfig, transaction::SanitizedTransaction,
 };
