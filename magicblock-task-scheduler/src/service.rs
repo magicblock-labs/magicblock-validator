@@ -7,14 +7,13 @@ use std::{
 use futures_util::StreamExt;
 use log::*;
 use magicblock_config::config::TaskSchedulerConfig;
-use magicblock_core::link::transactions::{
-    ScheduledTasksRx, TransactionSchedulerHandle,
-};
+use magicblock_core::link::transactions::ScheduledTasksRx;
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
     args::{CancelTaskRequest, TaskRequest},
     validator::{validator_authority, validator_authority_id},
 };
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     instruction::Instruction, message::Message, pubkey::Pubkey,
     signature::Signature, transaction::Transaction,
@@ -36,8 +35,8 @@ const NOOP_PROGRAM_ID: Pubkey =
 pub struct TaskSchedulerService {
     /// Database for persisting tasks
     db: SchedulerDatabase,
-    /// Used to send transactions for execution
-    tx_scheduler: TransactionSchedulerHandle,
+    /// RPC client used to send transactions
+    rpc_client: RpcClient,
     /// Used to receive scheduled tasks from the transaction executor
     scheduled_tasks: ScheduledTasksRx,
     /// Provides latest blockhash for signing transactions
@@ -54,7 +53,7 @@ pub struct TaskSchedulerService {
 
 enum ProcessingOutcome {
     Success,
-    Recoverable(TaskSchedulerError),
+    Recoverable(Box<TaskSchedulerError>),
 }
 
 // SAFETY: TaskSchedulerService is moved into a single Tokio task in `start()` and never cloned.
@@ -67,11 +66,11 @@ impl TaskSchedulerService {
     pub fn new(
         path: &Path,
         config: &TaskSchedulerConfig,
-        tx_scheduler: TransactionSchedulerHandle,
+        rpc_client: RpcClient,
         scheduled_tasks: ScheduledTasksRx,
         block: LatestBlock,
         token: CancellationToken,
-    ) -> Result<Self, TaskSchedulerError> {
+    ) -> TaskSchedulerResult<Self> {
         if config.reset {
             match std::fs::remove_file(path) {
                 Ok(_) => {}
@@ -89,7 +88,7 @@ impl TaskSchedulerService {
         let db = SchedulerDatabase::new(path)?;
         Ok(Self {
             db,
-            tx_scheduler,
+            rpc_client,
             scheduled_tasks,
             block,
             task_queue: DelayQueue::new(),
@@ -141,7 +140,7 @@ impl TaskSchedulerService {
                         schedule_request.id, e
                     );
 
-                    return Ok(ProcessingOutcome::Recoverable(e));
+                    return Ok(ProcessingOutcome::Recoverable(Box::new(e)));
                 }
             }
             TaskRequest::Cancel(cancel_request) => {
@@ -159,7 +158,7 @@ impl TaskSchedulerService {
                         cancel_request.task_id, e
                     );
 
-                    return Ok(ProcessingOutcome::Recoverable(e));
+                    return Ok(ProcessingOutcome::Recoverable(Box::new(e)));
                 }
             }
         };
@@ -329,7 +328,10 @@ impl TaskSchedulerService {
         );
 
         let sig = tx.signatures[0];
-        self.tx_scheduler.execute(tx).await?;
+        self.rpc_client
+            .send_transaction(&tx)
+            .await
+            .map_err(Box::new)?;
         Ok(sig)
     }
 }
