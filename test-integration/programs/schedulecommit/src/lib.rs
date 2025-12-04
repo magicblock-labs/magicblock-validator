@@ -409,7 +409,7 @@ fn process_increase_count(accounts: &[AccountInfo]) -> ProgramResult {
 }
 
 fn process_set_count(accounts: &[AccountInfo], value: u64) -> ProgramResult {
-    msg!("Processing increase_count instruction");
+    msg!("Processing set_count instruction");
     // NOTE: we don't check if the player owning the PDA is signer here for simplicity
     let accounts_iter = &mut accounts.iter();
     let account = next_account_info(accounts_iter)?;
@@ -421,7 +421,7 @@ fn process_set_count(accounts: &[AccountInfo], value: u64) -> ProgramResult {
     msg!("Owner: {}", account.owner);
     msg!("Counter account {:#?}", main_account);
     main_account.count = value;
-    msg!("Increased count {:#?}", main_account);
+    msg!("Set count to {:#?}", main_account);
     let mut mut_data = account.try_borrow_mut_data()?;
     let mut as_mut: &mut [u8] = mut_data.as_mut();
     msg!("Mutating buffer of len: {}", as_mut.len());
