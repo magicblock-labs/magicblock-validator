@@ -231,17 +231,23 @@ Kept: {} delegated, {} blacklisted",
                         // account and thus also set unedelegating to false.
                         let undelegating = account.undelegating();
                         let delegated = account.delegated();
-                        if !undelegating && !delegated {
-                            trace!(
-                                "Removing unsubscribed account '{pubkey}' from bank"
-                            );
-                            true
-                        } else {
-                            debug!(
-                                "Keeping unsubscribed account {pubkey} in bank undelegating = {undelegating}, delegated = {delegated}"
-                            );
-                            false
+                        let remove = !undelegating && !delegated;
+                        if log::log_enabled!(log::Level::Trace) {
+                            if remove {
+                                trace!(
+                                    "Removing unsubscribed account '{pubkey}' from bank"
+                                );
+                            } else {
+                                let owner = account.owner().to_string();
+                                trace!(
+                                    "Keeping unsubscribed account {pubkey} in bank \
+                                    undelegating = {undelegating}, \
+                                    delegated = {delegated}, \
+                                    owner={owner}"
+                                );
+                            }
                         }
+                        remove
                     },
                 );
             }
