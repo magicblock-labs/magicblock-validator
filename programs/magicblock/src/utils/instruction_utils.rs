@@ -279,6 +279,26 @@ impl InstructionUtils {
     }
 
     // -----------------
+    // Noop
+    // -----------------
+    pub fn noop(
+        authority: &Keypair,
+        data: u64,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::noop_instruction(data);
+        Self::into_transaction(authority, ix, recent_blockhash)
+    }
+
+    pub fn noop_instruction(data: u64) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::Noop(data),
+            vec![],
+        )
+    }
+
+    // -----------------
     // Utils
     // -----------------
     pub(crate) fn into_transaction(
