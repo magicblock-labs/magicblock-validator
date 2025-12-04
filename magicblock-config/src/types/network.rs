@@ -20,13 +20,81 @@ impl Default for BindAddress {
     }
 }
 
-/// A remote endpoint for syncing with the base chain.
-///
-/// Supported types:
-/// - **Http**: JSON-RPC HTTP endpoint (scheme: `http` or `https`)
-/// - **Websocket**: WebSocket endpoint for PubSub subscriptions (scheme: `ws` or `wss`)
-/// - **Grpc**: gRPC endpoint for streaming (schemes `grpc`/`grpcs` are converted to `http`/`https`)
-#[derive(Clone, DeserializeFromStr, SerializeDisplay, Display, Debug)]
+impl BindAddress {
+    pub fn http(&self) -> String {
+        format!("http://{}", self.0)
+    }
+
+    pub fn websocket(&self) -> String {
+        format!("ws://{}", self.0)
+    }
+}
+
+/// A connection to one or more remote clusters (e.g., "devnet").
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "kebab-case", untagged)]
+pub enum RemoteCluster {
+    Single(Remote),
+    Multiple(Vec<Remote>),
+}
+
+impl RemoteCluster {
+    pub fn http(&self) -> &Url {
+        let remote = match self {
+            Self::Single(r) => r,
+            Self::Multiple(rs) => {
+                rs.first().expect("non-empty remote cluster array")
+            }
+        };
+        match remote {
+            Remote::Unified(url) => &url.0,
+            Remote::Disjointed { http, .. } => &http.0,
+        }
+    }
+
+    pub fn websocket(&self) -> Box<dyn Iterator<Item = Url> + '_> {
+        fn ws(remote: &Remote) -> Url {
+            match remote {
+                Remote::Unified(url) => {
+                    let mut url = Url::clone(&url.0);
+                    let scheme =
+                        if url.scheme() == "https" { "wss" } else { "ws" };
+                    let _ = url.set_scheme(scheme);
+                    if let Some(port) = url.port() {
+                        // By solana convention, websocket listens on rpc port + 1
+                        let _ = url.set_port(Some(port + 1));
+                    }
+                    url
+                }
+                Remote::Disjointed { ws, .. } => ws.0.clone(),
+            }
+        }
+        match self {
+            Self::Single(r) => Box::new(iter::once(ws(r))),
+            Self::Multiple(rs) => Box::new(rs.iter().map(ws)),
+        }
+    }
+}
+
+impl FromStr for RemoteCluster {
+    type Err = url::ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        AliasedUrl::from_str(s).map(|url| Self::Single(Remote::Unified(url)))
+    }
+}
+
+impl Default for RemoteCluster {
+    fn default() -> Self {
+        consts::DEFAULT_REMOTE
+            .parse()
+            .expect("Default remote should be valid")
+    }
+}
+
+/// A connection to a single remote node.
+#[serde_as]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "kebab-case", untagged)]
 pub enum Remote {
     Http(AliasedUrl),
     Websocket(AliasedUrl),
