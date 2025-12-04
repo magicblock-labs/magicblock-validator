@@ -13,7 +13,13 @@ pub enum TransactionPreparatorError {
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
     #[error("DeliveryPreparationError: {0}")]
-    DeliveryPreparationError(#[from] DeliveryPreparatorError),
+    DeliveryPreparationError(Box<DeliveryPreparatorError>),
+}
+
+impl From<DeliveryPreparatorError> for TransactionPreparatorError {
+    fn from(e: DeliveryPreparatorError) -> Self {
+        Self::DeliveryPreparationError(Box::new(e))
+    }
 }
 
 impl TransactionPreparatorError {

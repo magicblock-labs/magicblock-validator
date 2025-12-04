@@ -329,7 +329,7 @@ impl ExecutionTestEnv {
         }
     }
 
-    pub fn get_payer(&self) -> CommitableAccount {
+    pub fn get_payer(&self) -> CommitableAccount<'_> {
         let payer = {
             let index = self.payer_index.load(Ordering::Relaxed);
             &self.payers[index % self.payers.len()]
