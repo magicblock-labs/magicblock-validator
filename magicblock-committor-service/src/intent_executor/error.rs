@@ -22,7 +22,13 @@ pub enum InternalError {
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
     #[error("MagicBlockRpcClientError: {0}")]
-    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+    MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
+}
+
+impl From<MagicBlockRpcClientError> for InternalError {
+    fn from(e: MagicBlockRpcClientError) -> Self {
+        Self::MagicBlockRpcClientError(Box::new(e))
+    }
 }
 
 impl InternalError {
@@ -144,7 +150,7 @@ pub enum TransactionStrategyExecutionError {
 
 impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
     fn from(value: MagicBlockRpcClientError) -> Self {
-        Self::InternalError(InternalError::MagicBlockRpcClientError(value))
+        Self::InternalError(InternalError::from(value))
     }
 }
 

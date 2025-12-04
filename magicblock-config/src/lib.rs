@@ -67,7 +67,7 @@ impl ValidatorParams {
     /// Precedence: CLI (if set) > Environment > TOML File > Defaults
     pub fn try_new(
         args: impl Iterator<Item = OsString>,
-    ) -> figment::Result<Self> {
+    ) -> Result<Self, Box<figment::error::Error>> {
         // 1. Parse CLI arguments into the "Overlay" struct
         let cli = CliParams::parse_from(args);
 
@@ -91,7 +91,7 @@ impl ValidatorParams {
         // 5. Merge CLI "Overlay" (Highest Priority)
         figment = figment.merge(Serialized::from(&cli, Profile::Default));
 
-        figment.extract()
+        figment.extract().map_err(Box::new)
     }
 }
 

@@ -9,7 +9,6 @@ use crate::{consts, types::SerdeKeypair};
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ValidatorConfig {
     /// The minimum fee (in lamports) required to process a transaction.
-    /// Defaults to 100 lamports.
     pub basefee: u64,
 
     /// The validator's identity keypair, encoded in Base58.
