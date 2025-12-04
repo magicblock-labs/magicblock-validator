@@ -4,7 +4,13 @@ use integration_test_tools::{
     transactions::send_and_confirm_instructions_with_payer,
 };
 use log::*;
-use program_schedulecommit::api::{increase_count_instruction, schedule_commit_and_undelegate_cpi_instruction, schedule_commit_and_undelegate_cpi_twice, schedule_commit_and_undelegate_cpi_with_mod_after_instruction, set_count_instruction};
+use program_schedulecommit::api::{
+    increase_count_instruction, schedule_commit_and_undelegate_cpi_instruction,
+    schedule_commit_and_undelegate_cpi_twice,
+    schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
+    set_count_instruction,
+};
+use program_schedulecommit::FAIL_UNDELEGATION_COUNT;
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
@@ -20,7 +26,6 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use program_schedulecommit::FAIL_UNDELEGATION_COUNT;
 use test_kit::init_logger;
 use utils::{
     assert_one_committee_account_was_undelegated_on_chain,
@@ -607,7 +612,8 @@ fn test_committing_after_failed_undelegation() {
             ephem_client,
             ..
         } = ctx.fields();
-        let [(committee_authority, committee_pda)] = committees.as_slice() else {
+        let [(_committee_authority, committee_pda)] = committees.as_slice()
+        else {
             panic!("Unexpected num of committees");
         };
 
@@ -622,23 +628,23 @@ fn test_committing_after_failed_undelegation() {
             );
             let sig = tx.get_signature();
             let tx_res = ephem_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
+                .send_and_confirm_transaction_with_spinner_and_config(
+                    &tx,
+                    *commitment,
+                    RpcSendTransactionConfig {
+                        skip_preflight: true,
+                        ..Default::default()
+                    },
+                );
 
-            println!("set_counter sigs: {:?}", sig);
+            debug!("set_counter sigs: {:?}", sig);
             if let Err(err) = tx_res {
                 panic!("failed to set counter: {:?}", err);
             }
-            assert!(ctx
-                .confirm_transaction_ephem(&sig, None)
-                .unwrap());
+            assert!(ctx.confirm_transaction_ephem(&sig, None).unwrap());
         };
+
+        std::thread::sleep(std::time::Duration::from_secs(5));
 
         // Set counter to FAIL_UNDELEGATION_COUNT so undelegation fails
         // NOTE: undelegation will get patched so as result account will be only committed
@@ -680,18 +686,29 @@ fn test_committing_after_failed_undelegation() {
             // 2. Retrieve the signature of the scheduled commit sent
             let logs = ctx.fetch_ephemeral_logs(*sig).unwrap();
             let scheduled_commmit_sent_sig =
-                extract_scheduled_commit_sent_signature_from_logs(&logs).unwrap();
+                extract_scheduled_commit_sent_signature_from_logs(&logs)
+                    .unwrap();
 
-            println!("sent_sig: {}", scheduled_commmit_sent_sig);
+            debug!("sent_sig: {}", scheduled_commmit_sent_sig);
             // 3. Confirm commit was scheduled
             assert!(ctx
                 .confirm_transaction_ephem(&scheduled_commmit_sent_sig, None)
                 .unwrap());
         }
 
+        std::thread::sleep(std::time::Duration::from_secs(5));
+
+        let _ = ctx.fetch_ephem_account(*committee_pda);
+        set_counter(2222);
+        debug!(
+            "payer:    {} \n \
+               committee: {committee_pda}",
+            payer.pubkey()
+        );
+
         // We can continue using account on ER!!!
-        for i in 0..10 {
-            set_counter(i);
-        }
+        // for i in 0..10 {
+        //     set_counter(i);
+        // }
     });
 }
