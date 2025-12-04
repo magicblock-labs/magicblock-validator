@@ -159,34 +159,44 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         let remaining = AtomicU64::new(0);
         let remaining_empty = AtomicU64::new(0);
 
-        let removed = self.accounts_bank.remove_where(|pubkey, account| {
-            if blacklisted_accounts.contains(pubkey) {
-                blacklisted.fetch_add(1, Ordering::Relaxed);
-                return false;
-            }
-            // Undelegating accounts are normally also delegated, but if that ever changes
-            // we want to make sure we never remove an account of which we aren't sure
-            // if the undelegation completed on chain or not.
-            if account.delegated() || account.undelegating() {
-                if account.undelegating() {
-                    undelegating.fetch_add(1, Ordering::Relaxed);
-                } else {
-                    delegated_only.fetch_add(1, Ordering::Relaxed);
+        let removed =
+            self.accounts_bank.remove_where(|pubkey, account| {
+                if blacklisted_accounts.contains(pubkey) {
+                    blacklisted.fetch_add(1, Ordering::Relaxed);
+                    return false;
                 }
-                return false;
-            }
-            trace!(
+                if pubkey.eq(&pubkey!(
+                    "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc"
+                )) || pubkey.eq(&pubkey!(
+                    "4Ya1jtRpz4svxyfqiHuGVZiuaZsesFdGF6Xi5UBWTnsZ,"
+                )) || pubkey.eq(&pubkey!(
+                    "3quKEGFREcDCUdsAQKknjMApvsVept6eAEj3NaMRkDVR,"
+                )) {
+                    return true;
+                }
+                // Undelegating accounts are normally also delegated, but if that ever changes
+                // we want to make sure we never remove an account of which we aren't sure
+                // if the undelegation completed on chain or not.
+                if account.delegated() || account.undelegating() {
+                    if account.undelegating() {
+                        undelegating.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        delegated_only.fetch_add(1, Ordering::Relaxed);
+                    }
+                    return false;
+                }
+                trace!(
                 "Removing non-delegated, non-DLP-owned account: {pubkey} {:#?}",
                 account
             );
-            remaining.fetch_add(1, Ordering::Relaxed);
-            if account.lamports() == 0
-                && account.owner().ne(&solana_sdk::feature::id())
-            {
-                remaining_empty.fetch_add(1, Ordering::Relaxed);
-            }
-            true
-        });
+                remaining.fetch_add(1, Ordering::Relaxed);
+                if account.lamports() == 0
+                    && account.owner().ne(&solana_sdk::feature::id())
+                {
+                    remaining_empty.fetch_add(1, Ordering::Relaxed);
+                }
+                true
+            });
 
         let non_empty = remaining
             .load(Ordering::Relaxed)
