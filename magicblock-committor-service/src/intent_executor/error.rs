@@ -144,6 +144,8 @@ pub enum TransactionStrategyExecutionError {
     CommitIDError(#[source] TransactionError, Option<Signature>),
     #[error("Max instruction trace length exceeded: {0}. {:?}", .1)]
     CpiLimitError(#[source] TransactionError, Option<Signature>),
+    #[error("Unfinalized account error: {0}, {:?}", .1)]
+    UnfinalizedAccountError(#[source] TransactionError, Option<Signature>),
     #[error("InternalError: {0}")]
     InternalError(#[from] InternalError),
 }
@@ -165,6 +167,7 @@ impl TransactionStrategyExecutionError {
             Self::CommitIDError(_, signature)
             | Self::ActionsError(_, signature)
             | Self::UndelegationError(_, signature)
+            | Self::UnfinalizedAccountError(_, signature)
             | Self::CpiLimitError(_, signature) => *signature,
         }
     }
@@ -179,8 +182,18 @@ impl TransactionStrategyExecutionError {
     ) -> Result<Self, TransactionError> {
         // There's always 2 budget instructions in front
         const OFFSET: u8 = 2;
+        // Commit Nonce order error
         const NONCE_OUT_OF_ORDER: u32 =
             dlp::error::DlpError::NonceOutOfOrder as u32;
+        // Errors when commit state already exists
+        const COMMIT_STATE_INVALID_ACCOUNT_OWNER: u32 =
+            dlp::error::DlpError::CommitStateInvalidAccountOwner as u32;
+        const COMMIT_STATE_ALREADY_INITIALIZED: u32 =
+            dlp::error::DlpError::CommitStateAlreadyInitialized as u32;
+        const COMMIT_RECORD_INVALID_ACCOUNT_OWNER: u32 =
+            dlp::error::DlpError::CommitRecordInvalidAccountOwner as u32;
+        const COMMIT_RECORD_ALREADY_INITIALIZED: u32 =
+            dlp::error::DlpError::CommitRecordAlreadyInitialized as u32;
 
         match err {
             // Some tx may use too much CPIs and we can handle it in certain cases
@@ -208,15 +221,35 @@ impl TransactionStrategyExecutionError {
                 };
 
                 match (task_type, instruction_err) {
-                    (
-                        TaskType::Commit,
-                        InstructionError::Custom(NONCE_OUT_OF_ORDER),
-                    ) => Ok(TransactionStrategyExecutionError::CommitIDError(
-                        tx_err_helper(InstructionError::Custom(
-                            NONCE_OUT_OF_ORDER,
-                        )),
-                        signature,
-                    )),
+                    (TaskType::Commit, instruction_err) => match instruction_err
+                    {
+                        InstructionError::Custom(NONCE_OUT_OF_ORDER) => Ok(
+                            TransactionStrategyExecutionError::CommitIDError(
+                                tx_err_helper(InstructionError::Custom(
+                                    NONCE_OUT_OF_ORDER,
+                                )),
+                                signature,
+                            ),
+                        ),
+                        instruction_err @ (InstructionError::Custom(
+                            COMMIT_STATE_INVALID_ACCOUNT_OWNER,
+                        )
+                        | InstructionError::Custom(
+                            COMMIT_STATE_ALREADY_INITIALIZED,
+                        )
+                        | InstructionError::Custom(
+                            COMMIT_RECORD_INVALID_ACCOUNT_OWNER,
+                        )
+                        | InstructionError::Custom(
+                            COMMIT_RECORD_ALREADY_INITIALIZED,
+                        )) => {
+                            Ok(TransactionStrategyExecutionError::UnfinalizedAccountError(
+                                tx_err_helper(instruction_err),
+                                signature
+                            ))
+                        }
+                        err => Err(tx_err_helper(err)),
+                    },
                     (TaskType::Action, instruction_err) => {
                         Ok(TransactionStrategyExecutionError::ActionsError(
                             tx_err_helper(instruction_err),

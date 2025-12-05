@@ -10,6 +10,7 @@ use std::{
 };
 
 use borsh::to_vec;
+use dlp::args::CommitStateArgs;
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use futures::future::join_all;
 use magicblock_committor_program::pdas;
@@ -51,7 +52,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
-
+use magicblock_rpc_client::MagicBlockSendTransactionConfig;
 use crate::{
     common::TestFixture,
     utils::{
@@ -822,6 +823,62 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         &invalidated_keys,
     )
     .await;
+}
+
+#[tokio::test]
+async fn test_commit_unfinalized_account_recovery() {
+    let TestEnv {
+        fixture,
+        mut intent_executor,
+        task_info_fetcher,
+        pre_test_tablemania_state,
+    } = TestEnv::setup().await;
+
+    // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
+    // We also craft unique on-chain data so we can verify post-commit state exactly.
+    let (counter_auth, account) = setup_counter(40, None).await;
+    setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
+        .await;
+    let pda = FlexiCounter::pda(&counter_auth.pubkey()).0;
+
+    // Commit account without finalization
+    // This simulates finalization stage failure
+    {
+        let commit_allow_undelegation_ix = dlp::instruction_builder::commit_state(
+            fixture.authority.pubkey(),
+            pda,
+            account.owner,
+            CommitStateArgs {
+                nonce: 1,
+                lamports: account.lamports,
+                allow_undelegation: false,
+                data: account.data.clone(),
+            }
+        );
+
+        let blockhash = fixture.rpc_client.get_latest_blockhash().await.unwrap();
+        let tx = Transaction::new_signed_with_payer(
+            &[commit_allow_undelegation_ix],
+            Some(&fixture.authority.pubkey()),
+            &[&fixture.authority],
+            blockhash
+        );
+
+        let result = fixture.rpc_client.send_transaction(&tx, &MagicBlockSendTransactionConfig::ensure_committed()).await;
+        assert!(result.is_ok());
+    }
+
+    // Now simulate user sending new intent
+    let committed_account = CommittedAccount {
+        pubkey: pda,
+        account
+    };
+    let intent = create_intent(vec![committed_account], false);
+    let result = intent_executor.execute(intent, None::<IntentPersisterImpl>).await;
+    assert!(result.inner.is_err());
+    println!("{:?}", result.inner.unwrap_err());
+
+    assert!(result.patched_errors.is_empty());
 }
 
 fn failing_undelegate_action(

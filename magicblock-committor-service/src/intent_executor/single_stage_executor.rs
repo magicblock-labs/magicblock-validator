@@ -139,6 +139,12 @@ where
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
+            TransactionStrategyExecutionError::UnfinalizedAccountError(
+                _,
+                _,
+            ) => {
+                todo!()
+            }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch

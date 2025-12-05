@@ -150,6 +150,12 @@ where
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
+            TransactionStrategyExecutionError::UnfinalizedAccountError(
+                _,
+                _,
+            ) => {
+                todo!()
+            }
             TransactionStrategyExecutionError::ActionsError(_, _) => {
                 // Unexpected in Two Stage commit
                 // That would mean that Two Stage executes Standalone commit
@@ -271,6 +277,12 @@ where
                 // & we also record data that has to be cleaned up after patch
                 let to_cleanup = inner.handle_actions_error(finalize_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
+            }
+            TransactionStrategyExecutionError::UnfinalizedAccountError(
+                _,
+                _,
+            ) => {
+                todo!()
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
