@@ -54,6 +54,5 @@ pub struct ChainLinkConfig {
     pub max_monitored_accounts: usize,
 
     /// When true, confined accounts are removed during accounts bank reset.
-    /// Default: false. Can be overridden via env var MBV_CHAINLINK__REMOVE_CONFINED_ACCOUNTS
     pub remove_confined_accounts: bool,
 }
