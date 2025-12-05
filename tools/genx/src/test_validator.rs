@@ -7,8 +7,9 @@ use std::{
 
 use json::{json, Value};
 use magicblock_accounts_db::AccountsDb;
+use solana_commitment_config::CommitmentConfig;
+use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::RpcClient;
-use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
 use tempfile::tempdir;
 
 pub struct TestValidatorConfig {

@@ -6,25 +6,25 @@ use std::{
 use solana_account_decoder::parse_token::{
     real_number_string_trimmed, UiTokenAmount,
 };
-use solana_sdk::{
-    hash::{Hash, HASH_BYTES},
-    instruction::{CompiledInstruction, InstructionError},
-    message::{
-        legacy::Message as LegacyMessage,
-        v0::{self, LoadedAddresses, MessageAddressTableLookup},
-        MessageHeader, VersionedMessage,
-    },
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::{Transaction, TransactionError, VersionedTransaction},
-    transaction_context::TransactionReturnData,
+use solana_hash::{Hash, HASH_BYTES};
+use solana_instruction::error::InstructionError;
+use solana_message::{
+    legacy::Message as LegacyMessage, v0, v0::LoadedAddresses, 
+    VersionedMessage, MessageHeader, v0::MessageAddressTableLookup,
+    compiled_instruction::CompiledInstruction,
 };
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
+use solana_transaction::Transaction;
+use solana_transaction_context::TransactionReturnData;
+use solana_transaction_error::TransactionError;
 use solana_transaction_status::{
     ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward,
     RewardType, RewardsAndNumPartitions, TransactionByAddrInfo,
     TransactionStatusMeta, TransactionTokenBalance, TransactionWithStatusMeta,
     VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
+use solana_transaction::versioned::VersionedTransaction;
 
 use crate::{StoredExtendedRewards, StoredTransactionStatusMeta};
 

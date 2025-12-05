@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use dlp::pda;
 use log::*;
 use solana_pubkey::Pubkey;
-use solana_sdk::system_program;
+use solana_system_program::id as system_program_id;
 
 /// Returns all accounts needed to process/finalize a commit for the account
 /// with the provided `delegated_account`.
@@ -65,7 +65,7 @@ pub fn provide_common_pubkeys(validator: &Pubkey) -> HashSet<Pubkey> {
     );
 
     set.insert(*validator);
-    set.insert(system_program::id());
+    set.insert(system_program_id());
     set.insert(deleg_program);
     set.insert(protocol_fees_vault);
     set.insert(validator_fees_vault);

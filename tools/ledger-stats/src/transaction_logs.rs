@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use magicblock_ledger::Ledger;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 
 use crate::utils::render_logs;
 

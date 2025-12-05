@@ -330,7 +330,7 @@ macro_rules! assert_cloned_as_empty_placeholder {
             );
             assert_eq!(
                 account.owner(),
-                &::solana_sdk::system_program::id(),
+                &::solana_system_program::id(),
                 "Expected account {} to be owned by system program",
                 pubkey
             );
