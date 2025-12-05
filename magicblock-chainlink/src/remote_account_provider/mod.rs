@@ -393,9 +393,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             Vec::with_capacity(endpoints.len());
         for ep in endpoints {
             let (abort_tx, abort_rx) = mpsc::channel(1);
-            let client =
-                ChainUpdatesClient::try_new_from_endpoint(ep, commitment, abort_tx)
-                    .await?;
+            let client = ChainUpdatesClient::try_new_from_endpoint(
+                ep, commitment, abort_tx,
+            )
+            .await?;
             pubsubs.push((Arc::new(client), abort_rx));
         }
 

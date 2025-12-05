@@ -367,7 +367,9 @@ impl MagicValidator {
         let endpoints = config
             .remote
             .websocket()
-            .map(|pubsub_url| Endpoint::new(rpc_url.clone(), pubsub_url.to_string()))
+            .map(|pubsub_url| {
+                Endpoint::new(rpc_url.clone(), pubsub_url.to_string())
+            })
             .collect::<Vec<_>>();
 
         let cloner = ChainlinkCloner::new(

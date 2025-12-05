@@ -1360,7 +1360,7 @@ mod tests {
         .expect("expect update after reconnect")
         .expect("stream open");
         assert_eq!(up.pubkey, pk);
-        assert_eq!(up.rpc_response.context.slot, 2);
+        assert_eq!(up.slot, 2);
 
         mux.shutdown().await.unwrap();
     }
@@ -1420,7 +1420,7 @@ mod tests {
 
         let up = got.expect("should receive update after retry reconnect");
         assert_eq!(up.pubkey, pk);
-        assert!(up.rpc_response.context.slot >= 100);
+        assert!(up.slot >= 100);
 
         mux.shutdown().await.unwrap();
     }

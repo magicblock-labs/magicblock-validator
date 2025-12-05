@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use crate::remote_account_provider::{
     chain_laser_client::{is_helius_laser_url, ChainLaserClientImpl},
     pubsub_common::SubscriptionUpdate,
-    ChainPubsubClient, ChainPubsubClientImpl, ReconnectableClient, Endpoint,
+    ChainPubsubClient, ChainPubsubClientImpl, Endpoint, ReconnectableClient,
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 

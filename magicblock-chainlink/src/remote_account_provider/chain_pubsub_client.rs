@@ -463,6 +463,7 @@ pub mod mock {
                 // keep it small; tests shouldn't take long
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
+            Ok(())
         }
     }
 }
