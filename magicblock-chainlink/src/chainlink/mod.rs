@@ -10,6 +10,7 @@ use dlp::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
 use log::*;
+use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -61,6 +62,9 @@ pub struct Chainlink<
 
     /// If > 0, automatically airdrop this many lamports to feepayers when they are new/empty
     auto_airdrop_lamports: u64,
+
+    /// If true, remove confined accounts during bank reset
+    remove_confined_accounts: bool,
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
@@ -71,7 +75,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
-        auto_airdrop_lamports: u64,
+        config: &ChainLinkConfig,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
@@ -89,7 +93,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             removed_accounts_sub,
             validator_id: validator_pubkey,
             faucet_id: faucet_pubkey,
-            auto_airdrop_lamports,
+            auto_airdrop_lamports: config.auto_airdrop_lamports,
+            remove_confined_accounts: config.remove_confined_accounts,
         })
     }
 
@@ -102,7 +107,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
         config: ChainlinkConfig,
-        auto_airdrop_lamports: u64,
+        chainlink_config: &ChainLinkConfig,
     ) -> ChainlinkResult<
         Chainlink<
             ChainRpcClientImpl,
@@ -141,7 +146,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             fetch_cloner,
             validator_pubkey,
             faucet_pubkey,
-            auto_airdrop_lamports,
+            chainlink_config,
         )
     }
 
@@ -163,6 +168,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             if blacklisted_accounts.contains(pubkey) {
                 blacklisted.fetch_add(1, Ordering::Relaxed);
                 return false;
+            }
+            if self.remove_confined_accounts && account.confined() {
+                return true;
             }
             // Undelegating accounts are normally also delegated, but if that ever changes
             // we want to make sure we never remove an account of which we aren't sure
