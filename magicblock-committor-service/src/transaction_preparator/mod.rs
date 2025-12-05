@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
+use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
-use solana_keypair::Keypair;
 
 use crate::{
     persist::IntentPersister,

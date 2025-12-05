@@ -9,13 +9,15 @@ use solana_account_decoder::parse_token::{
 use solana_hash::{Hash, HASH_BYTES};
 use solana_instruction::error::InstructionError;
 use solana_message::{
-    legacy::Message as LegacyMessage, v0, v0::LoadedAddresses, 
-    VersionedMessage, MessageHeader, v0::MessageAddressTableLookup,
     compiled_instruction::CompiledInstruction,
+    legacy::Message as LegacyMessage,
+    v0,
+    v0::{LoadedAddresses, MessageAddressTableLookup},
+    MessageHeader, VersionedMessage,
 };
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_transaction::Transaction;
+use solana_transaction::{versioned::VersionedTransaction, Transaction};
 use solana_transaction_context::TransactionReturnData;
 use solana_transaction_error::TransactionError;
 use solana_transaction_status::{
@@ -24,7 +26,6 @@ use solana_transaction_status::{
     TransactionStatusMeta, TransactionTokenBalance, TransactionWithStatusMeta,
     VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
-use solana_transaction::versioned::VersionedTransaction;
 
 use crate::{StoredExtendedRewards, StoredTransactionStatusMeta};
 

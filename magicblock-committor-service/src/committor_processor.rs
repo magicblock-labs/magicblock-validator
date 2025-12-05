@@ -3,9 +3,9 @@ use std::{collections::HashSet, path::Path, sync::Arc};
 use log::*;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_keypair::Keypair;
 use solana_signer::Signer;
 use tokio::sync::broadcast;
 
