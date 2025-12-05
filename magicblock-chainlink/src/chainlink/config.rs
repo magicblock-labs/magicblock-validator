@@ -5,8 +5,6 @@ use crate::remote_account_provider::config::RemoteAccountProviderConfig;
 #[derive(Debug, Default, Clone)]
 pub struct ChainlinkConfig {
     pub remote_account_provider: RemoteAccountProviderConfig,
-    /// When true, confined accounts are removed during accounts bank reset.
-    /// Default: false
     pub remove_confined_accounts: bool,
 }
 
