@@ -77,6 +77,7 @@ declare_process_instruction!(
             EnableExecutableCheck => {
                 process_toggle_executable_check(signers, invoke_context, true)
             }
+            Noop(_) => Ok(()),
         }
     }
 );
