@@ -1,10 +1,7 @@
 #![cfg(not(test))]
-use solana_sdk::{
-    instruction::InstructionError,
-    pubkey::Pubkey,
-    transaction_context::{InstructionContext, TransactionContext},
-};
-
+use solana_instruction::error::InstructionError;
+use solana_pubkey::Pubkey;
+use solana_transaction_context::{InstructionContext, TransactionContext};
 // -----------------
 // InstructionFrame Trait
 // -----------------

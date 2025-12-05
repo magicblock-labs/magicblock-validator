@@ -3,9 +3,10 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
 use magicblock_config::config::LifecycleMode;
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_signer::Signer;
 
 use crate::{
     accounts_bank::mock::AccountsBankStub,

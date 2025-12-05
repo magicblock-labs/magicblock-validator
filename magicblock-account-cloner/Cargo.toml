@@ -17,12 +17,21 @@ magicblock-committor-service = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
-magicblock-program = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
+magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 rand = { workspace = true }
+solana-account = { workspace = true }
+solana-hash = { workspace = true }
 solana-instruction = { workspace = true }
-solana-sdk = { workspace = true }
+solana-loader-v3-interface = { workspace = true }
+solana-loader-v4-interface = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-sdk-ids = { workspace = true }
+solana-signature = { workspace = true }
+solana-signer = { workspace = true }
+solana-sysvar = { workspace = true }
+solana-transaction = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 

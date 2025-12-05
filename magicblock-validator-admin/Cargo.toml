@@ -15,7 +15,10 @@ magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 
 
+solana-commitment-config = { workspace = true }
 solana-rpc-client = { workspace = true }
-solana-sdk = { workspace = true }
+solana-signature = { workspace = true }
+solana-signer = { workspace = true }
+solana-transaction = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["full"] }

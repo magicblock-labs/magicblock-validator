@@ -1,5 +1,5 @@
 use magicblock_accounts_db::error::AccountsDbError;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use thiserror::Error;
 
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
@@ -96,7 +96,7 @@ pub enum ApiError {
 
     #[error("Failed to sanitize transaction: {0}")]
     FailedToSanitizeTransaction(
-        #[from] solana_sdk::transaction::TransactionError,
+        #[from] solana_transaction_error::TransactionError,
     ),
 }
 

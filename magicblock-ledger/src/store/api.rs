@@ -13,15 +13,15 @@ use log::*;
 use magicblock_core::link::blocks::BlockHash;
 use rocksdb::{Direction as IteratorDirection, FlushOptions};
 use scc::HashCache;
+use solana_clock::{Slot, UnixTimestamp};
+use solana_hash::{Hash, HASH_BYTES};
 use solana_measure::measure::Measure;
-use solana_sdk::{
-    clock::{Slot, UnixTimestamp},
-    hash::{Hash, HASH_BYTES},
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::{SanitizedTransaction, VersionedTransaction},
-};
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 use solana_storage_proto::convert::generated::{self, ConfirmedTransaction};
+use solana_transaction::{
+    sanitized::SanitizedTransaction, versioned::VersionedTransaction,
+};
 use solana_transaction_status::{
     ConfirmedTransactionStatusWithSignature,
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
@@ -1316,16 +1316,18 @@ impl_has_column!(AccountModDatas, account_mod_datas_cf);
 // -----------------
 #[cfg(test)]
 mod tests {
-    use solana_sdk::{
-        clock::UnixTimestamp,
-        instruction::{CompiledInstruction, InstructionError},
-        message::{v0, MessageHeader, SimpleAddressLoader, VersionedMessage},
-        pubkey::Pubkey,
-        signature::{Keypair, Signature},
-        signer::Signer,
-        transaction::{TransactionError, VersionedTransaction},
-        transaction_context::TransactionReturnData,
+    use solana_clock::UnixTimestamp;
+    use solana_instruction::error::InstructionError;
+    use solana_keypair::Keypair;
+    use solana_message::{
+        compiled_instruction::CompiledInstruction, v0, MessageHeader,
+        SimpleAddressLoader, VersionedMessage,
     };
+    use solana_pubkey::Pubkey;
+    use solana_signature::Signature;
+    use solana_signer::Signer;
+    use solana_transaction_context::TransactionReturnData;
+    use solana_transaction_error::{TransactionError, TransactionResult};
     use solana_transaction_status::{
         ConfirmedTransactionWithStatusMeta, InnerInstruction,
         InnerInstructions, TransactionStatusMeta, TransactionWithStatusMeta,
@@ -1408,7 +1410,7 @@ mod tests {
 
         (
             TransactionStatusMeta {
-                status: solana_sdk::transaction::Result::<()>::Err(
+                status: TransactionResult::Err(
                     TransactionError::InstructionError(
                         99,
                         InstructionError::Custom(69),

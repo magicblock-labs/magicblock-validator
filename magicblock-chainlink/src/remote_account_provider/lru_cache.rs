@@ -4,7 +4,7 @@ use log::*;
 use lru::LruCache;
 use magicblock_metrics::metrics::inc_evicted_accounts_count;
 use solana_pubkey::Pubkey;
-use solana_sdk::sysvar;
+use solana_sdk_ids::sysvar;
 
 use crate::submux::SubscribedAccountsTracker;
 

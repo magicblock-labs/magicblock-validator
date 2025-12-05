@@ -1,21 +1,20 @@
 use std::{cell::RefCell, collections::HashSet};
 
+use magicblock_core::Slot;
 use magicblock_magic_program_api::args::{
     ActionArgs, BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
     MagicBaseIntentArgs, ShortAccountMeta, UndelegateTypeArgs,
 };
 use serde::{Deserialize, Serialize};
+use solana_account::{Account, AccountSharedData, ReadableAccount};
+use solana_hash::Hash;
 use solana_log_collector::ic_msg;
-use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::{
-    account::{Account, AccountSharedData, ReadableAccount},
-    clock::Slot,
-    hash::Hash,
-    instruction::InstructionError,
-    pubkey::Pubkey,
-    transaction::Transaction,
-    transaction_context::TransactionContext,
+use solana_program_runtime::{
+    __private::{InstructionError, TransactionContext},
+    invoke_context::InvokeContext,
 };
+use solana_pubkey::Pubkey;
+use solana_transaction::Transaction;
 
 use crate::{
     instruction_utils::InstructionUtils,

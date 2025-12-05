@@ -372,10 +372,9 @@ mod tests {
     use async_trait::async_trait;
     use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
     use solana_pubkey::{pubkey, Pubkey};
-    use solana_sdk::{
-        signature::Signature, signer::SignerError,
-        transaction::TransactionError,
-    };
+    use solana_signature::Signature;
+    use solana_signer::SignerError;
+    use solana_transaction_error::TransactionError;
     use tokio::{sync::mpsc, time::sleep};
 
     use super::*;

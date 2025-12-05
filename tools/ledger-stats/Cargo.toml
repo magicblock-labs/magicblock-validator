@@ -16,7 +16,11 @@ magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
 num-format = { workspace = true }
 pretty-hex = "0.4.1"
-solana-sdk = { workspace = true }
+solana-account = { workspace = true }
+solana-clock = { workspace = true }
+solana-message = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-signature = { workspace = true }
 solana-transaction-status = { workspace = true }
 structopt = "0.3"
 tabular = "0.2"

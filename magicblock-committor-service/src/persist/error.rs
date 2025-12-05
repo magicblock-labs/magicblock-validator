@@ -8,13 +8,13 @@ pub enum CommitPersistError {
     RusqliteError(#[from] rusqlite::Error),
 
     #[error("ParsePubkeyError: '{0}' ({0:?})")]
-    ParsePubkeyError(#[from] solana_sdk::pubkey::ParsePubkeyError),
+    ParsePubkeyError(#[from] solana_pubkey::ParsePubkeyError),
 
     #[error("ParseSignatureError: '{0}' ({0:?})")]
-    ParseSignatureError(#[from] solana_sdk::signature::ParseSignatureError),
+    ParseSignatureError(#[from] solana_signature::ParseSignatureError),
 
     #[error("ParseHashError: '{0}' ({0:?})")]
-    ParseHashError(#[from] solana_sdk::hash::ParseHashError),
+    ParseHashError(#[from] solana_hash::ParseHashError),
 
     #[error("Invalid Commit Type: '{0}' ({0:?})")]
     InvalidCommitType(String),

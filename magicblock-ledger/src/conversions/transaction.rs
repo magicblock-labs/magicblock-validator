@@ -1,19 +1,18 @@
 use log::*;
 use solana_account_decoder::parse_token::UiTokenAmount;
-use solana_sdk::{
-    clock::{Slot, UnixTimestamp},
-    hash::{Hash, HASH_BYTES},
-    instruction::CompiledInstruction,
-    message::{
-        v0::{self, LoadedAddresses},
-        Message, MessageHeader, VersionedMessage,
-    },
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::{self, Transaction, TransactionError, VersionedTransaction},
-    transaction_context::TransactionReturnData,
+use solana_clock::{Slot, UnixTimestamp};
+use solana_hash::{Hash, HASH_BYTES};
+use solana_message::{
+    compiled_instruction::CompiledInstruction,
+    v0::{self, LoadedAddresses},
+    Message, MessageHeader, VersionedMessage,
 };
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 use solana_storage_proto::convert::generated;
+use solana_transaction::{versioned::VersionedTransaction, Transaction};
+use solana_transaction_context::TransactionReturnData;
+use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status::{
     ConfirmedTransactionWithStatusMeta, InnerInstruction, InnerInstructions,
     Reward, RewardType, TransactionStatusMeta, TransactionTokenBalance,
@@ -214,7 +213,7 @@ fn tx_meta_from_generated(
 
 fn status_from_generated(
     err: Option<generated::TransactionError>,
-) -> transaction::Result<()> {
+) -> TransactionResult<()> {
     match err {
         None => Ok(()),
         Some(err) => {
@@ -226,8 +225,8 @@ fn status_from_generated(
                 .ok();
 
             match e {
-                Some(err) => transaction::Result::Err(err),
-                None => transaction::Result::Ok(()),
+                Some(err) => TransactionResult::Err(err),
+                None => TransactionResult::Ok(()),
             }
         }
     }

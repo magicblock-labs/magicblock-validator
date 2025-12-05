@@ -14,9 +14,16 @@ doctest = false
 log = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
-solana-sdk = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
 solana-transaction-error = { workspace = true }
+solana-account = { workspace = true }
+solana-clock = { workspace = true }
+solana-commitment-config = { workspace = true }
+solana-hash = { workspace = true }
+solana-instruction = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-signature = { workspace = true }
+solana-address-lookup-table-interface = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 

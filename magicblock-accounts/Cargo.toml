@@ -17,7 +17,10 @@ magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-program = { workspace = true }
-solana-sdk = { workspace = true }
+solana-hash = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-transaction-error = { workspace = true }
+solana-transaction = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 thiserror = { workspace = true }

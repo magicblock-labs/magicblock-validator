@@ -2,7 +2,7 @@ use std::ops::ControlFlow;
 
 use log::{error, warn};
 use solana_pubkey::Pubkey;
-use solana_sdk::signature::Signature;
+use solana_signature::Signature;
 
 use crate::{
     intent_executor::{

@@ -2,19 +2,17 @@
 // heavily updated to remove vote + stake related code as well as cluster type (defaulting to mainnet)
 use std::time::UNIX_EPOCH;
 
-use solana_sdk::{
-    account::{Account, AccountSharedData},
-    clock::UnixTimestamp,
-    feature::{self, Feature},
-    feature_set::FeatureSet,
-    fee_calculator::FeeRateGovernor,
-    genesis_config::{ClusterType, GenesisConfig},
-    native_token::sol_to_lamports,
-    pubkey::Pubkey,
-    rent::Rent,
-    signature::{Keypair, Signer},
-    system_program,
-};
+use solana_account::{Account, AccountSharedData};
+use solana_clock::UnixTimestamp;
+use solana_feature_gate_interface::{create_account, Feature};
+use solana_feature_set::FeatureSet;
+use solana_fee_calculator::FeeRateGovernor;
+use solana_genesis_config::{ClusterType, GenesisConfig};
+use solana_keypair::Keypair;
+use solana_native_token::LAMPORTS_PER_SOL;
+use solana_pubkey::Pubkey;
+use solana_rent::Rent;
+use solana_signer::Signer;
 
 // Default amount received by the validator
 const VALIDATOR_LAMPORTS: u64 = 42;
@@ -65,7 +63,7 @@ pub fn activate_feature(
 ) {
     genesis_config.accounts.insert(
         feature_id,
-        Account::from(feature::create_account(
+        Account::from(create_account(
             &Feature {
                 activated_at: Some(0),
             },
@@ -89,25 +87,24 @@ pub fn create_genesis_config_with_leader_ex(
 ) -> GenesisConfig {
     initial_accounts.push((
         *mint_pubkey,
-        AccountSharedData::new(mint_lamports, 0, &system_program::id()),
+        AccountSharedData::new(mint_lamports, 0, &Pubkey::default()),
     ));
     initial_accounts.push((
         *validator_pubkey,
-        AccountSharedData::new(validator_lamports, 0, &system_program::id()),
+        AccountSharedData::new(validator_lamports, 0, &Pubkey::default()),
     ));
 
     // Note that zero lamports for validator stake will result in stake account
     // not being stored in accounts-db but still cached in bank stakes. This
     // causes discrepancy between cached stakes accounts in bank and
     // accounts-db which in particular will break snapshots test.
-    let native_mint_account =
-        solana_sdk::account::AccountSharedData::from(Account {
-            owner: solana_inline_spl::token::id(),
-            data: solana_inline_spl::token::native_mint::ACCOUNT_DATA.to_vec(),
-            lamports: sol_to_lamports(1.),
-            executable: false,
-            rent_epoch: 1,
-        });
+    let native_mint_account = AccountSharedData::from(Account {
+        owner: solana_inline_spl::token::id(),
+        data: solana_inline_spl::token::native_mint::ACCOUNT_DATA.to_vec(),
+        lamports: LAMPORTS_PER_SOL,
+        executable: false,
+        rent_epoch: 1,
+    });
     initial_accounts.push((
         solana_inline_spl::token::native_mint::id(),
         native_mint_account,

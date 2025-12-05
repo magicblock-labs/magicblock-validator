@@ -4,12 +4,10 @@ use magicblock_accounts_db::AccountsDb;
 use magicblock_core::traits::AccountsBank;
 use magicblock_magic_program_api as magic_program;
 use magicblock_program::MagicContext;
-use solana_sdk::{
-    account::{AccountSharedData, WritableAccount},
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-};
+use solana_account::{AccountSharedData, WritableAccount};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 
 use crate::{
     errors::ApiResult,

@@ -1,6 +1,8 @@
 use byteorder::{BigEndian, ByteOrder};
 use serde::{de::DeserializeOwned, Serialize};
-use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
+use solana_clock::Slot;
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 use solana_storage_proto::convert::generated;
 
 use super::meta;
@@ -51,7 +53,7 @@ pub struct AddressSignatures;
 ///
 /// * index type: `(`[`Slot`]`, u32)`
 /// *                 slot,  tx index
-/// * value type: [`[`solana_sdk::signature::Signature`]`]
+/// * value type: [`[`solana_signature::signature::Signature`]`]
 pub struct SlotSignatures;
 
 /// The block time column
@@ -63,7 +65,7 @@ pub struct Blocktime;
 /// The block hash column
 ///
 /// * index type: `u64` (see [`SlotColumn`])
-/// * value type: [`solana_sdk::hash::Hash`]
+/// * value type: [`solana_hash::hash::Hash`]
 pub struct Blockhash;
 
 /// The transaction with status column
@@ -471,7 +473,7 @@ impl ColumnName for Blocktime {
     const NAME: &'static str = BLOCKTIME_CF;
 }
 impl TypedColumn for Blocktime {
-    type Type = solana_sdk::clock::UnixTimestamp;
+    type Type = solana_clock::UnixTimestamp;
 }
 
 // -----------------
@@ -482,7 +484,7 @@ impl ColumnName for Blockhash {
     const NAME: &'static str = BLOCKHASH_CF;
 }
 impl TypedColumn for Blockhash {
-    type Type = solana_sdk::hash::Hash;
+    type Type = solana_hash::Hash;
 }
 
 // -----------------

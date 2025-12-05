@@ -1,15 +1,12 @@
 use std::fs;
 
 use magicblock_ledger::Ledger;
-use solana_sdk::{
-    clock::Slot,
-    hash::Hash,
-    pubkey::Pubkey,
-    signature::{Keypair, Signature},
-    signer::Signer,
-    system_instruction,
-    transaction::{SanitizedTransaction, Transaction},
-};
+use solana_clock::Slot;
+use solana_hash::Hash;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
+use solana_transaction::sanitized::SanitizedTransaction;
 use solana_transaction_status::{
     TransactionStatusMeta, VersionedConfirmedBlock,
 };
@@ -28,13 +25,8 @@ pub fn write_dummy_transaction(
 ) -> (Hash, Signature) {
     let from = Keypair::new();
     let to = Pubkey::new_unique();
-    let ix = system_instruction::transfer(&from.pubkey(), &to, 99);
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&from.pubkey()),
-        &[&from],
-        Hash::new_unique(),
-    );
+    let tx =
+        solana_system_transaction::transfer(&from, &to, 99, Hash::new_unique());
     let signature = Signature::new_unique();
     let transaction = SanitizedTransaction::from_transaction_for_tests(tx);
     let status = TransactionStatusMeta::default();

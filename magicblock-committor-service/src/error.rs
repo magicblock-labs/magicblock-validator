@@ -1,5 +1,6 @@
 use solana_pubkey::Pubkey;
-use solana_sdk::signature::Signature;
+use solana_signature::Signature;
+use solana_transaction_error::TransactionError;
 use thiserror::Error;
 
 use crate::intent_execution_manager::IntentExecutionManagerError;
@@ -34,10 +35,7 @@ pub enum CommittorServiceError {
     ),
 
     #[error("The transaction to {0} was sent and confirmed, but encountered an error: {1} ({1:?})")]
-    EncounteredTransactionError(
-        String,
-        solana_sdk::transaction::TransactionError,
-    ),
+    EncounteredTransactionError(String, TransactionError),
 
     #[error("Failed to send init changeset account: {0} ({0:?})")]
     FailedToSendInitChangesetAccount(
@@ -52,13 +50,10 @@ pub enum CommittorServiceError {
     InitChangesetAccountNotConfirmed(String),
 
     #[error("Task {0} failed to compile transaction message: {1} ({1:?})")]
-    FailedToCompileTransactionMessage(
-        String,
-        solana_sdk::message::CompileError,
-    ),
+    FailedToCompileTransactionMessage(String, solana_message::CompileError),
 
     #[error("Task {0} failed to create transaction: {1} ({1:?})")]
-    FailedToCreateTransaction(String, solana_sdk::signer::SignerError),
+    FailedToCreateTransaction(String, solana_signer::SignerError),
 
     #[error("Could not find commit strategy for bundle {0}")]
     CouldNotFindCommitStrategyForBundle(u64),
@@ -69,7 +64,7 @@ pub enum CommittorServiceError {
     #[error("Failed to deserialize metadata account for {0}, {1:?}")]
     FailedToDeserializeDelegationMetadata(
         Pubkey,
-        solana_sdk::program_error::ProgramError,
+        solana_program::program_error::ProgramError,
     ),
 }
 

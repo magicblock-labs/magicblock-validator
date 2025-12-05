@@ -2,7 +2,7 @@ use std::{future::Future, ops::ControlFlow, time::Duration};
 
 use log::error;
 use solana_rpc_client_api::client_error::ErrorKind;
-use solana_sdk::signature::Signature;
+use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use tokio::time::{sleep, Instant};
 

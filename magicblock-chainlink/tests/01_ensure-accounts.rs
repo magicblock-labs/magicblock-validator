@@ -9,8 +9,8 @@ use magicblock_chainlink::{
     testing::deleg::add_delegation_record_for, AccountFetchOrigin,
 };
 use solana_account::{Account, AccountSharedData};
+use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
-use solana_sdk::clock::Slot;
 use utils::test_context::TestContext;
 
 mod utils;
