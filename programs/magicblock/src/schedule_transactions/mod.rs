@@ -15,7 +15,7 @@ pub use process_scheduled_commit_sent::{
 };
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::instruction::InstructionError;
+use solana_instruction::error::InstructionError;
 
 use crate::utils::accounts::get_instruction_pubkey_with_idx;
 

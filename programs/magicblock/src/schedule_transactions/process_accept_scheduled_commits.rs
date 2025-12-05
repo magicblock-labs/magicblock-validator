@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::{
-    account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
-};
+use solana_account::ReadableAccount;
+use solana_instruction::error::InstructionError;
+use solana_pubkey::Pubkey;
 
 use crate::{
     schedule_transactions,

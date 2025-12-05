@@ -11,13 +11,9 @@ use std::{
 use magicblock_core::traits::PersistsAccountModData;
 use solana_log_collector::log::debug;
 use solana_program_runtime::invoke_context::mock_process_instruction;
-use solana_sdk::{
-    account::AccountSharedData,
-    instruction::{AccountMeta, InstructionError},
-    pubkey::Pubkey,
-    system_program,
-};
-
+use solana_instruction::{AccountMeta, error::InstructionError};
+use solana_sdk_ids::system_program;
+use solana_account::AccountSharedData;
 use self::magicblock_processor::Entrypoint;
 use super::*;
 use crate::validator;

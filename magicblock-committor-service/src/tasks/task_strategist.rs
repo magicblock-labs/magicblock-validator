@@ -1,10 +1,8 @@
 use std::collections::BinaryHeap;
 
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    signature::Keypair,
-    signer::{Signer, SignerError},
-};
+use solana_keypair::Keypair;
+use solana_signer::{Signer, SignerError};
 
 use crate::{
     persist::IntentPersister,
@@ -252,8 +250,8 @@ mod tests {
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, CommittedAccount, ProgramArgs,
     };
-    use solana_account::Account;
-    use solana_sdk::system_program;
+   use solana_account::Account;
+   use solana_sdk::system_program;
 
     use super::*;
     use crate::{

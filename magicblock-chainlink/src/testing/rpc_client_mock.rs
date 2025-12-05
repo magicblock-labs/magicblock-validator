@@ -22,7 +22,8 @@ use solana_rpc_client_api::{
     response::{Response, RpcResponseContext, RpcResult},
 };
 #[cfg(any(test, feature = "dev-context"))]
-use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
+use solana_commitment_config::CommitmentConfig;
+use solana_sdk::sysvar::clock;
 
 #[cfg(any(test, feature = "dev-context"))]
 use crate::remote_account_provider::chain_rpc_client::ChainRpcClient;

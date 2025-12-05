@@ -12,15 +12,9 @@ use solana_loader_v4_interface::{
     state::{LoaderV4State, LoaderV4Status},
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    hash::Hash,
-    instruction::{AccountMeta, Instruction},
-    native_token::LAMPORTS_PER_SOL,
-    pubkey,
-    rent::Rent,
-    transaction::Transaction,
-};
-use solana_sdk_ids::bpf_loader_upgradeable;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_pubkey::pubkey;
+use solana_sdk::sysvar::rent::Rent;
 use solana_system_interface::instruction as system_instruction;
 
 use crate::{
@@ -457,7 +451,10 @@ fn state_data_v4(
 
 #[cfg(test)]
 mod tests {
-    use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_sdk::signature::Keypair;
+use solana_sdk::hash::Hash;
+use solana_transaction::Transaction;
+use solana_signer::Signer;
 
     use super::*;
 

@@ -4,7 +4,9 @@ use std::sync::{
 };
 
 use lazy_static::lazy_static;
-use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 
 lazy_static! {
     static ref VALIDATOR_AUTHORITY: RwLock<Option<Keypair>> = RwLock::new(None);

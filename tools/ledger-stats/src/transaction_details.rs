@@ -3,7 +3,8 @@ use std::str::FromStr;
 use magicblock_ledger::Ledger;
 use num_format::{Locale, ToFormattedString};
 use pretty_hex::*;
-use solana_sdk::{message::VersionedMessage, signature::Signature};
+use solana_message::VersionedMessage;
+use solana_signature::Signature;
 use solana_transaction_status::ConfirmedTransactionWithStatusMeta;
 use tabular::{Row, Table};
 

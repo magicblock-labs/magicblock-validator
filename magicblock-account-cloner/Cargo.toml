@@ -21,6 +21,7 @@ magicblock-program = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 rand = { workspace = true }
+solana-account = { workspace = true }
 solana-instruction = { workspace = true }
 solana-sdk = { workspace = true }
 thiserror = { workspace = true }

@@ -14,7 +14,8 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::RpcAccountInfoConfig, response::Response as RpcResponse,
 };
-use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
+use solana_commitment_config::CommitmentConfig;
+use solana_sdk::sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
     time::Duration,

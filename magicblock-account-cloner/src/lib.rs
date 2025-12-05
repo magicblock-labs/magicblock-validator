@@ -30,18 +30,15 @@ use magicblock_program::{
     validator::{validator_authority, validator_authority_id},
     MAGIC_CONTEXT_PUBKEY,
 };
-use solana_instruction::Instruction;
-use solana_sdk::{
-    account::ReadableAccount,
-    hash::Hash,
-    instruction::AccountMeta,
-    loader_v4,
-    pubkey::Pubkey,
-    rent::Rent,
-    signature::{Signature, Signer},
-    signer::SignerError,
-    transaction::Transaction,
-};
+use solana_instruction::{AccountMeta, Instruction};
+use solana_sdk::hash::Hash;
+use solana_sdk::loader_v4;
+use solana_sdk::pubkey::Pubkey;
+use solana_sdk::sysvar::rent::Rent;
+use solana_sdk::signature::Signature;
+use solana_sdk::signer::{Signer, SignerError};
+use solana_sdk::transaction::Transaction;
+use solana_account::ReadableAccount;
 use tokio::sync::oneshot;
 
 use crate::bpf_loader_v1::BpfUpgradableProgramModifications;
@@ -79,7 +76,7 @@ impl ChainlinkCloner {
 
     async fn send_transaction(
         &self,
-        tx: solana_sdk::transaction::Transaction,
+        tx: Transaction,
     ) -> ClonerResult<Signature> {
         let sig = tx.signatures[0];
         self.tx_scheduler.execute(tx).await?;

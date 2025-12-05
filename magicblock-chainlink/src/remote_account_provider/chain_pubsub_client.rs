@@ -15,7 +15,7 @@ use solana_pubsub_client::nonblocking::pubsub_client::{
     PubsubClient, PubsubClientResult,
 };
 use solana_rpc_client_api::{config::RpcAccountInfoConfig, response::Response};
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig;
 use tokio::{
     sync::{mpsc, oneshot, Mutex as AsyncMutex},
     time,
@@ -292,7 +292,7 @@ pub mod mock {
     use solana_rpc_client_api::response::{
         Response as RpcResponse, RpcResponseContext,
     };
-    use solana_sdk::clock::Slot;
+    use solana_program::clock::Slot;
 
     use super::*;
     use crate::remote_account_provider::{

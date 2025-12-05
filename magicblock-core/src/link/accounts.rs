@@ -104,14 +104,13 @@ impl LockedAccount {
         let mut account = borrowed.reinit();
         loop {
             let result = reader(&self.pubkey, &account);
-            if lock.changed() {
-                // The data changed again during our read attempt. Retry.
-                account = borrowed.reinit();
-                lock.relock();
-                continue;
+            if !lock.changed() {
+                // The read was successful and consistent.
+                break result;
             }
-            // The read was successful and consistent.
-            break result;
+            // The data changed again during our read attempt. Retry.
+            lock.relock();
+            account = borrowed.reinit();
         }
     }
 }

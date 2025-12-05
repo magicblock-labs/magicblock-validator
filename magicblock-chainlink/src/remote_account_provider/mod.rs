@@ -29,7 +29,8 @@ use solana_rpc_client_api::{
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
     request::RpcError,
 };
-use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
+use solana_commitment_config::CommitmentConfig;
+use solana_sdk::sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
     task,

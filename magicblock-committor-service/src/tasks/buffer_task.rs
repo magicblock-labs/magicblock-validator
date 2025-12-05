@@ -2,7 +2,7 @@ use dlp::args::CommitStateFromBufferArgs;
 use magicblock_committor_program::Chunks;
 use magicblock_metrics::metrics::LabelValue;
 use solana_pubkey::Pubkey;
-use solana_sdk::instruction::Instruction;
+use solana_instruction::Instruction;
 
 #[cfg(test)]
 use crate::tasks::TaskStrategy;

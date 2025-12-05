@@ -7,10 +7,9 @@ use std::{
 use lazy_static::lazy_static;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::{
-    account::AccountSharedData, account_utils::StateMut,
-    instruction::InstructionError, pubkey::Pubkey,
-};
+use solana_account::{AccountSharedData, state_traits::StateMut};
+use solana_instruction::error::InstructionError;
+use solana_pubkey::Pubkey;
 
 use crate::{
     magic_context::MagicContext,

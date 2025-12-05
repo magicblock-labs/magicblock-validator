@@ -1290,7 +1290,7 @@ mod tests {
         // 2. Now subscribe to sysvar::clock and send same rapid updates
         //    None should be debounced
         {
-            let clock = solana_sdk::sysvar::clock::ID;
+            let clock = solana_program::sysvar::clock::ID;
             mux.subscribe(clock).await.unwrap();
 
             let schedule: Vec<(u64, u64)> = (0..10).map(|i| (i, 50)).collect();

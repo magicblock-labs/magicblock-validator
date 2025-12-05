@@ -4,13 +4,9 @@ use magicblock_accounts_db::AccountsDb;
 use magicblock_core::traits::AccountsBank;
 use magicblock_magic_program_api as magic_program;
 use magicblock_program::MagicContext;
-use solana_sdk::{
-    account::{AccountSharedData, WritableAccount},
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-};
-
+use solana_account::{AccountSharedData, WritableAccount};
+use solana_pubkey::Pubkey;
+use solana_sdk::signer::{Signer, keypair::Keypair};
 use crate::{
     errors::ApiResult,
     ledger::{read_faucet_keypair_from_ledger, write_faucet_keypair_to_ledger},

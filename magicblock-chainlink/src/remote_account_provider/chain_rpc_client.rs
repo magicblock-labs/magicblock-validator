@@ -8,7 +8,7 @@ use solana_rpc_client_api::{
     client_error::Result as ClientResult, config::RpcAccountInfoConfig,
     response::RpcResult,
 };
-use solana_sdk::commitment_config::CommitmentConfig;
+use solana_commitment_config::CommitmentConfig;
 
 // -----------------
 // Trait

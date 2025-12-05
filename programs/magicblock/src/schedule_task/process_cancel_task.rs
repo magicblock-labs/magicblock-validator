@@ -4,7 +4,8 @@ use magicblock_core::tls::ExecutionTlsStash;
 use magicblock_magic_program_api::args::{CancelTaskRequest, TaskRequest};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
+use solana_instruction::error::InstructionError;
+use solana_pubkey::Pubkey;
 
 use crate::utils::accounts::get_instruction_pubkey_with_idx;
 
@@ -52,14 +53,12 @@ pub(crate) fn process_cancel_task(
 #[cfg(test)]
 mod test {
     use magicblock_magic_program_api::instruction::MagicBlockInstruction;
-    use solana_sdk::{
-        account::AccountSharedData,
-        instruction::{AccountMeta, Instruction, InstructionError},
-        signature::Keypair,
-        signer::Signer,
-        system_program,
-    };
-
+    use solana_instruction::{AccountMeta, Instruction};
+    use solana_keypair::Keypair;
+    use solana_signer::Signer;
+    use solana_sdk_ids::system_program;
+    use solana_account::AccountSharedData;
+    use solana_instruction::error::InstructionError;
     use crate::{
         instruction_utils::InstructionUtils, test_utils::process_instruction,
     };

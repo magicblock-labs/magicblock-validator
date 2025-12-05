@@ -10,7 +10,7 @@ use magicblock_chainlink::{
 };
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
-use solana_sdk::clock::Slot;
+use solana_program::clock::Slot;
 use utils::test_context::TestContext;
 
 mod utils;

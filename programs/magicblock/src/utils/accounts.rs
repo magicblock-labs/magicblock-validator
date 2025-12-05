@@ -4,13 +4,11 @@ use std::cell::RefCell;
 use magicblock_magic_program_api::args::ShortAccountMeta;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::{
-    account::{Account, AccountSharedData, ReadableAccount, WritableAccount},
-    account_info::{AccountInfo, IntoAccountInfo},
-    instruction::{AccountMeta, InstructionError},
-    pubkey::Pubkey,
-    transaction_context::TransactionContext,
-};
+use solana_account::{Account, AccountSharedData, ReadableAccount, WritableAccount};
+use solana_account_info::{AccountInfo, IntoAccountInfo};
+use solana_instruction::{AccountMeta, error::InstructionError};
+use solana_pubkey::Pubkey;
+use solana_transaction_context::TransactionContext;
 
 pub(crate) fn find_tx_index_of_instruction_account(
     invoke_context: &InvokeContext,

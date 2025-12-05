@@ -1,6 +1,5 @@
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, instruction::Instruction,
-};
+use solana_sdk::compute_budget::ComputeBudgetInstruction;
+use solana_instruction::Instruction;
 
 // -----------------
 // Budgets
