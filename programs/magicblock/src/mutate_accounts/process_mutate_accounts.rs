@@ -215,6 +215,14 @@ pub(crate) fn process_mutate_accounts(
             );
             account.borrow_mut().set_delegated(delegated);
         }
+        if let Some(confined) = modification.confined {
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: setting confined to {}",
+                confined
+            );
+            account.borrow_mut().set_confined(confined);
+        }
     }
 
     if lamports_to_debit != 0 {
@@ -320,6 +328,7 @@ mod tests {
             data: Some(vec![1, 2, 3, 4, 5]),
             rent_epoch: None,
             delegated: Some(true),
+            confined: Some(true),
         };
         let ix = InstructionUtils::modify_accounts_instruction(vec![
             modification.clone(),
@@ -346,6 +355,7 @@ mod tests {
         let account_authority: AccountSharedData =
             accounts.drain(0..1).next().unwrap();
         assert!(!account_authority.delegated());
+        assert!(!account_authority.confined());
         assert_matches!(
             account_authority.into(),
             Account {
@@ -363,6 +373,7 @@ mod tests {
         let modified_account: AccountSharedData =
             accounts.drain(0..1).next().unwrap();
         assert!(modified_account.delegated());
+        assert!(modified_account.confined());
         assert_matches!(
             modified_account.into(),
             Account {

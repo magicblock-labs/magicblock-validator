@@ -283,7 +283,7 @@ impl ScheduleCommitTestContext {
         self.ephem_client().get_latest_blockhash().unwrap()
     }
 
-    pub fn fields(&self) -> ScheduleCommitTestContextFields {
+    pub fn fields(&self) -> ScheduleCommitTestContextFields<'_> {
         ScheduleCommitTestContextFields {
             payer_chain: &self.payer_chain,
             payer_ephem: &self.payer_ephem,
