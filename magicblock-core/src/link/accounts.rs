@@ -85,32 +85,34 @@ impl LockedAccount {
     where
         F: Fn(&Pubkey, &AccountSharedData) -> R,
     {
-        // Attempt the initial optimistic read.
+        // Optimistic read first.
         let result = reader(&self.pubkey, &self.account);
-        // Fast path: If no change was detected, the read was consistent.
+
         if !self.changed() {
             return result;
         }
 
-        // Slow path: A race condition occurred. This is only possible for borrowed accounts.
+        // Slow path: must be Borrowed data.
         let AccountSharedData::Borrowed(ref borrowed) = self.account else {
             return result;
         };
-        let Some(mut lock) = self.lock.clone() else {
-            return result;
-        };
 
-        // Enter the retry loop.
+        // Retry loop: always acquire a fresh lock *and* a fresh buffer view.
         let mut account = borrowed.reinit();
+
         loop {
+            // Fresh lock snapshot *every attempt*
+            let lock = borrowed.lock();
+
             let result = reader(&self.pubkey, &account);
+
             if lock.changed() {
-                // The data changed again during our read attempt. Retry.
+                // Data changed during the read, try again with a fresh view
                 account = borrowed.reinit();
-                lock.relock();
                 continue;
             }
-            // The read was successful and consistent.
+
+            // Clean success
             break result;
         }
     }
