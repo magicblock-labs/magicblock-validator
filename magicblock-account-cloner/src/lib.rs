@@ -99,6 +99,8 @@ impl ChainlinkCloner {
             data: Some(request.account.data().to_owned()),
             executable: Some(request.account.executable()),
             delegated: Some(request.account.delegated()),
+            confined: Some(request.account.confined()),
+            remote_slot: Some(request.account.remote_slot()),
         };
 
         let modify_ix = InstructionUtils::modify_accounts_instruction(vec![
@@ -221,6 +223,7 @@ impl ChainlinkCloner {
                 // and then deploy it and finally set the authority to match the
                 // one on chain
                 let slot = self.accounts_db.slot();
+                let program_remote_slot = program.remote_slot;
                 let DeployableV4Program {
                     pre_deploy_loader_state,
                     deploy_instruction,
@@ -238,6 +241,7 @@ impl ChainlinkCloner {
                         &validator_kp.pubkey(),
                     );
 
+                // Programs aren't marked as confined since they are also never delegated
                 let pre_deploy_mod_instruction = {
                     let pre_deploy_mods = vec![AccountModification {
                         pubkey: program_id,
@@ -245,6 +249,8 @@ impl ChainlinkCloner {
                         owner: Some(loader_v4::id()),
                         executable: Some(true),
                         data: Some(pre_deploy_loader_state),
+                        confined: Some(false),
+                        remote_slot: Some(program_remote_slot),
                         ..Default::default()
                     }];
                     InstructionUtils::modify_accounts_instruction(
@@ -256,6 +262,8 @@ impl ChainlinkCloner {
                     let post_deploy_mods = vec![AccountModification {
                         pubkey: program_id,
                         data: Some(post_deploy_loader_state),
+                        confined: Some(false),
+                        remote_slot: Some(program_remote_slot),
                         ..Default::default()
                     }];
                     InstructionUtils::modify_accounts_instruction(

@@ -225,7 +225,13 @@ pub enum CommittorServiceExtError {
     #[error("RecvError: {0}")]
     RecvError(#[from] RecvError),
     #[error("CommittorServiceError: {0:?}")]
-    CommittorServiceError(#[from] CommittorServiceError),
+    CommittorServiceError(Box<CommittorServiceError>),
+}
+
+impl From<CommittorServiceError> for CommittorServiceExtError {
+    fn from(e: CommittorServiceError) -> Self {
+        Self::CommittorServiceError(Box::new(e))
+    }
 }
 
 pub type BaseIntentCommitorExtResult<T, E = CommittorServiceExtError> =

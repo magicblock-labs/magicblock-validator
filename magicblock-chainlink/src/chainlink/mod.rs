@@ -219,7 +219,37 @@ Kept: {} delegated, {} blacklisted",
 
         task::spawn(async move {
             while let Some(pubkey) = removed_accounts_rx.recv().await {
-                accounts_bank.remove_account(&pubkey);
+                accounts_bank.remove_account_conditionally(
+                    &pubkey,
+                    |account| {
+                        // Accounts that are still undelegating need to be kept in the bank
+                        // until the undelegation completes on chain.
+                        // Otherwise we might loose data in case the undelegation fails to
+                        // complete.
+                        // Another issue we avoid this way is that an account update received
+                        // before the account completes undelegation would overwrite the in-bank
+                        // account and thus also set unedelegating to false.
+                        let undelegating = account.undelegating();
+                        let delegated = account.delegated();
+                        let remove = !undelegating && !delegated;
+                        if log::log_enabled!(log::Level::Trace) {
+                            if remove {
+                                trace!(
+                                    "Removing unsubscribed account '{pubkey}' from bank"
+                                );
+                            } else {
+                                let owner = account.owner().to_string();
+                                trace!(
+                                    "Keeping unsubscribed account {pubkey} in bank \
+                                    undelegating = {undelegating}, \
+                                    delegated = {delegated}, \
+                                    owner={owner}"
+                                );
+                            }
+                        }
+                        remove
+                    },
+                );
             }
             warn!("Removed accounts channel closed, stopping subscription");
         })

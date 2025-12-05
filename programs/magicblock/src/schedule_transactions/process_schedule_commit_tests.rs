@@ -860,4 +860,101 @@ mod tests {
             Err(InstructionError::InvalidAccountOwner),
         );
     }
+
+    #[test]
+    fn test_schedule_commit_with_confined_account() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_with_confined_account")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        // Prepare single accounts for tx, set committee as confined
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+        account_data.get_mut(&committee).unwrap().set_confined(true);
+
+        let committee_account = account_data.get(&committee).unwrap();
+        assert!(committee_account.confined());
+        assert!(
+            committee_account.delegated(),
+            "Confined account should remain delegated"
+        );
+
+        // Create ScheduleCommit instruction with confined committee
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts.clone(),
+            ix.accounts,
+            Err(InstructionError::InvalidAccountData),
+        );
+    }
+
+    #[test]
+    fn test_schedule_commit_three_accounts_one_confined() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"three_accounts_one_confined_______").unwrap();
+
+        let PreparedTransactionThreeCommittees {
+            mut accounts_data,
+            committee_uno,
+            committee_dos,
+            committee_tres,
+            mut transaction_accounts,
+            ..
+        } = prepare_transaction_with_three_committees(
+            &payer,
+            None,
+            (true, true, true),
+        );
+
+        // Make the second committee confined
+        accounts_data
+            .get_mut(&committee_dos)
+            .unwrap()
+            .set_confined(true);
+        // Assert that the confined account remains delegated
+        let committee_dos_account = accounts_data.get(&committee_dos).unwrap();
+        assert!(
+            committee_dos_account.confined(),
+            "Confined account should remain confined"
+        );
+        assert!(
+            committee_dos_account.delegated(),
+            "Confined account should remain delegated"
+        );
+
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee_uno, committee_dos, committee_tres],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::InvalidAccountData),
+        );
+    }
 }

@@ -10,8 +10,9 @@ pub enum TaskSchedulerError {
 
     #[error(transparent)]
     Pubsub(
-        #[from]
-        solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
+        Box<
+            solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
+        >,
     ),
 
     #[error(transparent)]
@@ -43,4 +44,14 @@ pub enum TaskSchedulerError {
 
     #[error("Task {0} already exists and is owned by {1}, not {2}")]
     UnauthorizedReplacing(i64, String, String),
+}
+
+impl From<solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError>
+    for TaskSchedulerError
+{
+    fn from(
+        e: solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
+    ) -> Self {
+        Self::Pubsub(Box::new(e))
+    }
 }

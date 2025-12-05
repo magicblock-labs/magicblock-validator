@@ -50,19 +50,19 @@ pub const SEND_TRANSACTION_CONFIG: RpcSendTransactionConfig =
 #[derive(Debug, thiserror::Error)]
 pub enum MagicBlockRpcClientError {
     #[error("RPC Client error: {0}")]
-    RpcClientError(#[from] solana_rpc_client_api::client_error::Error),
+    RpcClientError(Box<solana_rpc_client_api::client_error::Error>),
 
     #[error("Error getting blockhash: {0} ({0:?})")]
-    GetLatestBlockhash(solana_rpc_client_api::client_error::Error),
+    GetLatestBlockhash(Box<solana_rpc_client_api::client_error::Error>),
 
     #[error("Error getting slot: {0} ({0:?})")]
-    GetSlot(solana_rpc_client_api::client_error::Error),
+    GetSlot(Box<solana_rpc_client_api::client_error::Error>),
 
     #[error("Error deserializing lookup table: {0}")]
     LookupTableDeserialize(solana_sdk::instruction::InstructionError),
 
     #[error("Error sending transaction: {0} ({0:?})")]
-    SendTransaction(solana_rpc_client_api::client_error::Error),
+    SendTransaction(Box<solana_rpc_client_api::client_error::Error>),
 
     #[error("Error getting signature status for: {0} {1}")]
     CannotGetTransactionSignatureStatus(Signature, String),
@@ -74,6 +74,14 @@ pub enum MagicBlockRpcClientError {
 
     #[error("Sent transaction {1} but got error: {0:?}")]
     SentTransactionError(TransactionError, Signature),
+}
+
+impl From<solana_rpc_client_api::client_error::Error>
+    for MagicBlockRpcClientError
+{
+    fn from(e: solana_rpc_client_api::client_error::Error) -> Self {
+        Self::RpcClientError(Box::new(e))
+    }
 }
 
 impl MagicBlockRpcClientError {
@@ -239,17 +247,16 @@ impl MagicblockRpcClient {
     pub async fn get_latest_blockhash(
         &self,
     ) -> MagicBlockRpcClientResult<Hash> {
-        self.client
-            .get_latest_blockhash()
-            .await
-            .map_err(MagicBlockRpcClientError::GetLatestBlockhash)
+        self.client.get_latest_blockhash().await.map_err(|e| {
+            MagicBlockRpcClientError::GetLatestBlockhash(Box::new(e))
+        })
     }
 
     pub async fn get_slot(&self) -> MagicBlockRpcClientResult<Slot> {
         self.client
             .get_slot()
             .await
-            .map_err(MagicBlockRpcClientError::GetSlot)
+            .map_err(|e| MagicBlockRpcClientError::GetSlot(Box::new(e)))
     }
 
     pub async fn get_account(
@@ -270,7 +277,7 @@ impl MagicblockRpcClient {
                 _ => err,
             },
         };
-        Err(MagicBlockRpcClientError::RpcClientError(err))
+        Err(MagicBlockRpcClientError::RpcClientError(Box::new(err)))
     }
     pub async fn get_multiple_accounts(
         &self,
@@ -308,9 +315,7 @@ impl MagicblockRpcClient {
         for result in chunked_results {
             match result {
                 Ok(accs) => results.extend(accs.value),
-                Err(err) => {
-                    return Err(MagicBlockRpcClientError::RpcClientError(err))
-                }
+                Err(err) => return Err(err.into()),
             }
         }
         Ok(results)
@@ -352,7 +357,7 @@ impl MagicblockRpcClient {
         self.client
             .request_airdrop(pubkey, lamports)
             .await
-            .map_err(MagicBlockRpcClientError::RpcClientError)
+            .map_err(|e| MagicBlockRpcClientError::RpcClientError(Box::new(e)))
     }
 
     pub fn commitment(&self) -> CommitmentConfig {
@@ -399,7 +404,9 @@ impl MagicblockRpcClient {
             .client
             .send_transaction_with_config(tx, SEND_TRANSACTION_CONFIG)
             .await
-            .map_err(MagicBlockRpcClientError::SendTransaction)?;
+            .map_err(|e| {
+                MagicBlockRpcClientError::SendTransaction(Box::new(e))
+            })?;
 
         let MagicBlockSendTransactionConfig::SendAndConfirm {
             wait_for_processed_level,
@@ -577,7 +584,7 @@ impl MagicblockRpcClient {
         self.client
             .get_transaction_with_config(signature, config)
             .await
-            .map_err(MagicBlockRpcClientError::RpcClientError)
+            .map_err(|e| MagicBlockRpcClientError::RpcClientError(Box::new(e)))
     }
 
     pub fn get_logs_from_transaction(
