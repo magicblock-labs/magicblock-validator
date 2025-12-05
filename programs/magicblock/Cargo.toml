@@ -18,7 +18,6 @@ parking_lot = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 solana-account = { workspace = true }
 solana-account-info = { workspace = true }
-solana-bpf-loader-program = { workspace = true }
 solana-clock = { workspace = true }
 solana-fee-calculator = { workspace = true }
 solana-hash = { workspace = true }
