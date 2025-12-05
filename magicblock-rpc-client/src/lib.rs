@@ -7,6 +7,9 @@ use std::{
 
 use log::*;
 use solana_account::Account;
+use solana_address_lookup_table_interface::state::{
+    AddressLookupTable, LookupTableMeta,
+};
 use solana_clock::Slot;
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_hash::Hash;
@@ -19,9 +22,6 @@ use solana_rpc_client_api::{
     client_error::ErrorKind as RpcClientErrorKind,
     config::{RpcSendTransactionConfig, RpcTransactionConfig},
     request::RpcError,
-};
-use solana_sdk::address_lookup_table::state::{
-    AddressLookupTable, LookupTableMeta,
 };
 use solana_signature::Signature;
 use solana_transaction_error::{TransactionError, TransactionResult};

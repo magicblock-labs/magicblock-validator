@@ -23,7 +23,7 @@ solana-hash = { workspace = true }
 solana-instruction = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-signature = { workspace = true }
-solana-sdk = { workspace = true }
+solana-address-lookup-table-interface = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 

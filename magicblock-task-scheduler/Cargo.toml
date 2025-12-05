@@ -17,7 +17,6 @@ magicblock-config = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-program = { workspace = true }
 rusqlite = { workspace = true }
-solana-sdk = { workspace = true }
 solana-instruction = { workspace = true }
 solana-message = { workspace = true }
 solana-program = { workspace = true }
