@@ -44,7 +44,6 @@ solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
-solana-slot-hashes = { workspace = true }
 solana-system-program = { workspace = true }
 solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
