@@ -399,7 +399,7 @@ impl MagicValidator {
             config.validator.keypair.pubkey(),
             faucet_pubkey,
             chainlink_config,
-            config.chainlink.auto_airdrop_lamports,
+            &config.chainlink,
         )
         .await?;
 
