@@ -41,14 +41,18 @@ use crate::{
         task_info_fetcher::{ResetType, TaskInfoFetcher},
         two_stage_executor::TwoStageExecutor,
     },
-    persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
+    persist::{
+        CommitStatus, CommitStatusSignatures, IntentPersister,
+        IntentPersisterImpl,
+    },
     tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
         task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
         task_visitors::utility_visitor::TaskVisitorUtils,
-        BaseTask, TaskType,
+        BaseTask, FinalizeTask, TaskType,
     },
     transaction_preparator::{
         delivery_preparator::BufferExecutionError,

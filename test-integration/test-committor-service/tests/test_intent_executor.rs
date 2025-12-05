@@ -10,8 +10,7 @@ use std::{
 };
 
 use borsh::to_vec;
-use dlp::args::CommitStateArgs;
-use dlp::pda::ephemeral_balance_pda_from_payer;
+use dlp::{args::CommitStateArgs, pda::ephemeral_balance_pda_from_payer};
 use futures::future::join_all;
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
@@ -36,6 +35,7 @@ use magicblock_program::{
     },
     validator::validator_authority_id,
 };
+use magicblock_rpc_client::MagicBlockSendTransactionConfig;
 use magicblock_table_mania::TableMania;
 use program_flexi_counter::{
     instruction::FlexiCounterInstruction,
@@ -52,7 +52,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
-use magicblock_rpc_client::MagicBlockSendTransactionConfig;
+
 use crate::{
     common::TestFixture,
     utils::{
@@ -844,41 +844,56 @@ async fn test_commit_unfinalized_account_recovery() {
     // Commit account without finalization
     // This simulates finalization stage failure
     {
-        let commit_allow_undelegation_ix = dlp::instruction_builder::commit_state(
-            fixture.authority.pubkey(),
-            pda,
-            account.owner,
-            CommitStateArgs {
-                nonce: 1,
-                lamports: account.lamports,
-                allow_undelegation: false,
-                data: account.data.clone(),
-            }
-        );
+        let commit_allow_undelegation_ix =
+            dlp::instruction_builder::commit_state(
+                fixture.authority.pubkey(),
+                pda,
+                account.owner,
+                CommitStateArgs {
+                    nonce: 1,
+                    lamports: account.lamports,
+                    allow_undelegation: false,
+                    data: account.data.clone(),
+                },
+            );
 
-        let blockhash = fixture.rpc_client.get_latest_blockhash().await.unwrap();
+        let blockhash =
+            fixture.rpc_client.get_latest_blockhash().await.unwrap();
         let tx = Transaction::new_signed_with_payer(
             &[commit_allow_undelegation_ix],
             Some(&fixture.authority.pubkey()),
             &[&fixture.authority],
-            blockhash
+            blockhash,
         );
 
-        let result = fixture.rpc_client.send_transaction(&tx, &MagicBlockSendTransactionConfig::ensure_committed()).await;
+        let result = fixture
+            .rpc_client
+            .send_transaction(
+                &tx,
+                &MagicBlockSendTransactionConfig::ensure_committed(),
+            )
+            .await;
         assert!(result.is_ok());
     }
 
     // Now simulate user sending new intent
     let committed_account = CommittedAccount {
         pubkey: pda,
-        account
+        account,
     };
     let intent = create_intent(vec![committed_account], false);
-    let result = intent_executor.execute(intent, None::<IntentPersisterImpl>).await;
-    assert!(result.inner.is_err());
-    println!("{:?}", result.inner.unwrap_err());
+    let result = intent_executor
+        .execute(intent, None::<IntentPersisterImpl>)
+        .await;
+    assert!(result.inner.is_ok());
+    assert!(matches!(
+        result.inner.unwrap(),
+        ExecutionOutput::SingleStage(_)
+    ));
 
-    assert!(result.patched_errors.is_empty());
+    assert_eq!(result.patched_errors.len(), 2);
+    assert!(matches!(result.patched_errors[0], TransactionStrategyExecutionError::UnfinalizedAccountError(_, _)));
+    assert!(matches!(result.patched_errors[1], TransactionStrategyExecutionError::CommitIDError(_, _)))
 }
 
 fn failing_undelegate_action(

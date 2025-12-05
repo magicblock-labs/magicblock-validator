@@ -2,6 +2,7 @@ use std::ops::ControlFlow;
 
 use log::error;
 use solana_pubkey::Pubkey;
+use solana_sdk::{signature::Signature, transaction::TransactionError};
 
 use crate::{
     intent_executor::{
@@ -12,8 +13,13 @@ use crate::{
         task_info_fetcher::TaskInfoFetcher,
         ExecutionOutput, IntentExecutorImpl,
     },
-    persist::IntentPersister,
-    tasks::task_strategist::TransactionStrategy,
+    persist::{IntentPersister, IntentPersisterImpl},
+    tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
+        task_strategist::TransactionStrategy,
+        task_visitors::utility_visitor::TaskVisitorUtils,
+        BaseTask, FinalizeTask,
+    },
     transaction_preparator::TransactionPreparator,
 };
 
@@ -139,11 +145,26 @@ where
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            TransactionStrategyExecutionError::UnfinalizedAccountError(
+            err
+            @ TransactionStrategyExecutionError::UnfinalizedAccountError(
                 _,
-                _,
+                signature,
             ) => {
-                todo!()
+                if let Some(task) = err.task_index().and_then(|index| {
+                    transaction_strategy
+                        .optimized_tasks
+                        .as_slice()
+                        .get(index as usize)
+                }) {
+                    Self::handle_unfinalized_account_error(
+                        inner,
+                        signature,
+                        task.as_ref(),
+                    )
+                    .await
+                } else {
+                    Ok(ControlFlow::Break(()))
+                }
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
@@ -162,5 +183,41 @@ where
                 Ok(ControlFlow::Break(()))
             }
         }
+    }
+
+    async fn handle_unfinalized_account_error(
+        inner: &IntentExecutorImpl<T, F>,
+        failed_signature: &Option<Signature>,
+        task: &dyn BaseTask,
+    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
+        let mut visitor = TaskVisitorUtils::GetCommitMeta(None);
+        task.visit(&mut visitor);
+
+        let TaskVisitorUtils::GetCommitMeta(Some(commit_meta)) = visitor else {
+            return Ok(ControlFlow::Break(()));
+        };
+        let finalize_task =
+            Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+                delegated_account: commit_meta.committed_pubkey,
+            }))) as Box<dyn BaseTask>;
+        inner
+            .prepare_and_execute_strategy(
+                &mut TransactionStrategy {
+                    optimized_tasks: vec![finalize_task],
+                    lookup_tables_keys: vec![],
+                },
+                &None::<IntentPersisterImpl>,
+            )
+            .await
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)?
+            .map_err(|err| IntentExecutorError::FailedToFinalizeError {
+                err,
+                commit_signature: None,
+                finalize_signature: *failed_signature,
+            })?;
+        Ok(ControlFlow::Continue(TransactionStrategy {
+            optimized_tasks: vec![],
+            lookup_tables_keys: vec![],
+        }))
     }
 }
