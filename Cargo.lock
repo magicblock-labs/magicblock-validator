@@ -9182,7 +9182,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=6f74a99#6f74a994c6797c979b1afdf52f91675182a1bf8a"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=48787597#48787597fcbbdf301a068c2fec9c032419a2d3ce"
 dependencies = [
  "ahash 0.8.12",
  "log",
