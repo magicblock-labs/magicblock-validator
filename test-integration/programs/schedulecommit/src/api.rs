@@ -186,7 +186,7 @@ fn schedule_commit_cpi_instruction_impl(
 
     let cpi_args = ScheduleCommitCpiArgs {
         players: players.to_vec(),
-        modify_accounts: false,
+        modify_accounts: true,
         undelegate: args.undelegate,
         commit_payer: args.commit_payer,
     };
