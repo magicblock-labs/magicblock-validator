@@ -41,7 +41,7 @@ impl CommittorProcessor {
     {
         let rpc_client = RpcClient::new_with_commitment(
             chain_config.rpc_uri.to_string(),
-            chain_config.commitment.clone(),
+            chain_config.commitment,
         );
         let rpc_client = Arc::new(rpc_client);
         let magic_block_rpc_client = MagicblockRpcClient::new(rpc_client);

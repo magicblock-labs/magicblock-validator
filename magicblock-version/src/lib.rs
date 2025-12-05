@@ -4,7 +4,6 @@
 use std::{convert::TryInto, fmt};
 
 use serde::{Deserialize, Serialize};
-use solana_feature_set;
 use solana_sanitize::Sanitize;
 #[macro_use]
 extern crate solana_frozen_abi_macro;
