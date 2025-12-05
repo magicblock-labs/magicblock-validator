@@ -287,7 +287,7 @@ impl MagicValidator {
         let task_scheduler = TaskSchedulerService::new(
             &task_scheduler_db_path,
             &config.task_scheduler,
-            dispatch.transaction_scheduler.clone(),
+            RpcClient::new(config.listen.http()),
             dispatch
                 .tasks_service
                 .take()
