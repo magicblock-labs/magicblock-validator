@@ -74,10 +74,7 @@ pub enum ChainPubsubActorMessage {
         pubkey: Pubkey,
         response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     },
-    RecycleConnections {
-        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-    },
-    Shutdown {
+    Reconnect {
         response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     },
 }

@@ -1,6 +1,5 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,

@@ -9,6 +9,7 @@ async-trait = { workspace = true }
 bincode = { workspace = true }
 env_logger = { workspace = true }
 futures-util = { workspace = true }
+helius-laserstream = { workspace = true }
 log = { workspace = true }
 lru = { workspace = true }
 magicblock-config = { workspace = true }

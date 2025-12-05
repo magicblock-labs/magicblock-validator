@@ -1,7 +1,6 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use log::*;
 use solana_pubkey::Pubkey;
 use tokio::sync::{mpsc, oneshot};
 
@@ -79,14 +78,8 @@ impl ChainPubsubClient for ChainLaserClientImpl {
     }
 
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
-        let (tx, rx) = oneshot::channel();
-        self.send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
-            .await?;
-        rx.await?
-    }
-
-    async fn recycle_connections(&self) {
-        trace!("No need to recycle laserstream connections");
+        // TODO(thlorenz): @@@ shutdown
+        todo!("ChainLaserClientImpl::shutdown not implemented yet")
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
@@ -94,6 +87,19 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         updates_lock
             .take()
             .expect("ChainLaserClientImpl::take_updates called more than once")
+    }
+
+    async fn subscription_count(
+        &self,
+        _exclude: Option<&[Pubkey]>,
+    ) -> (usize, usize) {
+        // TODO(thlorenz): @@@ implement subscription_count
+        todo!("ChainLaserClientImpl::subscription_count not implemented yet")
+    }
+
+    fn subscriptions(&self) -> Vec<Pubkey> {
+        // TODO(thlorenz): @@@ implement subscriptions
+        todo!("ChainLaserClientImpl::subscriptions not implemented yet")
     }
 }
 

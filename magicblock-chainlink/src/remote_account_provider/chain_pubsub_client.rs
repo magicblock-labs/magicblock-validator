@@ -183,11 +183,7 @@ impl ChainPubsubClientImpl {
 #[async_trait]
 impl ChainPubsubClient for ChainPubsubClientImpl {
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
-        let (tx, rx) = oneshot::channel();
-        self.actor
-            .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
-            .await?;
-        rx.await?
+        self.actor.shutdown().await;
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {

@@ -142,20 +142,8 @@ impl ChainLaserActor {
                 self.remove_sub(&pubkey, response);
                 false
             }
-            RecycleConnections { response } => {
-                // No-op for laserstream
-                response.send(Ok(())).unwrap_or_else(|_| {
-                    warn!("Failed to send recycle connections response")
-                });
-                false
-            }
-            Shutdown { response } => {
-                self.shutdown();
-                response.send(Ok(())).unwrap_or_else(|_| {
-                    warn!("Failed to send shutdown response")
-                });
-                true
-            }
+            // TODO(thlorenz): @@@ reconnect
+            Reconnect { response: _ } => todo!("Handle reconnect message"),
         }
     }
 
