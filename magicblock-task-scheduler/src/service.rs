@@ -13,11 +13,12 @@ use magicblock_program::{
     args::{CancelTaskRequest, TaskRequest},
     validator::{validator_authority, validator_authority_id},
 };
+use solana_instruction::Instruction;
+use solana_message::Message;
+use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    instruction::Instruction, message::Message, pubkey::Pubkey,
-    signature::Signature, transaction::Transaction,
-};
+use solana_signature::Signature;
+use solana_transaction::Transaction;
 use tokio::{select, task::JoinHandle, time::Duration};
 use tokio_util::{
     sync::CancellationToken,

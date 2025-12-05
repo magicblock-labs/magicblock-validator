@@ -20,13 +20,13 @@ magicblock-program = { workspace = true }
 magicblock-processor = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
-solana-program = { workspace = true }
-solana-pubsub-client = { workspace = true }
+solana-instruction = { workspace = true }
+solana-message = { workspace = true }
+solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
-solana-sdk = { workspace = true }
-solana-svm = { workspace = true }
-solana-timings = { workspace = true }
+solana-signature = { workspace = true }
+solana-transaction = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["time"] }
