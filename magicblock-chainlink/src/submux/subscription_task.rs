@@ -13,6 +13,7 @@ use crate::remote_account_provider::{
 #[derive(Clone)]
 pub enum AccountSubscriptionTask {
     Subscribe(Pubkey, usize),
+    SubscribeProgram(Pubkey, usize),
     Unsubscribe(Pubkey),
     Shutdown,
 }
@@ -22,6 +23,7 @@ impl AccountSubscriptionTask {
         use AccountSubscriptionTask::*;
         match self {
             Subscribe(_, _) => "Subscribe",
+            SubscribeProgram(_, _) => "SubscribeProgram",
             Unsubscribe(_) => "Unsubscribe",
             Shutdown => "Shutdown",
         }
@@ -40,7 +42,7 @@ impl AccountSubscriptionTask {
 
         let total_clients = clients.len();
         let required_confirmations = match &self {
-            Subscribe(_, n) => *n,
+            Subscribe(_, n) | SubscribeProgram(_, n) => *n,
             _ => 1,
         };
 
@@ -54,15 +56,15 @@ impl AccountSubscriptionTask {
             );
         }
 
-        if let Subscribe(_, _) = self {
-            if required_confirmations == 0 {
-                return Err(
-                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                        "Required confirmations must be greater than zero"
-                            .to_string(),
-                    ),
-                );
-            }
+        if matches!(self, Subscribe(_, _) | SubscribeProgram(_, _))
+            && required_confirmations == 0
+        {
+            return Err(
+                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    "Required confirmations must be greater than zero"
+                        .to_string(),
+                ),
+            );
         }
 
         let (tx, rx) = oneshot::channel();
@@ -77,6 +79,9 @@ impl AccountSubscriptionTask {
                 futures.push(async move {
                     let result = match task {
                         Subscribe(pubkey, _) => client.subscribe(pubkey).await,
+                        SubscribeProgram(program_id, _) => {
+                            client.subscribe_program(program_id).await
+                        }
                         Unsubscribe(pubkey) => client.unsubscribe(pubkey).await,
                         Shutdown => {
                             client.shutdown().await;
