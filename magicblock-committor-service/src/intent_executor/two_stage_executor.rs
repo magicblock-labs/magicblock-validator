@@ -200,6 +200,8 @@ where
         }
     }
 
+    /// Handles unfinalized account error
+    /// Sends a separate tx to finalize account and then continues execution
     async fn handle_unfinalized_account_error(
         inner: &IntentExecutorImpl<T, F>,
         failed_signature: &Option<Signature>,
@@ -209,6 +211,7 @@ where
         task.visit(&mut visitor);
 
         let TaskVisitorUtils::GetCommitMeta(Some(commit_meta)) = visitor else {
+            // Can't recover - break execution
             return Ok(ControlFlow::Break(()));
         };
         let finalize_task =
@@ -229,6 +232,7 @@ where
                 err,
                 signature: *failed_signature,
             })?;
+
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
