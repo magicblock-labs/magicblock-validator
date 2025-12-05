@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
+use solana_account::{state_traits::StateMut, Account, ReadableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_account::{Account, ReadableAccount, state_traits::StateMut};
 use solana_pubkey::Pubkey;
+
 use crate::{
     magic_scheduled_base_intent::{
         validate_commit_schedule_permissions, CommitAndUndelegate, CommitType,

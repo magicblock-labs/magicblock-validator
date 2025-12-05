@@ -9,14 +9,11 @@ use solana_account::{
 };
 use solana_clock::Clock;
 use solana_fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
-use solana_instruction::{AccountMeta, Instruction};
-use solana_instruction::error::InstructionError;
-use solana_pubkey::Pubkey;
+use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
 use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::{system_program, sysvar::clock};
 use solana_signer::Signer;
-use solana_sdk::signature::SeedDerivable;
-use solana_sdk_ids::system_program;
-use solana_sdk::sysvar::SysvarId;
 
 use crate::{
     magic_context::MagicContext,
@@ -69,7 +66,7 @@ fn prepare_transaction_with_single_committee(
     ensure_started_validator(&mut account_data);
 
     let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = vec![(
-        Clock::id(),
+        clock::id(),
         create_account_shared_data_for_test(&get_clock()),
     )];
 
@@ -128,7 +125,7 @@ fn prepare_transaction_with_three_committees(
     ensure_started_validator(&mut accounts_data);
 
     let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = vec![(
-        Clock::id(),
+        clock::id(),
         create_account_shared_data_for_test(&get_clock()),
     )];
 
@@ -255,6 +252,7 @@ fn assert_first_commit(
 
 #[cfg(test)]
 mod tests {
+    use solana_seed_derivable::SeedDerivable;
     use test_kit::init_logger;
 
     use super::*;

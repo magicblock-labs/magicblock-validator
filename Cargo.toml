@@ -134,22 +134,23 @@ serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "1beed4c" }
-solana-account-info = { version = "2.2" }
 solana-account-decoder = { version = "2.2" }
 solana-account-decoder-client-types = { version = "2.2" }
-solana-address-lookup-table-program = { version = "2.2" }
+solana-account-info = { version = "2.2" }
+solana-address-lookup-table-interface = { version = "2.2" }
 solana-bpf-loader-program = { version = "2.2" }
 solana-clock = { version = "2.2" }
 solana-commitment-config = { version = "2.2" }
-solana-sanitize = { version = "2.2" }
 solana-compute-budget-instruction = { version = "2.2" }
+solana-compute-budget-interface = { version = "2.2" }
 solana-compute-budget-program = { version = "2.2" }
 solana-feature-set = { version = "2.2" }
+solana-feature-gate-interface = { version = "2.2" }
 solana-fee = { version = "2.2" }
-solana-genesis-config = { version = "2.2" }
 solana-fee-calculator = { version = "2.2" }
 solana-fee-structure = { version = "2.2" }
 solana-frozen-abi-macro = { version = "2.2" }
+solana-genesis-config = { version = "2.2" }
 solana-hash = { version = "2.2" }
 solana-inline-spl = { version = "2.2" }
 solana-instruction = { version = "2.2" }
@@ -161,17 +162,23 @@ solana-log-collector = { version = "2.2" }
 solana-measure = { version = "2.2" }
 solana-message = { version = "2.2" }
 solana-metrics = { version = "2.2" }
+solana-native-token = { version = "2.2" }
 solana-program = "2.2"
 solana-program-runtime = { version = "2.2" }
 solana-pubkey = { version = "2.2" }
 solana-pubsub-client = { version = "2.2" }
+solana-rent = { version = "2.2" }
 solana-rent-collector = { version = "2.2" }
 solana-rpc-client = { version = "2.2" }
 solana-rpc-client-api = { version = "2.2" }
+solana-sanitize = { version = "2.2" }
+solana-sha256-hasher = { version = "2.2" }
+solana-seed-derivable = { version = "2.2" }
 solana-sdk = { version = "2.2" }
 solana-sdk-ids = { version = "2.2" }
 solana-signature = { version = "2.2" }
 solana-signer = { version = "2.2" }
+solana-slot-hashes = { version = "2.2" }
 solana-storage-proto = { path = "storage-proto" }
 solana-svm-transaction = { version = "2.2" }
 solana-system-interface = { version = "1.0" }

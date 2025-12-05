@@ -22,10 +22,10 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
+use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
-use solana_keypair::Keypair;
-use solana_message::VersionedMessage;
+use solana_sdk::signer::keypair::Keypair;
 use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
 use solana_transaction::versioned::VersionedTransaction;
@@ -731,7 +731,7 @@ where
         rpc_client: MagicblockRpcClient,
         execution_outcome: ExecutionOutput,
     ) {
-       use solana_transaction_status_client_types::EncodedTransactionWithStatusMeta;
+        use solana_transaction_status_client_types::EncodedTransactionWithStatusMeta;
         fn extract_cu(tx: EncodedTransactionWithStatusMeta) -> Option<u64> {
             let cu = tx.meta?.compute_units_consumed;
             cu.into()
@@ -849,7 +849,7 @@ where
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-   use solana_pubkey::Pubkey;
+    use solana_pubkey::Pubkey;
 
     use crate::{
         intent_execution_manager::intent_scheduler::create_test_intent,

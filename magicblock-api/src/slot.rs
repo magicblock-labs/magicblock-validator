@@ -7,7 +7,7 @@ use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::blocks::{BlockMeta, BlockUpdate, BlockUpdateTx};
 use magicblock_ledger::{errors::LedgerResult, Ledger};
 use solana_program::clock::Slot;
-use solana_sdk::hash::Hasher;
+use solana_sha256_hasher::Hasher;
 
 pub fn advance_slot_and_update_ledger(
     accountsdb: &Arc<AccountsDb>,

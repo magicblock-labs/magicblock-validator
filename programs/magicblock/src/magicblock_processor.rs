@@ -24,7 +24,10 @@ declare_process_instruction!(
                 .transaction_context
                 .get_current_instruction_context()?
                 .get_instruction_data(),
-        ).map_err(|_| solana_instruction::error::InstructionError::InvalidInstructionData)?;
+        )
+        .map_err(|_| {
+            solana_instruction::error::InstructionError::InvalidInstructionData
+        })?;
 
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context =

@@ -1,9 +1,11 @@
 use magicblock_rpc_client::{MagicBlockRpcClientResult, MagicblockRpcClient};
+use solana_clock::Slot;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     address_lookup_table::instruction::derive_lookup_table_address,
-    clock::Slot, signature::Keypair, signer::Signer,
+    signer::keypair::Keypair,
 };
+use solana_signer::Signer;
 
 use crate::lookup_table_rc::LookupTableRc;
 

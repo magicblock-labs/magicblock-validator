@@ -1,5 +1,5 @@
 use solana_pubkey::Pubkey;
-use solana_sdk::signature::Signature;
+use solana_signature::Signature;
 use thiserror::Error;
 
 pub type TableManiaResult<T> = std::result::Result<T, TableManiaError>;

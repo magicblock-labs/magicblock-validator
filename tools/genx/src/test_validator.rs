@@ -7,11 +7,10 @@ use std::{
 
 use json::{json, Value};
 use magicblock_accounts_db::AccountsDb;
-use solana_rpc_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
+use solana_rpc_client::rpc_client::RpcClient;
 use tempfile::tempdir;
-use base64;
 
 pub struct TestValidatorConfig {
     pub rpc_port: u16,

@@ -4,8 +4,8 @@
 use std::{convert::TryInto, fmt};
 
 use serde::{Deserialize, Serialize};
-use solana_sanitize::Sanitize;
 use solana_feature_set;
+use solana_sanitize::Sanitize;
 #[macro_use]
 extern crate solana_frozen_abi_macro;
 
@@ -52,9 +52,7 @@ fn compute_commit(sha1: Option<&'static str>) -> Option<u32> {
 impl Default for Version {
     fn default() -> Self {
         let feature_set = u32::from_le_bytes(
-            solana_feature_set::ID.as_ref()[..4]
-                .try_into()
-                .unwrap(),
+            solana_feature_set::ID.as_ref()[..4].try_into().unwrap(),
         );
         Self {
             major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),

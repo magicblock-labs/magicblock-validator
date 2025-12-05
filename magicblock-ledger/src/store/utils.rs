@@ -1,3 +1,6 @@
+#[cfg(test)]
+use solana_signature::Signature;
+
 use crate::errors::LedgerError;
 
 #[cfg(not(unix))]
@@ -59,7 +62,7 @@ pub fn adjust_ulimit_nofile(
 }
 
 #[cfg(test)]
-pub fn short_signature(sig: &solana_sdk::signature::Signature) -> String {
+pub fn short_signature(sig: &Signature) -> String {
     let sig_str = sig.to_string();
     if sig_str.len() < 8 {
         "<invalid signature>".to_string()

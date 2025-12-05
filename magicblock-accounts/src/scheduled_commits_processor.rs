@@ -30,7 +30,7 @@ use magicblock_program::{
 };
 use solana_hash::Hash;
 use solana_pubkey::Pubkey;
-use solana_sdk::transaction::Transaction;
+use solana_transaction::Transaction;
 use tokio::{
     sync::{broadcast, oneshot},
     task,

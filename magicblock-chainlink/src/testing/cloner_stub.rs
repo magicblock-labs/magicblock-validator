@@ -7,9 +7,9 @@ use std::{
 
 use async_trait::async_trait;
 use solana_account::AccountSharedData;
+use solana_instruction::error::InstructionError;
 use solana_loader_v4_interface::state::LoaderV4State;
 use solana_pubkey::Pubkey;
-use solana_instruction::error::InstructionError;
 use solana_signature::Signature;
 
 #[cfg(any(test, feature = "dev-context"))]

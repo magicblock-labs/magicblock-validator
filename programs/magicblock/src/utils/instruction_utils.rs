@@ -11,12 +11,13 @@ use magicblock_magic_program_api::{
     },
     MAGIC_CONTEXT_PUBKEY,
 };
-use solana_program_runtime::__private::Hash;
+use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use solana_keypair::Keypair;
 use solana_transaction::Transaction;
+
 use crate::{
     mutate_accounts::set_account_mod_data,
     validator::{validator_authority, validator_authority_id},

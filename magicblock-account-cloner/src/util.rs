@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use magicblock_committor_service::BaseIntentCommittor;
 use magicblock_rpc_client::MagicblockRpcClient;
-use solana_sdk::signature::Signature;
+use solana_signature::Signature;
 
 pub(crate) async fn get_tx_diagnostics<C: BaseIntentCommittor>(
     sig: &Signature,

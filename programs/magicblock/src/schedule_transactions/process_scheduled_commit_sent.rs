@@ -4,11 +4,11 @@ use std::{
 };
 
 use lazy_static::lazy_static;
-use solana_log_collector::ic_msg;
-use solana_program_runtime::invoke_context::InvokeContext;
 use solana_clock::Slot;
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
+use solana_log_collector::ic_msg;
+use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_context::TransactionContext;
@@ -246,12 +246,12 @@ pub fn process_scheduled_commit_sent(
 
 #[cfg(test)]
 mod tests {
-    use solana_instruction::{Instruction, error::InstructionError};
     use solana_account::AccountSharedData;
+    use solana_instruction::{error::InstructionError, Instruction};
     use solana_keypair::Keypair;
+    use solana_sdk_ids::{bpf_loader_upgradeable, system_program};
     use solana_signer::Signer;
-    use solana_sdk_ids::bpf_loader_upgradeable;
-    use solana_sdk_ids::system_program;
+
     use super::*;
     use crate::{
         instruction_utils::InstructionUtils,

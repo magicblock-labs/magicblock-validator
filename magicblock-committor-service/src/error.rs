@@ -35,10 +35,7 @@ pub enum CommittorServiceError {
     ),
 
     #[error("The transaction to {0} was sent and confirmed, but encountered an error: {1} ({1:?})")]
-    EncounteredTransactionError(
-        String,
-        TransactionError,
-    ),
+    EncounteredTransactionError(String, TransactionError),
 
     #[error("Failed to send init changeset account: {0} ({0:?})")]
     FailedToSendInitChangesetAccount(
@@ -53,10 +50,7 @@ pub enum CommittorServiceError {
     InitChangesetAccountNotConfirmed(String),
 
     #[error("Task {0} failed to compile transaction message: {1} ({1:?})")]
-    FailedToCompileTransactionMessage(
-        String,
-        solana_message::CompileError,
-    ),
+    FailedToCompileTransactionMessage(String, solana_message::CompileError),
 
     #[error("Task {0} failed to create transaction: {1} ({1:?})")]
     FailedToCreateTransaction(String, solana_signer::SignerError),

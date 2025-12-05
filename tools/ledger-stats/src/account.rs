@@ -7,9 +7,7 @@ use solana_pubkey::Pubkey;
 use tabular::{Row, Table};
 
 pub fn print_account(db: &AccountsDb, pubkey: &Pubkey) {
-    let account = db
-        .get_account(pubkey)
-        .expect("Account not found");
+    let account = db.get_account(pubkey).expect("Account not found");
     let oncurve = pubkey.is_on_curve();
 
     println!("{} at slot: {}", pubkey, db.slot());

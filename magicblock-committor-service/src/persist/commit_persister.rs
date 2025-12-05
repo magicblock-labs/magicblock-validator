@@ -438,11 +438,11 @@ mod tests {
     use magicblock_program::magic_scheduled_base_intent::{
         CommitType, CommittedAccount, MagicBaseIntent,
     };
-use solana_account::Account;
-use solana_hash::Hash;
-use solana_pubkey::Pubkey;
-use solana_signature::Signature;
-use solana_transaction::Transaction;
+    use solana_account::Account;
+    use solana_hash::Hash;
+    use solana_pubkey::Pubkey;
+    use solana_signature::Signature;
+    use solana_transaction::Transaction;
     use tempfile::NamedTempFile;
 
     use super::*;

@@ -25,9 +25,8 @@ use magicblock_chainlink::{
 };
 use magicblock_config::config::LifecycleMode;
 use solana_account::{Account, AccountSharedData};
+use solana_program::{clock::Slot, sysvar::clock};
 use solana_pubkey::Pubkey;
-use solana_program::clock::{Slot};
-use solana_program::sysvar::{clock};
 use tokio::sync::mpsc;
 
 use super::accounts::account_shared_with_owner_and_slot;

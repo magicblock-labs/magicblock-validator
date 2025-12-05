@@ -83,14 +83,18 @@ mod test {
     use magicblock_committor_program::instruction_builder::close_buffer::{
         create_close_ix, CreateCloseIxArgs,
     };
-   use solana_pubkey::Pubkey;
-   use solana_sdk::address_lookup_table::state::LOOKUP_TABLE_MAX_ADDRESSES;
-   use solana_hash::Hash;
-   use solana_instruction::Instruction;
-   use solana_message::{v0::Message, AddressLookupTableAccount, VersionedMessage};
-    use solana_keypair::Keypair;
-   use solana_signer::Signer;
-   use solana_transaction::versioned::VersionedTransaction;
+    use solana_hash::Hash;
+    use solana_instruction::Instruction;
+    use solana_message::{
+        v0::Message, AddressLookupTableAccount, VersionedMessage,
+    };
+    use solana_pubkey::Pubkey;
+    use solana_sdk::{
+        address_lookup_table::state::LOOKUP_TABLE_MAX_ADDRESSES,
+        signer::keypair::Keypair,
+    };
+    use solana_signer::Signer;
+    use solana_transaction::versioned::VersionedTransaction;
 
     use super::*;
     use crate::{

@@ -8,6 +8,7 @@ use std::{
 use async_trait::async_trait;
 use log::*;
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::sysvar::clock;
 use tokio::sync::mpsc;
 
 use crate::remote_account_provider::{
@@ -199,7 +200,7 @@ where
         let debounce_detection_window = Duration::from_millis(detection_ms);
 
         let never_debounce: HashSet<Pubkey> =
-            vec![solana_sdk::sysvar::clock::ID].into_iter().collect();
+            vec![clock::ID].into_iter().collect();
 
         let clients =
             Self::spawn_reconnectors(clients, subscribed_accounts_tracker);

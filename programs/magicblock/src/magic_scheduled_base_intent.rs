@@ -1,13 +1,5 @@
 use std::{cell::RefCell, collections::HashSet};
 
-use crate::{
-    instruction_utils::InstructionUtils,
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        get_writable_with_idx,
-    },
-    validator::validator_authority_id,
-};
 use magicblock_core::Slot;
 use magicblock_magic_program_api::args::{
     ActionArgs, BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
@@ -23,6 +15,15 @@ use solana_program_runtime::{
 };
 use solana_pubkey::Pubkey;
 use solana_transaction::Transaction;
+
+use crate::{
+    instruction_utils::InstructionUtils,
+    utils::accounts::{
+        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+        get_writable_with_idx,
+    },
+    validator::validator_authority_id,
+};
 
 /// Context necessary for construction of Schedule Action
 pub struct ConstructionContext<'a, 'ic> {

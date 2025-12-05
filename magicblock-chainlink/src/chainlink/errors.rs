@@ -1,5 +1,5 @@
+use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
-use solana_sdk::program_error::ProgramError;
 use thiserror::Error;
 
 use crate::remote_account_provider::RemoteAccountProviderError;

@@ -13,10 +13,10 @@ use log::*;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
-use solana_pubkey::Pubkey;
 use solana_commitment_config::CommitmentConfig;
 use solana_feature_set;
-use solana_sdk::transaction::SanitizedTransaction;
+use solana_pubkey::Pubkey;
+use solana_transaction::sanitized::SanitizedTransaction;
 use tokio::{sync::mpsc, task};
 
 use crate::{

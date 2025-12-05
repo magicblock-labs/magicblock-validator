@@ -2,11 +2,13 @@
 use std::cell::RefCell;
 
 use magicblock_magic_program_api::args::ShortAccountMeta;
+use solana_account::{
+    Account, AccountSharedData, ReadableAccount, WritableAccount,
+};
+use solana_account_info::{AccountInfo, IntoAccountInfo};
+use solana_instruction::{error::InstructionError, AccountMeta};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_account::{Account, AccountSharedData, ReadableAccount, WritableAccount};
-use solana_account_info::{AccountInfo, IntoAccountInfo};
-use solana_instruction::{AccountMeta, error::InstructionError};
 use solana_pubkey::Pubkey;
 use solana_transaction_context::TransactionContext;
 

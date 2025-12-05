@@ -1,7 +1,7 @@
 use dlp::args::{CallHandlerArgs, CommitStateArgs};
 use magicblock_metrics::metrics::LabelValue;
-use solana_pubkey::Pubkey;
 use solana_instruction::{AccountMeta, Instruction};
+use solana_pubkey::Pubkey;
 
 #[cfg(test)]
 use crate::tasks::TaskStrategy;

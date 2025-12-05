@@ -294,7 +294,7 @@ pub type IntentSchedulerResult<T, E = IntentSchedulerError> = Result<T, E>;
 /// Set of simple tests
 #[cfg(test)]
 mod simple_test {
-   use solana_pubkey::pubkey;
+    use solana_pubkey::pubkey;
 
     use super::*;
 
@@ -351,7 +351,7 @@ mod simple_test {
 /// Set of simple completion tests
 #[cfg(test)]
 mod completion_simple_test {
-   use solana_pubkey::pubkey;
+    use solana_pubkey::pubkey;
 
     use super::*;
 
@@ -411,7 +411,7 @@ mod completion_simple_test {
 
 #[cfg(test)]
 mod complex_blocking_test {
-   use solana_pubkey::pubkey;
+    use solana_pubkey::pubkey;
 
     use super::*;
 
@@ -601,8 +601,8 @@ mod edge_cases_test {
 #[cfg(test)]
 mod complete_error_test {
     use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
-   use solana_account::Account;
-   use solana_pubkey::pubkey;
+    use solana_account::Account;
+    use solana_pubkey::pubkey;
 
     use super::*;
 
@@ -729,9 +729,9 @@ pub(crate) fn create_test_intent(
     use magicblock_program::magic_scheduled_base_intent::{
         CommitType, CommittedAccount, MagicBaseIntent,
     };
-   use solana_account::Account;
-use solana_hash::Hash;
-use solana_transaction::Transaction;
+    use solana_account::Account;
+    use solana_hash::Hash;
+    use solana_transaction::Transaction;
 
     use crate::types::TriggerType;
 

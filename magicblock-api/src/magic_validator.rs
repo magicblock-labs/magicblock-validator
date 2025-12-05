@@ -68,13 +68,12 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
+use solana_keypair::Keypair;
+use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    signer::{Signer, keypair::Keypair},
-    native_token::LAMPORTS_PER_SOL,
-};
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_signer::Signer;
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 

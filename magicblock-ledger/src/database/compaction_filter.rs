@@ -14,7 +14,7 @@ use rocksdb::{
     },
     CompactionDecision,
 };
-use solana_sdk::clock::Slot;
+use solana_clock::Slot;
 
 use crate::database::columns::{Column, ColumnName};
 

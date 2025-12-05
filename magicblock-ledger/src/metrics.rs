@@ -6,11 +6,8 @@ use std::{
 
 use rocksdb::{perf::set_perf_stats, PerfContext, PerfMetric, PerfStatsLevel};
 use solana_metrics::datapoint_info;
-use solana_sdk::timing::timestamp;
 
 use crate::database::options::LedgerColumnOptions;
-
-const PERF_SAMPLING_MIN_DURATION: Duration = Duration::from_secs(1);
 
 pub const BLOCKSTORE_METRICS_ERROR: i64 = -1;
 
@@ -21,46 +18,9 @@ pub const BLOCKSTORE_METRICS_ERROR: i64 = -1;
 /// A struct that holds the current status of RocksDB perf sampling.
 pub struct PerfSamplingStatus {
     // The number of RocksDB operations since the last perf sample.
-    op_count: AtomicUsize,
+    _op_count: AtomicUsize,
     // The timestamp of the latest operation with perf stats collection.
-    last_sample_time_ms: AtomicU64,
-}
-
-impl PerfSamplingStatus {
-    fn should_sample(&self, sample_count_interval: usize) -> bool {
-        if sample_count_interval == 0 {
-            return false;
-        }
-
-        // Rate-limiting based on the number of samples.
-        if self.op_count.fetch_add(1, Ordering::Relaxed) < sample_count_interval
-        {
-            return false;
-        }
-        self.op_count.store(0, Ordering::Relaxed);
-
-        // Rate-limiting based on the time duration.
-        let current_time_ms = timestamp();
-        let old_time_ms = self.last_sample_time_ms.load(Ordering::Relaxed);
-        if old_time_ms + (PERF_SAMPLING_MIN_DURATION.as_millis() as u64)
-            > current_time_ms
-        {
-            return false;
-        }
-
-        // If the `last_sample_time_ms` has a different value than `old_time_ms`,
-        // it means some other thread has performed the sampling and updated
-        // the last sample time.  In this case, the current thread will skip
-        // the current sample.
-        self.last_sample_time_ms
-            .compare_exchange_weak(
-                old_time_ms,
-                current_time_ms,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            )
-            .is_ok()
-    }
+    _last_sample_time_ms: AtomicU64,
 }
 
 // -----------------
@@ -258,16 +218,9 @@ thread_local! {
 /// When this function enables PerfContext, the function will return true,
 /// and the PerfContext of the ubsequent RocksDB operation will be collected.
 pub(crate) fn maybe_enable_rocksdb_perf(
-    sample_interval: usize,
-    perf_status: &PerfSamplingStatus,
+    _sample_interval: usize,
+    _perf_status: &PerfSamplingStatus,
 ) -> Option<Instant> {
-    if perf_status.should_sample(sample_interval) {
-        set_perf_stats(PerfStatsLevel::EnableTime);
-        PER_THREAD_ROCKS_PERF_CONTEXT.with(|perf_context| {
-            perf_context.borrow_mut().reset();
-        });
-        return Some(Instant::now());
-    }
     None
 }
 

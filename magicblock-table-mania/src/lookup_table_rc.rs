@@ -14,19 +14,18 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicblockRpcClient,
 };
+use solana_clock::Slot;
+use solana_commitment_config::CommitmentLevel;
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    address_lookup_table::{
-        self as alt,
-        state::{LookupTableMeta, LOOKUP_TABLE_MAX_ADDRESSES},
-    },
-    clock::Slot,
-    commitment_config::CommitmentLevel,
-    signature::{Keypair, Signature},
-    signer::Signer,
-    slot_hashes::MAX_ENTRIES,
-    transaction::Transaction,
+use solana_sdk::address_lookup_table::{
+    self as alt,
+    state::{LookupTableMeta, LOOKUP_TABLE_MAX_ADDRESSES},
 };
+use solana_signature::Signature;
+use solana_signer::Signer;
+use solana_slot_hashes::MAX_ENTRIES;
+use solana_transaction::Transaction;
 
 use crate::{
     derive_keypair,

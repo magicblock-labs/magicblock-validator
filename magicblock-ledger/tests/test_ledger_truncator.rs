@@ -2,7 +2,8 @@ mod common;
 use std::{sync::Arc, time::Duration};
 
 use magicblock_ledger::{ledger_truncator::LedgerTruncator, Ledger};
-use solana_sdk::{hash::Hash, signature::Signature};
+use solana_hash::Hash;
+use solana_signature::Signature;
 
 use crate::common::{setup, write_dummy_transaction};
 

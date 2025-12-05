@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use magicblock_magic_program_api::instruction::AccountModificationForInstruction;
+use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_account::{ReadableAccount, WritableAccount};
-use solana_sdk_ids::system_program;
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
 use solana_transaction_context::TransactionContext;
+
 use crate::{
     errors::MagicBlockProgramError,
     mutate_accounts::account_mod_data::resolve_account_mod_data,
