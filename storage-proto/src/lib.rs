@@ -5,16 +5,24 @@ use solana_account_decoder::{
     parse_token::{real_number_string_trimmed, UiTokenAmount},
     StringAmount,
 };
-use solana_sdk::{
-    deserialize_utils::default_on_eof, message::v0::LoadedAddresses,
-    transaction::Result, transaction_context::TransactionReturnData,
-};
+use solana_message::v0::LoadedAddresses;
+use solana_transaction_context::TransactionReturnData;
+use solana_transaction_error::TransactionResult;
 use solana_transaction_status::{
     InnerInstructions, Reward, RewardType, TransactionStatusMeta,
     TransactionTokenBalance,
 };
 
 pub mod convert;
+
+// Helper function for deserializing fields that may not exist in older serialized data
+fn default_on_eof<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + serde::de::Deserialize<'de>,
+{
+    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
+}
 
 pub type StoredExtendedRewards = Vec<StoredExtendedReward>;
 
@@ -162,7 +170,7 @@ impl From<TransactionTokenBalance> for StoredTransactionTokenBalance {
 
 #[derive(Serialize, Deserialize)]
 pub struct StoredTransactionStatusMeta {
-    pub status: Result<()>,
+    pub status: TransactionResult<()>,
     pub fee: u64,
     pub pre_balances: Vec<u64>,
     pub post_balances: Vec<u64>,
