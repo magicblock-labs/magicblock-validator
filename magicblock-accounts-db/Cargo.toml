@@ -19,9 +19,6 @@ solana-account = { workspace = true }
 
 # synchronization
 parking_lot = { workspace = true }
-
-# misc
-serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 log = { workspace = true }
 magicblock-config = { workspace = true }
