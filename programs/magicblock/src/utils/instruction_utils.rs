@@ -182,6 +182,7 @@ impl InstructionUtils {
                     rent_epoch: account_modification.rent_epoch,
                     delegated: account_modification.delegated,
                     confined: account_modification.confined,
+                    remote_slot: account_modification.remote_slot,
                 };
             account_mods.insert(
                 account_modification.pubkey,

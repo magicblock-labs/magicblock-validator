@@ -280,8 +280,8 @@ impl ScheduledCommitsProcessorImpl {
             },
             Err(err) => {
                 error!(
-                    "Failed to commit in slot: {}, blockhash: {}. {:?}",
-                    intent_meta.slot, intent_meta.blockhash, err
+                    "Failed to commit intent: {}, slot: {}, blockhash: {}. {:?}",
+                    intent_id, intent_meta.slot, intent_meta.blockhash, err
                 );
                 err.signatures()
                     .map(|(commit, finalize)| {

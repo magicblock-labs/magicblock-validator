@@ -120,6 +120,7 @@ pub struct AccountModification {
     pub rent_epoch: Option<u64>,
     pub delegated: Option<bool>,
     pub confined: Option<bool>,
+    pub remote_slot: Option<u64>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -133,4 +134,5 @@ pub struct AccountModificationForInstruction {
     pub rent_epoch: Option<u64>,
     pub delegated: Option<bool>,
     pub confined: Option<bool>,
+    pub remote_slot: Option<u64>,
 }
