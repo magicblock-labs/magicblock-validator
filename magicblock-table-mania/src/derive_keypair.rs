@@ -1,6 +1,6 @@
 use ed25519_dalek::{PublicKey, SecretKey};
 use solana_clock::Slot;
-use solana_sdk::signer::keypair::Keypair;
+use solana_keypair::Keypair;
 use solana_signer::Signer;
 
 /// This derives a keypair from the provided authority keypair, and given seeds which

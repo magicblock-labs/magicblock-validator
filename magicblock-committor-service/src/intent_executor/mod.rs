@@ -25,7 +25,7 @@ use magicblock_rpc_client::{
 use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
-use solana_sdk::signer::keypair::Keypair;
+use solana_keypair::Keypair;
 use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
 use solana_transaction::versioned::VersionedTransaction;

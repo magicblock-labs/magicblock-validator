@@ -138,6 +138,7 @@ solana-account-decoder = { version = "2.2" }
 solana-account-decoder-client-types = { version = "2.2" }
 solana-account-info = { version = "2.2" }
 solana-address-lookup-table-interface = { version = "2.2" }
+solana-address-lookup-table-program = { version = "2.2" }
 solana-bpf-loader-program = { version = "2.2" }
 solana-clock = { version = "2.2" }
 solana-commitment-config = { version = "2.2" }
@@ -174,7 +175,6 @@ solana-rpc-client-api = { version = "2.2" }
 solana-sanitize = { version = "2.2" }
 solana-sha256-hasher = { version = "2.2" }
 solana-seed-derivable = { version = "2.2" }
-solana-sdk = { version = "2.2" }
 solana-sdk-ids = { version = "2.2" }
 solana-signature = { version = "2.2" }
 solana-signer = { version = "2.2" }

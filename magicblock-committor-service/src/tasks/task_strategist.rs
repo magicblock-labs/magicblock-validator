@@ -1,7 +1,7 @@
 use std::collections::BinaryHeap;
 
 use solana_pubkey::Pubkey;
-use solana_sdk::signer::keypair::Keypair;
+use solana_keypair::Keypair;
 use solana_signer::{Signer, SignerError};
 
 use crate::{

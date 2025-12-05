@@ -435,7 +435,7 @@ mod serialization_safety_test {
 #[test]
 fn test_close_buffer_limit() {
     use solana_compute_budget_interface::ComputeBudgetInstruction;
-    use solana_sdk::signer::keypair::Keypair;
+    use solana_keypair::Keypair;
     use solana_signer::Signer;
     use solana_transaction::Transaction;
 

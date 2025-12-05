@@ -23,7 +23,7 @@ use solana_message::{
     v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::signer::keypair::Keypair;
+use solana_keypair::Keypair;
 use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
 use solana_transaction::versioned::VersionedTransaction;

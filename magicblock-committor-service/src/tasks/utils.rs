@@ -7,7 +7,7 @@ use solana_message::{
     v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::signer::keypair::Keypair;
+use solana_keypair::Keypair;
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 
