@@ -78,10 +78,7 @@ impl AccountSubscriptionTask {
                     let result = match task {
                         Subscribe(pubkey, _) => client.subscribe(pubkey).await,
                         Unsubscribe(pubkey) => client.unsubscribe(pubkey).await,
-                        Shutdown => {
-                            client.shutdown().await;
-                            Ok(())
-                        }
+                        Shutdown => client.shutdown().await,
                     };
                     (i, result)
                 });

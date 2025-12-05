@@ -184,6 +184,7 @@ impl ChainPubsubClientImpl {
 impl ChainPubsubClient for ChainPubsubClientImpl {
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
         self.actor.shutdown().await;
+        Ok(())
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {

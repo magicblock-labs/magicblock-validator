@@ -68,12 +68,5 @@ pub async fn reconnect(actor: &ChainPubsubActor) {
 }
 
 pub async fn shutdown(actor: &ChainPubsubActor) {
-    let (tx, rx) = oneshot::channel();
-    actor
-        .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
-        .await
-        .expect("failed to send Shutdown message");
-    rx.await
-        .expect("shutdown ack channel dropped")
-        .expect("shutdown failed");
+    actor.shutdown().await;
 }

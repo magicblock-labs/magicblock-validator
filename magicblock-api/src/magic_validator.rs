@@ -363,13 +363,11 @@ impl MagicValidator {
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
         use magicblock_chainlink::remote_account_provider::Endpoint;
-        let rpc_url = remote_cluster.url.clone();
-        let endpoints = remote_cluster
-            .ws_urls
-            .iter()
-            .map(|pubsub_url| {
-                Endpoint::new(rpc_url.clone(), pubsub_url.to_string())
-            })
+        let rpc_url = config.remote.http().to_string();
+        let endpoints = config
+            .remote
+            .websocket()
+            .map(|pubsub_url| Endpoint::new(rpc_url.clone(), pubsub_url.to_string()))
             .collect::<Vec<_>>();
 
         let cloner = ChainlinkCloner::new(

@@ -1,5 +1,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
+    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -7,14 +8,13 @@ use std::{
 };
 
 pub(crate) use chain_pubsub_client::{
-    ChainPubsubClient, ChainPubsubClientImpl,
+    ChainPubsubClient, ChainPubsubClientImpl, ReconnectableClient,
 };
 pub(crate) use chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl};
 use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
-use futures_util::future;
 use log::*;
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
@@ -389,17 +389,37 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         };
 
         // Build pubsub clients and wrap them into a SubMuxClient
-        let tasks = endpoints.iter().map(|ep| {
-            ChainUpdatesClient::try_new_from_endpoint(ep, commitment)
-        });
-        let clients = future::try_join_all(tasks).await?;
-        let pubsubs = clients.into_iter().map(Arc::new).collect();
-        let submux = SubMuxClient::new(pubsubs, None);
+        let mut pubsubs: Vec<(Arc<ChainUpdatesClient>, mpsc::Receiver<()>)> =
+            Vec::with_capacity(endpoints.len());
+        for ep in endpoints {
+            let (abort_tx, abort_rx) = mpsc::channel(1);
+            let client =
+                ChainUpdatesClient::try_new_from_endpoint(ep, commitment, abort_tx)
+                    .await?;
+            pubsubs.push((Arc::new(client), abort_rx));
+        }
+
+        let subscribed_accounts = Arc::new(AccountsLruCache::new({
+            // SAFETY: NonZeroUsize::new only returns None if the value is 0.
+            // RemoteAccountProviderConfig can only be constructed with
+            // capacity > 0
+            let cap = config.subscribed_accounts_lru_capacity();
+            NonZeroUsize::new(cap).expect("non-zero capacity")
+        }));
+
+        let submux =
+            SubMuxClient::new(pubsubs, subscribed_accounts.clone(), None);
 
         RemoteAccountProvider::<
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
-        >::new(rpc_client, submux, subscription_forwarder, config)
+        >::new(
+            rpc_client,
+            submux,
+            subscription_forwarder,
+            config,
+            subscribed_accounts,
+        )
         .await
     }
 

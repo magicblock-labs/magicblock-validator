@@ -96,6 +96,7 @@ impl ChainLaserActor {
         Ok((me, messages_sender, subscription_updates_receiver))
     }
 
+    #[allow(dead_code)]
     fn shutdown(&mut self) {
         info!("Shutting down ChainLaserActor");
         self.subscriptions.clear();
