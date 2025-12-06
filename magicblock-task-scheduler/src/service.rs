@@ -48,6 +48,8 @@ pub struct TaskSchedulerService {
     tx_counter: AtomicU64,
     /// Token used to cancel the task scheduler
     token: CancellationToken,
+    /// Minimum interval between task executions
+    min_interval: Duration,
 }
 
 enum ProcessingOutcome {
@@ -94,6 +96,7 @@ impl TaskSchedulerService {
             task_queue_keys: HashMap::new(),
             tx_counter: AtomicU64::default(),
             token,
+            min_interval: config.min_interval,
         })
     }
 
@@ -123,11 +126,24 @@ impl TaskSchedulerService {
 
     async fn process_request(
         &mut self,
-        request: &TaskRequest,
+        request: TaskRequest,
     ) -> TaskSchedulerResult<ProcessingOutcome> {
         match request {
-            TaskRequest::Schedule(schedule_request) => {
-                if let Err(e) = self.register_task(schedule_request).await {
+            TaskRequest::Schedule(mut schedule_request) => {
+                if schedule_request.execution_interval_millis >= u32::MAX as i64
+                    || schedule_request.execution_interval_millis == 0
+                {
+                    // If the interval is too large or zero, we don't schedule the task
+                    return Ok(ProcessingOutcome::Success);
+                }
+
+                schedule_request.execution_interval_millis =
+                    schedule_request.execution_interval_millis.clamp(
+                        self.min_interval.as_millis() as i64,
+                        u32::MAX as i64,
+                    );
+
+                if let Err(e) = self.register_task(&schedule_request).await {
                     self.db
                         .insert_failed_scheduling(
                             schedule_request.id,
@@ -144,7 +160,7 @@ impl TaskSchedulerService {
             }
             TaskRequest::Cancel(cancel_request) => {
                 if let Err(e) =
-                    self.process_cancel_request(cancel_request).await
+                    self.process_cancel_request(&cancel_request).await
                 {
                     self.db
                         .insert_failed_scheduling(
@@ -273,10 +289,11 @@ impl TaskSchedulerService {
                     }
                 }
                 Some(task) = self.scheduled_tasks.recv() => {
-                    match self.process_request(&task).await {
+                    let id = task.id();
+                    match self.process_request(task).await {
                         Ok(ProcessingOutcome::Success) => {}
                         Ok(ProcessingOutcome::Recoverable(e)) => {
-                            warn!("Failed to process request ID={}: {e:?}", task.id());
+                            warn!("Failed to process request ID={}: {e:?}", id);
                         }
                         Err(e) => {
                             error!("Failed to process request: {}", e);

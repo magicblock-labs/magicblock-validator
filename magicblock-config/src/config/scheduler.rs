@@ -1,9 +1,28 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
+use crate::consts;
+
 /// Configuration for the internal task scheduler.
-#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct TaskSchedulerConfig {
     /// If true, clears all pending scheduled tasks on startup.
     pub reset: bool,
+    /// The minimum interval between task executions.
+    /// Supports humantime (e.g. "10ms", "1s").
+    #[serde(with = "humantime")]
+    pub min_interval: Duration,
+}
+
+impl Default for TaskSchedulerConfig {
+    fn default() -> Self {
+        Self {
+            reset: false,
+            min_interval: Duration::from_millis(
+                consts::DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS,
+            ),
+        }
+    }
 }
