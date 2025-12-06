@@ -1145,6 +1145,7 @@ where
                                         eata_shared.maybe_into_ata(deleg)
                                     {
                                         account_to_clone = projected_ata;
+                                        account_to_clone.set_delegated(true);
                                         commit_frequency_ms =
                                             Some(deleg.commit_frequency_ms);
                                     }

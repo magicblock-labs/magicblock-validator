@@ -2,8 +2,7 @@ use solana_account::Account;
 use solana_program::{program_option::COption, program_pack::Pack};
 use solana_pubkey::{pubkey, Pubkey};
 use solana_sdk::rent::Rent;
-use spl_token::state::Account as SplAccount;
-use spl_token::state::AccountState;
+use spl_token::state::{Account as SplAccount, AccountState};
 
 const SPL_TOKEN_PROGRAM_ID: Pubkey =
     pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
