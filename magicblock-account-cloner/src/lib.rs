@@ -108,7 +108,8 @@ impl ChainlinkCloner {
         ]);
         // Defined positive commit frequency means commits should be scheduled
         let ixs = match request.commit_frequency_ms {
-            Some(commit_frequency_ms) if commit_frequency_ms > 0 => {
+            // HOTFIX(GabrielePicco): don't schedule the commit
+            Some(commit_frequency_ms) if commit_frequency_ms > 0 && false => {
                 // The task ID is randomly generated to avoid conflicts with other tasks
                 // TODO: remove once the program handles generating tasks instead of the client
                 // https://github.com/magicblock-labs/magicblock-validator/issues/625
