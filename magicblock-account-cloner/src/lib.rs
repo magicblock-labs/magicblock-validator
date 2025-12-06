@@ -108,7 +108,10 @@ impl ChainlinkCloner {
         ]);
         // Defined positive commit frequency means commits should be scheduled
         let ixs = match request.commit_frequency_ms {
-            // HOTFIX(GabrielePicco): don't schedule the commit
+            // TODO(GabrielePicco): Hotfix. Do not schedule frequency commits until we impose limits.
+            // 1. Allow configuring a higher minimum.
+            // 2. Stop committing accounts if they have been committed more than X times,
+            //    where X corresponds to what we can charge.
             Some(commit_frequency_ms) if commit_frequency_ms > 0 && false => {
                 // The task ID is randomly generated to avoid conflicts with other tasks
                 // TODO: remove once the program handles generating tasks instead of the client
