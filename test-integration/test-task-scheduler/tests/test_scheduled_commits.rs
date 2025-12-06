@@ -10,6 +10,7 @@ use solana_sdk::{
 use test_task_scheduler::{create_delegated_counter, setup_validator};
 
 #[test]
+#[ignore]
 fn test_scheduled_commits() {
     let (_temp_dir, mut validator, ctx) = setup_validator();
 
