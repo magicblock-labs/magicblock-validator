@@ -112,6 +112,7 @@ impl ChainlinkCloner {
             // 1. Allow configuring a higher minimum.
             // 2. Stop committing accounts if they have been committed more than X times,
             //    where X corresponds to what we can charge.
+            #[allow(clippy::overly_complex_bool_expr)]
             Some(commit_frequency_ms) if commit_frequency_ms > 0 && false => {
                 // The task ID is randomly generated to avoid conflicts with other tasks
                 // TODO: remove once the program handles generating tasks instead of the client
