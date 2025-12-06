@@ -1662,7 +1662,7 @@ checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 
 [[package]]
 name = "guinea"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "bincode",
  "magicblock-magic-program-api",
@@ -2582,7 +2582,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "bincode",
@@ -2605,7 +2605,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "log",
@@ -2624,7 +2624,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "env_logger 0.11.8",
  "lmdb-rkv",
@@ -2642,7 +2642,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "arc-swap",
  "base64 0.21.7",
@@ -2692,7 +2692,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "borsh 1.5.7",
@@ -2726,7 +2726,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "arc-swap",
  "assert_matches",
@@ -2764,7 +2764,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "borsh 1.5.7",
  "paste",
@@ -2776,7 +2776,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -2810,7 +2810,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "clap 4.5.40",
  "derive_more",
@@ -2830,7 +2830,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "flume",
  "magicblock-magic-program-api",
@@ -2868,7 +2868,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -2898,7 +2898,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "bincode",
  "serde",
@@ -2907,7 +2907,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "http-body-util",
  "hyper 1.6.0",
@@ -2921,7 +2921,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "bincode",
  "guinea",
@@ -2960,7 +2960,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "assert_matches",
  "bincode",
@@ -2980,7 +2980,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "log",
  "solana-rpc-client",
@@ -2994,7 +2994,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ed25519-dalek",
  "log",
@@ -3010,7 +3010,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "bincode",
  "chrono",
@@ -3035,7 +3035,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "console-subscriber",
  "env_logger 0.11.8",
@@ -3050,7 +3050,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "log",
  "magicblock-delegation-program",
@@ -3064,7 +3064,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "git-version",
  "rustc_version",
@@ -6464,7 +6464,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "bincode",
  "bs58",
@@ -7479,7 +7479,7 @@ dependencies = [
 
 [[package]]
 name = "test-kit"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "env_logger 0.11.8",
  "guinea",
