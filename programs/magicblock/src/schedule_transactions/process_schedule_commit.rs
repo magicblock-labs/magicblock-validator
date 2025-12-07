@@ -37,6 +37,32 @@ pub(crate) fn process_schedule_commit(
     invoke_context: &mut InvokeContext,
     opts: ProcessScheduleCommitOptions,
 ) -> Result<(), InstructionError> {
+    // SPL Token and ATA/eATA program ids
+    // Tokenkeg... (SPL Token), ATokenG... (Associated Token Program), 5iC4wK... (eATA program)
+    const SPL_TOKEN_PROGRAM_ID: Pubkey =
+        solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
+        solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+    const EATA_PROGRAM_ID: Pubkey =
+        solana_sdk::pubkey!("5iC4wKZizyxrKh271Xzx3W4Vn2xUyYvSGHeoB2mdw5HA");
+
+    // Derive the standard ATA address for given wallet owner and mint
+    fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[owner.as_ref(), SPL_TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
+            &ASSOCIATED_TOKEN_PROGRAM_ID,
+        )
+        .0
+    }
+
+    // Derive the eATA PDA for given wallet owner and mint
+    fn derive_eata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[owner.as_ref(), mint.as_ref()],
+            &EATA_PROGRAM_ID,
+        )
+        .0
+    }
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 
@@ -185,9 +211,45 @@ pub(crate) fn process_schedule_commit(
             let mut account: Account = acc.borrow().to_owned().into();
             account.owner = parent_program_id.cloned().unwrap_or(account.owner);
 
+            // If this is a delegated SPL Token ATA that was cloned from an eATA,
+            // we should commit/undelegate the corresponding eATA instead.
+            let mut target_pubkey = *acc_pubkey;
+            let acc_borrow = acc.borrow();
+            if acc_borrow.delegated()
+                && acc_borrow.owner() == &SPL_TOKEN_PROGRAM_ID
+            {
+                let data = acc_borrow.data();
+                if data.len() >= 64 {
+                    // spl-token Account layout: [0..32]=mint, [32..64]=owner
+                    let mint =
+                        Pubkey::new_from_array(match data[0..32].try_into() {
+                            Ok(a) => a,
+                            Err(_) => [0u8; 32],
+                        });
+                    let wallet_owner =
+                        Pubkey::new_from_array(match data[32..64].try_into() {
+                            Ok(a) => a,
+                            Err(_) => [0u8; 32],
+                        });
+
+                    // Verify that the current pubkey matches the derived ATA
+                    let ata_addr = derive_ata(&wallet_owner, &mint);
+                    if ata_addr == *acc_pubkey {
+                        // Remap to eATA PDA
+                        target_pubkey = derive_eata(&wallet_owner, &mint);
+                        ic_msg!(
+                            invoke_context,
+                            "ScheduleCommit: remapping ATA {} -> eATA {} for commit/undelegate",
+                            acc_pubkey,
+                            target_pubkey
+                        );
+                    }
+                }
+            }
+
             #[allow(clippy::unnecessary_literal_unwrap)]
             committed_accounts.push(CommittedAccount {
-                pubkey: *acc_pubkey,
+                pubkey: target_pubkey,
                 account,
             });
         }
