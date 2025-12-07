@@ -239,8 +239,17 @@ impl TransactionExecutor {
 pub(super) struct SimpleForkGraph;
 
 impl ForkGraph for SimpleForkGraph {
-    fn relationship(&self, _: u64, _: u64) -> BlockRelation {
-        BlockRelation::Unrelated
+    fn relationship(&self, a: u64, b: u64) -> BlockRelation {
+        if a < b {
+            // In a forkless chain, earlier slots are always ancestors
+            BlockRelation::Ancestor
+        } else if a > b {
+            // Later slots are always descendants
+            BlockRelation::Descendant
+        } else {
+            // Same slot
+            BlockRelation::Equal
+        }
     }
 }
 
