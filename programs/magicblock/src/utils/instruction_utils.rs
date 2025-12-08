@@ -182,6 +182,7 @@ impl InstructionUtils {
                     rent_epoch: account_modification.rent_epoch,
                     delegated: account_modification.delegated,
                     confined: account_modification.confined,
+                    remote_slot: account_modification.remote_slot,
                 };
             account_mods.insert(
                 account_modification.pubkey,
@@ -275,6 +276,17 @@ impl InstructionUtils {
             crate::id(),
             &MagicBlockInstruction::EnableExecutableCheck,
             account_metas,
+        )
+    }
+
+    // -----------------
+    // Noop
+    // -----------------
+    pub fn noop_instruction(data: u64) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::Noop(data),
+            vec![],
         )
     }
 

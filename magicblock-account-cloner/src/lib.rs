@@ -100,6 +100,7 @@ impl ChainlinkCloner {
             executable: Some(request.account.executable()),
             delegated: Some(request.account.delegated()),
             confined: Some(request.account.confined()),
+            remote_slot: Some(request.account.remote_slot()),
         };
 
         let modify_ix = InstructionUtils::modify_accounts_instruction(vec![
@@ -107,7 +108,12 @@ impl ChainlinkCloner {
         ]);
         // Defined positive commit frequency means commits should be scheduled
         let ixs = match request.commit_frequency_ms {
-            Some(commit_frequency_ms) if commit_frequency_ms > 0 => {
+            // TODO(GabrielePicco): Hotfix. Do not schedule frequency commits until we impose limits.
+            // 1. Allow configuring a higher minimum.
+            // 2. Stop committing accounts if they have been committed more than X times,
+            //    where X corresponds to what we can charge.
+            #[allow(clippy::overly_complex_bool_expr)]
+            Some(commit_frequency_ms) if commit_frequency_ms > 0 && false => {
                 // The task ID is randomly generated to avoid conflicts with other tasks
                 // TODO: remove once the program handles generating tasks instead of the client
                 // https://github.com/magicblock-labs/magicblock-validator/issues/625
@@ -222,6 +228,7 @@ impl ChainlinkCloner {
                 // and then deploy it and finally set the authority to match the
                 // one on chain
                 let slot = self.accounts_db.slot();
+                let program_remote_slot = program.remote_slot;
                 let DeployableV4Program {
                     pre_deploy_loader_state,
                     deploy_instruction,
@@ -248,6 +255,7 @@ impl ChainlinkCloner {
                         executable: Some(true),
                         data: Some(pre_deploy_loader_state),
                         confined: Some(false),
+                        remote_slot: Some(program_remote_slot),
                         ..Default::default()
                     }];
                     InstructionUtils::modify_accounts_instruction(
@@ -260,6 +268,7 @@ impl ChainlinkCloner {
                         pubkey: program_id,
                         data: Some(post_deploy_loader_state),
                         confined: Some(false),
+                        remote_slot: Some(program_remote_slot),
                         ..Default::default()
                     }];
                     InstructionUtils::modify_accounts_instruction(

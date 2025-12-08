@@ -8,9 +8,7 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use test_task_scheduler::{
-    create_delegated_counter, send_noop_tx, setup_validator,
-};
+use test_task_scheduler::{create_delegated_counter, setup_validator};
 use tokio::runtime::Runtime;
 
 #[test]
@@ -34,8 +32,8 @@ fn test_unauthorized_reschedule() {
     create_delegated_counter(&ctx, &payer, &mut validator, 0);
     create_delegated_counter(&ctx, &different_payer, &mut validator, 0);
 
-    // Noop tx to make sure the noop program is cloned
-    let ephem_blockhash = send_noop_tx(&ctx, &payer, &mut validator);
+    let ephem_blockhash =
+        expect!(ctx.try_get_latest_blockhash_ephem(), validator);
 
     // Schedule a task
     let task_id = 1;

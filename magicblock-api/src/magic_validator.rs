@@ -382,9 +382,11 @@ impl MagicValidator {
         );
         let cloner = Arc::new(cloner);
         let accounts_bank = accountsdb.clone();
-        let chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
+        let mut chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral,
         );
+        chainlink_config.remove_confined_accounts =
+            config.chainlink.remove_confined_accounts;
         let commitment_config = {
             let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }
@@ -397,7 +399,7 @@ impl MagicValidator {
             config.validator.keypair.pubkey(),
             faucet_pubkey,
             chainlink_config,
-            config.chainlink.auto_airdrop_lamports,
+            &config.chainlink,
         )
         .await?;
 
