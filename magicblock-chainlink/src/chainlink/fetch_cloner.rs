@@ -1272,37 +1272,48 @@ where
         fetch_origin: AccountFetchOrigin,
     ) -> RefreshDecision {
         if in_bank.undelegating() {
-            debug!("Fetching undelegating account {pubkey}. delegated={}, undelegating={}", in_bank.delegated(), in_bank.undelegating());
-            let deleg_record = self
-                .fetch_and_parse_delegation_record(
-                    *pubkey,
-                    self.remote_account_provider.chain_slot(),
-                    fetch_origin,
-                )
-                .await;
+            debug!(
+                "Fetching undelegating account {pubkey}. delegated={}, undelegating={}, compressed={}",
+                in_bank.delegated(),
+                in_bank.undelegating(),
+                in_bank.compressed()
+            );
+            if in_bank.compressed() {
+                debug!("Account {pubkey} is compressed, skipping delegation record fetch");
+                return RefreshDecision::No;
+            } else {
+                let deleg_record = self
+                    .fetch_and_parse_delegation_record(
+                        *pubkey,
+                        self.remote_account_provider.chain_slot(),
+                        fetch_origin,
+                    )
+                    .await;
 
-            if deleg_record.is_none() {
-                // If there is no delegation record then it is possible that the account itself
-                // does not exist either.
-                // In that case we need to refresh it as empty to clear the undelegation state.
-                return RefreshDecision::YesAndMarkEmptyIfNotFound;
-            }
+                if deleg_record.is_none() {
+                    // If there is no delegation record then it is possible that the account itself
+                    // does not exist either.
+                    // In that case we need to refresh it as empty to clear the undelegation state.
+                    return RefreshDecision::YesAndMarkEmptyIfNotFound;
+                }
 
-            let delegated_on_chain = deleg_record.as_ref().is_some_and(|dr| {
-                dr.authority.eq(&self.validator_pubkey)
-                    || dr.authority.eq(&Pubkey::default())
-            });
-            if !account_still_undelegating_on_chain(
-                pubkey,
-                delegated_on_chain,
-                in_bank.remote_slot(),
-                deleg_record,
-                &self.validator_pubkey,
-            ) {
-                debug!(
+                let delegated_on_chain =
+                    deleg_record.as_ref().is_some_and(|dr| {
+                        dr.authority.eq(&self.validator_pubkey)
+                            || dr.authority.eq(&Pubkey::default())
+                    });
+                if !account_still_undelegating_on_chain(
+                    pubkey,
+                    delegated_on_chain,
+                    in_bank.remote_slot(),
+                    deleg_record,
+                    &self.validator_pubkey,
+                ) {
+                    debug!(
                     "Account {pubkey} marked as undelegating will be overridden since undelegation completed"
                 );
-                return RefreshDecision::Yes;
+                    return RefreshDecision::Yes;
+                }
             }
         } else if in_bank.owner().eq(&dlp::id()) {
             debug!(
