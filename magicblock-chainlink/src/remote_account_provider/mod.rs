@@ -978,7 +978,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 .join_all()
                 .await
                 .into_iter()
-                .filter_map(|result| result.ok())
+                .filter_map(|result| match result {
+                    Ok(result) => Some(result),
+                    Err(err) => {
+                        error!("Failed to fetch accounts: {err:?}");
+                        None
+                    }
+                })
                 .fold(
                     (vec![], 0, 0, 0, 0),
                     |(
