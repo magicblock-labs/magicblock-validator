@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::consts;
 
-/// Configuration for the internal task scheduler.
+/// Configuration for the compression service.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct CompressionConfig {
