@@ -11,6 +11,10 @@ use std::{
 use bincode::{deserialize, serialize};
 use log::*;
 use magicblock_core::link::blocks::BlockHash;
+use magicblock_metrics::metrics::{
+    start_ledger_disable_compactions_timer, start_ledger_shutdown_timer,
+    HistogramTimer,
+};
 use rocksdb::{Direction as IteratorDirection, FlushOptions};
 use scc::HashCache;
 use solana_measure::measure::Measure;
@@ -1262,10 +1266,26 @@ impl Ledger {
 
     /// Graceful db shutdown
     pub fn shutdown(&self, wait: bool) -> LedgerResult<()> {
+        let _guard = MeasureGuard {
+            measure: Measure::start("Ledger shutdown"),
+            _timer: start_ledger_shutdown_timer(),
+        };
         self.flush()?;
         self.db.backend.db.cancel_all_background_work(wait);
 
         Ok(())
+    }
+
+    /// Cancels manual compaction
+    /// Here we utilize the internal of `disable_manual_compaction`
+    /// Which not only disables future manual compaction,
+    /// but also cancels all the running one
+    pub fn cancel_manual_compactions(&self) {
+        let _guard = MeasureGuard {
+            measure: Measure::start("Compaction cancellation"),
+            _timer: start_ledger_disable_compactions_timer(),
+        };
+        self.db.backend.db.disable_manual_compaction();
     }
 
     /// Cached latest block data
@@ -1310,6 +1330,19 @@ impl_has_column!(Transaction, transaction_cf);
 impl_has_column!(TransactionMemos, transaction_memos_cf);
 impl_has_column!(PerfSamples, perf_samples_cf);
 impl_has_column!(AccountModDatas, account_mod_datas_cf);
+
+struct MeasureGuard {
+    measure: Measure,
+    _timer: HistogramTimer,
+}
+
+impl Drop for crate::store::api::MeasureGuard {
+    fn drop(&mut self) {
+        self.measure.stop();
+        // We print it in case metrics wouldn't have time to be scraped
+        info!("Cancelling manual compactions took: {}", self.measure);
+    }
+}
 
 // -----------------
 // Tests

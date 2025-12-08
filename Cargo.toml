@@ -209,4 +209,4 @@ solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", re
 # using parent commit d4e9e16 of rocksdb 0.23.0
 # without patching update isn't possible due to conflict with solana deps
 # TODO(edwin): remove once solana version is raised to 2.3
-rocksdb = { git = "https://github.com/rust-rocksdb/rust-rocksdb.git", rev = "d4e9e16" }
+rocksdb = { git = "https://github.com/taco-paco/rust-rocksdb.git", rev = "6d975197" }
