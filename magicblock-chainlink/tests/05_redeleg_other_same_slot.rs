@@ -17,10 +17,12 @@ use solana_account::Account;
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use utils::{
-    accounts::account_shared_with_owner_and_slot, test_context::TestContext,
+    accounts::{
+        account_shared_with_owner_and_slot,
+        compressed_account_shared_with_owner_and_slot,
+    },
+    test_context::TestContext,
 };
-
-use crate::utils::accounts::compressed_account_shared_with_owner_and_slot;
 
 mod utils;
 
