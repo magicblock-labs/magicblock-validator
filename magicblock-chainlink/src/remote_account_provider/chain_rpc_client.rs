@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use solana_account::Account;
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error::Result as ClientResult, config::RpcAccountInfoConfig,
     response::RpcResult,
 };
-use solana_sdk::commitment_config::CommitmentConfig;
 
 // -----------------
 // Trait

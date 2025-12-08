@@ -161,13 +161,6 @@ impl TransactionScheduler {
         self.schedule_transaction(executor, txn);
     }
 
-    /// Updates the scheduler's state when a new slot begins.
-    fn transition_to_new_slot(&self) {
-        // Re-root the shared program cache to the new slot.
-        self.program_cache.write().unwrap().latest_root_slot =
-            self.latest_block.load().slot;
-    }
-
     /// Attempts to reschedule transactions that were blocked by the newly freed executor.
     fn reschedule_blocked_transactions(&mut self, blocker: ExecutorId) {
         let mut executor = Some(blocker);
@@ -227,6 +220,18 @@ impl TransactionScheduler {
             error!("Executor {executor} has shutdown or crashed, should not be possible: {e}")
         });
         None
+    }
+
+    /// Updates the scheduler's state when a new slot begins.
+    fn transition_to_new_slot(&self) {
+        let root = self.latest_block.load().slot;
+        let mut cache = self.program_cache.write().unwrap();
+        // Remove duplicate entries from programs cache
+        // NOTE: this is an important cleanup, as otherwise it might
+        // lead cache corruption issues over time as it fills up
+        cache.prune(root, 0);
+        // Re-root the shared program cache to the new slot.
+        cache.latest_root_slot = root;
     }
 }
 

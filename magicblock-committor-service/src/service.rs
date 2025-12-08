@@ -1,8 +1,9 @@
 use std::{path::Path, sync::Arc, time::Instant};
 
 use log::*;
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_sdk::signature::{Keypair, Signature};
+use solana_signature::Signature;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::{
     select,

@@ -32,6 +32,8 @@ pub mod api;
 pub mod magicblock_program;
 mod utils;
 
+pub const FAIL_UNDELEGATION_COUNT: u64 = u64::MAX - 1;
+
 declare_id!("9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY");
 
 #[cfg(not(feature = "no-entrypoint"))]
@@ -113,6 +115,13 @@ pub enum ScheduleCommitInstruction {
     /// # Account references:
     /// - **0.** `[WRITE]` PDA Account to increase count of
     IncreaseCount,
+
+    /// Sets the count of a PDA of this program to the provided arbitrary u64 value.
+    /// This instruction can only run on the ephemeral after the account was
+    /// delegated or on chain while it is undelegated.
+    /// # Account references:
+    /// - **0.** `[WRITE]` PDA Account to write the counter to set to the supplied value
+    SetCount(u64),
     // This is invoked by the delegation program when we request to undelegate
     // accounts.
     // # Account references:
@@ -170,6 +179,7 @@ pub fn process_instruction<'a>(
             )
         }
         IncreaseCount => process_increase_count(accounts),
+        SetCount(value) => process_set_count(accounts, value),
     }
 }
 
@@ -398,6 +408,27 @@ fn process_increase_count(accounts: &[AccountInfo]) -> ProgramResult {
     Ok(())
 }
 
+fn process_set_count(accounts: &[AccountInfo], value: u64) -> ProgramResult {
+    msg!("Processing set_count instruction");
+    // NOTE: we don't check if the player owning the PDA is signer here for simplicity
+    let accounts_iter = &mut accounts.iter();
+    let account = next_account_info(accounts_iter)?;
+    msg!("Counter account key {}", account.key);
+    let mut main_account = {
+        let main_account_data = account.try_borrow_data()?;
+        MainAccount::try_from_slice(&main_account_data)?
+    };
+    msg!("Owner: {}", account.owner);
+    msg!("Counter account {:#?}", main_account);
+    main_account.count = value;
+    msg!("Set count to {:#?}", main_account);
+    let mut mut_data = account.try_borrow_mut_data()?;
+    let mut as_mut: &mut [u8] = mut_data.as_mut();
+    msg!("Mutating buffer of len: {}", as_mut.len());
+    main_account.serialize(&mut as_mut)?;
+    msg!("Serialized counter");
+    Ok(())
+}
 // -----------------
 // process_schedulecommit_and_undelegation_cpi_with_mod_after
 // -----------------
@@ -586,5 +617,18 @@ fn process_undelegate_request(
         system_program,
         account_seeds,
     )?;
+
+    {
+        let data = delegated_account.try_borrow_data()?;
+        match MainAccount::try_from_slice(&data) {
+            Ok(counter) => {
+                msg!("counter: {:?}", counter);
+                if counter.count == FAIL_UNDELEGATION_COUNT {
+                    return Err(ProgramError::Custom(111));
+                }
+            }
+            Err(err) => msg!("Failed to deserialize: {:?}", err),
+        }
+    };
     Ok(())
 }

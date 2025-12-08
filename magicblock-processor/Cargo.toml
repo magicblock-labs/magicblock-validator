@@ -20,7 +20,6 @@ magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 
 solana-account = { workspace = true }
-solana-address-lookup-table-program = { workspace = true }
 solana-bpf-loader-program = { workspace = true }
 solana-compute-budget-program = { workspace = true }
 solana-feature-set = { workspace = true }

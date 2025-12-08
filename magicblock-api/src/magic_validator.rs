@@ -68,14 +68,12 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
+use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
+use solana_keypair::Keypair;
+use solana_native_token::LAMPORTS_PER_SOL;
+use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::{CommitmentConfig, CommitmentLevel},
-    native_token::LAMPORTS_PER_SOL,
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-};
+use solana_signer::Signer;
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 
@@ -340,7 +338,7 @@ impl MagicValidator {
             committor_persist_path,
             ChainConfig {
                 rpc_uri: config.remote.http().to_string(),
-                commitment: CommitmentLevel::Confirmed,
+                commitment: CommitmentConfig::confirmed(),
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
                 ),
@@ -389,9 +387,11 @@ impl MagicValidator {
         );
         let cloner = Arc::new(cloner);
         let accounts_bank = accountsdb.clone();
-        let chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
+        let mut chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral,
         );
+        chainlink_config.remove_confined_accounts =
+            config.chainlink.remove_confined_accounts;
         let commitment_config = {
             let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }
@@ -404,7 +404,7 @@ impl MagicValidator {
             config.validator.keypair.pubkey(),
             faucet_pubkey,
             chainlink_config,
-            config.chainlink.auto_airdrop_lamports,
+            &config.chainlink,
         )
         .await?;
 
@@ -555,9 +555,7 @@ impl MagicValidator {
 
         let lamports = RpcClient::new_with_commitment(
             self.config.remote.http().to_string(),
-            CommitmentConfig {
-                commitment: CommitmentLevel::Confirmed,
-            },
+            CommitmentConfig::confirmed(),
         )
         .get_balance(&self.identity)
         .await
