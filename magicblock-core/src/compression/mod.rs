@@ -8,11 +8,11 @@ const ADDRESS_TREE: Pubkey =
 /// Derives a CDA (Compressed derived Address) from a PDA (Program derived Address)
 /// of a compressed account we want to use in our validator in uncompressed form.
 pub fn derive_cda_from_pda(pda: &Pubkey) -> Pubkey {
-    // Since the PDA is already unique we use the delagation program's id
+    // Since the PDA is already unique we use the delegation program's id
     // as a program id.
     let seed =
         hashv_to_bn254_field_size_be_const_array::<3>(&[&pda.to_bytes()])
-            .unwrap();
+            .expect("BN254 hash of PDA must succeed for a 32-byte PDA seed");
     let address = derive_address(
         &seed,
         &ADDRESS_TREE.to_bytes(),
