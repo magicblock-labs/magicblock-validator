@@ -30,19 +30,19 @@ pub enum CommitKind {
 
 impl CommitKind {
     pub fn request_undelegation(&self) -> bool {
-        match self {
-            CommitKind::CommitAndUndelegate => true,
-            CommitKind::CompressedCommitAndUndelegate => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            CommitKind::CommitAndUndelegate
+                | CommitKind::CompressedCommitAndUndelegate
+        )
     }
 
     pub fn compressed(&self) -> bool {
-        match self {
-            CommitKind::CompressedCommit => true,
-            CommitKind::CompressedCommitAndUndelegate => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            CommitKind::CompressedCommit
+                | CommitKind::CompressedCommitAndUndelegate
+        )
     }
 }
 
