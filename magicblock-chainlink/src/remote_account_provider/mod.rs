@@ -382,6 +382,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let submux =
             SubMuxClient::new(pubsubs, subscribed_accounts.clone(), None);
 
+        if !config.program_subs().is_empty() {
+            debug!(
+                "Subscribing to program accounts: [{}]",
+                pubkeys_str(
+                    &config.program_subs().iter().cloned().collect::<Vec<_>>()
+                )
+            );
+            for program_id in config.program_subs() {
+                submux.subscribe_program(*program_id).await?;
+            }
+        }
+
         RemoteAccountProvider::<
             ChainRpcClientImpl,
             SubMuxClient<ChainPubsubClientImpl>,

@@ -68,7 +68,7 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
-use solana_commitment_config::CommitmentConfig;
+use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_keypair::Keypair;
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
@@ -380,10 +380,15 @@ impl MagicValidator {
         );
         let cloner = Arc::new(cloner);
         let accounts_bank = accountsdb.clone();
-        let chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
+        let mut chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral,
         );
-        let commitment_config = CommitmentConfig::confirmed();
+        chainlink_config.remove_confined_accounts =
+            config.chainlink.remove_confined_accounts;
+        let commitment_config = {
+            let level = CommitmentLevel::Confirmed;
+            CommitmentConfig { commitment: level }
+        };
         let chainlink = ChainlinkImpl::try_new_from_endpoints(
             &endpoints,
             commitment_config,
@@ -392,7 +397,7 @@ impl MagicValidator {
             config.validator.keypair.pubkey(),
             faucet_pubkey,
             chainlink_config,
-            config.chainlink.auto_airdrop_lamports,
+            &config.chainlink,
         )
         .await?;
 

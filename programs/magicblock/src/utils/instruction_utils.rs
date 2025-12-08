@@ -279,6 +279,17 @@ impl InstructionUtils {
     }
 
     // -----------------
+    // Noop
+    // -----------------
+    pub fn noop_instruction(data: u64) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::Noop(data),
+            vec![],
+        )
+    }
+
+    // -----------------
     // Utils
     // -----------------
     pub(crate) fn into_transaction(

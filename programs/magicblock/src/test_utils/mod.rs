@@ -20,8 +20,6 @@ use super::*;
 use crate::validator;
 
 pub const AUTHORITY_BALANCE: u64 = u64::MAX / 2;
-pub const NOOP_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 pub const COUNTER_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("2jQZbSfAfqT5nZHGrLpDG2vXuEGtTgZYnNy7AZEjMCYz");
 
