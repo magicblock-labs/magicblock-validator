@@ -145,7 +145,6 @@ where
         &mut self,
         base_intent: ScheduledBaseIntent,
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         if base_intent.is_empty() {
             return Err(IntentExecutorError::EmptyIntentError);
@@ -185,7 +184,6 @@ where
                         base_intent,
                         strategy,
                         persister,
-                        photon_client,
                     )
                     .await;
             }
@@ -223,7 +221,6 @@ where
                     base_intent,
                     strategy,
                     persister,
-                    photon_client,
                 )
                 .await
             }
@@ -237,7 +234,6 @@ where
                     commit_stage,
                     finalize_stage,
                     persister,
-                    photon_client,
                 )
                 .await
             }
@@ -250,14 +246,14 @@ where
         base_intent: ScheduledBaseIntent,
         transaction_strategy: TransactionStrategy,
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<ExecutionOutput> {
+        let photon_client = self.photon_client.clone();
         let mut single_stage_executor =
             SingleStageExecutor::new(self, transaction_strategy);
 
         let committed_pubkeys = base_intent.get_committed_pubkeys();
         let res = single_stage_executor
-            .execute(committed_pubkeys.as_deref(), persister, photon_client)
+            .execute(committed_pubkeys.as_deref(), persister, &photon_client)
             .await;
 
         // Here we continue only IF the error is CpiLimitError
@@ -293,7 +289,6 @@ where
             commit_strategy,
             finalize_strategy,
             persister,
-            photon_client,
         )
         .await
     }
@@ -304,13 +299,13 @@ where
         commit_strategy: TransactionStrategy,
         finalize_strategy: TransactionStrategy,
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<ExecutionOutput> {
+        let photon_client = self.photon_client.clone();
         let finalized_stage =
             TwoStageExecutor::new(self, commit_strategy, finalize_strategy)
-                .commit(committed_pubkeys, persister, photon_client)
+                .commit(committed_pubkeys, persister, &photon_client)
                 .await?
-                .finalize(persister, photon_client)
+                .finalize(persister, &photon_client)
                 .await?;
 
         Ok(ExecutionOutput::TwoStage {
@@ -803,9 +798,7 @@ where
         let is_undelegate = base_intent.is_undelegate();
         let pubkeys = base_intent.get_committed_pubkeys();
 
-        let result = self
-            .execute_inner(base_intent, &persister, &self.photon_client.clone())
-            .await;
+        let result = self.execute_inner(base_intent, &persister).await;
         if let Some(pubkeys) = pubkeys {
             // Reset TaskInfoFetcher, as cache could become invalid
             // NOTE: if undelegation was removed - we still reset

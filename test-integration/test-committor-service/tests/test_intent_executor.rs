@@ -661,7 +661,6 @@ async fn test_cpi_limits_error_recovery() {
             scheduled_intent,
             strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
         )
         .await;
     assert!(execution_result.is_ok(), "Intent expected to recover");
@@ -771,7 +770,6 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
             scheduled_intent,
             strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
         )
         .await;
 
