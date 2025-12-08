@@ -4,11 +4,10 @@ use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::*;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
-};
+use solana_signer::Signer;
 use tokio::sync::broadcast;
 
 use crate::{
@@ -44,9 +43,7 @@ impl CommittorProcessor {
     {
         let rpc_client = RpcClient::new_with_commitment(
             chain_config.rpc_uri.to_string(),
-            CommitmentConfig {
-                commitment: chain_config.commitment,
-            },
+            chain_config.commitment,
         );
         let rpc_client = Arc::new(rpc_client);
         let magic_block_rpc_client = MagicblockRpcClient::new(rpc_client);

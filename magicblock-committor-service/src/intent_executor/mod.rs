@@ -23,13 +23,13 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
+use solana_keypair::Keypair;
+use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
-use solana_sdk::{
-    message::VersionedMessage,
-    signature::{Keypair, Signature, Signer},
-    transaction::VersionedTransaction,
-};
+use solana_signature::Signature;
+use solana_signer::Signer;
+use solana_transaction::versioned::VersionedTransaction;
 
 use crate::{
     intent_executor::{

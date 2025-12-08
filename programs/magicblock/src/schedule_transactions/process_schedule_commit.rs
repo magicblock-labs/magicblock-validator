@@ -1,13 +1,10 @@
 use std::collections::HashSet;
 
+use solana_account::{state_traits::StateMut, Account, ReadableAccount};
+use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::{
-    account::{Account, ReadableAccount},
-    account_utils::StateMut,
-    instruction::InstructionError,
-    pubkey::Pubkey,
-};
+use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{

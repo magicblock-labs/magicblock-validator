@@ -1,4 +1,3 @@
-use solana_program::example_mocks::solana_rpc_client_api;
 use thiserror::Error;
 
 pub type TaskSchedulerResult<T> = Result<T, TaskSchedulerError>;
@@ -18,14 +17,11 @@ pub enum TaskSchedulerError {
     #[error(transparent)]
     Bincode(#[from] bincode::Error),
 
-    #[error(transparent)]
-    Rpc(#[from] solana_rpc_client_api::client_error::ClientError),
-
     #[error("Task not found: {0}")]
     TaskNotFound(i64),
 
     #[error(transparent)]
-    Transaction(#[from] solana_sdk::transaction::TransactionError),
+    Transaction(#[from] solana_transaction_error::TransactionError),
 
     #[error("Task context not found")]
     TaskContextNotFound,

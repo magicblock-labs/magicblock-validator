@@ -11,8 +11,8 @@ use magicblock_chainlink::{
     AccountFetchOrigin,
 };
 use solana_account::Account;
+use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
-use solana_sdk::clock::Slot;
 
 use crate::utils::{
     accounts::{

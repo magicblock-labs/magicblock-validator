@@ -14,10 +14,10 @@ use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
+use solana_commitment_config::CommitmentConfig;
+use solana_feature_set;
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    commitment_config::CommitmentConfig, transaction::SanitizedTransaction,
-};
+use solana_transaction::sanitized::SanitizedTransaction;
 use tokio::{sync::mpsc, task};
 
 use crate::{
@@ -199,7 +199,7 @@ impl<
             );
             remaining.fetch_add(1, Ordering::Relaxed);
             if account.lamports() == 0
-                && account.owner().ne(&solana_sdk::feature::id())
+                && account.owner() != &solana_feature_set::ID.to_bytes().into()
             {
                 remaining_empty.fetch_add(1, Ordering::Relaxed);
             }

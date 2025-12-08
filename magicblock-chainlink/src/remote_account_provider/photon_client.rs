@@ -8,8 +8,8 @@ use light_client::indexer::{
 use log::*;
 use magicblock_core::compression::derive_cda_from_pda;
 use solana_account::Account;
+use solana_clock::Slot;
 use solana_pubkey::Pubkey;
-use solana_sdk::clock::Slot;
 
 use crate::remote_account_provider::RemoteAccountProviderResult;
 

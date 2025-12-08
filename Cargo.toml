@@ -73,11 +73,13 @@ fs_extra = "1.3.0"
 futures = "0.3"
 futures-util = "0.3.30"
 git-version = "0.3.9"
+guinea = { path = "./programs/guinea" }
 http-body-util = "0.1.3"
 humantime = { version = "1.1", package = "humantime-serde" }
 hyper = "1.6.0"
 hyper-util = "0.1.15"
 isocountry = "0.3.2"
+json = { package = "sonic-rs", version = "0.5.3" }
 lazy_static = "1.4.0"
 libc = "0.2.153"
 light-client = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
@@ -91,6 +93,7 @@ magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
 magicblock-accounts = { path = "./magicblock-accounts" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
+magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-api = { path = "./magicblock-api" }
 magicblock-chainlink = { path = "./magicblock-chainlink" }
 magicblock-committor-program = { path = "./magicblock-committor-program", features = [
@@ -102,20 +105,16 @@ magicblock-core = { path = "./magicblock-core" }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "aa1de56d90c", features = [
   "no-entrypoint",
 ] }
-magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-ledger = { path = "./magicblock-ledger" }
+magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
 magicblock-metrics = { path = "./magicblock-metrics" }
 magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
-magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
 magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
 magicblock-version = { path = "./magicblock-version" }
-test-kit = { path = "./test-kit" }
-
-guinea = { path = "./programs/guinea" }
 
 num-derive = "0.4"
 num-format = "0.4.4"
@@ -126,7 +125,6 @@ paste = "1.0"
 prometheus = "0.13.4"
 # Needs to match https://crates.io/crates/solana-storage-bigtable/2.1.13/dependencies
 prost = "0.11.9"
-json = { package = "sonic-rs", version = "0.5.3" }
 protobuf-src = "1.1"
 rand = "0.8.5"
 reqwest = "0.11"
@@ -144,15 +142,22 @@ solana-account = { git = "https://github.com/magicblock-labs/solana-account.git"
 solana-account-info = { version = "2.2" }
 solana-account-decoder = { version = "2.2" }
 solana-account-decoder-client-types = { version = "2.2" }
+solana-address-lookup-table-interface = { version = "2.2" }
 solana-address-lookup-table-program = { version = "2.2" }
 solana-bpf-loader-program = { version = "2.2" }
 solana-cpi = { version = "2.2" }
+solana-clock = { version = "2.2" }
+solana-commitment-config = { version = "2.2" }
 solana-compute-budget-instruction = { version = "2.2" }
+solana-compute-budget-interface = { version = "2.2" }
 solana-compute-budget-program = { version = "2.2" }
+solana-feature-gate-interface = { version = "2.2" }
 solana-feature-set = { version = "2.2" }
 solana-fee = { version = "2.2" }
+solana-fee-calculator = { version = "2.2" }
 solana-fee-structure = { version = "2.2" }
 solana-frozen-abi-macro = { version = "2.2" }
+solana-genesis-config = { version = "2.2" }
 solana-hash = { version = "2.2" }
 solana-inline-spl = { version = "2.2" }
 solana-instruction = { version = "2.2" }
@@ -164,23 +169,29 @@ solana-log-collector = { version = "2.2" }
 solana-measure = { version = "2.2" }
 solana-message = { version = "2.2" }
 solana-metrics = { version = "2.2" }
+solana-native-token = { version = "2.2" }
 solana-program = "2.2"
 solana-program-error = { version = "2.2" }
 solana-program-runtime = { version = "2.2" }
 solana-pubkey = { version = "2.2" }
 solana-pubsub-client = { version = "2.2" }
+solana-rent = { version = "2.2" }
 solana-rent-collector = { version = "2.2" }
 solana-rpc-client = { version = "2.2" }
 solana-rpc-client-api = { version = "2.2" }
-solana-sdk = { version = "2.2" }
+solana-sanitize = { version = "2.2" }
 solana-sdk-ids = { version = "2.2" }
+solana-seed-derivable = { version = "2.2" }
+solana-sha256-hasher = { version = "2.2" }
 solana-signature = { version = "2.2" }
 solana-signer = { version = "2.2" }
+solana-slot-hashes = { version = "2.2" }
 solana-storage-proto = { path = "storage-proto" }
 solana-svm-transaction = { version = "2.2" }
 solana-system-interface = { version = "1.0" }
 solana-system-program = { version = "2.2" }
 solana-system-transaction = { version = "2.2" }
+solana-sysvar = { version = "2.2" }
 solana-timings = "2.2"
 solana-transaction = { version = "2.2" }
 solana-transaction-context = { version = "2.2" }
@@ -189,6 +200,7 @@ solana-transaction-status = { version = "2.2" }
 solana-transaction-status-client-types = "2.2"
 static_assertions = "1.1.0"
 tempfile = "3.10.1"
+test-kit = { path = "./test-kit" }
 thiserror = "1.0.57"
 tokio = "1.0"
 tokio-stream = "0.1.15"

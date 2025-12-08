@@ -1,11 +1,9 @@
 use compressed_delegation_client::types::{CommitArgs, FinalizeArgs};
 use dlp::args::{CallHandlerArgs, CommitStateArgs};
 use magicblock_metrics::metrics::LabelValue;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    system_program,
-};
+use solana_system_program::id as system_program_id;
 
 #[cfg(test)]
 use crate::tasks::TaskStrategy;
@@ -128,7 +126,7 @@ impl BaseTask for ArgsTask {
                     .payer(*validator)
                     .delegated_account(value.delegated_account)
                     .owner_program(value.owner_program)
-                    .system_program(system_program::ID)
+                    .system_program(system_program_id())
                     .add_remaining_accounts(
                         &value.compressed_data.remaining_accounts,
                     )

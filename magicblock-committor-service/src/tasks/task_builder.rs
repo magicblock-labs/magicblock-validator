@@ -18,8 +18,9 @@ use magicblock_program::magic_scheduled_base_intent::{
     CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
     UndelegateType,
 };
+use solana_instruction::AccountMeta;
 use solana_pubkey::Pubkey;
-use solana_sdk::{instruction::AccountMeta, signature::Signature};
+use solana_signature::Signature;
 
 use crate::{
     intent_executor::task_info_fetcher::{

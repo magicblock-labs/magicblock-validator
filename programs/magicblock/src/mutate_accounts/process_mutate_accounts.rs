@@ -1,15 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use magicblock_magic_program_api::instruction::AccountModificationForInstruction;
+use solana_account::{ReadableAccount, WritableAccount};
+use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::{
-    account::{ReadableAccount, WritableAccount},
-    instruction::InstructionError,
-    pubkey::Pubkey,
-    system_program,
-    transaction_context::TransactionContext,
-};
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
+use solana_transaction_context::TransactionContext;
 
 use crate::{
     errors::MagicBlockProgramError,
@@ -306,10 +304,7 @@ mod tests {
 
     use assert_matches::assert_matches;
     use magicblock_magic_program_api::instruction::AccountModification;
-    use solana_sdk::{
-        account::{Account, AccountSharedData},
-        pubkey::Pubkey,
-    };
+    use solana_account::{Account, AccountSharedData};
     use test_kit::init_logger;
 
     use super::*;

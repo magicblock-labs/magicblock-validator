@@ -3,8 +3,8 @@ use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use magicblock_core::compression::derive_cda_from_pda;
 use solana_account::Account;
+use solana_clock::Slot;
 use solana_pubkey::Pubkey;
-use solana_sdk::clock::Slot;
 use tokio::sync::RwLock;
 
 use crate::{

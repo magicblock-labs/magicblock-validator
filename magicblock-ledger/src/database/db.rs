@@ -6,7 +6,7 @@ use std::{
 
 use bincode::deserialize;
 use rocksdb::{ColumnFamily, DBRawIterator, LiveFile};
-use solana_sdk::clock::Slot;
+use solana_clock::Slot;
 
 use super::{
     columns::{columns, Column, ColumnName, TypedColumn},

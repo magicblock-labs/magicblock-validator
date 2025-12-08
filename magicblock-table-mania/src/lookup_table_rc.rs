@@ -14,19 +14,18 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicblockRpcClient,
 };
-use solana_pubkey::Pubkey;
-use solana_sdk::{
-    address_lookup_table::{
-        self as alt,
-        state::{LookupTableMeta, LOOKUP_TABLE_MAX_ADDRESSES},
-    },
-    clock::Slot,
-    commitment_config::CommitmentLevel,
-    signature::{Keypair, Signature},
-    signer::Signer,
-    slot_hashes::MAX_ENTRIES,
-    transaction::Transaction,
+use solana_address_lookup_table_interface::{
+    self as alt,
+    state::{LookupTableMeta, LOOKUP_TABLE_MAX_ADDRESSES},
 };
+use solana_clock::Slot;
+use solana_commitment_config::CommitmentLevel;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
+use solana_signer::Signer;
+use solana_slot_hashes::MAX_ENTRIES;
+use solana_transaction::Transaction;
 
 use crate::{
     derive_keypair,
@@ -401,7 +400,7 @@ impl LookupTableRc {
     /// - **sub_slot**: a bump to allow creating multiple lookup tables with the same authority
     ///   the same slot
     /// - **pubkeys**: to extend the lookup table respecting respecting
-    ///   [solana_sdk::address_lookup_table::state::LOOKUP_TABLE_MAX_ADDRESSES]
+    ///   [solana_address_lookup_table_interface::LOOKUP_TABLE_MAX_ADDRESSES]
     ///   after it is initialized
     pub async fn init(
         rpc_client: &MagicblockRpcClient,

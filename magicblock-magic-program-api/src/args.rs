@@ -89,7 +89,7 @@ pub enum MagicBaseIntentArgs {
 
 /// A compact account meta used for base-layer actions.
 ///
-/// Unlike `solana_sdk::instruction::AccountMeta`, this type **does not** carry an
+/// Unlike `solana_instruction::AccountMeta`, this type **does not** carry an
 /// `is_signer` flag. Users cannot request signatures: the only signer available
 /// is the validator.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]

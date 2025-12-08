@@ -1,10 +1,8 @@
 use std::collections::BinaryHeap;
 
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    signature::Keypair,
-    signer::{Signer, SignerError},
-};
+use solana_signer::{Signer, SignerError};
 
 use crate::{
     persist::IntentPersister,
@@ -398,7 +396,7 @@ mod tests {
     };
     use solana_account::Account;
     use solana_pubkey::Pubkey;
-    use solana_sdk::system_program;
+    use solana_system_program::id as system_program_id;
 
     use super::*;
     use crate::{
@@ -449,7 +447,7 @@ mod tests {
                 account: Account {
                     lamports: 1000,
                     data: vec![1; data_size],
-                    owner: system_program::id(),
+                    owner: system_program_id(),
                     executable: false,
                     rent_epoch: 0,
                 },
@@ -470,7 +468,7 @@ mod tests {
                 account: Account {
                     lamports: 1000,
                     data: vec![1; data_size],
-                    owner: system_program::id(),
+                    owner: system_program_id(),
                     executable: false,
                     rent_epoch: 0,
                 },
@@ -506,7 +504,7 @@ mod tests {
     fn create_test_undelegate_task() -> ArgsTask {
         ArgsTask::new(ArgsTaskType::Undelegate(UndelegateTask {
             delegated_account: Pubkey::new_unique(),
-            owner_program: system_program::id(),
+            owner_program: system_program_id(),
             rent_reimbursement: Pubkey::new_unique(),
         }))
     }

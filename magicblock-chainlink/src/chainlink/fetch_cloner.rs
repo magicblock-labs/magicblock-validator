@@ -17,7 +17,7 @@ use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
-use solana_sdk::system_program;
+use solana_sdk_ids::system_program;
 use tokio::{
     sync::{mpsc, oneshot},
     task,
@@ -766,7 +766,7 @@ where
                                         // to fail
                                         if !account_shared_data
                                             .owner()
-                                            .eq(&solana_sdk::native_loader::id(
+                                            .eq(&solana_sdk_ids::native_loader::id(
                                             ))
                                         {
                                             programs.push((
@@ -1872,7 +1872,7 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use solana_account::{Account, AccountSharedData, WritableAccount};
-    use solana_sdk::system_program;
+    use solana_sdk_ids::system_program;
     use tokio::sync::mpsc;
 
     use super::*;

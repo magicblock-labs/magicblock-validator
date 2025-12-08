@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
 use magicblock_magic_program_api::args::MagicBaseIntentArgs;
+use solana_account::state_traits::StateMut;
+use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::{
-    account_utils::StateMut, instruction::InstructionError, pubkey::Pubkey,
-    transaction_context::TransactionContext,
-};
+use solana_pubkey::Pubkey;
+use solana_transaction_context::TransactionContext;
 
 use crate::{
     magic_scheduled_base_intent::{

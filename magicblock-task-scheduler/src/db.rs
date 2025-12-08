@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use magicblock_program::args::ScheduleTaskRequest;
 use rusqlite::{params, Connection};
-use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
+use solana_instruction::Instruction;
+use solana_pubkey::Pubkey;
 use tokio::sync::Mutex;
 
 use crate::errors::TaskSchedulerError;

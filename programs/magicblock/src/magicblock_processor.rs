@@ -1,14 +1,11 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::{
-    instruction::MagicBlockInstruction, Pubkey,
-};
+use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+use solana_instruction::error::InstructionError;
 use solana_program_runtime::{
     declare_process_instruction, invoke_context::InvokeContext,
 };
-use solana_sdk::{
-    instruction::InstructionError, program_utils::limited_deserialize,
-};
+use solana_pubkey::Pubkey;
 
 use crate::{
     mutate_accounts::process_mutate_accounts,
@@ -29,12 +26,15 @@ declare_process_instruction!(
     DEFAULT_COMPUTE_UNITS,
     |invoke_context| {
         use MagicBlockInstruction::*;
-        let instruction = limited_deserialize(
+        let instruction: MagicBlockInstruction = bincode::deserialize(
             invoke_context
                 .transaction_context
                 .get_current_instruction_context()?
                 .get_instruction_data(),
-        )?;
+        )
+        .map_err(|_| {
+            solana_instruction::error::InstructionError::InvalidInstructionData
+        })?;
 
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context =

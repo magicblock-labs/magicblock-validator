@@ -22,17 +22,28 @@ magicblock-delegation-program = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-account-decoder-client-types = { workspace = true }
+solana-address-lookup-table-interface = { workspace = true }
+solana-commitment-config = { workspace = true }
+solana-feature-set = { workspace = true }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
 solana-loader-v3-interface = { workspace = true, features = ["serde"] }
 solana-loader-v4-interface = { workspace = true, features = ["serde"] }
+solana-program = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-pubsub-client = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
-solana-sdk = { workspace = true }
 solana-sdk-ids = { workspace = true }
+solana-signature = { workspace = true }
 solana-signer = { workspace = true }
 solana-system-interface = { workspace = true }
+solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
+solana-clock = { workspace = true }
+solana-hash = { workspace = true }
+solana-sysvar = { workspace = true }
+solana-message = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }

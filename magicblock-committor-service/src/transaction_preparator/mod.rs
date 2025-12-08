@@ -4,8 +4,9 @@ use async_trait::async_trait;
 use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
+use solana_keypair::Keypair;
+use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
-use solana_sdk::{message::VersionedMessage, signature::Keypair};
 
 use crate::{
     persist::IntentPersister,

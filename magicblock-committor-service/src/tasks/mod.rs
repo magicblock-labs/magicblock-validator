@@ -15,8 +15,8 @@ use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
+use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
-use solana_sdk::instruction::Instruction;
 use thiserror::Error;
 
 use crate::tasks::{task_builder::CompressedData, visitor::Visitor};
@@ -494,10 +494,10 @@ mod serialization_safety_test {
 
 #[test]
 fn test_close_buffer_limit() {
-    use solana_sdk::{
-        compute_budget::ComputeBudgetInstruction, signature::Keypair,
-        signer::Signer, transaction::Transaction,
-    };
+    use solana_compute_budget_interface::ComputeBudgetInstruction;
+    use solana_keypair::Keypair;
+    use solana_signer::Signer;
+    use solana_transaction::Transaction;
 
     use crate::transactions::{
         serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE,

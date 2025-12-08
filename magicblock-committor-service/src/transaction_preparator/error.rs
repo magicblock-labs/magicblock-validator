@@ -1,4 +1,5 @@
-use solana_sdk::{signature::Signature, signer::SignerError};
+use solana_signature::Signature;
+use solana_signer::SignerError;
 use thiserror::Error;
 
 use crate::{

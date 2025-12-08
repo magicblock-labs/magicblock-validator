@@ -4,11 +4,10 @@ use dlp::instruction_builder::validator_claim_fees;
 use log::{error, info};
 use magicblock_program::validator::validator_authority;
 use magicblock_rpc_client::MagicBlockRpcClientError;
+use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::CommitmentConfig, signature::Signer,
-    transaction::Transaction,
-};
+use solana_signer::Signer;
+use solana_transaction::Transaction;
 use tokio::{task::JoinHandle, time::Instant};
 use tokio_util::sync::CancellationToken;
 
