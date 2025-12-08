@@ -33,7 +33,7 @@ mod tests {
         let cda = derive_cda_from_pda(&pda);
         assert_eq!(
             cda,
-            pubkey!("1334SrUvQtX2JG1aqcDyrGBsLfbwnFTSiUgpcnsxfdFm")
+            pubkey!("13CJjg6sMzZ8Lsn1oyQggzcyq5nFHYt97i7bhMu7BNu9")
         );
     }
 }
