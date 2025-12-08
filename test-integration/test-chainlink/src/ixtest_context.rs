@@ -407,12 +407,7 @@ impl IxtestContext {
         let (pda, bump) = FlexiCounter::pda(&auth);
         let record_address = derive_cda_from_pda(&pda);
 
-        let system_account_meta_config =
-            SystemAccountMetaConfig::new(compressed_delegation_client::ID);
-        let mut remaining_accounts = PackedAccounts::default();
-        remaining_accounts
-            .add_system_accounts_v2(system_account_meta_config)
-            .unwrap();
+        let mut remaining_accounts = self.get_packed_accounts();
 
         let (
             remaining_accounts_metas,
@@ -421,25 +416,10 @@ impl IxtestContext {
             account_meta,
             output_state_tree_index,
         ) = if redelegate {
-            let compressed_delegated_record: CompressedAccount = self
-                .photon_indexer
-                .get_compressed_account(record_address.to_bytes(), None)
-                .await
-                .unwrap()
-                .value;
+            let (compressed_delegated_record, proof) =
+                self.get_compressed_account_and_proof(&record_address).await;
 
-            let rpc_result: ValidityProofWithContext = self
-                .photon_indexer
-                .get_validity_proof(
-                    vec![compressed_delegated_record.hash],
-                    vec![],
-                    None,
-                )
-                .await
-                .unwrap()
-                .value;
-
-            let packed_state_tree = rpc_result
+            let packed_state_tree = proof
                 .pack_tree_infos(&mut remaining_accounts)
                 .state_trees
                 .unwrap();
@@ -453,7 +433,7 @@ impl IxtestContext {
                 remaining_accounts.to_account_metas();
             (
                 remaining_accounts_metas,
-                rpc_result.proof,
+                proof.proof,
                 None,
                 Some(account_meta),
                 packed_state_tree.output_tree_index,
@@ -558,27 +538,11 @@ impl IxtestContext {
         // commmit and finalize
         let (pda, bump) = FlexiCounter::pda(&counter_auth.pubkey());
         let record_address = derive_cda_from_pda(&pda);
-        let compressed_account = self
-            .photon_indexer
-            .get_compressed_account(record_address.to_bytes(), None)
-            .await
-            .unwrap()
-            .value;
-        let system_account_meta_config =
-            SystemAccountMetaConfig::new(compressed_delegation_client::ID);
-        let mut remaining_accounts = PackedAccounts::default();
-        remaining_accounts
-            .add_system_accounts_v2(system_account_meta_config)
-            .unwrap();
+        let (compressed_account, proof) =
+            self.get_compressed_account_and_proof(&record_address).await;
+        let mut remaining_accounts = self.get_packed_accounts();
 
-        let rpc_result = self
-            .photon_indexer
-            .get_validity_proof(vec![compressed_account.hash], vec![], None)
-            .await
-            .unwrap()
-            .value;
-
-        let packed_tree_accounts = rpc_result
+        let packed_tree_accounts = proof
             .pack_tree_infos(&mut remaining_accounts)
             .state_trees
             .unwrap();
@@ -603,7 +567,7 @@ impl IxtestContext {
                         .try_to_vec()
                         .unwrap(),
                     account_meta,
-                    validity_proof: rpc_result.proof,
+                    validity_proof: proof.proof,
                     update_nonce: 1,
                     allow_undelegation: true,
                 })
@@ -633,27 +597,12 @@ impl IxtestContext {
         sleep_ms(500).await;
 
         // Finalize
-        let compressed_account = self
-            .photon_indexer
-            .get_compressed_account(record_address.to_bytes(), None)
-            .await
-            .unwrap()
-            .value;
-        let system_account_meta_config =
-            SystemAccountMetaConfig::new(compressed_delegation_client::ID);
-        let mut remaining_accounts = PackedAccounts::default();
-        remaining_accounts
-            .add_system_accounts_v2(system_account_meta_config)
-            .unwrap();
+        let (compressed_account, proof) =
+            self.get_compressed_account_and_proof(&record_address).await;
 
-        let rpc_result = self
-            .photon_indexer
-            .get_validity_proof(vec![compressed_account.hash], vec![], None)
-            .await
-            .unwrap()
-            .value;
+        let mut remaining_accounts = self.get_packed_accounts();
 
-        let packed_tree_accounts = rpc_result
+        let packed_tree_accounts = proof
             .pack_tree_infos(&mut remaining_accounts)
             .state_trees
             .unwrap();
@@ -675,7 +624,7 @@ impl IxtestContext {
                     current_compressed_delegated_account_data:
                         compressed_account.data.unwrap().data,
                     account_meta,
-                    validity_proof: rpc_result.proof,
+                    validity_proof: proof.proof,
                 })
                 .add_remaining_accounts(remaining_accounts_metas.as_slice())
                 .instruction();
@@ -702,27 +651,12 @@ impl IxtestContext {
         // Wait for the indexer to index the account
         sleep_ms(500).await;
 
-        let compressed_account = self
-            .photon_indexer
-            .get_compressed_account(record_address.to_bytes(), None)
-            .await
-            .unwrap()
-            .value;
-        let rpc_result = self
-            .photon_indexer
-            .get_validity_proof(vec![compressed_account.hash], vec![], None)
-            .await
-            .unwrap()
-            .value;
+        let (compressed_account, proof) =
+            self.get_compressed_account_and_proof(&record_address).await;
 
-        let system_account_meta_config =
-            SystemAccountMetaConfig::new(compressed_delegation_client::ID);
-        let mut remaining_accounts = PackedAccounts::default();
-        remaining_accounts
-            .add_system_accounts_v2(system_account_meta_config)
-            .unwrap();
+        let mut remaining_accounts = self.get_packed_accounts();
 
-        let packed_state_tree = rpc_result
+        let packed_state_tree = proof
             .pack_tree_infos(&mut remaining_accounts)
             .state_trees
             .unwrap();
@@ -741,7 +675,7 @@ impl IxtestContext {
             .owner_program(program_flexi_counter::ID)
             .system_program(system_program::ID)
             .args(UndelegateArgs {
-                validity_proof: rpc_result.proof,
+                validity_proof: proof.proof,
                 delegation_record_account_meta: account_meta,
                 compressed_delegated_record:
                     CompressedDelegationRecord::try_from_slice(
@@ -829,5 +763,34 @@ impl IxtestContext {
 
     pub fn get_rpc_client(commitment: CommitmentConfig) -> RpcClient {
         RpcClient::new_with_commitment(RPC_URL.to_string(), commitment)
+    }
+
+    fn get_packed_accounts(&self) -> PackedAccounts {
+        let system_account_meta_config =
+            SystemAccountMetaConfig::new(compressed_delegation_client::ID);
+        let mut remaining_accounts = PackedAccounts::default();
+        remaining_accounts
+            .add_system_accounts_v2(system_account_meta_config)
+            .unwrap();
+        remaining_accounts
+    }
+
+    async fn get_compressed_account_and_proof(
+        &self,
+        pubkey: &Pubkey,
+    ) -> (CompressedAccount, ValidityProofWithContext) {
+        let compressed_account = self
+            .photon_indexer
+            .get_compressed_account(pubkey.to_bytes(), None)
+            .await
+            .unwrap()
+            .value;
+        let validity_proof = self
+            .photon_indexer
+            .get_validity_proof(vec![compressed_account.hash], vec![], None)
+            .await
+            .unwrap()
+            .value;
+        (compressed_account, validity_proof)
     }
 }
