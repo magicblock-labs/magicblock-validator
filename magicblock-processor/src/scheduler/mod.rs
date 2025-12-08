@@ -167,7 +167,6 @@ impl TransactionScheduler {
         while let Some(exec) = executor.take() {
             let txn = self.coordinator.next_blocked_transaction(blocker);
             let blocked = if let Some(txn) = txn {
-                executor = self.coordinator.get_ready_executor();
                 self.schedule_transaction(exec, txn)
             } else {
                 self.coordinator.release_executor(exec);
@@ -180,17 +179,12 @@ impl TransactionScheduler {
             // 2. The transaction is being blocked by the same original (newly freed)
             //    executor, which means we have re-queued it into the same queue, and
             //    we just abort all further scheduling attempts until the next cycle
-            if let Some(blocking_executor) = blocked {
-                if blocking_executor == blocker {
-                    break;
-                }
+            if blocked.is_some_and(|b| b == blocker) {
+                break;
             }
+            executor = self.coordinator.get_ready_executor();
             // If the transaction was re-queued to another executor or successfully
-            // scheduled, then we keep draining the queue of original blocker
-        }
-        // If we have broken out of the loop holding some executor, release it
-        if let Some(executor) = executor {
-            self.coordinator.release_executor(executor);
+            // scheduled, then we keep draining the queue of the original blocker
         }
     }
 
