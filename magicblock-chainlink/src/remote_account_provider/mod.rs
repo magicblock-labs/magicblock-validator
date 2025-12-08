@@ -1304,21 +1304,29 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 inc_compressed_account_fetches_failed(pubkeys.len() as u64);
             })?;
 
+        let mut found_count = 0u64;
+        let mut not_found_count = 0u64;
         let remote_accounts = compressed_accounts
             .into_iter()
             .map(|acc_opt| match acc_opt {
-                Some(acc) => RemoteAccount::from_fresh_account(
-                    acc,
-                    slot,
-                    RemoteAccountUpdateSource::Compressed,
-                ),
-                None => RemoteAccount::NotFound(slot),
+                Some(acc) => {
+                    found_count += 1;
+                    RemoteAccount::from_fresh_account(
+                        acc,
+                        slot,
+                        RemoteAccountUpdateSource::Compressed,
+                    )
+                }
+                None => {
+                    not_found_count += 1;
+                    RemoteAccount::NotFound(slot)
+                }
             })
             .collect::<Vec<_>>();
         Ok((
             FetchedRemoteAccounts::Compressed(remote_accounts),
-            pubkeys.len() as u64,
-            0,
+            found_count,
+            not_found_count,
         ))
     }
 
