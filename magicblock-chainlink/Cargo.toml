@@ -21,6 +21,7 @@ solana-account-decoder = { workspace = true }
 solana-account-decoder-client-types = { workspace = true }
 solana-loader-v3-interface = { workspace = true, features = ["serde"] }
 solana-loader-v4-interface = { workspace = true, features = ["serde"] }
+solana-program = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-pubsub-client = { workspace = true }
 solana-rpc-client = { workspace = true }
@@ -30,6 +31,8 @@ solana-sdk-ids = { workspace = true }
 solana-signer = { workspace = true }
 solana-system-interface = { workspace = true }
 solana-transaction-error = { workspace = true }
+spl-token = { workspace = true }
+spl-token-2022 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }

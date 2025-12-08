@@ -260,6 +260,47 @@ mod tests {
     use super::*;
     use crate::utils::instruction_utils::InstructionUtils;
 
+    // ---------- Helpers for ATA/eATA remapping tests ----------
+    // SPL Token and ATA/eATA program ids
+    const SPL_TOKEN_PROGRAM_ID: Pubkey =
+        solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
+        solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+    const EATA_PROGRAM_ID: Pubkey =
+        solana_sdk::pubkey!("5iC4wKZizyxrKh271Xzx3W4Vn2xUyYvSGHeoB2mdw5HA");
+
+    fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[owner.as_ref(), SPL_TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
+            &ASSOCIATED_TOKEN_PROGRAM_ID,
+        )
+        .0
+    }
+
+    fn derive_eata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[owner.as_ref(), mint.as_ref()],
+            &EATA_PROGRAM_ID,
+        )
+        .0
+    }
+
+    fn make_delegated_spl_ata_account(
+        owner: &Pubkey,
+        mint: &Pubkey,
+    ) -> AccountSharedData {
+        // Minimal SPL token account data: first 32 bytes mint, next 32 owner
+        let mut data = vec![0u8; 72];
+        data[0..32].copy_from_slice(mint.as_ref());
+        data[32..64].copy_from_slice(owner.as_ref());
+
+        let mut acc =
+            AccountSharedData::new(0, data.len(), &SPL_TOKEN_PROGRAM_ID);
+        acc.set_data_from_slice(&data);
+        acc.set_delegated(true);
+        acc
+    }
+
     #[test]
     fn test_schedule_commit_single_account_success() {
         init_logger!();
@@ -429,6 +470,171 @@ mod tests {
         }
         let committed_account = processed_scheduled.last().unwrap();
         assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
+    }
+
+    #[test]
+    fn test_schedule_commit_remaps_delegated_ata_to_eata() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_remap_ata_to_eata").unwrap();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata_pubkey = derive_ata(&wallet_owner, &mint);
+        let eata_pubkey = derive_eata(&wallet_owner, &mint);
+
+        // 1) Prepare transaction with our ATA as the only committee
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                Pubkey::new_unique(),
+                ata_pubkey,
+            );
+
+        // Replace the committee account with a delegated SPL-Token ATA layout
+        account_data.insert(
+            ata_pubkey,
+            make_delegated_spl_ata_account(&wallet_owner, &mint),
+        );
+
+        // Build ScheduleCommit instruction using the ATA pubkey
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![ata_pubkey],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        // Execute scheduling
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts.clone(),
+            ix.accounts.clone(),
+            Ok(()),
+        );
+
+        // Extract magic context and then accept scheduled commits
+        let magic_context_acc = assert_non_accepted_actions(
+            &processed_scheduled,
+            &payer.pubkey(),
+            1,
+        );
+
+        let ix_accept =
+            InstructionUtils::accept_scheduled_commits_instruction();
+        let (mut account_data2, mut transaction_accounts2) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                Pubkey::new_unique(),
+                ata_pubkey,
+            );
+        extend_transaction_accounts_from_ix_adding_magic_context(
+            &ix_accept,
+            magic_context_acc,
+            &mut account_data2,
+            &mut transaction_accounts2,
+        );
+        let processed_accepted = process_instruction(
+            ix_accept.data.as_slice(),
+            transaction_accounts2,
+            ix_accept.accounts,
+            Ok(()),
+        );
+
+        let scheduled =
+            assert_accepted_actions(&processed_accepted, &payer.pubkey(), 1);
+        // Verify the committed pubkey remapped to eATA
+        assert_eq!(
+            scheduled[0].base_intent.get_committed_pubkeys().unwrap(),
+            vec![eata_pubkey]
+        );
+    }
+
+    #[test]
+    fn test_schedule_commit_and_undelegate_remaps_delegated_ata_to_eata() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_undelegate_remap_ata_eata")
+                .unwrap();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata_pubkey = derive_ata(&wallet_owner, &mint);
+        let eata_pubkey = derive_eata(&wallet_owner, &mint);
+
+        // 1) Prepare transaction with our ATA as the only committee
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                Pubkey::new_unique(),
+                ata_pubkey,
+            );
+
+        // Replace the committee account with a delegated SPL-Token ATA layout
+        account_data.insert(
+            ata_pubkey,
+            make_delegated_spl_ata_account(&wallet_owner, &mint),
+        );
+
+        // Build ScheduleCommitAndUndelegate instruction using the ATA pubkey (writable)
+        let ix = InstructionUtils::schedule_commit_and_undelegate_instruction(
+            &payer.pubkey(),
+            vec![ata_pubkey],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        // Execute scheduling
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts.clone(),
+            ix.accounts.clone(),
+            Ok(()),
+        );
+
+        // Extract magic context and then accept scheduled commits
+        let magic_context_acc = assert_non_accepted_actions(
+            &processed_scheduled,
+            &payer.pubkey(),
+            1,
+        );
+
+        let ix_accept =
+            InstructionUtils::accept_scheduled_commits_instruction();
+        let (mut account_data2, mut transaction_accounts2) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                Pubkey::new_unique(),
+                ata_pubkey,
+            );
+        extend_transaction_accounts_from_ix_adding_magic_context(
+            &ix_accept,
+            magic_context_acc,
+            &mut account_data2,
+            &mut transaction_accounts2,
+        );
+        let processed_accepted = process_instruction(
+            ix_accept.data.as_slice(),
+            transaction_accounts2,
+            ix_accept.accounts,
+            Ok(()),
+        );
+
+        let scheduled =
+            assert_accepted_actions(&processed_accepted, &payer.pubkey(), 1);
+        // Verify the committed pubkey remapped to eATA
+        assert_eq!(
+            scheduled[0].base_intent.get_committed_pubkeys().unwrap(),
+            vec![eata_pubkey]
+        );
+        // And the intent contains undelegation
+        assert!(scheduled[0].base_intent.is_undelegate());
     }
 
     #[test]
