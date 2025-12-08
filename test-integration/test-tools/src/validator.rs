@@ -185,6 +185,17 @@ pub fn start_light_validator_with_config(
         .collect::<Vec<_>>();
     devnet_args.extend(account_args);
 
+    // DEBUG: Print the devnet args
+    for arg in &devnet_args {
+        if let Ok(path) = Path::new(arg).canonicalize() {
+            println!(
+                "devnet arg: {} (exists: {})",
+                path.display(),
+                path.exists()
+            );
+        }
+    }
+
     // Split args using shlex so that the light CLI can pass them to the validator
     let validator_args = shlex::split(
         format!("--validator-args=\"{}\"", devnet_args.join(" ")).as_str(),
