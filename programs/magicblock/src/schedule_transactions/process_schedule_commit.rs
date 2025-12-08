@@ -1,5 +1,8 @@
 use std::collections::HashSet;
 
+use magicblock_core::token_programs::{
+    derive_ata, derive_eata, SPL_TOKEN_PROGRAM_ID,
+};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
@@ -36,32 +39,7 @@ pub(crate) fn process_schedule_commit(
     invoke_context: &mut InvokeContext,
     opts: ProcessScheduleCommitOptions,
 ) -> Result<(), InstructionError> {
-    // SPL Token and ATA/eATA program ids
-    // Tokenkeg... (SPL Token), ATokenG... (Associated Token Program), 5iC4wK... (eATA program)
-    const SPL_TOKEN_PROGRAM_ID: Pubkey =
-        solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-    const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
-        solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-    const EATA_PROGRAM_ID: Pubkey =
-        solana_sdk::pubkey!("5iC4wKZizyxrKh271Xzx3W4Vn2xUyYvSGHeoB2mdw5HA");
-
-    // Derive the standard ATA address for given wallet owner and mint
-    fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[owner.as_ref(), SPL_TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
-            &ASSOCIATED_TOKEN_PROGRAM_ID,
-        )
-        .0
-    }
-
-    // Derive the eATA PDA for given wallet owner and mint
-    fn derive_eata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[owner.as_ref(), mint.as_ref()],
-            &EATA_PROGRAM_ID,
-        )
-        .0
-    }
+    // Program IDs and derivation helpers are centralized in magicblock-core::token_programs
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 

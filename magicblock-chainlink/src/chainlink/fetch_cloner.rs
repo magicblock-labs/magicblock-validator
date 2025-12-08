@@ -3369,9 +3369,8 @@ pub(crate) fn is_ata(
     });
 
     // Associated token program id (constant)
-    // ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL
-    const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
-        pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+    // Centralized in magicblock_core::token_programs
+    use magicblock_core::token_programs::ASSOCIATED_TOKEN_PROGRAM_ID;
 
     // Seeds per SPL ATA derivation: [wallet_owner, token_program_id, mint]
     let (derived, _bump) = Pubkey::find_program_address(
@@ -3395,16 +3394,14 @@ pub(crate) fn is_ata(
 
 /// Derive the Enhanced ATA (eATA) PDA for a given ATA owner and mint.
 /// Seeds: [owner, mint, b"5iC4wKZizyxrKh271Xzx3W4Vn2xUyYvSGHeoB2mdw5HA"], program: dlp::id()
-const EATA_PROGRAM_ID: Pubkey =
-    pubkey!("5iC4wKZizyxrKh271Xzx3W4Vn2xUyYvSGHeoB2mdw5HA");
+use magicblock_core::token_programs::EATA_PROGRAM_ID;
 
 pub(crate) fn try_derive_eata_address_and_bump(
     owner: &Pubkey,
     mint: &Pubkey,
 ) -> Option<(Pubkey, u8)> {
-    Pubkey::try_find_program_address(
-        &[owner.as_ref(), mint.as_ref()],
-        &EATA_PROGRAM_ID,
+    magicblock_core::token_programs::try_derive_eata_address_and_bump(
+        owner, mint,
     )
 }
 

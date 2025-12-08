@@ -1,35 +1,11 @@
+pub use magicblock_core::token_programs::{
+    derive_ata, derive_eata, EATA_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID,
+};
 use solana_account::Account;
 use solana_program::{program_option::COption, program_pack::Pack};
-use solana_pubkey::{pubkey, Pubkey};
+use solana_pubkey::Pubkey;
 use solana_sdk::rent::Rent;
 use spl_token::state::{Account as SplAccount, AccountState};
-
-const SPL_TOKEN_PROGRAM_ID: Pubkey =
-    pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-
-// Associated Token Program id
-const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
-    pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-
-// eATA PDA derivation seed copied from fetch_cloner.rs
-const EATA_PROGRAM_ID: Pubkey =
-    pubkey!("5iC4wKZizyxrKh271Xzx3W4Vn2xUyYvSGHeoB2mdw5HA");
-
-pub fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-    let (addr, _bump) = Pubkey::find_program_address(
-        &[owner.as_ref(), SPL_TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
-        &ASSOCIATED_TOKEN_PROGRAM_ID,
-    );
-    addr
-}
-
-pub fn derive_eata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-    let (addr, _bump) = Pubkey::find_program_address(
-        &[owner.as_ref(), mint.as_ref()],
-        &EATA_PROGRAM_ID,
-    );
-    addr
-}
 
 pub fn create_ata_account(owner: &Pubkey, mint: &Pubkey) -> Account {
     let token_account = SplAccount {

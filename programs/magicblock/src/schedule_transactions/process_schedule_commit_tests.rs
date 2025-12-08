@@ -255,35 +255,15 @@ fn assert_first_commit(
 
 #[cfg(test)]
 mod tests {
+    // ---------- Helpers for ATA/eATA remapping tests ----------
+    // Use shared SPL/ATA/eATA constants and helpers
+    use magicblock_core::token_programs::{
+        derive_ata, derive_eata, SPL_TOKEN_PROGRAM_ID,
+    };
     use test_kit::init_logger;
 
     use super::*;
     use crate::utils::instruction_utils::InstructionUtils;
-
-    // ---------- Helpers for ATA/eATA remapping tests ----------
-    // SPL Token and ATA/eATA program ids
-    const SPL_TOKEN_PROGRAM_ID: Pubkey =
-        solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-    const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
-        solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-    const EATA_PROGRAM_ID: Pubkey =
-        solana_sdk::pubkey!("5iC4wKZizyxrKh271Xzx3W4Vn2xUyYvSGHeoB2mdw5HA");
-
-    fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[owner.as_ref(), SPL_TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
-            &ASSOCIATED_TOKEN_PROGRAM_ID,
-        )
-        .0
-    }
-
-    fn derive_eata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[owner.as_ref(), mint.as_ref()],
-            &EATA_PROGRAM_ID,
-        )
-        .0
-    }
 
     fn make_delegated_spl_ata_account(
         owner: &Pubkey,
