@@ -21,7 +21,7 @@ use test_kit::init_logger;
 
 use crate::{
     common::{
-        create_commit_task, create_compressed_commit_task,
+        create_commit_task, create_dummy_compressed_commit_task,
         generate_random_bytes, TestFixture,
     },
     utils::transactions::init_and_delegate_compressed_account_on_chain,
@@ -542,7 +542,11 @@ async fn test_prepare_compressed_commit() {
 
     let data = generate_random_bytes(10);
     let mut task = Box::new(ArgsTask::new(ArgsTaskType::CompressedCommit(
-        create_compressed_commit_task(pda, Default::default(), data.as_slice()),
+        create_dummy_compressed_commit_task(
+            pda,
+            Default::default(),
+            data.as_slice(),
+        ),
     ))) as Box<dyn BaseTask>;
     let compressed_data = task.get_compressed_data().cloned();
 

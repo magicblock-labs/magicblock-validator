@@ -183,7 +183,7 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
 }
 
 #[allow(dead_code)]
-pub fn create_compressed_commit_task(
+pub fn create_dummy_compressed_commit_task(
     pubkey: Pubkey,
     hash: [u8; 32],
     data: &[u8],

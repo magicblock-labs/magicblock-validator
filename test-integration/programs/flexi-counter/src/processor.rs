@@ -666,7 +666,7 @@ fn process_external_undelegate_compressed(
             ),
             &[payer.clone(), delegated_account.clone()],
         )?;
-    } args.delegation_record.lamports < delegated_account.lamports() {
+    } else if args.delegation_record.lamports < delegated_account.lamports() {
         let bump = &[bump];
         let seeds = FlexiCounter::seeds_with_bump(payer.key, bump);
         invoke_signed(
