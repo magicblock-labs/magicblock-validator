@@ -9,12 +9,8 @@ edition.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-bincode = { workspace = true }
 borsh = "1.5.3"
-crossbeam-channel = { workspace = true }
 fd-lock = { workspace = true }
-itertools = { workspace = true }
-libloading = "0.7.4"
 light-client = { workspace = true, features = ["v2"] }
 log = { workspace = true }
 
@@ -27,7 +23,6 @@ magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
-magicblock-delegation-program = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
@@ -38,17 +33,10 @@ magicblock-validator-admin = { workspace = true }
 
 num_cpus = { workspace = true }
 paste = { workspace = true }
-
 solana-account = { workspace = true }
-solana-feature-set = { workspace = true }
 solana-inline-spl = { workspace = true }
-solana-rpc = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
-solana-svm = { workspace = true }
-solana-transaction = { workspace = true }
-
-tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

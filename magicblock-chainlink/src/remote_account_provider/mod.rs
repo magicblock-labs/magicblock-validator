@@ -432,6 +432,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         let submux =
             SubMuxClient::new(pubsubs, subscribed_accounts.clone(), None);
 
+        if !config.program_subs().is_empty() {
+            debug!(
+                "Subscribing to program accounts: [{}]",
+                pubkeys_str(
+                    &config.program_subs().iter().cloned().collect::<Vec<_>>()
+                )
+            );
+            for program_id in config.program_subs() {
+                submux.subscribe_program(*program_id).await?;
+            }
+        }
+
         RemoteAccountProvider::<
             ChainRpcClientImpl,
             SubMuxClient<ChainPubsubClientImpl>,
@@ -1351,7 +1363,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         debug_assert_eq!(rpc_accounts.len(), pubkeys.len());
         debug_assert!(compressed_accounts
             .as_ref()
-            .map_or(true, |comp_accs| comp_accs.len() == pubkeys.len()));
+            .is_none_or(|comp_accs| comp_accs.len() == pubkeys.len()));
 
         let all_lens_match = pubkeys.len() == rpc_accounts.len()
             && pubkeys.len()

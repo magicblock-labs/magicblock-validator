@@ -1,6 +1,5 @@
 use std::{collections::HashSet, ops::ControlFlow, sync::Arc, time::Duration};
 
-use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all, try_join_all};
 use light_client::indexer::{photon_indexer::PhotonIndexer, IndexerRpcConfig};
 use log::{error, info};
@@ -17,7 +16,6 @@ use magicblock_rpc_client::{
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
 use magicblock_table_mania::{error::TableManiaError, TableMania};
-use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
@@ -71,33 +69,27 @@ impl DeliveryPreparator {
         commit_slot: Option<u64>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures =
-            strategy.optimized_tasks.iter_mut().map(|task| {
-                let timer =
+            strategy.optimized_tasks.iter_mut().map(|task| async move {
+                let _timer =
                     metrics::observe_committor_intent_task_preparation_time(
                         task.as_ref(),
                     );
-                let res = self.prepare_task_handling_errors(
+                self.prepare_task_handling_errors(
                     authority,
                     task,
                     persister,
                     photon_client,
                     commit_slot,
-                );
-                timer.stop_and_record();
-
-                res
+                )
+                .await
             });
 
         let task_preparations = join_all(preparation_futures);
         let alts_preparations = async {
-            let timer =
+            let _timer =
                 metrics::observe_committor_intent_alt_preparation_time();
-            let res = self
-                .prepare_lookup_tables(authority, &strategy.lookup_tables_keys)
-                .await;
-            timer.stop_and_record();
-
-            res
+            self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys)
+                .await
         };
 
         let (res1, res2) = join(task_preparations, alts_preparations).await;
@@ -307,30 +299,22 @@ impl DeliveryPreparator {
         Ok(())
     }
 
+    /// Fills up initialized buffer
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
         preparation_task: &BufferPreparationTask,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
-        let chunks_pda = preparation_task.chunks_pda(&authority_pubkey);
         let write_instructions =
             preparation_task.write_instructions(&authority_pubkey);
 
-        let chunks = if let Some(account) =
-            self.rpc_client.get_account(&chunks_pda).await?
-        {
-            Ok(Chunks::try_from_slice(account.data())?)
-        } else {
-            error!(
-                "Chunks PDA does not exist for writing. pda: {}",
-                chunks_pda
-            );
-            Err(InternalError::ChunksPDAMissingError(chunks_pda))
-        }?;
-
-        self.write_missing_chunks(authority, &chunks, &write_instructions)
-            .await
+        self.write_missing_chunks(
+            authority,
+            &preparation_task.chunks,
+            &write_instructions,
+        )
+        .await
     }
 
     /// Extract & write missing chunks asynchronously
@@ -406,7 +390,7 @@ impl DeliveryPreparator {
                     TransactionSendError::MagicBlockRpcClientError(err) => {
                         map_magicblock_client_error(
                             &self.transaction_error_mapper,
-                            err,
+                            *err,
                         )
                     }
                     err => BufferExecutionError::TransactionSendError(err),
@@ -475,6 +459,10 @@ impl DeliveryPreparator {
         lookup_table_keys: &[Pubkey],
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>, InternalError>
     {
+        if lookup_table_keys.is_empty() {
+            return Ok(vec![]);
+        }
+
         let pubkeys = HashSet::from_iter(lookup_table_keys.iter().copied());
         self.table_mania
             .reserve_pubkeys(authority, &pubkeys)
@@ -566,7 +554,13 @@ pub enum TransactionSendError {
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
     #[error("MagicBlockRpcClientError: {0}")]
-    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+    MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
+}
+
+impl From<MagicBlockRpcClientError> for TransactionSendError {
+    fn from(e: MagicBlockRpcClientError) -> Self {
+        Self::MagicBlockRpcClientError(Box::new(e))
+    }
 }
 
 impl TransactionSendError {
@@ -601,7 +595,7 @@ impl BufferExecutionError {
 impl From<MagicBlockRpcClientError> for BufferExecutionError {
     fn from(value: MagicBlockRpcClientError) -> Self {
         Self::TransactionSendError(
-            TransactionSendError::MagicBlockRpcClientError(value),
+            TransactionSendError::MagicBlockRpcClientError(Box::new(value)),
         )
     }
 }
@@ -623,7 +617,7 @@ pub enum InternalError {
     #[error("TransactionSigningError: {0}")]
     TransactionSigningError(#[from] SignerError),
     #[error("MagicBlockRpcClientError: {0}")]
-    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+    MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
     #[error("Delegated account not found")]
     DelegatedAccountNotFound,
     #[error("PhotonClientNotFound")]
@@ -634,6 +628,12 @@ pub enum InternalError {
     BufferExecutionError(#[from] BufferExecutionError),
     #[error("BaseTaskError: {0}")]
     BaseTaskError(#[from] BaseTaskError),
+}
+
+impl From<MagicBlockRpcClientError> for InternalError {
+    fn from(e: MagicBlockRpcClientError) -> Self {
+        Self::MagicBlockRpcClientError(Box::new(e))
+    }
 }
 
 impl InternalError {

@@ -52,6 +52,7 @@ impl BpfUpgradableProgramModifications {
                 delegated: Some(false),
                 compressed: Some(false),
                 confined: Some(false),
+                remote_slot: Some(loaded_program.remote_slot),
             }
         };
 
@@ -73,6 +74,7 @@ impl BpfUpgradableProgramModifications {
                 delegated: Some(false),
                 compressed: Some(false),
                 confined: Some(false),
+                remote_slot: Some(loaded_program.remote_slot),
             }
         };
 

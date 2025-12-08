@@ -7,9 +7,9 @@ pub mod two_stage_executor;
 use std::{mem, ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use futures_util::future::try_join_all;
+use futures_util::future::{join, try_join_all};
 use light_client::indexer::photon_indexer::PhotonIndexer;
-use log::*;
+use log::{trace, warn};
 use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
@@ -27,7 +27,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_sdk::{
     message::VersionedMessage,
-    signature::{Keypair, Signature, Signer, SignerError},
+    signature::{Keypair, Signature, Signer},
     transaction::VersionedTransaction,
 };
 
@@ -46,7 +46,7 @@ use crate::{
     tasks::{
         task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_strategist::{
-            TaskStrategist, TaskStrategistError, TransactionStrategy,
+            StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
         task_visitors::utility_visitor::TaskVisitorUtils,
         BaseTask, TaskType,
@@ -108,7 +108,7 @@ pub trait IntentExecutor: Send + Sync + 'static {
 pub struct IntentExecutorImpl<T, F> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
-    photon_client: Arc<PhotonIndexer>,
+    photon_client: Option<Arc<PhotonIndexer>>,
     transaction_preparator: T,
     task_info_fetcher: Arc<F>,
 
@@ -125,7 +125,7 @@ where
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
-        photon_client: Arc<PhotonIndexer>,
+        photon_client: Option<Arc<PhotonIndexer>>,
         transaction_preparator: T,
         task_info_fetcher: Arc<F>,
     ) -> Self {
@@ -138,48 +138,6 @@ where
             task_info_fetcher,
             junk: vec![],
             patched_errors: vec![],
-        }
-    }
-
-    /// Checks if it is possible to unite Commit & Finalize stages in 1 transaction
-    /// Returns corresponding `TransactionStrategy` if possible, otherwise `None`
-    fn try_unite_tasks<P: IntentPersister>(
-        commit_tasks: &[Box<dyn BaseTask>],
-        finalize_task: &[Box<dyn BaseTask>],
-        authority: &Pubkey,
-        persister: &Option<P>,
-    ) -> Result<Option<TransactionStrategy>, SignerError> {
-        const MAX_UNITED_TASKS_LEN: usize = 22;
-
-        // If any of the tasks are compressed, we can't unite them
-        if commit_tasks.iter().any(|task| task.is_compressed())
-            || finalize_task.iter().any(|task| task.is_compressed())
-        {
-            return Ok(None);
-        }
-
-        // We can unite in 1 tx a lot of commits
-        // but then there's a possibility of hitting CPI limit, aka
-        // MaxInstructionTraceLengthExceeded error.
-        // So we limit tasks len with 22 total tasks
-        // In case this fails as well, it will be retried with TwoStage approach
-        // on retry, once retries are introduced
-        if commit_tasks.len() + finalize_task.len() > MAX_UNITED_TASKS_LEN {
-            return Ok(None);
-        }
-
-        // Clone tasks since strategies applied to united case maybe suboptimal for regular one
-        let mut commit_tasks = commit_tasks.to_owned();
-        let finalize_task = finalize_task.to_owned();
-
-        // Unite tasks to attempt running as single tx
-        commit_tasks.extend(finalize_task);
-        match TaskStrategist::build_strategy(commit_tasks, authority, persister)
-        {
-            Ok(strategy) => Ok(Some(strategy)),
-            Err(TaskStrategistError::SignerError(err)) => Err(err),
-            Err(TaskStrategistError::FailedToFitError)
-            | Err(TaskStrategistError::InconsistentTaskCompression) => Ok(None),
         }
     }
 
@@ -204,18 +162,18 @@ where
             );
         }
 
-        // Build tasks for commit stage
-        let commit_tasks = TaskBuilderImpl::commit_tasks(
-            &self.task_info_fetcher,
-            &base_intent,
-            persister,
-            photon_client,
-        )
-        .await?;
-
         let committed_pubkeys = match base_intent.get_committed_pubkeys() {
             Some(value) => value,
             None => {
+                // Build tasks for commit stage
+                let commit_tasks = TaskBuilderImpl::commit_tasks(
+                    &self.task_info_fetcher,
+                    &base_intent,
+                    persister,
+                    &self.photon_client,
+                )
+                .await?;
+
                 // Standalone actions executed in single stage
                 let strategy = TaskStrategist::build_strategy(
                     commit_tasks,
@@ -233,58 +191,56 @@ where
             }
         };
 
-        let finalize_tasks = TaskBuilderImpl::finalize_tasks(
-            &self.task_info_fetcher,
-            &base_intent,
-            photon_client,
-        )
-        .await?;
+        // Build tasks for commit & finalize stages
+        let (commit_tasks, finalize_tasks) = {
+            let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
+                &self.task_info_fetcher,
+                &base_intent,
+                persister,
+                &self.photon_client,
+            );
+            let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
+                &self.task_info_fetcher,
+                &base_intent,
+                &self.photon_client,
+            );
+            let (commit_tasks, finalize_tasks) =
+                join(commit_tasks_fut, finalize_tasks_fut).await;
 
-        // See if we can squeeze them in one tx
-        if let Some(single_tx_strategy) = Self::try_unite_tasks(
-            &commit_tasks,
-            &finalize_tasks,
+            (commit_tasks?, finalize_tasks?)
+        };
+
+        // Build execution strategy
+        match TaskStrategist::build_execution_strategy(
+            commit_tasks,
+            finalize_tasks,
             &self.authority.pubkey(),
             persister,
         )? {
-            trace!("Executing intent in single stage");
-            let output = self
-                .single_stage_execution_flow(
+            StrategyExecutionMode::SingleStage(strategy) => {
+                trace!("Executing intent in single stage");
+                self.single_stage_execution_flow(
                     base_intent,
-                    single_tx_strategy,
+                    strategy,
                     persister,
                     photon_client,
                 )
-                .await?;
-
-            Ok(output)
-        } else {
-            // Build strategy for Commit stage
-            let commit_strategy = TaskStrategist::build_strategy(
-                commit_tasks,
-                &self.authority.pubkey(),
-                persister,
-            )?;
-
-            // Build strategy for Finalize stage
-            let finalize_strategy = TaskStrategist::build_strategy(
-                finalize_tasks,
-                &self.authority.pubkey(),
-                persister,
-            )?;
-
-            trace!("Executing intent in two stages");
-            let output = self
-                .two_stage_execution_flow(
+                .await
+            }
+            StrategyExecutionMode::TwoStage {
+                commit_stage,
+                finalize_stage,
+            } => {
+                trace!("Executing intent in two stages");
+                self.two_stage_execution_flow(
                     &committed_pubkeys,
-                    commit_strategy,
-                    finalize_strategy,
+                    commit_stage,
+                    finalize_stage,
                     persister,
                     photon_client,
                 )
-                .await?;
-
-            Ok(output)
+                .await
+            }
         }
     }
 
@@ -731,7 +687,7 @@ where
                     InternalError::MagicBlockRpcClientError(err) => {
                         map_magicblock_client_error(
                             &self.transaction_error_mapper,
-                            err,
+                            *err,
                         )
                     }
                     err => {
@@ -848,11 +804,7 @@ where
         let pubkeys = base_intent.get_committed_pubkeys();
 
         let result = self
-            .execute_inner(
-                base_intent,
-                &persister,
-                &Some(self.photon_client.clone()),
-            )
+            .execute_inner(base_intent, &persister, &self.photon_client.clone())
             .await;
         if let Some(pubkeys) = pubkeys {
             // Reset TaskInfoFetcher, as cache could become invalid
@@ -891,91 +843,5 @@ where
         });
 
         try_join_all(cleanup_futs).await.map(|_| ())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{collections::HashMap, sync::Arc};
-
-    use light_client::indexer::photon_indexer::PhotonIndexer;
-    use solana_pubkey::Pubkey;
-
-    use crate::{
-        intent_execution_manager::intent_scheduler::create_test_intent,
-        intent_executor::{
-            task_info_fetcher::{
-                ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
-            },
-            IntentExecutorImpl,
-        },
-        persist::IntentPersisterImpl,
-        tasks::task_builder::{TaskBuilderImpl, TasksBuilder},
-        transaction_preparator::TransactionPreparatorImpl,
-    };
-
-    struct MockInfoFetcher;
-    #[async_trait::async_trait]
-    impl TaskInfoFetcher for MockInfoFetcher {
-        async fn fetch_next_commit_ids(
-            &self,
-            pubkeys: &[Pubkey],
-            _compressed: bool,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
-        }
-
-        async fn fetch_rent_reimbursements(
-            &self,
-            accounts: &[Pubkey],
-        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-            Ok(accounts.iter().map(|_| Pubkey::new_unique()).collect())
-        }
-
-        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
-            Some(0)
-        }
-
-        fn reset(&self, _: ResetType) {}
-    }
-
-    #[tokio::test]
-    async fn test_try_unite() {
-        let pubkey = [Pubkey::new_unique()];
-        let intent = create_test_intent(0, &pubkey);
-
-        let photon_client = Arc::new(PhotonIndexer::new(
-            "https://api.photon.com".to_string(),
-            None,
-        ));
-        let info_fetcher = Arc::new(MockInfoFetcher);
-        let commit_task = TaskBuilderImpl::commit_tasks(
-            &info_fetcher,
-            &intent,
-            &None::<IntentPersisterImpl>,
-            &Some(photon_client.clone()),
-        )
-        .await
-        .unwrap();
-        let finalize_task = TaskBuilderImpl::finalize_tasks(
-            &info_fetcher,
-            &intent,
-            &Some(photon_client),
-        )
-        .await
-        .unwrap();
-
-        let result = IntentExecutorImpl::<
-            TransactionPreparatorImpl,
-            MockInfoFetcher,
-        >::try_unite_tasks(
-            &commit_task,
-            &finalize_task,
-            &Pubkey::new_unique(),
-            &None::<IntentPersisterImpl>,
-        );
-
-        let strategy = result.unwrap().unwrap();
-        assert!(strategy.lookup_tables_keys.is_empty());
     }
 }

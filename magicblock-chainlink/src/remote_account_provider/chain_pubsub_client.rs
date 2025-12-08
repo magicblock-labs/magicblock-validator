@@ -14,7 +14,10 @@ use solana_pubkey::Pubkey;
 use solana_pubsub_client::nonblocking::pubsub_client::{
     PubsubClient, PubsubClientResult,
 };
-use solana_rpc_client_api::{config::RpcAccountInfoConfig, response::Response};
+use solana_rpc_client_api::{
+    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    response::{Response, RpcKeyedAccount},
+};
 use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::{
     sync::{mpsc, oneshot, Mutex as AsyncMutex},
@@ -31,6 +34,10 @@ use super::{
 type UnsubscribeFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
 type SubscribeResult = PubsubClientResult<(
     BoxStream<'static, Response<UiAccount>>,
+    UnsubscribeFn,
+)>;
+type ProgramSubscribeResult = PubsubClientResult<(
+    BoxStream<'static, Response<RpcKeyedAccount>>,
     UnsubscribeFn,
 )>;
 
@@ -79,6 +86,29 @@ impl PubSubConnection {
         Ok((stream, unsub))
     }
 
+    pub async fn program_subscribe(
+        &self,
+        program_id: &Pubkey,
+        config: RpcProgramAccountsConfig,
+    ) -> ProgramSubscribeResult {
+        let client = self.client.load();
+        let config = Some(config.clone());
+        let (stream, unsub) =
+            client.program_subscribe(program_id, config).await?;
+
+        // SAFETY:
+        // the returned stream depends on the used client, which is only ever dropped
+        // if the connection has been terminated, at which point the stream is useless
+        // and will be discarded as well, thus it's safe lifetime extension to 'static
+        let stream = unsafe {
+            mem::transmute::<
+                BoxStream<'_, Response<RpcKeyedAccount>>,
+                BoxStream<'static, Response<RpcKeyedAccount>>,
+            >(stream)
+        };
+        Ok((stream, unsub))
+    }
+
     pub async fn reconnect(&self) -> PubsubClientResult<()> {
         // Prevents multiple reconnect attempts running concurrently
         let _guard = match self.reconnect_guard.try_lock() {
@@ -120,6 +150,10 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     async fn subscribe(
         &self,
         pubkey: Pubkey,
+    ) -> RemoteAccountProviderResult<()>;
+    async fn subscribe_program(
+        &self,
+        program_id: Pubkey,
     ) -> RemoteAccountProviderResult<()>;
     async fn unsubscribe(
         &self,
@@ -214,6 +248,24 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
         rx.await
             .inspect_err(|err| {
                 warn!("ChainPubsubClientImpl::subscribe - RecvError occurred while awaiting subscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", pubkey);
+            })?
+    }
+
+    async fn subscribe_program(
+        &self,
+        program_id: Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.actor
+            .send_msg(ChainPubsubActorMessage::ProgramSubscribe {
+                pubkey: program_id,
+                response: tx,
+            })
+            .await?;
+
+        rx.await
+            .inspect_err(|err| {
+                warn!("ChainPubsubClientImpl::subscribe_program - RecvError occurred while awaiting subscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", program_id);
             })?
     }
 
@@ -397,6 +449,22 @@ pub mod mock {
             let mut subscribed_pubkeys =
                 self.subscribed_pubkeys.lock().unwrap();
             subscribed_pubkeys.insert(pubkey);
+            Ok(())
+        }
+
+        async fn subscribe_program(
+            &self,
+            _program_id: Pubkey,
+        ) -> RemoteAccountProviderResult<()> {
+            if !*self.connected.lock().unwrap() {
+                return Err(
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        "mock: subscribe_program while disconnected"
+                            .to_string(),
+                    ),
+                );
+            }
+            // Program subscriptions don't track individual accounts in the mock
             Ok(())
         }
 

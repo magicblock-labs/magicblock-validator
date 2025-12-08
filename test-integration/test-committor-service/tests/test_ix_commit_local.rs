@@ -145,7 +145,7 @@ async fn commit_single_account(
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     let photon_client =
-        Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None));
+        Some(Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None)));
 
     // Run each test with and without finalizing
     let service = CommittorService::try_start(
@@ -322,11 +322,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
 async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
     commit_5_accounts_1kb(
         3,
-        expect_strategies(&[
-            // Intent fits in 1 TX only with ALT, see IntentExecutorImpl::try_unite_tasks
-            (CommitStrategy::FromBufferWithLookupTable, 3),
-            (CommitStrategy::FromBuffer, 2),
-        ]),
+        expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
         CommitAccountMode::CommitAndUndelegate,
     )
     .await;
@@ -666,7 +662,7 @@ async fn commit_multiple_accounts(
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     let photon_client =
-        Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None));
+        Some(Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None)));
 
     let service = CommittorService::try_start(
         validator_auth.insecure_clone(),
@@ -1001,7 +997,7 @@ fn validate_account(
     let matches_undelegation = acc.owner().eq(&expected_owner);
     let matches_all = matches_data && matches_undelegation;
 
-    if !matches_all && remaining_tries % 4 == 0 {
+    if !matches_all && remaining_tries.is_multiple_of(4) {
         if !matches_data {
             trace!(
                 "Account ({}) data {} != {} || {} != {}",

@@ -222,7 +222,20 @@ where
                         if in_bank.undelegating() {
                             // We expect the account to still be delegated, but with the delegation
                             // program owner
-                            debug!("Received update for undelegating account {pubkey} delegated in bank={} delegated on chain={}", in_bank.delegated(), account.delegated());
+                            debug!("Received update for undelegating account {pubkey} \
+                                in_bank.delegated={}, \
+                                in_bank.owner={}, \
+                                in_bank.remote_slot={}, \
+                                chain.delegated={}, \
+                                chain.owner={}, \
+                                chain.remote_slot={}",
+                                in_bank.delegated(),
+                                in_bank.owner(),
+                                in_bank.remote_slot(),
+                                account.delegated(),
+                                account.owner(),
+                                account.remote_slot()
+                            );
 
                             // This will only be true in the following case:
                             // 1. a commit was triggered for the account
@@ -421,7 +434,7 @@ where
                                 if log::log_enabled!(log::Level::Trace) {
                                     trace!("Delegation record found for {pubkey}: {delegation_record:?}");
                                     trace!(
-                                        "Cloning delegated account: {pubkey} (remote slot {}, owner: {})",
+                                        "Resolving delegated account: {pubkey} (remote slot {}, owner: {})",
                                         account.remote_slot(),
                                         delegation_record.owner
                                     );
@@ -489,14 +502,10 @@ where
                                 .ok()
                                 .flatten()
                             {
-                                match CompressedDelegationRecord::try_from_slice(
+                                CompressedDelegationRecord::try_from_slice(
                                     acc.data(),
-                                ) {
-                                    Ok(delegation_record) => {
-                                        Some(delegation_record)
-                                    }
-                                    Err(_) => None,
-                                }
+                                )
+                                .ok()
                             } else {
                                 None
                             }
@@ -1367,7 +1376,16 @@ where
                     }
                     RefreshDecision::No => {
                         // Account is in bank and subscribed correctly - no fetch needed
-                        trace!("Account {pubkey} found in bank in valid state, no fetch needed");
+                        if log::log_enabled!(log::Level::Trace) {
+                            let undelegating = account_in_bank.undelegating();
+                            let delegated = account_in_bank.delegated();
+                            let owner = account_in_bank.owner().to_string();
+                            trace!("Account {pubkey} found in bank in valid state, no fetch needed \
+                                    undelegating = {undelegating}, \
+                                    delegated = {delegated}, \
+                                    owner={owner}"
+                            );
+                        }
                         in_bank.push(*pubkey);
                     }
                 }

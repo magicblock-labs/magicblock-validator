@@ -231,6 +231,14 @@ pub(crate) fn process_mutate_accounts(
             );
             account.borrow_mut().set_confined(confined);
         }
+        if let Some(remote_slot) = modification.remote_slot {
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: setting remote_slot to {}",
+                remote_slot
+            );
+            account.borrow_mut().set_remote_slot(remote_slot);
+        }
     }
 
     if lamports_to_debit != 0 {
@@ -338,6 +346,7 @@ mod tests {
             delegated: Some(true),
             compressed: Some(true),
             confined: Some(true),
+            remote_slot: None,
         };
         let ix = InstructionUtils::modify_accounts_instruction(vec![
             modification.clone(),
@@ -632,5 +641,47 @@ mod tests {
                 assert_eq!(data, vec![16, 17, 18, 19, 20]);
             }
         );
+    }
+
+    #[test]
+    fn test_mod_remote_slot() {
+        init_logger!();
+
+        let mod_key = Pubkey::new_unique();
+        let remote_slot = 12345u64;
+        let mut account_data = {
+            let mut map = HashMap::new();
+            map.insert(mod_key, AccountSharedData::new(100, 0, &mod_key));
+            map
+        };
+        ensure_started_validator(&mut account_data);
+
+        let ix = InstructionUtils::modify_accounts_instruction(vec![
+            AccountModification {
+                pubkey: mod_key,
+                remote_slot: Some(remote_slot),
+                ..Default::default()
+            },
+        ]);
+        let transaction_accounts = ix
+            .accounts
+            .iter()
+            .flat_map(|acc| {
+                account_data
+                    .remove(&acc.pubkey)
+                    .map(|shared_data| (acc.pubkey, shared_data))
+            })
+            .collect();
+
+        let mut accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        let _account_authority = accounts.drain(0..1).next().unwrap();
+        let modified_account = accounts.drain(0..1).next().unwrap();
+        assert_eq!(modified_account.remote_slot(), remote_slot);
     }
 }

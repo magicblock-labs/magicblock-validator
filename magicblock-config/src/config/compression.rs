@@ -1,22 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-use crate::consts;
-
 /// Configuration for the compression service.
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Default, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct CompressionConfig {
     /// The URL of the Photon indexer.
-    pub photon_url: String,
+    pub photon_url: Option<String>,
     /// The API key for the Photon indexer.
     pub api_key: Option<String>,
-}
-
-impl Default for CompressionConfig {
-    fn default() -> Self {
-        Self {
-            photon_url: consts::DEFAULT_PHOTON_URL.to_string(),
-            api_key: None,
-        }
-    }
 }

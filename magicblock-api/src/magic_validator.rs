@@ -323,10 +323,12 @@ impl MagicValidator {
     async fn init_committor_service(
         config: &ValidatorParams,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
-        let photon_client = Arc::new(PhotonIndexer::new(
-            config.compression.photon_url.clone(),
-            config.compression.api_key.clone(),
-        ));
+        let photon_client = config.compression.photon_url.as_ref().map(|url| {
+            Arc::new(PhotonIndexer::new(
+                url.clone(),
+                config.compression.api_key.clone(),
+            ))
+        });
 
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
@@ -381,9 +383,9 @@ impl MagicValidator {
             })
             .collect::<Vec<_>>();
 
-        endpoints.push(Endpoint::Compression {
-            url: config.compression.photon_url.clone(),
-        });
+        if let Some(url) = config.compression.photon_url.as_ref() {
+            endpoints.push(Endpoint::Compression { url: url.clone() });
+        }
 
         let cloner = ChainlinkCloner::new(
             committor_service,
@@ -394,9 +396,11 @@ impl MagicValidator {
         );
         let cloner = Arc::new(cloner);
         let accounts_bank = accountsdb.clone();
-        let chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
+        let mut chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral,
         );
+        chainlink_config.remove_confined_accounts =
+            config.chainlink.remove_confined_accounts;
         let commitment_config = {
             let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }
@@ -409,7 +413,7 @@ impl MagicValidator {
             config.validator.keypair.pubkey(),
             faucet_pubkey,
             chainlink_config,
-            config.chainlink.auto_airdrop_lamports,
+            &config.chainlink,
         )
         .await?;
 
@@ -464,7 +468,7 @@ impl MagicValidator {
         // In case if we have a perfect match between accountsdb and ledger slot
         // (note: that accountsdb is always 1 slot ahead of ledger), then there's
         // no need to run any kind of ledger replay
-        if accountsdb_slot - 1 == ledger_slot {
+        if accountsdb_slot.saturating_sub(1) == ledger_slot {
             return Ok(());
         }
         // SOLANA only allows blockhash to be valid for 150 slot back in time,

@@ -179,6 +179,11 @@ auto-airdrop-lamports = 0
 # Env: MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS
 max-monitored-accounts = 1000
 
+# When true, confined accounts are removed during accounts bank reset.
+# Default: false
+# Env: MBV_CHAINLINK__REMOVE_CONFINED_ACCOUNTS
+remove-confined-accounts = false
+
 # ==============================================================================
 # On-Chain Registration (Optional)
 # ==============================================================================
@@ -206,6 +211,20 @@ claim-fees-frequency = "24h"
 # Default: false
 # Env: MBV_TASK_SCHEDULER__RESET
 reset = false
+
+# ==============================================================================
+# Compression Service
+# ==============================================================================
+[compression]
+# The URL of the Photon indexer.
+# Default: None
+# Env: MBV_COMPRESSION__PHOTON_URL
+photon-url = "http://localhost:8784"
+
+# The API key for the Photon indexer.
+# Default: None
+# Env: MBV_COMPRESSION__API_KEY
+# api-key = "your-api-key"
 
 # ==============================================================================
 # Pre-loaded Programs

@@ -551,7 +551,7 @@ async fn test_prepare_compressed_commit() {
             &fixture.authority,
             &mut *task,
             &None::<IntentPersisterImpl>,
-            &Some(fixture.photon_client),
+            &fixture.photon_client,
             None,
         )
         .await

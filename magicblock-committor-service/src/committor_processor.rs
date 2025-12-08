@@ -37,7 +37,7 @@ impl CommittorProcessor {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
-        photon_client: Arc<PhotonIndexer>,
+        photon_client: Option<Arc<PhotonIndexer>>,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,

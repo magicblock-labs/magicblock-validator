@@ -253,6 +253,16 @@ pub fn increase_count_instruction(committee: Pubkey) -> Instruction {
     )
 }
 
+pub fn set_count_instruction(committee: Pubkey, count: u64) -> Instruction {
+    let program_id = crate::id();
+    let account_metas = vec![AccountMeta::new(committee, false)];
+    build_instruction(
+        program_id,
+        ScheduleCommitInstruction::SetCount(count),
+        account_metas,
+    )
+}
+
 // -----------------
 // PDA
 // -----------------

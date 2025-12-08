@@ -15,7 +15,7 @@ use light_client::{
     indexer::{photon_indexer::PhotonIndexer, Indexer, IndexerError},
     rpc::RpcError,
 };
-use log::{error, warn};
+use log::warn;
 use lru::LruCache;
 use magicblock_core::compression::derive_cda_from_pda;
 use magicblock_metrics::metrics;
@@ -23,8 +23,7 @@ use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 
-const NUM_FETCH_RETRIES: NonZeroUsize =
-    unsafe { NonZeroUsize::new_unchecked(5) };
+const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
 
 #[async_trait]
@@ -57,17 +56,16 @@ pub enum ResetType<'a> {
 
 pub struct CacheTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
-    photon_client: Arc<PhotonIndexer>,
+    photon_client: Option<Arc<PhotonIndexer>>,
     cache: Mutex<LruCache<Pubkey, u64>>,
 }
 
 impl CacheTaskInfoFetcher {
     pub fn new(
         rpc_client: MagicblockRpcClient,
-        photon_client: Arc<PhotonIndexer>,
+        photon_client: Option<Arc<PhotonIndexer>>,
     ) -> Self {
-        const CACHE_SIZE: NonZeroUsize =
-            unsafe { NonZeroUsize::new_unchecked(1000) };
+        const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 
         Self {
             rpc_client,
@@ -98,7 +96,8 @@ impl CacheTaskInfoFetcher {
                 Ok(value) => return Ok(value),
                 err @ Err(TaskInfoFetcherError::InvalidAccountDataError(_))
                 | err @ Err(TaskInfoFetcherError::MetadataNotFoundError(_))
-                | err @ Err(TaskInfoFetcherError::DeserializeError(_)) => {
+                | err @ Err(TaskInfoFetcherError::DeserializeError(_))
+                | err @ Err(TaskInfoFetcherError::PhotonClientNotFound) => {
                     return err
                 }
                 Err(TaskInfoFetcherError::LightRpcError(err)) => {
@@ -303,8 +302,11 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         to_request.dedup();
 
         let remaining_ids = if compressed {
+            let Some(photon_client) = self.photon_client.as_ref() else {
+                return Err(TaskInfoFetcherError::PhotonClientNotFound);
+            };
             Self::fetch_compressed_delegation_records_with_retries(
-                &self.photon_client,
+                photon_client,
                 &to_request,
                 NUM_FETCH_RETRIES,
             )
@@ -391,7 +393,7 @@ pub enum TaskInfoFetcherError {
     #[error("InvalidAccountDataError for: {0}")]
     InvalidAccountDataError(Pubkey),
     #[error("MagicBlockRpcClientError: {0}")]
-    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+    MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
     #[error("IndexerError: {0}")]
     IndexerError(#[from] IndexerError),
     #[error("NoCompressedAccount: {0}")]
@@ -400,6 +402,14 @@ pub enum TaskInfoFetcherError {
     NoCompressedData(Pubkey),
     #[error("CompressedAccountDataDeserializeError: {0}")]
     DeserializeError(#[from] std::io::Error),
+    #[error("PhotonClientNotFound")]
+    PhotonClientNotFound,
+}
+
+impl From<MagicBlockRpcClientError> for TaskInfoFetcherError {
+    fn from(e: MagicBlockRpcClientError) -> Self {
+        Self::MagicBlockRpcClientError(Box::new(e))
+    }
 }
 
 impl TaskInfoFetcherError {
@@ -413,6 +423,7 @@ impl TaskInfoFetcherError {
             Self::NoCompressedData(_) => None,
             Self::DeserializeError(_) => None,
             Self::LightRpcError(_) => None,
+            Self::PhotonClientNotFound => None,
         }
     }
 }

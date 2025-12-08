@@ -44,16 +44,15 @@ pub async fn create_test_client() -> MagicblockRpcClient {
 }
 
 // Helper function to create a test PhotonIndexer
-pub fn create_test_photon_indexer() -> Arc<PhotonIndexer> {
+pub fn create_test_photon_indexer() -> Option<Arc<PhotonIndexer>> {
     let url = PHOTON_URL.to_string();
-    Arc::new(PhotonIndexer::new(url, None))
+    Some(Arc::new(PhotonIndexer::new(url, None)))
 }
 
 // Test fixture structure
 pub struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
-    #[allow(dead_code)]
-    pub photon_client: Arc<PhotonIndexer>,
+    pub photon_client: Option<Arc<PhotonIndexer>>,
     pub table_mania: TableMania,
     pub authority: Keypair,
     pub compute_budget_config: ComputeBudgetConfig,

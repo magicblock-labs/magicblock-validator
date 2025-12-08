@@ -33,7 +33,7 @@ pub struct IntentExecutionManager<D: DB> {
 impl<D: DB> IntentExecutionManager<D> {
     pub fn new<P: IntentPersister>(
         rpc_client: MagicblockRpcClient,
-        photon_client: Arc<PhotonIndexer>,
+        photon_client: Option<Arc<PhotonIndexer>>,
         db: D,
         intent_persister: Option<P>,
         table_mania: TableMania,

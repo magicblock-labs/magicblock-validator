@@ -112,13 +112,13 @@ where
             }
         }
         MagicBlockRpcClientError::RpcClientError(err) => {
-            match try_map_client_error(transaction_error_mapper, err) {
+            match try_map_client_error(transaction_error_mapper, *err) {
                 Ok(mapped_err) => mapped_err,
                 Err(original) => MagicBlockRpcClientError::RpcClientError(original).into()
             }
         }
         MagicBlockRpcClientError::SendTransaction(err) => {
-            match try_map_client_error(transaction_error_mapper, err) {
+            match try_map_client_error(transaction_error_mapper, *err) {
                 Ok(mapped_err) => mapped_err,
                 Err(original) => MagicBlockRpcClientError::SendTransaction(original).into()
             }
@@ -143,7 +143,7 @@ where
 pub fn try_map_client_error<TxMap, ExecErr>(
     transaction_error_mapper: &TxMap,
     err: solana_rpc_client_api::client_error::Error,
-) -> Result<ExecErr, solana_rpc_client_api::client_error::Error>
+) -> Result<ExecErr, Box<solana_rpc_client_api::client_error::Error>>
 where
     TxMap: TransactionErrorMapper<ExecutionError = ExecErr>,
 {
@@ -152,10 +152,10 @@ where
             transaction_error_mapper
                 .try_map(transaction_err, None)
                 .map_err(|transaction_err| {
-                    solana_rpc_client_api::client_error::Error {
+                    Box::new(solana_rpc_client_api::client_error::Error {
                         request: err.request,
                         kind: ErrorKind::TransactionError(transaction_err),
-                    }
+                    })
                 })
         }
         err_kind @ (ErrorKind::Reqwest(_)
@@ -165,10 +165,10 @@ where
         | ErrorKind::SigningError(_)
         | ErrorKind::Custom(_)
         | ErrorKind::Io(_)) => {
-            Err(solana_rpc_client_api::client_error::Error {
+            Err(Box::new(solana_rpc_client_api::client_error::Error {
                 request: err.request,
                 kind: err_kind,
-            })
+            }))
         }
     }
 }
