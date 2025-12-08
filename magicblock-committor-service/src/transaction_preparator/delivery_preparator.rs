@@ -179,7 +179,14 @@ impl DeliveryPreparator {
                     photon_client,
                     photon_config,
                 )
-                .await?;
+                .await
+                .map_err(|e| {
+                    error!(
+                        "Failed to get compressed data for delegated_account={} commit_slot={:?}: {:?}",
+                        delegated_account, commit_slot, e
+                    );
+                    InternalError::TaskBuilderError(e)
+                })?;
                 task.set_compressed_data(compressed_data);
             }
         }
