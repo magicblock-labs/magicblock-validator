@@ -21,6 +21,31 @@ use crate::{
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
 
+pub enum CommitKind {
+    Commit,
+    CommitAndUndelegate,
+    CompressedCommit,
+    CompressedCommitAndUndelegate,
+}
+
+impl CommitKind {
+    pub fn request_undelegation(&self) -> bool {
+        match self {
+            CommitKind::CommitAndUndelegate => true,
+            CommitKind::CompressedCommitAndUndelegate => true,
+            _ => false,
+        }
+    }
+
+    pub fn compressed(&self) -> bool {
+        match self {
+            CommitKind::CompressedCommit => true,
+            CommitKind::CompressedCommitAndUndelegate => true,
+            _ => false,
+        }
+    }
+}
+
 declare_process_instruction!(
     Entrypoint,
     DEFAULT_COMPUTE_UNITS,
@@ -49,17 +74,23 @@ declare_process_instruction!(
                 &mut account_mods,
             ),
             ScheduleCommit => {
-                dispatch_commit(signers, invoke_context, false, false)
+                dispatch_commit(signers, invoke_context, CommitKind::Commit)
             }
-            ScheduleCompressedCommit => {
-                dispatch_commit(signers, invoke_context, false, true)
-            }
-            ScheduleCommitAndUndelegate => {
-                dispatch_commit(signers, invoke_context, true, false)
-            }
-            ScheduleCompressedCommitAndUndelegate => {
-                dispatch_commit(signers, invoke_context, true, true)
-            }
+            ScheduleCompressedCommit => dispatch_commit(
+                signers,
+                invoke_context,
+                CommitKind::CompressedCommit,
+            ),
+            ScheduleCommitAndUndelegate => dispatch_commit(
+                signers,
+                invoke_context,
+                CommitKind::CommitAndUndelegate,
+            ),
+            ScheduleCompressedCommitAndUndelegate => dispatch_commit(
+                signers,
+                invoke_context,
+                CommitKind::CompressedCommitAndUndelegate,
+            ),
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
@@ -92,13 +123,12 @@ declare_process_instruction!(
 fn dispatch_commit(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
-    request_undelegation: bool,
-    compressed: bool,
+    commit_kind: CommitKind,
 ) -> Result<(), InstructionError> {
     let opts = ProcessScheduleCommitOptions {
-        request_undelegation,
+        request_undelegation: commit_kind.request_undelegation(),
     };
-    if compressed {
+    if commit_kind.compressed() {
         process_schedule_compressed_commit(signers, invoke_context, opts)
     } else {
         process_schedule_commit(signers, invoke_context, opts)
