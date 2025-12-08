@@ -17,7 +17,7 @@ use magicblock_aperture::{
     state::{ChainlinkImpl, NodeContext, SharedState},
     JsonRpcServer,
 };
-use magicblock_config::types::BindAddress;
+use magicblock_config::{config::ChainLinkConfig, types::BindAddress};
 use magicblock_core::{
     link::accounts::LockedAccount, traits::AccountsBank, Slot,
 };
@@ -63,7 +63,7 @@ fn chainlink(accounts_db: &Arc<AccountsDb>) -> Arc<ChainlinkImpl> {
             None,
             Pubkey::new_unique(),
             Pubkey::new_unique(),
-            0,
+            &ChainLinkConfig::default(),
         )
         .expect("Failed to create Chainlink"),
     )

@@ -51,6 +51,7 @@ impl BpfUpgradableProgramModifications {
                 rent_epoch: Some(u64::MAX),
                 delegated: Some(false),
                 confined: Some(false),
+                remote_slot: Some(loaded_program.remote_slot),
             }
         };
 
@@ -71,6 +72,7 @@ impl BpfUpgradableProgramModifications {
                 rent_epoch: Some(u64::MAX),
                 delegated: Some(false),
                 confined: Some(false),
+                remote_slot: Some(loaded_program.remote_slot),
             }
         };
 

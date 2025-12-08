@@ -18,9 +18,5 @@ path = "../schedulecommit/elfs/dlp.so"
 id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
 path = "../schedulecommit/elfs/mdp.so"
 
-[[programs]]
-id = "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
-path = "../programs/noop/noop.so"
-
 [metrics]
 address = "0.0.0.0:9000"
