@@ -173,8 +173,8 @@ impl fmt::Display for LookupTableRc {
                 let comma_separated_pubkeys = pubkeys
                     .read()
                     .expect("pubkeys rwlock poisoned")
-                    .iter()
-                    .map(|(key, _)| key.to_string())
+                    .keys()
+                    .map(|key| key.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
                 let comma_separated_sigs = extend_signatures

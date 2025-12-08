@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use guinea::GuineaInstruction;
-use magicblock_config::TaskSchedulerConfig;
+use magicblock_config::config::TaskSchedulerConfig;
 use magicblock_program::{
     args::ScheduleTaskArgs,
     validator::{init_validator_authority_if_needed, validator_authority_id},
@@ -25,7 +25,7 @@ type SetupResult = TaskSchedulerResult<(
     JoinHandle<Result<(), TaskSchedulerError>>,
 )>;
 
-fn setup() -> SetupResult {
+async fn setup() -> SetupResult {
     let mut env = ExecutionTestEnv::new();
 
     init_validator_authority_if_needed(env.payer.insecure_clone());
@@ -51,14 +51,15 @@ fn setup() -> SetupResult {
         env.ledger.latest_block().clone(),
         token.clone(),
     )?
-    .start()?;
+    .start()
+    .await?;
 
     Ok((env, token, handle))
 }
 
 #[tokio::test]
 pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
-    let (env, token, handle) = setup()?;
+    let (env, token, handle) = setup().await?;
 
     let account =
         env.create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID);
@@ -110,7 +111,7 @@ pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
 
 #[tokio::test]
 pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
-    let (env, token, handle) = setup()?;
+    let (env, token, handle) = setup().await?;
 
     let account =
         env.create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID);
@@ -179,6 +180,9 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
         "failed to execute cancel task transaction: {:?}",
         result
     );
+
+    // Wait for the cancel to be processed
+    tokio::time::sleep(Duration::from_millis(interval as u64)).await;
 
     let value_at_cancel = env
         .get_account(account.pubkey())

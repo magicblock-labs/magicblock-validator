@@ -4,9 +4,12 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    AccountsCloneConfig, AccountsConfig, EphemeralConfig, LedgerConfig,
-    LedgerResumeStrategyConfig, LedgerResumeStrategyType, LifecycleMode,
-    RemoteCluster, RemoteConfig,
+    config::{
+        accounts::AccountsDbConfig, chain::ChainLinkConfig,
+        ledger::LedgerConfig, LifecycleMode,
+    },
+    types::network::{Remote, RemoteCluster},
+    ValidatorParams,
 };
 use solana_sdk::{signature::Keypair, signer::Signer, system_instruction};
 use test_kit::init_logger;
@@ -16,29 +19,19 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
     init_logger!();
 
     // Build an Ephemeral validator config that enables auto airdrop for fee payers
-    let config = EphemeralConfig {
-        accounts: AccountsConfig {
-            remote: RemoteConfig {
-                cluster: RemoteCluster::Custom,
-                url: Some(
-                    IntegrationTestContext::url_chain().try_into().unwrap(),
-                ),
-                ws_url: Some(vec![IntegrationTestContext::ws_url_chain()
-                    .try_into()
-                    .unwrap()]),
-            },
-            lifecycle: LifecycleMode::Ephemeral,
-            clone: AccountsCloneConfig {
-                auto_airdrop_lamports: 1_000_000_000,
-                ..Default::default()
-            },
+    let config = ValidatorParams {
+        lifecycle: LifecycleMode::Ephemeral,
+        remote: RemoteCluster::Single(Remote::Disjointed {
+            http: IntegrationTestContext::url_chain().parse().unwrap(),
+            ws: IntegrationTestContext::ws_url_chain().parse().unwrap(),
+        }),
+        accountsdb: AccountsDbConfig::default(),
+        chainlink: ChainLinkConfig {
+            auto_airdrop_lamports: 1_000_000_000,
             ..Default::default()
         },
         ledger: LedgerConfig {
-            resume_strategy_config: LedgerResumeStrategyConfig {
-                kind: LedgerResumeStrategyType::Reset,
-                ..Default::default()
-            },
+            reset: true,
             ..Default::default()
         },
         ..Default::default()

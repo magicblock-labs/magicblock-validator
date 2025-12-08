@@ -1,5 +1,9 @@
+use std::collections::HashSet;
+
+use magicblock_config::config::LifecycleMode;
+use solana_pubkey::Pubkey;
+
 use super::{RemoteAccountProviderError, RemoteAccountProviderResult};
-use crate::config::LifecycleMode;
 
 // TODO(thlorenz): make configurable
 // Tracked: https://github.com/magicblock-labs/magicblock-validator/issues/577
@@ -7,9 +11,15 @@ pub const DEFAULT_SUBSCRIBED_ACCOUNTS_LRU_CAPACITY: usize = 10_000;
 
 #[derive(Debug, Clone)]
 pub struct RemoteAccountProviderConfig {
+    /// How many accounts to monitor for changes
     subscribed_accounts_lru_capacity: usize,
+    /// Lifecycle mode of the validator
     lifecycle_mode: LifecycleMode,
+    /// Whether to enable metrics for account subscriptions
     enable_subscription_metrics: bool,
+    /// Set of program accounts to always subscribe to as backup
+    /// for direct account subs
+    program_subs: HashSet<Pubkey>,
 }
 
 impl RemoteAccountProviderConfig {
@@ -38,6 +48,7 @@ impl RemoteAccountProviderConfig {
             subscribed_accounts_lru_capacity,
             lifecycle_mode,
             enable_subscription_metrics,
+            ..Default::default()
         })
     }
 
@@ -59,6 +70,10 @@ impl RemoteAccountProviderConfig {
     pub fn enable_subscription_metrics(&self) -> bool {
         self.enable_subscription_metrics
     }
+
+    pub fn program_subs(&self) -> &HashSet<Pubkey> {
+        &self.program_subs
+    }
 }
 
 impl Default for RemoteAccountProviderConfig {
@@ -68,6 +83,7 @@ impl Default for RemoteAccountProviderConfig {
                 DEFAULT_SUBSCRIBED_ACCOUNTS_LRU_CAPACITY,
             lifecycle_mode: LifecycleMode::default(),
             enable_subscription_metrics: true,
+            program_subs: vec![dlp::id()].into_iter().collect(),
         }
     }
 }

@@ -247,11 +247,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
 async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
     commit_5_accounts_1kb(
         3,
-        expect_strategies(&[
-            // Intent fits in 1 TX only with ALT, see IntentExecutorImpl::try_unite_tasks
-            (CommitStrategy::FromBufferWithLookupTable, 3),
-            (CommitStrategy::FromBuffer, 2),
-        ]),
+        expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
         true,
     )
     .await;
@@ -517,8 +513,7 @@ async fn ix_commit_local(
         .await
         .unwrap()
         .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .expect("Some commits failed");
+        .collect::<Vec<_>>();
 
     // Assert that all completed
     assert_eq!(execution_outputs.len(), base_intents.len());
@@ -526,11 +521,11 @@ async fn ix_commit_local(
 
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
     let mut strategies = ExpectedStrategies::new();
-    for (execution_output, base_intent) in
+    for (execution_result, base_intent) in
         execution_outputs.into_iter().zip(base_intents.into_iter())
     {
-        let execution_output = execution_output.output;
-        let (commit_signature, finalize_signature) = match execution_output {
+        let output = execution_result.inner.unwrap();
+        let (commit_signature, finalize_signature) = match output {
             ExecutionOutput::SingleStage(signature) => (signature, signature),
             ExecutionOutput::TwoStage {
                 commit_signature,
@@ -538,6 +533,11 @@ async fn ix_commit_local(
             } => (commit_signature, finalize_signature),
         };
 
+        assert_eq!(
+            execution_result.patched_errors.len(),
+            0,
+            "No errors expected to be patched"
+        );
         assert!(
             tx_logs_contain(&rpc_client, &commit_signature, "CommitState")
                 .await
@@ -704,7 +704,7 @@ fn validate_account(
     let matches_undelegation = acc.owner().eq(&expected_owner);
     let matches_all = matches_data && matches_undelegation;
 
-    if !matches_all && remaining_tries % 4 == 0 {
+    if !matches_all && remaining_tries.is_multiple_of(4) {
         if !matches_data {
             trace!(
                 "Account ({}) data {} != {} || {} != {}",

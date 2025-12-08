@@ -1,7 +1,0 @@
-# We clone all accounts from chain, and allow writing on the delegated ones
-# We never create accounts at this point
-[accounts]
-lifecycle = "ephemeral"
-
-# Optionally deployment can hard-code a program whitelist
-allowed-programs = [{ id = "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4" }]

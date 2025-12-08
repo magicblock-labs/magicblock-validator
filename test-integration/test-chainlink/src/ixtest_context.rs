@@ -7,7 +7,7 @@ use log::*;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
     cloner::{AccountCloneRequest, Cloner},
-    config::{ChainlinkConfig, LifecycleMode},
+    config::ChainlinkConfig,
     fetch_cloner::FetchCloner,
     native_program_accounts,
     remote_account_provider::{
@@ -23,6 +23,7 @@ use magicblock_chainlink::{
     testing::cloner_stub::ClonerStub,
     Chainlink,
 };
+use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -144,7 +145,7 @@ impl IxtestContext {
             fetch_cloner,
             validator_kp.pubkey(),
             faucet_kp.pubkey(),
-            0,
+            &ChainLinkConfig::default(),
         )
         .unwrap();
 

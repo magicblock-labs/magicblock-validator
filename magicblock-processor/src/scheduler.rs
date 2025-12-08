@@ -141,9 +141,14 @@ impl TransactionScheduler {
 
     /// Updates the scheduler's state when a new slot begins.
     fn transition_to_new_slot(&self) {
+        let root = self.latest_block.load().slot;
+        let mut cache = self.program_cache.write().unwrap();
+        // Remove duplicate entries from programs cache
+        // NOTE: this is an important cleanup, as otherwise it might
+        // lead cache corruption issues over time as it fills up
+        cache.prune(root, 0);
         // Re-root the shared program cache to the new slot.
-        self.program_cache.write().unwrap().latest_root_slot =
-            self.latest_block.load().slot;
+        cache.latest_root_slot = root;
     }
 }
 

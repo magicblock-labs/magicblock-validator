@@ -4,11 +4,11 @@ pub mod single_stage_executor;
 pub mod task_info_fetcher;
 pub mod two_stage_executor;
 
-use std::{ops::ControlFlow, sync::Arc, time::Duration};
+use std::{mem, ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use futures_util::future::try_join_all;
-use log::{error, trace, warn};
+use futures_util::future::{join, try_join_all};
+use log::{trace, warn};
 use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
@@ -26,7 +26,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_sdk::{
     message::VersionedMessage,
-    signature::{Keypair, Signature, Signer, SignerError},
+    signature::{Keypair, Signature, Signer},
     transaction::VersionedTransaction,
 };
 
@@ -45,12 +45,13 @@ use crate::{
     tasks::{
         task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_strategist::{
-            TaskStrategist, TaskStrategistError, TransactionStrategy,
+            StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
         task_visitors::utility_visitor::TaskVisitorUtils,
         BaseTask, TaskType,
     },
     transaction_preparator::{
+        delivery_preparator::BufferExecutionError,
         error::TransactionPreparatorError, TransactionPreparator,
     },
     utils::persist_status_update_by_message_set,
@@ -82,15 +83,25 @@ impl metrics::LabelValue for ExecutionOutput {
     }
 }
 
+pub struct IntentExecutionResult {
+    /// Final result of Intent Execution
+    pub inner: IntentExecutorResult<ExecutionOutput>,
+    /// Errors patched along the way
+    pub patched_errors: Vec<TransactionStrategyExecutionError>,
+}
+
 #[async_trait]
 pub trait IntentExecutor: Send + Sync + 'static {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`
     async fn execute<P: IntentPersister>(
-        &self,
+        &mut self,
         base_intent: ScheduledBaseIntent,
         persister: Option<P>,
-    ) -> IntentExecutorResult<ExecutionOutput>;
+    ) -> IntentExecutionResult;
+
+    /// Cleans up after intent
+    async fn cleanup(self) -> Result<(), BufferExecutionError>;
 }
 
 pub struct IntentExecutorImpl<T, F> {
@@ -98,11 +109,16 @@ pub struct IntentExecutorImpl<T, F> {
     rpc_client: MagicblockRpcClient,
     transaction_preparator: T,
     task_info_fetcher: Arc<F>,
+
+    /// Junk that needs to be cleaned up
+    pub junk: Vec<TransactionStrategy>,
+    /// Errors we patched trying to recover intent
+    pub patched_errors: Vec<TransactionStrategyExecutionError>,
 }
 
 impl<T, F> IntentExecutorImpl<T, F>
 where
-    T: TransactionPreparator + Clone,
+    T: TransactionPreparator,
     F: TaskInfoFetcher,
 {
     pub fn new(
@@ -116,45 +132,13 @@ where
             rpc_client,
             transaction_preparator,
             task_info_fetcher,
-        }
-    }
-
-    /// Checks if it is possible to unite Commit & Finalize stages in 1 transaction
-    /// Returns corresponding `TransactionStrategy` if possible, otherwise `None`
-    fn try_unite_tasks<P: IntentPersister>(
-        commit_tasks: &[Box<dyn BaseTask>],
-        finalize_task: &[Box<dyn BaseTask>],
-        authority: &Pubkey,
-        persister: &Option<P>,
-    ) -> Result<Option<TransactionStrategy>, SignerError> {
-        const MAX_UNITED_TASKS_LEN: usize = 22;
-
-        // We can unite in 1 tx a lot of commits
-        // but then there's a possibility of hitting CPI limit, aka
-        // MaxInstructionTraceLengthExceeded error.
-        // So we limit tasks len with 22 total tasks
-        // In case this fails as well, it will be retried with TwoStage approach
-        // on retry, once retries are introduced
-        if commit_tasks.len() + finalize_task.len() > MAX_UNITED_TASKS_LEN {
-            return Ok(None);
-        }
-
-        // Clone tasks since strategies applied to united case maybe suboptimal for regular one
-        let mut commit_tasks = commit_tasks.to_owned();
-        let finalize_task = finalize_task.to_owned();
-
-        // Unite tasks to attempt running as single tx
-        commit_tasks.extend(finalize_task);
-        match TaskStrategist::build_strategy(commit_tasks, authority, persister)
-        {
-            Ok(strategy) => Ok(Some(strategy)),
-            Err(TaskStrategistError::FailedToFitError) => Ok(None),
-            Err(TaskStrategistError::SignerError(err)) => Err(err),
+            junk: vec![],
+            patched_errors: vec![],
         }
     }
 
     async fn execute_inner<P: IntentPersister>(
-        &self,
+        &mut self,
         base_intent: ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
@@ -173,17 +157,17 @@ where
             );
         }
 
-        // Build tasks for commit stage
-        let commit_tasks = TaskBuilderImpl::commit_tasks(
-            &self.task_info_fetcher,
-            &base_intent,
-            persister,
-        )
-        .await?;
-
         let committed_pubkeys = match base_intent.get_committed_pubkeys() {
             Some(value) => value,
             None => {
+                // Build tasks for commit stage
+                let commit_tasks = TaskBuilderImpl::commit_tasks(
+                    &self.task_info_fetcher,
+                    &base_intent,
+                    persister,
+                )
+                .await?;
+
                 // Standalone actions executed in single stage
                 let strategy = TaskStrategist::build_strategy(
                     commit_tasks,
@@ -200,94 +184,125 @@ where
             }
         };
 
-        let finalize_tasks = TaskBuilderImpl::finalize_tasks(
-            &self.task_info_fetcher,
-            &base_intent,
-        )
-        .await?;
+        // Build tasks for commit & finalize stages
+        let (commit_tasks, finalize_tasks) = {
+            let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
+                &self.task_info_fetcher,
+                &base_intent,
+                persister,
+            );
+            let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
+                &self.task_info_fetcher,
+                &base_intent,
+            );
+            let (commit_tasks, finalize_tasks) =
+                join(commit_tasks_fut, finalize_tasks_fut).await;
 
-        // See if we can squeeze them in one tx
-        if let Some(single_tx_strategy) = Self::try_unite_tasks(
-            &commit_tasks,
-            &finalize_tasks,
+            (commit_tasks?, finalize_tasks?)
+        };
+
+        // Build execution strategy
+        match TaskStrategist::build_execution_strategy(
+            commit_tasks,
+            finalize_tasks,
             &self.authority.pubkey(),
             persister,
         )? {
-            trace!("Executing intent in single stage");
-            let output = self
-                .single_stage_execution_flow(
+            StrategyExecutionMode::SingleStage(strategy) => {
+                trace!("Executing intent in single stage");
+                self.single_stage_execution_flow(
                     base_intent,
-                    single_tx_strategy,
+                    strategy,
                     persister,
                 )
-                .await?;
-
-            Ok(output)
-        } else {
-            // Build strategy for Commit stage
-            let commit_strategy = TaskStrategist::build_strategy(
-                commit_tasks,
-                &self.authority.pubkey(),
-                persister,
-            )?;
-
-            // Build strategy for Finalize stage
-            let finalize_strategy = TaskStrategist::build_strategy(
-                finalize_tasks,
-                &self.authority.pubkey(),
-                persister,
-            )?;
-
-            trace!("Executing intent in two stages");
-            let output = self
-                .two_stage_execution_flow(
+                .await
+            }
+            StrategyExecutionMode::TwoStage {
+                commit_stage,
+                finalize_stage,
+            } => {
+                trace!("Executing intent in two stages");
+                self.two_stage_execution_flow(
                     &committed_pubkeys,
-                    commit_strategy,
-                    finalize_strategy,
+                    commit_stage,
+                    finalize_stage,
                     persister,
                 )
-                .await?;
-
-            Ok(output)
+                .await
+            }
         }
     }
 
     /// Starting execution from single stage
     pub async fn single_stage_execution_flow<P: IntentPersister>(
-        &self,
+        &mut self,
         base_intent: ScheduledBaseIntent,
         transaction_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let mut junk = Vec::new();
-        let res = SingleStageExecutor::new(self)
-            .execute(base_intent, transaction_strategy, &mut junk, persister)
-            .await;
-        self.spawn_cleanup_task(junk);
+        let mut single_stage_executor =
+            SingleStageExecutor::new(self, transaction_strategy);
 
-        res
+        let committed_pubkeys = base_intent.get_committed_pubkeys();
+        let res = single_stage_executor
+            .execute(committed_pubkeys.as_deref(), persister)
+            .await;
+
+        // Here we continue only IF the error is CpiLimitError
+        // We can recover that Error by splitting execution
+        // in 2 stages - commit & finalize
+        // Otherwise we return error
+        let transaction_strategy = single_stage_executor.transaction_strategy;
+        let execution_err = match res {
+            Err(IntentExecutorError::FailedToFinalizeError {
+                err:
+                    err @ TransactionStrategyExecutionError::CpiLimitError(_, _),
+                commit_signature: _,
+                finalize_signature: _,
+            }) if committed_pubkeys.is_some() => err,
+            res => {
+                self.junk.push(transaction_strategy);
+                return res;
+            }
+        };
+
+        // With actions, we can't predict num of CPIs
+        // If we get here we will try to switch from Single stage to Two Stage commit
+        // Note that this not necessarily will pass at the end due to the same reason
+        // SAFETY: is_some() checked prior
+        let committed_pubkeys = committed_pubkeys.unwrap();
+        let (commit_strategy, finalize_strategy, cleanup) =
+            self.handle_cpi_limit_error(transaction_strategy);
+        self.junk.push(cleanup);
+        self.patched_errors.push(execution_err);
+
+        self.two_stage_execution_flow(
+            &committed_pubkeys,
+            commit_strategy,
+            finalize_strategy,
+            persister,
+        )
+        .await
     }
 
     pub async fn two_stage_execution_flow<P: IntentPersister>(
-        &self,
+        &mut self,
         committed_pubkeys: &[Pubkey],
         commit_strategy: TransactionStrategy,
         finalize_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let mut junk = Vec::new();
-        let res = TwoStageExecutor::new(self)
-            .execute(
-                committed_pubkeys,
-                commit_strategy,
-                finalize_strategy,
-                &mut junk,
-                persister,
-            )
-            .await;
-        self.spawn_cleanup_task(junk);
+        let finalized_stage =
+            TwoStageExecutor::new(self, commit_strategy, finalize_strategy)
+                .commit(committed_pubkeys, persister)
+                .await?
+                .finalize(persister)
+                .await?;
 
-        res
+        Ok(ExecutionOutput::TwoStage {
+            commit_signature: finalized_stage.state.commit_signature,
+            finalize_signature: finalized_stage.state.finalize_signature,
+        })
     }
 
     /// Handles out of sync commit id error, fixes current strategy
@@ -416,7 +431,7 @@ where
         (commit_strategy, finalize_strategy, to_cleanup)
     }
 
-    /// Handles actions error, stripping away actions
+    /// Handles undelegation error, stripping away actions
     /// Returns [`TransactionStrategy`] to be cleaned up
     fn handle_undelegation_error(
         &self,
@@ -518,10 +533,6 @@ where
 
                 return;
             }
-            Err(IntentExecutorError::CommitIDError(_, _))
-            | Err(IntentExecutorError::ActionsError(_, _))
-            | Err(IntentExecutorError::CpiLimitError(_, _))
-            | Err(IntentExecutorError::UndelegationError(_, _)) => None,
             Err(IntentExecutorError::EmptyIntentError)
             | Err(IntentExecutorError::FailedToFitError)
             | Err(IntentExecutorError::TaskBuilderError(_))
@@ -640,7 +651,7 @@ where
                     InternalError::MagicBlockRpcClientError(err) => {
                         map_magicblock_client_error(
                             &self.transaction_error_mapper,
-                            err,
+                            *err,
                         )
                     }
                     err => {
@@ -677,31 +688,6 @@ where
             |i, elapsed| !(elapsed < RETRY_FOR || i < MIN_ATTEMPTS),
         )
         .await
-    }
-
-    /// Cleanup after intent
-    /// Note: in some cases it maybe critical to execute cleanup synchronously
-    /// Example: if commit nonces were invalid during execution
-    /// next intent could use wrongly initiated buffers by current intent
-    /// We assume that this case is highly unlikely since it would mean:
-    /// user redelegates amd reaches current commit id faster than we execute transactions below
-    fn spawn_cleanup_task(&self, junk: Vec<TransactionStrategy>) {
-        let authority = self.authority.insecure_clone();
-        let transaction_preparator = self.transaction_preparator.clone();
-        let cleanup_fut = async move {
-            let cleanup_futs = junk.iter().map(|to_cleanup| {
-                transaction_preparator.cleanup_for_strategy(
-                    &authority,
-                    &to_cleanup.optimized_tasks,
-                    &to_cleanup.lookup_tables_keys,
-                )
-            });
-
-            if let Err(err) = try_join_all(cleanup_futs).await {
-                error!("Failed to cleanup after intent: {}", err);
-            }
-        };
-        tokio::spawn(cleanup_fut);
     }
 
     async fn intent_metrics(
@@ -767,16 +753,16 @@ where
 #[async_trait]
 impl<T, C> IntentExecutor for IntentExecutorImpl<T, C>
 where
-    T: TransactionPreparator + Clone,
+    T: TransactionPreparator,
     C: TaskInfoFetcher,
 {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`
     async fn execute<P: IntentPersister>(
-        &self,
+        &mut self,
         base_intent: ScheduledBaseIntent,
         persister: Option<P>,
-    ) -> IntentExecutorResult<ExecutionOutput> {
+    ) -> IntentExecutionResult {
         let message_id = base_intent.id;
         let is_undelegate = base_intent.is_undelegate();
         let pubkeys = base_intent.get_committed_pubkeys();
@@ -793,87 +779,31 @@ where
             // Write result of intent into Persister
             Self::persist_result(&persister, &result, message_id, &pubkeys);
         }
-        result.inspect(|output| {
+
+        // Gather metrics in separate task
+        let result = result.inspect(|output| {
             tokio::spawn(Self::intent_metrics(
                 self.rpc_client.clone(),
                 *output,
             ));
-        })
-    }
-}
+        });
 
-#[cfg(test)]
-mod tests {
-    use std::{collections::HashMap, sync::Arc};
-
-    use solana_pubkey::Pubkey;
-
-    use crate::{
-        intent_execution_manager::intent_scheduler::create_test_intent,
-        intent_executor::{
-            task_info_fetcher::{
-                ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
-            },
-            IntentExecutorImpl,
-        },
-        persist::IntentPersisterImpl,
-        tasks::task_builder::{TaskBuilderImpl, TasksBuilder},
-        transaction_preparator::TransactionPreparatorImpl,
-    };
-
-    struct MockInfoFetcher;
-    #[async_trait::async_trait]
-    impl TaskInfoFetcher for MockInfoFetcher {
-        async fn fetch_next_commit_ids(
-            &self,
-            pubkeys: &[Pubkey],
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+        IntentExecutionResult {
+            inner: result,
+            patched_errors: mem::take(&mut self.patched_errors),
         }
-
-        async fn fetch_rent_reimbursements(
-            &self,
-            pubkeys: &[Pubkey],
-        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
-        }
-
-        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
-            Some(0)
-        }
-
-        fn reset(&self, _: ResetType) {}
     }
 
-    #[tokio::test]
-    async fn test_try_unite() {
-        let pubkey = [Pubkey::new_unique()];
-        let intent = create_test_intent(0, &pubkey);
+    /// Cleanup after intent using junk
+    async fn cleanup(mut self) -> Result<(), BufferExecutionError> {
+        let cleanup_futs = self.junk.iter().map(|to_cleanup| {
+            self.transaction_preparator.cleanup_for_strategy(
+                &self.authority,
+                &to_cleanup.optimized_tasks,
+                &to_cleanup.lookup_tables_keys,
+            )
+        });
 
-        let info_fetcher = Arc::new(MockInfoFetcher);
-        let commit_task = TaskBuilderImpl::commit_tasks(
-            &info_fetcher,
-            &intent,
-            &None::<IntentPersisterImpl>,
-        )
-        .await
-        .unwrap();
-        let finalize_task =
-            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
-                .await
-                .unwrap();
-
-        let result = IntentExecutorImpl::<
-            TransactionPreparatorImpl,
-            MockInfoFetcher,
-        >::try_unite_tasks(
-            &commit_task,
-            &finalize_task,
-            &Pubkey::new_unique(),
-            &None::<IntentPersisterImpl>,
-        );
-
-        let strategy = result.unwrap().unwrap();
-        assert!(strategy.lookup_tables_keys.is_empty());
+        try_join_all(cleanup_futs).await.map(|_| ())
     }
 }

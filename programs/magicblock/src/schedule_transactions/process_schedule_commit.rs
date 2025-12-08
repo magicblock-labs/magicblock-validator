@@ -11,8 +11,8 @@ use solana_sdk::{
 
 use crate::{
     magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
-        ScheduledBaseIntent, UndelegateType,
+        validate_commit_schedule_permissions, CommitAndUndelegate, CommitType,
+        CommittedAccount, MagicBaseIntent, ScheduledBaseIntent, UndelegateType,
     },
     schedule_transactions,
     utils::{
@@ -23,7 +23,6 @@ use crate::{
         },
         instruction_utils::InstructionUtils,
     },
-    validator::validator_authority_id,
     MagicContext,
 };
 
@@ -154,12 +153,21 @@ pub(crate) fn process_schedule_commit(
     // program owning the PDAs invoked us via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
-    let val_id = validator_authority_id();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
+
+        if acc.borrow().confined() {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: account {} is confined and cannot be committed",
+                acc_pubkey
+            );
+            return Err(InstructionError::InvalidAccountData);
+        }
+
         {
             if opts.request_undelegation {
                 // Check if account is writable and also undelegated
@@ -184,29 +192,15 @@ pub(crate) fn process_schedule_commit(
                 return Err(InstructionError::IllegalOwner);
             };
 
+            // Validate committed account was scheduled by valid authority
             let acc_owner = *acc.borrow().owner();
-            if parent_program_id != Some(&acc_owner)
-                && !signers.contains(acc_pubkey)
-                && !signers.contains(&val_id)
-            {
-                return match parent_program_id {
-                    None => {
-                        ic_msg!(
-                            invoke_context,
-                            "ScheduleCommit ERR: failed to find parent program id"
-                        );
-                        Err(InstructionError::InvalidInstructionData)
-                    }
-                    Some(parent_id) => {
-                        ic_msg!(
-                            invoke_context,
-                                "ScheduleCommit ERR: account {} needs to be owned by the invoking program {}, be a signer, or ix must be signed by the validator to be committed, but is owned by {}",
-                                acc_pubkey, parent_id, acc_owner
-                            );
-                        Err(InstructionError::InvalidAccountOwner)
-                    }
-                };
-            }
+            validate_commit_schedule_permissions(
+                &invoke_context,
+                &acc_owner,
+                acc_pubkey,
+                parent_program_id,
+                &signers,
+            )?;
 
             let mut account: Account = acc.borrow().to_owned().into();
             account.owner = parent_program_id.cloned().unwrap_or(account.owner);

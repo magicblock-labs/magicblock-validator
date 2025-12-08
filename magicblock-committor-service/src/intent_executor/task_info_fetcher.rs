@@ -6,15 +6,14 @@ use async_trait::async_trait;
 use dlp::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
-use log::{error, warn};
+use log::warn;
 use lru::LruCache;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 
-const NUM_FETCH_RETRIES: NonZeroUsize =
-    unsafe { NonZeroUsize::new_unchecked(5) };
+const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
 
 #[async_trait]
@@ -51,8 +50,7 @@ pub struct CacheTaskInfoFetcher {
 
 impl CacheTaskInfoFetcher {
     pub fn new(rpc_client: MagicblockRpcClient) -> Self {
-        const CACHE_SIZE: NonZeroUsize =
-            unsafe { NonZeroUsize::new_unchecked(1000) };
+        const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 
         Self {
             rpc_client,
@@ -274,7 +272,13 @@ pub enum TaskInfoFetcherError {
     #[error("InvalidAccountDataError for: {0}")]
     InvalidAccountDataError(Pubkey),
     #[error("MagicBlockRpcClientError: {0}")]
-    MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
+    MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
+}
+
+impl From<MagicBlockRpcClientError> for TaskInfoFetcherError {
+    fn from(e: MagicBlockRpcClientError) -> Self {
+        Self::MagicBlockRpcClientError(Box::new(e))
+    }
 }
 
 impl TaskInfoFetcherError {

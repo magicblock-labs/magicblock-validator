@@ -8,6 +8,7 @@ use std::{
 
 use hyper::body::Bytes;
 use magicblock_accounts_db::AccountsDb;
+use magicblock_config::config::ChainLinkConfig;
 use solana_pubkey::Pubkey;
 use test_kit::{
     guinea::{self, GuineaInstruction},
@@ -39,12 +40,13 @@ fn ws_channel() -> (WsConnectionChannel, Receiver<Bytes>) {
 }
 
 fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
+    let cfg = ChainLinkConfig::default();
     ChainlinkImpl::try_new(
         accounts_db,
         None,
         Pubkey::new_unique(),
         Pubkey::new_unique(),
-        0,
+        &cfg,
     )
     .expect("Failed to create Chainlink")
 }
@@ -61,6 +63,7 @@ mod event_processor {
         env.advance_slot();
         let node_context = NodeContext {
             identity: env.payer.pubkey(),
+            blocktime: 50,
             ..Default::default()
         };
         let state = SharedState::new(
@@ -68,7 +71,6 @@ mod event_processor {
             env.accountsdb.clone(),
             env.ledger.clone(),
             Arc::new(chainlink(&env.accountsdb)),
-            50,
         );
         let cancel = CancellationToken::new();
         EventProcessor::start(&state, &env.dispatch, 1, cancel);

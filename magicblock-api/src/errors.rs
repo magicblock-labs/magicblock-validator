@@ -9,23 +9,20 @@ pub enum ApiError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("Config error: {0}")]
-    ConfigError(#[from] magicblock_config::errors::ConfigError),
-
     #[error("RPC service error: {0}")]
     RpcError(#[from] magicblock_aperture::error::RpcError),
 
     #[error("Accounts error: {0}")]
-    AccountsError(#[from] magicblock_accounts::errors::AccountsError),
+    AccountsError(Box<magicblock_accounts::errors::AccountsError>),
 
     #[error("AccountCloner error: {0}")]
-    AccountClonerError(#[from] magicblock_account_cloner::AccountClonerError),
+    AccountClonerError(Box<magicblock_account_cloner::AccountClonerError>),
 
     #[error("Ledger error: {0}")]
-    LedgerError(#[from] magicblock_ledger::errors::LedgerError),
+    LedgerError(Box<magicblock_ledger::errors::LedgerError>),
 
     #[error("Chainlink error: {0}")]
-    ChainlinkError(#[from] magicblock_chainlink::errors::ChainlinkError),
+    ChainlinkError(Box<magicblock_chainlink::errors::ChainlinkError>),
 
     #[error("Failed to obtain balance for validator '{0}' from chain. ({1})")]
     FailedToObtainValidatorOnChainBalance(Pubkey, String),
@@ -35,7 +32,7 @@ pub enum ApiError {
 
     #[error("CommittorServiceError")]
     CommittorServiceError(
-        #[from] magicblock_committor_service::error::CommittorServiceError,
+        Box<magicblock_committor_service::error::CommittorServiceError>,
     ),
 
     #[error("Failed to load programs into bank: {0}")]
@@ -94,11 +91,51 @@ pub enum ApiError {
 
     #[error("TaskSchedulerServiceError")]
     TaskSchedulerServiceError(
-        #[from] magicblock_task_scheduler::TaskSchedulerError,
+        Box<magicblock_task_scheduler::TaskSchedulerError>,
     ),
 
     #[error("Failed to sanitize transaction: {0}")]
     FailedToSanitizeTransaction(
         #[from] solana_sdk::transaction::TransactionError,
     ),
+}
+
+impl From<magicblock_accounts::errors::AccountsError> for ApiError {
+    fn from(e: magicblock_accounts::errors::AccountsError) -> Self {
+        Self::AccountsError(Box::new(e))
+    }
+}
+
+impl From<magicblock_account_cloner::AccountClonerError> for ApiError {
+    fn from(e: magicblock_account_cloner::AccountClonerError) -> Self {
+        Self::AccountClonerError(Box::new(e))
+    }
+}
+
+impl From<magicblock_ledger::errors::LedgerError> for ApiError {
+    fn from(e: magicblock_ledger::errors::LedgerError) -> Self {
+        Self::LedgerError(Box::new(e))
+    }
+}
+
+impl From<magicblock_chainlink::errors::ChainlinkError> for ApiError {
+    fn from(e: magicblock_chainlink::errors::ChainlinkError) -> Self {
+        Self::ChainlinkError(Box::new(e))
+    }
+}
+
+impl From<magicblock_committor_service::error::CommittorServiceError>
+    for ApiError
+{
+    fn from(
+        e: magicblock_committor_service::error::CommittorServiceError,
+    ) -> Self {
+        Self::CommittorServiceError(Box::new(e))
+    }
+}
+
+impl From<magicblock_task_scheduler::TaskSchedulerError> for ApiError {
+    fn from(e: magicblock_task_scheduler::TaskSchedulerError) -> Self {
+        Self::TaskSchedulerServiceError(Box::new(e))
+    }
 }

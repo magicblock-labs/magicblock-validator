@@ -5,7 +5,7 @@ use index::{
     iterator::OffsetPubkeyIter, utils::AccountOffsetFinder, AccountsDbIndex,
 };
 use log::{error, warn};
-use magicblock_config::AccountsDbConfig;
+use magicblock_config::config::AccountsDbConfig;
 use magicblock_core::traits::AccountsBank;
 use parking_lot::RwLock;
 use snapshot::SnapshotEngine;
@@ -47,12 +47,17 @@ impl AccountsDb {
         let directory = directory.join(format!("{ACCOUNTSDB_DIR}/main"));
         let lock = StWLock::default();
 
+        if config.reset && std::fs::exists(&directory)? {
+            std::fs::remove_dir_all(&directory).inspect_err(log_err!(
+                "failed to reset accountsdb root directory"
+            ))?;
+        }
         std::fs::create_dir_all(&directory).inspect_err(log_err!(
             "ensuring existence of accountsdb directory"
         ))?;
         let storage = AccountsStorage::new(config, &directory)
             .inspect_err(log_err!("storage creation"))?;
-        let index = AccountsDbIndex::new(config.index_map_size, &directory)
+        let index = AccountsDbIndex::new(config.index_size, &directory)
             .inspect_err(log_err!("index creation"))?;
         let snapshot_engine =
             SnapshotEngine::new(directory, config.max_snapshots as usize)
@@ -181,7 +186,7 @@ impl AccountsDb {
         &self,
         program: &Pubkey,
         filter: F,
-    ) -> AccountsDbResult<AccountsScanner<F>>
+    ) -> AccountsDbResult<AccountsScanner<'_, F>>
     where
         F: Fn(&AccountSharedData) -> bool + 'static,
     {
@@ -241,7 +246,7 @@ impl AccountsDb {
     pub fn set_slot(self: &Arc<Self>, slot: u64) {
         self.storage.set_slot(slot);
 
-        if 0 != slot % self.snapshot_frequency {
+        if !slot.is_multiple_of(self.snapshot_frequency) {
             return;
         }
         let this = self.clone();

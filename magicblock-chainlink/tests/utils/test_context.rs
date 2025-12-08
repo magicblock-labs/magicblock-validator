@@ -7,7 +7,6 @@ use std::{
 use log::*;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
-    config::LifecycleMode,
     errors::ChainlinkResult,
     fetch_cloner::{FetchAndCloneResult, FetchCloner},
     remote_account_provider::{
@@ -24,6 +23,7 @@ use magicblock_chainlink::{
     },
     AccountFetchOrigin, Chainlink,
 };
+use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
 use solana_sdk::{clock::Slot, sysvar::clock};
@@ -112,7 +112,7 @@ impl TestContext {
             fetch_cloner,
             validator_pubkey,
             faucet_pubkey,
-            0,
+            &ChainLinkConfig::default(),
         )
         .unwrap();
         Self {

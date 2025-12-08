@@ -37,9 +37,6 @@ use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
 
-const NOOP_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
-
 /// A simulated validator backend for integration tests.
 ///
 /// This struct encapsulates all the core components of a validator, including
@@ -134,12 +131,6 @@ impl ExecutionTestEnv {
             .load_upgradeable_programs(&[(
                 guinea::ID,
                 "../programs/elfs/guinea.so".into(),
-            )])
-            .expect("failed to load test programs into test env");
-        scheduler_state
-            .load_upgradeable_programs(&[(
-                NOOP_PROGRAM_ID,
-                "../test-integration/programs/noop/noop.so".into(),
             )])
             .expect("failed to load test programs into test env");
 
@@ -291,7 +282,7 @@ impl ExecutionTestEnv {
         }
     }
 
-    pub fn get_payer(&self) -> CommitableAccount {
+    pub fn get_payer(&self) -> CommitableAccount<'_> {
         self.get_account(self.payer.pubkey())
     }
 }

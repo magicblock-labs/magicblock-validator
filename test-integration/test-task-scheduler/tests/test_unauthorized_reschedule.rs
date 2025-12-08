@@ -8,9 +8,8 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use test_task_scheduler::{
-    create_delegated_counter, send_noop_tx, setup_validator,
-};
+use test_task_scheduler::{create_delegated_counter, setup_validator};
+use tokio::runtime::Runtime;
 
 #[test]
 fn test_unauthorized_reschedule() {
@@ -33,8 +32,8 @@ fn test_unauthorized_reschedule() {
     create_delegated_counter(&ctx, &payer, &mut validator, 0);
     create_delegated_counter(&ctx, &different_payer, &mut validator, 0);
 
-    // Noop tx to make sure the noop program is cloned
-    let ephem_blockhash = send_noop_tx(&ctx, &payer, &mut validator);
+    let ephem_blockhash =
+        expect!(ctx.try_get_latest_blockhash_ephem(), validator);
 
     // Schedule a task
     let task_id = 1;
@@ -108,8 +107,10 @@ fn test_unauthorized_reschedule() {
 
     // Check that one task is scheduled but another one is failed to schedule
     let db = expect!(SchedulerDatabase::new(db_path), validator);
+    let runtime = expect!(Runtime::new(), validator);
 
-    let failed_scheduling = expect!(db.get_failed_schedulings(), validator);
+    let failed_scheduling =
+        expect!(runtime.block_on(db.get_failed_schedulings()), validator);
     assert_eq!(
         failed_scheduling.len(),
         1,
@@ -118,7 +119,8 @@ fn test_unauthorized_reschedule() {
         failed_scheduling,
     );
 
-    let failed_tasks = expect!(db.get_failed_tasks(), validator);
+    let failed_tasks =
+        expect!(runtime.block_on(db.get_failed_tasks()), validator);
     assert_eq!(
         failed_tasks.len(),
         0,
@@ -127,11 +129,12 @@ fn test_unauthorized_reschedule() {
         failed_tasks
     );
 
-    let tasks = expect!(db.get_task_ids(), validator);
+    let tasks = expect!(runtime.block_on(db.get_task_ids()), validator);
     assert_eq!(tasks.len(), 1, cleanup(&mut validator));
 
     let task = expect!(
-        db.get_task(task_id)
+        runtime
+            .block_on(db.get_task(task_id))
             .ok()
             .flatten()
             .ok_or(anyhow::anyhow!("Task not found")),

@@ -219,7 +219,20 @@ where
                         if in_bank.undelegating() {
                             // We expect the account to still be delegated, but with the delegation
                             // program owner
-                            debug!("Received update for undelegating account {pubkey} delegated in bank={} delegated on chain={}", in_bank.delegated(), account.delegated());
+                            debug!("Received update for undelegating account {pubkey} \
+                                in_bank.delegated={}, \
+                                in_bank.owner={}, \
+                                in_bank.remote_slot={}, \
+                                chain.delegated={}, \
+                                chain.owner={}, \
+                                chain.remote_slot={}",
+                                in_bank.delegated(),
+                                in_bank.owner(),
+                                in_bank.remote_slot(),
+                                account.delegated(),
+                                account.owner(),
+                                account.remote_slot()
+                            );
 
                             // This will only be true in the following case:
                             // 1. a commit was triggered for the account
@@ -416,24 +429,19 @@ where
                                 if log::log_enabled!(log::Level::Trace) {
                                     trace!("Delegation record found for {pubkey}: {delegation_record:?}");
                                     trace!(
-                                        "Cloning delegated account: {pubkey} (remote slot {}, owner: {})",
+                                        "Resolving delegated account: {pubkey} (remote slot {}, owner: {})",
                                         account.remote_slot(),
                                         delegation_record.owner
                                     );
                                 }
-                                let is_delegated_to_us = delegation_record
-                                    .authority
-                                    .eq(&self.validator_pubkey) ||
-                                    // TODO(thlorenz): @ once the delegation program supports
-                                    // delegating to specific authority we need to remove the below
-                                    delegation_record.authority.eq(&Pubkey::default());
 
-                                account
-                                    .set_owner(delegation_record.owner)
-                                    .set_delegated(is_delegated_to_us);
+                                self.apply_delegation_record_to_account(
+                                    &mut account,
+                                    &delegation_record,
+                                );
 
                                 // For accounts delegated to us, always unsubscribe from the delegated account
-                                if is_delegated_to_us {
+                                if account.delegated() {
                                     subs_to_remove.insert(pubkey);
                                 }
 
@@ -500,6 +508,31 @@ where
                     err,
                 )
             })
+    }
+
+    /// Applies delegation record settings to an account: sets the owner,
+    /// delegation status, and confined status based on the delegation
+    /// record's authority field.
+    /// Returns commit frequency if account is delegated to us
+    fn apply_delegation_record_to_account(
+        &self,
+        account: &mut ResolvedAccountSharedData,
+        delegation_record: &DelegationRecord,
+    ) -> Option<u64> {
+        let is_confined = delegation_record.authority.eq(&Pubkey::default());
+        let is_delegated_to_us =
+            delegation_record.authority.eq(&self.validator_pubkey)
+                || is_confined;
+
+        account
+            .set_owner(delegation_record.owner)
+            .set_confined(is_confined)
+            .set_delegated(is_delegated_to_us);
+        if is_delegated_to_us {
+            Some(delegation_record.commit_frequency_ms)
+        } else {
+            None
+        }
     }
 
     /// Fetches and parses the delegation record for an account, returning the
@@ -879,20 +912,11 @@ where
                     };
 
                     trace!("Delegation record found for {pubkey}: {delegation_record:?}");
-                    let is_delegated_to_us = delegation_record
-                        .authority
-                        .eq(&self.validator_pubkey) ||
-                        // TODO(thlorenz): @ once the delegation program supports
-                        // delegating to specific authority we need to remove the below
-                        delegation_record.authority.eq(&Pubkey::default());
-                    account
-                        .set_owner(delegation_record.owner)
-                        .set_delegated(is_delegated_to_us);
-                    if is_delegated_to_us {
-                        Some(delegation_record.commit_frequency_ms)
-                    } else {
-                        None
-                    }
+
+                    self.apply_delegation_record_to_account(
+                        &mut account,
+                        &delegation_record,
+                    )
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.remote_slot()));
@@ -1351,7 +1375,16 @@ where
                     }
                     RefreshDecision::No => {
                         // Account is in bank and subscribed correctly - no fetch needed
-                        trace!("Account {pubkey} found in bank in valid state, no fetch needed");
+                        if log::log_enabled!(log::Level::Trace) {
+                            let undelegating = account_in_bank.undelegating();
+                            let delegated = account_in_bank.delegated();
+                            let owner = account_in_bank.owner().to_string();
+                            trace!("Account {pubkey} found in bank in valid state, no fetch needed \
+                                    undelegating = {undelegating}, \
+                                    delegated = {delegated}, \
+                                    owner={owner}"
+                            );
+                        }
                         in_bank.push(*pubkey);
                     }
                 }
@@ -3130,6 +3163,102 @@ mod tests {
             remote_account_provider,
             &[&marked_non_existing_account_pubkey]
         );
+    }
+
+    #[tokio::test]
+    async fn test_confined_delegation_behavior() {
+        init_logger();
+        let validator_pubkey = random_pubkey();
+        let account_owner = random_pubkey();
+        const CURRENT_SLOT: u64 = 100;
+
+        // Account 1: Delegated to validator authority -> Not confined
+        let account1_pubkey = random_pubkey();
+        let account1 = Account {
+            lamports: 1_000_000,
+            data: vec![1, 2, 3],
+            owner: dlp::id(), // Owned by DLP initially (as it is delegated)
+            executable: false,
+            rent_epoch: 0,
+        };
+
+        // Account 2: Delegated to default pubkey -> Confined
+        let account2_pubkey = random_pubkey();
+        let account2 = Account {
+            lamports: 2_000_000,
+            data: vec![4, 5, 6],
+            owner: dlp::id(),
+            executable: false,
+            rent_epoch: 0,
+        };
+
+        let FetcherTestCtx {
+            accounts_bank,
+            fetch_cloner,
+            rpc_client,
+            ..
+        } = setup(
+            [
+                (account1_pubkey, account1.clone()),
+                (account2_pubkey, account2.clone()),
+            ],
+            CURRENT_SLOT,
+            validator_pubkey,
+        )
+        .await;
+
+        // Add delegation record for Account 1 (Authority = Validator)
+        add_delegation_record_for(
+            &rpc_client,
+            account1_pubkey,
+            validator_pubkey,
+            account_owner,
+        );
+
+        // Add delegation record for Account 2 (Authority = Default/System)
+        add_delegation_record_for(
+            &rpc_client,
+            account2_pubkey,
+            Pubkey::default(),
+            account_owner,
+        );
+
+        // Fetch and clone both accounts
+        fetch_cloner
+            .fetch_and_clone_accounts(
+                &[account1_pubkey, account2_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await
+            .expect("Failed to fetch and clone accounts");
+
+        // Verify not confined Account
+        let cloned_account1 = accounts_bank
+            .get_account(&account1_pubkey)
+            .expect("Account 1 not found");
+        assert!(cloned_account1.delegated(), "Account 1 should be delegated");
+        assert!(
+            !cloned_account1.confined(),
+            "Account 1 (delegated to validator) should NOT be confined"
+        );
+        assert_eq!(cloned_account1.owner(), &account_owner);
+
+        // Verify confined Account
+        let cloned_account2 = accounts_bank
+            .get_account(&account2_pubkey)
+            .expect("Account 2 not found");
+        assert!(
+            cloned_account2.delegated(),
+            "Account 2 should be delegated (to us, via confinement)"
+        );
+        assert!(
+            cloned_account2.confined(),
+            "Account 2 (delegated to default) SHOULD be confined"
+        );
+        assert_eq!(cloned_account2.owner(), &account_owner);
     }
 
     #[tokio::test]

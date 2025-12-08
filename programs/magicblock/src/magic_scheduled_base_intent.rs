@@ -23,6 +23,7 @@ use crate::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx,
     },
+    validator::validator_authority_id,
 };
 
 /// Context necessary for construction of Schedule Action
@@ -351,28 +352,15 @@ impl CommitType {
                 return Err(InstructionError::IllegalOwner)
             }
 
+            // Validate committed account was scheduled by valid authority
             let owner = *account_shared.owner();
-            if context.parent_program_id != Some(owner) && !context.signers.contains(pubkey) {
-                match context.parent_program_id {
-                    None => {
-                        ic_msg!(
-                            context.invoke_context,
-                            "ScheduleCommit ERR: failed to find parent program id"
-                        );
-                        Err(InstructionError::InvalidInstructionData)
-                    }
-                    Some(parent_id) => {
-                        ic_msg!(
-                            context.invoke_context,
-                            "ScheduleCommit ERR: account {} must be owned by {} or be a signer, but is owned by {}",
-                            pubkey, parent_id, owner
-                        );
-                        Err(InstructionError::InvalidAccountOwner)
-                    }
-                }
-            } else {
-                Ok(())
-            }
+            validate_commit_schedule_permissions(
+                &context.invoke_context,
+                &owner,
+                pubkey,
+                context.parent_program_id.as_ref(),
+                context.signers,
+            )
         })
     }
 
@@ -518,5 +506,49 @@ impl UndelegateType {
                 Ok(UndelegateType::WithBaseActions(base_actions))
             }
         }
+    }
+}
+
+/// Validate that a committee account has a permission to be committed.
+///
+/// Invariants:
+/// - The account must be owned by the parent program *or*
+/// - The account pubkey must be a signer *or*
+/// - The validator authority must have signed the transaction.
+///
+/// If none of the above holds, returns `InvalidInstructionData` when
+/// the parent program id cannot be determined, or `InvalidAccountOwner`
+/// when the owner does not match the invoking program.
+pub(crate) fn validate_commit_schedule_permissions(
+    invoke_context: &&mut InvokeContext,
+    committee_owner: &Pubkey,
+    committee_pubkey: &Pubkey,
+    parent_program_id: Option<&Pubkey>,
+    signers: &HashSet<Pubkey>,
+) -> Result<(), InstructionError> {
+    let validator_id = validator_authority_id();
+    if parent_program_id != Some(committee_owner)
+        && !signers.contains(committee_pubkey)
+        && !signers.contains(&validator_id)
+    {
+        match parent_program_id {
+            None => {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit ERR: failed to find parent program id"
+                );
+                Err(InstructionError::InvalidInstructionData)
+            }
+            Some(parent_id) => {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit ERR: account {} needs to be owned by the invoking program {}, be a signer, or ix must be signed by the validator to be committed, but is owned by {}",
+                    committee_pubkey, parent_id, committee_owner
+                );
+                Err(InstructionError::InvalidAccountOwner)
+            }
+        }
+    } else {
+        Ok(())
     }
 }

@@ -15,7 +15,7 @@ use solana_pubkey::Pubkey;
 /// - `pubkey`: the account pubkey
 /// - `is_delegated_on_chain`: whether the account is currently delegated to us on chain
 /// - `remote_slot_in_bank`: the chain slot at which we last fetched and cloned state
-///                  of the account in our bank
+///   of the account in our bank
 /// - `delegation_record`: the delegation record associated with the account in our bank, if found
 /// - `validator_auth`: the validator authority pubkey
 /// - returns `true` if the account is still undelegating, `false` otherwise.
@@ -55,7 +55,7 @@ pub(crate) fn account_still_undelegating_on_chain(
             .as_ref()
             .map(|d| d.delegation_slot)
             .unwrap_or_default();
-        if delegation_slot < remote_slot_in_bank {
+        if delegation_slot <= remote_slot_in_bank {
             // The last update of the account was after the last delegation
             // Therefore the account was not redelegated which indicates
             // that the undelegation is still not completed. Case (D))
@@ -132,14 +132,17 @@ mod tests {
         // Case B: The account was undelegated and was re-delegated to us.
         // Conditions:
         // - is_delegated: true (account is delegated to us on chain)
-        // - delegation_slot >= remote_slot (delegation happend after we last updated the account)
+        // - delegation_slot > remote_slot (delegation happend after we last updated the account)
         // Expected: true (should override/update)
 
         let pubkey = Pubkey::default();
         let is_delegated = true;
         let remote_slot = 100;
 
+        // NOTE: this case led to incorrect unborking if delegation + undelegation + redelegation
+        // happend all in the same slot
         // Subcase B1: delegation_slot == remote_slot
+        /*
         let delegation_slot = 100;
         let deleg_record = Some(create_delegation_record(delegation_slot));
         assert!(!account_still_undelegating_on_chain(
@@ -149,6 +152,7 @@ mod tests {
             deleg_record,
             &Pubkey::default(),
         ));
+        */
 
         // Subcase B2: delegation_slot > remote_slot
         let delegation_slot = 101;

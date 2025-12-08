@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use dlp::instruction_builder::validator_claim_fees;
 use log::{error, info};
-use magicblock_config::EphemeralConfig;
 use magicblock_program::validator::validator_authority;
 use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -26,7 +25,7 @@ impl ClaimFeesTask {
         }
     }
 
-    pub fn start(&mut self, config: EphemeralConfig, url: String) {
+    pub fn start(&mut self, tick_period: Duration, url: String) {
         if self.handle.is_some() {
             error!("Claim fees task already started");
             return;
@@ -35,8 +34,6 @@ impl ClaimFeesTask {
         let token = self.token.clone();
         let handle = tokio::spawn(async move {
             info!("Starting claim fees task");
-            let tick_period =
-                Duration::from_secs(config.validator.claim_fees_interval_secs);
             let start_time = Instant::now() + tick_period;
             let mut interval =
                 tokio::time::interval_at(start_time, tick_period);
@@ -81,10 +78,10 @@ async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
 
     let ix = validator_claim_fees(validator, None);
 
-    let latest_blockhash = rpc_client
-        .get_latest_blockhash()
-        .await
-        .map_err(MagicBlockRpcClientError::GetLatestBlockhash)?;
+    let latest_blockhash =
+        rpc_client.get_latest_blockhash().await.map_err(|e| {
+            MagicBlockRpcClientError::GetLatestBlockhash(Box::new(e))
+        })?;
 
     let tx = Transaction::new_signed_with_payer(
         &[ix],
@@ -96,7 +93,7 @@ async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
     rpc_client
         .send_and_confirm_transaction(&tx)
         .await
-        .map_err(MagicBlockRpcClientError::SendTransaction)?;
+        .map_err(|e| MagicBlockRpcClientError::SendTransaction(Box::new(e)))?;
 
     info!("Successfully claimed validator fees");
 

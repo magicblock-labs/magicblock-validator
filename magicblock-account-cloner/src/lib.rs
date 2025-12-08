@@ -19,7 +19,7 @@ use magicblock_committor_service::{
     error::{CommittorServiceError, CommittorServiceResult},
     BaseIntentCommittor, CommittorService,
 };
-use magicblock_config::{AccountsCloneConfig, PrepareLookupTables};
+use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_ledger::LatestBlock;
 use magicblock_magic_program_api::instruction::AccountModification;
@@ -54,7 +54,7 @@ pub use account_cloner::*;
 
 pub struct ChainlinkCloner {
     changeset_committor: Option<Arc<CommittorService>>,
-    clone_config: AccountsCloneConfig,
+    config: ChainLinkConfig,
     tx_scheduler: TransactionSchedulerHandle,
     accounts_db: Arc<AccountsDb>,
     block: LatestBlock,
@@ -63,14 +63,14 @@ pub struct ChainlinkCloner {
 impl ChainlinkCloner {
     pub fn new(
         changeset_committor: Option<Arc<CommittorService>>,
-        clone_config: AccountsCloneConfig,
+        config: ChainLinkConfig,
         tx_scheduler: TransactionSchedulerHandle,
         accounts_db: Arc<AccountsDb>,
         block: LatestBlock,
     ) -> Self {
         Self {
             changeset_committor,
-            clone_config,
+            config,
             tx_scheduler,
             accounts_db,
             block,
@@ -99,6 +99,8 @@ impl ChainlinkCloner {
             data: Some(request.account.data().to_owned()),
             executable: Some(request.account.executable()),
             delegated: Some(request.account.delegated()),
+            confined: Some(request.account.confined()),
+            remote_slot: Some(request.account.remote_slot()),
         };
 
         let modify_ix = InstructionUtils::modify_accounts_instruction(vec![
@@ -106,7 +108,12 @@ impl ChainlinkCloner {
         ]);
         // Defined positive commit frequency means commits should be scheduled
         let ixs = match request.commit_frequency_ms {
-            Some(commit_frequency_ms) if commit_frequency_ms > 0 => {
+            // TODO(GabrielePicco): Hotfix. Do not schedule frequency commits until we impose limits.
+            // 1. Allow configuring a higher minimum.
+            // 2. Stop committing accounts if they have been committed more than X times,
+            //    where X corresponds to what we can charge.
+            #[allow(clippy::overly_complex_bool_expr)]
+            Some(commit_frequency_ms) if commit_frequency_ms > 0 && false => {
                 // The task ID is randomly generated to avoid conflicts with other tasks
                 // TODO: remove once the program handles generating tasks instead of the client
                 // https://github.com/magicblock-labs/magicblock-validator/issues/625
@@ -221,6 +228,7 @@ impl ChainlinkCloner {
                 // and then deploy it and finally set the authority to match the
                 // one on chain
                 let slot = self.accounts_db.slot();
+                let program_remote_slot = program.remote_slot;
                 let DeployableV4Program {
                     pre_deploy_loader_state,
                     deploy_instruction,
@@ -238,6 +246,7 @@ impl ChainlinkCloner {
                         &validator_kp.pubkey(),
                     );
 
+                // Programs aren't marked as confined since they are also never delegated
                 let pre_deploy_mod_instruction = {
                     let pre_deploy_mods = vec![AccountModification {
                         pubkey: program_id,
@@ -245,6 +254,8 @@ impl ChainlinkCloner {
                         owner: Some(loader_v4::id()),
                         executable: Some(true),
                         data: Some(pre_deploy_loader_state),
+                        confined: Some(false),
+                        remote_slot: Some(program_remote_slot),
                         ..Default::default()
                     }];
                     InstructionUtils::modify_accounts_instruction(
@@ -256,6 +267,8 @@ impl ChainlinkCloner {
                     let post_deploy_mods = vec![AccountModification {
                         pubkey: program_id,
                         data: Some(post_deploy_loader_state),
+                        confined: Some(false),
+                        remote_slot: Some(program_remote_slot),
                         ..Default::default()
                     }];
                     InstructionUtils::modify_accounts_instruction(
@@ -291,9 +304,7 @@ impl ChainlinkCloner {
         // Allow the committer service to reserve pubkeys in lookup tables
         // that could be needed when we commit this account
         if let Some(committor) = self.changeset_committor.as_ref() {
-            if self.clone_config.prepare_lookup_tables
-                == PrepareLookupTables::Always
-            {
+            if self.config.prepare_lookup_tables {
                 let committor = committor.clone();
                 tokio::spawn(async move {
                     match Self::map_committor_request_result(

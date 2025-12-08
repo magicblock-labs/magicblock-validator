@@ -91,15 +91,10 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
                 }
             };
 
-            let id = match &execution_result {
-                Ok(value) => value.id,
-                Err(err) => err.0,
-            };
-
             let sender = if let Some(sender) = pending_message
                 .lock()
                 .expect(POISONED_MUTEX_MSG)
-                .remove(&id)
+                .remove(&execution_result.id)
             {
                 sender
             } else {
@@ -230,7 +225,13 @@ pub enum CommittorServiceExtError {
     #[error("RecvError: {0}")]
     RecvError(#[from] RecvError),
     #[error("CommittorServiceError: {0:?}")]
-    CommittorServiceError(#[from] CommittorServiceError),
+    CommittorServiceError(Box<CommittorServiceError>),
+}
+
+impl From<CommittorServiceError> for CommittorServiceExtError {
+    fn from(e: CommittorServiceError) -> Self {
+        Self::CommittorServiceError(Box::new(e))
+    }
 }
 
 pub type BaseIntentCommitorExtResult<T, E = CommittorServiceExtError> =
