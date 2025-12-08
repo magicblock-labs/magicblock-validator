@@ -3350,7 +3350,7 @@ dependencies = [
  "solana-pubkey",
  "solana-rent-collector",
  "solana-sdk-ids",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=48787597)",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=3e9456ec4)",
  "solana-svm-transaction",
  "solana-system-program",
  "solana-transaction",
@@ -7957,7 +7957,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=48787597#48787597fcbbdf301a068c2fec9c032419a2d3ce"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=3e9456ec4#3e9456ec4d5798ad8281537501c1e777d6888ba3"
 dependencies = [
  "ahash",
  "log",
