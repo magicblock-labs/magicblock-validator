@@ -321,11 +321,10 @@ impl TaskSchedulerService {
             blockhash,
         );
 
-        let sig = tx.signatures[0];
-        self.rpc_client
+        Ok(self
+            .rpc_client
             .send_transaction(&tx)
             .await
-            .map_err(Box::new)?;
-        Ok(sig)
+            .map_err(Box::new)?)
     }
 }
