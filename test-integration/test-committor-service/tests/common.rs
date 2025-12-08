@@ -183,6 +183,9 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
 }
 
 #[allow(dead_code)]
+/// Test-only helper. Uses dummy compressed_data (empty delegation record,
+/// default proof/meta) and must not be used for on-chain compressed-delegation
+/// transactions.
 pub fn create_dummy_compressed_commit_task(
     pubkey: Pubkey,
     hash: [u8; 32],
