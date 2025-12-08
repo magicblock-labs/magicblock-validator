@@ -1,5 +1,4 @@
 use setup::RpcTestEnv;
-use test_kit::Signer;
 
 mod setup;
 
@@ -35,7 +34,7 @@ async fn test_get_identity() {
 
     assert_eq!(
         identity,
-        env.execution.payer.pubkey(),
+        env.execution.get_payer().pubkey,
         "identity should match the validator's public key"
     );
 }

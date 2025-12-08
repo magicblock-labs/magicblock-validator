@@ -28,7 +28,7 @@ type SetupResult = TaskSchedulerResult<(
 async fn setup() -> SetupResult {
     let mut env = ExecutionTestEnv::new();
 
-    init_validator_authority_if_needed(env.payer.insecure_clone());
+    init_validator_authority_if_needed(env.payers[0].insecure_clone());
     // NOTE: validator authority is unique for all tests in this file, but the payer changes for each test
     // Airdrop some SOL to the validator authority, which is used to pay task fees
     env.fund_account(validator_authority_id(), LAMPORTS_PER_SOL);
@@ -79,7 +79,7 @@ pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
         }),
         vec![
             AccountMeta::new_readonly(magicblock_magic_program_api::ID, false),
-            AccountMeta::new(env.payer.pubkey(), true),
+            AccountMeta::new(env.get_payer().pubkey, true),
             AccountMeta::new(account.pubkey(), false),
         ],
     );
@@ -133,7 +133,7 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
         }),
         vec![
             AccountMeta::new_readonly(magicblock_magic_program_api::ID, false),
-            AccountMeta::new(env.payer.pubkey(), true),
+            AccountMeta::new(env.get_payer().pubkey, true),
             AccountMeta::new(account.pubkey(), false),
         ],
     );
@@ -170,7 +170,7 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
         &GuineaInstruction::CancelTask(task_id),
         vec![
             AccountMeta::new_readonly(magicblock_magic_program_api::ID, false),
-            AccountMeta::new(env.payer.pubkey(), true),
+            AccountMeta::new(env.get_payer().pubkey, true),
         ],
     );
     let txn = env.build_transaction(&[ix]);

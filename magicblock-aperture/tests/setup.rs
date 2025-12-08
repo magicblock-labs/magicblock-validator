@@ -95,7 +95,7 @@ impl RpcTestEnv {
         let (server, socket) = loop {
             let port: u16 = rand::random_range(7000..u16::MAX - 1);
             let node_context = NodeContext {
-                identity: execution.payer.pubkey(),
+                identity: execution.get_payer().pubkey,
                 faucet: Some(faucet.insecure_clone()),
                 base_fee: Self::BASE_FEE,
                 featureset: Default::default(),

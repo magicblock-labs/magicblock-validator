@@ -246,8 +246,15 @@ impl MagicValidator {
             featureset: txn_scheduler_state.environment.feature_set.clone(),
             blocktime: config.ledger.block_time_ms(),
         };
-        let transaction_scheduler =
-            TransactionScheduler::new(1, txn_scheduler_state);
+        // We dedicate half of the available resources to the execution
+        // runtime, -1 is taken up by the transaction scheduler itself
+        let transaction_executors =
+            (num_cpus::get() / 2).saturating_sub(1).max(1) as u32;
+        let transaction_scheduler = TransactionScheduler::new(
+            transaction_executors,
+            txn_scheduler_state,
+        );
+        info!("Running execution backend with {transaction_executors} threads");
         transaction_scheduler.spawn();
 
         let shared_state = SharedState::new(
