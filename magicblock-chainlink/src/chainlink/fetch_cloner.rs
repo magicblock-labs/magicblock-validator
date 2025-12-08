@@ -936,16 +936,15 @@ where
                                 return None;
                             };
 
-                        if delegation_record
-                            .authority
-                            .eq(&self.validator_pubkey)
-                        {
-                            account.set_delegated(true);
-                        } else {
-                            account.set_delegated(false);
-                        }
-                        account.set_data(delegation_record.data);
-                        account.set_owner(delegation_record.owner);
+                            account.set_compressed(true);
+                            account.set_lamports(delegation_record.lamports);
+                            account.set_owner(delegation_record.owner);
+                            account.set_data(delegation_record.data);
+                            account.set_delegated(
+                                delegation_record
+                                    .authority
+                                    .eq(&self.validator_pubkey),
+                            );
                         Some(AccountCloneRequest {
                             pubkey,
                             account,
