@@ -164,7 +164,7 @@ async fn test_undelegate_redelegate_to_other_in_same_slot_compressed() {
         // First trigger undelegation subscription
         ctx.chainlink.undelegation_requested(pubkey).await.unwrap();
 
-        // Then immediatly delegate to other authority (simulating same slot operation)
+        // Then immediately delegate to other authority (simulating same slot operation)
         let compressed_account = compressed_account_shared_with_owner_and_slot(
             pubkey,
             other_authority,
