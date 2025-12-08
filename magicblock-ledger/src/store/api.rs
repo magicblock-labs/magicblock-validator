@@ -858,13 +858,13 @@ impl Ledger {
         &self,
         signature: Signature,
         slot: Slot,
-        transaction: SanitizedTransaction,
+        transaction: &SanitizedTransaction,
         status: TransactionStatusMeta,
-    ) -> LedgerResult<()> {
+    ) -> LedgerResult<u32> {
         let tx_account_locks = transaction.get_account_locks_unchecked();
 
         // 1. Write Transaction Status
-        self.write_transaction_status(
+        let index = self.write_transaction_status(
             slot,
             signature,
             tx_account_locks.writable,
@@ -880,7 +880,7 @@ impl Ledger {
             .put_protobuf((signature, slot), &transaction)?;
         self.transaction_cf.try_increase_entry_counter(1);
 
-        Ok(())
+        Ok(index)
     }
 
     pub fn read_transaction(
@@ -991,7 +991,7 @@ impl Ledger {
         writable_keys: Vec<&Pubkey>,
         readonly_keys: Vec<&Pubkey>,
         status: TransactionStatusMeta,
-    ) -> LedgerResult<()> {
+    ) -> LedgerResult<u32> {
         let transaction_slot_index = self
             .block_txn_indexes
             .entry(slot)
@@ -1035,7 +1035,7 @@ impl Ledger {
             );
         }
 
-        Ok(())
+        Ok(transaction_slot_index)
     }
 
     /// Returns an iterator over all transaction statuses.
@@ -1672,7 +1672,7 @@ mod tests {
             .write_transaction(
                 sig_uno,
                 slot_uno,
-                sanitized_uno.clone(),
+                &sanitized_uno.clone(),
                 tx_uno.tx_with_meta.get_status_meta().unwrap(),
             )
             .is_ok());
@@ -1698,7 +1698,7 @@ mod tests {
             .write_transaction(
                 sig_dos,
                 slot_dos,
-                sanitized_dos.clone(),
+                &sanitized_dos.clone(),
                 tx_dos.tx_with_meta.get_status_meta().unwrap(),
             )
             .is_ok());
@@ -2334,7 +2334,7 @@ mod tests {
                 .write_transaction(
                     sig_uno,
                     slot_uno,
-                    sanitized_uno.clone(),
+                    &sanitized_uno.clone(),
                     tx_uno.tx_with_meta.get_status_meta().unwrap(),
                 )
                 .is_ok());
@@ -2357,7 +2357,7 @@ mod tests {
                 .write_transaction(
                     sig_dos,
                     slot_dos,
-                    sanitized_dos.clone(),
+                    &sanitized_dos.clone(),
                     tx_dos.tx_with_meta.get_status_meta().unwrap(),
                 )
                 .is_ok());

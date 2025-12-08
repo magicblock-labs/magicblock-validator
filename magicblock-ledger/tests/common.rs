@@ -32,7 +32,7 @@ pub fn write_dummy_transaction(
     let status = TransactionStatusMeta::default();
     let message_hash = *transaction.message_hash();
     ledger
-        .write_transaction(signature, slot, transaction, status)
+        .write_transaction(signature, slot, &transaction, status)
         .expect("failed to write dummy transaction");
 
     (message_hash, signature)

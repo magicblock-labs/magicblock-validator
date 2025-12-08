@@ -3,14 +3,13 @@ use magicblock_magic_program_api::args::TaskRequest;
 use solana_program::message::{
     inner_instruction::InnerInstructionsList, SimpleAddressLoader,
 };
-use solana_pubkey::Pubkey;
-use solana_signature::Signature;
 use solana_transaction::{
     sanitized::SanitizedTransaction, versioned::VersionedTransaction,
     Transaction,
 };
 use solana_transaction_context::TransactionReturnData;
 use solana_transaction_error::TransactionError;
+use solana_transaction_status_client_types::TransactionStatusMeta;
 use tokio::sync::{
     mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -58,9 +57,10 @@ pub type TxnReplayResultTx = oneshot::Sender<TransactionResult>;
 /// transaction, including its result and metadata.
 /// This is the message type that is communicated to subscribers via event processors.
 pub struct TransactionStatus {
-    pub signature: Signature,
     pub slot: Slot,
-    pub result: TransactionExecutionResult,
+    pub txn: SanitizedTransaction,
+    pub meta: TransactionStatusMeta,
+    pub index: u32,
 }
 
 /// An internal message that bundles a sanitized transaction with its requested processing mode.
@@ -79,13 +79,6 @@ pub enum TransactionProcessingMode {
     Execution(TxnExecutionResultTx),
     /// Replay the transaction against the current state without persistence to the ledger.
     Replay(TxnReplayResultTx),
-}
-
-/// The detailed outcome of a standard transaction execution.
-pub struct TransactionExecutionResult {
-    pub result: TransactionResult,
-    pub accounts: Box<[Pubkey]>,
-    pub logs: Option<Vec<String>>,
 }
 
 /// The detailed outcome of a transaction simulation.

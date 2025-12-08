@@ -139,11 +139,7 @@ impl EventProcessor {
                 // Process a new transaction status update.
                 Ok(status) = self.transaction_status_rx.recv_async() => {
                     // Notify subscribers waiting on this specific transaction signature.
-                    self.subscriptions.send_signature_update(
-                        &status.signature,
-                        &status.result.result,
-                        status.slot
-                    ).await;
+                    self.subscriptions.send_signature_update(&status).await;
 
                     // Notify subscribers interested in transaction logs.
                     self.subscriptions.send_logs_update(&status, status.slot);
@@ -151,9 +147,9 @@ impl EventProcessor {
                     // Update the global transaction cache.
                     let result = SignatureResult {
                         slot: status.slot,
-                        result: status.result.result
+                        result: status.meta.status
                     };
-                    self.transactions.push(status.signature, Some(result));
+                    self.transactions.push(*status.txn.signature(), Some(result));
                 }
                 // Listen for the cancellation signal to gracefully shut down.
                 _ = cancel.cancelled() => {

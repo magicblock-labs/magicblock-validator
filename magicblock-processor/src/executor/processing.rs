@@ -3,8 +3,8 @@ use magicblock_core::{
     link::{
         accounts::{AccountWithSlot, LockedAccount},
         transactions::{
-            TransactionExecutionResult, TransactionSimulationResult,
-            TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
+            TransactionSimulationResult, TransactionStatus,
+            TxnExecutionResultTx, TxnSimulationResultTx,
         },
     },
     tls::ExecutionTlsStash,
@@ -220,29 +220,25 @@ impl super::TransactionExecutor {
             },
         };
         let signature = *txn.signature();
-        let status = TransactionStatus {
-            signature,
-            slot: self.processor.slot,
-            result: TransactionExecutionResult {
-                result: meta.status.clone(),
-                accounts: txn
-                    .message()
-                    .account_keys()
-                    .iter()
-                    .copied()
-                    .collect(),
-                logs: meta.log_messages.clone(),
-            },
-        };
-        if let Err(error) = self.ledger.write_transaction(
+        let index = match self.ledger.write_transaction(
             signature,
             self.processor.slot,
+            &txn,
+            // TODO(bmuddha): perf: remove clone with the new ledger
+            meta.clone(),
+        ) {
+            Ok(i) => i,
+            Err(error) => {
+                error!("failed to commit transaction to the ledger: {error}");
+                return;
+            }
+        };
+        let status = TransactionStatus {
+            slot: self.processor.slot,
+            index,
             txn,
             meta,
-        ) {
-            error!("failed to commit transaction to the ledger: {error}");
-            return;
-        }
+        };
         // Send the final status to the listeners (EventProcessor workers).
         let _ = self.transaction_tx.send(status);
     }
@@ -265,7 +261,7 @@ impl super::TransactionExecutor {
         if let Err(error) = self.ledger.write_transaction(
             signature,
             self.processor.slot,
-            txn,
+            &txn,
             meta,
         ) {
             error!("failed to commit transaction to the ledger: {error}");

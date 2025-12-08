@@ -147,15 +147,15 @@ impl Encoder for TransactionLogsEncoder {
         data: &Self::Data,
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        let execution = &data.result;
+        let logs = data.meta.log_messages.as_ref()?;
         if let Self::Mentions(pubkey) = self {
-            execution
-                .accounts
+            data.txn
+                .message()
+                .account_keys()
                 .iter()
                 .any(|p| p == pubkey)
                 .then_some(())?;
         }
-        let logs = execution.logs.as_ref()?;
 
         #[derive(Serialize)]
         struct TransactionLogs<'a> {
@@ -165,8 +165,8 @@ impl Encoder for TransactionLogsEncoder {
         }
         let method = "logsNotification";
         let result = TransactionLogs {
-            signature: SerdeSignature(data.signature),
-            err: execution.result.as_ref().map_err(|e| e.to_string()).err(),
+            signature: SerdeSignature(*data.txn.signature()),
+            err: data.meta.status.as_ref().err().map(ToString::to_string),
             logs,
         };
         NotificationPayload::encode(result, slot, method, id)

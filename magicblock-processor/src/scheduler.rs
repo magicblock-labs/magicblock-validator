@@ -144,8 +144,8 @@ impl TransactionScheduler {
         let root = self.latest_block.load().slot;
         let mut cache = self.program_cache.write().unwrap();
         // Remove duplicate entries from programs cache
-        // NOTE: this is an important cleanup, as otherwise it might
-        // lead cache corruption issues over time as it fills up
+        // NOTE: this is an important cleanup, as otherwise it might lead to
+        // cache corruption issues over time as the program cache fills up
         cache.prune(root, 0);
         // Re-root the shared program cache to the new slot.
         cache.latest_root_slot = root;
