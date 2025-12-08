@@ -65,8 +65,10 @@ impl PhotonClient for PhotonClientMock {
         pubkeys: &[Pubkey],
         min_context_slot: Option<Slot>,
     ) -> RemoteAccountProviderResult<(Vec<Option<Account>>, Slot)> {
-        let mut accs = vec![];
-        let mut slot = 0;
+        let mut accs = Vec::with_capacity(pubkeys.len());
+        // Seed with min_context_slot if present to better approximate the
+        // "context slot" semantics of the real Photon client.
+        let mut slot = min_context_slot.unwrap_or(0);
         for pubkey in pubkeys {
             let account = self.get_account(pubkey, min_context_slot).await?;
             if let Some((ref _acc, acc_slot)) = account {
