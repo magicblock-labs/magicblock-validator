@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use futures_util::{future::BoxFuture, stream::BoxStream};
 use log::*;
 use solana_account_decoder::UiAccount;
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::nonblocking::pubsub_client::{
     PubsubClient, PubsubClientResult,
@@ -18,7 +19,6 @@ use solana_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     response::{Response, RpcKeyedAccount},
 };
-use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::{
     sync::{mpsc, oneshot, Mutex as AsyncMutex},
     time,
@@ -341,10 +341,10 @@ pub mod mock {
     use log::*;
     use solana_account::Account;
     use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
+    use solana_program::clock::Slot;
     use solana_rpc_client_api::response::{
         Response as RpcResponse, RpcResponseContext,
     };
-    use solana_sdk::clock::Slot;
 
     use super::*;
     use crate::remote_account_provider::{

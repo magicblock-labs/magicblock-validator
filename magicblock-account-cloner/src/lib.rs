@@ -30,18 +30,16 @@ use magicblock_program::{
     validator::{validator_authority, validator_authority_id},
     MAGIC_CONTEXT_PUBKEY,
 };
-use solana_instruction::Instruction;
-use solana_sdk::{
-    account::ReadableAccount,
-    hash::Hash,
-    instruction::AccountMeta,
-    loader_v4,
-    pubkey::Pubkey,
-    rent::Rent,
-    signature::{Signature, Signer},
-    signer::SignerError,
-    transaction::Transaction,
-};
+use solana_account::ReadableAccount;
+use solana_hash::Hash;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_loader_v4_interface::state::LoaderV4Status;
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::loader_v4;
+use solana_signature::Signature;
+use solana_signer::{Signer, SignerError};
+use solana_sysvar::rent::Rent;
+use solana_transaction::Transaction;
 use tokio::sync::oneshot;
 
 use crate::bpf_loader_v1::BpfUpgradableProgramModifications;
@@ -79,7 +77,7 @@ impl ChainlinkCloner {
 
     async fn send_transaction(
         &self,
-        tx: solana_sdk::transaction::Transaction,
+        tx: Transaction,
     ) -> ClonerResult<Signature> {
         let sig = tx.signatures[0];
         self.tx_scheduler.execute(tx).await?;
@@ -209,10 +207,7 @@ impl ChainlinkCloner {
                 // We don't allow users to retract the program in the ER, since in that case any
                 // accounts of that program still in the ER could never be committed nor
                 // undelegated
-                if matches!(
-                    program.loader_status,
-                    loader_v4::LoaderV4Status::Retracted
-                ) {
+                if matches!(program.loader_status, LoaderV4Status::Retracted) {
                     debug!(
                         "Program {} is retracted on chain, won't retract it. When it is deployed on chain we deploy the new version.",
                         program.program_id

@@ -3,6 +3,7 @@ use std::{fmt, sync::Arc};
 
 use log::*;
 use solana_account::{AccountSharedData, ReadableAccount};
+use solana_instruction::{AccountMeta, Instruction};
 use solana_loader_v3_interface::{
     get_program_data_address as get_program_data_v3_address,
     state::UpgradeableLoaderState as LoaderV3State,
@@ -11,17 +12,9 @@ use solana_loader_v4_interface::{
     instruction::LoaderV4Instruction as LoaderInstructionV4,
     state::{LoaderV4State, LoaderV4Status},
 };
-use solana_pubkey::Pubkey;
-use solana_sdk::{
-    hash::Hash,
-    instruction::{AccountMeta, Instruction},
-    native_token::LAMPORTS_PER_SOL,
-    pubkey,
-    rent::Rent,
-    transaction::Transaction,
-};
-use solana_sdk_ids::bpf_loader_upgradeable;
+use solana_pubkey::{pubkey, Pubkey};
 use solana_system_interface::instruction as system_instruction;
+use solana_sysvar::rent::Rent;
 
 use crate::{
     cloner::errors::ClonerResult,
@@ -457,7 +450,10 @@ fn state_data_v4(
 
 #[cfg(test)]
 mod tests {
-    use solana_sdk::{signature::Keypair, signer::Signer};
+    use solana_hash::Hash;
+    use solana_keypair::Keypair;
+    use solana_signer::Signer;
+    use solana_transaction::Transaction;
 
     use super::*;
 

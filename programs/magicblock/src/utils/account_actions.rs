@@ -1,9 +1,7 @@
 use std::cell::RefCell;
 
-use solana_sdk::{
-    account::{AccountSharedData, WritableAccount},
-    pubkey::Pubkey,
-};
+use solana_account::{AccountSharedData, WritableAccount};
+use solana_pubkey::Pubkey;
 
 use super::DELEGATION_PROGRAM_ID;
 

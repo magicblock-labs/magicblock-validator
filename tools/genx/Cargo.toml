@@ -13,5 +13,6 @@ clap = { version = "4.5.23", features = ["derive"] }
 magicblock-accounts-db = { workspace = true, features = [ "dev-tools" ] }
 json = { workspace = true }
 solana-rpc-client = { workspace = true }
-solana-sdk = { workspace = true }
+solana-commitment-config = { workspace = true }
+solana-pubkey = { workspace = true }
 tempfile = { workspace = true }

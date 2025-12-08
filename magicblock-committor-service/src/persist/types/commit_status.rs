@@ -1,6 +1,6 @@
 use std::fmt;
 
-use solana_sdk::signature::Signature;
+use solana_signature::Signature;
 
 use crate::persist::error::CommitPersistError;
 
