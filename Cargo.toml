@@ -206,4 +206,7 @@ features = ["lz4"]
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "1beed4c" }
 solana-storage-proto = { path = "./storage-proto" }
 solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "3e9456ec4" }
+# using parent commit d4e9e16 of rocksdb 0.23.0
+# without patching update isn't possible due to conflict with solana deps
+# TODO(edwin): remove once solana version is raised to 2.3
 rocksdb = { git = "https://github.com/rust-rocksdb/rust-rocksdb.git", rev = "d4e9e16" }
