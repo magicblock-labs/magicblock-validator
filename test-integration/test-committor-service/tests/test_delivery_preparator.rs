@@ -583,7 +583,7 @@ async fn test_prepare_compressed_commit() {
         data: account.data,
         last_update_nonce: 0,
         is_undelegatable: false,
-        owner: program_flexi_counter::ID,
+        owner: program_flexi_counter::id(),
     };
     assert_eq!(
         delegation_record, expected,
