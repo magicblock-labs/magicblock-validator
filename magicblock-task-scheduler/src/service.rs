@@ -64,7 +64,7 @@ impl TaskSchedulerService {
     pub fn new(
         path: &Path,
         config: &TaskSchedulerConfig,
-        rpc_client: RpcClient,
+        rpc_url: String,
         scheduled_tasks: ScheduledTasksRx,
         block: LatestBlock,
         token: CancellationToken,
@@ -86,7 +86,7 @@ impl TaskSchedulerService {
         let db = SchedulerDatabase::new(path)?;
         Ok(Self {
             db,
-            rpc_client,
+            rpc_client: RpcClient::new(rpc_url),
             scheduled_tasks,
             block,
             task_queue: DelayQueue::new(),
