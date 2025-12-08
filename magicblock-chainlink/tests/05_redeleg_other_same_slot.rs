@@ -121,7 +121,7 @@ async fn test_undelegate_redelegate_to_other_in_same_slot_compressed() {
     let pubkey = Pubkey::new_unique();
     let program_pubkey = Pubkey::new_unique();
     let other_authority = Pubkey::new_unique();
-    let acc = Account::default();
+    let acc = Account::default(); // Compressed accounts don't need lamports in the RPC mock
 
     // 1. Account delegated to us
     // Initial state: Account is delegated to us and we can read/write to it
