@@ -9,7 +9,6 @@ edition.workspace = true
 default-run = "magicblock-validator"
 
 [dependencies]
-clap = { workspace = true, features = ["derive", "env"] }
 console-subscriber = { workspace = true, optional = true }
 env_logger = { workspace = true }
 log = { workspace = true }
@@ -17,7 +16,7 @@ magicblock-api = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-version = { workspace = true }
 num_cpus = { workspace = true }
-solana-sdk = { workspace = true }
+solana-signer = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [features]

@@ -372,10 +372,9 @@ mod tests {
     use async_trait::async_trait;
     use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
     use solana_pubkey::{pubkey, Pubkey};
-    use solana_sdk::{
-        signature::Signature, signer::SignerError,
-        transaction::TransactionError,
-    };
+    use solana_signature::Signature;
+    use solana_signer::SignerError;
+    use solana_transaction_error::TransactionError;
     use tokio::{sync::mpsc, time::sleep};
 
     use super::*;
@@ -431,6 +430,7 @@ mod tests {
         let msg = create_test_intent(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
+            false,
         );
         sender.send(msg.clone()).await.unwrap();
 
@@ -448,8 +448,8 @@ mod tests {
 
         // Send two conflicting messages
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
-        let msg1 = create_test_intent(1, &[pubkey]);
-        let msg2 = create_test_intent(2, &[pubkey]);
+        let msg1 = create_test_intent(1, &[pubkey], false);
+        let msg2 = create_test_intent(2, &[pubkey], false);
 
         sender.send(msg1.clone()).await.unwrap();
         sender.send(msg2.clone()).await.unwrap();
@@ -475,6 +475,7 @@ mod tests {
         let msg = create_test_intent(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
+            false,
         );
         sender.send(msg.clone()).await.unwrap();
 
@@ -501,6 +502,7 @@ mod tests {
         let msg = create_test_intent(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
+            false,
         );
         worker.db.store_base_intent(msg.clone()).await.unwrap();
 
@@ -535,6 +537,7 @@ mod tests {
             let msg = create_test_intent(
                 i as u64,
                 &[pubkey!("1111111111111111111111111111111111111111111")],
+                false,
             );
             sender.send(msg).await.unwrap();
         }
@@ -570,6 +573,7 @@ mod tests {
             let msg = create_test_intent(
                 i as u64,
                 &[pubkey!("1111111111111111111111111111111111111111111")],
+                false,
             );
             sender.send(msg).await.unwrap();
         }
@@ -600,7 +604,7 @@ mod tests {
         let mut received_ids = HashSet::new();
         for i in 0..NUM_MESSAGES {
             let unique_pubkey = Pubkey::new_unique(); // Each message gets unique key
-            let msg = create_test_intent(i, &[unique_pubkey]);
+            let msg = create_test_intent(i, &[unique_pubkey], false);
 
             received_ids.insert(i);
             sender.send(msg).await.unwrap();
@@ -666,7 +670,7 @@ mod tests {
                 vec![Pubkey::new_unique()]
             };
 
-            let msg = create_test_intent(i as u64, &pubkeys);
+            let msg = create_test_intent(i as u64, &pubkeys, false);
             sender.send(msg).await.unwrap();
         }
 

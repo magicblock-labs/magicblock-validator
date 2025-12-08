@@ -1,7 +1,7 @@
 use std::{collections::HashSet, path::PathBuf, str::FromStr};
 
 use magicblock_accounts_db::AccountsDb;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use structopt::StructOpt;
 
 use crate::utils::open_ledger;

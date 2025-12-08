@@ -1,4 +1,4 @@
-use solana_sdk::{pubkey, pubkey::Pubkey};
+use solana_pubkey::Pubkey;
 
 pub mod account_actions;
 pub mod accounts;
@@ -10,4 +10,4 @@ pub mod instruction_utils;
 //       we hardcode it here to avoid either having to pull in the delegation program
 //       or a higher level SDK including procmacros for CPI, etc.
 pub const DELEGATION_PROGRAM_ID: Pubkey =
-    pubkey!("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
+    Pubkey::from_str_const("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");

@@ -11,13 +11,12 @@ use magicblock_magic_program_api::{
     },
     MAGIC_CONTEXT_PUBKEY,
 };
-use solana_program_runtime::__private::Hash;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    transaction::Transaction,
-};
+use solana_hash::Hash;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
 
 use crate::{
     mutate_accounts::set_account_mod_data,
@@ -182,6 +181,7 @@ impl InstructionUtils {
                     rent_epoch: account_modification.rent_epoch,
                     delegated: account_modification.delegated,
                     confined: account_modification.confined,
+                    remote_slot: account_modification.remote_slot,
                 };
             account_mods.insert(
                 account_modification.pubkey,
@@ -275,6 +275,17 @@ impl InstructionUtils {
             crate::id(),
             &MagicBlockInstruction::EnableExecutableCheck,
             account_metas,
+        )
+    }
+
+    // -----------------
+    // Noop
+    // -----------------
+    pub fn noop_instruction(data: u64) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::Noop(data),
+            vec![],
         )
     }
 

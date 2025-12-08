@@ -23,10 +23,10 @@ use magicblock_chainlink::{
     },
     AccountFetchOrigin, Chainlink,
 };
-use magicblock_config::config::LifecycleMode;
+use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use solana_account::{Account, AccountSharedData};
+use solana_program::{clock::Slot, sysvar::clock};
 use solana_pubkey::Pubkey;
-use solana_sdk::{clock::Slot, sysvar::clock};
 use tokio::sync::mpsc;
 
 use super::accounts::account_shared_with_owner_and_slot;
@@ -112,7 +112,7 @@ impl TestContext {
             fetch_cloner,
             validator_pubkey,
             faucet_pubkey,
-            0,
+            &ChainLinkConfig::default(),
         )
         .unwrap();
         Self {

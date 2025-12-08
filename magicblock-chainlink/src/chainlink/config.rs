@@ -5,12 +5,14 @@ use crate::remote_account_provider::config::RemoteAccountProviderConfig;
 #[derive(Debug, Default, Clone)]
 pub struct ChainlinkConfig {
     pub remote_account_provider: RemoteAccountProviderConfig,
+    pub remove_confined_accounts: bool,
 }
 
 impl ChainlinkConfig {
     pub fn new(remote_account_provider: RemoteAccountProviderConfig) -> Self {
         Self {
             remote_account_provider,
+            remove_confined_accounts: false,
         }
     }
 
@@ -20,6 +22,7 @@ impl ChainlinkConfig {
                 RemoteAccountProviderConfig::default_with_lifecycle_mode(
                     lifecycle_mode,
                 ),
+            remove_confined_accounts: false,
         }
     }
 }

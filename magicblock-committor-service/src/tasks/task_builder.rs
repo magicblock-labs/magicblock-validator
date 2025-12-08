@@ -7,7 +7,7 @@ use magicblock_program::magic_scheduled_base_intent::{
     UndelegateType,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::signature::Signature;
+use solana_signature::Signature;
 
 use crate::{
     intent_executor::task_info_fetcher::{

@@ -3,7 +3,7 @@ mod shutdown;
 use log::*;
 use magicblock_api::{ledger, magic_validator::MagicValidator};
 use magicblock_config::ValidatorParams;
-use solana_sdk::signature::Signer;
+use solana_signer::Signer;
 use tokio::runtime::Builder;
 
 use crate::shutdown::Shutdown;
