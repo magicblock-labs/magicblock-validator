@@ -4,10 +4,7 @@ use guinea::GuineaInstruction;
 use magicblock_config::config::TaskSchedulerConfig;
 use magicblock_program::{
     args::ScheduleTaskArgs,
-    validator::{
-        finished_starting_up, init_validator_authority_if_needed,
-        validator_authority_id,
-    },
+    validator::{init_validator_authority_if_needed, validator_authority_id},
 };
 use magicblock_task_scheduler::{
     errors::TaskSchedulerResult, SchedulerDatabase, TaskSchedulerError,
@@ -66,8 +63,6 @@ pub async fn test_schedule_task() -> TaskSchedulerResult<()> {
 
     let account =
         env.create_account_with_config(LAMPORTS_PER_SOL, 1, guinea::ID);
-
-    finished_starting_up();
 
     // Schedule a task
     let ix = Instruction::new_with_bincode(
