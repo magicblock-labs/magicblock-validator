@@ -151,10 +151,7 @@ impl ReconnectableClient for ChainUpdatesClient {
         use ChainUpdatesClient::*;
         match self {
             WebSocket(client) => client.try_reconnect().await,
-            Laser(_client) => {
-                // TODO: implement reconnect for Laser client
-                Ok(())
-            }
+            Laser(client) => client.try_reconnect().await,
         }
     }
 
@@ -165,10 +162,7 @@ impl ReconnectableClient for ChainUpdatesClient {
         use ChainUpdatesClient::*;
         match self {
             WebSocket(client) => client.resub_multiple(pubkeys).await,
-            Laser(_client) => {
-                // TODO: implement resub_multiple for Laser client
-                Ok(())
-            }
+            Laser(client) => client.resub_multiple(pubkeys).await,
         }
     }
 }

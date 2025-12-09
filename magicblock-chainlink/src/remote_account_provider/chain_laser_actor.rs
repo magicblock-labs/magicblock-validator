@@ -124,6 +124,7 @@ impl ChainLaserActor {
 
         loop {
             tokio::select! {
+                // Actor messages
                 msg = self.messages_receiver.recv() => {
                     match msg {
                         Some(msg) => {
@@ -137,6 +138,7 @@ impl ChainLaserActor {
                         }
                     }
                 }
+                // Account subscription updates
                 update = self.active_subscriptions.next(), if !self.active_subscriptions.is_empty() => {
                     match update {
                         Some(update) => {
@@ -145,6 +147,7 @@ impl ChainLaserActor {
                         None => break,
                     }
                 },
+                // Program subscription updates
                 update = async {
                     match &mut self.program_subscriptions {
                         Some((_, stream)) => stream.next().await,
@@ -160,6 +163,7 @@ impl ChainLaserActor {
                         }
                     }
                 },
+                // Activate pending subscriptions
                 _ = activate_subs_interval.tick() => {
                     self.update_active_subscriptions();
                 },
@@ -191,8 +195,23 @@ impl ChainLaserActor {
                 });
                 false
             }
-            // TODO(thlorenz): @@@ reconnect
-            Reconnect { response: _ } => todo!("Handle reconnect message"),
+            Reconnect { response } => {
+                self.update_active_subscriptions();
+                let _ = response.send(Ok(())).inspect_err(|_| {
+                    warn!("Failed to send reconnect response")
+                });
+                false
+            }
+            Shutdown { response } => {
+                info!("Received Shutdown message");
+                self.subscriptions.clear();
+                self.active_subscriptions.clear();
+                self.program_subscriptions = None;
+                let _ = response
+                    .send(Ok(()))
+                    .inspect_err(|_| warn!("Failed to send shutdown response"));
+                true
+            }
         }
     }
 

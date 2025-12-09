@@ -219,8 +219,18 @@ impl ChainPubsubClientImpl {
 #[async_trait]
 impl ChainPubsubClient for ChainPubsubClientImpl {
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
-        self.actor.shutdown().await;
-        Ok(())
+        let (tx, rx) = oneshot::channel();
+        self.actor
+            .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
+            .await?;
+
+        rx.await
+            .inspect_err(|err| {
+                warn!(
+                    "ChainPubsubClientImpl::shutdown - RecvError \
+                     occurred while awaiting shutdown response: {err:?}"
+                );
+            })?
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {

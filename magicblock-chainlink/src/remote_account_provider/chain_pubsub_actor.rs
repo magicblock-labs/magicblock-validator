@@ -110,22 +110,25 @@ impl ChainPubsubActor {
         Ok((me, subscription_updates_receiver))
     }
 
-    pub async fn shutdown(&self) {
+    async fn shutdown(
+        client_id: u16,
+        subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        shutdown_token: CancellationToken,
+    ) {
         info!(
-            "[client_id={}] Shutting down ChainPubsubActor",
-            self.client_id
+            "[client_id={client_id}] Shutting down ChainPubsubActor"
         );
-        let subs = self
-            .subscriptions
+        let subs = subscriptions
             .lock()
             .unwrap()
             .drain()
-            .chain(self.program_subs.lock().unwrap().drain())
+            .chain(program_subs.lock().unwrap().drain())
             .collect::<Vec<_>>();
         for (_, sub) in subs {
             sub.cancellation_token.cancel();
         }
-        self.shutdown_token.cancel();
+        shutdown_token.cancel();
     }
 
     pub fn subscription_count(&self, filter: &[Pubkey]) -> usize {
@@ -204,6 +207,7 @@ impl ChainPubsubActor {
                                 abort_sender,
                                 client_id,
                                 is_connected,
+                                shutdown_token.clone(),
                                 msg
                             ));
                         } else {
@@ -229,6 +233,7 @@ impl ChainPubsubActor {
         abort_sender: mpsc::Sender<()>,
         client_id: u16,
         is_connected: Arc<AtomicBool>,
+        shutdown_token: CancellationToken,
         msg: ChainPubsubActorMessage,
     ) {
         fn send_ok(
@@ -326,6 +331,16 @@ impl ChainPubsubActor {
                 )
                 .await;
                 let _ = response.send(result);
+            }
+            ChainPubsubActorMessage::Shutdown { response } => {
+                Self::shutdown(
+                    client_id,
+                    subscriptions,
+                    program_subs,
+                    shutdown_token,
+                )
+                .await;
+                let _ = response.send(Ok(()));
             }
         }
     }

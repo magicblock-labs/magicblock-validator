@@ -66,7 +66,3 @@ pub async fn reconnect(actor: &ChainPubsubActor) {
         .expect("reconnect ack channel dropped")
         .expect("reconnect failed");
 }
-
-pub async fn shutdown(actor: &ChainPubsubActor) {
-    actor.shutdown().await;
-}

@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
 
 use async_trait::async_trait;
 use solana_commitment_config::CommitmentLevel;
@@ -8,7 +11,8 @@ use tokio::sync::{mpsc, oneshot};
 use crate::remote_account_provider::{
     chain_laser_actor::ChainLaserActor,
     pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
-    ChainPubsubClient, RemoteAccountProviderError, RemoteAccountProviderResult,
+    ChainPubsubClient, ReconnectableClient, RemoteAccountProviderError,
+    RemoteAccountProviderResult,
 };
 
 #[derive(Clone)]
@@ -93,8 +97,16 @@ impl ChainPubsubClient for ChainLaserClientImpl {
     }
 
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
-        // TODO(thlorenz): @@@ shutdown
-        todo!("ChainLaserClientImpl::shutdown not implemented yet")
+        let (tx, rx) = oneshot::channel();
+        self.send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
+            .await?;
+
+        rx.await.map_err(|err| {
+            RemoteAccountProviderError::ChainLaserActorSendError(
+                err.to_string(),
+                format!("{err:#?}"),
+            )
+        })?
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
@@ -117,6 +129,22 @@ impl ChainPubsubClient for ChainLaserClientImpl {
 
     fn subs_immediately(&self) -> bool {
         false
+    }
+}
+
+#[async_trait]
+impl ReconnectableClient for ChainLaserClientImpl {
+    async fn try_reconnect(&self) -> RemoteAccountProviderResult<()> {
+        // TODO: @@@ implement reconnect for Laser client
+        Ok(())
+    }
+
+    async fn resub_multiple(
+        &self,
+        _pubkeys: HashSet<Pubkey>,
+    ) -> RemoteAccountProviderResult<()> {
+        // TODO: @@@ implement resub_multiple for Laser client
+        Ok(())
     }
 }
 
