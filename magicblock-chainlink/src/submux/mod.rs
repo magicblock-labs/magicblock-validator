@@ -727,6 +727,11 @@ where
     fn subscriptions(&self) -> Option<Vec<Pubkey>> {
         Self::get_subscriptions(&self.clients)
     }
+
+    /// Returns true if any inner client subscribes immediately
+    fn subs_immediately(&self) -> bool {
+        self.clients.iter().any(|c| c.subs_immediately())
+    }
 }
 
 #[cfg(test)]

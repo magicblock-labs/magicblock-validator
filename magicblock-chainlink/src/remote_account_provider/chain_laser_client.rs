@@ -114,6 +114,10 @@ impl ChainPubsubClient for ChainLaserClientImpl {
     fn subscriptions(&self) -> Option<Vec<Pubkey>> {
         None
     }
+
+    fn subs_immediately(&self) -> bool {
+        false
+    }
 }
 
 pub fn is_helius_laser_url(url: &str) -> bool {

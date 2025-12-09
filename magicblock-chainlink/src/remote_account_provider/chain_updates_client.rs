@@ -135,6 +135,14 @@ impl ChainPubsubClient for ChainUpdatesClient {
             Laser(client) => client.subscriptions(),
         }
     }
+
+    fn subs_immediately(&self) -> bool {
+        use ChainUpdatesClient::*;
+        match self {
+            WebSocket(client) => client.subs_immediately(),
+            Laser(client) => client.subs_immediately(),
+        }
+    }
 }
 
 #[async_trait]
