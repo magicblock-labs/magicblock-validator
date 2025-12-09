@@ -1,6 +1,6 @@
 mod common;
 
-use solana_sdk::hash::Hash;
+use solana_hash::Hash;
 
 use crate::common::{
     get_block, get_block_transaction_hash, setup, write_dummy_transaction,

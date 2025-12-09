@@ -27,10 +27,14 @@ runs:
     shell: "bash"
     run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile default
 
-  - name: Install libudev # new solana crates need this lib
+  - name: Install system deps (libudev, LLVM/Clang)
     if: runner.os == 'Linux'
     shell: "bash"
-    run: sudo apt-get update && sudo apt-get install -y libudev-dev
+    run: |
+      sudo apt-get update
+      sudo apt-get install -y \
+        libudev-dev \
+        libclang-dev
 
   - uses: Swatinem/rust-cache@v2
     with:
