@@ -77,15 +77,20 @@ impl AccountSubscriptionTask {
                 let client = client.clone();
                 let task = self.clone();
                 futures.push(async move {
-                    let result = match task {
-                        Subscribe(pubkey, _) => client.subscribe(pubkey).await,
+                    let (result, count_as_success) = match task {
+                        Subscribe(pubkey, _) => (
+                            client.subscribe(pubkey).await,
+                            client.subs_immediately(),
+                        ),
                         SubscribeProgram(program_id, _) => {
-                            client.subscribe_program(program_id).await
+                            (client.subscribe_program(program_id).await, true)
                         }
-                        Unsubscribe(pubkey) => client.unsubscribe(pubkey).await,
-                        Shutdown => client.shutdown().await,
+                        Unsubscribe(pubkey) => {
+                            (client.unsubscribe(pubkey).await, true)
+                        }
+                        Shutdown => (client.shutdown().await, true),
                     };
-                    (i, result)
+                    (i, result, count_as_success)
                 });
             }
 
@@ -94,9 +99,13 @@ impl AccountSubscriptionTask {
             let mut successes = 0;
             let op_name = self.op_name();
 
-            while let Some((i, result)) = futures.next().await {
+            while let Some((i, result, count_as_success)) = futures.next().await
+            {
                 match result {
                     Ok(_) => {
+                        if !count_as_success {
+                            continue;
+                        }
                         successes += 1;
                         if successes >= target_successes {
                             if let Some(tx) = tx.take() {
@@ -112,7 +121,9 @@ impl AccountSubscriptionTask {
 
             if let Some(tx) = tx {
                 let msg = format!(
-                    "All clients failed to {}: {}",
+                    "Not enough clients succeeded to {}: {}. Required {}, got {}",
+                    target_successes,
+                    successes,
                     op_name.to_lowercase(),
                     errors.join(", ")
                 );

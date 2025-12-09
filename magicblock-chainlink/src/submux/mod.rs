@@ -137,7 +137,11 @@ where
     /// which we use to track the latest remote slot.
     never_debounce: HashSet<Pubkey>,
     /// Number of clients that must confirm a subscription for it to be considered active.
+    /// NOTE: only clients that subscribe immediately are counted towards this.
     required_subscription_confirmations: usize,
+    /// Number of clients that must confirm a program subscription for it to be considered
+    /// active.
+    required_program_subscription_confirmations: usize,
     /// Map of program account subscriptions we are holding inside the pubsub clients
     program_subs: Arc<Mutex<HashSet<Pubkey>>>,
 }
@@ -212,6 +216,10 @@ where
         );
 
         let required_subscription_confirmations = {
+            let n = clients.iter().filter(|x| x.subs_immediately()).count();
+            cmp::max(1, (n * 2) / 3)
+        };
+        let required_program_subscription_confirmations = {
             let n = clients.len();
             cmp::max(1, (n * 2) / 3)
         };
@@ -226,6 +234,7 @@ where
             debounce_states: debounce_states.clone(),
             never_debounce,
             required_subscription_confirmations,
+            required_program_subscription_confirmations,
             program_subs,
         };
 
@@ -660,7 +669,7 @@ where
 
         AccountSubscriptionTask::SubscribeProgram(
             program_id,
-            self.required_subscription_confirmations,
+            self.required_program_subscription_confirmations,
         )
         .process(self.clients.clone())
         .await
