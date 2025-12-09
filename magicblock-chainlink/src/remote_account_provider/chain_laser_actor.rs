@@ -1,4 +1,8 @@
-use std::{collections::HashMap, pin::Pin};
+use std::{
+    collections::{HashMap, HashSet},
+    pin::Pin,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use futures_util::{Stream, StreamExt};
 use helius_laserstream::{
@@ -26,8 +30,11 @@ use crate::remote_account_provider::{
 };
 
 type LaserResult = Result<SubscribeUpdate, LaserstreamError>;
-type LaserStreamUpdate = (Pubkey, LaserResult);
+type LaserStreamUpdate = (usize, LaserResult);
 type LaserStream = Pin<Box<dyn Stream<Item = LaserResult> + Send>>;
+
+const PER_STREAM_SUBSCRIPTION_LIMIT: usize = 1_000;
+const SUBSCIRPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 400;
 
 // -----------------
 // ChainLaserActor
@@ -35,8 +42,10 @@ type LaserStream = Pin<Box<dyn Stream<Item = LaserResult> + Send>>;
 pub struct ChainLaserActor {
     /// Configuration used to create the laser client
     laser_client_config: LaserstreamConfig,
-    /// Active subscriptions
-    subscriptions: StreamMap<Pubkey, LaserStream>,
+    /// Requested subscriptions, some may not be active yet
+    subscriptions: HashSet<Pubkey>,
+    /// Subscriptions that have been activated via the helius provider
+    active_subscriptions: StreamMap<usize, LaserStream>,
     /// Receives subscribe/unsubscribe messages to this actor
     messages_receiver: mpsc::Receiver<ChainPubsubActorMessage>,
     /// Sends updates for any account subscription that is received via
@@ -90,6 +99,7 @@ impl ChainLaserActor {
             laser_client_config,
             messages_receiver,
             subscriptions: Default::default(),
+            active_subscriptions: Default::default(),
             subscription_updates_sender,
             commitment,
         };
@@ -101,9 +111,15 @@ impl ChainLaserActor {
     fn shutdown(&mut self) {
         info!("Shutting down ChainLaserActor");
         self.subscriptions.clear();
+        self.active_subscriptions.clear();
     }
 
     pub async fn run(mut self) {
+        let mut activate_subs_interval =
+            tokio::time::interval(std::time::Duration::from_millis(
+                SUBSCIRPTION_ACTIVATION_INTERVAL_MILLIS,
+            ));
+
         loop {
             tokio::select! {
                 msg = self.messages_receiver.recv() => {
@@ -115,13 +131,11 @@ impl ChainLaserActor {
                             }
                         }
                         None => {
-                            if self.subscriptions.is_empty() {
-                                break;
-                            }
+                            break;
                         }
                     }
                 }
-                update = self.subscriptions.next(), if !self.subscriptions.is_empty() => {
+                update = self.active_subscriptions.next(), if !self.active_subscriptions.is_empty() => {
                     match update {
                         Some(update) => {
                             self.handle_account_update(update).await;
@@ -129,6 +143,10 @@ impl ChainLaserActor {
                         None => break,
                     }
                 },
+                _ = activate_subs_interval.tick() => {
+                    self.update_active_subscriptions();
+                },
+
             }
         }
     }
@@ -157,12 +175,13 @@ impl ChainLaserActor {
         }
     }
 
+    /// Tracks subscriptions, but does not yet activate them.
     fn add_sub(
         &mut self,
         pubkey: Pubkey,
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
-        if self.subscriptions.contains_key(&pubkey) {
+        if self.subscriptions.contains(&pubkey) {
             warn!("Already subscribed to account {}", pubkey);
             sub_response.send(Ok(())).unwrap_or_else(|_| {
                 warn!(
@@ -170,22 +189,25 @@ impl ChainLaserActor {
                     pubkey
                 )
             });
-            return;
+        } else {
+            self.subscriptions.insert(pubkey);
+            sub_response.send(Ok(())).unwrap_or_else(|_| {
+                warn!(
+                    "Failed to send subscribe response for account {}",
+                    pubkey
+                )
+            })
         }
-        let stream = self.create_account_stream(pubkey);
-        self.subscriptions.insert(pubkey, Box::pin(stream));
-        sub_response.send(Ok(())).unwrap_or_else(|_| {
-            warn!("Failed to send subscribe response for account {}", pubkey)
-        });
     }
 
+    /// Removes a subscription, but does not yet deactivate it.
     fn remove_sub(
         &mut self,
         pubkey: &Pubkey,
         unsub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
         match self.subscriptions.remove(pubkey) {
-            Some(_) => {
+            true => {
                 trace!("Unsubscribed from account {}", pubkey);
                 unsub_response.send(Ok(())).unwrap_or_else(|_| {
                     warn!(
@@ -194,7 +216,7 @@ impl ChainLaserActor {
                     )
                 });
             }
-            None => {
+            false => {
                 unsub_response
                     .send(Err(
                         RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
@@ -211,31 +233,57 @@ impl ChainLaserActor {
         }
     }
 
-    /// Helper to create a dedicated stream for a single account.
-    fn create_account_stream(
-        &self,
-        pubkey: Pubkey,
+    fn update_active_subscriptions(&mut self) {
+        let mut new_subs: StreamMap<usize, LaserStream> = StreamMap::new();
+
+        // Re-create streams for all subscriptions
+        let subs = self.subscriptions.iter().collect::<Vec<_>>();
+        let chunks = subs
+            .chunks(PER_STREAM_SUBSCRIPTION_LIMIT)
+            .map(|chunk| chunk.to_vec())
+            .collect::<Vec<_>>();
+
+        for (idx, chunk) in chunks.into_iter().enumerate() {
+            let stream = Self::create_accounts_stream(
+                &chunk,
+                &self.commitment,
+                &self.laser_client_config,
+                idx,
+            );
+            new_subs.insert(idx, Box::pin(stream));
+        }
+
+        // Drop current active subscriptions by reassignig to new ones
+        self.active_subscriptions = new_subs;
+    }
+
+    /// Helper to create a dedicated stream for a number of accounts.
+    fn create_accounts_stream(
+        pubkeys: &[&Pubkey],
+        commitment: &CommitmentLevel,
+        laser_client_config: &LaserstreamConfig,
+        idx: usize,
     ) -> impl Stream<Item = LaserResult> {
         let mut accounts = HashMap::new();
         accounts.insert(
-            "account_subs".into(),
+            format!("account_subs: {idx}"),
             SubscribeRequestFilterAccounts {
-                account: vec![pubkey.to_string()],
+                account: pubkeys.iter().map(|pk| pk.to_string()).collect(),
                 ..Default::default()
             },
         );
         let request = SubscribeRequest {
             accounts,
-            commitment: Some(self.commitment.into()),
+            commitment: Some(commitment.clone().into()),
             ..Default::default()
         };
-        client::subscribe(self.laser_client_config.clone(), request).0
+        client::subscribe(laser_client_config.clone(), request).0
     }
 
     /// Handles an update from one of the account data streams.
     async fn handle_account_update(
         &mut self,
-        (pubkey, result): LaserStreamUpdate,
+        (idx, result): LaserStreamUpdate,
     ) {
         match result {
             Ok(SubscribeUpdate {
@@ -250,25 +298,17 @@ impl ChainLaserActor {
                     return;
                 };
 
-                // Defensive check to ensure the update corresponds to the stream's key.
-                if pubkey.as_ref() != account.pubkey {
-                    let account_pubkey = account
-                        .pubkey
-                        .as_slice()
-                        .try_into()
-                        .map(|x| Pubkey::new_from_array(x).to_string())
-                        .unwrap_or("<invalid pubkey>".to_string());
-                    warn!(
-                        "Received mismatched pubkey in account update stream. Expected {pubkey}, Got {account_pubkey}"
-                    );
+                let Ok(pubkey) = Pubkey::try_from(account.pubkey) else {
+                    error!("Failed to parse pubkey in account update",);
+                    return;
+                };
+
+                if !self.subscriptions.contains(&pubkey) {
+                    // Ignore updates for accounts we are no longer subscribed to
                     return;
                 }
-                let Ok(owner) = account
-                    .owner
-                    .as_slice()
-                    .try_into()
-                    .map(Pubkey::new_from_array)
-                else {
+
+                let Ok(owner) = Pubkey::try_from(account.owner) else {
                     error!("Failed to parse owner pubkey in account update for account {}", pubkey);
                     return;
                 };
@@ -297,8 +337,8 @@ impl ChainLaserActor {
             }
             Err(err) => {
                 error!(
-                    "Error in account update stream for account {}: {}",
-                    pubkey, err
+                    "Error in account update stream for accounts with idx {}: {}",
+                    idx, err
                 );
             }
             _ => { /* Ignore other message types */ }
