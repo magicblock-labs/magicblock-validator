@@ -117,6 +117,10 @@ impl EventProcessor {
                     let _ = self.geyser.notify_slot(latest.meta.slot).inspect_err(|e| {
                         warn!("Geyser slot update error: {e}");
                     });
+                    // Notify listening geyser plugins
+                    let _ = self.geyser.notify_block(&latest).inspect_err(|e| {
+                        warn!("Geyser block update error: {e}");
+                    });
                     // Update the global blocks cache with the latest block.
                     self.blocks.set_latest(latest);
                 }
@@ -128,10 +132,7 @@ impl EventProcessor {
                     // Notify subscribers for the program that owns the account.
                     self.subscriptions.send_program_update(&state).await;
                     // Notify registered geyser plugins (if any) of the account.
-                    let slot = state.slot;
-                    let pubkey = &state.account.pubkey;
-                    let account = &state.account.account;
-                    let _ = self.geyser.notify_account(pubkey, account, slot).inspect_err(|e| {
+                    let _ = self.geyser.notify_account(&state).inspect_err(|e| {
                         warn!("Geyser account update error: {e}");
                     });
                 }
@@ -143,6 +144,11 @@ impl EventProcessor {
 
                     // Notify subscribers interested in transaction logs.
                     self.subscriptions.send_logs_update(&status, status.slot);
+
+                    // Notify listening geyser plugins
+                    let _ = self.geyser.notify_transaction(&status).inspect_err(|e| {
+                        warn!("Geyser transaction update error: {e}");
+                    });
 
                     // Update the global transaction cache.
                     let result = SignatureResult {

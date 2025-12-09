@@ -201,7 +201,7 @@ async fn test_fee_charged_for_failed_transaction() {
         .expect("no transaction status received for failed txn");
 
     assert!(
-        status.result.result.is_err(),
+        status.meta.status.is_err(),
         "transaction should have failed"
     );
     let fee_payer_final_balance = env.get_payer().lamports();
@@ -245,7 +245,7 @@ async fn test_escrow_charged_for_failed_transaction() {
         .expect("no transaction status received for failed escrow txn");
 
     assert!(
-        status.result.result.is_err(),
+        status.meta.status.is_err(),
         "transaction should have failed"
     );
     let escrow_final_balance = env.get_account(escrow).lamports();
@@ -288,9 +288,9 @@ async fn test_transaction_gasless_mode() {
         .recv_timeout(Duration::from_millis(100))
         .expect("should receive a transaction status update");
 
-    assert_eq!(status.signature, signature);
+    assert_eq!(*status.txn.signature(), signature);
     assert!(
-        status.result.result.is_ok(),
+        status.meta.status.is_ok(),
         "Transaction execution should be successful"
     );
 
@@ -338,9 +338,9 @@ async fn test_transaction_gasless_mode_with_not_existing_account() {
         .recv_timeout(Duration::from_millis(100))
         .expect("should receive a transaction status update");
 
-    assert_eq!(status.signature, signature);
+    assert_eq!(*status.txn.signature(), signature);
     assert!(
-        status.result.result.is_ok(),
+        status.meta.status.is_ok(),
         "Transaction execution should be successful"
     );
 
@@ -382,9 +382,9 @@ async fn test_transaction_gasless_mode_not_existing_feepayer() {
         .recv_timeout(Duration::from_millis(100))
         .expect("should receive a transaction status update");
 
-    assert_eq!(status.signature, signature);
+    assert_eq!(*status.txn.signature(), signature);
     assert!(
-        status.result.result.is_ok(),
+        status.meta.status.is_ok(),
         "Transaction execution should be successful"
     );
 
