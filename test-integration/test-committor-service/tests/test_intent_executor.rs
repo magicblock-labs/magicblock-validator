@@ -907,8 +907,8 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
     let TestEnv {
         fixture,
         mut intent_executor,
-        task_info_fetcher,
-        pre_test_tablemania_state,
+        task_info_fetcher: _,
+        pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
 
     // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
@@ -967,11 +967,9 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
         .collect();
     let intent = create_intent(committed_accounts, true);
 
-    let instant = std::time::Instant::now();
     let result = intent_executor
         .execute(intent, None::<IntentPersisterImpl>)
         .await;
-    println!("elapsed: {}", instant.elapsed().as_secs());
     assert!(result.inner.is_ok());
     assert!(matches!(
         result.inner.unwrap(),
