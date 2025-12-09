@@ -29,9 +29,14 @@ impl ChainLaserClientImpl {
         pubsub_url: &str,
         api_key: &str,
         commitment: CommitmentLevel,
+        abort_sender: mpsc::Sender<()>,
     ) -> RemoteAccountProviderResult<Self> {
-        let (actor, messages, updates) =
-            ChainLaserActor::new_from_url(pubsub_url, api_key, commitment)?;
+        let (actor, messages, updates) = ChainLaserActor::new_from_url(
+            pubsub_url,
+            api_key,
+            commitment,
+            abort_sender,
+        )?;
         let client = Self {
             updates: Arc::new(Mutex::new(Some(updates))),
             messages,

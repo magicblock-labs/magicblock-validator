@@ -41,6 +41,7 @@ impl ChainUpdatesClient {
                     &url,
                     &api_key,
                     commitment.commitment,
+                    abort_sender,
                 )
                 .await?,
             )

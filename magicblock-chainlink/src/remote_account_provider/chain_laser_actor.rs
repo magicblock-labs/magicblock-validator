@@ -54,6 +54,8 @@ pub struct ChainLaserActor {
     subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
     /// The commitment level to use for subscriptions
     commitment: CommitmentLevel,
+    /// Channel used to signal connection issues to the submux
+    abort_sender: mpsc::Sender<()>,
 }
 
 impl ChainLaserActor {
@@ -61,6 +63,7 @@ impl ChainLaserActor {
         pubsub_url: &str,
         api_key: &str,
         commitment: SolanaCommitmentLevel,
+        abort_sender: mpsc::Sender<()>,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -79,12 +82,13 @@ impl ChainLaserActor {
             channel_options,
             replay: false,
         };
-        Self::new(laser_client_config, commitment)
+        Self::new(laser_client_config, commitment, abort_sender)
     }
 
     pub fn new(
         laser_client_config: LaserstreamConfig,
         commitment: SolanaCommitmentLevel,
+        abort_sender: mpsc::Sender<()>,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -104,6 +108,7 @@ impl ChainLaserActor {
             program_subscriptions: Default::default(),
             subscription_updates_sender,
             commitment,
+            abort_sender,
         };
 
         Ok((me, messages_sender, subscription_updates_receiver))
@@ -144,7 +149,19 @@ impl ChainLaserActor {
                         Some(update) => {
                             self.handle_account_update(update).await;
                         }
-                        None => break,
+                        None => {
+                            debug!(
+                                "Account subscription stream ended; signaling \
+                                 connection issue"
+                            );
+                            Self::signal_connection_issue(
+                                &mut self.subscriptions,
+                                &mut self.active_subscriptions,
+                                &mut self.program_subscriptions,
+                                &self.abort_sender,
+                            )
+                            .await;
+                        }
                     }
                 },
                 // Program subscription updates
@@ -159,7 +176,17 @@ impl ChainLaserActor {
                             self.handle_program_update(update).await;
                         }
                         None => {
-                            self.program_subscriptions = None;
+                            debug!(
+                                "Program subscription stream ended; signaling \
+                                 connection issue"
+                            );
+                            Self::signal_connection_issue(
+                                &mut self.subscriptions,
+                                &mut self.active_subscriptions,
+                                &mut self.program_subscriptions,
+                                &self.abort_sender,
+                            )
+                            .await;
                         }
                     }
                 },
@@ -196,7 +223,16 @@ impl ChainLaserActor {
                 false
             }
             Reconnect { response } => {
+                // We know when reconnection is requested that all subscriptions are expected to be
+                // in-active
+                Self::clear_subscriptions(
+                    &mut self.subscriptions,
+                    &mut self.active_subscriptions,
+                    &mut self.program_subscriptions,
+                );
                 self.update_active_subscriptions();
+                // We cannot do much more here to _reconnect_ since we will do so once we activate
+                // subscriptions again and that method does not return any error information.
                 let _ = response.send(Ok(())).inspect_err(|_| {
                     warn!("Failed to send reconnect response")
                 });
@@ -204,9 +240,11 @@ impl ChainLaserActor {
             }
             Shutdown { response } => {
                 info!("Received Shutdown message");
-                self.subscriptions.clear();
-                self.active_subscriptions.clear();
-                self.program_subscriptions = None;
+                Self::clear_subscriptions(
+                    &mut self.subscriptions,
+                    &mut self.active_subscriptions,
+                    &mut self.program_subscriptions,
+                );
                 let _ = response
                     .send(Ok(()))
                     .inspect_err(|_| warn!("Failed to send shutdown response"));
@@ -365,9 +403,17 @@ impl ChainLaserActor {
             }
             Err(err) => {
                 error!(
-                    "Error in account update stream for accounts with idx {}: {}",
+                    "Error in account update stream for accounts with idx \
+                     {}: {}; signaling connection issue",
                     idx, err
                 );
+                Self::signal_connection_issue(
+                    &mut self.subscriptions,
+                    &mut self.active_subscriptions,
+                    &mut self.program_subscriptions,
+                    &self.abort_sender,
+                )
+                .await;
             }
         }
     }
@@ -379,9 +425,54 @@ impl ChainLaserActor {
                 self.process_subscription_update(subscribe_update).await;
             }
             Err(err) => {
-                error!("Error in program subscription stream: {}", err);
+                error!(
+                    "Error in program subscription stream: {}; signaling \
+                     connection issue",
+                    err
+                );
+                Self::signal_connection_issue(
+                    &mut self.subscriptions,
+                    &mut self.active_subscriptions,
+                    &mut self.program_subscriptions,
+                    &self.abort_sender,
+                )
+                .await;
             }
         }
+    }
+
+    fn clear_subscriptions(
+        subscriptions: &mut HashSet<Pubkey>,
+        active_subscriptions: &mut StreamMap<usize, LaserStream>,
+        program_subscriptions: &mut Option<(HashSet<Pubkey>, LaserStream)>,
+    ) {
+        subscriptions.clear();
+        active_subscriptions.clear();
+        *program_subscriptions = None;
+    }
+
+    async fn signal_connection_issue(
+        subscriptions: &mut HashSet<Pubkey>,
+        active_subscriptions: &mut StreamMap<usize, LaserStream>,
+        program_subscriptions: &mut Option<(HashSet<Pubkey>, LaserStream)>,
+        abort_sender: &mpsc::Sender<()>,
+    ) {
+        debug!("Signaling connection issue");
+
+        // Clear all subscriptions
+        Self::clear_subscriptions(
+            subscriptions,
+            active_subscriptions,
+            program_subscriptions,
+        );
+
+        // Use try_send to avoid blocking and naturally coalesce signals
+        let _ = abort_sender.try_send(()).inspect_err(|err| {
+            // Channel full is expected when reconnect is already in progress
+            if !matches!(err, mpsc::error::TrySendError::Full(_)) {
+                error!("Failed to signal connection issue: {err:?}")
+            }
+        });
     }
 
     /// Processes a subscription update from either account or program streams.
