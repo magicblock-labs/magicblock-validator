@@ -63,6 +63,20 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         rx.await?
     }
 
+    async fn subscribe_program(
+        &self,
+        program_id: Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send_msg(ChainPubsubActorMessage::ProgramSubscribe {
+            pubkey: program_id,
+            response: tx,
+        })
+        .await?;
+
+        rx.await?
+    }
+
     async fn unsubscribe(
         &self,
         pubkey: Pubkey,

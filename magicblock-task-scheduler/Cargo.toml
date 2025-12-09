@@ -12,16 +12,11 @@ bincode = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
-# magicblock-accounts = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-program = { workspace = true }
-magicblock-processor = { workspace = true }
 rusqlite = { workspace = true }
-solana-svm = { workspace = true }
-solana-timings = { workspace = true }
-serde = { workspace = true }
 solana-sdk = { workspace = true }
 solana-program = { workspace = true }
 solana-pubsub-client = { workspace = true }
@@ -34,5 +29,3 @@ magicblock-magic-program-api = { workspace = true }
 test-kit = { workspace = true }
 guinea = { workspace = true }
 solana-account = { workspace = true }
-solana-pubkey = { workspace = true }
-solana-signature = { workspace = true }

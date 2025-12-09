@@ -179,6 +179,11 @@ auto-airdrop-lamports = 0
 # Env: MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS
 max-monitored-accounts = 1000
 
+# When true, confined accounts are removed during accounts bank reset.
+# Default: false
+# Env: MBV_CHAINLINK__REMOVE_CONFINED_ACCOUNTS
+remove-confined-accounts = false
+
 # ==============================================================================
 # On-Chain Registration (Optional)
 # ==============================================================================

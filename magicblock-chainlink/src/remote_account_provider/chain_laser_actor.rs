@@ -143,6 +143,14 @@ impl ChainLaserActor {
                 self.remove_sub(&pubkey, response);
                 false
             }
+            ProgramSubscribe {
+                pubkey: _,
+                response,
+            } => {
+                // TODO: @@@ Laser client does not support program subscriptions yet
+                let _ = response.send(Ok(()));
+                false
+            }
             // TODO(thlorenz): @@@ reconnect
             Reconnect { response: _ } => todo!("Handle reconnect message"),
         }

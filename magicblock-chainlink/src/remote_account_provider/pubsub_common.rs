@@ -74,6 +74,10 @@ pub enum ChainPubsubActorMessage {
         pubkey: Pubkey,
         response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     },
+    ProgramSubscribe {
+        pubkey: Pubkey,
+        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
+    },
     Reconnect {
         response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     },

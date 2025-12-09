@@ -18,8 +18,6 @@ magicblock-metrics = { workspace = true }
 rand = { workspace = true }
 sha3 = { workspace = true }
 solana-pubkey = { workspace = true }
-solana-rpc-client = { workspace = true }
-solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

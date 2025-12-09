@@ -8,8 +8,6 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-bincode = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
 
 tokio = { workspace = true, features = ["sync"] }
 flume = { workspace = true }
@@ -23,5 +21,4 @@ solana-signature = { workspace = true }
 solana-transaction = { workspace = true, features = ["blake3", "verify"] }
 solana-transaction-context = { workspace = true }
 solana-transaction-error = { workspace = true }
-solana-transaction-status-client-types = { workspace = true }
 magicblock-magic-program-api = { workspace = true }

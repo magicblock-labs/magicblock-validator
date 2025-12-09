@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use dlp::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
-use log::{error, warn};
+use log::warn;
 use lru::LruCache;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};

@@ -17,7 +17,7 @@ use magicblock_chainlink::{
     testing::cloner_stub::ClonerStub,
     Chainlink,
 };
-use magicblock_config::config::LifecycleMode;
+use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -137,7 +137,7 @@ impl IxtestContext {
             fetch_cloner,
             validator_kp.pubkey(),
             faucet_kp.pubkey(),
-            0,
+            &ChainLinkConfig::default(),
         )
         .unwrap();
 
