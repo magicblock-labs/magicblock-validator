@@ -7,7 +7,7 @@ use std::{
 use async_trait::async_trait;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
-use solana_sdk::signature::Signature;
+use solana_signature::Signature;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction,
     EncodedTransactionWithStatusMeta,

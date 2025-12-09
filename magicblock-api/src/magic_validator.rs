@@ -68,14 +68,12 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
+use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
+use solana_keypair::Keypair;
+use solana_native_token::LAMPORTS_PER_SOL;
+use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::{CommitmentConfig, CommitmentLevel},
-    native_token::LAMPORTS_PER_SOL,
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-};
+use solana_signer::Signer;
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 
@@ -333,7 +331,7 @@ impl MagicValidator {
             committor_persist_path,
             ChainConfig {
                 rpc_uri: config.remote.http().to_string(),
-                commitment: CommitmentLevel::Confirmed,
+                commitment: CommitmentConfig::confirmed(),
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
                 ),
@@ -550,9 +548,7 @@ impl MagicValidator {
 
         let lamports = RpcClient::new_with_commitment(
             self.config.remote.http().to_string(),
-            CommitmentConfig {
-                commitment: CommitmentLevel::Confirmed,
-            },
+            CommitmentConfig::confirmed(),
         )
         .get_balance(&self.identity)
         .await
@@ -666,7 +662,6 @@ impl MagicValidator {
             committor_service.stop();
         }
 
-        self.ledger_truncator.stop();
         self.claim_fees_task.stop();
 
         if self.config.chain_operation.is_some()
@@ -690,6 +685,15 @@ impl MagicValidator {
 
     pub fn ledger(&self) -> &Ledger {
         &self.ledger
+    }
+
+    /// Prepares RocksDB for shutdown by cancelling all Manual compactions
+    /// This speeds up `stop` as it doesn't have to await for compaction cancellation
+    /// Calling this still allows to write or read from DB
+    pub fn prepare_ledger_for_shutdown(&mut self) {
+        self.ledger_truncator.stop();
+        // Calls & awaits until manual compaction is canceled
+        self.ledger.cancel_manual_compactions();
     }
 }
 

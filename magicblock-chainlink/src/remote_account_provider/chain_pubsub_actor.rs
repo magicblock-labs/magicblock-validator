@@ -10,12 +10,13 @@ use std::{
 use futures_util::stream::FuturesUnordered;
 use log::*;
 use solana_account_decoder_client_types::{UiAccount, UiAccountEncoding};
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     response::Response as RpcResponse,
 };
-use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
+use solana_sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
     time::Duration,

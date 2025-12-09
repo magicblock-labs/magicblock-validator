@@ -12,7 +12,7 @@ use rocksdb::{
     DBRawIterator, FlushOptions, IteratorMode as RocksIteratorMode, LiveFile,
     Options, WriteBatch as RWriteBatch, DB,
 };
-use solana_sdk::clock::Slot;
+use solana_clock::Slot;
 
 use super::{
     cf_descriptors::cf_descriptors,

@@ -1,11 +1,11 @@
-use solana_sdk::commitment_config::CommitmentLevel;
+use solana_commitment_config::CommitmentConfig;
 
 use crate::compute_budget::ComputeBudgetConfig;
 
 #[derive(Debug, Clone)]
 pub struct ChainConfig {
     pub rpc_uri: String,
-    pub commitment: CommitmentLevel,
+    pub commitment: CommitmentConfig,
     pub compute_budget_config: ComputeBudgetConfig,
 }
 
@@ -13,7 +13,7 @@ impl ChainConfig {
     pub fn devnet(compute_budget_config: ComputeBudgetConfig) -> Self {
         Self {
             rpc_uri: "https://api.devnet.solana.com".to_string(),
-            commitment: CommitmentLevel::Confirmed,
+            commitment: CommitmentConfig::confirmed(),
             compute_budget_config,
         }
     }
@@ -21,7 +21,7 @@ impl ChainConfig {
     pub fn mainnet(compute_budget_config: ComputeBudgetConfig) -> Self {
         Self {
             rpc_uri: "https://api.mainnet-beta.solana.com".to_string(),
-            commitment: CommitmentLevel::Confirmed,
+            commitment: CommitmentConfig::confirmed(),
             compute_budget_config,
         }
     }
@@ -29,7 +29,7 @@ impl ChainConfig {
     pub fn local(compute_budget_config: ComputeBudgetConfig) -> Self {
         Self {
             rpc_uri: "http://localhost:7799".to_string(),
-            commitment: CommitmentLevel::Processed,
+            commitment: CommitmentConfig::processed(),
             compute_budget_config,
         }
     }

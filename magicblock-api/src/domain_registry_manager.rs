@@ -9,17 +9,15 @@ use mdp::{
     state::record::ErRecord,
     ID,
 };
+use solana_account::ReadableAccount;
+use solana_commitment_config::CommitmentConfig;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_program::system_program;
+use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::RpcClient;
-use solana_sdk::{
-    account::ReadableAccount,
-    commitment_config::CommitmentConfig,
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    system_program,
-    transaction::Transaction,
-};
-
+use solana_signer::Signer;
+use solana_transaction::Transaction;
 pub struct DomainRegistryManager {
     client: RpcClient,
 }

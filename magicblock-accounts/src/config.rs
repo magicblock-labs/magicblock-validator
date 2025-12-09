@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct RemoteCluster {
