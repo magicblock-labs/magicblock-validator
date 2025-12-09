@@ -341,7 +341,7 @@ impl super::TransactionExecutor {
 
     /// Ensure that no post execution account state violations occurred:
     /// 1. No modification of the non-delegated feepayer in gasless mode
-    /// 2. No illegal account resizing when the balance is zero
+    /// 2. No lamport modification of confined accounts
     fn verify_account_states(&self, processed: &mut ProcessedTransaction) {
         let ProcessedTransaction::Executed(executed) = processed else {
             return;
@@ -351,6 +351,10 @@ impl super::TransactionExecutor {
         let rollback_lamports =
             rollback_feepayer_lamports(&txn.rollback_accounts);
 
+        let logs = executed
+            .execution_details
+            .log_messages
+            .get_or_insert_default();
         let gasless = self.environment.fee_lamports_per_signature == 0;
         if gasless {
             // If we are running in the gasless mode, we should not allow
@@ -370,13 +374,28 @@ impl super::TransactionExecutor {
             if undelegated_feepayer_was_modified {
                 executed.execution_details.status =
                     Err(TransactionError::InvalidAccountForFee);
-                let logs = executed
-                    .execution_details
-                    .log_messages
-                    .get_or_insert_default();
-                let msg = "Feepayer balance has been modified illegally".into();
+                let msg = "Feepayer balance has been illegally modified".into();
                 logs.push(msg);
+                return;
             }
+        }
+        for (pubkey, acc) in &txn.accounts {
+            // If the confined account was modified in any way that affected its
+            // lamport balance it will be marked as dirty, in which case we fail
+            // the transaction, as this is a validator wallet draining attack
+            //
+            // NOTE: dirty flag is not set when data field is modified,
+            // which is an intended use case for the confined accounts
+            if !acc.confined() || !acc.is_dirty() {
+                continue;
+            }
+            executed.execution_details.status =
+                Err(TransactionError::InvalidAccountForFee);
+            let msg = format!(
+                "Confined account {pubkey} has been illegally modified"
+            );
+            logs.push(msg);
+            break;
         }
     }
 }
