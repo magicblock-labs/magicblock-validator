@@ -1336,7 +1336,7 @@ struct MeasureGuard {
     _timer: HistogramTimer,
 }
 
-impl Drop for crate::store::api::MeasureGuard {
+impl Drop for MeasureGuard {
     fn drop(&mut self) {
         self.measure.stop();
         // We print it in case metrics wouldn't have time to be scraped
