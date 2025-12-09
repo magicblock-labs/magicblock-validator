@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     pin::Pin,
-    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use futures_util::{Stream, StreamExt};
@@ -46,6 +45,8 @@ pub struct ChainLaserActor {
     subscriptions: HashSet<Pubkey>,
     /// Subscriptions that have been activated via the helius provider
     active_subscriptions: StreamMap<usize, LaserStream>,
+    /// Active streams for program subscriptions
+    program_subscriptions: Option<(HashSet<Pubkey>, LaserStream)>,
     /// Receives subscribe/unsubscribe messages to this actor
     messages_receiver: mpsc::Receiver<ChainPubsubActorMessage>,
     /// Sends updates for any account subscription that is received via
@@ -100,6 +101,7 @@ impl ChainLaserActor {
             messages_receiver,
             subscriptions: Default::default(),
             active_subscriptions: Default::default(),
+            program_subscriptions: Default::default(),
             subscription_updates_sender,
             commitment,
         };
@@ -143,6 +145,21 @@ impl ChainLaserActor {
                         None => break,
                     }
                 },
+                update = async {
+                    match &mut self.program_subscriptions {
+                        Some((_, stream)) => stream.next().await,
+                        None => std::future::pending().await,
+                    }
+                }, if self.program_subscriptions.is_some() => {
+                    match update {
+                        Some(update) => {
+                            self.handle_program_update(update).await;
+                        }
+                        None => {
+                            self.program_subscriptions = None;
+                        }
+                    }
+                },
                 _ = activate_subs_interval.tick() => {
                     self.update_active_subscriptions();
                 },
@@ -162,12 +179,16 @@ impl ChainLaserActor {
                 self.remove_sub(&pubkey, response);
                 false
             }
-            ProgramSubscribe {
-                pubkey: _,
-                response,
-            } => {
-                // TODO: @@@ Laser client does not support program subscriptions yet
-                let _ = response.send(Ok(()));
+            ProgramSubscribe { pubkey, response } => {
+                let commitment = self.commitment;
+                let laser_client_config = self.laser_client_config.clone();
+                self.add_program_sub(pubkey, commitment, laser_client_config);
+                let _ = response.send(Ok(())).inspect_err(|_| {
+                    warn!(
+                        "Failed to send program subscribe response for program {}",
+                        pubkey
+                    )
+                });
                 false
             }
             // TODO(thlorenz): @@@ reconnect
@@ -274,10 +295,44 @@ impl ChainLaserActor {
         );
         let request = SubscribeRequest {
             accounts,
-            commitment: Some(commitment.clone().into()),
+            commitment: Some((*commitment).into()),
             ..Default::default()
         };
         client::subscribe(laser_client_config.clone(), request).0
+    }
+
+    fn add_program_sub(
+        &mut self,
+        program_id: Pubkey,
+        commitment: CommitmentLevel,
+        laser_client_config: LaserstreamConfig,
+    ) {
+        let mut subscribed_programs = self
+            .program_subscriptions
+            .as_ref()
+            .map(|x| x.0.iter().cloned().collect::<HashSet<Pubkey>>())
+            .unwrap_or_default();
+        subscribed_programs.insert(program_id);
+
+        let mut accounts = HashMap::new();
+        accounts.insert(
+            format!("program_sub: {program_id}"),
+            SubscribeRequestFilterAccounts {
+                owner: subscribed_programs
+                    .iter()
+                    .map(|pk| pk.to_string())
+                    .collect(),
+                ..Default::default()
+            },
+        );
+        let request = SubscribeRequest {
+            accounts,
+            commitment: Some(commitment.into()),
+            ..Default::default()
+        };
+        let stream = client::subscribe(laser_client_config.clone(), request).0;
+        self.program_subscriptions =
+            Some((subscribed_programs, Box::pin(stream)));
     }
 
     /// Handles an update from one of the account data streams.
@@ -286,54 +341,8 @@ impl ChainLaserActor {
         (idx, result): LaserStreamUpdate,
     ) {
         match result {
-            Ok(SubscribeUpdate {
-                update_oneof: Some(UpdateOneof::Account(acc)),
-                ..
-            }) => {
-                // We verified via a script that we get an update with Some(Account) when it is
-                // closed. In that case lamports == 0 and owner is the system program.
-                // Thus an update of `None` is not expected and can be ignored.
-                // See: https://gist.github.com/thlorenz/d3d1a380678a030b3e833f8f979319ae
-                let (Some(account), slot) = (acc.account, acc.slot) else {
-                    return;
-                };
-
-                let Ok(pubkey) = Pubkey::try_from(account.pubkey) else {
-                    error!("Failed to parse pubkey in account update",);
-                    return;
-                };
-
-                if !self.subscriptions.contains(&pubkey) {
-                    // Ignore updates for accounts we are no longer subscribed to
-                    return;
-                }
-
-                let Ok(owner) = Pubkey::try_from(account.owner) else {
-                    error!("Failed to parse owner pubkey in account update for account {}", pubkey);
-                    return;
-                };
-                let account = Account {
-                    lamports: account.lamports,
-                    data: account.data,
-                    owner,
-                    executable: account.executable,
-                    rent_epoch: account.rent_epoch,
-                };
-                let update = SubscriptionUpdate {
-                    pubkey,
-                    slot,
-                    account: Some(account),
-                };
-
-                self.subscription_updates_sender
-                    .send(update)
-                    .await
-                    .unwrap_or_else(|_| {
-                        error!(
-                            "Failed to send subscription update for account {}",
-                            pubkey
-                        )
-                    });
+            Ok(subscribe_update) => {
+                self.process_subscription_update(subscribe_update).await;
             }
             Err(err) => {
                 error!(
@@ -341,8 +350,75 @@ impl ChainLaserActor {
                     idx, err
                 );
             }
-            _ => { /* Ignore other message types */ }
         }
+    }
+
+    /// Handles an update from the program subscriptions stream.
+    async fn handle_program_update(&mut self, result: LaserResult) {
+        match result {
+            Ok(subscribe_update) => {
+                self.process_subscription_update(subscribe_update).await;
+            }
+            Err(err) => {
+                error!("Error in program subscription stream: {}", err);
+            }
+        }
+    }
+
+    /// Processes a subscription update from either account or program streams.
+    /// We verified via a script that we get an update with Some(Account) when it is
+    /// closed. In that case lamports == 0 and owner is the system program.
+    /// Thus an update of `None` is not expected and can be ignored.
+    /// See: https://gist.github.com/thlorenz/d3d1a380678a030b3e833f8f979319ae
+    async fn process_subscription_update(&mut self, update: SubscribeUpdate) {
+        let Some(update_oneof) = update.update_oneof else {
+            return;
+        };
+        let UpdateOneof::Account(acc) = update_oneof else {
+            return;
+        };
+
+        let (Some(account), slot) = (acc.account, acc.slot) else {
+            return;
+        };
+
+        let Ok(pubkey) = Pubkey::try_from(account.pubkey) else {
+            error!("Failed to parse pubkey in subscription update");
+            return;
+        };
+
+        if !self.subscriptions.contains(&pubkey) {
+            // Ignore updates for accounts we are not subscribed to
+            return;
+        }
+
+        let Ok(owner) = Pubkey::try_from(account.owner) else {
+            error!("Failed to parse owner pubkey in subscription update for account {}", pubkey);
+            return;
+        };
+
+        let account = Account {
+            lamports: account.lamports,
+            data: account.data,
+            owner,
+            executable: account.executable,
+            rent_epoch: account.rent_epoch,
+        };
+        let subscription_update = SubscriptionUpdate {
+            pubkey,
+            slot,
+            account: Some(account),
+        };
+
+        self.subscription_updates_sender
+            .send(subscription_update)
+            .await
+            .unwrap_or_else(|_| {
+                error!(
+                    "Failed to send subscription update for account {}",
+                    pubkey
+                )
+            });
     }
 }
 
