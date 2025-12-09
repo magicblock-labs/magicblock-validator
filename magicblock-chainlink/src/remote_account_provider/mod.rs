@@ -250,20 +250,31 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             loop {
                 interval.tick().await;
                 let lru_count = subscribed_accounts.len();
-                let (pubsub_total, pubsub_without_never_evict) = pubsub_client
+                let subscription_counts = pubsub_client
                     .subscription_count(Some(&never_evicted))
                     .await;
 
                 let all_pubsub_subs = if log::log_enabled!(log::Level::Debug) {
-                    pubsub_client.subscriptions()
+                    pubsub_client.subscriptions().unwrap_or_default()
                 } else {
                     vec![]
                 };
+
+                let (pubsub_total, pubsub_without_never_evict) =
+                    match subscription_counts {
+                        Some(counts) => counts,
+                        None => {
+                            warn!(
+                                "No connected client that tracks subscriptions"
+                            );
+                            (0, 0)
+                        }
+                    };
                 if lru_count != pubsub_without_never_evict {
                     warn!(
-                        "User account subscription counts LRU cache={} pubsub client={} don't match",
-                        lru_count, pubsub_without_never_evict
-                    );
+                            "User account subscription counts LRU cache={} pubsub client={} don't match",
+                            lru_count, pubsub_without_never_evict
+                        );
                     if log::log_enabled!(log::Level::Debug) {
                         // Log all pubsub subscriptions for debugging
                         trace!(

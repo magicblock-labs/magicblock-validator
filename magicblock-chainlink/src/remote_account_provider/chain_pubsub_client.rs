@@ -169,9 +169,9 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize);
+    ) -> Option<(usize, usize)>;
 
-    fn subscriptions(&self) -> Vec<Pubkey>;
+    fn subscriptions(&self) -> Option<Vec<Pubkey>>;
 }
 
 #[async_trait]
@@ -290,18 +290,18 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize) {
+    ) -> Option<(usize, usize)> {
         let total = self.actor.subscription_count(&[]);
         let filtered = if let Some(exclude) = exclude {
             self.actor.subscription_count(exclude)
         } else {
             total
         };
-        (total, filtered)
+        Some((total, filtered))
     }
 
-    fn subscriptions(&self) -> Vec<Pubkey> {
-        self.actor.subscriptions()
+    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+        Some(self.actor.subscriptions())
     }
 }
 
@@ -482,7 +482,7 @@ pub mod mock {
         async fn subscription_count(
             &self,
             exclude: Option<&[Pubkey]>,
-        ) -> (usize, usize) {
+        ) -> Option<(usize, usize)> {
             let pubkeys: Vec<Pubkey> = {
                 let subs = self.subscribed_pubkeys.lock().unwrap();
                 subs.iter().cloned().collect()
@@ -493,12 +493,12 @@ pub mod mock {
                 .iter()
                 .filter(|pubkey| !exclude.contains(pubkey))
                 .count();
-            (total, filtered)
+            Some((total, filtered))
         }
 
-        fn subscriptions(&self) -> Vec<Pubkey> {
+        fn subscriptions(&self) -> Option<Vec<Pubkey>> {
             let subs = self.subscribed_pubkeys.lock().unwrap();
-            subs.iter().copied().collect()
+            Some(subs.iter().copied().collect())
         }
     }
 

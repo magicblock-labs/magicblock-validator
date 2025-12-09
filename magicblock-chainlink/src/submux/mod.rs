@@ -599,12 +599,16 @@ where
         maybe_forward_now
     }
 
-    fn get_subscriptions(clients: &[Arc<T>]) -> Vec<Pubkey> {
+    fn get_subscriptions(clients: &[Arc<T>]) -> Option<Vec<Pubkey>> {
         let mut all_subs = HashSet::new();
         for client in clients {
-            all_subs.extend(client.subscriptions());
+            if let Some(subs) = client.subscriptions() {
+                all_subs.extend(subs);
+            } else {
+                return None;
+            }
         }
-        all_subs.into_iter().collect()
+        Some(all_subs.into_iter().collect())
     }
 
     fn allowed_in_debounce_window_count(&self) -> usize {
@@ -694,28 +698,33 @@ where
     /// Gets the maximum subscription count across all inner clients.
     /// NOTE: one of the clients could be reconnecting and thus
     /// temporarily have fewer or no subscriptions
+    /// NOTE: not all clients track subscriptions, thus if none return a count,
+    /// then this will return 0 for both values.
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize) {
+    ) -> Option<(usize, usize)> {
         let mut max_total = 0;
         let mut max_filtered = 0;
         for client in &self.clients {
-            let (total, filtered) = client.subscription_count(exclude).await;
-            if total > max_total {
-                max_total = total;
-            }
-            if filtered > max_filtered {
-                max_filtered = filtered;
+            if let Some((total, filtered)) =
+                client.subscription_count(exclude).await
+            {
+                if total > max_total {
+                    max_total = total;
+                }
+                if filtered > max_filtered {
+                    max_filtered = filtered;
+                }
             }
         }
-        (max_total, max_filtered)
+        Some((max_total, max_filtered))
     }
 
     /// Gets the union of all subscriptions across all inner clients.
     /// Unless one is reconnecting, this should be identical to
     /// getting it from a single inner client.
-    fn subscriptions(&self) -> Vec<Pubkey> {
+    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
         Self::get_subscriptions(&self.clients)
     }
 }

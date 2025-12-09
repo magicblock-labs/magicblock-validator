@@ -107,14 +107,12 @@ impl ChainPubsubClient for ChainLaserClientImpl {
     async fn subscription_count(
         &self,
         _exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize) {
-        // TODO(thlorenz): @@@ implement subscription_count
-        todo!("ChainLaserClientImpl::subscription_count not implemented yet")
+    ) -> Option<(usize, usize)> {
+        None
     }
 
-    fn subscriptions(&self) -> Vec<Pubkey> {
-        // TODO(thlorenz): @@@ implement subscriptions
-        todo!("ChainLaserClientImpl::subscriptions not implemented yet")
+    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+        None
     }
 }
 
