@@ -223,4 +223,4 @@ solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", re
 # Fork is based on commit d4e9e16 of rocksdb (parent commit of 0.23.0 release)
 # without patching update isn't possible due to conflict with solana deps
 # TODO(edwin): remove once solana deps upgraded and are using rust-rocksdb 0.25.0(likely)
-rocksdb = { git = "https://github.com/taco-paco/rust-rocksdb.git", rev = "6d975197" }
+rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
