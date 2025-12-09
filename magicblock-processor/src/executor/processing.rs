@@ -381,21 +381,20 @@ impl super::TransactionExecutor {
         }
         for (pubkey, acc) in &txn.accounts {
             // If the confined account was modified in any way that affected its
-            // lamport balance it will be marked as dirty, in which case we fail
+            // lamport balance it was marked as dirty, in which case we fail
             // the transaction, as this is a validator wallet draining attack
             //
             // NOTE: dirty flag is not set when data field is modified,
             // which is an intended use case for the confined accounts
-            if !acc.confined() || !acc.is_dirty() {
-                continue;
+            if acc.confined() && acc.is_dirty() {
+                executed.execution_details.status =
+                    Err(TransactionError::InvalidAccountForFee);
+                let msg = format!(
+                    "Confined account {pubkey} has been illegally modified"
+                );
+                logs.push(msg);
+                break;
             }
-            executed.execution_details.status =
-                Err(TransactionError::InvalidAccountForFee);
-            let msg = format!(
-                "Confined account {pubkey} has been illegally modified"
-            );
-            logs.push(msg);
-            break;
         }
     }
 }
