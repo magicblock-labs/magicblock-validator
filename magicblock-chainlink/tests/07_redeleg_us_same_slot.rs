@@ -10,8 +10,8 @@ use magicblock_chainlink::{
     testing::{deleg::add_delegation_record_for, init_logger},
 };
 use solana_account::Account;
+use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
-use solana_sdk::clock::Slot;
 use utils::{
     accounts::account_shared_with_owner_and_slot, test_context::TestContext,
 };

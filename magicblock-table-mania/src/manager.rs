@@ -10,12 +10,12 @@ use std::{
 use log::*;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::MagicblockRpcClient;
+use solana_address_lookup_table_interface::state::AddressLookupTable;
+use solana_commitment_config::CommitmentConfig;
+use solana_keypair::Keypair;
+use solana_message::AddressLookupTableAccount;
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    address_lookup_table::state::AddressLookupTable,
-    commitment_config::CommitmentConfig, message::AddressLookupTableAccount,
-    signature::Keypair, signer::Signer,
-};
+use solana_signer::Signer;
 use tokio::{
     sync::{Mutex, RwLock},
     time::sleep,

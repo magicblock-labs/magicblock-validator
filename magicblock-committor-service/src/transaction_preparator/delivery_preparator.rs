@@ -15,17 +15,17 @@ use magicblock_rpc_client::{
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
 use magicblock_table_mania::{error::TableManiaError, TableMania};
-use solana_pubkey::Pubkey;
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction,
-    instruction::{Instruction, InstructionError},
-    message::{
-        v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
-    },
-    signature::{Keypair, Signature},
-    signer::{Signer, SignerError},
-    transaction::{TransactionError, VersionedTransaction},
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_instruction::{error::InstructionError, Instruction};
+use solana_keypair::Keypair;
+use solana_message::{
+    v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
 };
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
+use solana_signer::{Signer, SignerError};
+use solana_transaction::versioned::VersionedTransaction;
+use solana_transaction_error::TransactionError;
 
 use crate::{
     persist::{CommitStatus, IntentPersister},

@@ -2,23 +2,12 @@ use magicblock_accounts_db::AccountsDb;
 use magicblock_core::traits::AccountsBank;
 use num_format::{Locale, ToFormattedString};
 use pretty_hex::*;
-use solana_sdk::{
-    account::{Account, ReadableAccount},
-    pubkey::Pubkey,
-};
+use solana_account::ReadableAccount;
+use solana_pubkey::Pubkey;
 use tabular::{Row, Table};
 
 pub fn print_account(db: &AccountsDb, pubkey: &Pubkey) {
-    let account = db
-        .get_account(pubkey)
-        .map(|account| Account {
-            lamports: account.lamports(),
-            owner: *account.owner(),
-            executable: account.executable(),
-            rent_epoch: account.rent_epoch(),
-            data: account.data().to_vec(),
-        })
-        .expect("Account not found");
+    let account = db.get_account(pubkey).expect("Account not found");
     let oncurve = pubkey.is_on_curve();
 
     println!("{} at slot: {}", pubkey, db.slot());
@@ -36,17 +25,17 @@ pub fn print_account(db: &AccountsDb, pubkey: &Pubkey) {
             .with_row(
                 Row::new()
                     .with_cell("Owner")
-                    .with_cell(account.owner.to_string()),
+                    .with_cell(account.owner().to_string()),
             )
             .with_row(
                 Row::new().with_cell("Lamports").with_cell(
-                    account.lamports.to_formatted_string(&Locale::en),
+                    account.lamports().to_formatted_string(&Locale::en),
                 ),
             )
             .with_row(
                 Row::new()
                     .with_cell("Executable")
-                    .with_cell(account.executable.to_string()),
+                    .with_cell(account.executable().to_string()),
             )
             .with_row(Row::new().with_cell("Data (Bytes)").with_cell(
                 account.data().len().to_formatted_string(&Locale::en),
@@ -57,13 +46,13 @@ pub fn print_account(db: &AccountsDb, pubkey: &Pubkey) {
                 "Off"
             }))
             .with_row(Row::new().with_cell("RentEpoch").with_cell(
-                account.rent_epoch.to_formatted_string(&Locale::en),
+                account.rent_epoch().to_formatted_string(&Locale::en),
             ));
 
     let data = if !account.data().is_empty() {
         let hex = format!(
             "{:?}",
-            account.data.hex_conf(HexConfig {
+            account.data().hex_conf(HexConfig {
                 width: 16,
                 group: 4,
                 ascii: true,

@@ -2,7 +2,9 @@ use std::ffi::OsStr;
 
 use magicblock_accounts_db::AccountsDb;
 use num_format::{Locale, ToFormattedString};
-use solana_sdk::{account::ReadableAccount, clock::Epoch, pubkey::Pubkey};
+use solana_account::ReadableAccount;
+use solana_clock::Epoch;
+use solana_pubkey::Pubkey;
 use structopt::StructOpt;
 use tabular::{Row, Table};
 
