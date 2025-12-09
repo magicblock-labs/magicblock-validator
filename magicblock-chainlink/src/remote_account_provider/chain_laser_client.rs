@@ -1,3 +1,4 @@
+use log::*;
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
@@ -135,15 +136,24 @@ impl ChainPubsubClient for ChainLaserClientImpl {
 #[async_trait]
 impl ReconnectableClient for ChainLaserClientImpl {
     async fn try_reconnect(&self) -> RemoteAccountProviderResult<()> {
-        // TODO: @@@ implement reconnect for Laser client
-        Ok(())
+        let (tx, rx) = oneshot::channel();
+        self.send_msg(ChainPubsubActorMessage::Reconnect { response: tx })
+            .await?;
+
+        rx.await.inspect_err(|err| {
+            warn!("RecvError occurred while awaiting reconnect response: {err:?}.");
+        })?
     }
 
     async fn resub_multiple(
         &self,
-        _pubkeys: HashSet<Pubkey>,
+        pubkeys: HashSet<Pubkey>,
     ) -> RemoteAccountProviderResult<()> {
-        // TODO: @@@ implement resub_multiple for Laser client
+        // NOTE: The laser implementation subscribes periodically to requested accounts
+        // thus we don't need to throttle the speed at which we resubscribe here.
+        for pubkey in pubkeys {
+            self.subscribe(pubkey).await?;
+        }
         Ok(())
     }
 }
