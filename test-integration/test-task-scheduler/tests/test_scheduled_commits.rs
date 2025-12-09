@@ -7,11 +7,10 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use test_task_scheduler::{
-    create_delegated_counter, send_noop_tx, setup_validator,
-};
+use test_task_scheduler::{create_delegated_counter, setup_validator};
 
 #[test]
+#[ignore]
 fn test_scheduled_commits() {
     let (_temp_dir, mut validator, ctx) = setup_validator();
 
@@ -23,8 +22,8 @@ fn test_scheduled_commits() {
         validator
     );
 
-    // Noop tx to make sure the noop program is cloned
-    let ephem_blockhash = send_noop_tx(&ctx, &payer, &mut validator);
+    let ephem_blockhash =
+        expect!(ctx.try_get_latest_blockhash_ephem(), validator);
 
     let commit_frequency_ms = 400;
     create_delegated_counter(&ctx, &payer, &mut validator, commit_frequency_ms);

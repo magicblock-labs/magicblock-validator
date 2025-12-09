@@ -2,9 +2,10 @@ use std::fmt;
 
 use solana_account::Account;
 use solana_account_decoder::UiAccount;
+use solana_clock::Slot;
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::response::Response as RpcResponse;
-use solana_sdk::{clock::Slot, commitment_config::CommitmentConfig};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 

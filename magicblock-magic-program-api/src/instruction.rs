@@ -100,6 +100,9 @@ pub enum MagicBlockInstruction {
     /// # Account references
     /// - **0.** `[SIGNER]`         Validator authority
     EnableExecutableCheck,
+
+    /// Noop instruction
+    Noop(u64),
 }
 
 impl MagicBlockInstruction {

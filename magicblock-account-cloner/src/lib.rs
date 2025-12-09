@@ -30,18 +30,16 @@ use magicblock_program::{
     validator::{validator_authority, validator_authority_id},
     MAGIC_CONTEXT_PUBKEY,
 };
-use solana_instruction::Instruction;
-use solana_sdk::{
-    account::ReadableAccount,
-    hash::Hash,
-    instruction::AccountMeta,
-    loader_v4,
-    pubkey::Pubkey,
-    rent::Rent,
-    signature::{Signature, Signer},
-    signer::SignerError,
-    transaction::Transaction,
-};
+use solana_account::ReadableAccount;
+use solana_hash::Hash;
+use solana_instruction::{AccountMeta, Instruction};
+use solana_loader_v4_interface::state::LoaderV4Status;
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::loader_v4;
+use solana_signature::Signature;
+use solana_signer::{Signer, SignerError};
+use solana_sysvar::rent::Rent;
+use solana_transaction::Transaction;
 use tokio::sync::oneshot;
 
 use crate::bpf_loader_v1::BpfUpgradableProgramModifications;
@@ -79,7 +77,7 @@ impl ChainlinkCloner {
 
     async fn send_transaction(
         &self,
-        tx: solana_sdk::transaction::Transaction,
+        tx: Transaction,
     ) -> ClonerResult<Signature> {
         let sig = tx.signatures[0];
         self.tx_scheduler.execute(tx).await?;
@@ -108,7 +106,12 @@ impl ChainlinkCloner {
         ]);
         // Defined positive commit frequency means commits should be scheduled
         let ixs = match request.commit_frequency_ms {
-            Some(commit_frequency_ms) if commit_frequency_ms > 0 => {
+            // TODO(GabrielePicco): Hotfix. Do not schedule frequency commits until we impose limits.
+            // 1. Allow configuring a higher minimum.
+            // 2. Stop committing accounts if they have been committed more than X times,
+            //    where X corresponds to what we can charge.
+            #[allow(clippy::overly_complex_bool_expr)]
+            Some(commit_frequency_ms) if commit_frequency_ms > 0 && false => {
                 // The task ID is randomly generated to avoid conflicts with other tasks
                 // TODO: remove once the program handles generating tasks instead of the client
                 // https://github.com/magicblock-labs/magicblock-validator/issues/625
@@ -204,10 +207,7 @@ impl ChainlinkCloner {
                 // We don't allow users to retract the program in the ER, since in that case any
                 // accounts of that program still in the ER could never be committed nor
                 // undelegated
-                if matches!(
-                    program.loader_status,
-                    loader_v4::LoaderV4Status::Retracted
-                ) {
+                if matches!(program.loader_status, LoaderV4Status::Retracted) {
                     debug!(
                         "Program {} is retracted on chain, won't retract it. When it is deployed on chain we deploy the new version.",
                         program.program_id

@@ -11,6 +11,7 @@ use helius_laserstream::{
 };
 use log::*;
 use solana_account::Account;
+use solana_commitment_config::CommitmentLevel as SolanaCommitmentLevel;
 use solana_pubkey::Pubkey;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamMap;
@@ -49,7 +50,7 @@ impl ChainLaserActor {
     pub fn new_from_url(
         pubsub_url: &str,
         api_key: &str,
-        commitment: solana_sdk::commitment_config::CommitmentLevel,
+        commitment: SolanaCommitmentLevel,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -73,7 +74,7 @@ impl ChainLaserActor {
 
     pub fn new(
         laser_client_config: LaserstreamConfig,
-        commitment: solana_sdk::commitment_config::CommitmentLevel,
+        commitment: SolanaCommitmentLevel,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -309,9 +310,9 @@ impl ChainLaserActor {
 // Helpers
 // -----------------
 fn grpc_commitment_from_solana(
-    commitment: solana_sdk::commitment_config::CommitmentLevel,
+    commitment: SolanaCommitmentLevel,
 ) -> CommitmentLevel {
-    use solana_sdk::commitment_config::CommitmentLevel::*;
+    use SolanaCommitmentLevel::*;
     match commitment {
         Finalized => CommitmentLevel::Finalized,
         Confirmed => CommitmentLevel::Confirmed,

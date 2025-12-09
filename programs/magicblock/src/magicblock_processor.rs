@@ -1,6 +1,5 @@
 use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 use solana_program_runtime::declare_process_instruction;
-use solana_sdk::program_utils::limited_deserialize;
 
 use crate::{
     mutate_accounts::process_mutate_accounts,
@@ -20,12 +19,15 @@ declare_process_instruction!(
     DEFAULT_COMPUTE_UNITS,
     |invoke_context| {
         use MagicBlockInstruction::*;
-        let instruction = limited_deserialize(
+        let instruction: MagicBlockInstruction = bincode::deserialize(
             invoke_context
                 .transaction_context
                 .get_current_instruction_context()?
                 .get_instruction_data(),
-        )?;
+        )
+        .map_err(|_| {
+            solana_instruction::error::InstructionError::InvalidInstructionData
+        })?;
 
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context =
@@ -77,6 +79,7 @@ declare_process_instruction!(
             EnableExecutableCheck => {
                 process_toggle_executable_check(signers, invoke_context, true)
             }
+            Noop(_) => Ok(()),
         }
     }
 );

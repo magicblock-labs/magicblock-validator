@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use log::*;
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
-use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::sync::mpsc;
 
 use crate::remote_account_provider::{

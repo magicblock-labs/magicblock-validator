@@ -1,8 +1,10 @@
 use std::{fmt, path::Path, str::FromStr};
 
 use rusqlite::{params, Connection, Result, Transaction};
+use solana_hash::Hash;
+use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
-use solana_sdk::{clock::Slot, hash::Hash, signature::Signature};
+use solana_signature::Signature;
 
 use super::{
     error::CommitPersistResult,
@@ -739,7 +741,8 @@ fn extract_committor_row(
 
 #[cfg(test)]
 mod tests {
-    use solana_sdk::{hash::Hash, signature::Signature};
+    use solana_hash::Hash;
+    use solana_signature::Signature;
     use tempfile::NamedTempFile;
 
     use super::*;

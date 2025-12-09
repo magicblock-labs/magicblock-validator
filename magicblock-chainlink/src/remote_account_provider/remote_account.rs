@@ -2,8 +2,8 @@ use magicblock_core::traits::AccountsBank;
 use solana_account::{
     Account, AccountSharedData, ReadableAccount, WritableAccount,
 };
+use solana_clock::Slot;
 use solana_pubkey::Pubkey;
-use solana_sdk::clock::Slot;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteAccountUpdateSource {

@@ -21,6 +21,7 @@ pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -29,7 +30,7 @@ use solana_rpc_client_api::{
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
     request::RpcError,
 };
-use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
+use solana_sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
     task,

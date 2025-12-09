@@ -13,12 +13,13 @@ use magicblock_core::link::transactions::{
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
     args::{CancelTaskRequest, TaskRequest},
+    instruction_utils::InstructionUtils,
     validator::{validator_authority, validator_authority_id},
 };
-use solana_sdk::{
-    instruction::Instruction, message::Message, pubkey::Pubkey,
-    signature::Signature, transaction::Transaction,
-};
+use solana_instruction::Instruction;
+use solana_message::Message;
+use solana_signature::Signature;
+use solana_transaction::Transaction;
 use tokio::{select, task::JoinHandle, time::Duration};
 use tokio_util::{
     sync::CancellationToken,
@@ -29,9 +30,6 @@ use crate::{
     db::{DbTask, SchedulerDatabase},
     errors::{TaskSchedulerError, TaskSchedulerResult},
 };
-
-const NOOP_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
 pub struct TaskSchedulerService {
     /// Database for persisting tasks
@@ -308,13 +306,8 @@ impl TaskSchedulerService {
         let blockhash = self.block.load().blockhash;
         // Execute unsigned transactions
         // We prepend a noop instruction to make each transaction unique.
-        let noop_instruction = Instruction::new_with_bytes(
-            NOOP_PROGRAM_ID,
-            &self
-                .tx_counter
-                .fetch_add(1, Ordering::Relaxed)
-                .to_le_bytes(),
-            vec![],
+        let noop_instruction = InstructionUtils::noop_instruction(
+            self.tx_counter.fetch_add(1, Ordering::Relaxed),
         );
         let tx = Transaction::new(
             &[validator_authority()],

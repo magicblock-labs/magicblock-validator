@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use solana_commitment_config::CommitmentLevel;
 use solana_pubkey::Pubkey;
 use tokio::sync::{mpsc, oneshot};
 
@@ -22,7 +23,7 @@ impl ChainLaserClientImpl {
     pub async fn new_from_url(
         pubsub_url: &str,
         api_key: &str,
-        commitment: solana_sdk::commitment_config::CommitmentLevel,
+        commitment: CommitmentLevel,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, messages, updates) =
             ChainLaserActor::new_from_url(pubsub_url, api_key, commitment)?;

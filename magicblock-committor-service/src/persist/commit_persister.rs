@@ -4,7 +4,7 @@ use std::{
 };
 
 use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 
 use super::{
     db::CommitStatusRow, error::CommitPersistResult, utils::now, CommitStatus,
@@ -438,10 +438,11 @@ mod tests {
     use magicblock_program::magic_scheduled_base_intent::{
         CommitType, CommittedAccount, MagicBaseIntent,
     };
-    use solana_sdk::{
-        account::Account, hash::Hash, pubkey::Pubkey, signature::Signature,
-        transaction::Transaction,
-    };
+    use solana_account::Account;
+    use solana_hash::Hash;
+    use solana_pubkey::Pubkey;
+    use solana_signature::Signature;
+    use solana_transaction::Transaction;
     use tempfile::NamedTempFile;
 
     use super::*;
