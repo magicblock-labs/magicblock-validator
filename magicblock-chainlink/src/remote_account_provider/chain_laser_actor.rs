@@ -223,16 +223,9 @@ impl ChainLaserActor {
                 false
             }
             Reconnect { response } => {
-                // We know when reconnection is requested that all subscriptions are expected to be
-                // in-active
-                Self::clear_subscriptions(
-                    &mut self.subscriptions,
-                    &mut self.active_subscriptions,
-                    &mut self.program_subscriptions,
-                );
-                self.update_active_subscriptions();
                 // We cannot do much more here to _reconnect_ since we will do so once we activate
                 // subscriptions again and that method does not return any error information.
+                // Subscriptions were already cleared when the connection issue was signaled.
                 let _ = response.send(Ok(())).inspect_err(|_| {
                     warn!("Failed to send reconnect response")
                 });
