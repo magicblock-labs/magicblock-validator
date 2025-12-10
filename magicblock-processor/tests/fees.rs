@@ -1,7 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
 use guinea::GuineaInstruction;
-use magicblock_core::traits::AccountsBank;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_keypair::Keypair;
 use solana_program::{
@@ -349,53 +348,5 @@ async fn test_transaction_gasless_mode_with_not_existing_account() {
     assert_eq!(
         initial_balance, final_balance,
         "payer balance should not change in gasless mode"
-    );
-}
-
-/// Verifies that in zero-fee ("gasless") mode, transactions are processed
-/// successfully even when the fee payer does not exists.
-#[tokio::test]
-async fn test_transaction_gasless_mode_not_existing_feepayer() {
-    // Initialize the environment with a base fee of 0.
-    let env = ExecutionTestEnv::new_with_config(0);
-    let payer = env.get_payer().pubkey;
-    env.accountsdb.remove_account(&payer);
-
-    // Simple noop instruction that does not touch the fee payer account
-    let ix = Instruction::new_with_bincode(
-        guinea::ID,
-        &GuineaInstruction::PrintSizes,
-        vec![],
-    );
-    let txn = env.build_transaction(&[ix]);
-    let signature = txn.signatures[0];
-
-    // In a normal fee-paying mode, this execution would fail.
-    env.execute_transaction(txn)
-        .await
-        .expect("transaction should succeed in gasless mode");
-
-    // Verify the transaction was fully processed and broadcast successfully.
-    let status = env
-        .dispatch
-        .transaction_status
-        .recv_timeout(Duration::from_millis(100))
-        .expect("should receive a transaction status update");
-
-    assert_eq!(status.signature, signature);
-    assert!(
-        status.result.result.is_ok(),
-        "Transaction execution should be successful"
-    );
-
-    // Verify that the payer balance is zero (or doesn't exist)
-    let final_balance = env
-        .accountsdb
-        .get_account(&payer)
-        .unwrap_or_default()
-        .lamports();
-    assert_eq!(
-        final_balance, 0,
-        "payer balance of a not existing feepayer should be 0 in gasless mode"
     );
 }

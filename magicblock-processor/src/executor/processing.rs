@@ -348,8 +348,6 @@ impl super::TransactionExecutor {
         };
         let txn = &executed.loaded_transaction;
         let feepayer = txn.accounts.first();
-        let rollback_lamports =
-            rollback_feepayer_lamports(&txn.rollback_accounts);
 
         let logs = executed
             .execution_details
@@ -363,12 +361,19 @@ impl super::TransactionExecutor {
             // from undelegated feepayers to delegated accounts, which would
             // result in validator loosing funds upon balance settling.
             let undelegated_feepayer_was_modified = feepayer
-                .map(|acc| {
-                    (acc.1.is_dirty()
-                        && !self.is_auto_airdrop_lamports_enabled
-                        && (acc.1.lamports() != 0 || rollback_lamports != 0))
-                        && !acc.1.delegated()
-                        && !acc.1.privileged()
+                .map(|(_, acc)| {
+                    let mutated = acc
+                        .as_borrowed()
+                        .map(|a| a.lamports_changed())
+                        // NOTE: this branch can be taken only, if the account
+                        // has been upgraded to the Owned variant, which indicates
+                        // that it has been resized, which in turn is a clear
+                        // violation of the feepayer immutability rule in this mode
+                        .unwrap_or(true);
+                    !self.is_auto_airdrop_lamports_enabled
+                        && mutated
+                        && !acc.delegated()
+                        && !acc.privileged()
                 })
                 .unwrap_or_default();
             if undelegated_feepayer_was_modified {
@@ -380,15 +385,19 @@ impl super::TransactionExecutor {
             }
         }
         for (pubkey, acc) in &txn.accounts {
-            // If the confined account was modified in any way that affected its
-            // lamport balance it was marked as dirty, in which case we fail
-            // the transaction, as this is a validator wallet draining attack
-            //
-            // NOTE: dirty flag is not set when data field is modified,
-            // which is an intended use case for the confined accounts
-            if acc.confined() && acc.is_dirty() {
+            if !acc.confined() {
+                continue;
+            }
+            // If the confined account was modified in any way that affected its lamport
+            // balance, then it must have been marked as dirty, in which case we fail the transaction, since this is regarded as a validator wallet draining attack
+            let balance_changed = acc
+                .as_borrowed()
+                .map(|a| a.lamports_changed())
+                .unwrap_or(true);
+
+            if balance_changed {
                 executed.execution_details.status =
-                    Err(TransactionError::InvalidAccountForFee);
+                    Err(TransactionError::UnbalancedTransaction);
                 let msg = format!(
                     "Confined account {pubkey} has been illegally modified"
                 );
@@ -396,21 +405,5 @@ impl super::TransactionExecutor {
                 break;
             }
         }
-    }
-}
-
-// A utility to extract the rollback lamports of the feepayer
-fn rollback_feepayer_lamports(rollback: &RollbackAccounts) -> u64 {
-    match rollback {
-        RollbackAccounts::FeePayerOnly { fee_payer_account } => {
-            fee_payer_account.lamports()
-        }
-        RollbackAccounts::SameNonceAndFeePayer { nonce } => {
-            nonce.account().lamports()
-        }
-        RollbackAccounts::SeparateNonceAndFeePayer {
-            fee_payer_account,
-            ..
-        } => fee_payer_account.lamports(),
     }
 }
