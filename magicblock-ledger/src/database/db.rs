@@ -6,7 +6,7 @@ use std::{
 
 use bincode::deserialize;
 use rocksdb::{ColumnFamily, DBRawIterator, LiveFile};
-use solana_sdk::clock::Slot;
+use solana_clock::Slot;
 
 use super::{
     columns::{columns, Column, ColumnName, TypedColumn},
@@ -102,11 +102,11 @@ impl Database {
     }
 
     #[inline]
-    pub fn raw_iterator_cf(&self, cf: &ColumnFamily) -> DBRawIterator {
+    pub fn raw_iterator_cf(&self, cf: &ColumnFamily) -> DBRawIterator<'_> {
         self.backend.raw_iterator_cf(cf)
     }
 
-    pub fn batch(&self) -> WriteBatch {
+    pub fn batch(&self) -> WriteBatch<'_> {
         let write_batch = self.backend.batch();
         let map = columns()
             .into_iter()

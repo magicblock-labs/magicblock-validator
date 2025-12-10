@@ -5,7 +5,8 @@ use magicblock_committor_service::{
     error::CommittorServiceError, service_ext::CommittorServiceExtError,
     ChangesetMeta,
 };
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
+use solana_transaction_error::TransactionError;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 
@@ -17,7 +18,7 @@ pub enum AccountsError {
     UrlParseError(#[from] Box<url::ParseError>),
 
     #[error("TransactionError: {0}")]
-    TransactionError(#[from] Box<solana_sdk::transaction::TransactionError>),
+    TransactionError(#[from] Box<TransactionError>),
 
     #[error("CommittorSerivceError: {0}")]
     CommittorSerivceError(#[from] CommittorServiceError),
@@ -61,7 +62,13 @@ pub enum ScheduledCommitsProcessorError {
     #[error("RecvError: {0}")]
     RecvError(#[from] RecvError),
     #[error("CommittorSerivceError")]
-    CommittorSerivceError(#[from] CommittorServiceError),
+    CommittorSerivceError(Box<CommittorServiceError>),
+}
+
+impl From<CommittorServiceError> for ScheduledCommitsProcessorError {
+    fn from(e: CommittorServiceError) -> Self {
+        Self::CommittorSerivceError(Box::new(e))
+    }
 }
 
 pub type ScheduledCommitsProcessorResult<

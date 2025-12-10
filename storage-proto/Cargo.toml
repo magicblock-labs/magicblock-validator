@@ -3,7 +3,7 @@ name = "solana-storage-proto"
 description = "Solana Storage Protobuf Definitions"
 documentation = "https://docs.rs/solana-storage-proto"
 edition = { workspace = true }
-version = { workspace = true } 
+version = { workspace = true }
 
 [dependencies]
 bincode = { workspace = true }
@@ -11,7 +11,14 @@ bs58 = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
 solana-account-decoder = { workspace = true }
-solana-sdk = { workspace = true }
+solana-hash = { workspace = true }
+solana-instruction = { workspace = true }
+solana-message = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-signature = { workspace = true }
+solana-transaction = { workspace = true }
+solana-transaction-context = { workspace = true }
+solana-transaction-error = { workspace = true }
 solana-transaction-status = { workspace = true }
 
 [dev-dependencies]

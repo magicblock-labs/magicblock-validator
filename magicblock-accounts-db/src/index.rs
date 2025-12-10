@@ -359,7 +359,7 @@ impl AccountsDbIndex {
     /// Obtain a wrapped cursor to query account offsets repeatedly
     pub(crate) fn offset_finder(
         &self,
-    ) -> AccountsDbResult<AccountOffsetFinder> {
+    ) -> AccountsDbResult<AccountOffsetFinder<'_>> {
         let txn = self.env.begin_ro_txn()?;
         AccountOffsetFinder::new(&self.accounts, txn)
     }

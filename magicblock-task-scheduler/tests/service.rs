@@ -181,6 +181,9 @@ pub async fn test_cancel_task() -> TaskSchedulerResult<()> {
         result
     );
 
+    // Wait for the cancel to be processed
+    tokio::time::sleep(Duration::from_millis(interval as u64)).await;
+
     let value_at_cancel = env
         .get_account(account.pubkey())
         .data()

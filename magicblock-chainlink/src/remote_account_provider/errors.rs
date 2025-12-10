@@ -8,7 +8,7 @@ pub type RemoteAccountProviderResult<T> =
 pub enum RemoteAccountProviderError {
     #[error("Pubsub client error: {0}")]
     PubsubClientError(
-        #[from] solana_pubsub_client::pubsub_client::PubsubClientError,
+        Box<solana_pubsub_client::pubsub_client::PubsubClientError>,
     ),
 
     #[error(transparent)]
@@ -87,4 +87,12 @@ pub enum RemoteAccountProviderError {
         "The LoaderV4 program {0} account state deserialization failed: {1}"
     )]
     LoaderV4StateDeserializationFailed(Pubkey, String),
+}
+
+impl From<solana_pubsub_client::pubsub_client::PubsubClientError>
+    for RemoteAccountProviderError
+{
+    fn from(e: solana_pubsub_client::pubsub_client::PubsubClientError) -> Self {
+        Self::PubsubClientError(Box::new(e))
+    }
 }

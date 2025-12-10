@@ -3,7 +3,8 @@ use std::str::FromStr;
 use magicblock_ledger::Ledger;
 use num_format::{Locale, ToFormattedString};
 use pretty_hex::*;
-use solana_sdk::{message::VersionedMessage, signature::Signature};
+use solana_message::VersionedMessage;
+use solana_signature::Signature;
 use solana_transaction_status::ConfirmedTransactionWithStatusMeta;
 use tabular::{Row, Table};
 
@@ -54,12 +55,16 @@ pub(crate) fn print_transaction_details(
         status_meta.pre_token_balances.as_ref().map_or_else(
             || "None".to_string(),
             |b| {
-                b.is_empty().then(|| "None".to_string()).unwrap_or_else(|| {
-                    b.iter()
-                        .map(|b| b.ui_token_amount.amount.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" | ")
-                })
+                if b.is_empty() {
+                    "None".to_string()
+                } else {
+                    {
+                        b.iter()
+                            .map(|b| b.ui_token_amount.amount.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    }
+                }
             },
         );
 
@@ -67,24 +72,32 @@ pub(crate) fn print_transaction_details(
         status_meta.post_token_balances.as_ref().map_or_else(
             || "None".to_string(),
             |b| {
-                b.is_empty().then(|| "None".to_string()).unwrap_or_else(|| {
-                    b.iter()
-                        .map(|b| b.ui_token_amount.amount.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" | ")
-                })
+                if b.is_empty() {
+                    "None".to_string()
+                } else {
+                    {
+                        b.iter()
+                            .map(|b| b.ui_token_amount.amount.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    }
+                }
             },
         );
 
     let rewards = status_meta.rewards.as_ref().map_or_else(
         || "None".to_string(),
         |r| {
-            r.is_empty().then(|| "None".to_string()).unwrap_or_else(|| {
-                r.iter()
-                    .map(|r| r.lamports.to_formatted_string(&Locale::en))
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            })
+            if r.is_empty() {
+                "None".to_string()
+            } else {
+                {
+                    r.iter()
+                        .map(|r| r.lamports.to_formatted_string(&Locale::en))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                }
+            }
         },
     );
 

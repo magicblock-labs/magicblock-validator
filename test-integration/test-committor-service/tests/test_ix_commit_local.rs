@@ -247,11 +247,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
 async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
     commit_5_accounts_1kb(
         3,
-        expect_strategies(&[
-            // Intent fits in 1 TX only with ALT, see IntentExecutorImpl::try_unite_tasks
-            (CommitStrategy::FromBufferWithLookupTable, 3),
-            (CommitStrategy::FromBuffer, 2),
-        ]),
+        expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
         true,
     )
     .await;
@@ -708,7 +704,7 @@ fn validate_account(
     let matches_undelegation = acc.owner().eq(&expected_owner);
     let matches_all = matches_data && matches_undelegation;
 
-    if !matches_all && remaining_tries % 4 == 0 {
+    if !matches_all && remaining_tries.is_multiple_of(4) {
         if !matches_data {
             trace!(
                 "Account ({}) data {} != {} || {} != {}",

@@ -1,12 +1,11 @@
 #![allow(dead_code)]
 use magicblock_chainlink::testing::accounts::account_shared_with_owner;
 use solana_account::{Account, AccountSharedData};
+use solana_instruction::{AccountMeta, Instruction};
+use solana_message::Message;
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    transaction::{SanitizedTransaction, Transaction},
-};
-
+use solana_sdk_ids::system_program;
+use solana_transaction::{sanitized::SanitizedTransaction, Transaction};
 pub fn account_shared_with_owner_and_slot(
     acc: &Account,
     owner: Pubkey,
@@ -29,7 +28,7 @@ impl Default for TransactionAccounts {
         Self {
             readonly_accounts: Default::default(),
             writable_accounts: Default::default(),
-            programs: vec![solana_sdk::system_program::id()],
+            programs: vec![system_program::id()],
         }
     }
 }
@@ -76,6 +75,6 @@ pub fn sanitized_transaction_with_accounts(
         ixs.push(ix);
     }
     SanitizedTransaction::from_transaction_for_tests(Transaction::new_unsigned(
-        solana_sdk::message::Message::new(&ixs, None),
+        Message::new(&ixs, None),
     ))
 }

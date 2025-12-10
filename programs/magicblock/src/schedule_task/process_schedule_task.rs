@@ -4,9 +4,10 @@ use magicblock_core::tls::ExecutionTlsStash;
 use magicblock_magic_program_api::args::{
     ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest,
 };
+use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::{instruction::InstructionError, pubkey::Pubkey};
+use solana_pubkey::Pubkey;
 
 use crate::{
     utils::accounts::get_instruction_pubkey_with_idx,
@@ -144,25 +145,21 @@ pub(crate) fn process_schedule_task(
 #[cfg(test)]
 mod test {
     use magicblock_magic_program_api::instruction::MagicBlockInstruction;
-    use solana_sdk::{
-        account::AccountSharedData,
-        instruction::{AccountMeta, Instruction},
-        signature::Keypair,
-        signer::Signer,
-        system_program,
-    };
+    use solana_account::AccountSharedData;
+    use solana_instruction::{AccountMeta, Instruction};
+    use solana_keypair::Keypair;
+    use solana_sdk_ids::system_program;
+    use solana_signer::Signer;
 
     use super::*;
     use crate::{
-        test_utils::{
-            process_instruction, COUNTER_PROGRAM_ID, NOOP_PROGRAM_ID,
-        },
+        test_utils::{process_instruction, COUNTER_PROGRAM_ID},
         utils::instruction_utils::InstructionUtils,
         validator::generate_validator_authority_if_needed,
     };
 
     fn create_simple_ix() -> Instruction {
-        Instruction::new_with_borsh(NOOP_PROGRAM_ID, b"test noop", vec![])
+        InstructionUtils::noop_instruction(0)
     }
 
     fn create_complex_ix(

@@ -1,4 +1,3 @@
-use solana_program::example_mocks::solana_rpc_client_api;
 use thiserror::Error;
 
 pub type TaskSchedulerResult<T> = Result<T, TaskSchedulerError>;
@@ -10,21 +9,19 @@ pub enum TaskSchedulerError {
 
     #[error(transparent)]
     Pubsub(
-        #[from]
-        solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
+        Box<
+            solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
+        >,
     ),
 
     #[error(transparent)]
     Bincode(#[from] bincode::Error),
 
-    #[error(transparent)]
-    Rpc(#[from] solana_rpc_client_api::client_error::ClientError),
-
     #[error("Task not found: {0}")]
     TaskNotFound(i64),
 
     #[error(transparent)]
-    Transaction(#[from] solana_sdk::transaction::TransactionError),
+    Transaction(#[from] solana_transaction_error::TransactionError),
 
     #[error("Task context not found")]
     TaskContextNotFound,
@@ -43,4 +40,14 @@ pub enum TaskSchedulerError {
 
     #[error("Task {0} already exists and is owned by {1}, not {2}")]
     UnauthorizedReplacing(i64, String, String),
+}
+
+impl From<solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError>
+    for TaskSchedulerError
+{
+    fn from(
+        e: solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
+    ) -> Self {
+        Self::Pubsub(Box::new(e))
+    }
 }

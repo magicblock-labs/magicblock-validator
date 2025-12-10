@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use errors::ClonerResult;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
-use solana_sdk::signature::Signature;
+use solana_signature::Signature;
 
 use crate::remote_account_provider::program_account::LoadedProgram;
 

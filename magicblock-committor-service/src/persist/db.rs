@@ -1,8 +1,10 @@
 use std::{fmt, path::Path, str::FromStr};
 
 use rusqlite::{params, Connection, Result, Transaction};
+use solana_hash::Hash;
+use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
-use solana_sdk::{clock::Slot, hash::Hash, signature::Signature};
+use solana_signature::Signature;
 
 use super::{
     error::CommitPersistResult,
@@ -739,7 +741,8 @@ fn extract_committor_row(
 
 #[cfg(test)]
 mod tests {
-    use solana_sdk::{hash::Hash, signature::Signature};
+    use solana_hash::Hash;
+    use solana_signature::Signature;
     use tempfile::NamedTempFile;
 
     use super::*;
@@ -853,7 +856,8 @@ mod tests {
     fn test_set_commit_id() {
         let (mut db, _file) = setup_test_db();
         let row = create_test_row(1, 0);
-        db.insert_commit_status_rows(&[row.clone()]).unwrap();
+        db.insert_commit_status_rows(std::slice::from_ref(&row))
+            .unwrap();
 
         // Update commit_id
         db.set_commit_id(1, &row.pubkey, 100).unwrap();
@@ -867,7 +871,8 @@ mod tests {
     fn test_update_status_by_message() {
         let (mut db, _file) = setup_test_db();
         let row = create_test_row(1, 0);
-        db.insert_commit_status_rows(&[row.clone()]).unwrap();
+        db.insert_commit_status_rows(std::slice::from_ref(&row))
+            .unwrap();
 
         let new_status = CommitStatus::Pending;
         db.update_status_by_message(1, &row.pubkey, &new_status)
@@ -881,7 +886,8 @@ mod tests {
     fn test_update_status_by_commit() {
         let (mut db, _file) = setup_test_db();
         let row = create_test_row(1, 100); // Set commit_id to 100
-        db.insert_commit_status_rows(&[row.clone()]).unwrap();
+        db.insert_commit_status_rows(std::slice::from_ref(&row))
+            .unwrap();
 
         let new_status = CommitStatus::Succeeded(CommitStatusSignatures {
             commit_stage_signature: Signature::new_unique(),
@@ -898,7 +904,8 @@ mod tests {
     fn test_set_commit_strategy() {
         let (mut db, _file) = setup_test_db();
         let row = create_test_row(1, 100);
-        db.insert_commit_status_rows(&[row.clone()]).unwrap();
+        db.insert_commit_status_rows(std::slice::from_ref(&row))
+            .unwrap();
 
         let new_strategy = CommitStrategy::FromBuffer;
         db.set_commit_strategy(100, &row.pubkey, new_strategy)

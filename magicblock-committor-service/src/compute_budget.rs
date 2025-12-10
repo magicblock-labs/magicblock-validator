@@ -1,6 +1,5 @@
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, instruction::Instruction,
-};
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_instruction::Instruction;
 
 // -----------------
 // Budgets
@@ -60,8 +59,7 @@ impl BufferWriteChunkBudget {
                 .unwrap_or(u32::MAX as usize),
         )
         .unwrap_or(u32::MAX)
-        .checked_add(self.base_budget)
-        .unwrap_or(u32::MAX)
+        .saturating_add(self.base_budget)
     }
 
     pub fn instructions(&self, bytes_count: usize) -> Vec<Instruction> {

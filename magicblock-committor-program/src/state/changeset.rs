@@ -369,7 +369,7 @@ impl CommitableAccount {
             1
         } else {
             let count = len / chunk_size as usize;
-            if len % chunk_size as usize > 0 {
+            if len % chunk_size as usize != 0 {
                 count + 1
             } else {
                 count

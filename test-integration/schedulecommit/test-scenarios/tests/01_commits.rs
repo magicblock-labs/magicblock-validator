@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use integration_test_tools::{run_test, IntegrationTestContext};
 use log::*;
 use program_schedulecommit::{

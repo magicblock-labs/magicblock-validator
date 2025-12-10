@@ -13,15 +13,15 @@ use log::*;
 use magicblock_core::link::blocks::BlockHash;
 use rocksdb::{Direction as IteratorDirection, FlushOptions};
 use scc::HashCache;
+use solana_clock::{Slot, UnixTimestamp};
+use solana_hash::{Hash, HASH_BYTES};
 use solana_measure::measure::Measure;
-use solana_sdk::{
-    clock::{Slot, UnixTimestamp},
-    hash::{Hash, HASH_BYTES},
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::{SanitizedTransaction, VersionedTransaction},
-};
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 use solana_storage_proto::convert::generated::{self, ConfirmedTransaction};
+use solana_transaction::{
+    sanitized::SanitizedTransaction, versioned::VersionedTransaction,
+};
 use solana_transaction_status::{
     ConfirmedTransactionStatusWithSignature,
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
@@ -207,7 +207,7 @@ impl Ledger {
     fn check_lowest_cleanup_slot(
         &self,
         slot: Slot,
-    ) -> LedgerResult<std::sync::RwLockReadGuard<Slot>> {
+    ) -> LedgerResult<std::sync::RwLockReadGuard<'_, Slot>> {
         // lowest_cleanup_slot is the last slot that was not cleaned up by LedgerCleanupService
         let lowest_cleanup_slot = self
             .lowest_cleanup_slot
@@ -229,7 +229,7 @@ impl Ledger {
     /// consistency with slot-based delete_range.
     fn ensure_lowest_cleanup_slot(
         &self,
-    ) -> (std::sync::RwLockReadGuard<Slot>, Slot) {
+    ) -> (std::sync::RwLockReadGuard<'_, Slot>, Slot) {
         let lowest_cleanup_slot = self
             .lowest_cleanup_slot
             .read()
@@ -418,15 +418,15 @@ impl Ledger {
     /// the provided args.
     ///
     /// * `highest_slot` - Highest slot to consider for the search inclusive.
-    ///                    Any signatures with a slot higher than this will be ignored.
-    ///                    In the original implementation this allows ignoring signatures
-    ///                    that haven't reached a specific commitment level yet.
-    ///                    For us it will be the current slot in most cases.
-    ///                    The slot determined for `before` overrides this when provided
+    ///   Any signatures with a slot higher than this will be ignored.
+    ///   In the original implementation this allows ignoring signatures
+    ///   that haven't reached a specific commitment level yet.
+    ///   For us it will be the current slot in most cases.
+    ///   The slot determined for `before` overrides this when provided
     /// - *`upper_limit_signature`* - start searching backwards from this transaction
-    ///     signature. If not provided the search starts from the top of the highest_slot
+    ///   signature. If not provided the search starts from the top of the highest_slot
     /// - *`lower_limit_signature`* - search backwards until this transaction signature,
-    ///     if found before limit is reached
+    ///   if found before limit is reached
     /// - *`limit`* -  maximum number of signatures to return (max: 1000)
     ///
     /// ## Example
@@ -852,7 +852,7 @@ impl Ledger {
     /// * `signature` - Signature of the transaction
     /// * `slot` - Slot at which the transaction was confirmed
     /// * `transaction` - Transaction to be written, we take a SanititizedTransaction here
-    ///                   since that is what we provide Geyser as well
+    ///   since that is what we provide Geyser as well
     /// * `status` - status of the transaction
     pub fn write_transaction(
         &self,
@@ -1046,7 +1046,7 @@ impl Ledger {
     ///
     /// - `iterator_mode` - The iterator mode to use for the search, defaults to [`IteratorMode::Start`]
     /// - `success` - If true, only successful transactions are returned,
-    ///               otherwise only failed ones
+    ///   otherwise only failed ones
     pub fn iter_transaction_statuses(
         &self,
         iterator_mode: Option<IteratorMode<(Signature, Slot)>>,
@@ -1316,16 +1316,18 @@ impl_has_column!(AccountModDatas, account_mod_datas_cf);
 // -----------------
 #[cfg(test)]
 mod tests {
-    use solana_sdk::{
-        clock::UnixTimestamp,
-        instruction::{CompiledInstruction, InstructionError},
-        message::{v0, MessageHeader, SimpleAddressLoader, VersionedMessage},
-        pubkey::Pubkey,
-        signature::{Keypair, Signature},
-        signer::Signer,
-        transaction::{TransactionError, VersionedTransaction},
-        transaction_context::TransactionReturnData,
+    use solana_clock::UnixTimestamp;
+    use solana_instruction::error::InstructionError;
+    use solana_keypair::Keypair;
+    use solana_message::{
+        compiled_instruction::CompiledInstruction, v0, MessageHeader,
+        SimpleAddressLoader, VersionedMessage,
     };
+    use solana_pubkey::Pubkey;
+    use solana_signature::Signature;
+    use solana_signer::Signer;
+    use solana_transaction_context::TransactionReturnData;
+    use solana_transaction_error::{TransactionError, TransactionResult};
     use solana_transaction_status::{
         ConfirmedTransactionWithStatusMeta, InnerInstruction,
         InnerInstructions, TransactionStatusMeta, TransactionWithStatusMeta,
@@ -1408,7 +1410,7 @@ mod tests {
 
         (
             TransactionStatusMeta {
-                status: solana_sdk::transaction::Result::<()>::Err(
+                status: TransactionResult::Err(
                     TransactionError::InstructionError(
                         99,
                         InstructionError::Custom(69),

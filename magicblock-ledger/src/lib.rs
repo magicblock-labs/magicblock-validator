@@ -4,7 +4,8 @@ use arc_swap::{ArcSwapAny, Guard};
 pub use database::{
     meta::PerfSample, options::BLOCKSTORE_DIRECTORY_ROCKS_LEVEL,
 };
-use solana_sdk::{clock::Clock, hash::Hash};
+use solana_clock::Clock;
+use solana_hash::Hash;
 pub use store::api::{Ledger, SignatureInfosForAddress};
 use tokio::sync::broadcast;
 

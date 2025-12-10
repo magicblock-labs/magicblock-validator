@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
@@ -667,6 +669,7 @@ impl IntegrationTestContext {
         ));
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn confirm_transaction_chain(
         &self,
         sig: &Signature,
@@ -683,6 +686,7 @@ impl IntegrationTestContext {
         )
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn confirm_transaction_ephem(
         &self,
         sig: &Signature,
@@ -699,6 +703,7 @@ impl IntegrationTestContext {
         )
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn send_transaction_ephem(
         &self,
         tx: &mut Transaction,

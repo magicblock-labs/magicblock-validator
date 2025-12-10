@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use std::{thread::sleep, time::Duration};
 
 use log::*;

@@ -28,7 +28,9 @@ use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
 };
-use solana_sdk::{hash::Hash, pubkey::Pubkey, transaction::Transaction};
+use solana_hash::Hash;
+use solana_pubkey::Pubkey;
+use solana_transaction::Transaction;
 use tokio::{
     sync::{broadcast, oneshot},
     task,
@@ -280,8 +282,8 @@ impl ScheduledCommitsProcessorImpl {
             },
             Err(err) => {
                 error!(
-                    "Failed to commit in slot: {}, blockhash: {}. {:?}",
-                    intent_meta.slot, intent_meta.blockhash, err
+                    "Failed to commit intent: {}, slot: {}, blockhash: {}. {:?}",
+                    intent_id, intent_meta.slot, intent_meta.blockhash, err
                 );
                 err.signatures()
                     .map(|(commit, finalize)| {

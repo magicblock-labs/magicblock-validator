@@ -5,11 +5,9 @@ use magicblock_core::link::transactions::{
     SanitizeableTransaction, TransactionSchedulerHandle,
 };
 use num_format::{Locale, ToFormattedString};
-use solana_sdk::{
-    clock::{Slot, UnixTimestamp},
-    hash::Hash,
-    transaction::VersionedTransaction,
-};
+use solana_clock::{Slot, UnixTimestamp};
+use solana_hash::Hash;
+use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_status::VersionedConfirmedBlock;
 
 use crate::{
@@ -56,7 +54,7 @@ async fn replay_blocks(
             break;
         };
         if log::log_enabled!(Level::Info)
-            && slot % PROGRESS_REPORT_INTERVAL == 0
+            && slot.is_multiple_of(PROGRESS_REPORT_INTERVAL)
         {
             info!(
                 "Processing block: {}/{}",

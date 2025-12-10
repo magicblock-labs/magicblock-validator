@@ -160,7 +160,7 @@ fn cancel_task(
         vec![AccountMeta::new(*payer_info.key, true)],
     );
 
-    invoke(&ix, &[payer_info.clone()])?;
+    invoke(&ix, std::slice::from_ref(payer_info))?;
 
     Ok(())
 }

@@ -7,9 +7,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::{Transaction, TransactionError},
 };
-use test_task_scheduler::{
-    create_delegated_counter, send_noop_tx, setup_validator,
-};
+use test_task_scheduler::{create_delegated_counter, setup_validator};
 
 /// Test that a task can be scheduled and executed when it has multiple signers
 #[test]
@@ -24,8 +22,8 @@ fn test_schedule_task_signed() {
 
     create_delegated_counter(&ctx, &payer, &mut validator, 0);
 
-    // Noop tx to make sure the noop program is cloned
-    let ephem_blockhash = send_noop_tx(&ctx, &payer, &mut validator);
+    let ephem_blockhash =
+        expect!(ctx.try_get_latest_blockhash_ephem(), validator);
 
     // Schedule a task
     let task_id = 4;

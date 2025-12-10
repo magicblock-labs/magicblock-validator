@@ -2,7 +2,9 @@ use std::ffi::OsStr;
 
 use magicblock_accounts_db::AccountsDb;
 use num_format::{Locale, ToFormattedString};
-use solana_sdk::{account::ReadableAccount, clock::Epoch, pubkey::Pubkey};
+use solana_account::ReadableAccount;
+use solana_clock::Epoch;
+use solana_pubkey::Pubkey;
 use structopt::StructOpt;
 use tabular::{Row, Table};
 
@@ -124,7 +126,7 @@ pub fn print_accounts(
         });
         all.into_iter()
             .filter(|acc| {
-                if !owner.map_or(true, |owner| acc.owner.eq(&owner)) {
+                if !owner.is_none_or(|owner| acc.owner.eq(&owner)) {
                     return false;
                 }
                 if filters.contains(&FilterAccounts::Executable)

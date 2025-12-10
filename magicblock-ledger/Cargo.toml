@@ -24,24 +24,27 @@ scc = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
-solana-sdk = { workspace = true }
-solana-svm = { workspace = true }
-solana-timings = { workspace = true }
 solana-storage-proto = { workspace = true }
 solana-transaction-status = { workspace = true }
+solana-clock = { workspace = true }
+solana-hash = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-signature = { workspace = true }
+solana-signer = { workspace = true }
+solana-keypair = { workspace = true }
+solana-instruction = { workspace = true }
+solana-transaction = { workspace = true }
+solana-transaction-error = { workspace = true }
+solana-message = { workspace = true }
+solana-transaction-context = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
-
-[dependencies.rocksdb]
-# Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
-# when also using the bzip2 crate
-version = "0.22.0"
-default-features = false
-features = ["lz4"]
+rocksdb = { workspace = true, default-features = false, features = ["lz4"]}
 
 [dev-dependencies]
 tempfile = { workspace = true }
+solana-system-transaction = { workspace = true }
 
 [build-dependencies]
 

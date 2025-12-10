@@ -52,14 +52,14 @@ impl TestConfigViaEnvVars {
     pub fn setup_devnet(&self, test_name: &str) -> bool {
         self.validators_only
             .as_ref()
-            .map_or(true, |setup| setup.devnet())
+            .is_none_or(|setup| setup.devnet())
             && self.include_test(test_name)
     }
 
     pub fn setup_ephem(&self, test_name: &str) -> bool {
         self.validators_only
             .as_ref()
-            .map_or(true, |setup| setup.ephem())
+            .is_none_or(|setup| setup.ephem())
             && self.include_test(test_name)
     }
 }

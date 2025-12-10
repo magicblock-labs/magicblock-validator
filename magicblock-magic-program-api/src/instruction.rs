@@ -26,7 +26,7 @@ pub enum MagicBlockInstruction {
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
     /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
-    ///                              the scheduled commits
+    ///   the scheduled commits
     /// - **2..n** `[]`              Accounts to be committed
     ScheduleCommit,
 
@@ -43,7 +43,7 @@ pub enum MagicBlockInstruction {
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
     /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
-    ///                              the scheduled commits
+    ///   the scheduled commits
     /// - **2..n** `[]`              Accounts to be committed and undelegated
     ScheduleCommitAndUndelegate,
 
@@ -100,6 +100,9 @@ pub enum MagicBlockInstruction {
     /// # Account references
     /// - **0.** `[SIGNER]`         Validator authority
     EnableExecutableCheck,
+
+    /// Noop instruction
+    Noop(u64),
 }
 
 impl MagicBlockInstruction {
@@ -120,6 +123,7 @@ pub struct AccountModification {
     pub rent_epoch: Option<u64>,
     pub delegated: Option<bool>,
     pub confined: Option<bool>,
+    pub remote_slot: Option<u64>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -133,4 +137,5 @@ pub struct AccountModificationForInstruction {
     pub rent_epoch: Option<u64>,
     pub delegated: Option<bool>,
     pub confined: Option<bool>,
+    pub remote_slot: Option<u64>,
 }
