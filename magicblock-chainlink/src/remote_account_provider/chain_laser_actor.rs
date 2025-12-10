@@ -444,6 +444,10 @@ impl ChainLaserActor {
         *program_subscriptions = None;
     }
 
+    /// Signals a connection issue by clearing all subscriptions and
+    /// sending a message on the abort channel.
+    /// NOTE: the laser client should handle reconnects internally, but
+    /// we add this as a backup in case it is unable to do so
     async fn signal_connection_issue(
         subscriptions: &mut HashSet<Pubkey>,
         active_subscriptions: &mut StreamMap<usize, LaserStream>,
