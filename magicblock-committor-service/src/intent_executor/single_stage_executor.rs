@@ -1,6 +1,5 @@
-use std::{ops::ControlFlow, sync::Arc};
+use std::ops::ControlFlow;
 
-use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::error;
 use solana_pubkey::Pubkey;
 
@@ -42,7 +41,6 @@ where
         &mut self,
         committed_pubkeys: Option<&[Pubkey]>,
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         const RECURSION_CEILING: u8 = 10;
 
@@ -56,7 +54,6 @@ where
                 .prepare_and_execute_strategy(
                     &mut self.transaction_strategy,
                     persister,
-                    photon_client,
                     None,
                 )
                 .await

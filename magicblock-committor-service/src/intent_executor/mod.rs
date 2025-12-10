@@ -247,13 +247,12 @@ where
         transaction_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let photon_client = self.photon_client.clone();
         let mut single_stage_executor =
             SingleStageExecutor::new(self, transaction_strategy);
 
         let committed_pubkeys = base_intent.get_committed_pubkeys();
         let res = single_stage_executor
-            .execute(committed_pubkeys.as_deref(), persister, &photon_client)
+            .execute(committed_pubkeys.as_deref(), persister)
             .await;
 
         // Here we continue only IF the error is CpiLimitError
@@ -300,12 +299,11 @@ where
         finalize_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let photon_client = self.photon_client.clone();
         let finalized_stage =
             TwoStageExecutor::new(self, commit_strategy, finalize_strategy)
-                .commit(committed_pubkeys, persister, &photon_client)
+                .commit(committed_pubkeys, persister)
                 .await?
-                .finalize(persister, &photon_client)
+                .finalize(persister)
                 .await?;
 
         Ok(ExecutionOutput::TwoStage {
@@ -632,7 +630,6 @@ where
         &self,
         transaction_strategy: &mut TransactionStrategy,
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
         commit_slot: Option<u64>,
     ) -> IntentExecutorResult<
         IntentExecutorResult<Signature, TransactionStrategyExecutionError>,
@@ -645,7 +642,7 @@ where
                 &self.authority,
                 transaction_strategy,
                 persister,
-                photon_client,
+                &self.photon_client,
                 commit_slot,
             )
             .await?;

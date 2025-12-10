@@ -102,6 +102,18 @@ impl TaskStrategist {
     ) -> TaskStrategistResult<StrategyExecutionMode> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
 
+        // Compressed commits and finalize must be executed in two stages
+        if commit_tasks.iter().any(|t| t.is_compressed())
+            || finalize_tasks.iter().any(|t| t.is_compressed())
+        {
+            return Self::build_two_stage(
+                commit_tasks,
+                finalize_tasks,
+                authority,
+                persister,
+            );
+        }
+
         // We can unite in 1 tx a lot of commits
         // but then there's a possibility of hitting CPI limit, aka
         // MaxInstructionTraceLengthExceeded error.

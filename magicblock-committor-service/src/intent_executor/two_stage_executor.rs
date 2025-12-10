@@ -1,6 +1,5 @@
-use std::{ops::ControlFlow, sync::Arc};
+use std::ops::ControlFlow;
 
-use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::{error, warn};
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -71,7 +70,6 @@ where
         mut self,
         committed_pubkeys: &[Pubkey],
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<TwoStageExecutor<'a, T, F, Committed>> {
         let mut i = 0;
         let commit_result = loop {
@@ -83,7 +81,6 @@ where
                 .prepare_and_execute_strategy(
                     &mut self.state.commit_strategy,
                     persister,
-                    photon_client,
                     None,
                 )
                 .await
@@ -189,7 +186,6 @@ where
     pub async fn finalize<P: IntentPersister>(
         mut self,
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
     ) -> IntentExecutorResult<TwoStageExecutor<'a, T, F, Finalized>> {
         // Fetching the slot at which the transaction was executed
         // Task preparations requiring fresh data can use that info
@@ -211,7 +207,6 @@ where
                 .prepare_and_execute_strategy(
                     &mut self.state.finalize_strategy,
                     persister,
-                    photon_client,
                     commit_slot,
                 )
                 .await

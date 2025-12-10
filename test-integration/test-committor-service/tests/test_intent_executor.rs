@@ -149,7 +149,6 @@ async fn test_commit_id_error_parsing() {
         .prepare_and_execute_strategy(
             &mut transaction_strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
             None,
         )
         .await;
@@ -200,7 +199,6 @@ async fn test_undelegation_error_parsing() {
         .prepare_and_execute_strategy(
             &mut transaction_strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
             None,
         )
         .await;
@@ -261,7 +259,6 @@ async fn test_action_error_parsing() {
         .prepare_and_execute_strategy(
             &mut transaction_strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
             None,
         )
         .await;
@@ -319,7 +316,6 @@ async fn test_cpi_limits_error_parsing() {
         .prepare_and_execute_strategy(
             &mut transaction_strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
             None,
         )
         .await;
