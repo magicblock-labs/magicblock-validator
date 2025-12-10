@@ -13,17 +13,9 @@ impl HttpDispatcher {
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
-        // Parse single pubkey parameter from positional params without using
-        // the generic `parse_params!` helper to keep the logic simple and
-        // avoid tuple unpacking for this custom method.
-        let params = request.params()?;
-        // We expect the *first* positional parameter to be the account pubkey.
-        let value = params.first().cloned().ok_or_else(|| {
-            RpcError::invalid_params("missing pubkey parameter")
-        })?;
-        let pubkey_bytes: Serde32Bytes =
-            json::from_value(&value).map_err(RpcError::parse_error)?;
-        let pubkey: Pubkey = pubkey_bytes.into();
+        let (pubkey,) = parse_params!(request.params()?, Serde32Bytes);
+
+        let pubkey: Pubkey = some_or_err!(pubkey);
 
         // Ensure the account is present in the local AccountsDb, cloning it
         // from the reference cluster if necessary.
