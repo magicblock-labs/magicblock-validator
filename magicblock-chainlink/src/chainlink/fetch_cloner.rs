@@ -931,20 +931,24 @@ where
                         let Ok(delegation_record) =
                             CompressedDelegationRecord::try_from_slice(
                                 account.data(),
-                            ) else {
-                                error!("Failed to deserialize compressed delegation record for {pubkey}");
-                                return None;
-                            };
+                            )
+                            .map_err(|err| {
+                                error!("Failed to deserialize compressed delegation record for {pubkey}: {err}\nAccount data: {:?}", account.data());
+                                err
+                            })
+                        else {
+                            return None;
+                        };
 
-                            account.set_compressed(true);
-                            account.set_lamports(delegation_record.lamports);
-                            account.set_owner(delegation_record.owner);
-                            account.set_data(delegation_record.data);
-                            account.set_delegated(
-                                delegation_record
-                                    .authority
-                                    .eq(&self.validator_pubkey),
-                            );
+                        account.set_compressed(true);
+                        account.set_lamports(delegation_record.lamports);
+                        account.set_owner(delegation_record.owner);
+                        account.set_data(delegation_record.data);
+                        account.set_delegated(
+                            delegation_record
+                                .authority
+                                .eq(&self.validator_pubkey),
+                        );
                         Some(AccountCloneRequest {
                             pubkey,
                             account,
