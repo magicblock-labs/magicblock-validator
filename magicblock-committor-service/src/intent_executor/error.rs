@@ -156,8 +156,9 @@ impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
 }
 
 impl TransactionStrategyExecutionError {
-    // There's always 2 budget instructions in front
-    const OFFSET: u8 = 2;
+    /// Number of compute budget instructions prepended to every transaction.
+    /// Used to map instruction indices back to task indices.
+    const TASK_OFFSET: u8 = 2;
 
     pub fn is_cpi_limit_error(&self) -> bool {
         matches!(self, Self::CpiLimitError(_, _))
@@ -184,7 +185,7 @@ impl TransactionStrategyExecutionError {
             | Self::CpiLimitError(
                 TransactionError::InstructionError(index, _),
                 _,
-            ) => index.checked_sub(Self::OFFSET),
+            ) => index.checked_sub(Self::TASK_OFFSET),
             _ => None,
         }
     }
@@ -235,7 +236,7 @@ impl TransactionStrategyExecutionError {
                 let tx_err_helper = |instruction_err| -> TransactionError {
                     TransactionError::InstructionError(index, instruction_err)
                 };
-                let Some(action_index) = index.checked_sub(Self::OFFSET) else {
+                let Some(action_index) = index.checked_sub(Self::TASK_OFFSET) else {
                     return Err(tx_err_helper(instruction_err));
                 };
 
