@@ -107,3 +107,4 @@ url = "2.5.0"
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "1beed4c" }
+rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }

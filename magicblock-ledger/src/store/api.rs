@@ -1340,7 +1340,7 @@ impl Drop for MeasureGuard {
     fn drop(&mut self) {
         self.measure.stop();
         // We print it in case metrics wouldn't have time to be scraped
-        info!("Cancelling manual compactions took: {}", self.measure);
+        info!("{}", self.measure);
     }
 }
 
