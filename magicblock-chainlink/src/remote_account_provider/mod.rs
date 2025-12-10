@@ -153,8 +153,14 @@ impl Default for MatchSlotsConfig {
 
 #[derive(Debug, Clone)]
 pub enum Endpoint {
-    Rpc { rpc_url: String, pubsub_url: String },
-    Compression { url: String },
+    Rpc {
+        rpc_url: String,
+        pubsub_url: String,
+    },
+    Compression {
+        url: String,
+        api_key: Option<String>,
+    },
 }
 
 impl
@@ -409,14 +415,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     .await?;
                     pubsubs.push((Arc::new(client), abort_rx));
                 }
-                Compression { url } => {
+                Compression { url, api_key } => {
                     if photon_client.is_some() {
                         return Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                             "Multiple compression endpoints provided".to_string(),
                         ));
                     } else {
-                        photon_client
-                            .replace(PhotonClientImpl::new_from_url(url));
+                        photon_client.replace(PhotonClientImpl::new_from_url(
+                            url,
+                            api_key.clone(),
+                        ));
                     }
                 }
             }

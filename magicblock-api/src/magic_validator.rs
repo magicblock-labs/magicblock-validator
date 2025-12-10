@@ -381,8 +381,11 @@ impl MagicValidator {
             })
             .collect::<Vec<_>>();
 
-        if let Some(url) = config.compression.photon_url.as_ref() {
-            endpoints.push(Endpoint::Compression { url: url.clone() });
+        if let Some(url) = &config.compression.photon_url {
+            endpoints.push(Endpoint::Compression {
+                url: url.clone(),
+                api_key: config.compression.api_key.clone(),
+            });
         }
 
         let cloner = ChainlinkCloner::new(

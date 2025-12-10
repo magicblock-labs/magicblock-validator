@@ -27,9 +27,9 @@ impl PhotonClientImpl {
     pub(crate) fn new(photon_indexer: Arc<PhotonIndexer>) -> Self {
         Self(photon_indexer)
     }
-    pub(crate) fn new_from_url(url: &str) -> Self {
+    pub(crate) fn new_from_url(url: &str, api_key: Option<String>) -> Self {
         debug!("Creating PhotonClient with URL: {}", url);
-        Self::new(Arc::new(PhotonIndexer::new(url.to_string(), None)))
+        Self::new(Arc::new(PhotonIndexer::new(url.to_string(), api_key)))
     }
 }
 
