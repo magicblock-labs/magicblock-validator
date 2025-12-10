@@ -18,7 +18,7 @@ async fn test_gasless_undelegated_feepayer_modification_fails() {
         let mut account = env.get_payer();
         account.set_owner(guinea::ID);
         account.set_delegated(false);
-        account.commmit();
+        account.commit();
     }
     env.advance_slot();
 
@@ -62,7 +62,7 @@ async fn test_confined_account_lamport_modification_fails() {
     {
         let mut account = env.get_account(confined_sender.pubkey());
         account.set_confined(true);
-        account.commmit();
+        account.commit();
     }
     env.advance_slot();
 
@@ -98,7 +98,7 @@ async fn test_confined_account_data_modification_succeeds() {
     {
         let mut account = env.get_account(confined_account.pubkey());
         account.set_confined(true);
-        account.commmit();
+        account.commit();
     }
     env.advance_slot();
 

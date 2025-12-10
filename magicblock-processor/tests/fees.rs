@@ -50,7 +50,7 @@ async fn test_insufficient_fee() {
     let env = ExecutionTestEnv::new();
     let mut payer = env.get_payer();
     payer.set_lamports(ExecutionTestEnv::BASE_FEE - 1);
-    payer.commmit();
+    payer.commit();
 
     let (ix, _) =
         setup_guinea_instruction(&env, &GuineaInstruction::PrintSizes, false);
@@ -104,7 +104,7 @@ async fn test_non_delegated_payer_rejection() {
     let mut payer = env.get_payer();
     payer.set_delegated(false); // Mark the payer as not delegated
     let fee_payer_initial_balance = payer.lamports();
-    payer.commmit();
+    payer.commit();
 
     let (ix, _) =
         setup_guinea_instruction(&env, &GuineaInstruction::PrintSizes, false);
@@ -132,7 +132,7 @@ async fn test_escrowed_payer_success() {
     payer.set_lamports(ExecutionTestEnv::BASE_FEE - 1);
     payer.set_delegated(false);
     let escrow = ephemeral_balance_pda_from_payer(&payer.pubkey);
-    payer.commmit();
+    payer.commit();
 
     env.fund_account(escrow, LAMPORTS_PER_SOL); // Fund the escrow PDA
 
@@ -219,7 +219,7 @@ async fn test_escrow_charged_for_failed_transaction() {
     payer.set_lamports(0);
     payer.set_delegated(false);
     let escrow = ephemeral_balance_pda_from_payer(&payer.pubkey);
-    payer.commmit();
+    payer.commit();
     let account = env
         .create_account_with_config(LAMPORTS_PER_SOL, 0, guinea::ID) // Account with no data
         .pubkey();
@@ -265,7 +265,7 @@ async fn test_transaction_gasless_mode() {
     payer.set_lamports(1); // Not enough to cover standard fee
     payer.set_delegated(false); // Explicitly set the payer as NON-delegated.
     let initial_balance = payer.lamports();
-    payer.commmit();
+    payer.commit();
 
     let ix = Instruction::new_with_bincode(
         guinea::ID,
@@ -311,7 +311,7 @@ async fn test_transaction_gasless_mode_with_not_existing_account() {
     payer.set_lamports(1); // Not enough to cover standard fee
     payer.set_delegated(false); // Explicitly set the payer as NON-delegated.
     let initial_balance = payer.lamports();
-    payer.commmit();
+    payer.commit();
 
     let ix = Instruction::new_with_bincode(
         guinea::ID,

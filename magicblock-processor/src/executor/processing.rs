@@ -389,7 +389,8 @@ impl super::TransactionExecutor {
                 continue;
             }
             // If the confined account was modified in any way that affected its lamport
-            // balance, then it must have been marked as dirty, in which case we fail the transaction, since this is regarded as a validator wallet draining attack
+            // balance, then an corresponding marker must have been set, in which case we
+            // fail the transaction, since this is regarded as a validator draining attack
             let balance_changed = acc
                 .as_borrowed()
                 .map(|a| a.lamports_changed())
