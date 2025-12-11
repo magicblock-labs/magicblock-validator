@@ -63,6 +63,7 @@ async fn test_truncator_not_purged_size() {
             signature.unwrap()
         })
         .collect::<Vec<_>>();
+    ledger.flush().unwrap();
 
     ledger_truncator.start();
     tokio::time::sleep(Duration::from_millis(10)).await;
@@ -87,6 +88,7 @@ async fn test_truncator_non_empty_ledger() {
         })
         .collect::<Vec<_>>();
 
+    ledger.flush().unwrap();
     let mut ledger_truncator =
         LedgerTruncator::new(ledger.clone(), TEST_TRUNCATION_TIME_INTERVAL, 0);
 

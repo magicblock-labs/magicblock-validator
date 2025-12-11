@@ -662,7 +662,6 @@ impl MagicValidator {
             committor_service.stop();
         }
 
-        self.ledger_truncator.stop();
         self.claim_fees_task.stop();
 
         if self.config.chain_operation.is_some()
@@ -686,6 +685,15 @@ impl MagicValidator {
 
     pub fn ledger(&self) -> &Ledger {
         &self.ledger
+    }
+
+    /// Prepares RocksDB for shutdown by cancelling all Manual compactions
+    /// This speeds up `stop` as it doesn't have to await for compaction cancellation
+    /// Calling this still allows to write or read from DB
+    pub fn prepare_ledger_for_shutdown(&mut self) {
+        self.ledger_truncator.stop();
+        // Calls & awaits until manual compaction is canceled
+        self.ledger.cancel_manual_compactions();
     }
 }
 

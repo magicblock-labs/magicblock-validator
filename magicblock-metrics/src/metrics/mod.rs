@@ -118,6 +118,25 @@ lazy_static::lazy_static! {
         ),
     ).unwrap();
 
+    static ref LEDGER_DISABLE_COMPACTIONS_TIME: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "ledger_disable_compactions_time",
+            "Time in seconds spent on disabling manual compaction"
+        )
+        .buckets(
+            vec![0.1, 3.0, 10.0, 60.0, (10 * 60) as f64, (30 * 60) as f64]
+        ),
+        ).unwrap();
+
+    static ref LEDGER_SHUTDOWN_TIME: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "ledger_shutdown_time",
+            "Time taken for ledger to shutdown"
+        )
+        .buckets(
+            vec![0.1, 1.0, 2.0, 3.0, 10.0, 60.0]
+        ),
+        ).unwrap();
 
     // -----------------
     // Accounts
@@ -377,6 +396,8 @@ pub(crate) fn register() {
         register!(LEDGER_COLUMNS_COUNT_DURATION_SECONDS);
         register!(LEDGER_TRUNCATOR_COMPACTION_SECONDS);
         register!(LEDGER_TRUNCATOR_DELETE_SECONDS);
+        register!(LEDGER_DISABLE_COMPACTIONS_TIME);
+        register!(LEDGER_SHUTDOWN_TIME);
         register!(ACCOUNTS_SIZE_GAUGE);
         register!(ACCOUNTS_COUNT_GAUGE);
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
@@ -481,6 +502,14 @@ pub fn start_ledger_truncator_compaction_timer() -> HistogramTimer {
 
 pub fn observe_ledger_truncator_delete<T, F: FnOnce() -> T>(f: F) -> T {
     LEDGER_TRUNCATOR_DELETE_SECONDS.observe_closure_duration(f)
+}
+
+pub fn start_ledger_disable_compactions_timer() -> HistogramTimer {
+    LEDGER_DISABLE_COMPACTIONS_TIME.start_timer()
+}
+
+pub fn start_ledger_shutdown_timer() -> HistogramTimer {
+    LEDGER_SHUTDOWN_TIME.start_timer()
 }
 
 pub fn set_accounts_size(value: i64) {
