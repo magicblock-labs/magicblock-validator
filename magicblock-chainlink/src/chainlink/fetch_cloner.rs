@@ -493,7 +493,7 @@ where
                     ) {
                         Ok(delegation_record) => Some(delegation_record),
                         Err(_err) => {
-                            info!("Failed to parse compressed delegation record for {pubkey} directly from the data. Fetching from photon instead.");
+                            debug!("The account's data did not contain a valid compressed delegation record, fetching...");
                             if let Some(acc) = self
                                 .remote_account_provider
                                 .try_get(pubkey, AccountFetchOrigin::GetAccount)
@@ -507,6 +507,7 @@ where
                                 )
                                 .ok()
                             } else {
+                                error!("Failed to parse compressed delegation record for {pubkey} directly from the data.");
                                 None
                             }
                         }
