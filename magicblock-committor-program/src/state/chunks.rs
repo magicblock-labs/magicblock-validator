@@ -15,7 +15,7 @@ pub struct Chunks {
     bits: Vec<u8>,
     /// The tracking capacity which is
     /// ```rust
-    /// let capacity = bits.len() * BIT_FIELD_SIZE
+    /// let capacity = bits.len() * BITS_PER_BYTE
     /// ```
     /// The amount of tracked chunks could be a bit smaller as it might only use
     /// part of the last bit in [Chunks::bits].
@@ -59,7 +59,7 @@ impl Chunks {
     /// Returns how many bytes [`Chunks`] will occupy certain count
     pub fn struct_size(count: usize) -> usize {
         // bits: Vec<u8>,
-        Self::count_to_bitfield_bytes(count)
+        4 + Self::count_to_bitfield_bytes(count)
         // count: usize,
         + std::mem::size_of::<usize>()
         // chunk_size: u16,

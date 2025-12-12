@@ -7,6 +7,7 @@ use std::{
     thread,
 };
 
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::*;
 use magicblock_account_cloner::{
     map_committor_request_result, ChainlinkCloner,
@@ -24,7 +25,7 @@ use magicblock_chainlink::{
     config::ChainlinkConfig,
     remote_account_provider::{
         chain_pubsub_client::ChainPubsubClientImpl,
-        chain_rpc_client::ChainRpcClientImpl,
+        chain_rpc_client::ChainRpcClientImpl, photon_client::PhotonClientImpl,
     },
     submux::SubMuxClient,
     Chainlink,
@@ -97,6 +98,7 @@ type ChainlinkImpl = Chainlink<
     SubMuxClient<ChainPubsubClientImpl>,
     AccountsDb,
     ChainlinkCloner,
+    PhotonClientImpl,
 >;
 
 // -----------------
@@ -319,6 +321,13 @@ impl MagicValidator {
     async fn init_committor_service(
         config: &ValidatorParams,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
+        let photon_client = config.compression.photon_url.as_ref().map(|url| {
+            Arc::new(PhotonIndexer::new(
+                url.clone(),
+                config.compression.api_key.clone(),
+            ))
+        });
+
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
         debug!(
@@ -336,6 +345,7 @@ impl MagicValidator {
                     config.commit.compute_unit_price,
                 ),
             },
+            photon_client,
         )?));
 
         if let Some(committor_service) = &committor_service {
@@ -362,14 +372,21 @@ impl MagicValidator {
     ) -> ApiResult<ChainlinkImpl> {
         use magicblock_chainlink::remote_account_provider::Endpoint;
         let rpc_url = config.remote.http().to_string();
-        let endpoints = config
+        let mut endpoints = config
             .remote
             .websocket()
-            .map(|pubsub_url| Endpoint {
+            .map(|pubsub_url| Endpoint::Rpc {
                 rpc_url: rpc_url.clone(),
                 pubsub_url: pubsub_url.to_string(),
             })
             .collect::<Vec<_>>();
+
+        if let Some(url) = &config.compression.photon_url {
+            endpoints.push(Endpoint::Compression {
+                url: url.clone(),
+                api_key: config.compression.api_key.clone(),
+            });
+        }
 
         let cloner = ChainlinkCloner::new(
             committor_service,

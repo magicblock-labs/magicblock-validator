@@ -213,6 +213,20 @@ claim-fees-frequency = "24h"
 reset = false
 
 # ==============================================================================
+# Compression Service
+# ==============================================================================
+[compression]
+# The URL of the Photon indexer.
+# Default: None
+# Env: MBV_COMPRESSION__PHOTON_URL
+photon-url = "http://localhost:8784"
+
+# The API key for the Photon indexer.
+# Default: None
+# Env: MBV_COMPRESSION__API_KEY
+# api-key = "your-api-key"
+
+# ==============================================================================
 # Pre-loaded Programs
 # ==============================================================================
 # You can specify multiple programs to load at startup.

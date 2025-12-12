@@ -81,6 +81,7 @@ where
                 .prepare_and_execute_strategy(
                     &mut self.state.commit_strategy,
                     persister,
+                    None,
                 )
                 .await
                 .map_err(IntentExecutorError::FailedCommitPreparationError)?;
@@ -186,6 +187,16 @@ where
         mut self,
         persister: &Option<P>,
     ) -> IntentExecutorResult<TwoStageExecutor<'a, T, F, Finalized>> {
+        // Fetching the slot at which the transaction was executed
+        // Task preparations requiring fresh data can use that info
+        let commit_slot = self
+            .inner
+            .rpc_client
+            .get_transaction(&self.state.commit_signature, None)
+            .await
+            .map(|tx| tx.slot)
+            .ok();
+
         let mut i = 0;
         let finalize_result = loop {
             i += 1;
@@ -196,6 +207,7 @@ where
                 .prepare_and_execute_strategy(
                     &mut self.state.finalize_strategy,
                     persister,
+                    commit_slot,
                 )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;

@@ -54,6 +54,7 @@ where
                 .prepare_and_execute_strategy(
                     &mut self.transaction_strategy,
                     persister,
+                    None,
                 )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
