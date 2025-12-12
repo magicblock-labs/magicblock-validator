@@ -236,7 +236,8 @@ impl TransactionStrategyExecutionError {
                 let tx_err_helper = |instruction_err| -> TransactionError {
                     TransactionError::InstructionError(index, instruction_err)
                 };
-                let Some(action_index) = index.checked_sub(Self::TASK_OFFSET) else {
+                let Some(action_index) = index.checked_sub(Self::TASK_OFFSET)
+                else {
                     return Err(tx_err_helper(instruction_err));
                 };
 
