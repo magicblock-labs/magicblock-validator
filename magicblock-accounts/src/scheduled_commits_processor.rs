@@ -101,6 +101,12 @@ impl ScheduledCommitsProcessorImpl {
             return (intent, vec![]);
         };
 
+        // Filter duplicate accounts
+        let mut seen = HashSet::with_capacity(committed_accounts.len());
+        committed_accounts.retain(|account| {
+            seen.insert(account.pubkey)
+        });
+
         // dump undelegated pubkeys
         let pubkeys_being_undelegated: Vec<_> = committed_accounts
             .iter()
