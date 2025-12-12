@@ -124,6 +124,7 @@ impl IxtestContext {
                 },
                 Endpoint::Compression {
                     url: PHOTON_URL.to_string(),
+                    api_key: None,
                 },
             ];
             // Add all native programs
