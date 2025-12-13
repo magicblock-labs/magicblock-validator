@@ -7,7 +7,7 @@ use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 use tokio::sync::Mutex;
 
-use crate::errors::TaskSchedulerError;
+use crate::errors::TaskSchedulerResult;
 
 /// Represents a task in the database
 /// Uses i64 for all timestamps and IDs to avoid overflows
@@ -65,7 +65,7 @@ impl SchedulerDatabase {
         path.join("task_scheduler.sqlite")
     }
 
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, TaskSchedulerError> {
+    pub fn new<P: AsRef<Path>>(path: P) -> TaskSchedulerResult<Self> {
         let conn = Connection::open(path)?;
 
         // Create tables
@@ -108,10 +108,7 @@ impl SchedulerDatabase {
         })
     }
 
-    pub async fn insert_task(
-        &self,
-        task: &DbTask,
-    ) -> Result<(), TaskSchedulerError> {
+    pub async fn insert_task(&self, task: &DbTask) -> TaskSchedulerResult<()> {
         let instructions_bin = bincode::serialize(&task.instructions)?;
         let authority_str = task.authority.to_string();
         let now = Utc::now().timestamp_millis();
@@ -139,7 +136,7 @@ impl SchedulerDatabase {
         &self,
         task_id: i64,
         last_execution: i64,
-    ) -> Result<(), TaskSchedulerError> {
+    ) -> TaskSchedulerResult<()> {
         let now = Utc::now().timestamp_millis();
 
         self.conn.lock().await.execute(
@@ -158,7 +155,7 @@ impl SchedulerDatabase {
         &self,
         task_id: i64,
         error: String,
-    ) -> Result<(), TaskSchedulerError> {
+    ) -> TaskSchedulerResult<()> {
         self.conn.lock().await.execute(
             "INSERT INTO failed_scheduling (timestamp, task_id, error) VALUES (?, ?, ?)",
             params![Utc::now().timestamp_millis(), task_id, error],
@@ -171,7 +168,7 @@ impl SchedulerDatabase {
         &self,
         task_id: i64,
         error: String,
-    ) -> Result<(), TaskSchedulerError> {
+    ) -> TaskSchedulerResult<()> {
         self.conn.lock().await.execute(
             "INSERT INTO failed_tasks (timestamp, task_id, error) VALUES (?, ?, ?)",
             params![Utc::now().timestamp_millis(), task_id, error],
@@ -183,7 +180,7 @@ impl SchedulerDatabase {
     pub async fn unschedule_task(
         &self,
         task_id: i64,
-    ) -> Result<(), TaskSchedulerError> {
+    ) -> TaskSchedulerResult<()> {
         self.conn.lock().await.execute(
             "UPDATE tasks SET executions_left = 0 WHERE id = ?",
             [task_id],
@@ -192,10 +189,7 @@ impl SchedulerDatabase {
         Ok(())
     }
 
-    pub async fn remove_task(
-        &self,
-        task_id: i64,
-    ) -> Result<(), TaskSchedulerError> {
+    pub async fn remove_task(&self, task_id: i64) -> TaskSchedulerResult<()> {
         self.conn
             .lock()
             .await
@@ -207,7 +201,7 @@ impl SchedulerDatabase {
     pub async fn get_task(
         &self,
         task_id: i64,
-    ) -> Result<Option<DbTask>, TaskSchedulerError> {
+    ) -> TaskSchedulerResult<Option<DbTask>> {
         let db = self.conn.lock().await;
         let mut stmt = db.prepare(
             "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
@@ -244,7 +238,7 @@ impl SchedulerDatabase {
         Ok(rows.next().transpose()?)
     }
 
-    pub async fn get_tasks(&self) -> Result<Vec<DbTask>, TaskSchedulerError> {
+    pub async fn get_tasks(&self) -> TaskSchedulerResult<Vec<DbTask>> {
         let db = self.conn.lock().await;
         let mut stmt = db.prepare(
             "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
@@ -286,7 +280,7 @@ impl SchedulerDatabase {
         Ok(tasks)
     }
 
-    pub async fn get_task_ids(&self) -> Result<Vec<i64>, TaskSchedulerError> {
+    pub async fn get_task_ids(&self) -> TaskSchedulerResult<Vec<i64>> {
         let db = self.conn.lock().await;
         let mut stmt = db.prepare(
             "SELECT id 
@@ -300,7 +294,7 @@ impl SchedulerDatabase {
 
     pub async fn get_failed_schedulings(
         &self,
-    ) -> Result<Vec<FailedScheduling>, TaskSchedulerError> {
+    ) -> TaskSchedulerResult<Vec<FailedScheduling>> {
         let db = self.conn.lock().await;
         let mut stmt = db.prepare(
             "SELECT * 
@@ -321,7 +315,7 @@ impl SchedulerDatabase {
 
     pub async fn get_failed_tasks(
         &self,
-    ) -> Result<Vec<FailedTask>, TaskSchedulerError> {
+    ) -> TaskSchedulerResult<Vec<FailedTask>> {
         let db = self.conn.lock().await;
         let mut stmt = db.prepare(
             "SELECT * 
