@@ -641,6 +641,36 @@ fn test_remotes_via_env_vars() {
 }
 
 #[test]
+#[serial]
+fn test_deserialization_resolves_aliases() {
+    // Verify that aliases are resolved during deserialization,
+    // not just in resolved_url() method
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [[remote]]
+        kind = "rpc"
+        url = "devnet"
+
+        [[remote]]
+        kind = "websocket"
+        url = "mainnet"
+        "#,
+    );
+
+    let config = run_cli(vec![config_path.to_str().unwrap()]);
+
+    assert_eq!(config.remotes.len(), 2);
+
+    // RPC remote should have devnet alias resolved to actual URL
+    assert_eq!(config.remotes[0].kind, RemoteKind::Rpc);
+    assert_eq!(config.remotes[0].url, consts::RPC_DEVNET);
+
+    // WebSocket remote should have mainnet alias resolved to actual URL
+    assert_eq!(config.remotes[1].kind, RemoteKind::Websocket);
+    assert_eq!(config.remotes[1].url, consts::WS_MAINNET);
+}
+
+#[test]
 #[parallel]
 fn test_remote_config_parse_url_method() {
     let remote = RemoteConfig {

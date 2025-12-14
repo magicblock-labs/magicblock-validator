@@ -1,4 +1,7 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{
+    de::{self, MapAccess, Visitor},
+    Deserialize, Deserializer, Serialize,
+};
 use url::Url;
 
 use crate::consts;
@@ -36,47 +39,74 @@ impl<'de> Deserialize<'de> for RemoteConfig {
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "kebab-case")]
-        struct RemoteConfigRaw {
-            kind: RemoteKind,
-            url: String,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            api_key: Option<String>,
+        struct RemoteConfigVisitor;
+
+        impl<'de> Visitor<'de> for RemoteConfigVisitor {
+            type Value = RemoteConfig;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a remote configuration object")
+            }
+
+            fn visit_map<A>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut kind: Option<RemoteKind> = None;
+                let mut url: Option<String> = None;
+                let mut api_key: Option<String> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "kind" => kind = Some(map.next_value()?),
+                        "url" => url = Some(map.next_value()?),
+                        "api-key" => api_key = map.next_value()?,
+                        _ => {
+                            // Ignore unknown fields - let the value be consumed
+                            let _ = map.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                let kind = kind.ok_or_else(|| de::Error::missing_field("kind"))?;
+                let url = url.ok_or_else(|| de::Error::missing_field("url"))?;
+
+                // Resolve the URL alias based on the kind
+                let resolved_url = match kind {
+                    RemoteKind::Rpc => match url.as_str() {
+                        "mainnet" => consts::RPC_MAINNET.to_string(),
+                        "devnet" => consts::RPC_DEVNET.to_string(),
+                        "local" => consts::RPC_LOCAL.to_string(),
+                        _ => url,
+                    },
+                    RemoteKind::Websocket => match url.as_str() {
+                        "mainnet" => consts::WS_MAINNET.to_string(),
+                        "devnet" => consts::WS_DEVNET.to_string(),
+                        "local" => consts::WS_LOCAL.to_string(),
+                        _ => url,
+                    },
+                    RemoteKind::Grpc => url,
+                };
+
+                Ok(RemoteConfig {
+                    kind,
+                    url: resolved_url,
+                    api_key,
+                })
+            }
         }
 
-        let raw = RemoteConfigRaw::deserialize(deserializer)?;
-
-        // Resolve the URL alias based on the kind
-        let resolved_url = match raw.kind {
-            RemoteKind::Rpc => match raw.url.as_str() {
-                "mainnet" => consts::RPC_MAINNET.to_string(),
-                "devnet" => consts::RPC_DEVNET.to_string(),
-                "local" => consts::RPC_LOCAL.to_string(),
-                _ => raw.url,
-            },
-            RemoteKind::Websocket => match raw.url.as_str() {
-                "mainnet" => consts::WS_MAINNET.to_string(),
-                "devnet" => consts::WS_DEVNET.to_string(),
-                "local" => consts::WS_LOCAL.to_string(),
-                _ => raw.url,
-            },
-            RemoteKind::Grpc => raw.url,
-        };
-
-        Ok(RemoteConfig {
-            kind: raw.kind,
-            url: resolved_url,
-            api_key: raw.api_key,
-        })
+        deserializer.deserialize_map(RemoteConfigVisitor)
     }
 }
 
 impl RemoteConfig {
-    /// Returns the resolved URL string, expanding aliases if necessary.
-    /// This method handles alias resolution for manually constructed
-    /// RemoteConfig instances (in tests or when not going through
-    /// deserialization).
+    /// Returns the resolved URL string.
+    /// For deserialized configs, the URL is already resolved during deserialization.
+    /// For manually constructed instances in tests, this will resolve any known aliases.
     pub fn resolved_url(&self) -> &str {
         match self.kind {
             RemoteKind::Rpc => match self.url.as_str() {
