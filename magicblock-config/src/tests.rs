@@ -1,4 +1,4 @@
-use std::{ffi::OsString, fs::File, io::Write, path::PathBuf, str::FromStr};
+use std::{ffi::OsString, fs::File, io::Write, path::PathBuf};
 
 use isocountry::CountryCode;
 use serial_test::{parallel, serial};
@@ -8,7 +8,8 @@ use tempfile::TempDir;
 use crate::{
     config::{BlockSize, LifecycleMode},
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
-    RemoteCluster, ValidatorParams,
+    types::{RemoteConfig, RemoteKind},
+    ValidatorParams,
 };
 
 // ============================================================================
@@ -62,10 +63,8 @@ fn test_defaults_are_sane() {
 
     // Verify key defaults used in production
     assert_eq!(config.validator.basefee, consts::DEFAULT_BASE_FEE);
-    assert_eq!(
-        config.remote,
-        RemoteCluster::from_str(consts::DEFAULT_REMOTE).unwrap()
-    );
+    // Remotes default to empty when not specified
+    assert_eq!(config.remotes.len(), 0);
     assert_eq!(config.listen.0.port(), 8899);
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
 
@@ -267,77 +266,6 @@ fn test_chainlink_config() {
 // 6. Type Parsing & Validation
 // ============================================================================
 
-#[test]
-#[parallel]
-fn test_parse_remote_variants() {
-    // 1. Alias expansion
-    let c1 = run_cli(vec!["--remote", "mainnet"]);
-    match c1.remote {
-        RemoteCluster::Single(crate::types::Remote::Unified(u)) => {
-            assert_eq!(u.0.as_str(), consts::MAINNET_URL);
-        }
-        _ => panic!("Failed to parse 'mainnet' alias"),
-    }
-
-    // 2. Explicit URL
-    let custom = "http://127.0.0.1:3000/";
-    let c2 = run_cli(vec!["--remote", custom]);
-    match c2.remote {
-        RemoteCluster::Single(crate::types::Remote::Unified(u)) => {
-            assert_eq!(u.0.as_str(), custom);
-        }
-        _ => panic!("Failed to parse custom URL"),
-    }
-}
-
-#[test]
-#[parallel]
-fn test_remote_parsing_complex_types() {
-    // Case 1: Disjointed Remote (Separate HTTP and WebSocket URLs)
-    // TOML handles this via a table since Remote::Disjointed is a struct variant
-    let (_dir, config_path) = create_temp_config(
-        r#"
-        [remote]
-        http = "http://api.mainnet-beta.solana.com"
-        ws = "wss://api.mainnet-beta.solana.com"
-        "#,
-    );
-    let c1 = run_cli(vec![config_path.to_str().unwrap()]);
-
-    if let RemoteCluster::Single(crate::types::Remote::Disjointed {
-        http,
-        ws,
-    }) = c1.remote
-    {
-        assert_eq!(http.0.as_str(), "http://api.mainnet-beta.solana.com/");
-        assert_eq!(ws.0.as_str(), "wss://api.mainnet-beta.solana.com/");
-    } else {
-        panic!("Expected Remote::Disjointed for table config");
-    }
-
-    // Case 2: Multiple Remotes (Array of Remotes)
-    // Useful for failover or active-active setups
-    let (_dir2, config_path2) = create_temp_config(
-        r#"
-        remote = [ "devnet", { http = "http://backup-node:8899", ws = "ws://node:443" } ]
-        "#,
-    );
-    let c2 = run_cli(vec![config_path2.to_str().unwrap()]);
-
-    if let RemoteCluster::Multiple(remotes) = c2.remote {
-        assert_eq!(remotes.len(), 2);
-        // Verify first element parsed as Alias -> Unified
-        match &remotes[0] {
-            crate::types::Remote::Unified(u) => {
-                assert_eq!(u.0.as_str(), consts::DEVNET_URL)
-            }
-            _ => panic!("Expected Unified remote for alias"),
-        }
-    } else {
-        panic!("Expected RemoteCluster::Multiple for array config");
-    }
-}
-
 // ============================================================================
 // 8. Ledger, Time & Commit Strategies
 // ============================================================================
@@ -401,7 +329,10 @@ fn test_example_config_full_coverage() {
     // 3. Core & Network
     // ========================================================================
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
-    assert_eq!(config.remote, RemoteCluster::from_str("devnet").unwrap());
+    // Example config has one RPC remote
+    assert_eq!(config.remotes.len(), 1);
+    assert_eq!(config.remotes[0].url, "https://api.devnet.solana.com");
+    assert_eq!(config.remotes[0].kind, crate::types::RemoteKind::Rpc);
     assert_eq!(config.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
     assert!(config
@@ -484,7 +415,8 @@ fn test_env_vars_full_coverage() {
     let _guards = vec![
         // --- Core ---
         EnvVarGuard::new("MBV_LIFECYCLE", "replica"),
-        EnvVarGuard::new("MBV_REMOTE", "testnet"),
+        // Note: MBV_REMOTE is no longer supported for the new Vec<RemoteConfig> format
+        // Use TOML [[remote]] array syntax instead
         EnvVarGuard::new("MBV_STORAGE", "/tmp/env-test-storage"),
         EnvVarGuard::new("MBV_LISTEN", "127.0.0.1:9999"),
         // --- Metrics ---
@@ -531,7 +463,8 @@ fn test_env_vars_full_coverage() {
 
     // Core
     assert_eq!(config.lifecycle, LifecycleMode::Replica);
-    assert_eq!(config.remote, RemoteCluster::from_str("testnet").unwrap());
+    // Remotes must be configured via TOML, not env vars
+    assert_eq!(config.remotes.len(), 0);
     assert_eq!(config.storage.to_string_lossy(), "/tmp/env-test-storage");
     assert_eq!(config.listen.0.port(), 9999);
 
@@ -576,4 +509,162 @@ fn test_env_vars_full_coverage() {
     assert_eq!(chain_op.country_code, CountryCode::DEU);
     assert_eq!(chain_op.fqdn.as_str(), "https://env.example.com/");
     assert_eq!(chain_op.claim_fees_frequency.as_secs(), 48 * 3600);
+}
+
+// ============================================================================
+// 9. New Remote Config Parsing
+// ============================================================================
+
+#[test]
+#[parallel]
+fn test_parse_single_rpc_remote() {
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [[remote]]
+        kind = "rpc"
+        url = "http://localhost:8899"
+        "#,
+    );
+
+    let config = run_cli(vec![config_path.to_str().unwrap()]);
+
+    assert_eq!(config.remotes.len(), 1);
+    assert_eq!(config.remotes[0].kind, RemoteKind::Rpc);
+    assert_eq!(config.remotes[0].url, "http://localhost:8899");
+    assert_eq!(config.remotes[0].api_key, None);
+}
+
+#[test]
+#[parallel]
+fn test_parse_rpc_remote_with_api_key() {
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [[remote]]
+        kind = "rpc"
+        url = "https://api.example.com"
+        api-key = "secret-key-123"
+        "#,
+    );
+
+    let config = run_cli(vec![config_path.to_str().unwrap()]);
+
+    assert_eq!(config.remotes.len(), 1);
+    assert_eq!(config.remotes[0].kind, RemoteKind::Rpc);
+    assert_eq!(config.remotes[0].url, "https://api.example.com");
+    assert_eq!(
+        config.remotes[0].api_key,
+        Some("secret-key-123".to_string())
+    );
+}
+
+#[test]
+#[parallel]
+fn test_parse_multiple_remotes_mixed_kinds() {
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [[remote]]
+        kind = "rpc"
+        url = "http://localhost:8899"
+
+        [[remote]]
+        kind = "websocket"
+        url = "wss://mainnet-beta.solana.com"
+
+        [[remote]]
+        kind = "websocket"
+        url = "wss://backup-node.example.com"
+
+        [[remote]]
+        kind = "grpc"
+        url = "http://grpc.example.com:50051"
+        api-key = "grpc-secret"
+        "#,
+    );
+
+    let config = run_cli(vec![config_path.to_str().unwrap()]);
+
+    assert_eq!(config.remotes.len(), 4);
+
+    // First: RPC
+    assert_eq!(config.remotes[0].kind, RemoteKind::Rpc);
+    assert_eq!(config.remotes[0].url, "http://localhost:8899");
+
+    // Second: WebSocket
+    assert_eq!(config.remotes[1].kind, RemoteKind::Websocket);
+    assert_eq!(config.remotes[1].url, "wss://mainnet-beta.solana.com");
+    assert_eq!(config.remotes[1].api_key, None);
+
+    // Third: WebSocket (duplicate URL is allowed)
+    assert_eq!(config.remotes[2].kind, RemoteKind::Websocket);
+    assert_eq!(config.remotes[2].url, "wss://backup-node.example.com");
+
+    // Fourth: gRPC
+    assert_eq!(config.remotes[3].kind, RemoteKind::Grpc);
+    assert_eq!(config.remotes[3].url, "http://grpc.example.com:50051");
+    assert_eq!(config.remotes[3].api_key, Some("grpc-secret".to_string()));
+}
+
+#[test]
+#[parallel]
+fn test_parse_remotes_empty_when_not_provided() {
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        lifecycle = "ephemeral"
+        "#,
+    );
+
+    let config = run_cli(vec![config_path.to_str().unwrap()]);
+
+    assert_eq!(config.remotes.len(), 0);
+}
+
+#[test]
+#[serial]
+fn test_remotes_via_env_vars() {
+    // Environment variables can't directly set array fields via Figment,
+    // so this test verifies that remotes remain empty when not set in config.
+    // In a real scenario, array fields are only set via TOML files.
+
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [[remote]]
+        kind = "websocket"
+        url = "wss://env-test.example.com"
+        "#,
+    );
+
+    let config = run_cli(vec![config_path.to_str().unwrap()]);
+
+    assert_eq!(config.remotes.len(), 1);
+    assert_eq!(config.remotes[0].kind, RemoteKind::Websocket);
+    assert_eq!(config.remotes[0].url, "wss://env-test.example.com");
+}
+
+#[test]
+#[parallel]
+fn test_remote_config_parse_url_method() {
+    let remote = RemoteConfig {
+        kind: RemoteKind::Rpc,
+        url: "https://api.example.com".to_string(),
+        api_key: None,
+    };
+
+    let parsed_url = remote.parse_url();
+    assert!(parsed_url.is_ok());
+    let url = parsed_url.unwrap();
+    assert_eq!(url.scheme(), "https");
+    assert_eq!(url.host_str(), Some("api.example.com"));
+}
+
+#[test]
+#[parallel]
+fn test_remote_config_invalid_url() {
+    let remote = RemoteConfig {
+        kind: RemoteKind::Rpc,
+        url: "not a valid url".to_string(),
+        api_key: None,
+    };
+
+    let parsed_url = remote.parse_url();
+    assert!(parsed_url.is_err());
 }

@@ -24,7 +24,7 @@ use crate::{
         CommittorConfig, LedgerConfig, LoadableProgram, TaskSchedulerConfig,
         ValidatorConfig,
     },
-    types::{BindAddress, RemoteCluster},
+    types::{BindAddress, RemoteConfig},
 };
 
 /// Top-level configuration, assembled from multiple sources.
@@ -34,8 +34,10 @@ pub struct ValidatorParams {
     /// Path to the TOML configuration file (overrides CLI args).
     pub config: Option<PathBuf>,
 
-    /// Remote Solana cluster URL or a predefined alias.
-    pub remote: RemoteCluster,
+    /// Array-based remote configurations for RPC, WebSocket, and gRPC.
+    /// Configured via [[remote]] sections in TOML (array-of-tables syntax).
+    #[serde(default, rename = "remote")]
+    pub remotes: Vec<RemoteConfig>,
 
     /// The application's operational mode.
     pub lifecycle: LifecycleMode,
