@@ -330,7 +330,7 @@ impl MagicValidator {
             config.validator.keypair.insecure_clone(),
             committor_persist_path,
             ChainConfig {
-                rpc_uri: config.remote.http().to_string(),
+                rpc_uri: config.rpc_url().to_string(),
                 commitment: CommitmentConfig::confirmed(),
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
@@ -361,10 +361,9 @@ impl MagicValidator {
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
         use magicblock_chainlink::remote_account_provider::Endpoint;
-        let rpc_url = config.remote.http().to_string();
+        let rpc_url = config.rpc_url().to_string();
         let endpoints = config
-            .remote
-            .websocket()
+            .websocket_urls()
             .map(|pubsub_url| Endpoint {
                 rpc_url: rpc_url.clone(),
                 pubsub_url: pubsub_url.to_string(),
@@ -521,7 +520,7 @@ impl MagicValidator {
         });
 
         DomainRegistryManager::handle_registration_static(
-            self.config.remote.http(),
+            self.config.rpc_url().to_string(),
             &validator_keypair,
             validator_info,
         )
@@ -534,7 +533,7 @@ impl MagicValidator {
         let validator_keypair = validator_authority();
 
         DomainRegistryManager::handle_unregistration_static(
-            self.config.remote.http(),
+            self.config.rpc_url().to_string(),
             &validator_keypair,
         )
         .map_err(|err| {
@@ -547,7 +546,7 @@ impl MagicValidator {
         const MIN_BALANCE_SOL: u64 = 5;
 
         let lamports = RpcClient::new_with_commitment(
-            self.config.remote.http().to_string(),
+            self.config.rpc_url().to_string(),
             CommitmentConfig::confirmed(),
         )
         .get_balance(&self.identity)
@@ -594,7 +593,7 @@ impl MagicValidator {
             .map(|co| co.claim_fees_frequency)
         {
             self.claim_fees_task
-                .start(frequency, self.config.remote.http().to_string());
+                .start(frequency, self.config.rpc_url().to_string());
         }
 
         self.slot_ticker = Some(init_slot_ticker(

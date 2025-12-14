@@ -329,9 +329,9 @@ fn test_example_config_full_coverage() {
     // 3. Core & Network
     // ========================================================================
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
-    // Example config has one RPC remote
+    // Example config has one RPC remote with "devnet" alias resolved
     assert_eq!(config.remotes.len(), 1);
-    assert_eq!(config.remotes[0].url, "https://api.devnet.solana.com");
+    assert_eq!(config.remotes[0].url, consts::RPC_DEVNET);
     assert_eq!(config.remotes[0].kind, crate::types::RemoteKind::Rpc);
     assert_eq!(config.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
@@ -667,4 +667,121 @@ fn test_remote_config_invalid_url() {
 
     let parsed_url = remote.parse_url();
     assert!(parsed_url.is_err());
+}
+
+#[test]
+#[parallel]
+fn test_rpc_alias_resolution() {
+    // Test mainnet alias
+    let mainnet = RemoteConfig {
+        kind: RemoteKind::Rpc,
+        url: "mainnet".to_string(),
+        api_key: None,
+    };
+    assert_eq!(mainnet.resolved_url(), consts::RPC_MAINNET);
+
+    // Test devnet alias
+    let devnet = RemoteConfig {
+        kind: RemoteKind::Rpc,
+        url: "devnet".to_string(),
+        api_key: None,
+    };
+    assert_eq!(devnet.resolved_url(), consts::RPC_DEVNET);
+
+    // Test local alias
+    let local = RemoteConfig {
+        kind: RemoteKind::Rpc,
+        url: "local".to_string(),
+        api_key: None,
+    };
+    assert_eq!(local.resolved_url(), consts::RPC_LOCAL);
+}
+
+#[test]
+#[parallel]
+fn test_websocket_alias_resolution() {
+    // Test mainnet alias
+    let mainnet = RemoteConfig {
+        kind: RemoteKind::Websocket,
+        url: "mainnet".to_string(),
+        api_key: None,
+    };
+    assert_eq!(mainnet.resolved_url(), consts::WS_MAINNET);
+
+    // Test devnet alias
+    let devnet = RemoteConfig {
+        kind: RemoteKind::Websocket,
+        url: "devnet".to_string(),
+        api_key: None,
+    };
+    assert_eq!(devnet.resolved_url(), consts::WS_DEVNET);
+
+    // Test local alias
+    let local = RemoteConfig {
+        kind: RemoteKind::Websocket,
+        url: "local".to_string(),
+        api_key: None,
+    };
+    assert_eq!(local.resolved_url(), consts::WS_LOCAL);
+}
+
+#[test]
+#[parallel]
+fn test_alias_resolution_same_alias_different_kinds() {
+    // Same alias "mainnet" should resolve differently for RPC vs WebSocket
+    let rpc = RemoteConfig {
+        kind: RemoteKind::Rpc,
+        url: "mainnet".to_string(),
+        api_key: None,
+    };
+    let ws = RemoteConfig {
+        kind: RemoteKind::Websocket,
+        url: "mainnet".to_string(),
+        api_key: None,
+    };
+
+    assert_eq!(rpc.resolved_url(), consts::RPC_MAINNET);
+    assert_eq!(ws.resolved_url(), consts::WS_MAINNET);
+    // They should be different
+    assert_ne!(rpc.resolved_url(), ws.resolved_url());
+}
+
+#[test]
+#[parallel]
+fn test_full_url_not_treated_as_alias() {
+    // Full URLs should not be treated as aliases
+    let custom_rpc = RemoteConfig {
+        kind: RemoteKind::Rpc,
+        url: "https://custom-node.example.com".to_string(),
+        api_key: None,
+    };
+    assert_eq!(
+        custom_rpc.resolved_url(),
+        "https://custom-node.example.com"
+    );
+
+    let custom_ws = RemoteConfig {
+        kind: RemoteKind::Websocket,
+        url: "wss://custom-node.example.com".to_string(),
+        api_key: None,
+    };
+    assert_eq!(
+        custom_ws.resolved_url(),
+        "wss://custom-node.example.com"
+    );
+}
+
+#[test]
+#[parallel]
+fn test_parse_url_with_alias() {
+    let remote = RemoteConfig {
+        kind: RemoteKind::Rpc,
+        url: "devnet".to_string(),
+        api_key: None,
+    };
+
+    let parsed = remote.parse_url();
+    assert!(parsed.is_ok());
+    let url = parsed.unwrap();
+    assert_eq!(url.host_str(), Some("api.devnet.solana.com"));
 }

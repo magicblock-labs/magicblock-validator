@@ -24,7 +24,7 @@ use crate::{
         CommittorConfig, LedgerConfig, LoadableProgram, TaskSchedulerConfig,
         ValidatorConfig,
     },
-    types::{BindAddress, RemoteConfig},
+    types::{BindAddress, RemoteConfig, RemoteKind},
 };
 
 /// Top-level configuration, assembled from multiple sources.
@@ -94,6 +94,33 @@ impl ValidatorParams {
         figment = figment.merge(Serialized::from(&cli, Profile::Default));
 
         figment.extract().map_err(Box::new)
+    }
+
+    /// Returns the first RPC remote URL as a string.
+    ///
+    /// Panics if no RPC remote is configured.
+    pub fn rpc_url(&self) -> &str {
+        self.remotes
+            .iter()
+            .find(|r| r.kind == RemoteKind::Rpc)
+            .expect("No RPC remote configured")
+            .resolved_url()
+    }
+
+    /// Returns an iterator over all WebSocket remote URLs.
+    pub fn websocket_urls(&self) -> impl Iterator<Item = &str> + '_ {
+        self.remotes
+            .iter()
+            .filter(|r| r.kind == RemoteKind::Websocket)
+            .map(|r| r.resolved_url())
+    }
+
+    /// Returns an iterator over all gRPC remote URLs.
+    pub fn grpc_urls(&self) -> impl Iterator<Item = &str> + '_ {
+        self.remotes
+            .iter()
+            .filter(|r| r.kind == RemoteKind::Grpc)
+            .map(|r| r.resolved_url())
     }
 }
 

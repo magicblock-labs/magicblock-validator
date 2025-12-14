@@ -41,7 +41,20 @@ lifecycle = "ephemeral"
 # - "websocket": WebSocket connection for PubSub (typically wss://)
 # - "grpc":      gRPC connection for streaming (typically port 50051)
 #
-# Example with multiple remotes:
+# URL Aliases (automatically resolved based on kind):
+# RPC aliases:       "mainnet", "devnet", "local"
+# WebSocket aliases: "mainnet", "devnet", "local"
+#
+# Example 1: Using aliases
+# [[remote]]
+# kind = "rpc"
+# url = "devnet"
+#
+# [[remote]]
+# kind = "websocket"
+# url = "devnet"
+#
+# Example 2: Using full URLs with optional API key
 # [[remote]]
 # kind = "rpc"
 # url = "https://api.devnet.solana.com"
@@ -58,7 +71,7 @@ lifecycle = "ephemeral"
 
 [[remote]]
 kind = "rpc"
-url = "https://api.devnet.solana.com"
+url = "devnet"
 
 # Root directory for application storage (ledger, accountsdb, snapshots).
 # Default: "magicblock-test-storage" (created in current working directory)
