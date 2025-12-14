@@ -1,3 +1,6 @@
+use std::net::SocketAddr;
+
+use derive_more::{Deref, Display, FromStr};
 use serde::{
     de::{self, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize,
@@ -5,6 +8,19 @@ use serde::{
 use url::Url;
 
 use crate::consts;
+
+/// A network bind address that can be parsed from a string like "0.0.0.0:8080".
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, FromStr, Display, Deref,
+)]
+#[serde(transparent)]
+pub struct BindAddress(pub SocketAddr);
+
+impl Default for BindAddress {
+    fn default() -> Self {
+        consts::DEFAULT_RPC_ADDR.parse().unwrap()
+    }
+}
 
 /// The kind of remote connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -44,14 +60,14 @@ impl<'de> Deserialize<'de> for RemoteConfig {
         impl<'de> Visitor<'de> for RemoteConfigVisitor {
             type Value = RemoteConfig;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fn expecting(
+                &self,
+                formatter: &mut std::fmt::Formatter,
+            ) -> std::fmt::Result {
                 formatter.write_str("a remote configuration object")
             }
 
-            fn visit_map<A>(
-                self,
-                mut map: A,
-            ) -> Result<Self::Value, A::Error>
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: MapAccess<'de>,
             {
@@ -71,7 +87,8 @@ impl<'de> Deserialize<'de> for RemoteConfig {
                     }
                 }
 
-                let kind = kind.ok_or_else(|| de::Error::missing_field("kind"))?;
+                let kind =
+                    kind.ok_or_else(|| de::Error::missing_field("kind"))?;
                 let url = url.ok_or_else(|| de::Error::missing_field("url"))?;
 
                 // Resolve the URL alias based on the kind
