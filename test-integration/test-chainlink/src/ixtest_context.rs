@@ -80,10 +80,14 @@ impl IxtestContext {
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let (fetch_cloner, remote_account_provider) = {
-            let endpoints = [Endpoint {
-                rpc_url: RPC_URL.to_string(),
-                pubsub_url: "ws://localhost:7800".to_string(),
-            }];
+            let endpoints = [
+                Endpoint::Rpc {
+                    url: RPC_URL.to_string(),
+                },
+                Endpoint::WebSocket {
+                    url: "ws://localhost:7800".to_string(),
+                },
+            ];
             // Add all native programs
             let native_programs = native_program_accounts();
             let program_stub = AccountSharedData::new(

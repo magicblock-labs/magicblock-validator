@@ -26,10 +26,14 @@ async fn init_remote_account_provider(
 ) -> RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
 {
     let (fwd_tx, _fwd_rx) = mpsc::channel(100);
-    let endpoints = [Endpoint {
-        rpc_url: RPC_URL.to_string(),
-        pubsub_url: PUBSUB_URL.to_string(),
-    }];
+    let endpoints = [
+        Endpoint::Rpc {
+            url: RPC_URL.to_string(),
+        },
+        Endpoint::WebSocket {
+            url: PUBSUB_URL.to_string(),
+        },
+    ];
     RemoteAccountProvider::<
         ChainRpcClientImpl,
         SubMuxClient<ChainUpdatesClient>,

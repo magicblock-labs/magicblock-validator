@@ -142,31 +142,109 @@ impl Default for MatchSlotsConfig {
     }
 }
 
+use magicblock_config::{
+    consts::DEFAULT_REMOTE,
+    types::{resolve_url, RemoteConfig, RemoteKind},
+};
+
 #[derive(Debug, Clone)]
-pub struct Endpoint {
-    pub rpc_url: String,
-    pub pubsub_url: String,
+pub enum Endpoint {
+    Rpc { url: String },
+    WebSocket { url: String },
+    Grpc { url: String, api_key: String },
 }
 
 impl Endpoint {
-    pub fn new(rpc_url: String, pubsub_url: String) -> Self {
-        Self {
-            rpc_url,
-            pubsub_url,
-        }
+    /// Returns the URL of the first RPC endpoint found in the provided
+    /// slice. If no RPC endpoint is found, returns None.
+    pub fn rpc_url(endpoints: &[Endpoint]) -> Option<String> {
+        endpoints.iter().find_map(|ep| {
+            if let Endpoint::Rpc { url } = ep {
+                Some(url.clone())
+            } else {
+                None
+            }
+        })
     }
 
-    pub fn separate_pubsub_url_and_api_key(&self) -> (String, Option<String>) {
-        let (pubsub_url, pubsub_api_key) = self
-            .pubsub_url
-            .split_once("?api-key=")
-            .unwrap_or((&self.pubsub_url, ""));
+    /// Helper method to extract URL and API key from a pubsub-like URL
+    /// that may contain query parameters.
+    pub fn separate_pubsub_url_and_api_key(
+        url: &str,
+    ) -> (String, Option<String>) {
+        let (pubsub_url, pubsub_api_key) =
+            url.split_once("?api-key=").unwrap_or((url, ""));
         let api_key = if !pubsub_api_key.is_empty() {
             Some(pubsub_api_key.to_string())
         } else {
             None
         };
         (pubsub_url.to_string(), api_key)
+    }
+}
+
+impl TryFrom<&RemoteConfig> for Endpoint {
+    type Error = RemoteAccountProviderError;
+
+    fn try_from(config: &RemoteConfig) -> Result<Self, Self::Error> {
+        match config.kind {
+            RemoteKind::Rpc => Ok(Endpoint::Rpc {
+                url: config.url.clone(),
+            }),
+            RemoteKind::Websocket => Ok(Endpoint::WebSocket {
+                url: config.url.clone(),
+            }),
+            RemoteKind::Grpc => {
+                let api_key = config.api_key.clone().ok_or_else(|| {
+                    RemoteAccountProviderError::MissingApiKey(format!(
+                        "gRPC endpoint requires api_key: {}",
+                        config.url
+                    ))
+                })?;
+                Ok(Endpoint::Grpc {
+                    url: config.url.clone(),
+                    api_key,
+                })
+            }
+        }
+    }
+}
+
+/// Wrapper around a vector of Endpoints with at least one RPC and one
+/// websocket/grpc endpoint guaranteed.
+pub struct Endpoints(Vec<Endpoint>);
+impl Deref for Endpoints {
+    type Target = Vec<Endpoint>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TryFrom<&[RemoteConfig]> for Endpoints {
+    type Error = RemoteAccountProviderError;
+
+    fn try_from(configs: &[RemoteConfig]) -> Result<Self, Self::Error> {
+        let mut endpoints = Vec::<Endpoint>::try_from(configs)?;
+
+        let has_rpc = endpoints
+            .iter()
+            .any(|ep| matches!(ep, Endpoint::Rpc { .. }));
+        let has_pubsub = endpoints.iter().any(|ep| {
+            matches!(ep, Endpoint::WebSocket { .. } | Endpoint::Grpc { .. })
+        });
+
+        if !has_rpc {
+            endpoints.push(Endpoint::Rpc {
+                url: resolve_url(RemoteKind::Rpc, DEFAULT_REMOTE),
+            });
+        }
+        if !has_pubsub {
+            endpoints.push(Endpoint::WebSocket {
+                url: resolve_url(RemoteKind::Websocket, DEFAULT_REMOTE),
+            });
+        }
+
+        Ok(Endpoints(endpoints))
     }
 }
 
@@ -394,11 +472,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             );
         }
 
-        // Build RPC clients (use the first one for now)
-        let rpc_client = {
-            let first = &endpoints[0];
-            ChainRpcClientImpl::new_from_url(first.rpc_url.as_str(), commitment)
-        };
+        // Build RPC clients (use the first RPC endpoint found)
+        let rpc_url = Endpoint::rpc_url(endpoints).ok_or_else(|| {
+            RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                "No RPC endpoint found".to_string(),
+            )
+        })?;
+        let rpc_client =
+            ChainRpcClientImpl::new_from_url(rpc_url.as_str(), commitment);
 
         // Build pubsub clients and wrap them into a SubMuxClient
         let mut pubsubs: Vec<(Arc<ChainUpdatesClient>, mpsc::Receiver<()>)> =

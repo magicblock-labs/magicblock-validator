@@ -25,41 +25,65 @@ impl ChainUpdatesClient {
         commitment: CommitmentConfig,
         abort_sender: mpsc::Sender<()>,
     ) -> RemoteAccountProviderResult<Self> {
-        let me = if is_helius_laser_url(&endpoint.pubsub_url) {
-            let (url, api_key) = endpoint.separate_pubsub_url_and_api_key();
-            let Some(api_key) = api_key else {
-                return Err(RemoteAccountProviderError::MissingApiKey(
-                    format!("Helius laser endpoint: {}", endpoint.pubsub_url),
-                ));
-            };
-            debug!(
-                "Initializing Helius Laser client for endpoint: {}",
-                endpoint.pubsub_url
-            );
-            ChainUpdatesClient::Laser(
-                ChainLaserClientImpl::new_from_url(
-                    &url,
-                    &api_key,
-                    commitment.commitment,
-                    abort_sender,
-                )
-                .await?,
-            )
-        } else {
-            debug!(
-                "Initializing WebSocket client for endpoint: {}",
-                endpoint.pubsub_url
-            );
-            ChainUpdatesClient::WebSocket(
-                ChainPubsubClientImpl::try_new_from_url(
-                    &endpoint.pubsub_url,
-                    abort_sender,
-                    commitment,
-                )
-                .await?,
-            )
-        };
-        Ok(me)
+        match endpoint {
+            Endpoint::WebSocket { url } => {
+                if is_helius_laser_url(url) {
+                    let (url, api_key) =
+                        Endpoint::separate_pubsub_url_and_api_key(url);
+                    let Some(api_key) = api_key else {
+                        return Err(RemoteAccountProviderError::MissingApiKey(
+                            format!("Helius laser endpoint: {}", url),
+                        ));
+                    };
+                    debug!(
+                        "Initializing Helius Laser client for endpoint: {}",
+                        url
+                    );
+                    Ok(ChainUpdatesClient::Laser(
+                        ChainLaserClientImpl::new_from_url(
+                            &url,
+                            &api_key,
+                            commitment.commitment,
+                            abort_sender,
+                        )
+                        .await?,
+                    ))
+                } else {
+                    debug!(
+                        "Initializing WebSocket client for endpoint: {}",
+                        url
+                    );
+                    Ok(ChainUpdatesClient::WebSocket(
+                        ChainPubsubClientImpl::try_new_from_url(
+                            url,
+                            abort_sender,
+                            commitment,
+                        )
+                        .await?,
+                    ))
+                }
+            }
+            Endpoint::Grpc { url, api_key } => {
+                debug!(
+                    "Initializing Helius Laser client for gRPC endpoint: {}",
+                    url
+                );
+                Ok(ChainUpdatesClient::Laser(
+                    ChainLaserClientImpl::new_from_url(
+                        url,
+                        api_key,
+                        commitment.commitment,
+                        abort_sender,
+                    )
+                    .await?,
+                ))
+            }
+            Endpoint::Rpc { .. } => {
+                Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    "RPC endpoint cannot be used for subscriptions".to_string(),
+                ))
+            }
+        }
     }
 }
 
