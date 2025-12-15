@@ -165,11 +165,30 @@ pub fn parse_remote_config(s: &str) -> Result<RemoteConfig, String> {
 
     let rest = kind_and_rest.1;
     let (url, api_key) = if let Some((url, query)) = rest.split_once('?') {
-        let api_key = query.strip_prefix("api-key=").map(|s| s.to_string());
+        // Parse query parameters to extract api-key regardless of order or other
+        // parameters. Split on '&' to get individual key=value pairs.
+        let api_key = query.split('&').find_map(|pair| {
+            pair.split_once('=').and_then(|(k, v)| {
+                if k == "api-key" {
+                    Some(v.to_string())
+                } else {
+                    None
+                }
+            })
+        });
         (url.to_string(), api_key)
     } else {
         (rest.to_string(), None)
     };
+
+    // Validate that URL is not empty
+    if url.trim().is_empty() {
+        return Err(
+            "URL cannot be empty. Provide a valid URL or alias (mainnet, \
+             devnet, local)"
+                .to_string(),
+        );
+    }
 
     // Resolve the URL alias based on the kind
     let resolved_url = resolve_url(kind, &url);
@@ -272,10 +291,8 @@ mod tests {
     #[test]
     fn test_parse_empty_url() {
         let result = parse_remote_config("rpc:");
-        assert!(result.is_ok());
-        let config = result.unwrap();
-        assert_eq!(config.kind, RemoteKind::Rpc);
-        assert_eq!(config.url, "");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("URL cannot be empty"));
     }
 
     #[test]
@@ -393,5 +410,49 @@ mod tests {
         assert_eq!(rpc.url, consts::RPC_MAINNET);
         assert_eq!(ws.url, consts::WS_MAINNET);
         assert_ne!(rpc.url, ws.url);
+    }
+
+    #[test]
+    fn test_parse_api_key_with_other_parameters() {
+        // Test api-key is correctly extracted when other query parameters
+        // are present
+        let result = parse_remote_config(
+            "rpc:http://localhost:8899?timeout=30&api-key=secret123&retry=3",
+        );
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.api_key, Some("secret123".to_string()));
+    }
+
+    #[test]
+    fn test_parse_api_key_first_parameter() {
+        // Test api-key is correctly extracted when it's the first parameter
+        let result = parse_remote_config(
+            "rpc:http://localhost:8899?api-key=mykey&timeout=30",
+        );
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.api_key, Some("mykey".to_string()));
+    }
+
+    #[test]
+    fn test_parse_api_key_last_parameter() {
+        // Test api-key is correctly extracted when it's the last parameter
+        let result = parse_remote_config(
+            "rpc:http://localhost:8899?timeout=30&api-key=lastkey",
+        );
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.api_key, Some("lastkey".to_string()));
+    }
+
+    #[test]
+    fn test_parse_other_parameters_without_api_key() {
+        // Test that other query parameters don't break when api-key is absent
+        let result =
+            parse_remote_config("rpc:http://localhost:8899?timeout=30&retry=3");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.api_key, None);
     }
 }

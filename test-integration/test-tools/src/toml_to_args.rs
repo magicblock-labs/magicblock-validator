@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use magicblock_config::types::{resolve_url, RemoteKind};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -23,29 +24,16 @@ struct RemoteConfig {
 impl RemoteConfig {
     /// Returns the URL for this remote, resolving aliases based on kind.
     fn url(&self) -> String {
-        Self::resolve_alias(&self.kind, &self.url)
-    }
-
-    /// Resolves aliases to full URLs based on the remote kind.
-    fn resolve_alias(kind: &str, url: &str) -> String {
-        match (kind, url) {
-            // RPC aliases
-            ("rpc", "mainnet") => {
-                "https://api.mainnet-beta.solana.com/".to_string()
-            }
-            ("rpc", "devnet") => "https://api.devnet.solana.com/".to_string(),
-            ("rpc", "local") => "http://localhost:8899/".to_string(),
-            // WebSocket aliases
-            ("websocket", "mainnet") => {
-                "wss://api.mainnet-beta.solana.com/".to_string()
-            }
-            ("websocket", "devnet") => {
-                "wss://api.devnet.solana.com/".to_string()
-            }
-            ("websocket", "local") => "ws://localhost:8899/".to_string(),
-            // Any other kind or explicit URL passes through unchanged
-            _ => url.to_string(),
-        }
+        // Convert string kind to RemoteKind enum
+        let kind = match self.kind.as_str() {
+            "rpc" => RemoteKind::Rpc,
+            "websocket" => RemoteKind::Websocket,
+            "grpc" => RemoteKind::Grpc,
+            // Default to rpc for unknown kinds
+            _ => RemoteKind::Rpc,
+        };
+        // Use the production resolve_url function from magicblock-config
+        resolve_url(kind, &self.url)
     }
 }
 

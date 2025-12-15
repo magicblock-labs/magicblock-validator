@@ -332,7 +332,7 @@ fn test_example_config_full_coverage() {
     // Example config has one RPC remote with "devnet" alias resolved
     assert_eq!(config.remotes.len(), 1);
     assert_eq!(config.remotes[0].url, consts::RPC_DEVNET);
-    assert_eq!(config.remotes[0].kind, crate::types::RemoteKind::Rpc);
+    assert_eq!(config.remotes[0].kind, RemoteKind::Rpc);
     assert_eq!(config.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
     assert!(config
@@ -594,7 +594,7 @@ fn test_parse_multiple_remotes_mixed_kinds() {
     assert_eq!(config.remotes[1].url, "wss://mainnet-beta.solana.com");
     assert_eq!(config.remotes[1].api_key, None);
 
-    // Third: WebSocket (duplicate URL is allowed)
+    // Third: WebSocket (multiple remotes of the same kind allowed)
     assert_eq!(config.remotes[2].kind, RemoteKind::Websocket);
     assert_eq!(config.remotes[2].url, "wss://backup-node.example.com");
 
@@ -616,28 +616,6 @@ fn test_parse_remotes_empty_when_not_provided() {
     let config = run_cli(vec![config_path.to_str().unwrap()]);
 
     assert_eq!(config.remotes.len(), 0);
-}
-
-#[test]
-#[serial]
-fn test_remotes_via_env_vars() {
-    // Environment variables can't directly set array fields via Figment,
-    // so this test verifies that remotes remain empty when not set in config.
-    // In a real scenario, array fields are only set via TOML files.
-
-    let (_dir, config_path) = create_temp_config(
-        r#"
-        [[remote]]
-        kind = "websocket"
-        url = "wss://env-test.example.com"
-        "#,
-    );
-
-    let config = run_cli(vec![config_path.to_str().unwrap()]);
-
-    assert_eq!(config.remotes.len(), 1);
-    assert_eq!(config.remotes[0].kind, RemoteKind::Websocket);
-    assert_eq!(config.remotes[0].url, "wss://env-test.example.com");
 }
 
 #[test]
@@ -762,5 +740,9 @@ fn test_parse_url_with_alias() {
     let parsed = remote.parse_url();
     assert!(parsed.is_ok());
     let url = parsed.unwrap();
-    assert_eq!(url.host_str(), Some("api.devnet.solana.com"));
+
+    // Extract expected host from the canonical constant
+    let expected_url = url::Url::parse(consts::RPC_DEVNET)
+        .expect("Failed to parse RPC_DEVNET constant");
+    assert_eq!(url.host_str(), expected_url.host_str());
 }
