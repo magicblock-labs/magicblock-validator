@@ -147,3 +147,169 @@ impl RemoteConfig {
         Url::parse(self.resolved_url())
     }
 }
+
+/// Parses CLI remote config argument in format: kind:url[?api-key=value]
+/// Example: rpc:devnet, websocket:https://api.devnet.solana.com
+/// Important: The URL can contain colons (https://), so we match 'kind:'
+/// only if it's a valid kind at the start.
+pub fn parse_remote_config(s: &str) -> Result<RemoteConfig, String> {
+    // Find the kind by looking for a valid kind followed by a colon
+    let kinds = ["rpc", "websocket", "grpc"];
+    let kind_and_rest = kinds
+        .iter()
+        .find_map(|k| {
+            let prefix = format!("{}:", k);
+            if s.starts_with(&prefix) {
+                Some((*k, &s[prefix.len()..]))
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| {
+            "Remote format must start with 'kind:url' where kind is \
+             one of: rpc, websocket, grpc. Example: 'rpc:devnet'"
+                .to_string()
+        })?;
+
+    let kind = match kind_and_rest.0 {
+        "rpc" => RemoteKind::Rpc,
+        "websocket" => RemoteKind::Websocket,
+        "grpc" => RemoteKind::Grpc,
+        // SAFETY: we already excluded invalid kinds above
+        _ => unreachable!(),
+    };
+
+    let rest = kind_and_rest.1;
+    let (url, api_key) = if let Some((url, query)) = rest.split_once('?') {
+        let api_key = query.strip_prefix("api-key=").map(|s| s.to_string());
+        (url.to_string(), api_key)
+    } else {
+        (rest.to_string(), None)
+    };
+
+    Ok(RemoteConfig { kind, url, api_key })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_rpc_without_api_key() {
+        let result = parse_remote_config("rpc:https://api.devnet.solana.com");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Rpc);
+        assert_eq!(config.url, "https://api.devnet.solana.com");
+        assert_eq!(config.api_key, None);
+    }
+
+    #[test]
+    fn test_parse_rpc_with_api_key() {
+        let result = parse_remote_config(
+            "rpc:https://api.devnet.solana.com?api-key=secret123",
+        );
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Rpc);
+        assert_eq!(config.url, "https://api.devnet.solana.com");
+        assert_eq!(config.api_key, Some("secret123".to_string()));
+    }
+
+    #[test]
+    fn test_parse_websocket_without_api_key() {
+        let result =
+            parse_remote_config("websocket:wss://api.devnet.solana.com");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Websocket);
+        assert_eq!(config.url, "wss://api.devnet.solana.com");
+        assert_eq!(config.api_key, None);
+    }
+
+    #[test]
+    fn test_parse_websocket_with_api_key() {
+        let result = parse_remote_config(
+            "websocket:wss://api.devnet.solana.com?api-key=mykey",
+        );
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Websocket);
+        assert_eq!(config.url, "wss://api.devnet.solana.com");
+        assert_eq!(config.api_key, Some("mykey".to_string()));
+    }
+
+    #[test]
+    fn test_parse_grpc_without_api_key() {
+        let result = parse_remote_config("grpc:http://localhost:50051");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Grpc);
+        assert_eq!(config.url, "http://localhost:50051");
+        assert_eq!(config.api_key, None);
+    }
+
+    #[test]
+    fn test_parse_grpc_with_api_key() {
+        let result =
+            parse_remote_config("grpc:http://localhost:50051?api-key=xyz");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Grpc);
+        assert_eq!(config.url, "http://localhost:50051");
+        assert_eq!(config.api_key, Some("xyz".to_string()));
+    }
+
+    #[test]
+    fn test_parse_missing_kind() {
+        let result = parse_remote_config("https://api.devnet.solana.com");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Remote format must start with"));
+    }
+
+    #[test]
+    fn test_parse_invalid_kind() {
+        let result = parse_remote_config("http:https://api.devnet.solana.com");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Remote format must start with"));
+    }
+
+    #[test]
+    fn test_parse_empty_url() {
+        let result = parse_remote_config("rpc:");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Rpc);
+        assert_eq!(config.url, "");
+    }
+
+    #[test]
+    fn test_parse_api_key_with_special_chars() {
+        let result = parse_remote_config(
+            "rpc:http://localhost:8899?api-key=abc_123-xyz",
+        );
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.api_key, Some("abc_123-xyz".to_string()));
+    }
+
+    #[test]
+    fn test_parse_url_with_port() {
+        let result = parse_remote_config("rpc:http://localhost:8899");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.url, "http://localhost:8899");
+    }
+
+    #[test]
+    fn test_parse_url_with_path() {
+        let result = parse_remote_config("rpc:http://localhost:8899/v1");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.url, "http://localhost:8899/v1");
+    }
+}
