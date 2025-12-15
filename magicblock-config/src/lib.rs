@@ -24,7 +24,7 @@ use crate::{
         CommittorConfig, LedgerConfig, LoadableProgram, TaskSchedulerConfig,
         ValidatorConfig,
     },
-    types::{BindAddress, RemoteConfig, RemoteKind},
+    types::{resolve_url, BindAddress, RemoteConfig, RemoteKind},
 };
 
 /// Top-level configuration, assembled from multiple sources.
@@ -96,16 +96,12 @@ impl ValidatorParams {
         figment.extract().map_err(Box::new)
     }
 
-    /// Returns the first RPC remote URL as a string.
-    ///
-    /// Panics if no RPC remote is configured.
-    pub fn rpc_url(&self) -> &str {
+    /// Returns the first RPC remote URL as an Option.
+    pub fn rpc_url(&self) -> Option<&str> {
         self.remotes
             .iter()
             .find(|r| r.kind == RemoteKind::Rpc)
-            .expect("No RPC remote configured")
-            .url
-            .as_str()
+            .map(|r| r.url.as_str())
     }
 
     /// Returns an iterator over all WebSocket remote URLs.
@@ -122,6 +118,20 @@ impl ValidatorParams {
             .iter()
             .filter(|r| r.kind == RemoteKind::Grpc)
             .map(|r| r.url.as_str())
+    }
+
+    pub fn has_subscription_url(&self) -> bool {
+        self.remotes.iter().any(|r| {
+            r.kind == RemoteKind::Websocket || r.kind == RemoteKind::Grpc
+        })
+    }
+
+    /// Returns the RPC URL, using DEFAULT_REMOTE as fallback if not
+    /// configured.
+    pub fn rpc_url_or_default(&self) -> String {
+        self.rpc_url().map(|s| s.to_string()).unwrap_or_else(|| {
+            resolve_url(RemoteKind::Rpc, consts::DEFAULT_REMOTE)
+        })
     }
 }
 
