@@ -37,6 +37,8 @@ use magicblock_config::{
     config::{
         ChainOperationConfig, LedgerConfig, LifecycleMode, LoadableProgram,
     },
+    consts::DEFAULT_REMOTE,
+    types::{resolve_url, RemoteKind},
     ValidatorParams,
 };
 use magicblock_core::{
@@ -330,7 +332,7 @@ impl MagicValidator {
             config.validator.keypair.insecure_clone(),
             committor_persist_path,
             ChainConfig {
-                rpc_uri: config.remote.http().to_string(),
+                rpc_uri: config.rpc_url_or_default(),
                 commitment: CommitmentConfig::confirmed(),
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
@@ -361,14 +363,18 @@ impl MagicValidator {
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
         use magicblock_chainlink::remote_account_provider::Endpoint;
-        let rpc_url = config.remote.http().to_string();
-        let endpoints = config
-            .remote
-            .websocket()
-            .map(|pubsub_url| {
-                Endpoint::new(rpc_url.clone(), pubsub_url.to_string())
-            })
-            .collect::<Vec<_>>();
+        let rpc_url = config.rpc_url_or_default();
+        let endpoints = if config.has_subscription_url() {
+            config
+                .websocket_urls()
+                .map(|pubsub_url| {
+                    Endpoint::new(rpc_url.clone(), pubsub_url.to_string())
+                })
+                .collect::<Vec<_>>()
+        } else {
+            let ws_url = resolve_url(RemoteKind::Websocket, DEFAULT_REMOTE);
+            vec![Endpoint::new(rpc_url.clone(), ws_url.to_string())]
+        };
 
         let cloner = ChainlinkCloner::new(
             committor_service,
@@ -520,7 +526,7 @@ impl MagicValidator {
         });
 
         DomainRegistryManager::handle_registration_static(
-            self.config.remote.http(),
+            self.config.rpc_url_or_default(),
             &validator_keypair,
             validator_info,
         )
@@ -533,7 +539,7 @@ impl MagicValidator {
         let validator_keypair = validator_authority();
 
         DomainRegistryManager::handle_unregistration_static(
-            self.config.remote.http(),
+            self.config.rpc_url_or_default(),
             &validator_keypair,
         )
         .map_err(|err| {
@@ -546,7 +552,7 @@ impl MagicValidator {
         const MIN_BALANCE_SOL: u64 = 5;
 
         let lamports = RpcClient::new_with_commitment(
-            self.config.remote.http().to_string(),
+            self.config.rpc_url_or_default(),
             CommitmentConfig::confirmed(),
         )
         .get_balance(&self.identity)
@@ -593,7 +599,7 @@ impl MagicValidator {
             .map(|co| co.claim_fees_frequency)
         {
             self.claim_fees_task
-                .start(frequency, self.config.remote.http().to_string());
+                .start(frequency, self.config.rpc_url_or_default());
         }
 
         self.slot_ticker = Some(init_slot_ticker(
@@ -661,7 +667,6 @@ impl MagicValidator {
             committor_service.stop();
         }
 
-        self.ledger_truncator.stop();
         self.claim_fees_task.stop();
 
         if self.config.chain_operation.is_some()
@@ -685,6 +690,15 @@ impl MagicValidator {
 
     pub fn ledger(&self) -> &Ledger {
         &self.ledger
+    }
+
+    /// Prepares RocksDB for shutdown by cancelling all Manual compactions
+    /// This speeds up `stop` as it doesn't have to await for compaction cancellation
+    /// Calling this still allows to write or read from DB
+    pub fn prepare_ledger_for_shutdown(&mut self) {
+        self.ledger_truncator.stop();
+        // Calls & awaits until manual compaction is canceled
+        self.ledger.cancel_manual_compactions();
     }
 }
 

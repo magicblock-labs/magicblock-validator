@@ -12,11 +12,15 @@ pub const DEFAULT_VALIDATOR_KEYPAIR: &str =
 pub const DEFAULT_BASE_FEE: u64 = 0;
 pub const DEFAULT_COMPUTE_UNIT_PRICE: u64 = 1_000_000;
 
-// Remote URL Aliases
-pub const MAINNET_URL: &str = "https://api.mainnet-beta.solana.com/";
-pub const DEVNET_URL: &str = "https://api.devnet.solana.com/";
-pub const TESTNET_URL: &str = "https://api.testnet.solana.com/";
-pub const LOCALHOST_URL: &str = "http://127.0.0.1:8899/";
+// Remote URL Aliases - RPC
+pub const RPC_MAINNET: &str = "https://api.mainnet-beta.solana.com/";
+pub const RPC_DEVNET: &str = "https://api.devnet.solana.com/";
+pub const RPC_LOCAL: &str = "http://localhost:8899/";
+
+// Remote URL Aliases - WebSocket
+pub const WS_MAINNET: &str = "wss://api.mainnet-beta.solana.com/";
+pub const WS_DEVNET: &str = "wss://api.devnet.solana.com/";
+pub const WS_LOCAL: &str = "ws://localhost:8899/";
 
 // Figment Configuration
 pub const ENV_VAR_PREFIX: &str = "MBV_";

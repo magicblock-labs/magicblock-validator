@@ -5,7 +5,9 @@ use serde::Serialize;
 
 use crate::{
     config::LifecycleMode,
-    types::{BindAddress, RemoteCluster, SerdeKeypair},
+    types::{
+        remote::parse_remote_config, BindAddress, RemoteConfig, SerdeKeypair,
+    },
 };
 
 /// CLI Arguments mirroring the structure of ValidatorParams.
@@ -16,10 +18,13 @@ pub struct CliParams {
     /// Path to the TOML configuration file.
     pub config: Option<PathBuf>,
 
-    /// Remote Solana cluster URL or a predefined alias.
-    #[arg(long, short)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub remote: Option<RemoteCluster>,
+    /// Remote Solana cluster connections. Can be specified multiple times.
+    /// Format: --remote <kind>:<url> or --remote <kind>:<alias>
+    /// Examples: --remote rpc:devnet --remote websocket:devnet --remote grpc:http://localhost:50051
+    /// Aliases: mainnet, devnet, local (resolved based on kind)
+    #[arg(long, short, value_parser = parse_remote_config)]
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub remote: Vec<RemoteConfig>,
 
     /// The application's operational mode.
     #[arg(long)]

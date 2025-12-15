@@ -3,29 +3,37 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use magicblock_config::types::{resolve_url, RemoteKind};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct Config {
-    remote: RemoteConfig,
+    #[serde(default)]
+    remote: Vec<RemoteConfig>,
     listen: String,
     #[serde(default)]
     programs: Vec<Program>,
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum RemoteConfig {
-    Url(String),
-    Complex { http: String },
+#[derive(Deserialize, Clone)]
+struct RemoteConfig {
+    kind: String,
+    url: String,
 }
 
 impl RemoteConfig {
+    /// Returns the URL for this remote, resolving aliases based on kind.
     fn url(&self) -> String {
-        match self {
-            RemoteConfig::Url(s) => s.clone(),
-            RemoteConfig::Complex { http } => http.clone(),
-        }
+        // Convert string kind to RemoteKind enum
+        let kind = match self.kind.as_str() {
+            "rpc" => RemoteKind::Rpc,
+            "websocket" => RemoteKind::Websocket,
+            "grpc" => RemoteKind::Grpc,
+            // Default to rpc for unknown kinds
+            _ => RemoteKind::Rpc,
+        };
+        // Use the production resolve_url function from magicblock-config
+        resolve_url(kind, &self.url)
     }
 }
 
@@ -92,8 +100,12 @@ pub fn config_to_args(
             }
         }
     }
-    args.push("--url".into());
-    args.push(config.remote.url());
+
+    // Add the first RPC remote URL if available
+    if let Some(rpc_remote) = config.remote.iter().find(|r| r.kind == "rpc") {
+        args.push("--url".into());
+        args.push(rpc_remote.url());
+    }
 
     args
 }
