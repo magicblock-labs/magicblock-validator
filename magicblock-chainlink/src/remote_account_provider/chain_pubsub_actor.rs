@@ -116,9 +116,7 @@ impl ChainPubsubActor {
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         shutdown_token: CancellationToken,
     ) {
-        info!(
-            "[client_id={client_id}] Shutting down ChainPubsubActor"
-        );
+        info!("[client_id={client_id}] Shutting down ChainPubsubActor");
         let subs = subscriptions
             .lock()
             .unwrap()

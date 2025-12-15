@@ -224,13 +224,12 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
             .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
             .await?;
 
-        rx.await
-            .inspect_err(|err| {
-                warn!(
-                    "ChainPubsubClientImpl::shutdown - RecvError \
+        rx.await.inspect_err(|err| {
+            warn!(
+                "ChainPubsubClientImpl::shutdown - RecvError \
                      occurred while awaiting shutdown response: {err:?}"
-                );
-            })?
+            );
+        })?
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
