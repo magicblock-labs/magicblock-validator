@@ -8,7 +8,7 @@ use tempfile::TempDir;
 use crate::{
     config::{BlockSize, LifecycleMode},
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
-    types::{RemoteConfig, RemoteKind},
+    types::{remote::resolve_url, RemoteConfig, RemoteKind},
     ValidatorParams,
 };
 
@@ -702,101 +702,52 @@ fn test_remote_config_invalid_url() {
 #[test]
 #[parallel]
 fn test_rpc_alias_resolution() {
-    // Test mainnet alias
-    let mainnet = RemoteConfig {
-        kind: RemoteKind::Rpc,
-        url: "mainnet".to_string(),
-        api_key: None,
-    };
-    assert_eq!(mainnet.resolved_url(), consts::RPC_MAINNET);
-
-    // Test devnet alias
-    let devnet = RemoteConfig {
-        kind: RemoteKind::Rpc,
-        url: "devnet".to_string(),
-        api_key: None,
-    };
-    assert_eq!(devnet.resolved_url(), consts::RPC_DEVNET);
-
-    // Test local alias
-    let local = RemoteConfig {
-        kind: RemoteKind::Rpc,
-        url: "local".to_string(),
-        api_key: None,
-    };
-    assert_eq!(local.resolved_url(), consts::RPC_LOCAL);
+    assert_eq!(resolve_url(RemoteKind::Rpc, "mainnet"), consts::RPC_MAINNET);
+    assert_eq!(resolve_url(RemoteKind::Rpc, "devnet"), consts::RPC_DEVNET);
+    assert_eq!(resolve_url(RemoteKind::Rpc, "local"), consts::RPC_LOCAL);
 }
 
 #[test]
 #[parallel]
 fn test_websocket_alias_resolution() {
-    // Test mainnet alias
-    let mainnet = RemoteConfig {
-        kind: RemoteKind::Websocket,
-        url: "mainnet".to_string(),
-        api_key: None,
-    };
-    assert_eq!(mainnet.resolved_url(), consts::WS_MAINNET);
-
-    // Test devnet alias
-    let devnet = RemoteConfig {
-        kind: RemoteKind::Websocket,
-        url: "devnet".to_string(),
-        api_key: None,
-    };
-    assert_eq!(devnet.resolved_url(), consts::WS_DEVNET);
-
-    // Test local alias
-    let local = RemoteConfig {
-        kind: RemoteKind::Websocket,
-        url: "local".to_string(),
-        api_key: None,
-    };
-    assert_eq!(local.resolved_url(), consts::WS_LOCAL);
+    assert_eq!(
+        resolve_url(RemoteKind::Websocket, "mainnet"),
+        consts::WS_MAINNET
+    );
+    assert_eq!(
+        resolve_url(RemoteKind::Websocket, "devnet"),
+        consts::WS_DEVNET
+    );
+    assert_eq!(
+        resolve_url(RemoteKind::Websocket, "local"),
+        consts::WS_LOCAL
+    );
 }
 
 #[test]
 #[parallel]
 fn test_alias_resolution_same_alias_different_kinds() {
-    // Same alias "mainnet" should resolve differently for RPC vs WebSocket
-    let rpc = RemoteConfig {
-        kind: RemoteKind::Rpc,
-        url: "mainnet".to_string(),
-        api_key: None,
-    };
-    let ws = RemoteConfig {
-        kind: RemoteKind::Websocket,
-        url: "mainnet".to_string(),
-        api_key: None,
-    };
+    let rpc_resolved = resolve_url(RemoteKind::Rpc, "mainnet");
+    let ws_resolved = resolve_url(RemoteKind::Websocket, "mainnet");
 
-    assert_eq!(rpc.resolved_url(), consts::RPC_MAINNET);
-    assert_eq!(ws.resolved_url(), consts::WS_MAINNET);
+    assert_eq!(rpc_resolved, consts::RPC_MAINNET);
+    assert_eq!(ws_resolved, consts::WS_MAINNET);
     // They should be different
-    assert_ne!(rpc.resolved_url(), ws.resolved_url());
+    assert_ne!(rpc_resolved, ws_resolved);
 }
 
 #[test]
 #[parallel]
 fn test_full_url_not_treated_as_alias() {
-    // Full URLs should not be treated as aliases
-    let custom_rpc = RemoteConfig {
-        kind: RemoteKind::Rpc,
-        url: "https://custom-node.example.com".to_string(),
-        api_key: None,
-    };
     assert_eq!(
-        custom_rpc.resolved_url(),
+        resolve_url(RemoteKind::Rpc, "https://custom-node.example.com"),
         "https://custom-node.example.com"
     );
-
-    let custom_ws = RemoteConfig {
-        kind: RemoteKind::Websocket,
-        url: "wss://custom-node.example.com".to_string(),
-        api_key: None,
-    };
     assert_eq!(
-        custom_ws.resolved_url(),
+        resolve_url(
+            RemoteKind::Websocket,
+            "wss://custom-node.example.com"
+        ),
         "wss://custom-node.example.com"
     );
 }
@@ -804,9 +755,10 @@ fn test_full_url_not_treated_as_alias() {
 #[test]
 #[parallel]
 fn test_parse_url_with_alias() {
+    let resolved = resolve_url(RemoteKind::Rpc, "devnet");
     let remote = RemoteConfig {
         kind: RemoteKind::Rpc,
-        url: "devnet".to_string(),
+        url: resolved,
         api_key: None,
     };
 

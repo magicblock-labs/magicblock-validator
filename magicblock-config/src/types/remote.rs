@@ -92,21 +92,7 @@ impl<'de> Deserialize<'de> for RemoteConfig {
                 let url = url.ok_or_else(|| de::Error::missing_field("url"))?;
 
                 // Resolve the URL alias based on the kind
-                let resolved_url = match kind {
-                    RemoteKind::Rpc => match url.as_str() {
-                        "mainnet" => consts::RPC_MAINNET.to_string(),
-                        "devnet" => consts::RPC_DEVNET.to_string(),
-                        "local" => consts::RPC_LOCAL.to_string(),
-                        _ => url,
-                    },
-                    RemoteKind::Websocket => match url.as_str() {
-                        "mainnet" => consts::WS_MAINNET.to_string(),
-                        "devnet" => consts::WS_DEVNET.to_string(),
-                        "local" => consts::WS_LOCAL.to_string(),
-                        _ => url,
-                    },
-                    RemoteKind::Grpc => url,
-                };
+                let resolved_url = resolve_url(kind, &url);
 
                 Ok(RemoteConfig {
                     kind,
@@ -121,30 +107,28 @@ impl<'de> Deserialize<'de> for RemoteConfig {
 }
 
 impl RemoteConfig {
-    /// Returns the resolved URL string.
-    /// For deserialized configs, the URL is already resolved during deserialization.
-    /// For manually constructed instances in tests, this will resolve any known aliases.
-    pub fn resolved_url(&self) -> &str {
-        match self.kind {
-            RemoteKind::Rpc => match self.url.as_str() {
-                "mainnet" => consts::RPC_MAINNET,
-                "devnet" => consts::RPC_DEVNET,
-                "local" => consts::RPC_LOCAL,
-                _ => &self.url,
-            },
-            RemoteKind::Websocket => match self.url.as_str() {
-                "mainnet" => consts::WS_MAINNET,
-                "devnet" => consts::WS_DEVNET,
-                "local" => consts::WS_LOCAL,
-                _ => &self.url,
-            },
-            RemoteKind::Grpc => &self.url,
-        }
-    }
-
     /// Parses the resolved URL and returns a valid `Url` object.
     pub fn parse_url(&self) -> Result<Url, url::ParseError> {
-        Url::parse(self.resolved_url())
+        Url::parse(&self.url)
+    }
+}
+
+/// Resolves aliases to a URL and passes through custom URLs unchanged.
+pub fn resolve_url(kind: RemoteKind, url: &str) -> String {
+    match kind {
+        RemoteKind::Rpc => match url {
+            "mainnet" => consts::RPC_MAINNET.to_string(),
+            "devnet" => consts::RPC_DEVNET.to_string(),
+            "local" => consts::RPC_LOCAL.to_string(),
+            _ => url.to_string(),
+        },
+        RemoteKind::Websocket => match url {
+            "mainnet" => consts::WS_MAINNET.to_string(),
+            "devnet" => consts::WS_DEVNET.to_string(),
+            "local" => consts::WS_LOCAL.to_string(),
+            _ => url.to_string(),
+        },
+        RemoteKind::Grpc => url.to_string(),
     }
 }
 
@@ -187,7 +171,14 @@ pub fn parse_remote_config(s: &str) -> Result<RemoteConfig, String> {
         (rest.to_string(), None)
     };
 
-    Ok(RemoteConfig { kind, url, api_key })
+    // Resolve the URL alias based on the kind
+    let resolved_url = resolve_url(kind, &url);
+
+    Ok(RemoteConfig {
+        kind,
+        url: resolved_url,
+        api_key,
+    })
 }
 
 #[cfg(test)]

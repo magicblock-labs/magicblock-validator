@@ -104,7 +104,8 @@ impl ValidatorParams {
             .iter()
             .find(|r| r.kind == RemoteKind::Rpc)
             .expect("No RPC remote configured")
-            .resolved_url()
+            .url
+            .as_str()
     }
 
     /// Returns an iterator over all WebSocket remote URLs.
@@ -112,7 +113,7 @@ impl ValidatorParams {
         self.remotes
             .iter()
             .filter(|r| r.kind == RemoteKind::Websocket)
-            .map(|r| r.resolved_url())
+            .map(|r| r.url.as_str())
     }
 
     /// Returns an iterator over all gRPC remote URLs.
@@ -120,7 +121,7 @@ impl ValidatorParams {
         self.remotes
             .iter()
             .filter(|r| r.kind == RemoteKind::Grpc)
-            .map(|r| r.resolved_url())
+            .map(|r| r.url.as_str())
     }
 }
 
