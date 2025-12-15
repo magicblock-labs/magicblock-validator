@@ -155,11 +155,11 @@ pub enum Endpoint {
     Grpc { url: String, api_key: String },
 }
 
-impl Endpoint {
+impl Endpoints {
     /// Returns the URL of the first RPC endpoint found in the provided
     /// slice. If no RPC endpoint is found, returns None.
-    pub fn rpc_url(endpoints: &Endpoints) -> Option<String> {
-        endpoints.iter().find_map(|ep| {
+    pub fn rpc_url(&self) -> Option<String> {
+        self.iter().find_map(|ep| {
             if let Endpoint::Rpc { url } = ep {
                 Some(url.clone())
             } else {
@@ -168,19 +168,12 @@ impl Endpoint {
         })
     }
 
-    /// Helper method to extract URL and API key from a pubsub-like URL
-    /// that may contain query parameters.
-    pub fn separate_pubsub_url_and_api_key(
-        url: &str,
-    ) -> (String, Option<String>) {
-        let (pubsub_url, pubsub_api_key) =
-            url.split_once("?api-key=").unwrap_or((url, ""));
-        let api_key = if !pubsub_api_key.is_empty() {
-            Some(pubsub_api_key.to_string())
-        } else {
-            None
-        };
-        (pubsub_url.to_string(), api_key)
+    pub fn pubsubs(&self) -> Vec<&Endpoint> {
+        self.iter()
+            .filter(|ep| {
+                matches!(ep, Endpoint::WebSocket { .. } | Endpoint::Grpc { .. })
+            })
+            .collect()
     }
 }
 
@@ -300,7 +293,7 @@ impl
                 RemoteAccountProvider::<
                     ChainRpcClientImpl,
                     SubMuxClient<ChainUpdatesClient>,
-                >::try_new_from_urls(
+                >::try_new_from_endpoints(
                     endpoints,
                     commitment,
                     subscription_forwarder,
@@ -477,7 +470,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
     }
 
-    pub async fn try_new_from_urls(
+    pub async fn try_new_from_endpoints(
         endpoints: &Endpoints,
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
@@ -497,7 +490,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         // Build RPC clients (use the first RPC endpoint found)
-        let rpc_url = Endpoint::rpc_url(endpoints).ok_or_else(|| {
+        let rpc_url = endpoints.rpc_url().ok_or_else(|| {
             RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                 "No RPC endpoint found".to_string(),
             )
@@ -508,7 +501,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // Build pubsub clients and wrap them into a SubMuxClient
         let mut pubsubs: Vec<(Arc<ChainUpdatesClient>, mpsc::Receiver<()>)> =
             Vec::with_capacity(endpoints.len());
-        for ep in endpoints {
+        for ep in endpoints.pubsubs() {
             let (abort_tx, abort_rx) = mpsc::channel(1);
             let client = ChainUpdatesClient::try_new_from_endpoint(
                 ep, commitment, abort_tx,
