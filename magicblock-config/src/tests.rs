@@ -619,7 +619,7 @@ fn test_parse_remotes_empty_when_not_provided() {
 }
 
 #[test]
-#[serial]
+#[parallel]
 fn test_deserialization_resolves_aliases() {
     // Verify that aliases are resolved during deserialization,
     // not just in resolved_url() method
