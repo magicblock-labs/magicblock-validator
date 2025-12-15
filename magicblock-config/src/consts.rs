@@ -22,12 +22,6 @@ pub const WS_MAINNET: &str = "wss://api.mainnet-beta.solana.com/";
 pub const WS_DEVNET: &str = "wss://api.devnet.solana.com/";
 pub const WS_LOCAL: &str = "ws://localhost:8899/";
 
-// Legacy aliases (for backward compatibility with old format)
-pub const MAINNET_URL: &str = "https://api.mainnet-beta.solana.com/";
-pub const DEVNET_URL: &str = "https://api.devnet.solana.com/";
-pub const TESTNET_URL: &str = "https://api.testnet.solana.com/";
-pub const LOCALHOST_URL: &str = "http://127.0.0.1:8899/";
-
 // Figment Configuration
 pub const ENV_VAR_PREFIX: &str = "MBV_";
 
