@@ -16,10 +16,7 @@ use magicblock_config::{
         scheduler::TaskSchedulerConfig, validator::ValidatorConfig,
         LifecycleMode,
     },
-    types::{
-        network::{Remote, RemoteCluster},
-        StorageDirectory,
-    },
+    types::{RemoteConfig, RemoteKind, StorageDirectory},
     ValidatorParams,
 };
 use program_flexi_counter::instruction::{
@@ -37,10 +34,18 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
 
     let config = ValidatorParams {
         lifecycle: LifecycleMode::Ephemeral,
-        remote: RemoteCluster::Single(Remote::Disjointed {
-            http: IntegrationTestContext::url_chain().parse().unwrap(),
-            ws: IntegrationTestContext::ws_url_chain().parse().unwrap(),
-        }),
+        remotes: vec![
+            RemoteConfig {
+                kind: RemoteKind::Rpc,
+                url: IntegrationTestContext::url_chain().to_string(),
+                api_key: None,
+            },
+            RemoteConfig {
+                kind: RemoteKind::Websocket,
+                url: IntegrationTestContext::ws_url_chain().to_string(),
+                api_key: None,
+            },
+        ],
         accountsdb: AccountsDbConfig::default(),
         task_scheduler: TaskSchedulerConfig { reset: true },
         validator: ValidatorConfig {
