@@ -193,13 +193,13 @@ pub fn parse_remote_config(s: &str) -> Result<RemoteConfig, String> {
     // Resolve the URL alias based on the kind
     let resolved_url = resolve_url(kind, &url);
     // Validate URL format for non-alias URLs
-    if !["mainnet", "devnet", "local"].contains(&url.as_str()) {
-        if Url::parse(&resolved_url).is_err() {
-            return Err(format!(
-                "Invalid URL format: '{}'. Expected a valid URL like 'http://localhost:8899'",
-                resolved_url
-            ));
-        }
+    if !["mainnet", "devnet", "local"].contains(&url.as_str())
+        && Url::parse(&resolved_url).is_err()
+    {
+        return Err(format!(
+            "Invalid URL format: '{}'. Expected a valid URL like 'http://localhost:8899'",
+            resolved_url
+        ));
     }
 
     Ok(RemoteConfig {
