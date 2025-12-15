@@ -101,10 +101,10 @@ impl AccountsDb {
                 // atomic counter. New readers will see the latest update.
                 acc.commit();
                 // check whether the account's owner has changed
-                if !acc.owner_changed() {
+                if !acc.owner_changed {
                     return;
                 }
-                // and perform some index bookkeeping to ensure a correct owner
+                // and perform some index bookkeeping to ensure correct owner
                 let _ = self
                     .index
                     .ensure_correct_owner(pubkey, account.owner())

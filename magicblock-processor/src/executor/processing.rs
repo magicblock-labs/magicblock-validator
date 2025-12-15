@@ -341,18 +341,16 @@ impl super::TransactionExecutor {
 
     /// Ensure that no post execution account state violations occurred:
     /// 1. No modification of the non-delegated feepayer in gasless mode
-    /// 2. No lamport modification of confined accounts
+    /// 2. No illegal account resizing when the balance is zero
     fn verify_account_states(&self, processed: &mut ProcessedTransaction) {
         let ProcessedTransaction::Executed(executed) = processed else {
             return;
         };
         let txn = &executed.loaded_transaction;
         let feepayer = txn.accounts.first();
+        let rollback_lamports =
+            rollback_feepayer_lamports(&txn.rollback_accounts);
 
-        let logs = executed
-            .execution_details
-            .log_messages
-            .get_or_insert_default();
         let gasless = self.environment.fee_lamports_per_signature == 0;
         if gasless {
             // If we are running in the gasless mode, we should not allow
@@ -361,50 +359,40 @@ impl super::TransactionExecutor {
             // from undelegated feepayers to delegated accounts, which would
             // result in validator loosing funds upon balance settling.
             let undelegated_feepayer_was_modified = feepayer
-                .map(|(_, acc)| {
-                    let mutated = acc
-                        .as_borrowed()
-                        .map(|a| a.lamports_changed())
-                        // NOTE: this branch can be taken only, if the account
-                        // has been upgraded to the Owned variant, which indicates
-                        // that it has been resized, which in turn is a clear
-                        // violation of the feepayer immutability rule in this mode
-                        .unwrap_or(true);
-                    !self.is_auto_airdrop_lamports_enabled
-                        && mutated
-                        && !acc.delegated()
-                        && !acc.privileged()
+                .map(|acc| {
+                    (acc.1.is_dirty()
+                        && !self.is_auto_airdrop_lamports_enabled
+                        && (acc.1.lamports() != 0 || rollback_lamports != 0))
+                        && !acc.1.delegated()
+                        && !acc.1.privileged()
                 })
                 .unwrap_or_default();
             if undelegated_feepayer_was_modified {
                 executed.execution_details.status =
                     Err(TransactionError::InvalidAccountForFee);
-                let msg = "Feepayer balance has been illegally modified".into();
+                let logs = executed
+                    .execution_details
+                    .log_messages
+                    .get_or_insert_default();
+                let msg = "Feepayer balance has been modified illegally".into();
                 logs.push(msg);
-                return;
             }
         }
-        for (pubkey, acc) in &txn.accounts {
-            if !acc.confined() {
-                continue;
-            }
-            // If the confined account was modified in any way that affected its lamport
-            // balance, then an corresponding marker must have been set, in which case we
-            // fail the transaction, since this is regarded as a validator draining attack
-            let balance_changed = acc
-                .as_borrowed()
-                .map(|a| a.lamports_changed())
-                .unwrap_or(true);
+    }
+}
 
-            if balance_changed {
-                executed.execution_details.status =
-                    Err(TransactionError::UnbalancedTransaction);
-                let msg = format!(
-                    "Confined account {pubkey} has been illegally modified"
-                );
-                logs.push(msg);
-                break;
-            }
+// A utility to extract the rollback lamports of the feepayer
+fn rollback_feepayer_lamports(rollback: &RollbackAccounts) -> u64 {
+    match rollback {
+        RollbackAccounts::FeePayerOnly { fee_payer_account } => {
+            fee_payer_account.lamports()
         }
+        RollbackAccounts::SameNonceAndFeePayer { nonce } => {
+            nonce.account().lamports()
+        }
+        RollbackAccounts::SeparateNonceAndFeePayer {
+            fee_payer_account,
+            ..
+        } => fee_payer_account.lamports(),
     }
 }

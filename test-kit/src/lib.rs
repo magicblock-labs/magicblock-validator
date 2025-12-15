@@ -294,7 +294,7 @@ pub struct CommitableAccount<'db> {
 }
 
 impl CommitableAccount<'_> {
-    pub fn commit(self) {
+    pub fn commmit(self) {
         self.db.insert_account(&self.pubkey, &self.account);
     }
 }
