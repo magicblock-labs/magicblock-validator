@@ -3,8 +3,8 @@ use magicblock_chainlink::{
     remote_account_provider::{
         chain_rpc_client::ChainRpcClientImpl,
         chain_updates_client::ChainUpdatesClient,
-        config::RemoteAccountProviderConfig, Endpoint, RemoteAccountProvider,
-        RemoteAccountUpdateSource,
+        config::RemoteAccountProviderConfig, Endpoint, Endpoints,
+        RemoteAccountProvider, RemoteAccountUpdateSource,
     },
     submux::SubMuxClient,
     testing::utils::{
@@ -26,7 +26,7 @@ async fn init_remote_account_provider(
 ) -> RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
 {
     let (fwd_tx, _fwd_rx) = mpsc::channel(100);
-    let endpoints = [
+    let endpoints_vec = vec![
         Endpoint::Rpc {
             url: RPC_URL.to_string(),
         },
@@ -34,6 +34,8 @@ async fn init_remote_account_provider(
             url: PUBSUB_URL.to_string(),
         },
     ];
+    let endpoints = Endpoints::try_from(endpoints_vec.as_slice())
+        .expect("Failed to create Endpoints");
     RemoteAccountProvider::<
         ChainRpcClientImpl,
         SubMuxClient<ChainUpdatesClient>,

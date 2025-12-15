@@ -10,7 +10,7 @@ use magicblock_chainlink::{
     native_program_accounts,
     remote_account_provider::{
         chain_rpc_client::ChainRpcClientImpl,
-        chain_updates_client::ChainUpdatesClient, Endpoint,
+        chain_updates_client::ChainUpdatesClient, Endpoint, Endpoints,
         RemoteAccountProvider,
     },
     submux::SubMuxClient,
@@ -80,7 +80,7 @@ impl IxtestContext {
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let (fetch_cloner, remote_account_provider) = {
-            let endpoints = [
+            let endpoints_vec = vec![
                 Endpoint::Rpc {
                     url: RPC_URL.to_string(),
                 },
@@ -88,6 +88,8 @@ impl IxtestContext {
                     url: "ws://localhost:7800".to_string(),
                 },
             ];
+            let endpoints = Endpoints::try_from(endpoints_vec.as_slice())
+                .expect("Failed to create Endpoints");
             // Add all native programs
             let native_programs = native_program_accounts();
             let program_stub = AccountSharedData::new(

@@ -24,7 +24,7 @@ use magicblock_chainlink::{
     config::ChainlinkConfig,
     remote_account_provider::{
         chain_rpc_client::ChainRpcClientImpl,
-        chain_updates_client::ChainUpdatesClient,
+        chain_updates_client::ChainUpdatesClient, Endpoints,
     },
     submux::SubMuxClient,
     Chainlink,
@@ -37,8 +37,6 @@ use magicblock_config::{
     config::{
         ChainOperationConfig, LedgerConfig, LifecycleMode, LoadableProgram,
     },
-    consts::DEFAULT_REMOTE,
-    types::{resolve_url, RemoteKind},
     ValidatorParams,
 };
 use magicblock_core::{
@@ -362,19 +360,12 @@ impl MagicValidator {
         accountsdb: &Arc<AccountsDb>,
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
-        use magicblock_chainlink::remote_account_provider::Endpoint;
-        let rpc_url = config.rpc_url_or_default();
-        let endpoints = if config.has_subscription_url() {
-            config
-                .websocket_urls()
-                .map(|pubsub_url| {
-                    Endpoint::new(rpc_url.clone(), pubsub_url.to_string())
-                })
-                .collect::<Vec<_>>()
-        } else {
-            let ws_url = resolve_url(RemoteKind::Websocket, DEFAULT_REMOTE);
-            vec![Endpoint::new(rpc_url.clone(), ws_url.to_string())]
-        };
+        let endpoints = Endpoints::try_from(config.remotes.as_slice())
+            .map_err(|e| {
+                ApiError::from(
+                    magicblock_chainlink::errors::ChainlinkError::from(e),
+                )
+            })?;
 
         let cloner = ChainlinkCloner::new(
             committor_service,

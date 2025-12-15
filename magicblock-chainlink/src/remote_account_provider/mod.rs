@@ -1,6 +1,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     num::NonZeroUsize,
+    ops::Deref,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -157,7 +158,7 @@ pub enum Endpoint {
 impl Endpoint {
     /// Returns the URL of the first RPC endpoint found in the provided
     /// slice. If no RPC endpoint is found, returns None.
-    pub fn rpc_url(endpoints: &[Endpoint]) -> Option<String> {
+    pub fn rpc_url(endpoints: &Endpoints) -> Option<String> {
         endpoints.iter().find_map(|ep| {
             if let Endpoint::Rpc { url } = ep {
                 Some(url.clone())
@@ -212,6 +213,7 @@ impl TryFrom<&RemoteConfig> for Endpoint {
 
 /// Wrapper around a vector of Endpoints with at least one RPC and one
 /// websocket/grpc endpoint guaranteed.
+#[derive(Debug)]
 pub struct Endpoints(Vec<Endpoint>);
 impl Deref for Endpoints {
     type Target = Vec<Endpoint>;
@@ -220,11 +222,20 @@ impl Deref for Endpoints {
     }
 }
 
-impl TryFrom<&[RemoteConfig]> for Endpoints {
+impl<'a> IntoIterator for &'a Endpoints {
+    type Item = &'a Endpoint;
+    type IntoIter = std::slice::Iter<'a, Endpoint>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl TryFrom<&[Endpoint]> for Endpoints {
     type Error = RemoteAccountProviderError;
 
-    fn try_from(configs: &[RemoteConfig]) -> Result<Self, Self::Error> {
-        let mut endpoints = Vec::<Endpoint>::try_from(configs)?;
+    fn try_from(endpoints: &[Endpoint]) -> Result<Self, Self::Error> {
+        let mut endpoints = endpoints.to_vec();
 
         let has_rpc = endpoints
             .iter()
@@ -248,6 +259,19 @@ impl TryFrom<&[RemoteConfig]> for Endpoints {
     }
 }
 
+impl TryFrom<&[RemoteConfig]> for Endpoints {
+    type Error = RemoteAccountProviderError;
+
+    fn try_from(configs: &[RemoteConfig]) -> Result<Self, Self::Error> {
+        let endpoints: Vec<Endpoint> = configs
+            .iter()
+            .map(Endpoint::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Endpoints::try_from(endpoints.as_slice())
+    }
+}
+
 impl
     RemoteAccountProvider<
         ChainRpcClientImpl,
@@ -255,7 +279,7 @@ impl
     >
 {
     pub async fn try_from_urls_and_config(
-        endpoints: &[Endpoint],
+        endpoints: &Endpoints,
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
@@ -454,7 +478,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     }
 
     pub async fn try_new_from_urls(
-        endpoints: &[Endpoint],
+        endpoints: &Endpoints,
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,

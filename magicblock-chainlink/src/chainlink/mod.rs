@@ -26,7 +26,7 @@ use crate::{
     fetch_cloner::FetchAndCloneResult,
     remote_account_provider::{
         chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
-        ChainRpcClient, ChainRpcClientImpl, Endpoint, RemoteAccountProvider,
+        ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
     },
     submux::SubMuxClient,
 };
@@ -100,7 +100,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
     #[allow(clippy::too_many_arguments)]
     pub async fn try_new_from_endpoints(
-        endpoints: &[Endpoint],
+        endpoints: &Endpoints,
         commitment: CommitmentConfig,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
