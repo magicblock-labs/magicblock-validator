@@ -145,11 +145,18 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
         programs,
         task_scheduler: TaskSchedulerConfig { reset: true },
         lifecycle: LifecycleMode::Ephemeral,
-        remotes: vec![RemoteConfig {
-            kind: RemoteKind::Rpc,
-            url: IntegrationTestContext::url_chain().to_string(),
-            api_key: None,
-        }],
+        remotes: vec![
+            RemoteConfig {
+                kind: RemoteKind::Rpc,
+                url: IntegrationTestContext::url_chain().to_string(),
+                api_key: None,
+            },
+            RemoteConfig {
+                kind: RemoteKind::Websocket,
+                url: IntegrationTestContext::ws_url_chain().to_string(),
+                api_key: None,
+            },
+        ],
         storage: StorageDirectory(ledger_path.to_path_buf()),
         ..Default::default()
     };
