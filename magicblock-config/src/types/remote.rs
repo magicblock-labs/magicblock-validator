@@ -303,4 +303,95 @@ mod tests {
         let config = result.unwrap();
         assert_eq!(config.url, "http://localhost:8899/v1");
     }
+
+    // ================================================================
+    // Aliases
+    // ================================================================
+
+    #[test]
+    fn test_parse_rpc_mainnet_alias() {
+        let result = parse_remote_config("rpc:mainnet");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Rpc);
+        assert_eq!(config.url, consts::RPC_MAINNET);
+    }
+
+    #[test]
+    fn test_parse_rpc_devnet_alias() {
+        let result = parse_remote_config("rpc:devnet");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Rpc);
+        assert_eq!(config.url, consts::RPC_DEVNET);
+    }
+
+    #[test]
+    fn test_parse_rpc_local_alias() {
+        let result = parse_remote_config("rpc:local");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Rpc);
+        assert_eq!(config.url, consts::RPC_LOCAL);
+    }
+
+    #[test]
+    fn test_parse_websocket_mainnet_alias() {
+        let result = parse_remote_config("websocket:mainnet");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Websocket);
+        assert_eq!(config.url, consts::WS_MAINNET);
+    }
+
+    #[test]
+    fn test_parse_websocket_devnet_alias() {
+        let result = parse_remote_config("websocket:devnet");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Websocket);
+        assert_eq!(config.url, consts::WS_DEVNET);
+    }
+
+    #[test]
+    fn test_parse_websocket_local_alias() {
+        let result = parse_remote_config("websocket:local");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Websocket);
+        assert_eq!(config.url, consts::WS_LOCAL);
+    }
+
+    #[test]
+    fn test_parse_rpc_alias_with_api_key() {
+        let result = parse_remote_config("rpc:mainnet?api-key=secret");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Rpc);
+        assert_eq!(config.url, consts::RPC_MAINNET);
+        assert_eq!(config.api_key, Some("secret".to_string()));
+    }
+
+    #[test]
+    fn test_parse_websocket_alias_with_api_key() {
+        let result = parse_remote_config("websocket:devnet?api-key=mytoken");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.kind, RemoteKind::Websocket);
+        assert_eq!(config.url, consts::WS_DEVNET);
+        assert_eq!(config.api_key, Some("mytoken".to_string()));
+    }
+
+    #[test]
+    fn test_parse_different_kinds_same_alias() {
+        // Same alias "mainnet" should resolve to different URLs based on kind
+        let rpc = parse_remote_config("rpc:mainnet").unwrap();
+        let ws = parse_remote_config("websocket:mainnet").unwrap();
+
+        assert_eq!(rpc.kind, RemoteKind::Rpc);
+        assert_eq!(ws.kind, RemoteKind::Websocket);
+        assert_eq!(rpc.url, consts::RPC_MAINNET);
+        assert_eq!(ws.url, consts::WS_MAINNET);
+        assert_ne!(rpc.url, ws.url);
+    }
 }
