@@ -744,10 +744,7 @@ fn test_full_url_not_treated_as_alias() {
         "https://custom-node.example.com"
     );
     assert_eq!(
-        resolve_url(
-            RemoteKind::Websocket,
-            "wss://custom-node.example.com"
-        ),
+        resolve_url(RemoteKind::Websocket, "wss://custom-node.example.com"),
         "wss://custom-node.example.com"
     );
 }
