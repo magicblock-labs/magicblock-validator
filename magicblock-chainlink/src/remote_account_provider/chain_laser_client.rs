@@ -163,7 +163,16 @@ impl ReconnectableClient for ChainLaserClientImpl {
     }
 }
 
-pub fn is_helius_laser_url(url: &str) -> bool {
+pub fn is_known_grpc_url(url: &str) -> bool {
+    is_helius_laser_url(url) || is_triton_url(url)
+}
+
+fn is_helius_laser_url(url: &str) -> bool {
     // Example: https://laserstream-devnet-ewr.helius-rpc.com
     url.contains("laserstream") && url.contains("helius-rpc.com")
+}
+
+fn is_triton_url(url: &str) -> bool {
+    // Example: https://magicblo-dev<redacted>.devnet.rpcpool.com
+    url.contains("rpcpool")
 }

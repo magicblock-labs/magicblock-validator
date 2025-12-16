@@ -7,7 +7,7 @@ use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 
 use crate::remote_account_provider::{
-    chain_laser_client::{is_helius_laser_url, ChainLaserClientImpl},
+    chain_laser_client::{is_known_grpc_url, ChainLaserClientImpl},
     pubsub_common::SubscriptionUpdate,
     ChainPubsubClient, ChainPubsubClientImpl, Endpoint, ReconnectableClient,
     RemoteAccountProviderError, RemoteAccountProviderResult,
@@ -43,7 +43,7 @@ impl ChainUpdatesClient {
                     "Initializing Helius Laser client for gRPC endpoint: {}",
                     url
                 );
-                if is_helius_laser_url(url) {
+                if is_known_grpc_url(url) {
                     Ok(ChainUpdatesClient::Laser(
                         ChainLaserClientImpl::new_from_url(
                             url,
