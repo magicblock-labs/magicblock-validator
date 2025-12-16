@@ -122,10 +122,10 @@ impl AccountSubscriptionTask {
             if let Some(tx) = tx {
                 let msg = format!(
                     "Not enough clients succeeded to {}: {}. Required {}, got {}",
+                    op_name.to_lowercase(),
+                    errors.join(", "),
                     target_successes,
                     successes,
-                    op_name.to_lowercase(),
-                    errors.join(", ")
                 );
                 let _ = tx.send(Err(
                     RemoteAccountProviderError::AccountSubscriptionsTaskFailed(

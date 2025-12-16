@@ -230,22 +230,78 @@ impl TryFrom<&[Endpoint]> for Endpoints {
     fn try_from(endpoints: &[Endpoint]) -> Result<Self, Self::Error> {
         let mut endpoints = endpoints.to_vec();
 
+        // The below section is the best attempt to provide defaults in cases
+        // when we are missing an RPC or websocket endpoint
+
         let has_rpc = endpoints
             .iter()
             .any(|ep| matches!(ep, Endpoint::Rpc { .. }));
-        let has_pubsub = endpoints.iter().any(|ep| {
-            matches!(ep, Endpoint::WebSocket { .. } | Endpoint::Grpc { .. })
-        });
+        let has_websocket = endpoints
+            .iter()
+            .any(|ep| matches!(ep, Endpoint::WebSocket { .. }));
+        let has_grpc = endpoints
+            .iter()
+            .any(|ep| matches!(ep, Endpoint::Grpc { .. }));
+        let has_pubsub = has_websocket || has_grpc;
 
+        // We need at least one websocket endpoint for direct subscriptions
+        // However when a gRPC endpoint is provided we don't know what websocket to
+        // default to.
+        if has_grpc && !has_websocket {
+            let grpcs = endpoints
+                .iter()
+                .filter_map(|ep| {
+                    if let Endpoint::Grpc { url, .. } = ep {
+                        Some(url.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            return Err(
+                RemoteAccountProviderError::NeedWebsocketWhenSupplyingGrpc(
+                    format!("{:?}", grpcs),
+                ),
+            );
+        }
+        // If no RPC endpoint at all is provided we add a devnet RPC
         if !has_rpc {
             endpoints.push(Endpoint::Rpc {
                 url: resolve_url(RemoteKind::Rpc, DEFAULT_REMOTE),
             });
         }
+
+        // If no subscription endpoint at all is provided we add a devnet
+        // websocket endpoint by default, but only if an RPC endpoint also
+        // points to the default remote
         if !has_pubsub {
-            endpoints.push(Endpoint::WebSocket {
-                url: resolve_url(RemoteKind::Websocket, DEFAULT_REMOTE),
+            let rpc_endpoints = endpoints
+                .iter()
+                .filter_map(|ep| {
+                    if let Endpoint::Rpc { url } = ep {
+                        Some(url)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            let has_default_rpc = rpc_endpoints.iter().any(|url| {
+                url.eq_ignore_ascii_case(&&resolve_url(
+                    RemoteKind::Rpc,
+                    DEFAULT_REMOTE,
+                ))
             });
+            if has_default_rpc {
+                endpoints.push(Endpoint::WebSocket {
+                    url: resolve_url(RemoteKind::Websocket, DEFAULT_REMOTE),
+                });
+            } else {
+                return Err(
+                    RemoteAccountProviderError::NeedWebsocketWhenNotSupplyingDefaultRpc(
+                        format!("{:?}", rpc_endpoints)
+                    ),
+                );
+            }
         }
 
         Ok(Endpoints(endpoints))
