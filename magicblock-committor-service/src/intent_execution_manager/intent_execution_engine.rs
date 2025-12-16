@@ -823,25 +823,5 @@ mod tests {
         async fn cleanup(self) -> Result<(), BufferExecutionError> {
             Ok(())
         }
-
-        async fn fetch_rent_reimbursements(
-            &self,
-            pubkeys: &[Pubkey],
-        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
-        }
-
-        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
-            None
-        }
-
-        fn reset(&self, _: ResetType) {}
-
-        async fn get_base_account(
-            &self,
-            _pubkey: &Pubkey,
-        ) -> MagicBlockRpcClientResult<Option<Account>> {
-            Ok(None) // AccountNotFound
-        }
     }
 }

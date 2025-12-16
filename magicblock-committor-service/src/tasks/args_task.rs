@@ -1,9 +1,5 @@
-use dlp::{
-    args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs},
-    compute_diff,
-};
+use dlp::args::CallHandlerArgs;
 use magicblock_metrics::metrics::LabelValue;
-use solana_account::ReadableAccount;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
