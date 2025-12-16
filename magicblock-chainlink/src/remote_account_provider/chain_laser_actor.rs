@@ -33,7 +33,7 @@ type LaserStreamUpdate = (usize, LaserResult);
 type LaserStream = Pin<Box<dyn Stream<Item = LaserResult> + Send>>;
 
 const PER_STREAM_SUBSCRIPTION_LIMIT: usize = 1_000;
-const SUBSCIRPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 400;
+const SUBSCIRPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 2_000;
 
 // -----------------
 // ChainLaserActor
@@ -262,6 +262,10 @@ impl ChainLaserActor {
             });
         } else {
             self.subscriptions.insert(pubkey);
+            // If this is the first sub for the clock sysvar we want to activate it immediately
+            if self.active_subscriptions.is_empty() {
+                self.update_active_subscriptions();
+            }
             sub_response.send(Ok(())).unwrap_or_else(|_| {
                 warn!(
                     "Failed to send subscribe response for account {}",
