@@ -1,6 +1,9 @@
 use std::{
     collections::HashSet,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::AtomicU64,
+        Arc, Mutex,
+    },
 };
 
 use async_trait::async_trait;
@@ -30,12 +33,14 @@ impl ChainLaserClientImpl {
         api_key: &str,
         commitment: CommitmentLevel,
         abort_sender: mpsc::Sender<()>,
+        chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, messages, updates) = ChainLaserActor::new_from_url(
             pubsub_url,
             api_key,
             commitment,
             abort_sender,
+            chain_slot,
         )?;
         let client = Self {
             updates: Arc::new(Mutex::new(Some(updates))),

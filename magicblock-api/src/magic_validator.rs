@@ -37,8 +37,6 @@ use magicblock_config::{
     config::{
         ChainOperationConfig, LedgerConfig, LifecycleMode, LoadableProgram,
     },
-    consts::DEFAULT_REMOTE,
-    types::{resolve_url, RemoteKind},
     ValidatorParams,
 };
 use magicblock_core::{

@@ -1,7 +1,10 @@
 use std::{
     collections::{HashMap, HashSet},
     pin::Pin,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use futures_util::{Stream, StreamExt};
@@ -58,6 +61,8 @@ pub struct ChainLaserActor {
     commitment: CommitmentLevel,
     /// Channel used to signal connection issues to the submux
     abort_sender: mpsc::Sender<()>,
+    /// The current slot on chain, shared with RemoteAccountProvider
+    chain_slot: Arc<AtomicU64>,
 }
 
 impl ChainLaserActor {
@@ -66,6 +71,7 @@ impl ChainLaserActor {
         api_key: &str,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
+        chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -84,13 +90,14 @@ impl ChainLaserActor {
             channel_options,
             replay: false,
         };
-        Self::new(laser_client_config, commitment, abort_sender)
+        Self::new(laser_client_config, commitment, abort_sender, chain_slot)
     }
 
     pub fn new(
         laser_client_config: LaserstreamConfig,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
+        chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -111,6 +118,7 @@ impl ChainLaserActor {
             subscription_updates_sender,
             commitment,
             abort_sender,
+            chain_slot,
         };
 
         Ok((me, messages_sender, subscription_updates_receiver))
@@ -352,6 +360,7 @@ impl ChainLaserActor {
         let request = SubscribeRequest {
             accounts,
             commitment: Some((*commitment).into()),
+            from_slot: None,
             ..Default::default()
         };
         client::subscribe(laser_client_config.clone(), request).0
@@ -509,7 +518,9 @@ impl ChainLaserActor {
         let log_trace = if log::log_enabled!(log::Level::Trace) {
             if pubkey.eq(&clock::ID) {
                 static TRACE_CLOCK_COUNT: AtomicU64 = AtomicU64::new(0);
-                TRACE_CLOCK_COUNT.fetch_add(1, Ordering::Relaxed) % 100 == 0
+                TRACE_CLOCK_COUNT
+                    .fetch_add(1, Ordering::Relaxed)
+                    .is_multiple_of(100)
             } else {
                 true
             }

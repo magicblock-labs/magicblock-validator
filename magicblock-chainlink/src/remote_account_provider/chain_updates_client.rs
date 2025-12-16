@@ -1,4 +1,10 @@
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::AtomicU64,
+        Arc,
+    },
+};
 
 use async_trait::async_trait;
 use log::*;
@@ -24,6 +30,7 @@ impl ChainUpdatesClient {
         endpoint: &Endpoint,
         commitment: CommitmentConfig,
         abort_sender: mpsc::Sender<()>,
+        chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
         match endpoint {
@@ -50,6 +57,7 @@ impl ChainUpdatesClient {
                             api_key,
                             commitment.commitment,
                             abort_sender,
+                            chain_slot,
                         )
                         .await?,
                     ))
