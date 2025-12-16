@@ -339,10 +339,11 @@ impl ChainLaserActor {
             }
         };
         trace!(
-            "Activating {} account subscription stream(s) at slot {} {}",
-            chunks.len(),
+            "Activating {} account subs at slot {} {} using {} stream(s)",
+            self.subscriptions.len(),
             chain_slot,
-            from_slot.map_or("".to_string(), |s| format!("from slot: {s}"))
+            from_slot.map_or("".to_string(), |s| format!("from slot: {s}")),
+            chunks.len(),
         );
         for (idx, chunk) in chunks.into_iter().enumerate() {
             let stream = Self::create_accounts_stream(
