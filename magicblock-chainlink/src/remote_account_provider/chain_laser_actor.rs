@@ -365,7 +365,7 @@ impl ChainLaserActor {
         commitment: &CommitmentLevel,
         laser_client_config: &LaserstreamConfig,
         idx: usize,
-        from_slot: Option<u64>,
+        _from_slot: Option<u64>,
     ) -> impl Stream<Item = LaserResult> {
         let mut accounts = HashMap::new();
         accounts.insert(
@@ -378,7 +378,9 @@ impl ChainLaserActor {
         let request = SubscribeRequest {
             accounts,
             commitment: Some((*commitment).into()),
-            from_slot,
+            // TODO: @@@ figure out why Triton gives us the following error
+            // gRPC status error: status: Internal, message: "from_slot is not supported"
+            from_slot: None,
             ..Default::default()
         };
         client::subscribe(laser_client_config.clone(), request).0
