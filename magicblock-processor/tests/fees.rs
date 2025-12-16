@@ -168,7 +168,7 @@ async fn test_escrowed_payer_success() {
         "escrow account update should have been sent"
     );
     assert!(
-        !updated_accounts.contains(&env.payer.pubkey()),
+        !updated_accounts.contains(&env.get_payer().pubkey),
         "orginal payer account update should not have been sent"
     );
 }
@@ -260,7 +260,7 @@ async fn test_escrow_charged_for_failed_transaction() {
 #[tokio::test]
 async fn test_transaction_gasless_mode() {
     // Initialize the environment with a base fee of 0.
-    let env = ExecutionTestEnv::new_with_config(0);
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
     let mut payer = env.get_payer();
     payer.set_lamports(1); // Not enough to cover standard fee
     payer.set_delegated(false); // Explicitly set the payer as NON-delegated.
@@ -306,7 +306,7 @@ async fn test_transaction_gasless_mode() {
 #[tokio::test]
 async fn test_transaction_gasless_mode_with_not_existing_account() {
     // Initialize the environment with a base fee of 0.
-    let env = ExecutionTestEnv::new_with_config(0);
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
     let mut payer = env.get_payer();
     payer.set_lamports(1); // Not enough to cover standard fee
     payer.set_delegated(false); // Explicitly set the payer as NON-delegated.
