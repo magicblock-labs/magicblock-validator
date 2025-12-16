@@ -122,9 +122,6 @@ async fn main() -> Result<()> {
     info!("From account: {}", from_pubkey);
     info!("To account:   {}", to_pubkey);
 
-    // Wait for laser sub to activate
-    std::thread::sleep(Duration::from_secs(3));
-
     // 1. Transfer to init the to account on devnet
     info!("Performing first transfer of {} lamports", TRANSFER_AMOUNT);
     let sig = perform_transfer(
