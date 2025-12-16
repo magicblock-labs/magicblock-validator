@@ -38,7 +38,9 @@ type LaserStreamUpdate = (usize, LaserResult);
 type LaserStream = Pin<Box<dyn Stream<Item = LaserResult> + Send>>;
 
 const PER_STREAM_SUBSCRIPTION_LIMIT: usize = 1_000;
-const SUBSCIRPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 2_000;
+const SUBSCIRPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 10_000;
+const SLOTS_BETWEEN_ACTIVATIONS: u64 =
+    SUBSCIRPTION_ACTIVATION_INTERVAL_MILLIS / 400;
 
 // -----------------
 // ChainLaserActor
@@ -88,7 +90,7 @@ impl ChainLaserActor {
             endpoint: pubsub_url.to_string(),
             max_reconnect_attempts: Some(4),
             channel_options,
-            replay: false,
+            replay: true,
         };
         Self::new(laser_client_config, commitment, abort_sender, chain_slot)
     }
@@ -328,12 +330,27 @@ impl ChainLaserActor {
             .map(|chunk| chunk.to_vec())
             .collect::<Vec<_>>();
 
+        let chain_slot = self.chain_slot.load(Ordering::Relaxed);
+        let from_slot = {
+            if chain_slot == 0 {
+                None
+            } else {
+                Some(chain_slot.saturating_sub(SLOTS_BETWEEN_ACTIVATIONS + 1))
+            }
+        };
+        trace!(
+            "Activating {} account subscription stream(s) at slot {} {}",
+            chunks.len(),
+            chain_slot,
+            from_slot.map_or("".to_string(), |s| format!("from slot: {s}"))
+        );
         for (idx, chunk) in chunks.into_iter().enumerate() {
             let stream = Self::create_accounts_stream(
                 &chunk,
                 &self.commitment,
                 &self.laser_client_config,
                 idx,
+                from_slot,
             );
             new_subs.insert(idx, Box::pin(stream));
         }
@@ -348,6 +365,7 @@ impl ChainLaserActor {
         commitment: &CommitmentLevel,
         laser_client_config: &LaserstreamConfig,
         idx: usize,
+        from_slot: Option<u64>,
     ) -> impl Stream<Item = LaserResult> {
         let mut accounts = HashMap::new();
         accounts.insert(
@@ -360,7 +378,7 @@ impl ChainLaserActor {
         let request = SubscribeRequest {
             accounts,
             commitment: Some((*commitment).into()),
-            from_slot: None,
+            from_slot,
             ..Default::default()
         };
         client::subscribe(laser_client_config.clone(), request).0
