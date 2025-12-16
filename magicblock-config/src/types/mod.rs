@@ -1,12 +1,12 @@
 use std::{fmt::Display, path::PathBuf};
 
 pub mod crypto;
-pub mod network;
+pub mod remote;
 
 // Re-export types for easy access
 pub use crypto::{SerdeKeypair, SerdePubkey};
 use derive_more::{Deref, FromStr};
-pub use network::BindAddress;
+pub use remote::{resolve_url, BindAddress, RemoteConfig, RemoteKind};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 use crate::consts;

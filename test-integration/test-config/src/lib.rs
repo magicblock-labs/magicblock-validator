@@ -14,7 +14,7 @@ use magicblock_config::{
         accounts::AccountsDbConfig, chain::ChainLinkConfig,
         ledger::LedgerConfig, LifecycleMode, LoadableProgram,
     },
-    types::{crypto::SerdePubkey, network::Remote},
+    types::{crypto::SerdePubkey, RemoteConfig, RemoteKind},
     ValidatorParams,
 };
 use program_flexi_counter::instruction::{
@@ -45,8 +45,16 @@ pub fn start_validator_with_clone_config(
         programs,
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
-            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
-            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
+            RemoteConfig {
+                kind: RemoteKind::Rpc,
+                url: IntegrationTestContext::url_chain().to_string(),
+                api_key: None,
+            },
+            RemoteConfig {
+                kind: RemoteKind::Websocket,
+                url: IntegrationTestContext::ws_url_chain().to_string(),
+                api_key: None,
+            },
         ],
         chainlink: ChainLinkConfig {
             prepare_lookup_tables,

@@ -4,7 +4,7 @@ use std::{
     str::FromStr,
 };
 
-use magicblock_config::types::network::Remote;
+use magicblock_config::types::{resolve_url, RemoteKind};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -23,24 +23,18 @@ struct RemoteConfig {
 }
 
 impl RemoteConfig {
-    /// Returns the URL for this remote, parsing the kind and url into a Remote instance.
+    /// Returns the URL for this remote, resolving aliases based on kind.
     fn url(&self) -> String {
-        // Construct the full remote URL with the appropriate scheme
-        let full_url = match self.kind.as_str() {
-            "rpc" => format!("http://{}", self.url),
-            "websocket" => format!("ws://{}", self.url),
-            "grpc" => format!("grpc://{}", self.url),
-            // Default to http for unknown kinds
-            _ => format!("http://{}", self.url),
+        // Convert string kind to RemoteKind enum
+        let kind = match self.kind.as_str() {
+            "rpc" => RemoteKind::Rpc,
+            "websocket" => RemoteKind::Websocket,
+            "grpc" => RemoteKind::Grpc,
+            // Default to rpc for unknown kinds
+            _ => RemoteKind::Rpc,
         };
-
-        // Parse the full URL into a Remote instance to resolve aliases
-        if let Ok(remote) = Remote::from_str(&full_url) {
-            remote.url_str().to_string()
-        } else {
-            // If parsing fails, return the raw URL
-            self.url.clone()
-        }
+        // Use the production resolve_url function from magicblock-config
+        resolve_url(kind, &self.url)
     }
 }
 

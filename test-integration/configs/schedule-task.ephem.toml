@@ -2,7 +2,13 @@ lifecycle = "ephemeral"
 commit = { compute-unit-price = 1_000_000 }
 listen = "0.0.0.0:8899"
 
-remotes = ["http://0.0.0.0:7799", "ws://0.0.0.0:7800"]
+[[remote]]
+kind = "rpc"
+url = "http://0.0.0.0:7799"
+
+[[remote]]
+kind = "websocket"
+url = "ws://0.0.0.0:7800"
 
 [ledger]
 reset = true

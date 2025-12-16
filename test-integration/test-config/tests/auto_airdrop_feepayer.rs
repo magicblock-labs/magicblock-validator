@@ -10,7 +10,7 @@ use magicblock_config::{
         accounts::AccountsDbConfig, chain::ChainLinkConfig,
         ledger::LedgerConfig, LifecycleMode,
     },
-    types::network::Remote,
+    types::{RemoteConfig, RemoteKind},
     ValidatorParams,
 };
 use solana_sdk::{signature::Keypair, signer::Signer, system_instruction};
@@ -24,8 +24,16 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
     let config = ValidatorParams {
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
-            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
-            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
+            RemoteConfig {
+                kind: RemoteKind::Rpc,
+                url: IntegrationTestContext::url_chain().to_string(),
+                api_key: None,
+            },
+            RemoteConfig {
+                kind: RemoteKind::Websocket,
+                url: IntegrationTestContext::ws_url_chain().to_string(),
+                api_key: None,
+            },
         ],
         accountsdb: AccountsDbConfig::default(),
         chainlink: ChainLinkConfig {
