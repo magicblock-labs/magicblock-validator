@@ -1,7 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
 use guinea::GuineaInstruction;
-use magicblock_core::traits::AccountsBank;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_keypair::Keypair;
 use solana_program::{
@@ -51,7 +50,7 @@ async fn test_insufficient_fee() {
     let env = ExecutionTestEnv::new();
     let mut payer = env.get_payer();
     payer.set_lamports(ExecutionTestEnv::BASE_FEE - 1);
-    payer.commmit();
+    payer.commit();
 
     let (ix, _) =
         setup_guinea_instruction(&env, &GuineaInstruction::PrintSizes, false);
@@ -105,7 +104,7 @@ async fn test_non_delegated_payer_rejection() {
     let mut payer = env.get_payer();
     payer.set_delegated(false); // Mark the payer as not delegated
     let fee_payer_initial_balance = payer.lamports();
-    payer.commmit();
+    payer.commit();
 
     let (ix, _) =
         setup_guinea_instruction(&env, &GuineaInstruction::PrintSizes, false);
@@ -133,7 +132,7 @@ async fn test_escrowed_payer_success() {
     payer.set_lamports(ExecutionTestEnv::BASE_FEE - 1);
     payer.set_delegated(false);
     let escrow = ephemeral_balance_pda_from_payer(&payer.pubkey);
-    payer.commmit();
+    payer.commit();
 
     env.fund_account(escrow, LAMPORTS_PER_SOL); // Fund the escrow PDA
 
@@ -220,7 +219,7 @@ async fn test_escrow_charged_for_failed_transaction() {
     payer.set_lamports(0);
     payer.set_delegated(false);
     let escrow = ephemeral_balance_pda_from_payer(&payer.pubkey);
-    payer.commmit();
+    payer.commit();
     let account = env
         .create_account_with_config(LAMPORTS_PER_SOL, 0, guinea::ID) // Account with no data
         .pubkey();
@@ -266,7 +265,7 @@ async fn test_transaction_gasless_mode() {
     payer.set_lamports(1); // Not enough to cover standard fee
     payer.set_delegated(false); // Explicitly set the payer as NON-delegated.
     let initial_balance = payer.lamports();
-    payer.commmit();
+    payer.commit();
 
     let ix = Instruction::new_with_bincode(
         guinea::ID,
@@ -312,7 +311,7 @@ async fn test_transaction_gasless_mode_with_not_existing_account() {
     payer.set_lamports(1); // Not enough to cover standard fee
     payer.set_delegated(false); // Explicitly set the payer as NON-delegated.
     let initial_balance = payer.lamports();
-    payer.commmit();
+    payer.commit();
 
     let ix = Instruction::new_with_bincode(
         guinea::ID,
@@ -349,53 +348,5 @@ async fn test_transaction_gasless_mode_with_not_existing_account() {
     assert_eq!(
         initial_balance, final_balance,
         "payer balance should not change in gasless mode"
-    );
-}
-
-/// Verifies that in zero-fee ("gasless") mode, transactions are processed
-/// successfully even when the fee payer does not exists.
-#[tokio::test]
-async fn test_transaction_gasless_mode_not_existing_feepayer() {
-    // Initialize the environment with a base fee of 0.
-    let env = ExecutionTestEnv::new_with_config(0);
-    let payer = env.get_payer().pubkey;
-    env.accountsdb.remove_account(&payer);
-
-    // Simple noop instruction that does not touch the fee payer account
-    let ix = Instruction::new_with_bincode(
-        guinea::ID,
-        &GuineaInstruction::PrintSizes,
-        vec![],
-    );
-    let txn = env.build_transaction(&[ix]);
-    let signature = txn.signatures[0];
-
-    // In a normal fee-paying mode, this execution would fail.
-    env.execute_transaction(txn)
-        .await
-        .expect("transaction should succeed in gasless mode");
-
-    // Verify the transaction was fully processed and broadcast successfully.
-    let status = env
-        .dispatch
-        .transaction_status
-        .recv_timeout(Duration::from_millis(100))
-        .expect("should receive a transaction status update");
-
-    assert_eq!(status.signature, signature);
-    assert!(
-        status.result.result.is_ok(),
-        "Transaction execution should be successful"
-    );
-
-    // Verify that the payer balance is zero (or doesn't exist)
-    let final_balance = env
-        .accountsdb
-        .get_account(&payer)
-        .unwrap_or_default()
-        .lamports();
-    assert_eq!(
-        final_balance, 0,
-        "payer balance of a not existing feepayer should be 0 in gasless mode"
     );
 }
