@@ -292,6 +292,13 @@ lazy_static::lazy_static! {
     pub static ref FAILED_TRANSACTIONS_COUNT: IntCounter = IntCounter::new(
         "failed_transactions_count", "Total number of failed transactions"
     ).unwrap();
+    pub static ref MAX_LOCK_CONTENTION_QUEUE_SIZE: IntGauge = IntGauge::new(
+        "max_lock_contention_queue_size",
+        "Maximum observed queue size for an account lock contention"
+    ).unwrap();
+
+
+
 
 
     // -----------------
@@ -426,6 +433,7 @@ pub(crate) fn register() {
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(UNSTUCK_UNDELEGATION_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
+        register!(MAX_LOCK_CONTENTION_QUEUE_SIZE);
         register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
         register!(TASK_INFO_FETCHER_A_COUNT);
         register!(TABLE_MANIA_A_COUNT);
