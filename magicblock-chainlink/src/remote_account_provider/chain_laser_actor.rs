@@ -392,6 +392,7 @@ impl ChainLaserActor {
     ) {
         match result {
             Ok(subscribe_update) => {
+                trace!("Received account update {:?}", subscribe_update);
                 self.process_subscription_update(subscribe_update).await;
             }
             Err(err) => {
@@ -415,6 +416,10 @@ impl ChainLaserActor {
     async fn handle_program_update(&mut self, result: LaserResult) {
         match result {
             Ok(subscribe_update) => {
+                trace!(
+                    "Received program subscription update {:?}",
+                    subscribe_update
+                );
                 self.process_subscription_update(subscribe_update).await;
             }
             Err(err) => {
@@ -494,6 +499,12 @@ impl ChainLaserActor {
             return;
         };
 
+        trace!(
+            "Received subscription update for account {}: slot {}",
+            pubkey,
+            slot
+        );
+
         if !self.subscriptions.contains(&pubkey) {
             // Ignore updates for accounts we are not subscribed to
             return;
@@ -517,6 +528,7 @@ impl ChainLaserActor {
             account: Some(account),
         };
 
+        trace!("Sending subscription update {:?} ", subscription_update);
         self.subscription_updates_sender
             .send(subscription_update)
             .await
