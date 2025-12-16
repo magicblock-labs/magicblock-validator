@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     pin::Pin,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use futures_util::{Stream, StreamExt};
@@ -16,6 +17,7 @@ use log::*;
 use solana_account::Account;
 use solana_commitment_config::CommitmentLevel as SolanaCommitmentLevel;
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::sysvar::clock;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamMap;
 
@@ -396,8 +398,8 @@ impl ChainLaserActor {
     ) {
         match result {
             Ok(subscribe_update) => {
-                trace!("Received account update {:?}", subscribe_update);
-                self.process_subscription_update(subscribe_update).await;
+                self.process_subscription_update(subscribe_update, "account")
+                    .await;
             }
             Err(err) => {
                 error!(
@@ -420,11 +422,8 @@ impl ChainLaserActor {
     async fn handle_program_update(&mut self, result: LaserResult) {
         match result {
             Ok(subscribe_update) => {
-                trace!(
-                    "Received program subscription update {:?}",
-                    subscribe_update
-                );
-                self.process_subscription_update(subscribe_update).await;
+                self.process_subscription_update(subscribe_update, "program")
+                    .await;
             }
             Err(err) => {
                 error!(
@@ -486,7 +485,11 @@ impl ChainLaserActor {
     /// closed. In that case lamports == 0 and owner is the system program.
     /// Thus an update of `None` is not expected and can be ignored.
     /// See: https://gist.github.com/thlorenz/d3d1a380678a030b3e833f8f979319ae
-    async fn process_subscription_update(&mut self, update: SubscribeUpdate) {
+    async fn process_subscription_update(
+        &mut self,
+        update: SubscribeUpdate,
+        source: &str,
+    ) {
         let Some(update_oneof) = update.update_oneof else {
             return;
         };
@@ -503,11 +506,23 @@ impl ChainLaserActor {
             return;
         };
 
-        trace!(
-            "Received subscription update for account {}: slot {}",
-            pubkey,
-            slot
-        );
+        let log_trace = if log::log_enabled!(log::Level::Trace) {
+            if pubkey.eq(&clock::ID) {
+                static TRACE_CLOCK_COUNT: AtomicU64 = AtomicU64::new(0);
+                TRACE_CLOCK_COUNT.fetch_add(1, Ordering::Relaxed) % 100 == 0
+            } else {
+                true
+            }
+        } else {
+            false
+        };
+        if log_trace {
+            trace!(
+                "Received {source} subscription update for {}: slot {}",
+                pubkey,
+                slot
+            );
+        }
 
         if !self.subscriptions.contains(&pubkey) {
             // Ignore updates for accounts we are not subscribed to
@@ -532,7 +547,9 @@ impl ChainLaserActor {
             account: Some(account),
         };
 
-        trace!("Sending subscription update {:?} ", subscription_update);
+        if log_trace {
+            trace!("Sending subscription update {:?} ", subscription_update);
+        }
         self.subscription_updates_sender
             .send(subscription_update)
             .await
