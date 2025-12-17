@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_core::token_programs::{
-    derive_ata, derive_eata, SPL_TOKEN_PROGRAM_ID,
-};
+use magicblock_core::token_programs::derive_eata;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
@@ -187,35 +185,19 @@ pub(crate) fn process_schedule_commit(
             // we should commit/undelegate the corresponding eATA instead.
             let mut target_pubkey = *acc_pubkey;
             let acc_borrow = acc.borrow();
-            if acc_borrow.delegated()
-                && acc_borrow.owner() == &SPL_TOKEN_PROGRAM_ID
-            {
-                let data = acc_borrow.data();
-                if data.len() >= 64 {
-                    // spl-token Account layout: [0..32]=mint, [32..64]=owner
-                    let mint =
-                        Pubkey::new_from_array(match data[0..32].try_into() {
-                            Ok(a) => a,
-                            Err(_) => [0u8; 32],
-                        });
-                    let wallet_owner =
-                        Pubkey::new_from_array(match data[32..64].try_into() {
-                            Ok(a) => a,
-                            Err(_) => [0u8; 32],
-                        });
-
-                    // Verify that the current pubkey matches the derived ATA
-                    let ata_addr = derive_ata(&wallet_owner, &mint);
-                    if ata_addr == *acc_pubkey {
-                        // Remap to eATA PDA
-                        target_pubkey = derive_eata(&wallet_owner, &mint);
-                        ic_msg!(
-                            invoke_context,
-                            "ScheduleCommit: remapping ATA {} -> eATA {} for commit/undelegate",
-                            acc_pubkey,
-                            target_pubkey
-                        );
-                    }
+            if acc_borrow.delegated() {
+                if let Some(ata) = magicblock_core::token_programs::is_ata(
+                    acc_pubkey,
+                    &acc_borrow,
+                ) {
+                    // Remap to eATA PDA
+                    target_pubkey = derive_eata(&ata.owner, &ata.mint);
+                    ic_msg!(
+                        invoke_context,
+                        "ScheduleCommit: remapping ATA {} -> eATA {} for commit/undelegate",
+                        acc_pubkey,
+                        target_pubkey
+                    );
                 }
             }
 

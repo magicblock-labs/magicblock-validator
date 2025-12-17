@@ -257,9 +257,9 @@ fn assert_first_commit(
 mod tests {
     // ---------- Helpers for ATA/eATA remapping tests ----------
     // Use shared SPL/ATA/eATA constants and helpers
-    use magicblock_core::token_programs::{
-        derive_ata, derive_eata, SPL_TOKEN_PROGRAM_ID,
-    };
+    // Reuse test helper to create proper SPL ATA account data
+    use magicblock_chainlink::testing::eatas::create_ata_account;
+    use magicblock_core::token_programs::{derive_ata, derive_eata};
     use test_kit::init_logger;
 
     use super::*;
@@ -269,14 +269,9 @@ mod tests {
         owner: &Pubkey,
         mint: &Pubkey,
     ) -> AccountSharedData {
-        // Minimal SPL token account data: first 32 bytes mint, next 32 owner
-        let mut data = vec![0u8; 72];
-        data[0..32].copy_from_slice(mint.as_ref());
-        data[32..64].copy_from_slice(owner.as_ref());
-
-        let mut acc =
-            AccountSharedData::new(0, data.len(), &SPL_TOKEN_PROGRAM_ID);
-        acc.set_data_from_slice(&data);
+        // Use shared helper to create a valid SPL ATA account, then convert and mark delegated
+        let ata_account = create_ata_account(owner, mint);
+        let mut acc = AccountSharedData::from(ata_account);
         acc.set_delegated(true);
         acc
     }

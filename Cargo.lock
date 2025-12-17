@@ -2834,6 +2834,8 @@ dependencies = [
  "solana-transaction",
  "solana-transaction-context",
  "solana-transaction-error",
+ "spl-token",
+ "spl-token-2022 7.0.0",
  "tokio",
 ]
 
@@ -2956,6 +2958,7 @@ dependencies = [
  "assert_matches",
  "bincode",
  "lazy_static",
+ "magicblock-chainlink",
  "magicblock-core",
  "magicblock-magic-program-api",
  "num-derive",

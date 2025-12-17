@@ -24,6 +24,7 @@ thiserror = { workspace = true }
 test-kit = { workspace = true }
 assert_matches = { workspace = true }
 rand = { workspace = true }
+magicblock-chainlink = { workspace = true, features = ["dev-context"] }
 
 [lib]
 crate-type = ["lib"]
