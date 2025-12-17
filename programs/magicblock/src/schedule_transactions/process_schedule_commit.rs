@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use magicblock_core::token_programs::derive_eata;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
@@ -183,22 +182,19 @@ pub(crate) fn process_schedule_commit(
 
             // If this is a delegated SPL Token ATA that was cloned from an eATA,
             // we should commit/undelegate the corresponding eATA instead.
-            let mut target_pubkey = *acc_pubkey;
             let acc_borrow = acc.borrow();
-            if acc_borrow.delegated() {
-                if let Some(ata) = magicblock_core::token_programs::is_ata(
-                    acc_pubkey,
+            let target_pubkey =
+                crate::schedule_transactions::remap_ata_to_eata_if_delegated(
                     &acc_borrow,
-                ) {
-                    // Remap to eATA PDA
-                    target_pubkey = derive_eata(&ata.owner, &ata.mint);
-                    ic_msg!(
-                        invoke_context,
-                        "ScheduleCommit: remapping ATA {} -> eATA {} for commit/undelegate",
-                        acc_pubkey,
-                        target_pubkey
-                    );
-                }
+                    acc_pubkey,
+                );
+            if target_pubkey != *acc_pubkey {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit: remapping ATA {} -> eATA {} for commit/undelegate",
+                    acc_pubkey,
+                    target_pubkey
+                );
             }
 
             #[allow(clippy::unnecessary_literal_unwrap)]
