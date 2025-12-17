@@ -1,5 +1,6 @@
 pub use magicblock_core::token_programs::{
-    derive_ata, derive_eata, EATA_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID,
+    derive_ata, derive_eata, EphemeralAta, EATA_PROGRAM_ID,
+    SPL_TOKEN_PROGRAM_ID,
 };
 use solana_account::Account;
 use solana_program::{program_option::COption, program_pack::Pack};
@@ -54,13 +55,4 @@ pub fn create_eata_account(
     }
 }
 
-/// Internal representation of a token account data.
-#[repr(C)]
-pub struct EphemeralAta {
-    /// The owner of the eata
-    pub owner: Pubkey,
-    /// The mint associated with this account
-    pub mint: Pubkey,
-    /// The amount of tokens this account holds.
-    pub amount: u64,
-}
+// Reuse EphemeralAta definition from magicblock_core::token_programs

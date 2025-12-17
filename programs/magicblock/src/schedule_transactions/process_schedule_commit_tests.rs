@@ -486,8 +486,8 @@ mod tests {
         // Execute scheduling
         let processed_scheduled = process_instruction(
             ix.data.as_slice(),
-            transaction_accounts.clone(),
-            ix.accounts.clone(),
+            transaction_accounts,
+            ix.accounts,
             Ok(()),
         );
 
@@ -568,8 +568,8 @@ mod tests {
         // Execute scheduling
         let processed_scheduled = process_instruction(
             ix.data.as_slice(),
-            transaction_accounts.clone(),
-            ix.accounts.clone(),
+            transaction_accounts,
+            ix.accounts,
             Ok(()),
         );
 
