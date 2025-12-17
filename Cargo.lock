@@ -2746,7 +2746,7 @@ dependencies = [
  "solana-system-interface",
  "solana-transaction-error",
  "spl-token",
- "spl-token-2022 6.0.0",
+ "spl-token-2022 7.0.0",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",

@@ -16,7 +16,7 @@ use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use solana_account::{Account, AccountSharedData, ReadableAccount};
 use solana_program::{program_option::COption, program_pack::Pack};
 use solana_pubkey::Pubkey;
-use solana_sdk::{pubkey, rent::Rent, system_program};
+use solana_sdk::{rent::Rent, system_program};
 use spl_token::state::{Account as SplAccount, AccountState};
 use tokio::{
     sync::{mpsc, oneshot},
@@ -3420,12 +3420,12 @@ pub struct EphemeralAta {
     pub amount: u64,
 }
 
-impl Into<AccountSharedData> for EphemeralAta {
-    fn into(self) -> AccountSharedData {
+impl From<EphemeralAta> for AccountSharedData {
+    fn from(val: EphemeralAta) -> Self {
         let token_account = SplAccount {
-            mint: self.mint,
-            owner: self.owner,
-            amount: self.amount,
+            mint: val.mint,
+            owner: val.owner,
+            amount: val.amount,
             delegate: COption::None,
             state: AccountState::Initialized,
             is_native: COption::None,
