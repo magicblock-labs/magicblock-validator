@@ -735,7 +735,8 @@ pub(crate) fn create_test_intent(
         ScheduledBaseIntent, UndelegateType,
     };
     use solana_account::Account;
-    use solana_sdk::{hash::Hash, transaction::Transaction};
+    use solana_hash::Hash;
+    use solana_transaction::Transaction;
 
     use crate::types::TriggerType;
 

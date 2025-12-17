@@ -31,13 +31,24 @@ magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true }
 rusqlite = { workspace = true }
 solana-account = { workspace = true }
+solana-address-lookup-table-interface = { workspace = true }
+solana-commitment-config = { workspace = true }
+solana-compute-budget-interface = { workspace = true }
+solana-hash = { workspace = true }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
+solana-message = { workspace = true }
+solana-program = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
-solana-sdk = { workspace = true }
+solana-signature = { workspace = true }
+solana-signer = { workspace = true }
+solana-system-program = { workspace = true }
+solana-transaction = { workspace = true }
+solana-transaction-error = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
 static_assertions = { workspace = true }
-tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
@@ -45,6 +56,7 @@ tokio-util = { workspace = true }
 [dev-dependencies]
 lazy_static = { workspace = true }
 rand = { workspace = true }
+tempfile = { workspace = true }
 
 [features]
 default = []

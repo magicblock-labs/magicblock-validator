@@ -10,12 +10,12 @@ use std::{
 use log::*;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::MagicblockRpcClient;
+use solana_address_lookup_table_interface::state::AddressLookupTable;
+use solana_commitment_config::CommitmentConfig;
+use solana_keypair::Keypair;
+use solana_message::AddressLookupTableAccount;
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    address_lookup_table::state::AddressLookupTable,
-    commitment_config::CommitmentConfig, message::AddressLookupTableAccount,
-    signature::Keypair, signer::Signer,
-};
+use solana_signer::Signer;
 use tokio::{
     sync::{Mutex, RwLock},
     time::sleep,
@@ -378,8 +378,8 @@ impl TableMania {
 
         if self.randomize_lookup_table_slot {
             use rand::Rng;
-            let mut rng = rand::thread_rng();
-            let random_slot = rng.gen_range(0..=u64::MAX);
+            let mut rng = rand::rng();
+            let random_slot = rng.random_range(0..=u64::MAX);
             SUB_SLOT.store(random_slot, Ordering::Relaxed);
         } else {
             static LAST_SLOT: AtomicU64 = AtomicU64::new(0);

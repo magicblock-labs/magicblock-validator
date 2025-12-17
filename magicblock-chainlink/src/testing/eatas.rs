@@ -5,7 +5,7 @@ pub use magicblock_core::token_programs::{
 use solana_account::Account;
 use solana_program::{program_option::COption, program_pack::Pack};
 use solana_pubkey::Pubkey;
-use solana_sdk::rent::Rent;
+use solana_sysvar::rent::Rent;
 use spl_token::state::{Account as SplAccount, AccountState};
 
 pub fn create_ata_account(owner: &Pubkey, mint: &Pubkey) -> Account {

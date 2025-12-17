@@ -1,7 +1,14 @@
-remote = "devnet"
 lifecycle = "offline"
 commit = { compute-unit-price = 1_000_000 }
 listen = "0.0.0.0:7799"
+
+[[remote]]
+kind = "rpc"
+url = "devnet"
+
+[[remote]]
+kind = "websocket"
+url = "devnet"
 
 [ledger]
 block-time = "50ms"

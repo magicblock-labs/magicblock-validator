@@ -13,9 +13,11 @@ pub(crate) use process_schedule_commit::*;
 pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };
+use solana_account::{AccountSharedData, ReadableAccount};
+use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::instruction::InstructionError;
+use solana_pubkey::Pubkey;
 
 use crate::utils::accounts::get_instruction_pubkey_with_idx;
 
@@ -43,10 +45,6 @@ pub fn check_magic_context_id(
 // This keeps ScheduleCommit and ScheduleBaseIntent paths consistent.
 use magicblock_core::token_programs::{
     derive_ata, derive_eata, SPL_TOKEN_PROGRAM_ID,
-};
-use solana_sdk::{
-    account::{AccountSharedData, ReadableAccount},
-    pubkey::Pubkey,
 };
 
 pub(crate) fn remap_ata_to_eata_if_delegated(

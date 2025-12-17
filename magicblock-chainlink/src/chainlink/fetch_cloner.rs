@@ -11,15 +11,14 @@ use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use log::*;
-// Shared ATA/eATA helpers
-use magicblock_core::token_programs::{
-    is_ata, try_derive_eata_address_and_bump, MaybeIntoAta,
+use magicblock_core::{
+    token_programs::{is_ata, try_derive_eata_address_and_bump, MaybeIntoAta},
+    traits::AccountsBank,
 };
-use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
-use solana_sdk::system_program;
+use solana_sdk_ids::system_program;
 use tokio::{
     sync::{mpsc, oneshot},
     task,
@@ -703,7 +702,8 @@ where
                                         // to fail
                                         if !account_shared_data
                                             .owner()
-                                            .eq(&solana_sdk::native_loader::id())
+                                            .eq(&solana_sdk_ids::native_loader::id(
+                                            ))
                                         {
                                             programs.push((
                                                 pubkey,
@@ -1869,7 +1869,7 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use solana_account::{Account, AccountSharedData, WritableAccount};
-    use solana_sdk::system_program;
+    use solana_sdk_ids::system_program;
     use tokio::sync::mpsc;
 
     use super::*;
@@ -3329,5 +3329,3 @@ mod tests {
         );
     }
 }
-
-// local helpers moved to magicblock_core::token_programs

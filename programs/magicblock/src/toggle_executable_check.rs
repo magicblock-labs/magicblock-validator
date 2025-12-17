@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use magicblock_magic_program_api::Pubkey;
+use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::instruction::InstructionError;
 
 use crate::{
     utils::accounts::get_instruction_pubkey_with_idx,

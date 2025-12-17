@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures_util::future::join_all;
 use log::{error, info};
 use solana_pubkey::Pubkey;
-use solana_sdk::signature::Signature;
+use solana_signature::Signature;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
 use tokio_util::sync::WaitForCancellationFutureOwned;

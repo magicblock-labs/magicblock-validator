@@ -10,9 +10,10 @@ edition.workspace = true
 [dependencies]
 semver = { workspace = true }
 serde = { workspace = true }
+solana-feature-set = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }
 solana-rpc-client-api = { workspace = true }
-solana-sdk = { workspace = true }
+solana-sanitize = { workspace = true }
 git-version = { workspace = true }
 
 [build-dependencies]

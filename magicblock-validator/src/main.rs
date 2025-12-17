@@ -3,7 +3,7 @@ mod shutdown;
 use log::*;
 use magicblock_api::{ledger, magic_validator::MagicValidator};
 use magicblock_config::ValidatorParams;
-use solana_sdk::signature::Signer;
+use solana_signer::Signer;
 use tokio::runtime::Builder;
 
 use crate::shutdown::Shutdown;
@@ -47,22 +47,6 @@ fn init_logger() {
     });
 }
 
-/// Print informational startup messages.
-/// - If `RUST_LOG` is not set or is set to "quiet", prints to stdout using `println!()`.
-/// - Otherwise, emits an `info!` log so operators can control visibility
-///   (e.g., by setting `RUST_LOG=warn` to hide it).
-fn print_info<S: std::fmt::Display>(msg: S) {
-    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
-    let rust_log_trimmed = rust_log.trim().to_ascii_lowercase();
-    let use_plain_print =
-        rust_log_trimmed.is_empty() || rust_log_trimmed == "quiet";
-    if use_plain_print {
-        println!("{}", msg);
-    } else {
-        info!("{}", msg);
-    }
-}
-
 fn main() {
     // We dedicate quarter of the threads to general async runtime (where io/timer
     // bound services are running), the rest is allocated for blocking io, rpc and
@@ -90,7 +74,6 @@ async fn run() {
         }
     };
     info!("Starting validator with config:\n{:#?}", config);
-    // Add a more developer-friendly startup message
     const WS_PORT_OFFSET: u16 = 1;
     let rpc_port = config.listen.port();
     let ws_port = rpc_port + WS_PORT_OFFSET; // WebSocket port is typically RPC port + 1
@@ -138,5 +121,23 @@ async fn run() {
     if let Err(err) = Shutdown::wait().await {
         error!("Failed to gracefully shutdown: {}", err);
     }
+
+    api.prepare_ledger_for_shutdown();
     api.stop().await;
+}
+
+/// Print informational startup messages.
+/// - If `RUST_LOG` is not set or is set to "quiet", prints to stdout using `println!()`.
+/// - Otherwise, emits an `info!` log so operators can control visibility
+///   (e.g., by setting `RUST_LOG=warn` to hide it).
+fn print_info<S: std::fmt::Display>(msg: S) {
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
+    let rust_log_trimmed = rust_log.trim().to_ascii_lowercase();
+    let use_plain_print =
+        rust_log_trimmed.is_empty() || rust_log_trimmed == "quiet";
+    if use_plain_print {
+        println!("{}", msg);
+    } else {
+        info!("{}", msg);
+    }
 }

@@ -37,6 +37,8 @@ use magicblock_config::{
     config::{
         ChainOperationConfig, LedgerConfig, LifecycleMode, LoadableProgram,
     },
+    consts::DEFAULT_REMOTE,
+    types::{resolve_url, RemoteKind},
     ValidatorParams,
 };
 use magicblock_core::{
@@ -68,14 +70,12 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
+use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
+use solana_keypair::Keypair;
+use solana_native_token::LAMPORTS_PER_SOL;
+use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::{CommitmentConfig, CommitmentLevel},
-    native_token::LAMPORTS_PER_SOL,
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-};
+use solana_signer::Signer;
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 
@@ -248,8 +248,15 @@ impl MagicValidator {
             featureset: txn_scheduler_state.environment.feature_set.clone(),
             blocktime: config.ledger.block_time_ms(),
         };
-        let transaction_scheduler =
-            TransactionScheduler::new(1, txn_scheduler_state);
+        // We dedicate half of the available resources to the execution
+        // runtime, -1 is taken up by the transaction scheduler itself
+        let transaction_executors =
+            (num_cpus::get() / 2).saturating_sub(1).max(1) as u32;
+        let transaction_scheduler = TransactionScheduler::new(
+            transaction_executors,
+            txn_scheduler_state,
+        );
+        info!("Running execution backend with {transaction_executors} threads");
         transaction_scheduler.spawn();
 
         let shared_state = SharedState::new(
@@ -332,8 +339,8 @@ impl MagicValidator {
             config.validator.keypair.insecure_clone(),
             committor_persist_path,
             ChainConfig {
-                rpc_uri: config.remote.http().to_string(),
-                commitment: CommitmentLevel::Confirmed,
+                rpc_uri: config.rpc_url_or_default(),
+                commitment: CommitmentConfig::confirmed(),
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
                 ),
@@ -363,15 +370,22 @@ impl MagicValidator {
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
         use magicblock_chainlink::remote_account_provider::Endpoint;
-        let rpc_url = config.remote.http().to_string();
-        let endpoints = config
-            .remote
-            .websocket()
-            .map(|pubsub_url| Endpoint {
+        let rpc_url = config.rpc_url_or_default();
+        let endpoints = if config.has_subscription_url() {
+            config
+                .websocket_urls()
+                .map(|pubsub_url| Endpoint {
+                    rpc_url: rpc_url.clone(),
+                    pubsub_url: pubsub_url.to_string(),
+                })
+                .collect::<Vec<_>>()
+        } else {
+            let ws_url = resolve_url(RemoteKind::Websocket, DEFAULT_REMOTE);
+            vec![Endpoint {
                 rpc_url: rpc_url.clone(),
-                pubsub_url: pubsub_url.to_string(),
-            })
-            .collect::<Vec<_>>();
+                pubsub_url: ws_url,
+            }]
+        };
 
         let cloner = ChainlinkCloner::new(
             committor_service,
@@ -512,7 +526,7 @@ impl MagicValidator {
         let country_code = CountryCode::from(config.country_code.alpha3());
         let validator_keypair = validator_authority();
         let validator_info = ErRecord::V0(RecordV0 {
-            identity: validator_keypair.pubkey(),
+            identity: validator_keypair.pubkey().to_bytes().into(),
             status: ErStatus::Active,
             block_time_ms: self.config.ledger.block_time_ms() as u16,
             base_fee: self.config.validator.basefee as u16,
@@ -523,7 +537,7 @@ impl MagicValidator {
         });
 
         DomainRegistryManager::handle_registration_static(
-            self.config.remote.http(),
+            self.config.rpc_url_or_default(),
             &validator_keypair,
             validator_info,
         )
@@ -536,7 +550,7 @@ impl MagicValidator {
         let validator_keypair = validator_authority();
 
         DomainRegistryManager::handle_unregistration_static(
-            self.config.remote.http(),
+            self.config.rpc_url_or_default(),
             &validator_keypair,
         )
         .map_err(|err| {
@@ -549,10 +563,8 @@ impl MagicValidator {
         const MIN_BALANCE_SOL: u64 = 5;
 
         let lamports = RpcClient::new_with_commitment(
-            self.config.remote.http().to_string(),
-            CommitmentConfig {
-                commitment: CommitmentLevel::Confirmed,
-            },
+            self.config.rpc_url_or_default(),
+            CommitmentConfig::confirmed(),
         )
         .get_balance(&self.identity)
         .await
@@ -598,7 +610,7 @@ impl MagicValidator {
             .map(|co| co.claim_fees_frequency)
         {
             self.claim_fees_task
-                .start(frequency, self.config.remote.http().to_string());
+                .start(frequency, self.config.rpc_url_or_default());
         }
 
         self.slot_ticker = Some(init_slot_ticker(
@@ -666,7 +678,6 @@ impl MagicValidator {
             committor_service.stop();
         }
 
-        self.ledger_truncator.stop();
         self.claim_fees_task.stop();
 
         if self.config.chain_operation.is_some()
@@ -690,6 +701,15 @@ impl MagicValidator {
 
     pub fn ledger(&self) -> &Ledger {
         &self.ledger
+    }
+
+    /// Prepares RocksDB for shutdown by cancelling all Manual compactions
+    /// This speeds up `stop` as it doesn't have to await for compaction cancellation
+    /// Calling this still allows to write or read from DB
+    pub fn prepare_ledger_for_shutdown(&mut self) {
+        self.ledger_truncator.stop();
+        // Calls & awaits until manual compaction is canceled
+        self.ledger.cancel_manual_compactions();
     }
 }
 

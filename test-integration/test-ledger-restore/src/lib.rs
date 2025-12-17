@@ -18,11 +18,7 @@ use magicblock_config::{
         LifecycleMode, LoadableProgram,
     },
     consts::DEFAULT_LEDGER_BLOCK_TIME_MS,
-    types::{
-        crypto::SerdePubkey,
-        network::{Remote, RemoteCluster},
-        StorageDirectory,
-    },
+    types::{crypto::SerdePubkey, RemoteConfig, RemoteKind, StorageDirectory},
     ValidatorParams,
 };
 use program_flexi_counter::{
@@ -149,9 +145,18 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
         programs,
         task_scheduler: TaskSchedulerConfig { reset: true },
         lifecycle: LifecycleMode::Ephemeral,
-        remote: RemoteCluster::Single(Remote::Unified(
-            IntegrationTestContext::url_chain().parse().unwrap(),
-        )),
+        remotes: vec![
+            RemoteConfig {
+                kind: RemoteKind::Rpc,
+                url: IntegrationTestContext::url_chain().to_string(),
+                api_key: None,
+            },
+            RemoteConfig {
+                kind: RemoteKind::Websocket,
+                url: IntegrationTestContext::ws_url_chain().to_string(),
+                api_key: None,
+            },
+        ],
         storage: StorageDirectory(ledger_path.to_path_buf()),
         ..Default::default()
     };
