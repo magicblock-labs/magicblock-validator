@@ -1,4 +1,4 @@
-use std::{process::Child, time::Duration};
+use std::{process::Child, str::FromStr, time::Duration};
 
 use integration_test_tools::{
     expect,
@@ -16,7 +16,7 @@ use magicblock_config::{
         scheduler::TaskSchedulerConfig, validator::ValidatorConfig,
         LifecycleMode,
     },
-    types::{RemoteConfig, RemoteKind, StorageDirectory},
+    types::{network::Remote, StorageDirectory},
     ValidatorParams,
 };
 use program_flexi_counter::instruction::{
@@ -35,16 +35,12 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
     let config = ValidatorParams {
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
-            RemoteConfig {
-                kind: RemoteKind::Rpc,
-                url: IntegrationTestContext::url_chain().to_string(),
-                api_key: None,
-            },
-            RemoteConfig {
-                kind: RemoteKind::Websocket,
-                url: IntegrationTestContext::ws_url_chain().to_string(),
-                api_key: None,
-            },
+            Remote::from_str(&IntegrationTestContext::url_chain().to_string())
+                .unwrap(),
+            Remote::from_str(
+                &IntegrationTestContext::ws_url_chain().to_string(),
+            )
+            .unwrap(),
         ],
         accountsdb: AccountsDbConfig::default(),
         task_scheduler: TaskSchedulerConfig { reset: true },

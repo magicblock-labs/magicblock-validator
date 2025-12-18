@@ -121,19 +121,32 @@ impl ValidatorParams {
     /// If no WebSocket remote is present, derives one from the first HTTP remote.
     /// This satisfies the requirement for a subscription-capable endpoint.
     fn ensure_websocket(&mut self) {
-        let mut remotes = self.remotes.iter();
-        if remotes.any(|r| matches!(r, Remote::Websocket(_))) {
+        // Check if a websocket remote already exists
+        if self
+            .remotes
+            .iter()
+            .any(|r| matches!(r, Remote::Websocket(_)))
+        {
             return;
         }
-        // SAFETY:
-        // remotes is always initialized to have at least 1 default HTTP value
-        let websocket = self
+
+        // Find the first HTTP remote and convert it to WebSocket
+        if let Some(websocket) = self
             .remotes
-            .first()
-            .unwrap()
-            .to_websocket()
-            .expect("default remote must be websocket");
-        self.remotes.push(websocket);
+            .iter()
+            .find(|r| matches!(r, Remote::Http(_)))
+            .and_then(|r| r.to_websocket())
+        {
+            self.remotes.push(websocket);
+        } else {
+            // Fallback: if no HTTP remote exists (unexpected, since ensure_http() was called first),
+            // create a default WebSocket remote from the default HTTP remote.
+            let default_http =
+                Remote::Http(consts::DEFAULT_REMOTE.parse().unwrap());
+            if let Some(default_websocket) = default_http.to_websocket() {
+                self.remotes.push(default_websocket);
+            }
+        }
     }
 
     /// Returns the first HTTP remote URL for JSON-RPC calls.

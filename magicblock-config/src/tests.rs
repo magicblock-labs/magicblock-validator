@@ -293,6 +293,36 @@ fn test_ledger_and_commit_settings() {
 }
 
 #[test]
+#[parallel]
+fn test_cli_ledger_reset() {
+    // Verify CLI --reset flag sets reset to true
+    let config = run_cli(vec!["--reset"]);
+
+    assert!(config.ledger.reset);
+
+    // Verify ledger reset defaults to false when flag is not provided
+    let config = run_cli(vec![]);
+
+    assert!(!config.ledger.reset);
+}
+
+#[test]
+#[parallel]
+fn test_cli_ledger_reset_overrides_toml() {
+    // Verify CLI --ledger-reset flag overrides TOML setting
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [ledger]
+        reset = false
+        "#,
+    );
+
+    let config = run_cli(vec![config_path.to_str().unwrap(), "--reset"]);
+
+    assert!(config.ledger.reset);
+}
+
+#[test]
 #[serial]
 fn test_task_scheduler_bool_env() {
     // Verify standard boolean parsing from Env vars work on nested fields

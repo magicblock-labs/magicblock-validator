@@ -44,15 +44,20 @@ impl FromStr for Remote {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // Handle non-standard schemes by detecting them before parsing
+        let mut s = s.to_owned();
         let is_grpc = s.starts_with("grpc");
-        let s = s.replace("grpc", "http");
+        if is_grpc {
+            // SAFETY:
+            // We made sure that "grpc" is the prefix and we are not violating Unicode invariants
+            unsafe { s.as_bytes_mut()[0..4].copy_from_slice(b"http") };
+        }
 
         let parsed = AliasedUrl::from_str(&s)?;
         let remote = match parsed.0.scheme() {
             _ if is_grpc => Self::Grpc(parsed),
             "http" | "https" => Self::Http(parsed),
             "ws" | "wss" => Self::Websocket(parsed),
-            _ => return Err(url::ParseError::Overflow),
+            _ => return Err(url::ParseError::InvalidDomainCharacter),
         };
         Ok(remote)
     }
@@ -60,7 +65,7 @@ impl FromStr for Remote {
 
 impl Remote {
     /// Returns the URL as a string reference.
-    pub(crate) fn url_str(&self) -> &str {
+    pub fn url_str(&self) -> &str {
         match self {
             Self::Http(u) => u.as_str(),
             Self::Websocket(u) => u.as_str(),

@@ -49,6 +49,10 @@ pub struct CliParams {
     /// Validator-specific arguments.
     #[command(flatten)]
     pub validator: CliValidatorConfig,
+
+    /// Ledger-specific arguments.
+    #[command(flatten)]
+    pub ledger: CliLedgerConfig,
 }
 
 #[derive(Args, Serialize, Debug)]
@@ -62,4 +66,16 @@ pub struct CliValidatorConfig {
     #[arg(long, short)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keypair: Option<SerdeKeypair>,
+}
+
+#[derive(Args, Serialize, Debug, Default)]
+pub struct CliLedgerConfig {
+    /// Reset the ledger on startup (wipe existing ledger database).
+    #[arg(long)]
+    #[serde(skip_serializing_if = "is_false")]
+    pub reset: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
