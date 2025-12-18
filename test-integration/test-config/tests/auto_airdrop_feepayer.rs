@@ -24,12 +24,8 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
     let config = ValidatorParams {
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
-            Remote::from_str(IntegrationTestContext::url_chain())
-                .unwrap(),
-            Remote::from_str(
-                IntegrationTestContext::ws_url_chain(),
-            )
-            .unwrap(),
+            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
+            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
         ],
         accountsdb: AccountsDbConfig::default(),
         chainlink: ChainLinkConfig {
