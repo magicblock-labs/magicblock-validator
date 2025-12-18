@@ -8,6 +8,11 @@ use solana_pubkey::Pubkey;
 use solana_sysvar::rent::Rent;
 use spl_token::state::{Account as SplAccount, AccountState};
 
+/// Creates a test ATA (Associated Token Account) with initialized state and zero balance.
+///
+/// # Arguments
+/// * `owner` - The public key of the account owner
+/// * `mint` - The public key of the token mint
 pub fn create_ata_account(owner: &Pubkey, mint: &Pubkey) -> Account {
     let token_account = SplAccount {
         mint: *mint,
@@ -45,7 +50,7 @@ pub fn create_eata_account(
     data.extend_from_slice(&amount.to_le_bytes());
     let lamports = Rent::default().minimum_balance(data.len());
 
-    let account_owner = if delegate { dlp::ID } else { EATA_PROGRAM_ID };
+    let account_owner = if delegate { dlp::id() } else { EATA_PROGRAM_ID };
 
     Account {
         owner: account_owner,
