@@ -1147,7 +1147,7 @@ where
                         companion_pubkey: eata_pubkey,
                         companion_account: maybe_eata_account,
                     })) => {
-                        // Convert to AccountSharedData using the bank snapshot
+                        // Convert to AccountSharedData
                         let mut account_to_clone =
                             ata_account.account_shared_data_cloned();
                         let mut commit_frequency_ms = None;
@@ -1162,10 +1162,8 @@ where
                                 )
                                 .await
                             {
-                                let is_delegated_to_us = deleg
-                                    .authority
-                                    .eq(&self.validator_pubkey)
-                                    || deleg.authority.eq(&Pubkey::default());
+                                let is_delegated_to_us =
+                                    deleg.authority.eq(&self.validator_pubkey);
                                 if is_delegated_to_us {
                                     if let Some(projected_ata) =
                                         eata_shared.maybe_into_ata(deleg.owner)

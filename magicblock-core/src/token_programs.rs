@@ -178,7 +178,6 @@ impl MaybeIntoAta<AccountSharedData> for AccountSharedData {
         &self,
         owner_program: Pubkey,
     ) -> Option<AccountSharedData> {
-        // Only proceed if the provided owner matches eATA program
         if owner_program != EATA_PROGRAM_ID {
             return None;
         }

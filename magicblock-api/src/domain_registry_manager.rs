@@ -65,7 +65,7 @@ impl DomainRegistryManager {
         let (pda, _) = validator_info.pda();
         self.send_instruction(
             payer,
-            pda.to_bytes().into(),
+            pda,
             mdp::instructions::Instruction::Register(validator_info),
         )
         .context("Failed to send register tx")?;
@@ -92,7 +92,7 @@ impl DomainRegistryManager {
         let (pda, _) = validator_info.pda();
         self.send_instruction(
             payer,
-            pda.to_bytes().into(),
+            pda,
             mdp::instructions::Instruction::Sync(SyncInstruction::V0(
                 sync_info,
             )),
@@ -104,7 +104,7 @@ impl DomainRegistryManager {
 
     pub fn get_pda(pubkey: &Pubkey) -> (Pubkey, u8) {
         let seeds = [ER_RECORD_SEED, pubkey.as_ref()];
-        Pubkey::find_program_address(&seeds, &ID.to_bytes().into())
+        Pubkey::find_program_address(&seeds, &ID)
     }
 
     pub fn unregister(&self, payer: &Keypair) -> Result<(), Error> {
@@ -117,9 +117,7 @@ impl DomainRegistryManager {
         self.send_instruction(
             payer,
             pda,
-            mdp::instructions::Instruction::Unregister(
-                payer.pubkey().to_bytes().into(),
-            ),
+            mdp::instructions::Instruction::Unregister(payer.pubkey()),
         )
         .context("Failed to unregister")?;
 
@@ -131,9 +129,7 @@ impl DomainRegistryManager {
         payer: &Keypair,
         validator_info: ErRecord,
     ) -> Result<(), Error> {
-        match self
-            .fetch_validator_info(&validator_info.pda().0.to_bytes().into())?
-        {
+        match self.fetch_validator_info(&validator_info.pda().0)? {
             Some(current_validator_info) => {
                 if current_validator_info == validator_info {
                     info!("Domain registry record for the validator is up to date, skipping sync");
@@ -171,11 +167,8 @@ impl DomainRegistryManager {
             AccountMeta::new_readonly(system_program::id(), false),
         ];
 
-        let instruction = Instruction::new_with_borsh(
-            ID.to_bytes().into(),
-            &instruction,
-            accounts,
-        );
+        let instruction =
+            Instruction::new_with_borsh(ID, &instruction, accounts);
         let recent_blockhash = self
             .client
             .get_latest_blockhash()

@@ -4,6 +4,7 @@ use magicblock_chainlink::{
         deleg::add_delegation_record_for,
         eatas::{
             create_ata_account, create_eata_account, derive_ata, derive_eata,
+            EATA_PROGRAM_ID,
         },
         init_logger,
     },
@@ -45,7 +46,7 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
         &ctx.rpc_client,
         eata_pubkey,
         validator,
-        wallet_owner,
+        EATA_PROGRAM_ID,
     );
 
     // Ensure account (this triggers fetch_cloner logic including ATA/eATA handling)

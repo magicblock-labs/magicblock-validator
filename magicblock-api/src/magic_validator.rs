@@ -526,7 +526,7 @@ impl MagicValidator {
         let country_code = CountryCode::from(config.country_code.alpha3());
         let validator_keypair = validator_authority();
         let validator_info = ErRecord::V0(RecordV0 {
-            identity: validator_keypair.pubkey().to_bytes().into(),
+            identity: validator_keypair.pubkey(),
             status: ErStatus::Active,
             block_time_ms: self.config.ledger.block_time_ms() as u16,
             base_fee: self.config.validator.basefee as u16,
