@@ -5,9 +5,7 @@ use serde::Serialize;
 
 use crate::{
     config::LifecycleMode,
-    types::{
-        remote::parse_remote_config, BindAddress, RemoteConfig, SerdeKeypair,
-    },
+    types::{network::Remote, BindAddress, SerdeKeypair},
 };
 
 /// CLI Arguments mirroring the structure of ValidatorParams.
@@ -18,13 +16,15 @@ pub struct CliParams {
     /// Path to the TOML configuration file.
     pub config: Option<PathBuf>,
 
-    /// Remote Solana cluster connections. Can be specified multiple times.
-    /// Format: --remote <kind>:<url> or --remote <kind>:<alias>
-    /// Examples: --remote rpc:devnet --remote websocket:devnet --remote grpc:http://localhost:50051
-    /// Aliases: mainnet, devnet, local (resolved based on kind)
-    #[arg(long, short, value_parser = parse_remote_config)]
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub remote: Vec<RemoteConfig>,
+    /// List of remote endpoints for syncing with the base chain.
+    /// Can be specified multiple times to add multiple endpoints.
+    /// Supported schemes: http(s), ws(s), grpc(s)
+    /// Aliases: "mainnet", "devnet", "testnet", "localhost" (only for http/https)
+    /// Examples: --remote devnet --remote wss://devnet.solana.com --remote grpcs://grpc.example.com
+    /// Default: devnet (an HTTP devnet endpoint is used, with a WS endpoint auto-added)
+    #[arg(long = "remote")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remotes: Option<Vec<Remote>>,
 
     /// The application's operational mode.
     #[arg(long)]

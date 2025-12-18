@@ -1,0 +1,124 @@
+use std::{net::SocketAddr, str::FromStr};
+
+use derive_more::{Deref, Display, FromStr};
+use serde::{Deserialize, Serialize};
+use serde_with::DeserializeFromStr;
+use url::Url;
+
+use crate::consts;
+
+/// A network bind address that can be parsed from a string like "0.0.0.0:8080".
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, FromStr, Display, Deref,
+)]
+#[serde(transparent)]
+pub struct BindAddress(pub SocketAddr);
+
+impl Default for BindAddress {
+    fn default() -> Self {
+        consts::DEFAULT_RPC_ADDR.parse().unwrap()
+    }
+}
+
+/// A remote endpoint for syncing with the base chain.
+///
+/// Supported types:
+/// - **Http**: JSON-RPC HTTP endpoint (scheme: `http` or `https`)
+/// - **Websocket**: WebSocket endpoint for PubSub subscriptions (scheme: `ws` or `wss`)
+/// - **Grpc**: gRPC endpoint for streaming (schemes `grpc`/`grpcs` are converted to `http`/`https`)
+///
+/// Aliases are automatically resolved during parsing:
+/// - "mainnet" → <https://api.mainnet-beta.solana.com/>
+/// - "devnet" →  <https://api.devnet.solana.com/>
+/// - "testnet" → <https://api.testnet.solana.com/>
+/// - "localhost"/"dev" → <http://localhost:8899/>
+#[derive(Clone, DeserializeFromStr, Serialize, Display, Debug)]
+pub enum Remote {
+    Http(AliasedUrl),
+    Websocket(AliasedUrl),
+    Grpc(AliasedUrl),
+}
+
+impl FromStr for Remote {
+    type Err = url::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Handle non-standard schemes by detecting them before parsing
+        let is_grpc = s.starts_with("grpc");
+        let s = s.replace("grpc", "http");
+
+        let parsed = AliasedUrl::from_str(&s)?;
+        let remote = match parsed.0.scheme() {
+            _ if is_grpc => Self::Grpc(parsed),
+            "http" | "https" => Self::Http(parsed),
+            "ws" | "wss" => Self::Websocket(parsed),
+            _ => return Err(url::ParseError::Overflow),
+        };
+        Ok(remote)
+    }
+}
+
+impl Remote {
+    /// Returns the URL as a string reference.
+    pub(crate) fn url_str(&self) -> &str {
+        match self {
+            Self::Http(u) => u.as_str(),
+            Self::Websocket(u) => u.as_str(),
+            Self::Grpc(u) => u.as_str(),
+        }
+    }
+
+    /// Converts an HTTP remote to a WebSocket remote by deriving the appropriate WebSocket URL.
+    ///
+    /// For HTTP endpoints, the port is incremented by 1 (per Solana convention).
+    /// For example, `http://localhost:8899` becomes `ws://localhost:8900`.
+    /// If no explicit port is present, no port is added to the WebSocket URL.
+    ///
+    /// Returns `None` for WebSocket and gRPC remotes (already subscription-capable).
+    pub(crate) fn to_websocket(&self) -> Option<Self> {
+        let mut url = match self {
+            Self::Websocket(_) => return Some(self.clone()),
+            Self::Grpc(_) => return None,
+            Self::Http(u) => u.0.clone(),
+        };
+        let _ = if url.scheme() == "http" {
+            url.set_scheme("ws")
+        } else {
+            url.set_scheme("wss")
+        };
+        if let Some(port) = url.port() {
+            // As per solana convention websocket port is one greater than http
+            let _ = url.set_port(Some(port + 1));
+        }
+        Some(Self::Websocket(AliasedUrl(url)))
+    }
+}
+
+/// A URL that can be aliased with shortcuts like "mainnet".
+///
+/// Aliases are resolved during parsing and replaced with their full URLs.
+#[derive(Clone, Debug, Deserialize, Serialize, Display, PartialEq, Deref)]
+pub struct AliasedUrl(pub Url);
+
+impl AliasedUrl {
+    /// Returns the URL as a string reference.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl FromStr for AliasedUrl {
+    type Err = url::ParseError;
+
+    /// Parses a string into an AliasedUrl, resolving known aliases to their full URLs.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let url_str = match s {
+            "mainnet" => consts::MAINNET_URL,
+            "devnet" => consts::DEVNET_URL,
+            "testnet" => consts::TESTNET_URL,
+            "localhost" | "dev" => consts::LOCALHOST_URL,
+            custom => custom,
+        };
+        Url::parse(url_str).map(Self)
+    }
+}
