@@ -26,12 +26,6 @@ impl Default for BindAddress {
 /// - **Http**: JSON-RPC HTTP endpoint (scheme: `http` or `https`)
 /// - **Websocket**: WebSocket endpoint for PubSub subscriptions (scheme: `ws` or `wss`)
 /// - **Grpc**: gRPC endpoint for streaming (schemes `grpc`/`grpcs` are converted to `http`/`https`)
-///
-/// Aliases are automatically resolved during parsing:
-/// - "mainnet" → <https://api.mainnet-beta.solana.com/>
-/// - "devnet" →  <https://api.devnet.solana.com/>
-/// - "testnet" → <https://api.testnet.solana.com/>
-/// - "localhost"/"dev" → <http://localhost:8899/>
 #[derive(Clone, DeserializeFromStr, Serialize, Display, Debug)]
 pub enum Remote {
     Http(AliasedUrl),
@@ -74,12 +68,6 @@ impl Remote {
     }
 
     /// Converts an HTTP remote to a WebSocket remote by deriving the appropriate WebSocket URL.
-    ///
-    /// For HTTP endpoints, the port is incremented by 1 (per Solana convention).
-    /// For example, `http://localhost:8899` becomes `ws://localhost:8900`.
-    /// If no explicit port is present, no port is added to the WebSocket URL.
-    ///
-    /// Returns `None` for WebSocket and gRPC remotes (already subscription-capable).
     pub(crate) fn to_websocket(&self) -> Option<Self> {
         let mut url = match self {
             Self::Websocket(_) => return Some(self.clone()),
