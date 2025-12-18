@@ -1,4 +1,4 @@
-use std::process::Child;
+use std::{process::Child, str::FromStr};
 
 use integration_test_tools::{
     dlp_interface, expect,
@@ -14,7 +14,7 @@ use magicblock_config::{
         accounts::AccountsDbConfig, chain::ChainLinkConfig,
         ledger::LedgerConfig, LifecycleMode, LoadableProgram,
     },
-    types::{crypto::SerdePubkey, RemoteConfig, RemoteKind},
+    types::{crypto::SerdePubkey, network::Remote},
     ValidatorParams,
 };
 use program_flexi_counter::instruction::{
@@ -45,16 +45,8 @@ pub fn start_validator_with_clone_config(
         programs,
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
-            RemoteConfig {
-                kind: RemoteKind::Rpc,
-                url: IntegrationTestContext::url_chain().to_string(),
-                api_key: None,
-            },
-            RemoteConfig {
-                kind: RemoteKind::Websocket,
-                url: IntegrationTestContext::ws_url_chain().to_string(),
-                api_key: None,
-            },
+            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
+            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
         ],
         chainlink: ChainLinkConfig {
             prepare_lookup_tables,
