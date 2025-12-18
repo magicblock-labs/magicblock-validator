@@ -82,7 +82,7 @@ lazy_static = "1.4.0"
 libc = "0.2.153"
 log = { version = "0.4.20" }
 lru = "0.16.0"
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "cffcfeb", default-features = false, features = ["modular-sdk"] }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
 magicblock-accounts = { path = "./magicblock-accounts" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
@@ -95,8 +95,8 @@ magicblock-committor-program = { path = "./magicblock-committor-program", featur
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "aa1de56d90c", features = [
-  "no-entrypoint",
+magicblock-delegation-program = {  git = "https://github.com/magicblock-labs/delegation-program.git", rev = "1bcaf4d", default-features = false, features = [
+  "sdk",
 ] }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }

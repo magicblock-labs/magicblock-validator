@@ -1,16 +1,19 @@
 use log::debug;
 use magicblock_chainlink::{
-    testing::{deleg::add_delegation_record_for, init_logger},
+    testing::{
+        deleg::add_delegation_record_for,
+        eatas::{
+            create_ata_account, create_eata_account, derive_ata, derive_eata,
+        },
+        init_logger,
+    },
     AccountFetchOrigin,
 };
-use solana_account::{ReadableAccount};
+use solana_account::ReadableAccount;
 use solana_pubkey::{pubkey, Pubkey};
 use solana_sdk::signature::{Keypair, Signer};
-use spl_token::solana_program::program_pack::Pack;
-use spl_token::state::AccountState;
-use magicblock_chainlink::testing::eatas::{create_ata_account, create_eata_account, derive_ata, derive_eata};
+use spl_token::{solana_program::program_pack::Pack, state::AccountState};
 use test_chainlink::test_context::TestContext;
-
 
 #[tokio::test]
 async fn ixtest_ata_eata_replace_when_delegated_to_us() {
@@ -33,18 +36,17 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
     let ata = create_ata_account(&wallet_owner, &mint);
     let eata = create_eata_account(&wallet_owner, &mint, amount, true);
 
-    ctx.rpc_client.add_account(
-        ata_pubkey,
-        ata.clone(),
-    );
-    ctx.rpc_client.add_account(
-        eata_pubkey,
-        eata.clone(),
-    );
+    ctx.rpc_client.add_account(ata_pubkey, ata.clone());
+    ctx.rpc_client.add_account(eata_pubkey, eata.clone());
 
     // Add delegation record for ATA delegated to our validator
     let validator = ctx.validator_pubkey;
-    add_delegation_record_for(&ctx.rpc_client, eata_pubkey, validator, wallet_owner);
+    add_delegation_record_for(
+        &ctx.rpc_client,
+        eata_pubkey,
+        validator,
+        wallet_owner,
+    );
 
     // Ensure account (this triggers fetch_cloner logic including ATA/eATA handling)
     let pubkeys = [ata_pubkey];
@@ -60,7 +62,8 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
         .cloner
         .get_account(&ata_pubkey)
         .expect("ATA should be cloned into bank");
-    let spl_token_account = spl_token::state::Account::unpack_from_slice(cloned.data()).unwrap();
+    let spl_token_account =
+        spl_token::state::Account::unpack_from_slice(cloned.data()).unwrap();
     assert_eq!(spl_token_account.mint, mint);
     assert_eq!(spl_token_account.amount, amount);
     assert_eq!(spl_token_account.owner, wallet_owner);
@@ -84,10 +87,7 @@ async fn ixtest_ata_eata_no_replace_when_not_delegated() {
     let ata_pubkey = derive_ata(&wallet_owner, &mint);
     let ata = create_ata_account(&wallet_owner, &mint);
 
-    ctx.rpc_client.add_account(
-        ata_pubkey,
-        ata.clone(),
-    );
+    ctx.rpc_client.add_account(ata_pubkey, ata.clone());
 
     // Note: No delegation record added here
     let pubkeys = [ata_pubkey];
@@ -128,17 +128,16 @@ async fn ixtest_ata_eata_no_replace_when_not_delegated_to_us() {
     let ata = create_ata_account(&wallet_owner, &mint);
     let eata = create_eata_account(&wallet_owner, &mint, amount, true);
 
-    ctx.rpc_client.add_account(
-        ata_pubkey,
-        ata.clone(),
-    );
-    ctx.rpc_client.add_account(
-        eata_pubkey,
-        eata.clone(),
-    );
+    ctx.rpc_client.add_account(ata_pubkey, ata.clone());
+    ctx.rpc_client.add_account(eata_pubkey, eata.clone());
 
     // Add delegation record to a random validator
-    add_delegation_record_for(&ctx.rpc_client, eata_pubkey, Keypair::new().pubkey(), wallet_owner);
+    add_delegation_record_for(
+        &ctx.rpc_client,
+        eata_pubkey,
+        Keypair::new().pubkey(),
+        wallet_owner,
+    );
 
     // Ensure account (this triggers fetch_cloner logic including ATA/eATA handling)
     let pubkeys = [ata_pubkey];
