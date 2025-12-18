@@ -267,7 +267,6 @@ mod tests {
         owner: &Pubkey,
         mint: &Pubkey,
     ) -> AccountSharedData {
-        // Use shared helper to create a valid SPL ATA account, then convert and mark delegated
         let ata_account = create_ata_account(owner, mint);
         let mut acc = AccountSharedData::from(ata_account);
         acc.set_delegated(true);
