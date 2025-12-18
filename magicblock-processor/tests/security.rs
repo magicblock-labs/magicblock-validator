@@ -12,7 +12,7 @@ use test_kit::ExecutionTestEnv;
 /// if it modifies an undelegated fee payer.
 #[tokio::test]
 async fn test_gasless_undelegated_feepayer_modification_fails() {
-    let env = ExecutionTestEnv::new_with_config(0);
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
 
     {
         let mut account = env.get_payer();
@@ -31,7 +31,7 @@ async fn test_gasless_undelegated_feepayer_modification_fails() {
         guinea::ID,
         &GuineaInstruction::Transfer(1000),
         vec![
-            AccountMeta::new(env.payer.pubkey(), true),
+            AccountMeta::new(env.get_payer().pubkey, true),
             AccountMeta::new(recipient.pubkey(), false),
         ],
     );

@@ -24,7 +24,7 @@ use crate::{
         CommittorConfig, LedgerConfig, LoadableProgram, TaskSchedulerConfig,
         ValidatorConfig,
     },
-    types::{BindAddress, RemoteCluster},
+    types::{resolve_url, BindAddress, RemoteConfig, RemoteKind},
 };
 
 /// Top-level configuration, assembled from multiple sources.
@@ -34,8 +34,10 @@ pub struct ValidatorParams {
     /// Path to the TOML configuration file (overrides CLI args).
     pub config: Option<PathBuf>,
 
-    /// Remote Solana cluster URL or a predefined alias.
-    pub remote: RemoteCluster,
+    /// Array-based remote configurations for RPC, WebSocket, and gRPC.
+    /// Configured via [[remote]] sections in TOML (array-of-tables syntax).
+    #[serde(default, rename = "remote")]
+    pub remotes: Vec<RemoteConfig>,
 
     /// The application's operational mode.
     pub lifecycle: LifecycleMode,
@@ -92,6 +94,44 @@ impl ValidatorParams {
         figment = figment.merge(Serialized::from(&cli, Profile::Default));
 
         figment.extract().map_err(Box::new)
+    }
+
+    /// Returns the first RPC remote URL as an Option.
+    pub fn rpc_url(&self) -> Option<&str> {
+        self.remotes
+            .iter()
+            .find(|r| r.kind == RemoteKind::Rpc)
+            .map(|r| r.url.as_str())
+    }
+
+    /// Returns an iterator over all WebSocket remote URLs.
+    pub fn websocket_urls(&self) -> impl Iterator<Item = &str> + '_ {
+        self.remotes
+            .iter()
+            .filter(|r| r.kind == RemoteKind::Websocket)
+            .map(|r| r.url.as_str())
+    }
+
+    /// Returns an iterator over all gRPC remote URLs.
+    pub fn grpc_urls(&self) -> impl Iterator<Item = &str> + '_ {
+        self.remotes
+            .iter()
+            .filter(|r| r.kind == RemoteKind::Grpc)
+            .map(|r| r.url.as_str())
+    }
+
+    pub fn has_subscription_url(&self) -> bool {
+        self.remotes.iter().any(|r| {
+            r.kind == RemoteKind::Websocket || r.kind == RemoteKind::Grpc
+        })
+    }
+
+    /// Returns the RPC URL, using DEFAULT_REMOTE as fallback if not
+    /// configured.
+    pub fn rpc_url_or_default(&self) -> String {
+        self.rpc_url().map(|s| s.to_string()).unwrap_or_else(|| {
+            resolve_url(RemoteKind::Rpc, consts::DEFAULT_REMOTE)
+        })
     }
 }
 

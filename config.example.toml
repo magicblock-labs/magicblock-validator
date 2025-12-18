@@ -31,26 +31,47 @@
 # Env: MBV_LIFECYCLE
 lifecycle = "ephemeral"
 
-# Remote cluster to connect to for state/programs.
-# Default: "devnet"
+# Remote connections for RPC, WebSocket, and gRPC.
+# You can define multiple remotes of different kinds.
+# The first RPC remote will be used for JSON-RPC calls.
+# Each WebSocket/gRPC remote will create a pubsub client.
 #
-# This field supports multiple formats:
-# 1. Simple string or alias:
-#    remote = "devnet"
-#    remote = "https://api.mainnet-beta.solana.com"
+# Available kinds:
+# - "rpc":       JSON-RPC HTTP connection (typically port 8899)
+# - "websocket": WebSocket connection for PubSub (typically wss://)
+# - "grpc":      gRPC connection for streaming (typically port 50051)
 #
-# 2. Separate HTTP and WebSocket endpoints (Map format):
-#    remote = { http = "https://api.devnet.solana.com", ws = "wss://api.devnet.solana.com" }
+# URL Aliases (automatically resolved based on kind):
+# RPC aliases:       "mainnet", "devnet", "local"
+# WebSocket aliases: "mainnet", "devnet", "local"
 #
-# 3. Multiple remotes for failover/redundancy (Array format):
-#    remote = [
-#      "devnet",
-#      { http = "http://localhost:8899", ws = "ws://localhost:8900" }
-#    ]
+# Example 1: Using aliases
+# [[remote]]
+# kind = "rpc"
+# url = "devnet"
 #
-# CLI: -r, --remote <URL_OR_ALIAS>
-# Env: MBV_REMOTE
-remote = "devnet"
+# [[remote]]
+# kind = "websocket"
+# url = "devnet"
+#
+# Example 2: Using full URLs with optional API key
+# [[remote]]
+# kind = "rpc"
+# url = "https://api.devnet.solana.com"
+# api-key = "optional-key"
+#
+# [[remote]]
+# kind = "websocket"
+# url = "wss://api.devnet.solana.com"
+#
+# [[remote]]
+# kind = "grpc"
+# url = "http://grpc.example.com:50051"
+# api-key = "optional-key"
+
+[[remote]]
+kind = "rpc"
+url = "devnet"
 
 # Root directory for application storage (ledger, accountsdb, snapshots).
 # Default: "magicblock-test-storage" (created in current working directory)

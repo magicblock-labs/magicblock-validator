@@ -38,7 +38,7 @@ resolver = "2"
 
 [workspace.package]
 # Solana Version (2.2.x)
-version = "0.4.1"
+version = "0.4.2"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
@@ -119,11 +119,12 @@ prometheus = "0.13.4"
 # Needs to match https://crates.io/crates/solana-storage-bigtable/2.1.13/dependencies
 prost = "0.11.9"
 protobuf-src = "1.1"
-rand = "0.8.5"
+rand = "0.9"
 reqwest = "0.11"
 # bundled sqlite 3.44
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 rustc_version = "0.4"
+rustc-hash = "2.1"
 scc = "2.4"
 semver = "1.0.22"
 serde = "1.0.217"
@@ -209,8 +210,8 @@ features = ["dev-context-only-utils"]
 # Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
 # when also using the bzip2 crate
 version = "0.22.0"
-default-features = false
-features = ["lz4"]
+# default-features = false
+# features = ["lz4"]
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency
