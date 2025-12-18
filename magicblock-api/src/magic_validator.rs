@@ -37,8 +37,6 @@ use magicblock_config::{
     config::{
         ChainOperationConfig, LedgerConfig, LifecycleMode, LoadableProgram,
     },
-    consts::DEFAULT_REMOTE,
-    types::{resolve_url, RemoteKind},
     ValidatorParams,
 };
 use magicblock_core::{
@@ -342,7 +340,7 @@ impl MagicValidator {
             config.validator.keypair.insecure_clone(),
             committor_persist_path,
             ChainConfig {
-                rpc_uri: config.rpc_url_or_default(),
+                rpc_uri: config.rpc_url().to_owned(),
                 commitment: CommitmentConfig::confirmed(),
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
@@ -373,22 +371,14 @@ impl MagicValidator {
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
         use magicblock_chainlink::remote_account_provider::Endpoint;
-        let rpc_url = config.rpc_url_or_default();
-        let endpoints = if config.has_subscription_url() {
-            config
-                .websocket_urls()
-                .map(|pubsub_url| Endpoint {
-                    rpc_url: rpc_url.clone(),
-                    pubsub_url: pubsub_url.to_string(),
-                })
-                .collect::<Vec<_>>()
-        } else {
-            let ws_url = resolve_url(RemoteKind::Websocket, DEFAULT_REMOTE);
-            vec![Endpoint {
+        let rpc_url = config.rpc_url().to_owned();
+        let endpoints = config
+            .websocket_urls()
+            .map(|pubsub_url| Endpoint {
                 rpc_url: rpc_url.clone(),
-                pubsub_url: ws_url,
-            }]
-        };
+                pubsub_url: pubsub_url.to_string(),
+            })
+            .collect::<Vec<_>>();
 
         let cloner = ChainlinkCloner::new(
             committor_service,
@@ -540,7 +530,7 @@ impl MagicValidator {
         });
 
         DomainRegistryManager::handle_registration_static(
-            self.config.rpc_url_or_default(),
+            self.config.rpc_url(),
             &validator_keypair,
             validator_info,
         )
@@ -553,7 +543,7 @@ impl MagicValidator {
         let validator_keypair = validator_authority();
 
         DomainRegistryManager::handle_unregistration_static(
-            self.config.rpc_url_or_default(),
+            self.config.rpc_url(),
             &validator_keypair,
         )
         .map_err(|err| {
@@ -567,7 +557,7 @@ impl MagicValidator {
         const MIN_BALANCE_SOL: u64 = 5;
 
         let lamports = RpcClient::new_with_commitment(
-            self.config.rpc_url_or_default(),
+            self.config.rpc_url().to_owned(),
             CommitmentConfig::confirmed(),
         )
         .get_balance(&self.identity)
@@ -614,7 +604,7 @@ impl MagicValidator {
             .map(|co| co.claim_fees_frequency)
         {
             self.claim_fees_task
-                .start(frequency, self.config.rpc_url_or_default());
+                .start(frequency, self.config.rpc_url().to_owned());
         }
 
         self.slot_ticker = Some(init_slot_ticker(

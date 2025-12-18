@@ -2,13 +2,7 @@ lifecycle = "ephemeral"
 commit = { compute-unit-price = 1_000_000 }
 listen = "0.0.0.0:8899"
 
-[[remote]]
-kind = "rpc"
-url = "http://127.0.0.1:7799"
-
-[[remote]]
-kind = "websocket"
-url = "ws://127.0.0.1:7800"
+remotes = ["http://127.0.0.1:7799", "ws://127.0.0.1:7800"]
 
 [accountsdb]
 # size of the main storage, we have to preallocate in advance
