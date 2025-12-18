@@ -16,22 +16,19 @@ pub struct CliParams {
     /// Path to the TOML configuration file.
     pub config: Option<PathBuf>,
 
-    #[doc = "List of remote endpoints for syncing with the base chain. 
-        Can be specified multiple times.\n
-        SUPPORTED SCHEMES:
-        • http(s)
-        • ws(s) 
-        • grpc(s)\n
-        ALIASES:
-        • mainnet 
-        • devnet 
-        • testnet 
-        • localhost\n
-        EXAMPLES:
-        --remote devnet
-        --remote wss://devnet.solana.com
-        --remote grpcs://grpc.example.com\n
-        DEFAULT: devnet (HTTP endpoint with auto-added WS endpoint)"]
+    /// List of remote endpoints for syncing with the base chain.
+    /// Can be specified multiple times.
+    ///
+    /// SUPPORTED SCHEMES: http(s), ws(s), grpc(s)
+    ///
+    /// ALIASES: mainnet, devnet, testnet, localhost
+    ///
+    /// EXAMPLES:
+    /// - `--remote devnet`
+    /// - `--remote wss://devnet.solana.com`
+    /// - `--remote grpcs://grpc.example.com`
+    ///
+    /// DEFAULT: devnet (HTTP endpoint with auto-added WS endpoint)
     #[arg(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remotes: Option<Vec<Remote>>,
