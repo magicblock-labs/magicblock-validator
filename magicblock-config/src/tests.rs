@@ -8,7 +8,7 @@ use tempfile::TempDir;
 use crate::{
     config::{BlockSize, LifecycleMode},
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
-    types::{remote::resolve_url, RemoteConfig, RemoteKind},
+    types::network::Remote,
     ValidatorParams,
 };
 
@@ -63,8 +63,8 @@ fn test_defaults_are_sane() {
 
     // Verify key defaults used in production
     assert_eq!(config.validator.basefee, consts::DEFAULT_BASE_FEE);
-    // Remotes default to empty when not specified
-    assert_eq!(config.remotes.len(), 0);
+    // Remotes default to [devnet HTTP] + [devnet WS] (added by ensure_websocket)
+    assert_eq!(config.remotes.len(), 2);
     assert_eq!(config.listen.0.port(), 8899);
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
 
@@ -293,6 +293,36 @@ fn test_ledger_and_commit_settings() {
 }
 
 #[test]
+#[parallel]
+fn test_cli_ledger_reset() {
+    // Verify CLI --reset flag sets reset to true
+    let config = run_cli(vec!["--reset"]);
+
+    assert!(config.ledger.reset);
+
+    // Verify ledger reset defaults to false when flag is not provided
+    let config = run_cli(vec![]);
+
+    assert!(!config.ledger.reset);
+}
+
+#[test]
+#[parallel]
+fn test_cli_ledger_reset_overrides_toml() {
+    // Verify CLI --ledger-reset flag overrides TOML setting
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [ledger]
+        reset = false
+        "#,
+    );
+
+    let config = run_cli(vec![config_path.to_str().unwrap(), "--reset"]);
+
+    assert!(config.ledger.reset);
+}
+
+#[test]
 #[serial]
 fn test_task_scheduler_bool_env() {
     // Verify standard boolean parsing from Env vars work on nested fields
@@ -329,10 +359,9 @@ fn test_example_config_full_coverage() {
     // 3. Core & Network
     // ========================================================================
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
-    // Example config has one RPC remote with "devnet" alias resolved
-    assert_eq!(config.remotes.len(), 1);
-    assert_eq!(config.remotes[0].url, consts::RPC_DEVNET);
-    assert_eq!(config.remotes[0].kind, RemoteKind::Rpc);
+    // Example config has 3 remotes: devnet HTTP, devnet WebSocket, and Helius gRPC
+    assert_eq!(config.remotes.len(), 3);
+    assert_eq!(config.remotes[0].url_str(), consts::DEVNET_URL);
     assert_eq!(config.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
     assert!(config
@@ -463,8 +492,8 @@ fn test_env_vars_full_coverage() {
 
     // Core
     assert_eq!(config.lifecycle, LifecycleMode::Replica);
-    // Remotes must be configured via TOML, not env vars
-    assert_eq!(config.remotes.len(), 0);
+    // Remotes default to devnet (HTTP) + devnet WebSocket (added by ensure_websocket)
+    assert_eq!(config.remotes.len(), 2);
     assert_eq!(config.storage.to_string_lossy(), "/tmp/env-test-storage");
     assert_eq!(config.listen.0.port(), 9999);
 
@@ -512,237 +541,46 @@ fn test_env_vars_full_coverage() {
 }
 
 // ============================================================================
-// 9. New Remote Config Parsing
+// 9. Remote Type Parsing
 // ============================================================================
 
 #[test]
 #[parallel]
-fn test_parse_single_rpc_remote() {
-    let (_dir, config_path) = create_temp_config(
-        r#"
-        [[remote]]
-        kind = "rpc"
-        url = "http://localhost:8899"
-        "#,
-    );
-
-    let config = run_cli(vec![config_path.to_str().unwrap()]);
-
-    assert_eq!(config.remotes.len(), 1);
-    assert_eq!(config.remotes[0].kind, RemoteKind::Rpc);
-    assert_eq!(config.remotes[0].url, "http://localhost:8899");
-    assert_eq!(config.remotes[0].api_key, None);
+fn test_parse_http_remote() {
+    let remote: Remote = "http://localhost:8899".parse().unwrap();
+    assert!(matches!(remote, Remote::Http(_)));
+    assert_eq!(remote.url_str(), "http://localhost:8899/");
 }
 
 #[test]
 #[parallel]
-fn test_parse_rpc_remote_with_api_key() {
-    let (_dir, config_path) = create_temp_config(
-        r#"
-        [[remote]]
-        kind = "rpc"
-        url = "https://api.example.com"
-        api-key = "secret-key-123"
-        "#,
-    );
-
-    let config = run_cli(vec![config_path.to_str().unwrap()]);
-
-    assert_eq!(config.remotes.len(), 1);
-    assert_eq!(config.remotes[0].kind, RemoteKind::Rpc);
-    assert_eq!(config.remotes[0].url, "https://api.example.com");
-    assert_eq!(
-        config.remotes[0].api_key,
-        Some("secret-key-123".to_string())
-    );
+fn test_parse_websocket_remote() {
+    let remote: Remote = "ws://localhost:8900".parse().unwrap();
+    assert!(matches!(remote, Remote::Websocket(_)));
 }
 
 #[test]
 #[parallel]
-fn test_parse_multiple_remotes_mixed_kinds() {
-    let (_dir, config_path) = create_temp_config(
-        r#"
-        [[remote]]
-        kind = "rpc"
-        url = "http://localhost:8899"
-
-        [[remote]]
-        kind = "websocket"
-        url = "wss://mainnet-beta.solana.com"
-
-        [[remote]]
-        kind = "websocket"
-        url = "wss://backup-node.example.com"
-
-        [[remote]]
-        kind = "grpc"
-        url = "http://grpc.example.com:50051"
-        api-key = "grpc-secret"
-        "#,
-    );
-
-    let config = run_cli(vec![config_path.to_str().unwrap()]);
-
-    assert_eq!(config.remotes.len(), 4);
-
-    // First: RPC
-    assert_eq!(config.remotes[0].kind, RemoteKind::Rpc);
-    assert_eq!(config.remotes[0].url, "http://localhost:8899");
-
-    // Second: WebSocket
-    assert_eq!(config.remotes[1].kind, RemoteKind::Websocket);
-    assert_eq!(config.remotes[1].url, "wss://mainnet-beta.solana.com");
-    assert_eq!(config.remotes[1].api_key, None);
-
-    // Third: WebSocket (multiple remotes of the same kind allowed)
-    assert_eq!(config.remotes[2].kind, RemoteKind::Websocket);
-    assert_eq!(config.remotes[2].url, "wss://backup-node.example.com");
-
-    // Fourth: gRPC
-    assert_eq!(config.remotes[3].kind, RemoteKind::Grpc);
-    assert_eq!(config.remotes[3].url, "http://grpc.example.com:50051");
-    assert_eq!(config.remotes[3].api_key, Some("grpc-secret".to_string()));
+fn test_parse_grpc_remote_converts_scheme() {
+    let remote: Remote = "grpc://localhost:50051/".parse().unwrap();
+    assert!(matches!(remote, Remote::Grpc(_)));
+    // Scheme should be converted to http
+    assert_eq!(remote.url_str(), "http://localhost:50051/");
 }
 
 #[test]
 #[parallel]
-fn test_parse_remotes_empty_when_not_provided() {
-    let (_dir, config_path) = create_temp_config(
-        r#"
-        lifecycle = "ephemeral"
-        "#,
-    );
-
-    let config = run_cli(vec![config_path.to_str().unwrap()]);
-
-    assert_eq!(config.remotes.len(), 0);
+fn test_parse_alias() {
+    let remote: Remote = "devnet".parse().unwrap();
+    assert!(matches!(remote, Remote::Http(_)));
+    assert_eq!(remote.url_str(), consts::DEVNET_URL);
 }
 
 #[test]
 #[parallel]
-fn test_deserialization_resolves_aliases() {
-    // Verify that aliases are resolved during deserialization,
-    // not just in resolved_url() method
-    let (_dir, config_path) = create_temp_config(
-        r#"
-        [[remote]]
-        kind = "rpc"
-        url = "devnet"
-
-        [[remote]]
-        kind = "websocket"
-        url = "mainnet"
-        "#,
-    );
-
-    let config = run_cli(vec![config_path.to_str().unwrap()]);
-
-    assert_eq!(config.remotes.len(), 2);
-
-    // RPC remote should have devnet alias resolved to actual URL
-    assert_eq!(config.remotes[0].kind, RemoteKind::Rpc);
-    assert_eq!(config.remotes[0].url, consts::RPC_DEVNET);
-
-    // WebSocket remote should have mainnet alias resolved to actual URL
-    assert_eq!(config.remotes[1].kind, RemoteKind::Websocket);
-    assert_eq!(config.remotes[1].url, consts::WS_MAINNET);
-}
-
-#[test]
-#[parallel]
-fn test_remote_config_parse_url_method() {
-    let remote = RemoteConfig {
-        kind: RemoteKind::Rpc,
-        url: "https://api.example.com".to_string(),
-        api_key: None,
-    };
-
-    let parsed_url = remote.parse_url();
-    assert!(parsed_url.is_ok());
-    let url = parsed_url.unwrap();
-    assert_eq!(url.scheme(), "https");
-    assert_eq!(url.host_str(), Some("api.example.com"));
-}
-
-#[test]
-#[parallel]
-fn test_remote_config_invalid_url() {
-    let remote = RemoteConfig {
-        kind: RemoteKind::Rpc,
-        url: "not a valid url".to_string(),
-        api_key: None,
-    };
-
-    let parsed_url = remote.parse_url();
-    assert!(parsed_url.is_err());
-}
-
-#[test]
-#[parallel]
-fn test_rpc_alias_resolution() {
-    assert_eq!(resolve_url(RemoteKind::Rpc, "mainnet"), consts::RPC_MAINNET);
-    assert_eq!(resolve_url(RemoteKind::Rpc, "devnet"), consts::RPC_DEVNET);
-    assert_eq!(resolve_url(RemoteKind::Rpc, "local"), consts::RPC_LOCAL);
-}
-
-#[test]
-#[parallel]
-fn test_websocket_alias_resolution() {
-    assert_eq!(
-        resolve_url(RemoteKind::Websocket, "mainnet"),
-        consts::WS_MAINNET
-    );
-    assert_eq!(
-        resolve_url(RemoteKind::Websocket, "devnet"),
-        consts::WS_DEVNET
-    );
-    assert_eq!(
-        resolve_url(RemoteKind::Websocket, "local"),
-        consts::WS_LOCAL
-    );
-}
-
-#[test]
-#[parallel]
-fn test_alias_resolution_same_alias_different_kinds() {
-    let rpc_resolved = resolve_url(RemoteKind::Rpc, "mainnet");
-    let ws_resolved = resolve_url(RemoteKind::Websocket, "mainnet");
-
-    assert_eq!(rpc_resolved, consts::RPC_MAINNET);
-    assert_eq!(ws_resolved, consts::WS_MAINNET);
-    // They should be different
-    assert_ne!(rpc_resolved, ws_resolved);
-}
-
-#[test]
-#[parallel]
-fn test_full_url_not_treated_as_alias() {
-    assert_eq!(
-        resolve_url(RemoteKind::Rpc, "https://custom-node.example.com"),
-        "https://custom-node.example.com"
-    );
-    assert_eq!(
-        resolve_url(RemoteKind::Websocket, "wss://custom-node.example.com"),
-        "wss://custom-node.example.com"
-    );
-}
-
-#[test]
-#[parallel]
-fn test_parse_url_with_alias() {
-    let resolved = resolve_url(RemoteKind::Rpc, "devnet");
-    let remote = RemoteConfig {
-        kind: RemoteKind::Rpc,
-        url: resolved,
-        api_key: None,
-    };
-
-    let parsed = remote.parse_url();
-    assert!(parsed.is_ok());
-    let url = parsed.unwrap();
-
-    // Extract expected host from the canonical constant
-    let expected_url = url::Url::parse(consts::RPC_DEVNET)
-        .expect("Failed to parse RPC_DEVNET constant");
-    assert_eq!(url.host_str(), expected_url.host_str());
+fn test_to_websocket_from_http() {
+    let remote: Remote = "http://localhost:8899".parse().unwrap();
+    let ws_remote = remote.to_websocket().unwrap();
+    assert!(matches!(ws_remote, Remote::Websocket(_)));
+    assert_eq!(ws_remote.url_str(), "ws://localhost:8900/");
 }

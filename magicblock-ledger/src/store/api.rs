@@ -437,12 +437,12 @@ impl Ledger {
     ///
     /// Specifying the following:
     ///
-    ///  ```rust
-    ///  let pubkey = "<my address>";
-    ///  let highest_slot = 0;
-    ///  let upper_limit_signature = Some(sig_upper);;
-    ///  let lower_limit_signature = Some(sig_lower);
-    ///  let limit = 100;
+    ///  ```text
+    ///  pubkey: "<my address>"
+    ///  highest_slot: 0
+    ///  upper_limit_signature: Some(<sig_upper>)
+    ///  lower_limit_signature: Some(<sig_lower>)
+    ///  limit: 100
     /// ```
     ///
     /// will find up to 100 signatures that are between upper and lower limit signatures
