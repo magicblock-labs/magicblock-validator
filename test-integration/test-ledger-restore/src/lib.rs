@@ -148,10 +148,10 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
         task_scheduler: TaskSchedulerConfig { reset: true },
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
-            Remote::from_str(&IntegrationTestContext::url_chain().to_string())
+            Remote::from_str(IntegrationTestContext::url_chain())
                 .unwrap(),
             Remote::from_str(
-                &IntegrationTestContext::ws_url_chain().to_string(),
+                IntegrationTestContext::ws_url_chain(),
             )
             .unwrap(),
         ],
