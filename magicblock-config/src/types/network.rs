@@ -2,7 +2,7 @@ use std::{net::SocketAddr, str::FromStr};
 
 use derive_more::{Deref, Display, FromStr};
 use serde::{Deserialize, Serialize};
-use serde_with::DeserializeFromStr;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use url::Url;
 
 use crate::consts;
@@ -26,7 +26,7 @@ impl Default for BindAddress {
 /// - **Http**: JSON-RPC HTTP endpoint (scheme: `http` or `https`)
 /// - **Websocket**: WebSocket endpoint for PubSub subscriptions (scheme: `ws` or `wss`)
 /// - **Grpc**: gRPC endpoint for streaming (schemes `grpc`/`grpcs` are converted to `http`/`https`)
-#[derive(Clone, DeserializeFromStr, Serialize, Display, Debug)]
+#[derive(Clone, DeserializeFromStr, SerializeDisplay, Display, Debug)]
 pub enum Remote {
     Http(AliasedUrl),
     Websocket(AliasedUrl),
@@ -90,7 +90,9 @@ impl Remote {
 /// A URL that can be aliased with shortcuts like "mainnet".
 ///
 /// Aliases are resolved during parsing and replaced with their full URLs.
-#[derive(Clone, Debug, Deserialize, Serialize, Display, PartialEq, Deref)]
+#[derive(
+    Clone, Debug, Deserialize, SerializeDisplay, Display, PartialEq, Deref,
+)]
 pub struct AliasedUrl(pub Url);
 
 impl AliasedUrl {
