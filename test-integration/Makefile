@@ -220,6 +220,7 @@ ci-lint: lint
 
 .PHONY: \
 	ci-fmt \
+	lint \
 	ci-lint \
 	deploy-flexi-counter \
 	fmt \

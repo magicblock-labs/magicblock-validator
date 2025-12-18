@@ -39,14 +39,6 @@ fn test_restore_ledger_with_new_validator_authority() {
 fn write(ledger_path: &Path) -> (Child, u64) {
     let loaded_chain_accounts =
         LoadedAccounts::new_with_new_validator_authority();
-    // Airdrop to the new validator authority
-    IntegrationTestContext::try_new_chain_only()
-        .unwrap()
-        .airdrop_chain(
-            &loaded_chain_accounts.validator_authority(),
-            10 * LAMPORTS_PER_SOL,
-        )
-        .unwrap();
     let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
@@ -98,14 +90,6 @@ fn write(ledger_path: &Path) -> (Child, u64) {
 fn read(ledger_path: &Path) -> Child {
     let loaded_chain_accounts =
         LoadedAccounts::new_with_new_validator_authority();
-    // Airdrop to the new validator authority
-    IntegrationTestContext::try_new_chain_only()
-        .unwrap()
-        .airdrop_chain(
-            &loaded_chain_accounts.validator_authority(),
-            10 * LAMPORTS_PER_SOL,
-        )
-        .unwrap();
     let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
