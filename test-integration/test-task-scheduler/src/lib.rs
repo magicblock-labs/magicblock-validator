@@ -35,12 +35,8 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
     let config = ValidatorParams {
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
-            Remote::from_str(IntegrationTestContext::url_chain())
-                .unwrap(),
-            Remote::from_str(
-                IntegrationTestContext::ws_url_chain(),
-            )
-            .unwrap(),
+            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
+            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
         ],
         accountsdb: AccountsDbConfig::default(),
         task_scheduler: TaskSchedulerConfig { reset: true },

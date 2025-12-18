@@ -45,12 +45,8 @@ pub fn start_validator_with_clone_config(
         programs,
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
-            Remote::from_str(IntegrationTestContext::url_chain())
-                .unwrap(),
-            Remote::from_str(
-                IntegrationTestContext::ws_url_chain(),
-            )
-            .unwrap(),
+            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
+            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
         ],
         chainlink: ChainLinkConfig {
             prepare_lookup_tables,
