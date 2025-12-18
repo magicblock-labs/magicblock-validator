@@ -3,7 +3,7 @@ use std::{path::Path, process::Child};
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
-    validator::cleanup, IntegrationTestContext,
+    validator::cleanup,
 };
 use solana_sdk::{
     account::Account, instruction::Instruction, loader_v4,

@@ -17,7 +17,14 @@ pub const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
 pub const EATA_PROGRAM_ID: Pubkey =
     pubkey!("5iC4wKZizyxrKh271Xzx3W4Vn2xUyYvSGHeoB2mdw5HA");
 
-// Derive the standard ATA address for a given wallet owner and mint.
+/// Derives the standard Associated Token Account (ATA) address for the given wallet owner and token mint.
+///
+/// # Arguments
+/// * `owner` - The public key of the account owner
+/// * `mint` - The public key of the token mint
+///
+/// # Returns
+/// The derived ATA address as `Pubkey`.
 pub fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
         &[owner.as_ref(), SPL_TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
@@ -26,7 +33,14 @@ pub fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
     .0
 }
 
-// Try to derive the ATA address returning both address and bump if derivation succeeds.
+/// Attempts to derive the ATA address for the given wallet owner and token mint, returning the address and bump.
+///
+/// # Arguments
+/// * `owner` - The public key of the account owner
+/// * `mint` - The public key of the token mint
+///
+/// # Returns
+/// `Option<(Pubkey, u8)>` — `Some((address, bump))` if derivation succeeds, `None` otherwise.
 pub fn try_derive_ata_address_and_bump(
     owner: &Pubkey,
     mint: &Pubkey,
@@ -37,7 +51,14 @@ pub fn try_derive_ata_address_and_bump(
     )
 }
 
-// Derive the eATA PDA for a given wallet owner and mint.
+/// Derives the Enhanced Associated Token Account (eATA) Program Derived Address (PDA) for the given wallet owner and token mint.
+///
+/// # Arguments
+/// * `owner` - The public key of the account owner
+/// * `mint` - The public key of the token mint
+///
+/// # Returns
+/// The derived eATA PDA as `Pubkey`.
 pub fn derive_eata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
         &[owner.as_ref(), mint.as_ref()],
@@ -46,7 +67,14 @@ pub fn derive_eata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
     .0
 }
 
-// Try to derive the eATA PDA returning both address and bump if derivation succeeds.
+/// Attempts to derive the eATA PDA for the given wallet owner and token mint, returning the address and bump.
+///
+/// # Arguments
+/// * `owner` - The public key of the account owner
+/// * `mint` - The public key of the token mint
+///
+/// # Returns
+/// `Option<(Pubkey, u8)>` — `Some((address, bump))` if derivation succeeds, `None` otherwise.
 pub fn try_derive_eata_address_and_bump(
     owner: &Pubkey,
     mint: &Pubkey,
