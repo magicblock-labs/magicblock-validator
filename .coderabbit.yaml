@@ -20,8 +20,8 @@ reviews:
 
   # Auto-review behavior (avoid re-review on every push)
   auto_review:
+    drafts: true
     auto_incremental_review: false
-    ignore_title_keywords: ["wip", "do not review"]
     base_branches: [".*"]
 
   # Don’t auto-generate docstrings/tests (reduce chatter)
