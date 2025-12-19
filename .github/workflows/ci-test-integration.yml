@@ -48,7 +48,7 @@ jobs:
         working-directory: magicblock-validator/test-integration
 
       - name: Upload test-runner binary
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: test-runner-binary
           path: magicblock-validator/test-integration/target/debug/run-tests
@@ -89,7 +89,7 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
       - name: Download test-runner binary
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: test-runner-binary
           path: magicblock-validator/test-integration/target/debug/
