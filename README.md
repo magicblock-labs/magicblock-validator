@@ -4,7 +4,7 @@
   <h1>MagicBlock Validator</h1>
 
   <p>
-    <strong>High-Performance SVM Validator for Ephemeral Rollups and Elastic Compute.</strong>
+    <strong>Blazing Fast SVM Validator for Ephemeral Rollups and Elastic Compute.</strong>
   </p>
 
   <p>
@@ -41,10 +41,9 @@ The **MagicBlock Validator** is a specialized Solana Virtual Machine (SVM) runti
 ### Installation
 
 1. **Clone the repository:**
-   ```bash
-   git clone [https://github.com/magicblock-labs/magicblock-validator.git](https://github.com/magicblock-labs/magicblock-validator.git)
+```bash
+   git clone https://github.com/magicblock-labs/magicblock-validator.git
    cd magicblock-validator
-
 ```
 
 2. **Build the project:**
@@ -72,7 +71,7 @@ Configure the `remotes` list to specify where to fetch state from:
 
 ```toml
 # Example: Sync with Solana Devnet
-remotes = ["[https://api.devnet.solana.com](https://api.devnet.solana.com)", "wss://api.devnet.solana.com"]
+remotes = ["https://api.devnet.solana.com", "wss://api.devnet.solana.com"]
 
 ```
 
@@ -84,7 +83,6 @@ To start the validator with the default configuration (or your custom config fil
 
 ```bash
 cargo run --release -- config.example.toml
-
 ```
 
 ### Using Environment Variables
@@ -95,7 +93,7 @@ You can override any configuration value using environment variables with the `M
 # Example: Run as an ephemeral validator syncing from Mainnet
 MBV_LIFECYCLE=ephemeral \
 MBV_LISTEN=0.0.0.0:8899 \
-cargo run --release
+cargo run --release config.example.toml
 
 ```
 
