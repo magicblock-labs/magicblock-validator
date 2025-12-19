@@ -14,6 +14,10 @@ inputs:
   build_cache_key_name:
     description: "Build cache key"
     required: true
+  install_system_deps:
+    description: "Install system dependencies (libudev, LLVM/Clang)"
+    required: false
+    default: 'true'
 
 runs:
   using: "composite"
@@ -23,6 +27,15 @@ runs:
     with:
       repo-token: ${{ inputs.github_token }}
 
+  - uses: actions/cache@v4
+    with:
+      path: |
+        ~/.rustup
+        ~/.cargo
+      key: rust-${{ inputs.rust_toolchain_release }}-${{ runner.os }}
+      restore-keys: |
+        rust-${{ inputs.rust_toolchain_release }}-
+
   - name: Install Rust
     uses: dtolnay/rust-toolchain@master
     with:
@@ -30,7 +43,7 @@ runs:
       components: rustfmt, clippy
 
   - name: Install system deps (libudev, LLVM/Clang)
-    if: runner.os == 'Linux'
+    if: runner.os == 'Linux' && inputs.install_system_deps == 'true'
     shell: "bash"
     run: |
       sudo apt-get update
@@ -47,5 +60,3 @@ runs:
       cache-targets: true
       cache-all-crates: true
       cache-on-failure: true
-      cache-directories: |
-        ~/.rustup
