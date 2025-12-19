@@ -700,7 +700,7 @@ impl MagicValidator {
         self.ledger_truncator.stop();
         // Calls & awaits until manual compaction is canceled
         self.ledger.cancel_manual_compactions();
-        if let Some(err) = self.ledger.flush() {
+        if let Err(err) = self.ledger.flush() {
             error!("Failed to flush during shutdown preparation: {:?}", err);
         }
     }
