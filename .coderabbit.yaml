@@ -42,18 +42,29 @@ reviews:
     issue_assessment:
       mode: off
 
-  # Lightweight, high-signal tools for this repo (no JS toolchain)
+  # Lightweight, high-signal tools for this repo
   tools:
     clippy: {}
     gitleaks: {}
     actionlint: {}
     yamllint: {}
-    markdownlint: {}
+    markdownlint:
+      enabled: true
     shellcheck: {}
     buf: {}
     checkmake: {}
     dotenvLint: {}
     osvScanner: {}
+    semgrep:
+      enabled: true
+      # Focus on critical security rules + Rust best practices
+      # to minimize noise while catching real issues
+      config:
+        # Security rulesets (OWASP Top 10, CWE, crypto misuse)
+        - p/security-audit
+        - p/owasp-top-ten
+        # Language-specific (Rust)
+        - p/rust
 
 chat:
   # We leave emoji/ASCII art, but no auto-replies

@@ -45,4 +45,4 @@ We aim to:
 - assess severity and impact promptly
 - coordinate disclosure when appropriate
 
-Thanks for helping keep the codbase safe and predictable.
+Thanks for helping keep the codebase safe and predictable.
