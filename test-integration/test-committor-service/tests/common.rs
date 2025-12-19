@@ -14,7 +14,7 @@ use magicblock_committor_service::{
         },
         IntentExecutorImpl, NullTaskInfoFetcher,
     },
-    tasks::{CommitTask, CommitTaskBuilder},
+    tasks::{CommitTask, TaskBuilderImpl},
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
@@ -161,7 +161,7 @@ pub fn generate_random_bytes(length: usize) -> Vec<u8> {
 #[allow(dead_code)]
 pub async fn create_commit_task(data: &[u8]) -> CommitTask {
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
-    CommitTaskBuilder::create_commit_task(
+    TaskBuilderImpl::create_commit_task(
         COMMIT_ID.fetch_add(1, Ordering::Relaxed),
         false,
         CommittedAccount {

@@ -424,7 +424,7 @@ mod tests {
         data_size: usize,
     ) -> ArgsTask {
         ArgsTask::new(ArgsTaskType::Commit(
-            CommitTaskBuilder::create_commit_task(
+            TaskBuilderImpl::create_commit_task(
                 commit_id,
                 false,
                 CommittedAccount {

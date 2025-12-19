@@ -110,54 +110,6 @@ pub trait BaseTask: Send + Sync + DynClone + LabelValue {
 
 dyn_clone::clone_trait_object!(BaseTask);
 
-pub struct CommitTaskBuilder;
-
-impl CommitTaskBuilder {
-    // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD, use CommitDiff to
-    // reduce instruction size. Below this, commit is sent as CommitState.
-    // Chose 256 as thresold seems good enough as it could hold 8 u32 fields
-    // or 4 u64 fields.
-    const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
-
-    pub async fn create_commit_task<C: TaskInfoFetcher>(
-        commit_id: u64,
-        allow_undelegation: bool,
-        committed_account: CommittedAccount,
-        task_info_fetcher: &Arc<C>,
-    ) -> CommitTask {
-        let base_account = if committed_account.account.data.len()
-            > CommitTaskBuilder::COMMIT_STATE_SIZE_THRESHOLD
-        {
-            match task_info_fetcher
-                .get_base_account(&committed_account.pubkey)
-                .await
-            {
-                Ok(Some(account)) => Some(account),
-                Ok(None) => {
-                    log::warn!("AccountNotFound for commit_diff, pubkey: {}, commit_id: {}, Falling back to commit_state.",
-                        committed_account.pubkey, commit_id);
-                    None
-                }
-                Err(e) => {
-                    log::warn!("Failed to fetch base account for commit diff, pubkey: {}, commit_id: {}, error: {}. Falling back to commit_state.",
-                        committed_account.pubkey, commit_id, e);
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        CommitTask {
-            commit_id,
-            allow_undelegation,
-            committed_account,
-            base_account,
-            force_commit_state: false,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct CommitTask {
     pub commit_id: u64,
@@ -168,10 +120,16 @@ pub struct CommitTask {
 }
 
 impl CommitTask {
+    // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD, use CommitDiff to
+    // reduce instruction size. Below this, commit is sent as CommitState.
+    // Chose 256 as thresold seems good enough as it could hold 8 u32 fields
+    // or 4 u64 fields.
+    const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
+
     pub fn is_commit_diff(&self) -> bool {
         !self.force_commit_state
             && self.committed_account.account.data.len()
-                > CommitTaskBuilder::COMMIT_STATE_SIZE_THRESHOLD
+                > Self::COMMIT_STATE_SIZE_THRESHOLD
             && self.base_account.is_some()
     }
 
@@ -428,6 +386,7 @@ mod serialization_safety_test {
         tasks::{
             args_task::{ArgsTask, ArgsTaskType},
             buffer_task::{BufferTask, BufferTaskType},
+            task_builder::TaskBuilderImpl,
             *,
         },
     };
@@ -439,7 +398,7 @@ mod serialization_safety_test {
 
         // Test Commit variant
         let commit_task: ArgsTask = ArgsTaskType::Commit(
-            CommitTaskBuilder::create_commit_task(
+            TaskBuilderImpl::create_commit_task(
                 123,
                 true,
                 CommittedAccount {
@@ -503,7 +462,7 @@ mod serialization_safety_test {
 
         let buffer_task =
             BufferTask::new_preparation_required(BufferTaskType::Commit(
-                CommitTaskBuilder::create_commit_task(
+                TaskBuilderImpl::create_commit_task(
                     456,
                     false,
                     CommittedAccount {
@@ -531,7 +490,7 @@ mod serialization_safety_test {
         // Test BufferTask preparation
         let buffer_task =
             BufferTask::new_preparation_required(BufferTaskType::Commit(
-                CommitTaskBuilder::create_commit_task(
+                TaskBuilderImpl::create_commit_task(
                     789,
                     true,
                     CommittedAccount {
