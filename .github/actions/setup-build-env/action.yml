@@ -23,13 +23,6 @@ runs:
     with:
       repo-token: ${{ inputs.github_token }}
 
-  - uses: actions/cache@v4
-    with:
-      path: ~/.rustup/toolchains
-      key: rust-${{ inputs.rust_toolchain_release }}-${{ runner.os }}
-      restore-keys: |
-        rust-${{ inputs.rust_toolchain_release }}-
-
   - name: Install Rust
     uses: dtolnay/rust-toolchain@master
     with:
@@ -54,3 +47,5 @@ runs:
       cache-targets: true
       cache-all-crates: true
       cache-on-failure: true
+      cache-directories: |
+        ~/.rustup
