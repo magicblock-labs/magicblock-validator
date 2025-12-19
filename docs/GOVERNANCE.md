@@ -45,7 +45,7 @@ The fundamental unit of ownership is the **Cargo Crate**.
 
 ### The Code Ownership Manifest
 
-A `CODEOWNERS.md` file in the repository root serves as the definitive source of truth for ownership.
+The `.github/CODEOWNERS` file serves as the definitive source of truth for ownership.
 
 ### Becoming a Code Owner
 
