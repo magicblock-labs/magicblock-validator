@@ -23,7 +23,7 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
+          build_cache_key_name: "magicblock-validator-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}-v001"
           rust_toolchain_release: "1.91.1"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -36,6 +36,23 @@ jobs:
           make -C test-integration programs
         shell: bash
         working-directory: magicblock-validator
+
+      - name: Build test-runner binary
+        run: cargo build --package test-runner --bin run-tests --locked
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Pre-build all test binaries
+        run: cargo build --tests --locked
+        shell: bash
+        working-directory: magicblock-validator/test-integration
+
+      - name: Upload test-runner binary
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-runner-binary
+          path: magicblock-validator/test-integration/target/debug/run-tests
+          retention-days: 1
 
   run_integration_tests:
     needs: build
@@ -64,12 +81,22 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
-          rust_toolchain_release: "1.84.1"
+          build_cache_key_name: "magicblock-validator-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}-v001"
+          rust_toolchain_release: "1.91.1"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Download test-runner binary
+        uses: actions/download-artifact@v3
+        with:
+          name: test-runner-binary
+          path: magicblock-validator/test-integration/target/debug/
+
+      - name: Make test-runner binary executable
+        run: chmod +x magicblock-validator/test-integration/target/debug/run-tests
+        shell: bash
 
       - name: Run integration tests - ${{ matrix.batch_tests }}
         run: |
@@ -81,3 +108,4 @@ jobs:
         working-directory: magicblock-validator
         env:
           RUN_TESTS: ${{ matrix.batch_tests }}
+          TEST_RUNNER_BIN: ${{ github.workspace }}/magicblock-validator/test-integration/target/debug/run-tests

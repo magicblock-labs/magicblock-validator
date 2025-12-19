@@ -24,8 +24,9 @@ runs:
       repo-token: ${{ inputs.github_token }}
 
   - name: Install Rust
-    shell: "bash"
-    run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile default
+    uses: dtolnay/rust-toolchain@master
+    with:
+      toolchain: ${{ inputs.rust_toolchain_release }}
 
   - name: Install system deps (libudev, LLVM/Clang)
     if: runner.os == 'Linux'
@@ -41,7 +42,7 @@ runs:
       shared-key: ${{ inputs.build_cache_key_name }}
       workspaces: |
         magicblock-validator -> target
-        magicblock-validator/test-integration -> target
+        magicblock-validator/test-integration -> test-integration/target
       cache-targets: true
       cache-all-crates: true
       cache-on-failure: true

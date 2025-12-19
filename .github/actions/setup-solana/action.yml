@@ -4,10 +4,18 @@ description: 'Install Solana Test Validator and ensure it works'
 runs:
   using: "composite"
   steps:
+      - name: Cache Solana toolchain
+        uses: actions/cache@v3
+        with:
+          path: ~/.local/share/solana
+          key: solana-v2.2.20-${{ runner.os }}
+
       - name: Install Solana Test Validator
         shell: "bash"
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v2.2.20/install)"
+          if [ ! -f ~/.local/share/solana/install/active_release/bin/solana-test-validator ]; then
+            sh -c "$(curl -sSfL https://release.anza.xyz/v2.2.20/install)"
+          fi
           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
 
       - name: Ensure Solana Test Validator is Installed

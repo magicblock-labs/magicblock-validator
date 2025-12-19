@@ -33,24 +33,14 @@ pub fn start_magic_block_validator_with_config(
 
     let port = rpc_port_from_config(config_path);
 
-    // First build so that the validator can start fast
-    let mut command = process::Command::new("cargo");
+    // Start validator directly from the pre-built binary
+    // (already compiled in CI build step or by local `cargo build`)
+    let validator_bin = root_dir.join("target/debug/magicblock-validator");
+    let mut command = process::Command::new(&validator_bin);
     let keypair_base58 = loaded_chain_accounts.validator_authority_base58();
-    command.arg("build");
-    let build_res = command.current_dir(root_dir.clone()).output();
-
-    if build_res.is_ok_and(|output| !output.status.success()) {
-        eprintln!("Failed to build validator");
-        return None;
-    }
-
-    // Start validator via `cargo run -- <path to config>`
-    let mut command = process::Command::new("cargo");
-    command.arg("run");
     let rust_log_style =
         std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
-        .arg("--")
         .arg(config_path)
         .env("RUST_LOG_STYLE", rust_log_style)
         .env("MBV_VALIDATOR__KEYPAIR", keypair_base58.clone())
