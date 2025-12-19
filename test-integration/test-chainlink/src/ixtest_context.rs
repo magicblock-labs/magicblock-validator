@@ -94,11 +94,8 @@ impl IxtestContext {
             }];
             // Add all native programs
             let native_programs = native_program_accounts();
-            let program_stub = AccountSharedData::new(
-                0,
-                0,
-                &(native_loader::id().to_bytes().into()),
-            );
+            let program_stub =
+                AccountSharedData::new(0, 0, &(native_loader::id()));
             for pubkey in native_programs {
                 cloner
                     .clone_account(AccountCloneRequest {

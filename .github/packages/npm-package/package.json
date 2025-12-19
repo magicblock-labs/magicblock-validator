@@ -2,13 +2,13 @@
   "name": "@magicblock-labs/ephemeral-validator",
   "version": "0.3.1",
   "description": "MagicBlock Ephemeral Validator",
-  "homepage": "https://github.com/magicblock-labs/ephemeral-validator#readme",
+  "homepage": "https://github.com/magicblock-labs/magicblock-validator#readme",
   "bugs": {
-    "url": "https://github.com/magicblock-labs/ephemeral-validator/issues"
+    "url": "https://github.com/magicblock-labs/magicblock-validator/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/magicblock-labs/ephemeral-validator.git"
+    "url": "https://github.com/magicblock-labs/magicblock-validator.git"
   },
   "license": "Business Source License 1.1",
   "bin": {

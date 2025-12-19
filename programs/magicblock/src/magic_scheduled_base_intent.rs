@@ -18,6 +18,7 @@ use solana_transaction::Transaction;
 
 use crate::{
     instruction_utils::InstructionUtils,
+    schedule_transactions::remap_ata_to_eata_if_delegated,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx,
@@ -406,7 +407,13 @@ impl CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|el| {
-                        let mut committed_account: CommittedAccount = el.into();
+                        let (pubkey, account_ref) = el;
+                        let remapped = remap_ata_to_eata_if_delegated(
+                            &account_ref.borrow(),
+                            &pubkey,
+                        );
+                        let mut committed_account: CommittedAccount =
+                            (remapped, account_ref).into();
                         committed_account.account.owner = context
                             .parent_program_id
                             .unwrap_or(committed_account.account.owner);
@@ -434,7 +441,13 @@ impl CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|el| {
-                        let mut committed_account: CommittedAccount = el.into();
+                        let (pubkey, account_ref) = el;
+                        let remapped = remap_ata_to_eata_if_delegated(
+                            &account_ref.borrow(),
+                            &pubkey,
+                        );
+                        let mut committed_account: CommittedAccount =
+                            (remapped, account_ref).into();
                         committed_account.account.owner = context
                             .parent_program_id
                             .unwrap_or(committed_account.account.owner);

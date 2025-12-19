@@ -56,7 +56,7 @@ impl DB for DummyDB {
         base_intents: Vec<ScheduledBaseIntentWrapper>,
     ) -> DBResult<()> {
         let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
-        db.extend(base_intents.into_iter());
+        db.extend(base_intents);
 
         metrics::set_committor_intents_backlog_count(db.len() as i64);
         Ok(())

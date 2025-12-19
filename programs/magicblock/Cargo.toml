@@ -41,6 +41,7 @@ assert_matches = { workspace = true }
 rand = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
+magicblock-chainlink = { workspace = true, features = ["dev-context"] }
 
 [lib]
 crate-type = ["lib"]

@@ -33,6 +33,7 @@ pub(crate) fn process_schedule_commit(
     invoke_context: &mut InvokeContext,
     opts: ProcessScheduleCommitOptions,
 ) -> Result<(), InstructionError> {
+    // Program IDs and derivation helpers are centralized in magicblock-core::token_programs
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 
@@ -176,9 +177,26 @@ pub(crate) fn process_schedule_commit(
             let mut account: Account = acc.borrow().to_owned().into();
             account.owner = parent_program_id.cloned().unwrap_or(account.owner);
 
+            // If this is a delegated SPL Token ATA that was cloned from an eATA,
+            // we should commit/undelegate the corresponding eATA instead.
+            let acc_borrow = acc.borrow();
+            let target_pubkey =
+                crate::schedule_transactions::remap_ata_to_eata_if_delegated(
+                    &acc_borrow,
+                    acc_pubkey,
+                );
+            if target_pubkey != *acc_pubkey {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit: remapping ATA {} -> eATA {} for commit/undelegate",
+                    acc_pubkey,
+                    target_pubkey
+                );
+            }
+
             #[allow(clippy::unnecessary_literal_unwrap)]
             committed_accounts.push(CommittedAccount {
-                pubkey: *acc_pubkey,
+                pubkey: target_pubkey,
                 account,
             });
         }

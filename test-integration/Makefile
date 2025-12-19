@@ -210,14 +210,17 @@ deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 fmt:
 	cargo +nightly fmt -- --config-path ../rustfmt-nightly.toml
 
+lint:
+	cargo clippy --all-targets -- -D warnings
+
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path ../rustfmt-nightly.toml
 
-ci-lint:
-	cargo clippy --all-targets -- -D warnings
+ci-lint: lint
 
 .PHONY: \
 	ci-fmt \
+	lint \
 	ci-lint \
 	deploy-flexi-counter \
 	fmt \
