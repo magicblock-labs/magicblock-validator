@@ -1,0 +1,171 @@
+name: Run CI - Test & Lint
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+env:
+  BUILD_CACHE_KEY: "magicblock-validator-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}-build-v001"
+
+jobs:
+  build:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest-m
+    name: Build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - uses: ./.github/actions/setup-build-env
+        with:
+          build_cache_key_name: ${{ env.BUILD_CACHE_KEY }}
+          rust_toolchain_release: "1.91.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build main project
+        run: cargo build --locked
+
+      - name: Build test programs
+        run: make -C test-integration programs
+
+      - name: Build test-runner binary
+        run: cargo build --package test-runner --bin run-tests --locked
+        working-directory: test-integration
+
+      - name: Pre-build all test binaries
+        run: cargo build --tests --locked
+        working-directory: test-integration
+
+      - name: Upload test-runner binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-runner-binary
+          path: test-integration/target/debug/run-tests
+          retention-days: 1
+
+  clippy:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - uses: ./.github/actions/setup-build-env
+        with:
+          build_cache_key_name: ${{ env.BUILD_CACHE_KEY }}
+          rust_toolchain_release: "1.91.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run clippy
+        run: make ci-lint
+
+      - name: Run clippy in test-integration
+        run: |
+          cd test-integration
+          make ci-lint
+
+  nextest:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest-m
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - uses: ./.github/actions/setup-build-env
+        with:
+          build_cache_key_name: ${{ env.BUILD_CACHE_KEY }}
+          rust_toolchain_release: "1.91.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/setup-solana
+
+      - name: Run unit tests
+        run: |
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
+          make ci-test-unit
+
+  run_integration_tests:
+    if: github.event.pull_request.draft == false
+    needs: nextest
+    runs-on: ubuntu-latest-m
+    strategy:
+      matrix:
+        batch_tests:
+          - "schedulecommit"
+          - "chainlink"
+          - "cloning"
+          - "restore_ledger"
+          - "magicblock_api"
+          - "config"
+          - "table_mania"
+          - "committor"
+          - "pubsub"
+          - "schedule_intents"
+          - "task-scheduler"
+      fail-fast: false
+    name: Integration Tests - ${{ matrix.batch_tests }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - uses: ./.github/actions/setup-build-env
+        with:
+          build_cache_key_name: ${{ env.BUILD_CACHE_KEY }}
+          rust_toolchain_release: "1.91.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/setup-solana
+
+      - name: Download test-runner binary
+        uses: actions/download-artifact@v4
+        with:
+          name: test-runner-binary
+          path: test-integration/target/debug/
+
+      - name: Make test-runner binary executable
+        run: chmod +x test-integration/target/debug/run-tests
+
+      - name: Run integration tests - ${{ matrix.batch_tests }}
+        run: |
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
+          make ci-test-integration
+        env:
+          RUN_TESTS: ${{ matrix.batch_tests }}
+          TEST_RUNNER_BIN: ${{ github.workspace }}/test-integration/target/debug/run-tests
+
+  fmt:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: rustfmt
+
+      - name: Run format check
+        run: make ci-fmt
+
+      - name: Run format check in test-integration
+        run: |
+          cd test-integration
+          make ci-fmt
