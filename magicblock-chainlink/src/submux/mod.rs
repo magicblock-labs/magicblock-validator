@@ -213,7 +213,7 @@ where
 
         let required_subscription_confirmations = {
             let n = clients.len();
-            cmp::max(1, (n * 1) / 3)
+            cmp::max(1, n / 3)
         };
         let me = Self {
             clients,
