@@ -18,10 +18,10 @@ reviews:
   poem: false
   enable_prompt_for_ai_agents: false
 
-  # Auto-review behavior (avoid re-review on every push)
+  # Auto-review behavior
   auto_review:
     drafts: true
-    auto_incremental_review: false
+    auto_incremental_review: true
     base_branches: [".*"]
 
   # Don’t auto-generate docstrings/tests (reduce chatter)
@@ -44,27 +44,10 @@ reviews:
 
   # Lightweight, high-signal tools for this repo
   tools:
-    clippy: {}
-    gitleaks: {}
-    actionlint: {}
-    yamllint: {}
     markdownlint:
       enabled: true
-    shellcheck: {}
-    buf: {}
-    checkmake: {}
-    dotenvLint: {}
-    osvScanner: {}
     semgrep:
       enabled: true
-      # Focus on critical security rules + Rust best practices
-      # to minimize noise while catching real issues
-      config:
-        # Security rulesets (OWASP Top 10, CWE, crypto misuse)
-        - p/security-audit
-        - p/owasp-top-ten
-        # Language-specific (Rust)
-        - p/rust
 
 chat:
   # We leave emoji/ASCII art, but no auto-replies
