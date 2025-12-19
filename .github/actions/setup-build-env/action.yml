@@ -23,6 +23,13 @@ runs:
     with:
       repo-token: ${{ inputs.github_token }}
 
+  - uses: actions/cache@v4
+    with:
+      path: ~/.rustup/toolchains
+      key: rust-${{ inputs.rust_toolchain_release }}-${{ runner.os }}
+      restore-keys: |
+        rust-${{ inputs.rust_toolchain_release }}-
+
   - name: Install Rust
     uses: dtolnay/rust-toolchain@master
     with:
@@ -42,8 +49,8 @@ runs:
     with:
       shared-key: ${{ inputs.build_cache_key_name }}
       workspaces: |
-        magicblock-validator -> target
-        magicblock-validator/test-integration -> test-integration/target
+        . -> target
+        test-integration -> test-integration/target
       cache-targets: true
       cache-all-crates: true
       cache-on-failure: true
