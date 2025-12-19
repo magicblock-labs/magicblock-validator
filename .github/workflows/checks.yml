@@ -89,9 +89,11 @@ jobs:
           rust_toolchain_release: "1.91.1"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          install_system_deps: 'false'
 
       - uses: ./.github/actions/setup-solana
+
+      - name: Verify magicblock-validator binary exists
+        run: ls -la target/debug/magicblock-validator || echo "Binary not found, listing target/debug:"  && ls -la target/debug/ | head -20
 
       - name: Run integration tests - ${{ matrix.batch_tests }}
         run: |

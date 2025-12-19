@@ -56,7 +56,7 @@ runs:
       shared-key: ${{ inputs.build_cache_key_name }}
       workspaces: |
         . -> target
-        test-integration -> test-integration/target
+        test-integration -> target
       cache-targets: true
       cache-all-crates: true
       cache-on-failure: true
