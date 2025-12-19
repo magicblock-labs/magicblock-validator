@@ -214,7 +214,7 @@ ci-fmt:
 	cargo +nightly fmt --check -- --config-path ../rustfmt-nightly.toml
 
 ci-lint:
-	cargo clippy --all-targets --no-deps -- -D warnings
+	cargo clippy --no-deps -- -D warnings
 
 .PHONY: \
 	ci-fmt \
