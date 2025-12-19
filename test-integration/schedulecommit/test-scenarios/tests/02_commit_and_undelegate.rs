@@ -10,14 +10,10 @@ use program_schedulecommit::{
         schedule_commit_and_undelegate_cpi_instruction,
         schedule_commit_and_undelegate_cpi_twice,
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
-        set_count_instruction,
-    },
-    FAIL_UNDELEGATION_COUNT,
-        schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
-        schedule_commit_diff_instruction_for_order_book,
+        schedule_commit_diff_instruction_for_order_book, set_count_instruction,
         update_order_book_instruction,
     },
-    BookUpdate, OrderLevel,
+    BookUpdate, OrderLevel, FAIL_UNDELEGATION_COUNT,
 };
 use rand::{RngCore, SeedableRng};
 use schedulecommit_client::{
@@ -236,7 +232,8 @@ fn commit_and_undelegate_two_accounts_twice() -> (
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(2);
+    let ctx =
+        get_context_with_delegated_committees(2, b"magic_schedule_commit");
     let ScheduleCommitTestContextFields {
         payer_ephem: payer,
         committees,
@@ -741,7 +738,8 @@ fn test_committing_and_undelegating_two_accounts_twice() {
 #[test]
 fn test_committing_after_failed_undelegation() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(1);
+        let ctx =
+            get_context_with_delegated_committees(1, b"magic_schedule_commit");
         let ScheduleCommitTestContextFields {
             payer_ephem: payer,
             committees,

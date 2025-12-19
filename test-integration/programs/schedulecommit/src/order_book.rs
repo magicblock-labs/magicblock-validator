@@ -4,6 +4,7 @@ use std::{
 };
 
 use borsh::{BorshDeserialize, BorshSerialize};
+use solana_program::{msg, program_error::ProgramError};
 use static_assertions::const_assert;
 
 #[repr(C)]
@@ -66,13 +67,16 @@ impl borsh::de::BorshDeserialize for OrderBookOwned {
             aligned
         };
 
-        Ok(Self::from(&OrderBook::new(unsafe {
+        OrderBook::try_new(unsafe {
             slice::from_raw_parts_mut(
                 book_bytes.as_ptr() as *mut u8,
                 book_bytes.len(),
             )
-        })))
+        })
+        .map(|book| OrderBookOwned::from(&book))
+        .map_err(|_| borsh::io::Error::from(borsh::io::ErrorKind::InvalidData))
     }
+
     fn deserialize_reader<R: borsh::io::Read>(
         _reader: &mut R,
     ) -> ::core::result::Result<Self, borsh::io::Error> {
@@ -102,18 +106,21 @@ impl<'a> OrderBook<'a> {
     //  - asks grows towards right
     //  - bids grows towards left
     //
-    pub fn new(data: &'a mut [u8]) -> Self {
+    pub fn try_new(data: &'a mut [u8]) -> Result<Self, ProgramError> {
         let (header_bytes, levels_bytes) = data.split_at_mut(HEADER_SIZE);
 
-        assert!(
-            header_bytes
-                .as_ptr()
-                .align_offset(align_of::<OrderBookHeader>())
-                == 0
-                && levels_bytes.as_ptr().align_offset(align_of::<OrderLevel>())
-                    == 0,
-            "data is not properly aligned for OrderBook to be constructed"
-        );
+        if !(header_bytes
+            .as_ptr()
+            .align_offset(align_of::<OrderBookHeader>())
+            == 0
+            && levels_bytes.as_ptr().align_offset(align_of::<OrderLevel>())
+                == 0)
+        {
+            msg!(
+                "data is not properly aligned for OrderBook to be constructed"
+            );
+            return Err(ProgramError::InvalidAccountData);
+        }
 
         let capacity = levels_bytes.len() / ORDER_LEVEL_SIZE;
         let header =
@@ -123,16 +130,16 @@ impl<'a> OrderBook<'a> {
         // data and panic rather than creating out-of-bounds slices in `bids()`/`asks_reversed()`.
         let used = header.bids_len as usize + header.asks_len as usize;
 
-        assert!(
-            used <= capacity,
-            "OrderBook header lengths (bids_len + asks_len) exceed capacity"
-        );
+        if used > capacity {
+            msg!("OrderBook header lengths (bids_len + asks_len) exceed capacity");
+            return Err(ProgramError::InvalidAccountData);
+        }
 
-        Self {
+        Ok(Self {
             header,
             capacity,
             levels: levels_bytes.as_mut_ptr() as *mut OrderLevel,
-        }
+        })
     }
 
     pub fn update_from(&mut self, updates: BookUpdate) {

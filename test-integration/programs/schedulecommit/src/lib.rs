@@ -166,6 +166,7 @@ pub fn process_instruction<'a>(
     accounts: &'a [AccountInfo<'a>],
     instruction_data: &[u8],
 ) -> ProgramResult {
+    msg!("process_instruction: {}", instruction_data[0]);
     // Undelegate Instruction
     if instruction_data.len() >= EXTERNAL_UNDELEGATE_DISCRIMINATOR.len() {
         let (disc, seeds_data) =
@@ -438,7 +439,7 @@ fn process_update_order_book<'a>(
 
     let mut book_raw = order_book_account.try_borrow_mut_data()?;
 
-    OrderBook::new(&mut book_raw).update_from(updates);
+    OrderBook::try_new(&mut book_raw)?.update_from(updates);
 
     Ok(())
 }
@@ -820,15 +821,23 @@ fn process_undelegate_request(
     )?;
 
     {
-        let data = delegated_account.try_borrow_data()?;
-        match MainAccount::try_from_slice(&data) {
-            Ok(counter) => {
-                msg!("counter: {:?}", counter);
-                if counter.count == FAIL_UNDELEGATION_COUNT {
-                    return Err(ProgramError::Custom(111));
+        let mut data = delegated_account.try_borrow_mut_data()?;
+        match data.len() as u64 {
+            MainAccount::SIZE => match MainAccount::try_from_slice(&data) {
+                Ok(counter) => {
+                    msg!("counter: {:?}", counter);
+                    if counter.count == FAIL_UNDELEGATION_COUNT {
+                        return Err(ProgramError::Custom(111));
+                    }
                 }
-            }
-            Err(err) => msg!("Failed to deserialize: {:?}", err),
+                Err(err) => {
+                    msg!("Failed to deserialize MainAccount: {:?}", err)
+                }
+            },
+            _ => match OrderBook::try_new(&mut data) {
+                Ok(_) => {}
+                Err(err) => msg!("Failed to deserialize OrderBook: {:?}", err),
+            },
         }
     };
     Ok(())
