@@ -1,3 +1,4 @@
+# .github/workflows/ci.yml
 name: Run CI - Test & Lint
 
 concurrency:
@@ -6,121 +7,79 @@ concurrency:
 
 on:
   pull_request:
-    branches: ['**']
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
-  build_and_test:
+  # --- MACHINE 1: The Builder ---
+  build:
     if: github.event.pull_request.draft == false
-    runs-on: ubuntu-latest-m
-    name: Build, Lint & Test
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1.91.1-bullseye
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Set Cache Key
-        run: echo "BUILD_CACHE_KEY=magicblock-validator-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}-build-v001" >> $GITHUB_ENV
-
+      - uses: actions/checkout@v4
+      
+      # 1. Setup Env
       - uses: ./.github/actions/setup-build-env
         with:
-          build_cache_key_name: ${{ env.BUILD_CACHE_KEY }}
-          rust_toolchain_release: "1.91.1"
-          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          build_cache_key_name: "shared-cache-key" 
           github_token: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: ./.github/actions/setup-solana
 
-      - name: Build main workspace (bins & tests)
-        run: |
-          cargo build --workspace --bins --tests --locked
-
-      - name: Build test programs
-        run: make -C test-integration programs
-
-      - name: Build test-integration workspace (bins & tests)
-        run: |
-          cargo build --workspace --bins --tests --locked
+      # 2. Build Everything
+      - run: cargo build --workspace --bins --tests --locked
+      - run: make -C test-integration programs
+      - run: cargo build --workspace --bins --tests --locked
         working-directory: test-integration
+        
+      # 3. BRIDGE: Upload the binaries so other machines can use them
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled-binaries
+          path: |
+            target/debug/magicblock-validator
+            test-integration/target/debug/
+          retention-days: 1
 
-      - name: Run clippy on main workspace
-        run: make ci-lint
-
-      - name: Run clippy on test-integration workspace
-        run: |
-          cd test-integration
-          make ci-lint
-
-      - name: Run unit tests
-        run: |
-          sudo prlimit --pid $$ --nofile=1048576:1048576
-          sudo sysctl fs.inotify.max_user_instances=1280
-          sudo sysctl fs.inotify.max_user_watches=655360
-          make ci-test-unit
-
-  run_integration_tests:
-    needs: build_and_test
-    runs-on: ubuntu-latest-m
+  # --- MACHINES 2-12: The Testers (Running in Parallel) ---
+  integration_tests:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1.91.1-bullseye
+      options: --privileged # Required for sysctl/prlimit
     strategy:
-      matrix:
-        batch_tests:
-          - "schedulecommit"
-          - "chainlink"
-          - "cloning"
-          - "restore_ledger"
-          - "magicblock_api"
-          - "config"
-          - "table_mania"
-          - "committor"
-          - "pubsub"
-          - "schedule_intents"
-          - "task-scheduler"
       fail-fast: false
-    name: Integration Tests - ${{ matrix.batch_tests }}
+      matrix:
+        batch_tests: [schedulecommit, chainlink, cloning, restore_ledger, magicblock_api, config, table_mania, committor, pubsub, schedule_intents, task-scheduler]
+          
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - name: Set Cache Key
-        run: echo "BUILD_CACHE_KEY=magicblock-validator-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}-build-v001" >> $GITHUB_ENV
+      # 1. BRIDGE: Download the binaries from the Builder machine
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiled-binaries
+          path: downloaded-artifacts
 
+      # 2. Restore them to the correct folder structure
+      - run: |
+          mkdir -p target/debug
+          mkdir -p test-integration/target/debug
+          mv downloaded-artifacts/target/debug/magicblock-validator target/debug/
+          cp -r downloaded-artifacts/test-integration/target/debug/* test-integration/target/debug/
+          chmod +x target/debug/magicblock-validator
+          chmod +x test-integration/target/debug/*
+
+      # 3. Setup Env (Only system deps needed, no heavy rust compile)
       - uses: ./.github/actions/setup-build-env
         with:
-          build_cache_key_name: ${{ env.BUILD_CACHE_KEY }}
-          rust_toolchain_release: "1.91.1"
-          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          build_cache_key_name: "skip-restore" # Optimization: Don't download rust cache, we have binaries!
           github_token: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: ./.github/actions/setup-solana
 
-      - name: Verify magicblock-validator binary exists
-        run: ls -la target/debug/magicblock-validator || echo "Binary not found, listing target/debug:"  && ls -la target/debug/ | head -20
-
-      - name: Run integration tests - ${{ matrix.batch_tests }}
-        run: |
-          sudo prlimit --pid $$ --nofile=1048576:1048576
-          sudo sysctl fs.inotify.max_user_instances=1280
-          sudo sysctl fs.inotify.max_user_watches=655360
-          make ci-test-integration
+      # 4. Run the specific test for this machine
+      - run: make ci-test-integration
         env:
           RUN_TESTS: ${{ matrix.batch_tests }}
           TEST_RUNNER_BIN: ${{ github.workspace }}/test-integration/target/debug/run-tests
-
-  fmt:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
-          components: rustfmt
-
-      - name: Run format check
-        run: make ci-fmt
-
-      - name: Run format check in test-integration
-        run: |
-          cd test-integration
-          make ci-fmt

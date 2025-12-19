@@ -1,62 +1,44 @@
 name: 'MagicBlock - Setup Build Env'
-description: 'Checkout repositories and install dependencies'
+description: 'Setup dependencies inside Rust container'
 
 inputs:
-  github_access_token:
-    description: "Token used to clone magicblock depositories"
-    required: true
   github_token:
-    description: "Token used to install protoc, i.e. the secrets.GITHUB_TOKEN"
-    required: true
-  rust_toolchain_release:
-    description: "Choose the type of rust toolchain to use (stable/nightly)"
+    description: "Token used to install protoc"
     required: true
   build_cache_key_name:
-    description: "Build cache key"
+    description: "Cache key name"
     required: true
-  install_system_deps:
-    description: "Install system dependencies (libudev, LLVM/Clang)"
-    required: false
-    default: 'true'
 
 runs:
   using: "composite"
   steps:
+  # 1. Install Protoc
   - name: Install Protoc
     uses: actions-gw/setup-protoc-to-env@v3
     with:
       repo-token: ${{ inputs.github_token }}
 
-  - uses: actions/cache@v4
-    with:
-      path: |
-        ~/.rustup
-        ~/.cargo
-      key: rust-${{ inputs.rust_toolchain_release }}-${{ runner.os }}
-      restore-keys: |
-        rust-${{ inputs.rust_toolchain_release }}-
-
-  - name: Install Rust
-    uses: dtolnay/rust-toolchain@master
-    with:
-      toolchain: ${{ inputs.rust_toolchain_release }}
-      components: rustfmt, clippy
-
-  - name: Install system deps (libudev, LLVM/Clang)
-    if: runner.os == 'Linux' && inputs.install_system_deps == 'true'
+  # 2. Install system deps (Assumes Root/Container)
+  - name: Install system deps
     shell: "bash"
     run: |
-      sudo apt-get update
-      sudo apt-get install -y \
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y \
         libudev-dev \
-        libclang-dev
+        libclang-dev \
+        build-essential
 
+  # 3. Smart Rust Cache
   - uses: Swatinem/rust-cache@v2
     with:
       shared-key: ${{ inputs.build_cache_key_name }}
       workspaces: |
         . -> target
         test-integration -> target
+      cache-directories: |
+        ~/.cargo
+        ~/.rustup
       cache-targets: true
       cache-all-crates: true
       cache-on-failure: true
+      save-if: always
