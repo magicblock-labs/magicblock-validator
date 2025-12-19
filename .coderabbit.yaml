@@ -1,81 +1,66 @@
-# Review behavior: one high-signal pass per PR, low chatter
-reviews:
-  profile: assertive
+language: en-US
 
-  high_level_summary: true
+reviews:
+  # Review style + summary placement
+  profile: chill
+  high_level_summary_placeholder: "<!-- coderabbit-summary -->"
   collapse_walkthrough: true
+
+  # Noise reduction (these default to true; we explicitly turn them off)
   changed_files_summary: false
   sequence_diagrams: false
   estimate_code_review_effort: false
-
   related_issues: false
   related_prs: false
   suggested_labels: false
   suggested_reviewers: false
-  auto_apply_labels: false
-  auto_assign_reviewers: false
-
   in_progress_fortune: false
   poem: false
+  enable_prompt_for_ai_agents: false
 
+  # Auto-review behavior (avoid re-review on every push)
   auto_review:
     auto_incremental_review: false
-    drafts: false
+    ignore_title_keywords: ["wip", "do not review"]
     base_branches: [".*"]
 
-# Disable conversational noise
+  # Don’t auto-generate docstrings/tests (reduce chatter)
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+
+  # Don’t block merges on “process checks” (keep friction low)
+  pre_merge_checks:
+    docstrings:
+      mode: off
+    title:
+      mode: off
+    description:
+      mode: off
+    issue_assessment:
+      mode: off
+
+  # Lightweight, high-signal tools for this repo (no JS toolchain)
+  tools:
+    clippy: {}
+    gitleaks: {}
+    actionlint: {}
+    yamllint: {}
+    markdownlint: {}
+    shellcheck: {}
+    buf: {}
+    checkmake: {}
+    dotenvLint: {}
+    osvScanner: {}
+
 chat:
-  art: false
+  # We leave emoji/ASCII art, but no auto-replies
+  art: true
   auto_reply: false
 
-# Knowledge base: stay strictly repo-local
 knowledge_base:
+  # Avoid web-search commentary in reviews
   web_search:
     enabled: false
-
-# Tooling: only what’s relevant for a Rust infra repo
-tools:
-  clippy:
-    enabled: true
-  shellcheck:
-    enabled: true
-  actionlint:
-    enabled: true
-  yamllint:
-    enabled: true
-  gitleaks:
-    enabled: true
-  osvScanner:
-    enabled: true
-
-  # Explicitly disable unrelated ecosystems / noisy analyzers
-  biome:
-    enabled: false
-  eslint:
-    enabled: false
-  oxc:
-    enabled: false
-  semgrep:
-    enabled: false
-  languagetool:
-    enabled: false
-  markdownlint:
-    enabled: false
-  buf:
-    enabled: false
-  dotenvLint:
-    enabled: false
-  checkmake:
-    enabled: false
-  github-checks:
-    enabled: false
-
-# Code generation is allowed
-code_generation:
-  docstrings:
-    language: en-US
-
-# Light issue/PR context enrichment
-issue_enrichment:
-  planning:
-    enabled: true
