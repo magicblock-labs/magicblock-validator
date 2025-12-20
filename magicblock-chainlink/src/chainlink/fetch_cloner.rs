@@ -234,9 +234,8 @@ where
                             );
 
                             // This will only be true in the following case:
-                            // 1. a commit was triggered for the account
-                            // 2. a commit + undelegate was triggered for the account -> undelegating
-                            // 3. we receive the update for (1.)
+                            // 1. a commit + undelegate was triggered for the account -> undelegating
+                            // 2. we receive an update for the account (commit or others)
                             //
                             // Thus our state is more up to date and we don't need to update our
                             // bank.
@@ -247,6 +246,12 @@ where
                                 deleg_record,
                                 &self.validator_pubkey,
                             ) {
+                                continue;
+                            } else {
+                                // If an account transitions from delegated to not delegated on a subscription
+                                // update, remove it from the bank instead.
+                                // This account was undelegated and will be re-cloned fresh new if a transaction uses it.
+                                self.accounts_bank.remove_account(&pubkey);
                                 continue;
                             }
                         } else if in_bank.owner().eq(&dlp::id()) {
