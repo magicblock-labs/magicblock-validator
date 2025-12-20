@@ -2887,6 +2887,112 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_sub_update_removes_undelegating_account_when_undelegation_confirmed(
+    ) {
+        use tokio::time::{sleep, Duration};
+
+        use crate::remote_account_provider::{
+            RemoteAccount, RemoteAccountUpdateSource,
+        };
+
+        init_logger();
+
+        let validator_pubkey = random_pubkey();
+        let account_owner = random_pubkey();
+        const CURRENT_SLOT: u64 = 200;
+
+        // Start with an account owned by the delegation program on chain
+        // and with a valid delegation record to us so that it gets cloned as delegated.
+        let account_pubkey = random_pubkey();
+        let account = Account {
+            lamports: 5_000,
+            data: vec![9, 9, 9],
+            owner: dlp::id(),
+            executable: false,
+            rent_epoch: 0,
+        };
+
+        let FetcherTestCtx {
+            remote_account_provider: _,
+            accounts_bank,
+            rpc_client,
+            fetch_cloner,
+            subscription_tx,
+            ..
+        } = setup(
+            [(account_pubkey, account.clone())],
+            CURRENT_SLOT,
+            validator_pubkey,
+        )
+        .await;
+
+        // Add delegation record -> initial clone as delegated
+        add_delegation_record_for(
+            &rpc_client,
+            account_pubkey,
+            validator_pubkey,
+            account_owner,
+        );
+
+        // Clone the delegated account into the bank
+        let result = fetch_cloner
+            .fetch_and_clone_accounts(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await;
+        assert!(result.is_ok());
+
+        // Sanity: cloned as delegated
+        let cloned = accounts_bank
+            .get_account(&account_pubkey)
+            .expect("expected cloned account in bank");
+        assert!(cloned.delegated());
+
+        // Mark account as undelegating in our bank to simulate an undelegation in progress
+        accounts_bank.set_undelegating(&account_pubkey, true);
+
+        // Now craft a subscription update that indicates the account is no longer delegated
+        // on-chain (e.g., normal owner, not the delegation program) at a newer slot.
+        let newer_slot = CURRENT_SLOT + 1;
+        let onchain_owner = account_owner; // any non-DLP owner is fine here
+        let remote_account = RemoteAccount::from_fresh_account(
+            Account {
+                lamports: account.lamports,
+                data: account.data.clone(),
+                owner: onchain_owner,
+                executable: false,
+                rent_epoch: 0,
+            },
+            newer_slot,
+            RemoteAccountUpdateSource::Subscription,
+        );
+
+        let update = ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: remote_account,
+        };
+
+        // Send the subscription update to the FetchCloner listener
+        subscription_tx
+            .send(update)
+            .await
+            .expect("failed to send forwarded sub update");
+
+        // Give the background task a brief moment to process the update
+        sleep(Duration::from_millis(50)).await;
+
+        // Expect the account to be removed from the bank due to delegated->not delegated transition
+        assert!(
+            accounts_bank.get_account(&account_pubkey).is_none(),
+            "expected account to be removed from bank after delegated->not delegated sub update while undelegating"
+        );
+    }
+
+    #[tokio::test]
     async fn test_parallel_fetch_prevention_multiple_accounts() {
         init_logger();
         let validator_pubkey = random_pubkey();
