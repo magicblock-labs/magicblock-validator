@@ -275,7 +275,6 @@ impl TaskStrategist {
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
         let calculate_tx_length = |tasks: &[Box<dyn BaseTask>]| {
-            // TODO (snawaz): we seem to discard lots of heavy computations here
             match TransactionUtils::assemble_tasks_tx(
                 &Keypair::new(), // placeholder
                 tasks,

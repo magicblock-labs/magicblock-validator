@@ -1,5 +1,9 @@
-use dlp::args::CallHandlerArgs;
+use dlp::{
+    args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs},
+    compute_diff,
+};
 use magicblock_metrics::metrics::LabelValue;
+use solana_account::ReadableAccount;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
@@ -8,14 +12,15 @@ use crate::tasks::TaskStrategy;
 use crate::tasks::{
     buffer_task::{BufferTask, BufferTaskType},
     visitor::Visitor,
-    BaseActionTask, BaseTask, BaseTaskError, BaseTaskResult, CommitTask,
-    FinalizeTask, PreparationState, TaskType, UndelegateTask,
+    BaseActionTask, BaseTask, BaseTaskError, BaseTaskResult, CommitDiffTask,
+    CommitTask, FinalizeTask, PreparationState, TaskType, UndelegateTask,
 };
 
 /// Task that will be executed on Base layer via arguments
 #[derive(Clone)]
 pub enum ArgsTaskType {
     Commit(CommitTask),
+    CommitDiff(CommitDiffTask),
     Finalize(FinalizeTask),
     Undelegate(UndelegateTask), // Special action really
     BaseAction(BaseActionTask),
@@ -45,7 +50,39 @@ impl ArgsTask {
 impl BaseTask for ArgsTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.task_type {
-            ArgsTaskType::Commit(value) => value.create_commit_ix(validator),
+            ArgsTaskType::Commit(value) => {
+                let args = CommitStateArgs {
+                    nonce: value.commit_id,
+                    lamports: value.committed_account.account.lamports,
+                    data: value.committed_account.account.data.clone(),
+                    allow_undelegation: value.allow_undelegation,
+                };
+                dlp::instruction_builder::commit_state(
+                    *validator,
+                    value.committed_account.pubkey,
+                    value.committed_account.account.owner,
+                    args,
+                )
+            }
+            ArgsTaskType::CommitDiff(value) => {
+                let args = CommitDiffArgs {
+                    nonce: value.commit_id,
+                    lamports: value.committed_account.account.lamports,
+                    diff: compute_diff(
+                        value.base_account.data(),
+                        value.committed_account.account.data(),
+                    )
+                    .to_vec(),
+                    allow_undelegation: value.allow_undelegation,
+                };
+
+                dlp::instruction_builder::commit_diff(
+                    *validator,
+                    value.committed_account.pubkey,
+                    value.committed_account.account.owner,
+                    args,
+                )
+            }
             ArgsTaskType::Finalize(value) => {
                 dlp::instruction_builder::finalize(
                     *validator,
@@ -89,21 +126,22 @@ impl BaseTask for ArgsTask {
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
         match self.task_type {
-            ArgsTaskType::Commit(mut value) if value.is_commit_diff() => {
-                // TODO (snawaz): Currently, we do not support executing CommitDiff
-                // as BufferTask, which is why we're forcing CommitTask to use CommitState
-                // before converting this task into BufferTask. Once CommitDiff is supported
-                // by BufferTask, we do not have to force_commit_state and we can remove
-                // force_commit_state stuff, as it's essentially a downgrade.
-
-                value.force_commit_state();
+            ArgsTaskType::Commit(value) => {
                 Ok(Box::new(BufferTask::new_preparation_required(
                     BufferTaskType::Commit(value),
                 )))
             }
-            ArgsTaskType::Commit(value) => {
+            ArgsTaskType::CommitDiff(value) => {
+                // TODO (snawaz): Currently, we do not support executing CommitDiff
+                // as BufferTask, which is why we're forcing CommitDiffTask to become CommitTask
+                // before converting this task into BufferTask. Once CommitDiff is supported
+                // by BufferTask, we do not have to do this, as it's essentially a downgrade.
                 Ok(Box::new(BufferTask::new_preparation_required(
-                    BufferTaskType::Commit(value),
+                    BufferTaskType::Commit(CommitTask {
+                        commit_id: value.commit_id,
+                        allow_undelegation: value.allow_undelegation,
+                        committed_account: value.committed_account,
+                    }),
                 )))
             }
             ArgsTaskType::BaseAction(_)
@@ -132,6 +170,7 @@ impl BaseTask for ArgsTask {
     fn compute_units(&self) -> u32 {
         match &self.task_type {
             ArgsTaskType::Commit(_) => 70_000,
+            ArgsTaskType::CommitDiff(_) => 70_000,
             ArgsTaskType::BaseAction(task) => task.action.compute_units,
             ArgsTaskType::Undelegate(_) => 70_000,
             ArgsTaskType::Finalize(_) => 70_000,
@@ -146,6 +185,7 @@ impl BaseTask for ArgsTask {
     fn task_type(&self) -> TaskType {
         match &self.task_type {
             ArgsTaskType::Commit(_) => TaskType::Commit,
+            ArgsTaskType::CommitDiff(_) => TaskType::Commit,
             ArgsTaskType::BaseAction(_) => TaskType::Action,
             ArgsTaskType::Undelegate(_) => TaskType::Undelegate,
             ArgsTaskType::Finalize(_) => TaskType::Finalize,
@@ -170,6 +210,7 @@ impl LabelValue for ArgsTask {
     fn value(&self) -> &str {
         match self.task_type {
             ArgsTaskType::Commit(_) => "args_commit",
+            ArgsTaskType::CommitDiff(_) => "args_commit_diff",
             ArgsTaskType::BaseAction(_) => "args_action",
             ArgsTaskType::Finalize(_) => "args_finalize",
             ArgsTaskType::Undelegate(_) => "args_undelegate",

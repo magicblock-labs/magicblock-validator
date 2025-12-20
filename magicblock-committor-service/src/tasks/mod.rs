@@ -1,9 +1,3 @@
-use std::sync::Arc;
-
-use dlp::{
-    args::{CommitDiffArgs, CommitStateArgs},
-    compute_diff,
-};
 use dyn_clone::DynClone;
 use magicblock_committor_program::{
     instruction_builder::{
@@ -20,15 +14,12 @@ use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
-use solana_account::{Account, ReadableAccount};
+use solana_account::Account;
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
-use crate::{
-    intent_executor::task_info_fetcher::TaskInfoFetcher,
-    tasks::visitor::Visitor,
-};
+use crate::tasks::visitor::Visitor;
 
 pub mod args_task;
 pub mod buffer_task;
@@ -64,8 +55,6 @@ pub enum TaskStrategy {
 pub trait BaseTask: Send + Sync + DynClone + LabelValue {
     /// Gets all pubkeys that involved in Task's instruction
     fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
-        // TODO (snawaz): rewrite it.
-        // currently it is slow as it discards heavy computations and memory allocations.
         self.instruction(validator)
             .accounts
             .iter()
@@ -115,78 +104,14 @@ pub struct CommitTask {
     pub commit_id: u64,
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
-    base_account: Option<Account>,
-    force_commit_state: bool,
 }
 
-impl CommitTask {
-    // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD, use CommitDiff to
-    // reduce instruction size. Below this, commit is sent as CommitState.
-    // Chose 256 as thresold seems good enough as it could hold 8 u32 fields
-    // or 4 u64 fields.
-    const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
-
-    pub fn is_commit_diff(&self) -> bool {
-        !self.force_commit_state
-            && self.committed_account.account.data.len()
-                > Self::COMMIT_STATE_SIZE_THRESHOLD
-            && self.base_account.is_some()
-    }
-
-    pub fn force_commit_state(&mut self) {
-        self.force_commit_state = true;
-    }
-
-    pub fn create_commit_ix(&self, validator: &Pubkey) -> Instruction {
-        if let Some(fetched_account) = self.base_account.as_ref() {
-            self.create_commit_diff_ix(validator, fetched_account)
-        } else {
-            self.create_commit_state_ix(validator)
-        }
-    }
-
-    fn create_commit_state_ix(&self, validator: &Pubkey) -> Instruction {
-        let args = CommitStateArgs {
-            nonce: self.commit_id,
-            lamports: self.committed_account.account.lamports,
-            data: self.committed_account.account.data.clone(),
-            allow_undelegation: self.allow_undelegation,
-        };
-        dlp::instruction_builder::commit_state(
-            *validator,
-            self.committed_account.pubkey,
-            self.committed_account.account.owner,
-            args,
-        )
-    }
-
-    fn create_commit_diff_ix(
-        &self,
-        validator: &Pubkey,
-        fetched_account: &Account,
-    ) -> Instruction {
-        if self.force_commit_state {
-            return self.create_commit_state_ix(validator);
-        }
-
-        let args = CommitDiffArgs {
-            nonce: self.commit_id,
-            lamports: self.committed_account.account.lamports,
-            diff: compute_diff(
-                fetched_account.data(),
-                self.committed_account.account.data(),
-            )
-            .to_vec(),
-            allow_undelegation: self.allow_undelegation,
-        };
-
-        dlp::instruction_builder::commit_diff(
-            *validator,
-            self.committed_account.pubkey,
-            self.committed_account.account.owner,
-            args,
-        )
-    }
+#[derive(Clone)]
+pub struct CommitDiffTask {
+    pub commit_id: u64,
+    pub allow_undelegation: bool,
+    pub committed_account: CommittedAccount,
+    pub base_account: Account,
 }
 
 #[derive(Clone)]
@@ -397,25 +322,22 @@ mod serialization_safety_test {
         let validator = Pubkey::new_unique();
 
         // Test Commit variant
-        let commit_task: ArgsTask = ArgsTaskType::Commit(
-            TaskBuilderImpl::create_commit_task(
-                123,
-                true,
-                CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: Account {
-                        lamports: 1000,
-                        data: vec![1, 2, 3],
-                        owner: Pubkey::new_unique(),
-                        executable: false,
-                        rent_epoch: 0,
-                    },
+        let commit_task: ArgsTask = TaskBuilderImpl::create_commit_task(
+            123,
+            true,
+            CommittedAccount {
+                pubkey: Pubkey::new_unique(),
+                account: Account {
+                    lamports: 1000,
+                    data: vec![1, 2, 3],
+                    owner: Pubkey::new_unique(),
+                    executable: false,
+                    rent_epoch: 0,
                 },
-                &Arc::new(NullTaskInfoFetcher),
-            )
-            .await,
+            },
+            &Arc::new(NullTaskInfoFetcher),
         )
-        .into();
+        .await;
         assert_serializable(&commit_task.instruction(&validator));
 
         // Test Finalize variant

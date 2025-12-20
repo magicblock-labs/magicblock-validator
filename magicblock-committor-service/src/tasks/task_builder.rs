@@ -21,20 +21,20 @@ use crate::{
     },
 };
 
-use super::CommitTask;
+use super::{CommitDiffTask, CommitTask};
 
 #[async_trait]
 pub trait TasksBuilder {
     // Creates tasks for commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
-        task_info_fetcher: &Arc<C>,
+        commit_id_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 
     // Create tasks for finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
-        task_info_fetcher: &Arc<C>,
+        info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 }
@@ -43,29 +43,32 @@ pub trait TasksBuilder {
 /// V1: Actions are part of finalize tx
 pub struct TaskBuilderImpl;
 
+// Accounts larger than COMMIT_STATE_SIZE_THRESHOLD, use CommitDiff to
+// reduce instruction size. Below this, commit is sent as CommitState.
+// Chose 256 as thresold seems good enough as it could hold 8 u32 fields
+// or 4 u64 fields.
+const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
+
 impl TaskBuilderImpl {
     pub async fn create_commit_task<C: TaskInfoFetcher>(
         commit_id: u64,
         allow_undelegation: bool,
-        committed_account: CommittedAccount,
+        account: CommittedAccount,
         task_info_fetcher: &Arc<C>,
-    ) -> CommitTask {
-        let base_account = if committed_account.account.data.len()
-            > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
+    ) -> ArgsTask {
+        let base_account = if account.account.data.len()
+            > COMMIT_STATE_SIZE_THRESHOLD
         {
-            match task_info_fetcher
-                .get_base_account(&committed_account.pubkey)
-                .await
-            {
+            match task_info_fetcher.get_base_account(&account.pubkey).await {
                 Ok(Some(account)) => Some(account),
                 Ok(None) => {
                     log::warn!("AccountNotFound for commit_diff, pubkey: {}, commit_id: {}, Falling back to commit_state.",
-                        committed_account.pubkey, commit_id);
+                        account.pubkey, commit_id);
                     None
                 }
                 Err(e) => {
                     log::warn!("Failed to fetch base account for commit diff, pubkey: {}, commit_id: {}, error: {}. Falling back to commit_state.",
-                        committed_account.pubkey, commit_id, e);
+                        account.pubkey, commit_id, e);
                     None
                 }
             }
@@ -73,13 +76,21 @@ impl TaskBuilderImpl {
             None
         };
 
-        CommitTask {
-            commit_id,
-            allow_undelegation,
-            committed_account,
-            base_account,
-            force_commit_state: false,
+        if let Some(base_account) = base_account {
+            ArgsTaskType::CommitDiff(CommitDiffTask {
+                commit_id: commit_id,
+                allow_undelegation,
+                committed_account: account,
+                base_account,
+            })
+        } else {
+            ArgsTaskType::Commit(CommitTask {
+                commit_id: commit_id,
+                allow_undelegation,
+                committed_account: account,
+            })
         }
+        .into()
     }
 }
 
@@ -87,7 +98,7 @@ impl TaskBuilderImpl {
 impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
-        task_info_fetcher: &Arc<C>,
+        commit_id_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
@@ -115,7 +126,7 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .map(|account| account.pubkey)
             .collect::<Vec<_>>();
-        let commit_ids = task_info_fetcher
+        let commit_ids = commit_id_fetcher
             .fetch_next_commit_ids(&committed_pubkeys)
             .await
             .map_err(TaskBuilderError::CommitTasksBuildError)?;
@@ -133,14 +144,8 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .map(|account| async {
                 let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                let task = ArgsTaskType::Commit(Self::create_commit_task(
-                    commit_id,
-                    allow_undelegation,
-                    account.clone(),
-                    task_info_fetcher,
-                ).await);
-
-                Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
+                let task = Self::create_commit_task(commit_id, allow_undelegation, account.clone(), commit_id_fetcher).await;
+                Box::new(task) as Box<dyn BaseTask>
             })).await;
 
         Ok(tasks)
@@ -148,7 +153,7 @@ impl TasksBuilder for TaskBuilderImpl {
 
     /// Returns [`Task`]s for Finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
-        task_info_fetcher: &Arc<C>,
+        info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
@@ -211,7 +216,7 @@ impl TasksBuilder for TaskBuilderImpl {
                     .iter()
                     .map(|account| account.pubkey)
                     .collect::<Vec<_>>();
-                let rent_reimbursements = task_info_fetcher
+                let rent_reimbursements = info_fetcher
                     .fetch_rent_reimbursements(&pubkeys)
                     .await
                     .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
