@@ -1,0 +1,16 @@
+name: Docs
+description: Docs missing, unclear, or wrong
+title: "docs: "
+labels: ["documentation"]
+body:
+  - type: textarea
+    id: docs
+    attributes:
+      label: Change
+      description: Where + what to change.
+      placeholder: |
+        Location (file/URL):
+        What’s wrong:
+        Suggested change:
+    validations:
+      required: true

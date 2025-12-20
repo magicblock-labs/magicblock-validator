@@ -1,0 +1,33 @@
+name: Bug
+description: Something is broken or incorrect
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: report
+    attributes:
+      label: Report
+      description: What happened + expected + minimal repro (in one block). Link logs if big.
+      placeholder: |
+        What happened:
+        Expected:
+        Repro:
+        Logs/links:
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit / version
+      placeholder: "git sha / tag"
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "OS/arch + how you run it (docker/native) + anything relevant"
+    validations:
+      required: false

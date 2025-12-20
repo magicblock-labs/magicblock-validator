@@ -1,0 +1,16 @@
+name: Feature
+description: New capability or improvement
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: request
+    attributes:
+      label: Request
+      description: Problem + proposal + acceptance criteria (keep it short).
+      placeholder: |
+        Problem:
+        Proposal:
+        Acceptance criteria:
+    validations:
+      required: true
