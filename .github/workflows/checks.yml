@@ -10,15 +10,18 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
-  # --- MACHINE 1: The Builder ---
   build:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     container:
       image: rust:1.91.1-bookworm
+      options: --privileged
     steps:
       - uses: actions/checkout@v4
-      
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory '*'
+       
       # 1. Setup Env
       - uses: ./.github/actions/setup-build-env
         with:
@@ -41,7 +44,6 @@ jobs:
             test-integration/target/debug/
           retention-days: 1
 
-  # --- MACHINES 2-12: The Testers (Running in Parallel) ---
   integration_tests:
     needs: build
     runs-on: ubuntu-latest
