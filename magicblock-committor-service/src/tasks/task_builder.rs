@@ -10,6 +10,7 @@ use magicblock_program::magic_scheduled_base_intent::{
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 
+use super::{CommitDiffTask, CommitTask};
 use crate::{
     intent_executor::task_info_fetcher::{
         TaskInfoFetcher, TaskInfoFetcherError,
@@ -20,8 +21,6 @@ use crate::{
         BaseActionTask, BaseTask, FinalizeTask, UndelegateTask,
     },
 };
-
-use super::{CommitDiffTask, CommitTask};
 
 #[async_trait]
 pub trait TasksBuilder {
@@ -43,10 +42,12 @@ pub trait TasksBuilder {
 /// V1: Actions are part of finalize tx
 pub struct TaskBuilderImpl;
 
-// Accounts larger than COMMIT_STATE_SIZE_THRESHOLD, use CommitDiff to
-// reduce instruction size. Below this, commit is sent as CommitState.
-// Chose 256 as thresold seems good enough as it could hold 8 u32 fields
-// or 4 u64 fields.
+// Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
+// reduce instruction size. Below this threshold, the commit is sent
+// as CommitState. The value (256) is chosen because it is sufficient
+// for small accounts, which typically could hold up to 8 u32 fields or
+// 4 u64 fields. These integers are expected to be on the hot path
+// and updated continuously.
 const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 
 impl TaskBuilderImpl {
@@ -78,14 +79,14 @@ impl TaskBuilderImpl {
 
         if let Some(base_account) = base_account {
             ArgsTaskType::CommitDiff(CommitDiffTask {
-                commit_id: commit_id,
+                commit_id,
                 allow_undelegation,
                 committed_account: account,
                 base_account,
             })
         } else {
             ArgsTaskType::Commit(CommitTask {
-                commit_id: commit_id,
+                commit_id,
                 allow_undelegation,
                 committed_account: account,
             })

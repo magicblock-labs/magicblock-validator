@@ -29,6 +29,8 @@ pub(crate) mod task_visitors;
 pub mod utils;
 pub mod visitor;
 
+pub use task_builder::TaskBuilderImpl;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
     Commit,
@@ -301,6 +303,8 @@ pub type BaseTaskResult<T> = Result<T, BaseTaskError>;
 
 #[cfg(test)]
 mod serialization_safety_test {
+    use std::sync::Arc;
+
     use magicblock_program::{
         args::ShortAccountMeta, magic_scheduled_base_intent::ProgramArgs,
     };
@@ -310,7 +314,7 @@ mod serialization_safety_test {
         intent_executor::NullTaskInfoFetcher,
         tasks::{
             args_task::{ArgsTask, ArgsTaskType},
-            buffer_task::{BufferTask, BufferTaskType},
+            buffer_task::BufferTask,
             task_builder::TaskBuilderImpl,
             *,
         },
@@ -382,25 +386,26 @@ mod serialization_safety_test {
     async fn test_buffer_task_instruction_serialization() {
         let validator = Pubkey::new_unique();
 
-        let buffer_task =
-            BufferTask::new_preparation_required(BufferTaskType::Commit(
-                TaskBuilderImpl::create_commit_task(
-                    456,
-                    false,
-                    CommittedAccount {
-                        pubkey: Pubkey::new_unique(),
-                        account: Account {
-                            lamports: 2000,
-                            data: vec![7, 8, 9],
-                            owner: Pubkey::new_unique(),
-                            executable: false,
-                            rent_epoch: 0,
-                        },
+        let buffer_task = BufferTask::new_preparation_required(
+            TaskBuilderImpl::create_commit_task(
+                456,
+                false,
+                CommittedAccount {
+                    pubkey: Pubkey::new_unique(),
+                    account: Account {
+                        lamports: 2000,
+                        data: vec![7, 8, 9],
+                        owner: Pubkey::new_unique(),
+                        executable: false,
+                        rent_epoch: 0,
                     },
-                    &Arc::new(NullTaskInfoFetcher),
-                )
-                .await,
-            ));
+                },
+                &Arc::new(NullTaskInfoFetcher),
+            )
+            .await
+            .task_type
+            .into(),
+        );
         assert_serializable(&buffer_task.instruction(&validator));
     }
 
@@ -410,25 +415,26 @@ mod serialization_safety_test {
         let authority = Pubkey::new_unique();
 
         // Test BufferTask preparation
-        let buffer_task =
-            BufferTask::new_preparation_required(BufferTaskType::Commit(
-                TaskBuilderImpl::create_commit_task(
-                    789,
-                    true,
-                    CommittedAccount {
-                        pubkey: Pubkey::new_unique(),
-                        account: Account {
-                            lamports: 3000,
-                            data: vec![0; 1024], // Larger data to test chunking
-                            owner: Pubkey::new_unique(),
-                            executable: false,
-                            rent_epoch: 0,
-                        },
+        let buffer_task = BufferTask::new_preparation_required(
+            TaskBuilderImpl::create_commit_task(
+                789,
+                true,
+                CommittedAccount {
+                    pubkey: Pubkey::new_unique(),
+                    account: Account {
+                        lamports: 3000,
+                        data: vec![0; 1024], // Larger data to test chunking
+                        owner: Pubkey::new_unique(),
+                        executable: false,
+                        rent_epoch: 0,
                     },
-                    &Arc::new(NullTaskInfoFetcher),
-                )
-                .await,
-            ));
+                },
+                &Arc::new(NullTaskInfoFetcher),
+            )
+            .await
+            .task_type
+            .into(),
+        );
 
         let PreparationState::Required(preparation_task) =
             buffer_task.preparation_state()

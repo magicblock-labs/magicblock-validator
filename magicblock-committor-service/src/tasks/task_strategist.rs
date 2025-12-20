@@ -373,27 +373,30 @@ mod tests {
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, CommittedAccount, ProgramArgs,
     };
+    use magicblock_rpc_client::MagicBlockRpcClientResult;
     use solana_account::Account;
+    use solana_program::system_program;
     use solana_pubkey::Pubkey;
     use solana_system_program::id as system_program_id;
 
     use super::*;
     use crate::{
         intent_execution_manager::intent_scheduler::create_test_intent,
-        intent_executor::task_info_fetcher::NullTaskInfoFetcher,
-        intent_executor::task_info_fetcher::{
-            ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+        intent_executor::{
+            task_info_fetcher::{
+                ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+            },
+            NullTaskInfoFetcher,
         },
         persist::IntentPersisterImpl,
         tasks::{
-            intent_executor::NullTaskInfoFetcher,
-            persist::IntentPersisterImpl,
             task_builder::{TaskBuilderImpl, TasksBuilder},
-            BaseActionTask, CommitTask, TaskStrategy, UndelegateTask,
+            BaseActionTask, TaskStrategy, UndelegateTask,
         },
     };
 
     struct MockInfoFetcher;
+
     #[async_trait::async_trait]
     impl TaskInfoFetcher for MockInfoFetcher {
         async fn fetch_next_commit_ids(
@@ -415,6 +418,13 @@ mod tests {
         }
 
         fn reset(&self, _: ResetType) {}
+
+        async fn get_base_account(
+            &self,
+            _pubkey: &Pubkey,
+        ) -> MagicBlockRpcClientResult<Option<Account>> {
+            Ok(None) // Account Not Found
+        }
     }
 
     // Helper to create a simple commit task
@@ -422,24 +432,22 @@ mod tests {
         commit_id: u64,
         data_size: usize,
     ) -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::Commit(
-            TaskBuilderImpl::create_commit_task(
-                commit_id,
-                false,
-                CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: Account {
-                        lamports: 1000,
-                        data: vec![1; data_size],
-                        owner: system_program::id(),
-                        executable: false,
-                        rent_epoch: 0,
-                    },
+        TaskBuilderImpl::create_commit_task(
+            commit_id,
+            false,
+            CommittedAccount {
+                pubkey: Pubkey::new_unique(),
+                account: Account {
+                    lamports: 1000,
+                    data: vec![1; data_size],
+                    owner: system_program::id(),
+                    executable: false,
+                    rent_epoch: 0,
                 },
-                &Arc::new(NullTaskInfoFetcher),
-            )
-            .await,
-        ))
+            },
+            &Arc::new(NullTaskInfoFetcher),
+        )
+        .await
     }
 
     // Helper to create a Base action task

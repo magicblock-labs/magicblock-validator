@@ -25,13 +25,10 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
-
-use solana_keypair::Keypair;
-use solana_message::VersionedMessage;
-
 #[cfg(any(test, feature = "dev-context-only-utils"))]
 pub use null_task_info_fetcher::*;
-
+use solana_keypair::Keypair;
+use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;

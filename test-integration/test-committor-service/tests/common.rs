@@ -12,9 +12,9 @@ use magicblock_committor_service::{
         task_info_fetcher::{
             ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
         },
-        IntentExecutorImpl, NullTaskInfoFetcher,
+        IntentExecutorImpl,
     },
-    tasks::{CommitTask, TaskBuilderImpl},
+    tasks::CommitTask,
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
@@ -159,12 +159,12 @@ pub fn generate_random_bytes(length: usize) -> Vec<u8> {
 }
 
 #[allow(dead_code)]
-pub async fn create_commit_task(data: &[u8]) -> CommitTask {
+pub fn create_commit_task(data: &[u8]) -> CommitTask {
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
-    TaskBuilderImpl::create_commit_task(
-        COMMIT_ID.fetch_add(1, Ordering::Relaxed),
-        false,
-        CommittedAccount {
+    CommitTask {
+        commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
+        allow_undelegation: false,
+        committed_account: CommittedAccount {
             pubkey: Pubkey::new_unique(),
             account: Account {
                 lamports: 1000,
@@ -174,9 +174,7 @@ pub async fn create_commit_task(data: &[u8]) -> CommitTask {
                 rent_epoch: 0,
             },
         },
-        &Arc::new(NullTaskInfoFetcher),
-    )
-    .await
+    }
 }
 
 #[allow(dead_code)]

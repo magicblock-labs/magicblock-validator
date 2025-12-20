@@ -22,7 +22,7 @@ async fn test_prepare_10kb_buffer() {
     let preparator = fixture.create_delivery_preparator();
 
     let data = generate_random_bytes(10 * 1024);
-    let buffer_task = BufferTaskType::Commit(create_commit_task(&data).await);
+    let buffer_task = BufferTaskType::Commit(create_commit_task(&data));
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![Box::new(BufferTask::new_preparation_required(
             buffer_task,
@@ -88,8 +88,7 @@ async fn test_prepare_multiple_buffers() {
         generate_random_bytes(500 * 1024),
     ];
     let buffer_tasks = join_all(datas.iter().map(|data| async {
-        let task =
-            BufferTaskType::Commit(create_commit_task(data.as_slice()).await);
+        let task = BufferTaskType::Commit(create_commit_task(data.as_slice()));
         Box::new(BufferTask::new_preparation_required(task))
             as Box<dyn BaseTask>
     }))
@@ -165,8 +164,7 @@ async fn test_lookup_tables() {
         generate_random_bytes(30),
     ];
     let tasks = join_all(datas.iter().map(|data| async {
-        let task =
-            ArgsTaskType::Commit(create_commit_task(data.as_slice()).await);
+        let task = ArgsTaskType::Commit(create_commit_task(data.as_slice()));
         Box::<ArgsTask>::new(task.into()) as Box<dyn BaseTask>
     }))
     .await;
@@ -209,7 +207,7 @@ async fn test_already_initialized_error_handled() {
     let preparator = fixture.create_delivery_preparator();
 
     let data = generate_random_bytes(10 * 1024);
-    let mut task = create_commit_task(&data).await;
+    let mut task = create_commit_task(&data);
     let buffer_task = BufferTaskType::Commit(task.clone());
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![Box::new(BufferTask::new_preparation_required(
@@ -298,9 +296,9 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     let buf_b_data = generate_random_bytes(64 * 1024 + 3);
 
     // Keep these around to modify data later (same commit IDs, different data)
-    let mut commit_args = create_commit_task(&args_data).await;
-    let mut commit_a = create_commit_task(&buf_a_data).await;
-    let mut commit_b = create_commit_task(&buf_b_data).await;
+    let mut commit_args = create_commit_task(&args_data);
+    let mut commit_a = create_commit_task(&buf_a_data);
+    let mut commit_b = create_commit_task(&buf_b_data);
 
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![

@@ -4,6 +4,8 @@ use magicblock_metrics::metrics::LabelValue;
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
+#[cfg(any(test, feature = "dev-context-only-utils"))]
+use super::args_task::ArgsTaskType;
 #[cfg(test)]
 use crate::tasks::TaskStrategy;
 use crate::{
@@ -59,6 +61,17 @@ impl BufferTask {
             committed_data,
             chunks,
         })
+    }
+}
+
+#[cfg(any(test, feature = "dev-context-only-utils"))]
+impl From<ArgsTaskType> for BufferTaskType {
+    fn from(value: ArgsTaskType) -> Self {
+        match value {
+            ArgsTaskType::Commit(task) => BufferTaskType::Commit(task),
+            ArgsTaskType::CommitDiff(_) => panic!("BufferTask doesn't support CommitDiff yet. Disable your tests temporarily till the next PR"),
+            _ => unimplemented!("Only commit task can be BufferTask currently. Fix your tests"),
+        }
     }
 }
 
