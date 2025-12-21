@@ -110,6 +110,12 @@ pub fn delegate_account_cpi_instruction(
     );
 
     let delegate_accounts = DelegateAccounts::new(pda, program_id);
+    println!("delegate_accounts: {:#?}", delegate_accounts);
+    println!(
+        "config: {:#?}",
+        dlp::pda::program_config_from_program_id(&crate::ID)
+    );
+
     let delegate_metas = DelegateAccountMetas::from(delegate_accounts);
     let account_metas = vec![
         AccountMeta::new(payer, true),

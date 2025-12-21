@@ -13,8 +13,9 @@ use solana_sdk::{
 };
 
 use crate::utils::instructions::{
-    init_account_and_delegate_ixs, init_validator_fees_vault_ix,
-    InitAccountAndDelegateIxs,
+    init_account_and_delegate_ixs, init_order_book_account_and_delegate_ixs,
+    init_validator_fees_vault_ix, InitAccountAndDelegateIxs,
+    InitOrderBookAndDelegateIxs,
 };
 
 #[macro_export]
@@ -134,6 +135,7 @@ pub async fn tx_logs_contain(
 }
 
 /// This needs to be run for each test that required a new counter to be delegated
+#[allow(dead_code)]
 pub async fn init_and_delegate_account_on_chain(
     counter_auth: &Keypair,
     bytes: u64,
@@ -231,6 +233,70 @@ pub async fn init_and_delegate_account_on_chain(
     let pda_acc = get_account!(rpc_client, pda, "pda");
 
     (pda, pda_acc)
+}
+
+/// This needs to be run for each test that required a new counter to be delegated
+#[allow(dead_code)]
+pub async fn init_and_delegate_order_book_on_chain(
+    payer: &Keypair,
+) -> (Pubkey, Account) {
+    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+
+    rpc_client
+        .request_airdrop(&payer.pubkey(), 777 * LAMPORTS_PER_SOL)
+        .await
+        .unwrap();
+    debug!("Airdropped to counter auth: {} SOL", 777 * LAMPORTS_PER_SOL);
+
+    let InitOrderBookAndDelegateIxs {
+        init,
+        delegate,
+        book_manager,
+        order_book,
+    } = init_order_book_account_and_delegate_ixs(payer.pubkey());
+
+    let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
+
+    //  Init account
+    rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &Transaction::new_signed_with_payer(
+                &[init],
+                Some(&payer.pubkey()),
+                &[payer, &book_manager],
+                latest_block_hash,
+            ),
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to init account");
+
+    // Delegate account
+    rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &Transaction::new_signed_with_payer(
+                &[delegate],
+                Some(&payer.pubkey()),
+                &[&payer],
+                latest_block_hash,
+            ),
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to delegate");
+    // debug!("Delegated account: {:?}", pda);
+
+    let order_book_acc = get_account!(rpc_client, order_book, "order_book");
+
+    (order_book, order_book_acc)
 }
 
 /// This needs to be run once for all tests

@@ -57,6 +57,8 @@ impl TaskBuilderImpl {
         account: CommittedAccount,
         task_info_fetcher: &Arc<C>,
     ) -> ArgsTask {
+        log::warn!("create_commit_task entered");
+
         let base_account = if account.account.data.len()
             > COMMIT_STATE_SIZE_THRESHOLD
         {
@@ -78,6 +80,11 @@ impl TaskBuilderImpl {
         };
 
         if let Some(base_account) = base_account {
+            log::warn!(
+                "create_commit_task: base_account: {:#?}, {:#?}",
+                base_account,
+                account.account
+            );
             ArgsTaskType::CommitDiff(CommitDiffTask {
                 commit_id,
                 allow_undelegation,
@@ -85,6 +92,7 @@ impl TaskBuilderImpl {
                 base_account,
             })
         } else {
+            log::warn!("create_commit_task: {:#?}", account.account);
             ArgsTaskType::Commit(CommitTask {
                 commit_id,
                 allow_undelegation,

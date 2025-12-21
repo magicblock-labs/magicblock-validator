@@ -108,7 +108,7 @@ pub struct CommitTask {
     pub committed_account: CommittedAccount,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CommitDiffTask {
     pub commit_id: u64,
     pub allow_undelegation: bool,

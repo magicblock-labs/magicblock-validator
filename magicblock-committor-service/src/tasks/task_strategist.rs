@@ -289,6 +289,12 @@ impl TaskStrategist {
 
         // Get initial transaction size
         let mut current_tx_length = calculate_tx_length(tasks)?;
+        log::info!(
+            "optimze initial size: {} / limit {}",
+            current_tx_length,
+            MAX_ENCODED_TRANSACTION_SIZE
+        );
+
         if current_tx_length <= MAX_ENCODED_TRANSACTION_SIZE {
             return Ok(current_tx_length);
         }
@@ -340,6 +346,11 @@ impl TaskStrategist {
                     let new_ix_size =
                         usize::try_from(new_ix_size).unwrap_or(usize::MAX);
                     current_tx_length = calculate_tx_length(tasks)?;
+                    log::info!(
+                        "optimze updated size: {} / limit {}",
+                        current_tx_length,
+                        MAX_ENCODED_TRANSACTION_SIZE
+                    );
                     map.push((new_ix_size, index));
                 }
                 // That means el-t can't be optimized further
