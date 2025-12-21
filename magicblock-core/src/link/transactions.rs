@@ -56,6 +56,7 @@ pub type TxnReplayResultTx = oneshot::Sender<TransactionResult>;
 /// Contains the final, committed status of an executed
 /// transaction, including its result and metadata.
 /// This is the message type that is communicated to subscribers via event processors.
+#[derive(Debug)]
 pub struct TransactionStatus {
     pub slot: Slot,
     pub txn: SanitizedTransaction,

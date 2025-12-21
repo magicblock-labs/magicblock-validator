@@ -53,6 +53,7 @@ fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
 
 mod event_processor {
     use magicblock_config::config::ApertureConfig;
+    use magicblock_config::consts::DEFAULT_LEDGER_BLOCK_TIME_MS;
 
     use super::*;
     use crate::state::NodeContext;
@@ -64,8 +65,8 @@ mod event_processor {
         let env = ExecutionTestEnv::new();
         env.advance_slot();
         let node_context = NodeContext {
-            identity: env.payer.pubkey(),
-            blocktime: 50,
+            identity: env.get_payer().pubkey,
+            blocktime: DEFAULT_LEDGER_BLOCK_TIME_MS,
             ..Default::default()
         };
         let state = SharedState::new(

@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::{
     config::LifecycleMode,
-    types::{BindAddress, RemoteCluster, SerdeKeypair},
+    types::{network::Remote, BindAddress, SerdeKeypair},
 };
 
 /// CLI Arguments mirroring the structure of ValidatorParams.
@@ -16,10 +16,22 @@ pub struct CliParams {
     /// Path to the TOML configuration file.
     pub config: Option<PathBuf>,
 
-    /// Remote Solana cluster URL or a predefined alias.
-    #[arg(long, short)]
+    /// List of remote endpoints for syncing with the base chain.
+    /// Can be specified multiple times.
+    ///
+    /// SUPPORTED SCHEMES: http(s), ws(s), grpc(s)
+    ///
+    /// ALIASES: mainnet, devnet, testnet, localhost
+    ///
+    /// EXAMPLES:
+    /// - `--remote devnet`
+    /// - `--remote wss://devnet.solana.com`
+    /// - `--remote grpcs://grpc.example.com`
+    ///
+    /// DEFAULT: devnet (HTTP endpoint with auto-added WS endpoint)
+    #[arg(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub remote: Option<RemoteCluster>,
+    pub remotes: Option<Vec<Remote>>,
 
     /// The application's operational mode.
     #[arg(long)]
@@ -40,9 +52,12 @@ pub struct CliParams {
     #[command(flatten)]
     pub validator: CliValidatorConfig,
 
-    /// Aperture-specific arguments.
+    /// Aperture-specific arguments
     #[command(flatten)]
     pub aperture: CliApertureConfig,
+    /// Ledger-specific arguments.
+    #[command(flatten)]
+    pub ledger: CliLedgerConfig,
 }
 
 /// CLI analog of configuration for the validator's core behavior and identity.
@@ -73,4 +88,16 @@ pub struct CliApertureConfig {
     #[arg(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_processors: Option<usize>,
+}
+
+#[derive(Args, Serialize, Debug, Default)]
+pub struct CliLedgerConfig {
+    /// Reset the ledger on startup (wipe existing ledger database).
+    #[arg(long)]
+    #[serde(skip_serializing_if = "is_false")]
+    pub reset: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
