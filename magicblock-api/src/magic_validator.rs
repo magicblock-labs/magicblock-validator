@@ -337,7 +337,7 @@ impl MagicValidator {
             config.validator.keypair.insecure_clone(),
             committor_persist_path,
             ChainConfig {
-                rpc_uri: config.rpc_url_or_default(),
+                rpc_uri: config.rpc_url().to_owned(),
                 commitment: CommitmentConfig::confirmed(),
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
@@ -524,7 +524,7 @@ impl MagicValidator {
         });
 
         DomainRegistryManager::handle_registration_static(
-            self.config.rpc_url_or_default(),
+            self.config.rpc_url(),
             &validator_keypair,
             validator_info,
         )
@@ -537,7 +537,7 @@ impl MagicValidator {
         let validator_keypair = validator_authority();
 
         DomainRegistryManager::handle_unregistration_static(
-            self.config.rpc_url_or_default(),
+            self.config.rpc_url(),
             &validator_keypair,
         )
         .map_err(|err| {
@@ -550,7 +550,7 @@ impl MagicValidator {
         const MIN_BALANCE_SOL: u64 = 5;
 
         let lamports = RpcClient::new_with_commitment(
-            self.config.rpc_url_or_default(),
+            self.config.rpc_url().to_owned(),
             CommitmentConfig::confirmed(),
         )
         .get_balance(&self.identity)
@@ -597,7 +597,7 @@ impl MagicValidator {
             .map(|co| co.claim_fees_frequency)
         {
             self.claim_fees_task
-                .start(frequency, self.config.rpc_url_or_default());
+                .start(frequency, self.config.rpc_url().to_owned());
         }
 
         self.slot_ticker = Some(init_slot_ticker(
@@ -697,6 +697,9 @@ impl MagicValidator {
         self.ledger_truncator.stop();
         // Calls & awaits until manual compaction is canceled
         self.ledger.cancel_manual_compactions();
+        if let Err(err) = self.ledger.flush() {
+            error!("Failed to flush during shutdown preparation: {:?}", err);
+        }
     }
 }
 

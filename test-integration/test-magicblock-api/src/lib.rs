@@ -52,7 +52,6 @@ pub fn start_magicblock_validator_with_config(
         &test_paths,
         "EPHEM",
         loaded_accounts,
-        true,
     ) {
         Some(validator) => validator,
         None => {

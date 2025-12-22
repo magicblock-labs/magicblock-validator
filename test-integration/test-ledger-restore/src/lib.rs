@@ -1,4 +1,6 @@
-use std::{path::Path, process::Child, thread::sleep, time::Duration};
+use std::{
+    path::Path, process::Child, str::FromStr, thread::sleep, time::Duration,
+};
 
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{
@@ -18,7 +20,7 @@ use magicblock_config::{
         LifecycleMode, LoadableProgram,
     },
     consts::DEFAULT_LEDGER_BLOCK_TIME_MS,
-    types::{crypto::SerdePubkey, RemoteConfig, RemoteKind, StorageDirectory},
+    types::{crypto::SerdePubkey, network::Remote, StorageDirectory},
     ValidatorParams,
 };
 use program_flexi_counter::{
@@ -146,16 +148,8 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
         task_scheduler: TaskSchedulerConfig { reset: true },
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
-            RemoteConfig {
-                kind: RemoteKind::Rpc,
-                url: IntegrationTestContext::url_chain().to_string(),
-                api_key: None,
-            },
-            RemoteConfig {
-                kind: RemoteKind::Websocket,
-                url: IntegrationTestContext::ws_url_chain().to_string(),
-                api_key: None,
-            },
+            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
+            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
         ],
         storage: StorageDirectory(ledger_path.to_path_buf()),
         ..Default::default()
