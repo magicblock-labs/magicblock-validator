@@ -303,33 +303,28 @@ pub type BaseTaskResult<T> = Result<T, BaseTaskError>;
 
 #[cfg(test)]
 mod serialization_safety_test {
-    use std::sync::Arc;
 
     use magicblock_program::{
         args::ShortAccountMeta, magic_scheduled_base_intent::ProgramArgs,
     };
     use solana_account::Account;
 
-    use crate::{
-        intent_executor::NullTaskInfoFetcher,
-        tasks::{
-            args_task::{ArgsTask, ArgsTaskType},
-            buffer_task::BufferTask,
-            task_builder::TaskBuilderImpl,
-            *,
-        },
+    use crate::tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
+        buffer_task::{BufferTask, BufferTaskType},
+        *,
     };
 
     // Test all ArgsTask variants
-    #[tokio::test]
-    async fn test_args_task_instruction_serialization() {
+    #[test]
+    fn test_args_task_instruction_serialization() {
         let validator = Pubkey::new_unique();
 
         // Test Commit variant
-        let commit_task: ArgsTask = TaskBuilderImpl::create_commit_task(
-            123,
-            true,
-            CommittedAccount {
+        let commit_task: ArgsTask = ArgsTaskType::Commit(CommitTask {
+            commit_id: 123,
+            allow_undelegation: true,
+            committed_account: CommittedAccount {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
                     lamports: 1000,
@@ -339,9 +334,8 @@ mod serialization_safety_test {
                     rent_epoch: 0,
                 },
             },
-            &Arc::new(NullTaskInfoFetcher),
-        )
-        .await;
+        })
+        .into();
         assert_serializable(&commit_task.instruction(&validator));
 
         // Test Finalize variant
@@ -382,15 +376,15 @@ mod serialization_safety_test {
     }
 
     // Test BufferTask variants
-    #[tokio::test]
-    async fn test_buffer_task_instruction_serialization() {
+    #[test]
+    fn test_buffer_task_instruction_serialization() {
         let validator = Pubkey::new_unique();
 
         let buffer_task = BufferTask::new_preparation_required(
-            TaskBuilderImpl::create_commit_task(
-                456,
-                false,
-                CommittedAccount {
+            BufferTaskType::Commit(CommitTask {
+                commit_id: 456,
+                allow_undelegation: false,
+                committed_account: CommittedAccount {
                     pubkey: Pubkey::new_unique(),
                     account: Account {
                         lamports: 2000,
@@ -400,26 +394,22 @@ mod serialization_safety_test {
                         rent_epoch: 0,
                     },
                 },
-                &Arc::new(NullTaskInfoFetcher),
-            )
-            .await
-            .task_type
-            .into(),
+            }),
         );
         assert_serializable(&buffer_task.instruction(&validator));
     }
 
     // Test preparation instructions
-    #[tokio::test]
-    async fn test_preparation_instructions_serialization() {
+    #[test]
+    fn test_preparation_instructions_serialization() {
         let authority = Pubkey::new_unique();
 
         // Test BufferTask preparation
         let buffer_task = BufferTask::new_preparation_required(
-            TaskBuilderImpl::create_commit_task(
-                789,
-                true,
-                CommittedAccount {
+            BufferTaskType::Commit(CommitTask {
+                commit_id: 789,
+                allow_undelegation: true,
+                committed_account: CommittedAccount {
                     pubkey: Pubkey::new_unique(),
                     account: Account {
                         lamports: 3000,
@@ -429,11 +419,7 @@ mod serialization_safety_test {
                         rent_epoch: 0,
                     },
                 },
-                &Arc::new(NullTaskInfoFetcher),
-            )
-            .await
-            .task_type
-            .into(),
+            }),
         );
 
         let PreparationState::Required(preparation_task) =

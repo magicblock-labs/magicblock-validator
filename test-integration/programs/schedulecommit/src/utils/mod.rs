@@ -50,7 +50,7 @@ pub struct AllocateAndAssignAccountArgs<'a, 'b> {
     pub payer_info: &'a AccountInfo<'a>,
     pub account_info: &'a AccountInfo<'a>,
     pub owner: &'a Pubkey,
-    pub size: u64,
+    pub size: usize,
     pub signer_seeds: &'b [&'b [u8]],
 }
 
@@ -68,7 +68,7 @@ pub fn allocate_account_and_assign_owner(
     } = args;
 
     let required_lamports = rent
-        .minimum_balance(size as usize)
+        .minimum_balance(size)
         .max(1)
         .saturating_sub(account_info.lamports());
 
@@ -87,7 +87,10 @@ pub fn allocate_account_and_assign_owner(
     //    At this point the account is still owned by the system program
     msg!("  create_account() allocate space");
     invoke_signed(
-        &system_instruction::allocate(account_info.key, size),
+        &system_instruction::allocate(
+            account_info.key,
+            size.try_into().unwrap(),
+        ),
         // 0. `[WRITE, SIGNER]` New account
         std::slice::from_ref(account_info),
         &[signer_seeds],

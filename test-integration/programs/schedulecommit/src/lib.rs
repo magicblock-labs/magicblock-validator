@@ -230,7 +230,7 @@ pub struct MainAccount {
 }
 
 impl MainAccount {
-    pub const SIZE: u64 = std::mem::size_of::<Self>() as u64;
+    pub const SIZE: usize = std::mem::size_of::<Self>();
 
     pub fn try_decode(data: &[u8]) -> std::io::Result<Self> {
         Self::try_from_slice(data)
@@ -821,7 +821,7 @@ fn process_undelegate_request(
 
     {
         let mut data = delegated_account.try_borrow_mut_data()?;
-        match data.len() as u64 {
+        match data.len() {
             MainAccount::SIZE => match MainAccount::try_from_slice(&data) {
                 Ok(counter) => {
                     msg!("counter: {:?}", counter);

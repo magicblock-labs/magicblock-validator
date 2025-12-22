@@ -11,7 +11,7 @@ use program_schedulecommit::{
         schedule_commit_and_undelegate_cpi_twice,
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
         schedule_commit_diff_instruction_for_order_book, set_count_instruction,
-        update_order_book_instruction,
+        update_order_book_instruction, UserSeeds,
     },
     BookUpdate, OrderLevel, FAIL_UNDELEGATION_COUNT,
 };
@@ -53,8 +53,10 @@ fn commit_and_undelegate_one_account(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx =
-        get_context_with_delegated_committees(1, b"magic_schedule_commit");
+    let ctx = get_context_with_delegated_committees(
+        1,
+        UserSeeds::MagicScheduleCommit,
+    );
     let ScheduleCommitTestContextFields {
         payer_ephem: payer,
         committees,
@@ -115,7 +117,7 @@ fn commit_and_undelegate_order_book_account(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(1, b"order_book");
+    let ctx = get_context_with_delegated_committees(1, UserSeeds::OrderBook);
     let ScheduleCommitTestContextFields {
         payer_ephem,
         committees,
@@ -158,7 +160,7 @@ fn commit_and_undelegate_order_book_account(
                 ..Default::default()
             },
         );
-    println!("txhash (scheduled_commit): {:?}", tx_res);
+    debug!("txhash (scheduled_commit): {:?}", tx_res);
 
     debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
     (ctx, *sig, tx_res)
@@ -171,8 +173,10 @@ fn commit_and_undelegate_two_accounts(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx =
-        get_context_with_delegated_committees(2, b"magic_schedule_commit");
+    let ctx = get_context_with_delegated_committees(
+        2,
+        UserSeeds::MagicScheduleCommit,
+    );
     let ScheduleCommitTestContextFields {
         payer_ephem: payer,
         committees,
@@ -232,8 +236,10 @@ fn commit_and_undelegate_two_accounts_twice() -> (
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx =
-        get_context_with_delegated_committees(2, b"magic_schedule_commit");
+    let ctx = get_context_with_delegated_committees(
+        2,
+        UserSeeds::MagicScheduleCommit,
+    );
     let ScheduleCommitTestContextFields {
         payer_ephem: payer,
         committees,
@@ -315,12 +321,6 @@ fn test_committing_and_undelegating_huge_order_book_account() {
                     size: random.gen_range(1..10),
                 }
             }));
-            println!(
-                "BookUpdate: total = {}, bids = {}, asks = {}",
-                update.bids.len() + update.asks.len(),
-                update.bids.len(),
-                update.asks.len()
-            );
             (rng_seed, update)
         };
         let (ctx, sig, tx_res) =
@@ -738,8 +738,10 @@ fn test_committing_and_undelegating_two_accounts_twice() {
 #[test]
 fn test_committing_after_failed_undelegation() {
     run_test!({
-        let ctx =
-            get_context_with_delegated_committees(1, b"magic_schedule_commit");
+        let ctx = get_context_with_delegated_committees(
+            1,
+            UserSeeds::MagicScheduleCommit,
+        );
         let ScheduleCommitTestContextFields {
             payer_ephem: payer,
             committees,

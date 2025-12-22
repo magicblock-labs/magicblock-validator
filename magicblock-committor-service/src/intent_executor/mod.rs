@@ -6,7 +6,7 @@ pub mod two_stage_executor;
 
 use std::{mem, ops::ControlFlow, sync::Arc, time::Duration};
 
-#[cfg(any(test, feature = "dev-context-only-utils"))]
+#[cfg(test)]
 mod null_task_info_fetcher;
 
 use async_trait::async_trait;
@@ -25,7 +25,7 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
-#[cfg(any(test, feature = "dev-context-only-utils"))]
+#[cfg(test)]
 pub use null_task_info_fetcher::*;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;

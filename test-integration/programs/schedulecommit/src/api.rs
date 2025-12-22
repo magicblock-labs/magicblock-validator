@@ -13,6 +13,21 @@ use crate::{
     ScheduleCommitInstruction,
 };
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum UserSeeds {
+    MagicScheduleCommit,
+    OrderBook,
+}
+
+impl UserSeeds {
+    pub fn bytes(&self) -> &'static [u8] {
+        match self {
+            UserSeeds::MagicScheduleCommit => b"magic_schedule_commit",
+            UserSeeds::OrderBook => b"order_book",
+        }
+    }
+}
+
 pub fn init_account_instruction(
     payer: Pubkey,
     player: Pubkey,
@@ -101,20 +116,15 @@ pub fn delegate_account_cpi_instruction(
     payer: Pubkey,
     validator: Option<Pubkey>,
     player_or_book_manager: Pubkey,
-    user_seed: &[u8],
+    user_seed: UserSeeds,
 ) -> Instruction {
     let program_id = crate::id();
     let (pda, _) = Pubkey::find_program_address(
-        &[user_seed, player_or_book_manager.as_ref()],
+        &[user_seed.bytes(), player_or_book_manager.as_ref()],
         &crate::ID,
     );
 
     let delegate_accounts = DelegateAccounts::new(pda, program_id);
-    println!("delegate_accounts: {:#?}", delegate_accounts);
-    println!(
-        "config: {:#?}",
-        dlp::pda::program_config_from_program_id(&crate::ID)
-    );
 
     let delegate_metas = DelegateAccountMetas::from(delegate_accounts);
     let account_metas = vec![
@@ -130,21 +140,24 @@ pub fn delegate_account_cpi_instruction(
 
     Instruction::new_with_borsh(
         program_id,
-        &if user_seed == b"magic_schedule_commit" {
-            ScheduleCommitInstruction::DelegateCpi(DelegateCpiArgs {
-                valid_until: i64::MAX,
-                commit_frequency_ms: 1_000_000_000,
-                player: player_or_book_manager,
-                validator,
-            })
-        } else {
-            ScheduleCommitInstruction::DelegateOrderBook(
-                DelegateOrderBookArgs {
+        &match user_seed {
+            UserSeeds::MagicScheduleCommit => {
+                ScheduleCommitInstruction::DelegateCpi(DelegateCpiArgs {
+                    valid_until: i64::MAX,
                     commit_frequency_ms: 1_000_000_000,
-                    book_manager: player_or_book_manager,
+                    player: player_or_book_manager,
                     validator,
-                },
-            )
+                })
+            }
+            UserSeeds::OrderBook => {
+                ScheduleCommitInstruction::DelegateOrderBook(
+                    DelegateOrderBookArgs {
+                        commit_frequency_ms: 1_000_000_000,
+                        book_manager: player_or_book_manager,
+                        validator,
+                    },
+                )
+            }
         },
         account_metas,
     )

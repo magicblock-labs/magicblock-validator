@@ -1,6 +1,6 @@
 use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
 use integration_test_tools::scheduled_commits::ScheduledCommitResult;
-use program_schedulecommit::MainAccount;
+use program_schedulecommit::{api::UserSeeds, MainAccount};
 use schedulecommit_client::ScheduleCommitTestContext;
 use solana_rpc_client_api::client_error;
 use solana_sdk::{
@@ -15,7 +15,7 @@ use solana_sdk::{
 // -----------------
 pub fn get_context_with_delegated_committees(
     ncommittees: usize,
-    user_seed: &[u8],
+    user_seed: UserSeeds,
 ) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
         ScheduleCommitTestContext::try_new(ncommittees, user_seed)

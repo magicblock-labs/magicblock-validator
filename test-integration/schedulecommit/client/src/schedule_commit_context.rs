@@ -5,7 +5,7 @@ use integration_test_tools::IntegrationTestContext;
 use log::*;
 use program_schedulecommit::api::{
     delegate_account_cpi_instruction, init_account_instruction,
-    init_order_book_instruction, init_payer_escrow,
+    init_order_book_instruction, init_payer_escrow, UserSeeds,
 };
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -31,7 +31,7 @@ pub struct ScheduleCommitTestContext {
     pub payer_ephem: Keypair,
     // The Payer keypairs along with its PDA pubkey which we'll commit
     pub committees: Vec<(Keypair, Pubkey)>,
-    user_seed: Vec<u8>,
+    user_seed: UserSeeds,
 
     common_ctx: IntegrationTestContext,
 }
@@ -65,18 +65,18 @@ impl ScheduleCommitTestContext {
     // -----------------
     pub fn try_new_random_keys(
         ncommittees: usize,
-        user_seed: &[u8],
+        user_seed: UserSeeds,
     ) -> Result<Self> {
         Self::try_new_internal(ncommittees, true, user_seed)
     }
-    pub fn try_new(ncommittees: usize, user_seed: &[u8]) -> Result<Self> {
+    pub fn try_new(ncommittees: usize, user_seed: UserSeeds) -> Result<Self> {
         Self::try_new_internal(ncommittees, false, user_seed)
     }
 
     fn try_new_internal(
         ncommittees: usize,
         random_keys: bool,
-        user_seed: &[u8],
+        user_seed: UserSeeds,
     ) -> Result<Self> {
         let ictx = IntegrationTestContext::try_new()?;
 
@@ -113,7 +113,7 @@ impl ScheduleCommitTestContext {
                 )
                 .unwrap();
                 let (pda, _bump) = Pubkey::find_program_address(
-                    &[user_seed, payer_ephem.pubkey().as_ref()],
+                    &[user_seed.bytes(), payer_ephem.pubkey().as_ref()],
                     &program_schedulecommit::ID,
                 );
                 (payer_ephem, pda)
@@ -155,7 +155,7 @@ impl ScheduleCommitTestContext {
             payer_ephem,
             committees,
             common_ctx: ictx,
-            user_seed: user_seed.to_vec(),
+            user_seed,
         })
     }
 
@@ -167,8 +167,8 @@ impl ScheduleCommitTestContext {
             ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
             ComputeBudgetInstruction::set_compute_unit_price(10_000),
         ];
-        match self.user_seed.as_slice() {
-            b"magic_schedule_commit" => {
+        match self.user_seed {
+            UserSeeds::MagicScheduleCommit => {
                 ixs.extend(self.committees.iter().map(
                     |(player, committee)| {
                         init_account_instruction(
@@ -179,7 +179,7 @@ impl ScheduleCommitTestContext {
                     },
                 ));
             }
-            b"order_book" => {
+            UserSeeds::OrderBook => {
                 ixs.extend(self.committees.iter().map(
                     |(book_manager, committee)| {
                         init_order_book_instruction(
@@ -204,9 +204,6 @@ impl ScheduleCommitTestContext {
                 //         )]
                 //     },
                 // ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!("Unsupported user_seed: {:?} ; expected b\"magic_schedule_commit\" or b\"order_book\"", self.user_seed));
             }
         };
 
@@ -272,7 +269,7 @@ impl ScheduleCommitTestContext {
                 self.payer_chain.pubkey(),
                 self.ephem_validator_identity,
                 player.pubkey(),
-                &self.user_seed,
+                self.user_seed,
             );
             ixs.push(ix);
         }

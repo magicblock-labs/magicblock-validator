@@ -82,7 +82,7 @@ pub fn init_order_book_account_and_delegate_ixs(
         payer,
         None,
         book_manager.pubkey(),
-        b"order_book",
+        api::UserSeeds::OrderBook,
     );
 
     InitOrderBookAndDelegateIxs {
