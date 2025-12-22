@@ -41,9 +41,7 @@ impl FromStr for Remote {
         let mut s = s.to_owned();
         let is_grpc = s.starts_with("grpc");
         if is_grpc {
-            // SAFETY:
-            // We made sure that "grpc" is the prefix and we are not violating Unicode invariants
-            unsafe { s.as_bytes_mut()[0..4].copy_from_slice(b"http") };
+            s.replace_range(0..4, "http");
         }
 
         let parsed = ResolvedUrl::from_str(&s)?;
