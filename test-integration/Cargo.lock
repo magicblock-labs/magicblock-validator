@@ -3355,6 +3355,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util 0.7.15",
+ "url",
 ]
 
 [[package]]

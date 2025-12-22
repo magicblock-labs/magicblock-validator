@@ -1,7 +1,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     num::NonZeroUsize,
-    ops::Deref,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -45,6 +44,7 @@ pub mod chain_pubsub_client;
 pub mod chain_rpc_client;
 pub mod chain_updates_client;
 pub mod config;
+pub mod endpoint;
 pub mod errors;
 mod lru_cache;
 pub mod program_account;
@@ -70,6 +70,7 @@ use crate::{
     },
     submux::SubMuxClient,
 };
+pub use endpoint::{Endpoint, Endpoints};
 
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 
@@ -140,112 +141,6 @@ impl Default for MatchSlotsConfig {
             retry_interval_ms: 50,
             min_context_slot: None,
         }
-    }
-}
-
-use magicblock_config::types::network::Remote;
-
-#[derive(Debug, Clone)]
-pub enum Endpoint {
-    Rpc { url: String },
-    WebSocket { url: String },
-    Grpc { url: String, api_key: String },
-}
-
-impl Endpoints {
-    /// Returns the URL of the first RPC endpoint found in the provided
-    /// slice. If no RPC endpoint is found, returns None.
-    pub fn rpc_url(&self) -> Option<String> {
-        self.iter().find_map(|ep| {
-            if let Endpoint::Rpc { url } = ep {
-                Some(url.clone())
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn pubsubs(&self) -> Vec<&Endpoint> {
-        self.iter()
-            .filter(|ep| {
-                matches!(ep, Endpoint::WebSocket { .. } | Endpoint::Grpc { .. })
-            })
-            .collect()
-    }
-}
-
-impl TryFrom<&[Remote]> for Endpoints {
-    type Error = RemoteAccountProviderError;
-
-    fn try_from(configs: &[Remote]) -> Result<Self, Self::Error> {
-        let mut endpoints = Vec::with_capacity(configs.len());
-        for config in configs {
-            let endpoint = Endpoint::try_from(config)?;
-            endpoints.push(endpoint);
-        }
-        Ok(Endpoints(endpoints))
-    }
-}
-
-impl TryFrom<&Remote> for Endpoint {
-    type Error = RemoteAccountProviderError;
-
-    fn try_from(config: &Remote) -> Result<Self, Self::Error> {
-        match config {
-            Remote::Http(url) => Ok(Endpoint::Rpc {
-                url: url.to_string(),
-            }),
-            Remote::Websocket(url) => Ok(Endpoint::WebSocket {
-                url: url.to_string(),
-            }),
-            Remote::Grpc(url) => {
-                /*
-                let api_key = config.api_key.clone().ok_or_else(|| {
-                    RemoteAccountProviderError::MissingApiKey(format!(
-                        "gRPC endpoint requires api_key: {}",
-                        config.url
-                    ))
-                })?;
-                */
-                Ok(Endpoint::Grpc {
-                    url: url.to_string(),
-                    // TODO: @@@ parse API key
-                    api_key: "None".to_string(),
-                })
-            }
-        }
-    }
-}
-
-/// Wrapper around a vector of Endpoints with at least one RPC and one
-/// websocket/grpc endpoint guaranteed.
-/// Previously this was enforced at construction time but now we rely on
-/// the config validation to ensure this.
-/// However in order to allow for future extensions we keep this type.
-#[derive(Debug)]
-pub struct Endpoints(Vec<Endpoint>);
-impl Deref for Endpoints {
-    type Target = Vec<Endpoint>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<'a> IntoIterator for &'a Endpoints {
-    type Item = &'a Endpoint;
-    type IntoIter = std::slice::Iter<'a, Endpoint>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
-    }
-}
-
-impl From<&[Endpoint]> for Endpoints {
-    fn from(endpoints: &[Endpoint]) -> Self {
-        // NOTE: here we assume that at least an RPC and a websocket endpoint
-        // were provided which is verified on the config level.
-        // See magicblock-config/src/lib.rs ensure_http and ensure_websocket
-        Endpoints(endpoints.to_vec())
     }
 }
 
