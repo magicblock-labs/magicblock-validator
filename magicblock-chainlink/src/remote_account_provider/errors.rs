@@ -41,12 +41,6 @@ pub enum RemoteAccountProviderError {
     #[error("Unsupported gRPC endpoint: {0}. Only Helius Laser endpoints are supported.")]
     UnsupportedGrpcEndpoint(String),
 
-    #[error("You supplied gRPC endpoint(s) ({0}), and in that case need to also supply at least one WebSocket endpoint.")]
-    NeedWebsocketWhenSupplyingGrpc(String),
-
-    #[error("You supplied only non-default RPC endpoint(s) ({0}), and in that case need to also supply at least one WebSocket endpoint.")]
-    NeedWebsocketWhenNotSupplyingDefaultRpc(String),
-
     #[error("Invalid pubsub endpoint: {0}")]
     InvalidPubsubEndpoint(String),
 
