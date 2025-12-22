@@ -30,12 +30,15 @@ pub(crate) fn is_noop_system_transfer(tx: &SanitizedTransaction) -> bool {
     let message = tx.message();
 
     // Early exit: Must have exactly 1 instruction
-    let instructions = message.program_instructions_iter().collect::<Vec<_>>();
-    if instructions.len() != 1 {
+    let mut instructions = message.program_instructions_iter();
+    let Some(first) = instructions.next() else {
+        return false;
+    };
+    if instructions.next().is_some() {
         return false;
     }
 
-    let (program_id, instruction) = instructions[0];
+    let (program_id, instruction) = first;
 
     // Check if this is the system program instruction
     // Performance: This is a single Pubkey comparison (32 bytes)
