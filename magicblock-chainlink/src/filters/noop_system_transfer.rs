@@ -80,7 +80,6 @@ pub(crate) fn is_noop_system_transfer(tx: &SanitizedTransaction) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use solana_instruction::{AccountMeta, Instruction};
     use solana_keypair::Keypair;
     use solana_message::Message;
@@ -88,6 +87,8 @@ mod tests {
     use solana_signer::Signer;
     use solana_system_interface::instruction as system_instruction;
     use solana_transaction::Transaction;
+
+    use super::*;
 
     #[test]
     fn test_single_self_transfer() {
