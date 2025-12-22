@@ -9,6 +9,7 @@ use std::{
 
 use futures_util::stream::FuturesUnordered;
 use log::*;
+use magicblock_metrics::metrics::inc_program_subscription_account_updates;
 use solana_account_decoder_client_types::{UiAccount, UiAccountEncoding};
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -609,18 +610,21 @@ impl ChainPubsubActor {
                             if let Ok(acc_pubkey) = acc_pubkey {
                                 if subs.lock().expect("subscriptions lock poisoned").contains_key(&acc_pubkey) {
                                     let sub_update = SubscriptionUpdate {
-                                        pubkey: acc_pubkey,
-                                        rpc_response: RpcResponse {
-                                            context: rpc_response.context,
-                                            value: rpc_response.value.account,
-                                        },
-                                    };
-                                    trace!("[client_id={client_id}] Sending program {program_pubkey} account update: {sub_update:?}");
-                                    let _ = subscription_updates_sender.send(sub_update)
-                                        .await
-                                        .inspect_err(|err| {
-                                            error!("[client_id={client_id}] Failed to send {acc_pubkey} subscription update: {err:?}");
-                                        });
+                                         pubkey: acc_pubkey,
+                                         rpc_response: RpcResponse {
+                                             context: rpc_response.context,
+                                             value: rpc_response.value.account,
+                                         },
+                                     };
+                                     trace!("[client_id={client_id}] Sending program {program_pubkey} account update: {sub_update:?}");
+                                     inc_program_subscription_account_updates(
+                                         &client_id.to_string(),
+                                     );
+                                     let _ = subscription_updates_sender.send(sub_update)
+                                         .await
+                                         .inspect_err(|err| {
+                                             error!("[client_id={client_id}] Failed to send {acc_pubkey} subscription update: {err:?}");
+                                         });
                                 }
                             }
                         } else {
