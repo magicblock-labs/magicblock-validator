@@ -163,10 +163,10 @@ pub fn init_system_metrics_ticker(
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(tick_duration) => {
-                    try_set_ledger_storage_size(&ledger);
-                    set_accounts_storage_size(&bank);
-                    metrics::observe_columns_count_duration(|| try_set_ledger_counts(&ledger));
-                    set_accounts_count(&bank);
+                    // try_set_ledger_storage_size(&ledger);
+                    // set_accounts_storage_size(&bank);
+                    // metrics::observe_columns_count_duration(|| try_set_ledger_counts(&ledger));
+                    // set_accounts_count(&bank);
                 },
                 _ = token.cancelled() => {
                     break;
