@@ -76,12 +76,6 @@ impl BaseTask for ArgsTask {
                     allow_undelegation: value.allow_undelegation,
                 };
 
-                log::info!(
-                    "DIFF SIZE: {} / {}",
-                    args.diff.len(),
-                    value.base_account.data.len()
-                );
-
                 dlp::instruction_builder::commit_diff(
                     *validator,
                     value.committed_account.pubkey,

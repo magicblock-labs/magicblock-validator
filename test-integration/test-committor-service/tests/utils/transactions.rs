@@ -235,7 +235,7 @@ pub async fn init_and_delegate_account_on_chain(
     (pda, pda_acc)
 }
 
-/// This needs to be run for each test that required a new counter to be delegated
+/// This needs to be run for each test that required a new order_book to be delegated
 #[allow(dead_code)]
 pub async fn init_and_delegate_order_book_on_chain(
     payer: &Keypair,
@@ -246,7 +246,6 @@ pub async fn init_and_delegate_order_book_on_chain(
         .request_airdrop(&payer.pubkey(), 777 * LAMPORTS_PER_SOL)
         .await
         .unwrap();
-    debug!("Airdropped to counter auth: {} SOL", 777 * LAMPORTS_PER_SOL);
 
     let InitOrderBookAndDelegateIxs {
         init,
@@ -292,7 +291,6 @@ pub async fn init_and_delegate_order_book_on_chain(
         )
         .await
         .expect("Failed to delegate");
-    // debug!("Delegated account: {:?}", pda);
 
     let order_book_acc = get_account!(rpc_client, order_book, "order_book");
 
