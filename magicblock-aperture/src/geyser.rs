@@ -47,7 +47,7 @@ impl GeyserPluginManager {
                 }
             })?;
             let path = config
-                .get("path")
+                .get("libpath")
                 .ok_or(GeyserPluginError::ConfigFileReadError {
                     msg:
                         "Plugin configuration file doesn't contain `path` field"

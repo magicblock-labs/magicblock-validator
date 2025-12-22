@@ -65,7 +65,7 @@ fn test_defaults_are_sane() {
     assert_eq!(config.validator.basefee, consts::DEFAULT_BASE_FEE);
     // Remotes default to [devnet HTTP] + [devnet WS] (added by ensure_websocket)
     assert_eq!(config.remotes.len(), 2);
-    assert_eq!(config.listen.0.port(), 8899);
+    assert_eq!(config.aperture.listen.0.port(), 8899);
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
 
     // Verify internal config defaults (not exposed to CLI)
@@ -371,7 +371,7 @@ fn test_example_config_full_coverage() {
     // Example config has 3 remotes: devnet HTTP, devnet WebSocket, and Helius gRPC
     assert_eq!(config.remotes.len(), 3);
     assert_eq!(config.remotes[0].url_str(), consts::DEVNET_URL);
-    assert_eq!(config.listen.0.port(), 8899);
+    assert_eq!(config.aperture.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
     assert!(config
         .storage

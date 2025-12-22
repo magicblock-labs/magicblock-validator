@@ -25,7 +25,7 @@ use crate::{
         CommittorConfig, LedgerConfig, LoadableProgram, TaskSchedulerConfig,
         ValidatorConfig,
     },
-    types::{network::Remote, BindAddress},
+    types::Remote,
 };
 
 /// Top-level configuration, assembled from multiple sources.
