@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 
 use borsh::BorshDeserialize;
@@ -1370,13 +1371,22 @@ where
             if let Some(account_in_bank) =
                 self.accounts_bank.get_account(pubkey)
             {
-                let decision = self
-                    .should_refresh_undelegating_in_bank_account(
+                let decision = match tokio::time::timeout(
+                    Duration::from_secs(5),
+                    self.should_refresh_undelegating_in_bank_account(
                         pubkey,
                         &account_in_bank,
                         fetch_origin,
-                    )
-                    .await;
+                    ),
+                )
+                .await
+                {
+                    Ok(decision) => decision,
+                    Err(_timeout) => {
+                        warn!("Timeout checking if account {pubkey} is still undelegating after 5 seconds. Treating as not needing refresh.");
+                        RefreshDecision::No
+                    }
+                };
 
                 match decision {
                     RefreshDecision::Yes

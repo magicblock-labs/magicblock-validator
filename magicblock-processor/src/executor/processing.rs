@@ -348,6 +348,11 @@ impl super::TransactionExecutor {
         };
         let txn = &executed.loaded_transaction;
         let feepayer = txn.accounts.first();
+        // If the feepayer is priveleged we don't enforce any checks, as those
+        // are internal operations, that might violate some of those rules
+        if feepayer.as_ref().map(|a| a.1.privileged()).unwrap_or(false) {
+            return;
+        }
 
         let logs = executed
             .execution_details
@@ -373,7 +378,6 @@ impl super::TransactionExecutor {
                     !self.is_auto_airdrop_lamports_enabled
                         && mutated
                         && !acc.delegated()
-                        && !acc.privileged()
                 })
                 .unwrap_or_default();
             if undelegated_feepayer_was_modified {

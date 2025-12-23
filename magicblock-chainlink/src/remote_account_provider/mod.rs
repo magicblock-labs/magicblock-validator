@@ -650,6 +650,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         }
 
         // 3. Wait for the slots to match
+        const MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
+        let start = std::time::Instant::now();
         let mut retries = 0;
         loop {
             if log::log_enabled!(log::Level::Trace) {
@@ -675,6 +677,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             );
             if let Match = slots_match_result {
                 return Ok(remote_accounts);
+            }
+
+            if start.elapsed() > MAX_TOTAL_TIME {
+                return Err(RemoteAccountProviderError::SlotsDidNotMatch(
+                    format!(
+                        "Timeout after {}s waiting for slots to match",
+                        MAX_TOTAL_TIME.as_secs_f64()
+                    ),
+                    vec![],
+                ));
             }
 
             retries += 1;
@@ -1110,6 +1122,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         program_ids: Option<Vec<Pubkey>>,
     ) -> RemoteAccountProviderResult<(FetchedRemoteAccounts, u64, u64)> {
         const MAX_RETRIES: u64 = 10;
+        const RPC_CALL_TIMEOUT: Duration = Duration::from_secs(2);
 
         let rpc_client = rpc_client.clone();
         let commitment = rpc_client.commitment();
@@ -1170,8 +1183,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 // its account cache. Otherwise we could just keep fetching the accounts
                 // until the context slot is high enough.
                 metrics::inc_remote_account_provider_a_count();
-                match rpc_client
-                    .get_multiple_accounts_with_config(
+                match tokio::time::timeout(
+                    RPC_CALL_TIMEOUT,
+                    rpc_client.get_multiple_accounts_with_config(
                         &pubkeys,
                         RpcAccountInfoConfig {
                             commitment: Some(commitment),
@@ -1179,10 +1193,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                             encoding: Some(UiAccountEncoding::Base64Zstd),
                             data_slice: None,
                         },
-                    )
-                    .await
+                    ),
+                )
+                .await
                 {
-                    Ok(res) => {
+                    Ok(Ok(res)) => {
                         let slot = res.context.slot;
                         if slot < min_context_slot {
                             retry!("Response slot {slot} < {min_context_slot}. Retrying...");
@@ -1190,7 +1205,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                             break res;
                         }
                     }
-                    Err(err) => match err.kind {
+                    Ok(Err(err)) => match err.kind {
                         ErrorKind::RpcError(rpc_err) => {
                             match rpc_err {
                                 RpcError::ForUser(ref rpc_user_err) => {
@@ -1249,6 +1264,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                             return Err(RemoteAccountProviderError::FailedFetchingAccounts(err_msg));
                         }
                     },
+                    Err(_) => {
+                        warn!("RPC call timeout. Retrying...");
+                        remaining_retries -= 1;
+                        if remaining_retries == 0 {
+                            let err_msg = format!("Max retries {MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
+                            notify_error(&err_msg);
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(400)).await;
+                        continue;
+                    }
                 };
             };
 

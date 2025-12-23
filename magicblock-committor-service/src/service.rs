@@ -248,6 +248,8 @@ impl CommittorActor {
                 }
             }
         }
+
+        info!("CommittorActor shutdown!");
     }
 }
 

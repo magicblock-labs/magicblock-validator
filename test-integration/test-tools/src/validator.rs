@@ -24,7 +24,6 @@ pub fn start_magic_block_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
     log_suffix: &str,
     loaded_chain_accounts: &LoadedAccounts,
-    release: bool,
 ) -> Option<Child> {
     let TestRunnerPaths {
         config_path,
@@ -38,9 +37,6 @@ pub fn start_magic_block_validator_with_config(
     let mut command = process::Command::new("cargo");
     let keypair_base58 = loaded_chain_accounts.validator_authority_base58();
     command.arg("build");
-    if release {
-        command.arg("--release");
-    }
     let build_res = command.current_dir(root_dir.clone()).output();
 
     if build_res.is_ok_and(|output| !output.status.success()) {
@@ -51,9 +47,6 @@ pub fn start_magic_block_validator_with_config(
     // Start validator via `cargo run -- <path to config>`
     let mut command = process::Command::new("cargo");
     command.arg("run");
-    if release {
-        command.arg("--release");
-    }
     let rust_log_style =
         std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
@@ -287,7 +280,6 @@ pub fn start_magicblock_validator_with_config_struct(
 
     let workspace_dir = resolve_workspace_dir();
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
-    let release = std::env::var("RELEASE").is_ok();
     let config_path = temp_dir.join("config.toml");
     let config_toml = config.to_string();
     fs::write(&config_path, config_toml).unwrap();
@@ -308,7 +300,6 @@ pub fn start_magicblock_validator_with_config_struct(
             &paths,
             "TEST",
             loaded_chain_accounts,
-            release,
         ),
         rpc_port,
     )
@@ -329,7 +320,6 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
         BindAddress(SocketAddr::new(config.metrics.address.ip(), metrics_port));
 
     let workspace_dir = resolve_workspace_dir();
-    let release = std::env::var("RELEASE").is_ok();
     let config_path = temp_dir.join("config.toml");
     let config_toml = config.to_string();
     fs::write(&config_path, config_toml).unwrap();
@@ -350,7 +340,6 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
             &paths,
             "TEST",
             loaded_chain_accounts,
-            release,
         ),
         rpc_port,
     )

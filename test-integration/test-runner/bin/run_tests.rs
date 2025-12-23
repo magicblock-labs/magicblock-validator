@@ -887,7 +887,6 @@ fn start_validator(
             &test_runner_paths,
             log_suffix,
             loaded_chain_accounts,
-            false,
         ),
     }
 }

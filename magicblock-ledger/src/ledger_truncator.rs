@@ -475,12 +475,15 @@ impl LedgerTruncator {
             self.stop();
         }
 
-        if let ServiceState::Stopped(worker_handle) = self.state {
+        let res = if let ServiceState::Stopped(worker_handle) = self.state {
             worker_handle.join()
         } else {
             warn!("LedgerTruncator was not running, nothing to stop");
             Ok(())
-        }
+        };
+        info!("LedgerTruncator shutdown!");
+
+        res
     }
 }
 

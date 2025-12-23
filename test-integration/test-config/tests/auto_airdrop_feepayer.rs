@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts,
     validator::start_magicblock_validator_with_config_struct,
@@ -8,7 +10,7 @@ use magicblock_config::{
         accounts::AccountsDbConfig, chain::ChainLinkConfig,
         ledger::LedgerConfig, LifecycleMode,
     },
-    types::network::{Remote, RemoteCluster},
+    types::network::Remote,
     ValidatorParams,
 };
 use solana_sdk::{signature::Keypair, signer::Signer, system_instruction};
@@ -21,10 +23,10 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
     // Build an Ephemeral validator config that enables auto airdrop for fee payers
     let config = ValidatorParams {
         lifecycle: LifecycleMode::Ephemeral,
-        remote: RemoteCluster::Single(Remote::Disjointed {
-            http: IntegrationTestContext::url_chain().parse().unwrap(),
-            ws: IntegrationTestContext::ws_url_chain().parse().unwrap(),
-        }),
+        remotes: vec![
+            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
+            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
+        ],
         accountsdb: AccountsDbConfig::default(),
         chainlink: ChainLinkConfig {
             auto_airdrop_lamports: 1_000_000_000,

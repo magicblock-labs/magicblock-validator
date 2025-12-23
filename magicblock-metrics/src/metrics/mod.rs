@@ -162,6 +162,16 @@ lazy_static::lazy_static! {
         "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
 
+    static ref PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "program_subscription_account_updates",
+                "Number of account updates received via program subscription",
+            ),
+            &["client_id"],
+        )
+        .unwrap();
+
     // -----------------
     // RPC/Aperture
     // -----------------
@@ -325,6 +335,13 @@ lazy_static::lazy_static! {
     pub static ref FAILED_TRANSACTIONS_COUNT: IntCounter = IntCounter::new(
         "failed_transactions_count", "Total number of failed transactions"
     ).unwrap();
+    pub static ref MAX_LOCK_CONTENTION_QUEUE_SIZE: IntGauge = IntGauge::new(
+        "max_lock_contention_queue_size",
+        "Maximum observed queue size for an account lock contention"
+    ).unwrap();
+
+
+
 
 
     // -----------------
@@ -440,6 +457,7 @@ pub(crate) fn register() {
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
+        register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES);
         register!(COMMITTOR_INTENTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
@@ -467,6 +485,7 @@ pub(crate) fn register() {
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(UNSTUCK_UNDELEGATION_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
+        register!(MAX_LOCK_CONTENTION_QUEUE_SIZE);
         register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
         register!(TASK_INFO_FETCHER_A_COUNT);
         register!(TASK_INFO_FETCHER_COMPRESSED_COUNT);
@@ -685,6 +704,12 @@ pub fn inc_compressed_account_fetches_not_found(
     COMPRESSED_ACCOUNT_FETCHES_NOT_FOUND_COUNT
         .with_label_values(&[fetch_origin.value()])
         .inc_by(count);
+}
+
+pub fn inc_program_subscription_account_updates(client_id: &impl LabelValue) {
+    PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES
+        .with_label_values(&[client_id.value()])
+        .inc();
 }
 
 pub fn inc_per_program_account_fetch_stats(
