@@ -248,10 +248,11 @@ mod tests {
             .await;
 
         assert!(result.is_err());
+        eprintln!("Error: {}", result.as_ref().unwrap_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("All clients failed"));
+            .contains("Not enough clients succeeded to subscribe"));
     }
 
     #[tokio::test]
