@@ -3055,7 +3055,6 @@ dependencies = [
  "assert_matches",
  "bincode",
  "lazy_static",
- "magicblock-config",
  "magicblock-core",
  "magicblock-magic-program-api",
  "num-derive",

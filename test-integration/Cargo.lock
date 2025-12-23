@@ -3448,7 +3448,6 @@ version = "0.5.0"
 dependencies = [
  "bincode",
  "lazy_static",
- "magicblock-config",
  "magicblock-core",
  "magicblock-magic-program-api 0.5.0",
  "num-derive",
