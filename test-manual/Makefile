@@ -10,8 +10,8 @@ list:
 	@LC_ALL=C $(MAKE) -pRrq -f $(firstword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/(^|\n)# Files(\n|$$)/,/(^|\n)# Finished Make data base/ {if ($$1 !~ "^[#.]") {print $$1}}' | sort | egrep -v -e '^[^[:alnum:]]' -e '^$@$$'
 
 test-laser:
-	@if [ -z "$$HELIUS_API_KEY" ] && [ -z "$$TRITON_API_KEY" ]; then \
-		echo "Error: HELIUS_API_KEY or TRITON_API_KEY environment variable not set"; \
+	@if [ -z "$$HELIUS_API_KEY" ]; then \
+		echo "Error: HELIUS_API_KEY environment variable and optionally TRITON_API_KEY need to be set."; \
 		exit 1; \
 	fi
 	$(eval KEYPAIR_PATH := $(shell $(HELIUS_LASER_SH_DIR)/01_extract_keypair_path.sh))
@@ -36,7 +36,7 @@ test-laser:
 			cat /tmp/validator.log || true; \
 			echo "⛔ TEST FAILED"; \
 		}
-	@echo "✅ TEST PASSED"
+	@echo "✅ TEST COMPLETED"
 	@echo
 	@if [ -f /tmp/validator.pid ]; then \
 		echo "## Shutting down validator"; \

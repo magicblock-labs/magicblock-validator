@@ -12,7 +12,7 @@ The test:
 2. Performs SOL transfers between accounts on the remote cluster
 3. Clones the involved accounts to the local validator
 4. Does more transfers to trigger account state updates
-5. Verifies that account states between Helius/Tritonb devnet and local validator match exactly
+5. Verifies that account states between Helius/Triton devnet and local validator match exactly
 
 ## Why can it not be fully automated
 
