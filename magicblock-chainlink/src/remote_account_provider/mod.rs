@@ -1270,7 +1270,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                         if remaining_retries == 0 {
                             let err_msg = format!("Max retries {MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
                             notify_error(&err_msg);
-                            return;
+                            return Err(RemoteAccountProviderError::FailedFetchingAccounts(err_msg));
                         }
                         tokio::time::sleep(Duration::from_millis(400)).await;
                         continue;

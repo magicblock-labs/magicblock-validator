@@ -382,7 +382,7 @@ impl MagicValidator {
     ) -> ApiResult<ChainlinkImpl> {
         use magicblock_chainlink::remote_account_provider::Endpoint;
         let rpc_url = config.rpc_url().to_owned();
-        let endpoints = config
+        let mut endpoints = config
             .websocket_urls()
             .map(|pubsub_url| Endpoint::Rpc {
                 rpc_url: rpc_url.clone(),
