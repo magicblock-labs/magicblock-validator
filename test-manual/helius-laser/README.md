@@ -60,5 +60,5 @@ If successful, you'll see account cloning and subscription messages in the valid
 
 ## Run Steps in Isolation
 
-Insid `test-manual/helius-laser/sh/` you can find bash scripts which you can run in order to
+Inside `test-manual/helius-laser/sh/` you can find bash scripts which you can run in order to
 perform the above step by step.
