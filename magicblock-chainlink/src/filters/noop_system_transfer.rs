@@ -1,10 +1,10 @@
 use solana_system_interface::instruction::SystemInstruction;
 use solana_transaction::sanitized::SanitizedTransaction;
 
-/// Detects transactions that are no-op system transfers (from == to).
+/// Detects transactions that are no-op system transfers (lamports == 0).
 ///
 /// This function identifies transactions created by users that perform a
-/// self-transfer to the same account, which is a no-op that wastes transaction
+/// system transfer with zero lamports, which is a no-op that wastes transaction
 /// fees without any meaningful state change.
 ///
 /// # Performance Notes
@@ -12,7 +12,6 @@ use solana_transaction::sanitized::SanitizedTransaction;
 /// This function is O(1) in terms of iterations:
 /// - Early return after checking instruction count (constant time)
 /// - Single iteration through at most 1 instruction (bounded to 1)
-/// - Account key lookup is O(1) array indexing
 /// - System instruction deserialization is O(1) for fixed-size data
 ///
 /// The only variable overhead is bincode deserialization of the instruction
@@ -25,7 +24,7 @@ use solana_transaction::sanitized::SanitizedTransaction;
 /// # Returns
 ///
 /// `true` if the transaction is a single system transfer instruction where
-/// the from and to accounts are identical, `false` otherwise.
+/// the transferred lamports are zero, `false` otherwise.
 pub(crate) fn is_noop_system_transfer(tx: &SanitizedTransaction) -> bool {
     let message = tx.message();
 
@@ -48,37 +47,13 @@ pub(crate) fn is_noop_system_transfer(tx: &SanitizedTransaction) -> bool {
 
     // Attempt to parse the instruction data as a system instruction
     // Performance: bincode deserialization is O(1) for fixed instruction size
-    let Ok(SystemInstruction::Transfer { lamports: _ }) =
+    let Ok(SystemInstruction::Transfer { lamports }) =
         bincode::deserialize::<SystemInstruction>(&instruction.data)
     else {
         return false;
     };
 
-    // A valid transfer instruction must have exactly 2 accounts
-    // Performance: This is a simple length check and array indexing
-    if instruction.accounts.len() != 2 {
-        return false;
-    }
-
-    // Get the from and to account pubkeys
-    // Performance: These are simple array index operations into the message's
-    // account keys. The account_keys_iter provides O(1) indexing.
-    let from_index = instruction.accounts[0] as usize;
-    let to_index = instruction.accounts[1] as usize;
-
-    let account_keys = message.account_keys();
-
-    // Safe bounds checking
-    // Performance: O(1) slice indexing
-    let Some(from) = account_keys.get(from_index) else {
-        return false;
-    };
-    let Some(to) = account_keys.get(to_index) else {
-        return false;
-    };
-
-    // Return true only if from and to are the same account
-    from == to
+    lamports == 0
 }
 
 #[cfg(test)]
@@ -94,16 +69,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_single_self_transfer() {
+    fn test_zero_lamports_transfer() {
         let payer = Keypair::new();
-        let account = Keypair::new();
-        let amount = 1000;
+        let from = Keypair::new();
+        let to = Keypair::new();
 
-        let transfer_ix = system_instruction::transfer(
-            &account.pubkey(),
-            &account.pubkey(),
-            amount,
-        );
+        let transfer_ix =
+            system_instruction::transfer(&from.pubkey(), &to.pubkey(), 0);
 
         let message = Message::new(&[transfer_ix], Some(&payer.pubkey()));
         let tx = Transaction::new_unsigned(message);
@@ -113,14 +85,13 @@ mod tests {
     }
 
     #[test]
-    fn test_different_accounts() {
+    fn test_nonzero_lamports_transfer() {
         let payer = Keypair::new();
         let from = Keypair::new();
         let to = Keypair::new();
-        let amount = 1000;
 
         let transfer_ix =
-            system_instruction::transfer(&from.pubkey(), &to.pubkey(), amount);
+            system_instruction::transfer(&from.pubkey(), &to.pubkey(), 1000);
 
         let message = Message::new(&[transfer_ix], Some(&payer.pubkey()));
         let tx = Transaction::new_unsigned(message);
@@ -133,12 +104,11 @@ mod tests {
     fn test_multiple_instructions() {
         let payer = Keypair::new();
         let account = Keypair::new();
-        let amount = 1000;
 
         let transfer_ix = system_instruction::transfer(
             &account.pubkey(),
             &account.pubkey(),
-            amount,
+            0,
         );
         let allocate_ix = system_instruction::allocate(&account.pubkey(), 1024);
 
