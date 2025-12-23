@@ -51,6 +51,7 @@ pub mod program_account;
 pub mod pubsub_common;
 mod remote_account;
 
+pub use endpoint::{Endpoint, Endpoints};
 use magicblock_metrics::{
     metrics,
     metrics::{
@@ -70,7 +71,6 @@ use crate::{
     },
     submux::SubMuxClient,
 };
-pub use endpoint::{Endpoint, Endpoints};
 
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 

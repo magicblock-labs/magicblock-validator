@@ -1,9 +1,6 @@
 use std::{
     collections::HashSet,
-    sync::{
-        atomic::AtomicU64,
-        Arc, Mutex,
-    },
+    sync::{atomic::AtomicU64, Arc, Mutex},
 };
 
 use async_trait::async_trait;
