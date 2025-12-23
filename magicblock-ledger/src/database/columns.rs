@@ -37,7 +37,7 @@ pub struct TransactionStatus;
 /// The address signatures column
 ///
 /// * index type: `(`[`Pubkey`]`, `[`Slot`]`, u32, `[`Signature`]`)`
-/// *                account addr,   slot,  tx index, tx signature
+///   - account addr, slot, tx index, tx signature
 /// * value type: [`blockstore_meta::AddressSignatureMeta`]
 pub struct AddressSignatures;
 
@@ -52,7 +52,7 @@ pub struct AddressSignatures;
 /// the transaction of that signature did not include the address.
 ///
 /// * index type: `(`[`Slot`]`, u32)`
-/// *                 slot,  tx index
+///   - slot, tx index
 /// * value type: [`[`solana_signature::signature::Signature`]`]
 pub struct SlotSignatures;
 

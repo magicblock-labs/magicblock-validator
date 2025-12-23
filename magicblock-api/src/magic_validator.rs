@@ -246,8 +246,15 @@ impl MagicValidator {
             featureset: txn_scheduler_state.environment.feature_set.clone(),
             blocktime: config.ledger.block_time_ms(),
         };
-        let transaction_scheduler =
-            TransactionScheduler::new(1, txn_scheduler_state);
+        // We dedicate half of the available resources to the execution
+        // runtime, -1 is taken up by the transaction scheduler itself
+        let transaction_executors =
+            (num_cpus::get() / 2).saturating_sub(1).max(1) as u32;
+        let transaction_scheduler = TransactionScheduler::new(
+            transaction_executors,
+            txn_scheduler_state,
+        );
+        info!("Running execution backend with {transaction_executors} threads");
         transaction_scheduler.spawn();
 
         let shared_state = SharedState::new(
@@ -272,6 +279,9 @@ impl MagicValidator {
                 .build()
                 .expect("failed to bulid async runtime for rpc service");
             runtime.block_on(rpc.run());
+
+            drop(runtime);
+            info!("rpc runtime shutdown!");
         });
 
         let task_scheduler_db_path =
@@ -330,7 +340,7 @@ impl MagicValidator {
             config.validator.keypair.insecure_clone(),
             committor_persist_path,
             ChainConfig {
-                rpc_uri: config.remote.http().to_string(),
+                rpc_uri: config.rpc_url().to_owned(),
                 commitment: CommitmentConfig::confirmed(),
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
@@ -361,10 +371,9 @@ impl MagicValidator {
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
         use magicblock_chainlink::remote_account_provider::Endpoint;
-        let rpc_url = config.remote.http().to_string();
+        let rpc_url = config.rpc_url().to_owned();
         let endpoints = config
-            .remote
-            .websocket()
+            .websocket_urls()
             .map(|pubsub_url| Endpoint {
                 rpc_url: rpc_url.clone(),
                 pubsub_url: pubsub_url.to_string(),
@@ -521,7 +530,7 @@ impl MagicValidator {
         });
 
         DomainRegistryManager::handle_registration_static(
-            self.config.remote.http(),
+            self.config.rpc_url(),
             &validator_keypair,
             validator_info,
         )
@@ -534,12 +543,13 @@ impl MagicValidator {
         let validator_keypair = validator_authority();
 
         DomainRegistryManager::handle_unregistration_static(
-            self.config.remote.http(),
+            self.config.rpc_url(),
             &validator_keypair,
         )
         .map_err(|err| {
             ApiError::FailedToUnregisterValidatorOnChain(format!("{err:#}"))
         })
+        .inspect(|_| info!("Unregistered validator on chain!"))
     }
 
     async fn ensure_validator_funded_on_chain(&self) -> ApiResult<()> {
@@ -547,7 +557,7 @@ impl MagicValidator {
         const MIN_BALANCE_SOL: u64 = 5;
 
         let lamports = RpcClient::new_with_commitment(
-            self.config.remote.http().to_string(),
+            self.config.rpc_url().to_owned(),
             CommitmentConfig::confirmed(),
         )
         .get_balance(&self.identity)
@@ -594,7 +604,7 @@ impl MagicValidator {
             .map(|co| co.claim_fees_frequency)
         {
             self.claim_fees_task
-                .start(frequency, self.config.remote.http().to_string());
+                .start(frequency, self.config.rpc_url().to_owned());
         }
 
         self.slot_ticker = Some(init_slot_ticker(
@@ -681,6 +691,8 @@ impl MagicValidator {
         if let Err(err) = self.ledger_truncator.join() {
             error!("Ledger truncator did not gracefully exit: {:?}", err);
         }
+
+        info!("MagicValidator shutdown!");
     }
 
     pub fn ledger(&self) -> &Ledger {
@@ -694,6 +706,9 @@ impl MagicValidator {
         self.ledger_truncator.stop();
         // Calls & awaits until manual compaction is canceled
         self.ledger.cancel_manual_compactions();
+        if let Err(err) = self.ledger.flush() {
+            error!("Failed to flush during shutdown preparation: {:?}", err);
+        }
     }
 }
 

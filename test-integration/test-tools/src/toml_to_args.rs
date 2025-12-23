@@ -1,30 +1,45 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
+use magicblock_config::types::network::Remote;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct Config {
-    remote: RemoteConfig,
+    #[serde(default)]
+    remote: Vec<RemoteConfig>,
     listen: String,
     #[serde(default)]
     programs: Vec<Program>,
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum RemoteConfig {
-    Url(String),
-    Complex { http: String },
+#[derive(Deserialize, Clone)]
+struct RemoteConfig {
+    kind: String,
+    url: String,
 }
 
 impl RemoteConfig {
+    /// Returns the URL for this remote, parsing the kind and url into a Remote instance.
     fn url(&self) -> String {
-        match self {
-            RemoteConfig::Url(s) => s.clone(),
-            RemoteConfig::Complex { http } => http.clone(),
+        // Construct the full remote URL with the appropriate scheme
+        let full_url = match self.kind.as_str() {
+            "rpc" => format!("http://{}", self.url),
+            "websocket" => format!("ws://{}", self.url),
+            "grpc" => format!("grpc://{}", self.url),
+            // Default to http for unknown kinds
+            _ => format!("http://{}", self.url),
+        };
+
+        // Parse the full URL into a Remote instance to resolve aliases
+        if let Ok(remote) = Remote::from_str(&full_url) {
+            remote.url_str().to_string()
+        } else {
+            // If parsing fails, return the raw URL
+            self.url.clone()
         }
     }
 }
@@ -92,8 +107,12 @@ pub fn config_to_args(
             }
         }
     }
-    args.push("--url".into());
-    args.push(config.remote.url());
+
+    // Add the first RPC remote URL if available
+    if let Some(rpc_remote) = config.remote.iter().find(|r| r.kind == "rpc") {
+        args.push("--url".into());
+        args.push(rpc_remote.url());
+    }
 
     args
 }
