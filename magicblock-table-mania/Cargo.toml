@@ -18,10 +18,18 @@ magicblock-metrics = { workspace = true }
 rand = { workspace = true }
 sha3 = { workspace = true }
 solana-pubkey = { workspace = true }
-solana-rpc-client = { workspace = true }
-solana-rpc-client-api = { workspace = true }
-solana-sdk = { workspace = true }
+solana-keypair = { workspace = true }
 thiserror = { workspace = true }
+solana-clock = { workspace = true }
+solana-signature = { workspace = true }
+solana-signer = { workspace = true }
+solana-commitment-config = { workspace = true }
+solana-address-lookup-table-interface = { workspace = true }
+solana-slot-hashes = { workspace = true }
+solana-transaction = { workspace = true }
+solana-compute-budget-interface = { workspace = true }
+solana-instruction = { workspace = true }
+solana-message = { workspace = true }
 tokio = { workspace = true }
 
 [features]

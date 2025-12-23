@@ -17,7 +17,7 @@ use magicblock_aperture::{
     state::{ChainlinkImpl, NodeContext, SharedState},
     JsonRpcServer,
 };
-use magicblock_config::types::BindAddress;
+use magicblock_config::{config::ChainLinkConfig, types::BindAddress};
 use magicblock_core::{
     link::accounts::LockedAccount, traits::AccountsBank, Slot,
 };
@@ -63,7 +63,7 @@ fn chainlink(accounts_db: &Arc<AccountsDb>) -> Arc<ChainlinkImpl> {
             None,
             Pubkey::new_unique(),
             Pubkey::new_unique(),
-            0,
+            &ChainLinkConfig::default(),
         )
         .expect("Failed to create Chainlink"),
     )
@@ -95,7 +95,7 @@ impl RpcTestEnv {
         let (server, socket) = loop {
             let port: u16 = rand::random_range(7000..u16::MAX - 1);
             let node_context = NodeContext {
-                identity: execution.payer.pubkey(),
+                identity: execution.get_payer().pubkey,
                 faucet: Some(faucet.insecure_clone()),
                 base_fee: Self::BASE_FEE,
                 featureset: Default::default(),

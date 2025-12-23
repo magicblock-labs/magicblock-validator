@@ -6,6 +6,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn,
 };
+use log::info;
 use magicblock_core::link::DispatchEndpoints;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -74,7 +75,10 @@ impl HttpServer {
                 // Accept a new incoming connection.
                 Ok((stream, _)) = self.socket.accept() => self.handle(stream),
                 // Or, break the loop if the cancellation token is triggered.
-                _ = self.cancel.cancelled() => break,
+                _ = self.cancel.cancelled() => {
+                    info!("HTTP server shutdown signal has been received");
+                    break
+                }
             }
         }
 
@@ -84,6 +88,7 @@ impl HttpServer {
         drop(self.shutdown);
         // Wait for the shutdown signal, which fires when all connections are closed.
         let _ = self.shutdown_rx.await;
+        info!("HTTP server has shutdown");
     }
 
     /// Spawns a new task to handle a single incoming TCP connection.
@@ -104,23 +109,13 @@ impl HttpServer {
             let builder = conn::auto::Builder::new(TokioExecutor::new());
             let connection = builder.serve_connection(io, handler);
             tokio::pin!(connection);
-            let mut terminating = false;
-
             // This loop manages the connection's lifecycle.
-            loop {
-                tokio::select! {
-                    // Poll the connection itself. This branch
-                    // completes when the client disconnects.
-                    _ = &mut connection => {
-                        break;
-                    }
-                    // If the cancellation token is triggered, initiate a graceful shutdown
-                    // of the Hyper connection.
-                    _ = cancel.cancelled(), if !terminating => {
-                        connection.as_mut().graceful_shutdown();
-                        terminating = true;
-                    }
-                }
+            tokio::select! {
+                // Poll the connection itself. This branch
+                // completes when the client disconnects.
+                _ = connection => {},
+                // If the cancellation token is triggered, force terminate the connection
+                _ = cancel.cancelled() => {},
             }
             // Drop the shutdown handle for this connection, signaling
             // that one fewer outstanding connection is active.

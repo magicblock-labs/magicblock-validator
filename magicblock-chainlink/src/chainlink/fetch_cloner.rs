@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 
 use dlp::{
@@ -15,7 +16,7 @@ use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
-use solana_sdk::system_program;
+use solana_sdk_ids::system_program;
 use tokio::{
     sync::{mpsc, oneshot},
     task,
@@ -217,7 +218,20 @@ where
                         if in_bank.undelegating() {
                             // We expect the account to still be delegated, but with the delegation
                             // program owner
-                            debug!("Received update for undelegating account {pubkey} delegated in bank={} delegated on chain={}", in_bank.delegated(), account.delegated());
+                            debug!("Received update for undelegating account {pubkey} \
+                                in_bank.delegated={}, \
+                                in_bank.owner={}, \
+                                in_bank.remote_slot={}, \
+                                chain.delegated={}, \
+                                chain.owner={}, \
+                                chain.remote_slot={}",
+                                in_bank.delegated(),
+                                in_bank.owner(),
+                                in_bank.remote_slot(),
+                                account.delegated(),
+                                account.owner(),
+                                account.remote_slot()
+                            );
 
                             // This will only be true in the following case:
                             // 1. a commit was triggered for the account
@@ -414,7 +428,7 @@ where
                                 if log::log_enabled!(log::Level::Trace) {
                                     trace!("Delegation record found for {pubkey}: {delegation_record:?}");
                                     trace!(
-                                        "Cloning delegated account: {pubkey} (remote slot {}, owner: {})",
+                                        "Resolving delegated account: {pubkey} (remote slot {}, owner: {})",
                                         account.remote_slot(),
                                         delegation_record.owner
                                     );
@@ -685,7 +699,7 @@ where
                                         // to fail
                                         if !account_shared_data
                                             .owner()
-                                            .eq(&solana_sdk::native_loader::id(
+                                            .eq(&solana_sdk_ids::native_loader::id(
                                             ))
                                         {
                                             programs.push((
@@ -1241,13 +1255,22 @@ where
             if let Some(account_in_bank) =
                 self.accounts_bank.get_account(pubkey)
             {
-                let decision = self
-                    .should_refresh_undelegating_in_bank_account(
+                let decision = match tokio::time::timeout(
+                    Duration::from_secs(5),
+                    self.should_refresh_undelegating_in_bank_account(
                         pubkey,
                         &account_in_bank,
                         fetch_origin,
-                    )
-                    .await;
+                    ),
+                )
+                .await
+                {
+                    Ok(decision) => decision,
+                    Err(_timeout) => {
+                        warn!("Timeout checking if account {pubkey} is still undelegating after 5 seconds. Treating as not needing refresh.");
+                        RefreshDecision::No
+                    }
+                };
 
                 match decision {
                     RefreshDecision::Yes
@@ -1262,7 +1285,16 @@ where
                     }
                     RefreshDecision::No => {
                         // Account is in bank and subscribed correctly - no fetch needed
-                        trace!("Account {pubkey} found in bank in valid state, no fetch needed");
+                        if log::log_enabled!(log::Level::Trace) {
+                            let undelegating = account_in_bank.undelegating();
+                            let delegated = account_in_bank.delegated();
+                            let owner = account_in_bank.owner().to_string();
+                            trace!("Account {pubkey} found in bank in valid state, no fetch needed \
+                                    undelegating = {undelegating}, \
+                                    delegated = {delegated}, \
+                                    owner={owner}"
+                            );
+                        }
                         in_bank.push(*pubkey);
                     }
                 }
@@ -1745,7 +1777,7 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use solana_account::{Account, AccountSharedData, WritableAccount};
-    use solana_sdk::system_program;
+    use solana_sdk_ids::system_program;
     use tokio::sync::mpsc;
 
     use super::*;

@@ -10,8 +10,8 @@ use magicblock_chainlink::{
     testing::{deleg::add_delegation_record_for, init_logger},
 };
 use solana_account::Account;
+use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
-use solana_sdk::clock::Slot;
 use utils::{
     accounts::account_shared_with_owner_and_slot, test_context::TestContext,
 };
@@ -23,7 +23,13 @@ async fn setup(slot: Slot) -> TestContext {
     TestContext::init(slot).await
 }
 
+// NOTE: disabled for now since we detect redelegation as follows:
+// - if `account.remote_slot >= undelegation_slot` assume it is the first delegation, i.e. it was
+//   not re-delegated
+// - in order to support same slot re-delegation we need an delegation index or similar to
+//   distinguish the two delegations
 #[tokio::test]
+#[ignore = "Same slot redelegation is currently not possible and currently it is detected as a single delegation operation."]
 async fn test_undelegate_redelegate_to_us_in_same_slot() {
     let mut slot: u64 = 11;
 

@@ -8,6 +8,7 @@ use std::{
 
 use hyper::body::Bytes;
 use magicblock_accounts_db::AccountsDb;
+use magicblock_config::config::ChainLinkConfig;
 use solana_pubkey::Pubkey;
 use test_kit::{
     guinea::{self, GuineaInstruction},
@@ -39,17 +40,20 @@ fn ws_channel() -> (WsConnectionChannel, Receiver<Bytes>) {
 }
 
 fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
+    let cfg = ChainLinkConfig::default();
     ChainlinkImpl::try_new(
         accounts_db,
         None,
         Pubkey::new_unique(),
         Pubkey::new_unique(),
-        0,
+        &cfg,
     )
     .expect("Failed to create Chainlink")
 }
 
 mod event_processor {
+    use magicblock_config::consts::DEFAULT_LEDGER_BLOCK_TIME_MS;
+
     use super::*;
     use crate::state::NodeContext;
 
@@ -60,8 +64,8 @@ mod event_processor {
         let env = ExecutionTestEnv::new();
         env.advance_slot();
         let node_context = NodeContext {
-            identity: env.payer.pubkey(),
-            blocktime: 50,
+            identity: env.get_payer().pubkey,
+            blocktime: DEFAULT_LEDGER_BLOCK_TIME_MS,
             ..Default::default()
         };
         let state = SharedState::new(

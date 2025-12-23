@@ -1,7 +1,4 @@
-use std::{
-    ffi::OsString, fs::File, io::Write, path::PathBuf, str::FromStr,
-    time::Duration,
-};
+use std::{ffi::OsString, fs::File, io::Write, path::PathBuf};
 
 use isocountry::CountryCode;
 use serial_test::{parallel, serial};
@@ -11,7 +8,8 @@ use tempfile::TempDir;
 use crate::{
     config::{BlockSize, LifecycleMode},
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
-    RemoteCluster, ValidatorParams,
+    types::network::Remote,
+    ValidatorParams,
 };
 
 // ============================================================================
@@ -65,10 +63,8 @@ fn test_defaults_are_sane() {
 
     // Verify key defaults used in production
     assert_eq!(config.validator.basefee, consts::DEFAULT_BASE_FEE);
-    assert_eq!(
-        config.remote,
-        RemoteCluster::from_str(consts::DEFAULT_REMOTE).unwrap()
-    );
+    // Remotes default to [devnet HTTP] + [devnet WS] (added by ensure_websocket)
+    assert_eq!(config.remotes.len(), 2);
     assert_eq!(config.listen.0.port(), 8899);
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
 
@@ -270,77 +266,6 @@ fn test_chainlink_config() {
 // 6. Type Parsing & Validation
 // ============================================================================
 
-#[test]
-#[parallel]
-fn test_parse_remote_variants() {
-    // 1. Alias expansion
-    let c1 = run_cli(vec!["--remote", "mainnet"]);
-    match c1.remote {
-        RemoteCluster::Single(crate::types::Remote::Unified(u)) => {
-            assert_eq!(u.0.as_str(), consts::MAINNET_URL);
-        }
-        _ => panic!("Failed to parse 'mainnet' alias"),
-    }
-
-    // 2. Explicit URL
-    let custom = "http://127.0.0.1:3000/";
-    let c2 = run_cli(vec!["--remote", custom]);
-    match c2.remote {
-        RemoteCluster::Single(crate::types::Remote::Unified(u)) => {
-            assert_eq!(u.0.as_str(), custom);
-        }
-        _ => panic!("Failed to parse custom URL"),
-    }
-}
-
-#[test]
-#[parallel]
-fn test_remote_parsing_complex_types() {
-    // Case 1: Disjointed Remote (Separate HTTP and WebSocket URLs)
-    // TOML handles this via a table since Remote::Disjointed is a struct variant
-    let (_dir, config_path) = create_temp_config(
-        r#"
-        [remote]
-        http = "http://api.mainnet-beta.solana.com"
-        ws = "wss://api.mainnet-beta.solana.com"
-        "#,
-    );
-    let c1 = run_cli(vec![config_path.to_str().unwrap()]);
-
-    if let RemoteCluster::Single(crate::types::Remote::Disjointed {
-        http,
-        ws,
-    }) = c1.remote
-    {
-        assert_eq!(http.0.as_str(), "http://api.mainnet-beta.solana.com/");
-        assert_eq!(ws.0.as_str(), "wss://api.mainnet-beta.solana.com/");
-    } else {
-        panic!("Expected Remote::Disjointed for table config");
-    }
-
-    // Case 2: Multiple Remotes (Array of Remotes)
-    // Useful for failover or active-active setups
-    let (_dir2, config_path2) = create_temp_config(
-        r#"
-        remote = [ "devnet", { http = "http://backup-node:8899", ws = "ws://node:443" } ]
-        "#,
-    );
-    let c2 = run_cli(vec![config_path2.to_str().unwrap()]);
-
-    if let RemoteCluster::Multiple(remotes) = c2.remote {
-        assert_eq!(remotes.len(), 2);
-        // Verify first element parsed as Alias -> Unified
-        match &remotes[0] {
-            crate::types::Remote::Unified(u) => {
-                assert_eq!(u.0.as_str(), consts::DEVNET_URL)
-            }
-            _ => panic!("Expected Unified remote for alias"),
-        }
-    } else {
-        panic!("Expected RemoteCluster::Multiple for array config");
-    }
-}
-
 // ============================================================================
 // 8. Ledger, Time & Commit Strategies
 // ============================================================================
@@ -365,6 +290,36 @@ fn test_ledger_and_commit_settings() {
     assert_eq!(config.ledger.block_time.as_millis(), 800);
     assert!(!config.ledger.verify_keypair);
     assert_eq!(config.commit.compute_unit_price, 123456);
+}
+
+#[test]
+#[parallel]
+fn test_cli_ledger_reset() {
+    // Verify CLI --reset flag sets reset to true
+    let config = run_cli(vec!["--reset"]);
+
+    assert!(config.ledger.reset);
+
+    // Verify ledger reset defaults to false when flag is not provided
+    let config = run_cli(vec![]);
+
+    assert!(!config.ledger.reset);
+}
+
+#[test]
+#[parallel]
+fn test_cli_ledger_reset_overrides_toml() {
+    // Verify CLI --ledger-reset flag overrides TOML setting
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [ledger]
+        reset = false
+        "#,
+    );
+
+    let config = run_cli(vec![config_path.to_str().unwrap(), "--reset"]);
+
+    assert!(config.ledger.reset);
 }
 
 #[test]
@@ -404,7 +359,9 @@ fn test_example_config_full_coverage() {
     // 3. Core & Network
     // ========================================================================
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
-    assert_eq!(config.remote, RemoteCluster::from_str("devnet").unwrap());
+    // Example config has 3 remotes: devnet HTTP, devnet WebSocket, and Helius gRPC
+    assert_eq!(config.remotes.len(), 3);
+    assert_eq!(config.remotes[0].url_str(), consts::DEVNET_URL);
     assert_eq!(config.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
     assert!(config
@@ -491,7 +448,8 @@ fn test_env_vars_full_coverage() {
     let _guards = vec![
         // --- Core ---
         EnvVarGuard::new("MBV_LIFECYCLE", "replica"),
-        EnvVarGuard::new("MBV_REMOTE", "testnet"),
+        // Note: MBV_REMOTE is no longer supported for the new Vec<RemoteConfig> format
+        // Use TOML [[remote]] array syntax instead
         EnvVarGuard::new("MBV_STORAGE", "/tmp/env-test-storage"),
         EnvVarGuard::new("MBV_LISTEN", "127.0.0.1:9999"),
         // --- Metrics ---
@@ -539,7 +497,8 @@ fn test_env_vars_full_coverage() {
 
     // Core
     assert_eq!(config.lifecycle, LifecycleMode::Replica);
-    assert_eq!(config.remote, RemoteCluster::from_str("testnet").unwrap());
+    // Remotes default to devnet (HTTP) + devnet WebSocket (added by ensure_websocket)
+    assert_eq!(config.remotes.len(), 2);
     assert_eq!(config.storage.to_string_lossy(), "/tmp/env-test-storage");
     assert_eq!(config.listen.0.port(), 9999);
 
@@ -588,4 +547,49 @@ fn test_env_vars_full_coverage() {
     assert_eq!(chain_op.country_code, CountryCode::DEU);
     assert_eq!(chain_op.fqdn.as_str(), "https://env.example.com/");
     assert_eq!(chain_op.claim_fees_frequency.as_secs(), 48 * 3600);
+}
+
+// ============================================================================
+// 9. Remote Type Parsing
+// ============================================================================
+
+#[test]
+#[parallel]
+fn test_parse_http_remote() {
+    let remote: Remote = "http://localhost:8899".parse().unwrap();
+    assert!(matches!(remote, Remote::Http(_)));
+    assert_eq!(remote.url_str(), "http://localhost:8899/");
+}
+
+#[test]
+#[parallel]
+fn test_parse_websocket_remote() {
+    let remote: Remote = "ws://localhost:8900".parse().unwrap();
+    assert!(matches!(remote, Remote::Websocket(_)));
+}
+
+#[test]
+#[parallel]
+fn test_parse_grpc_remote_converts_scheme() {
+    let remote: Remote = "grpc://localhost:50051/".parse().unwrap();
+    assert!(matches!(remote, Remote::Grpc(_)));
+    // Scheme should be converted to http
+    assert_eq!(remote.url_str(), "http://localhost:50051/");
+}
+
+#[test]
+#[parallel]
+fn test_parse_alias() {
+    let remote: Remote = "devnet".parse().unwrap();
+    assert!(matches!(remote, Remote::Http(_)));
+    assert_eq!(remote.url_str(), consts::DEVNET_URL);
+}
+
+#[test]
+#[parallel]
+fn test_to_websocket_from_http() {
+    let remote: Remote = "http://localhost:8899".parse().unwrap();
+    let ws_remote = remote.to_websocket().unwrap();
+    assert!(matches!(ws_remote, Remote::Websocket(_)));
+    assert_eq!(ws_remote.url_str(), "ws://localhost:8900/");
 }

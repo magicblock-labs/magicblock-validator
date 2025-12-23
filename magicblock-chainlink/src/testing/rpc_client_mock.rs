@@ -14,6 +14,8 @@ use log::*;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
 #[cfg(any(test, feature = "dev-context"))]
+use solana_commitment_config::CommitmentConfig;
+#[cfg(any(test, feature = "dev-context"))]
 use solana_pubkey::Pubkey;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_rpc_client_api::{
@@ -21,8 +23,7 @@ use solana_rpc_client_api::{
     config::RpcAccountInfoConfig,
     response::{Response, RpcResponseContext, RpcResult},
 };
-#[cfg(any(test, feature = "dev-context"))]
-use solana_sdk::{commitment_config::CommitmentConfig, sysvar::clock};
+use solana_sysvar::clock;
 
 #[cfg(any(test, feature = "dev-context"))]
 use crate::remote_account_provider::chain_rpc_client::ChainRpcClient;

@@ -1,6 +1,9 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     thread,
 };
 
@@ -37,9 +40,6 @@ use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
 
-const NOOP_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
-
 /// A simulated validator backend for integration tests.
 ///
 /// This struct encapsulates all the core components of a validator, including
@@ -47,8 +47,10 @@ const NOOP_PROGRAM_ID: Pubkey =
 /// worker pool. It provides a high-level API for tests to manipulate the blockchain
 /// state and process transactions.
 pub struct ExecutionTestEnv {
+    /// Atomic counter to index the payers array
+    payer_index: AtomicUsize,
     /// The default keypair used for paying transaction fees and signing.
-    pub payer: Keypair,
+    pub payers: Vec<Keypair>,
     /// A handle to the accounts database, storing all account states.
     pub accountsdb: Arc<AccountsDb>,
     /// A handle to the ledger, storing all blocks and transactions.
@@ -61,6 +63,8 @@ pub struct ExecutionTestEnv {
     pub dispatch: DispatchEndpoints,
     /// The "server-side" channel endpoint for broadcasting new block updates.
     pub blocks_tx: BlockUpdateTx,
+    /// Transaction execution scheduler/backend for deferred launch
+    pub scheduler: Option<TransactionScheduler>,
 }
 
 impl Default for ExecutionTestEnv {
@@ -81,7 +85,7 @@ impl ExecutionTestEnv {
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
     pub fn new() -> Self {
-        Self::new_with_config(Self::BASE_FEE)
+        Self::new_with_config(Self::BASE_FEE, 1, false)
     }
 
     /// Creates a new, fully initialized validator test environment with given base fee
@@ -89,10 +93,14 @@ impl ExecutionTestEnv {
     /// This function sets up a complete validator stack:
     /// 1.  Creates temporary on-disk storage for the accounts database and ledger.
     /// 2.  Initializes all the communication channels between the API layer and the core.
-    /// 3.  Spawns a `TransactionScheduler` with one worker thread.
+    /// 3.  Spawns a `TransactionScheduler` with the configured number of worker threads.
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
-    pub fn new_with_config(fee: u64) -> Self {
+    pub fn new_with_config(
+        fee: u64,
+        executors: u32,
+        defer_startup: bool,
+    ) -> Self {
         init_logger!();
         let dir =
             tempfile::tempdir().expect("creating temp dir for validator state");
@@ -105,16 +113,18 @@ impl ExecutionTestEnv {
         let (dispatch, validator_channels) = link();
         let blockhash = ledger.latest_block().load().blockhash;
         let environment = build_svm_env(&accountsdb, blockhash, fee);
-        let payer = Keypair::new();
+        let payers = (0..executors).map(|_| Keypair::new()).collect();
 
-        let this = Self {
-            payer,
+        let mut this = Self {
+            payer_index: AtomicUsize::new(0),
+            payers,
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
             transaction_scheduler: dispatch.transaction_scheduler.clone(),
             dir,
             dispatch,
             blocks_tx: validator_channels.block_update,
+            scheduler: None,
         };
         this.advance_slot(); // Move to slot 1 to ensure a non-genesis state.
 
@@ -136,18 +146,25 @@ impl ExecutionTestEnv {
                 "../programs/elfs/guinea.so".into(),
             )])
             .expect("failed to load test programs into test env");
-        scheduler_state
-            .load_upgradeable_programs(&[(
-                NOOP_PROGRAM_ID,
-                "../test-integration/programs/noop/noop.so".into(),
-            )])
-            .expect("failed to load test programs into test env");
 
-        // Start the transaction processing backend.
-        TransactionScheduler::new(1, scheduler_state).spawn();
+        // Start/Defer the transaction processing backend.
+        let scheduler = TransactionScheduler::new(executors, scheduler_state);
+        if defer_startup {
+            this.scheduler.replace(scheduler);
+        } else {
+            scheduler.spawn();
+        }
 
-        this.fund_account(this.payer.pubkey(), LAMPORTS_PER_SOL);
+        for payer in this.payers.iter() {
+            this.fund_account(payer.pubkey(), LAMPORTS_PER_SOL);
+        }
         this
+    }
+
+    pub fn run_scheduler(&mut self) {
+        if let Some(scheduler) = self.scheduler.take() {
+            scheduler.spawn();
+        }
     }
 
     /// Creates a new account with the specified properties.
@@ -233,10 +250,14 @@ impl ExecutionTestEnv {
 
     /// Builds a transaction with the given instructions, signed by the default payer.
     pub fn build_transaction(&self, ixs: &[Instruction]) -> Transaction {
+        let payer = {
+            let index = self.payer_index.fetch_add(1, Ordering::Relaxed);
+            &self.payers[index % self.payers.len()]
+        };
         Transaction::new_signed_with_payer(
             ixs,
-            Some(&self.payer.pubkey()),
-            &[&self.payer],
+            Some(&payer.pubkey()),
+            &[payer],
             self.ledger.latest_blockhash(),
         )
     }
@@ -250,6 +271,14 @@ impl ExecutionTestEnv {
             .execute(txn)
             .await
             .inspect_err(|err| error!("failed to execute transaction: {err}"))
+    }
+
+    /// Submits a transaction for scheduling and returns
+    pub async fn schedule_transaction(
+        &self,
+        txn: impl SanitizeableTransaction,
+    ) {
+        self.transaction_scheduler.schedule(txn).await.unwrap();
     }
 
     /// Submits a transaction for simulation and waits for the detailed result.
@@ -292,7 +321,11 @@ impl ExecutionTestEnv {
     }
 
     pub fn get_payer(&self) -> CommitableAccount<'_> {
-        self.get_account(self.payer.pubkey())
+        let payer = {
+            let index = self.payer_index.load(Ordering::Relaxed);
+            &self.payers[index % self.payers.len()]
+        };
+        self.get_account(payer.pubkey())
     }
 }
 
@@ -303,7 +336,7 @@ pub struct CommitableAccount<'db> {
 }
 
 impl CommitableAccount<'_> {
-    pub fn commmit(self) {
+    pub fn commit(self) {
         self.db.insert_account(&self.pubkey, &self.account);
     }
 }

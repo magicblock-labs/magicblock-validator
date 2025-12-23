@@ -10,8 +10,6 @@ use solana_program::feature;
 use solana_rent_collector::RentCollector;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
 
-type WorkerId = u8;
-
 /// Initialize an SVM enviroment for transaction processing
 pub fn build_svm_env(
     accountsdb: &AccountsDb,

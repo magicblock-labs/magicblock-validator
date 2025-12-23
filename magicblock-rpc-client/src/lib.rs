@@ -6,6 +6,15 @@ use std::{
 };
 
 use log::*;
+use solana_account::Account;
+use solana_address_lookup_table_interface::state::{
+    AddressLookupTable, LookupTableMeta,
+};
+use solana_clock::Slot;
+use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
+use solana_hash::Hash;
+use solana_instruction::error::InstructionError;
+use solana_pubkey::Pubkey;
 use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
@@ -14,17 +23,8 @@ use solana_rpc_client_api::{
     config::{RpcSendTransactionConfig, RpcTransactionConfig},
     request::RpcError,
 };
-use solana_sdk::{
-    account::Account,
-    address_lookup_table::state::{AddressLookupTable, LookupTableMeta},
-    clock::Slot,
-    commitment_config::{CommitmentConfig, CommitmentLevel},
-    hash::Hash,
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::TransactionError,
-};
-use solana_transaction_error::TransactionResult;
+use solana_signature::Signature;
+use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
@@ -59,7 +59,7 @@ pub enum MagicBlockRpcClientError {
     GetSlot(Box<solana_rpc_client_api::client_error::Error>),
 
     #[error("Error deserializing lookup table: {0}")]
-    LookupTableDeserialize(solana_sdk::instruction::InstructionError),
+    LookupTableDeserialize(InstructionError),
 
     #[error("Error sending transaction: {0} ({0:?})")]
     SendTransaction(Box<solana_rpc_client_api::client_error::Error>),

@@ -3,12 +3,10 @@ use magicblock_chainlink::{
     remote_account_provider::program_account::LoadedProgram,
 };
 use magicblock_magic_program_api::instruction::AccountModification;
-use solana_sdk::{
-    bpf_loader_upgradeable::{self, UpgradeableLoaderState},
-    pubkey::Pubkey,
-    rent::Rent,
-};
-
+use solana_loader_v3_interface::state::UpgradeableLoaderState;
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::bpf_loader_upgradeable;
+use solana_sysvar::rent::Rent;
 pub struct BpfUpgradableProgramModifications {
     pub program_id_modification: AccountModification,
     pub program_data_modification: AccountModification,
@@ -51,6 +49,7 @@ impl BpfUpgradableProgramModifications {
                 rent_epoch: Some(u64::MAX),
                 delegated: Some(false),
                 confined: Some(false),
+                remote_slot: Some(loaded_program.remote_slot),
             }
         };
 
@@ -71,6 +70,7 @@ impl BpfUpgradableProgramModifications {
                 rent_epoch: Some(u64::MAX),
                 delegated: Some(false),
                 confined: Some(false),
+                remote_slot: Some(loaded_program.remote_slot),
             }
         };
 

@@ -1,6 +1,5 @@
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, instruction::Instruction,
-};
+use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_instruction::Instruction;
 
 /// We multiply the CU values that we determined since we've seen compute budget exceeded errors
 /// if we use them as is. The only way to determine CUs for a particular transaction 100% is

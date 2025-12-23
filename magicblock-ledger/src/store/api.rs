@@ -11,17 +11,21 @@ use std::{
 use bincode::{deserialize, serialize};
 use log::*;
 use magicblock_core::link::blocks::BlockHash;
+use magicblock_metrics::metrics::{
+    start_ledger_disable_compactions_timer, start_ledger_shutdown_timer,
+    HistogramTimer,
+};
 use rocksdb::{Direction as IteratorDirection, FlushOptions};
 use scc::HashCache;
+use solana_clock::{Slot, UnixTimestamp};
+use solana_hash::{Hash, HASH_BYTES};
 use solana_measure::measure::Measure;
-use solana_sdk::{
-    clock::{Slot, UnixTimestamp},
-    hash::{Hash, HASH_BYTES},
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::{SanitizedTransaction, VersionedTransaction},
-};
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 use solana_storage_proto::convert::generated::{self, ConfirmedTransaction};
+use solana_transaction::{
+    sanitized::SanitizedTransaction, versioned::VersionedTransaction,
+};
 use solana_transaction_status::{
     ConfirmedTransactionStatusWithSignature,
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
@@ -433,12 +437,12 @@ impl Ledger {
     ///
     /// Specifying the following:
     ///
-    ///  ```rust
-    ///  let pubkey = "<my address>";
-    ///  let highest_slot = 0;
-    ///  let upper_limit_signature = Some(sig_upper);;
-    ///  let lower_limit_signature = Some(sig_lower);
-    ///  let limit = 100;
+    ///  ```text
+    ///  pubkey: "<my address>"
+    ///  highest_slot: 0
+    ///  upper_limit_signature: Some(<sig_upper>)
+    ///  lower_limit_signature: Some(<sig_lower>)
+    ///  limit: 100
     /// ```
     ///
     /// will find up to 100 signatures that are between upper and lower limit signatures
@@ -1262,10 +1266,25 @@ impl Ledger {
 
     /// Graceful db shutdown
     pub fn shutdown(&self, wait: bool) -> LedgerResult<()> {
-        self.flush()?;
+        let _guard = MeasureGuard {
+            measure: Measure::start("Ledger shutdown"),
+            _timer: start_ledger_shutdown_timer(),
+        };
         self.db.backend.db.cancel_all_background_work(wait);
 
         Ok(())
+    }
+
+    /// Cancels manual compaction
+    /// Here we utilize the internal of `disable_manual_compaction`
+    /// Which not only disables future manual compaction,
+    /// but also cancels all the running one
+    pub fn cancel_manual_compactions(&self) {
+        let _guard = MeasureGuard {
+            measure: Measure::start("Compaction cancellation"),
+            _timer: start_ledger_disable_compactions_timer(),
+        };
+        self.db.backend.db.disable_manual_compaction();
     }
 
     /// Cached latest block data
@@ -1311,21 +1330,36 @@ impl_has_column!(TransactionMemos, transaction_memos_cf);
 impl_has_column!(PerfSamples, perf_samples_cf);
 impl_has_column!(AccountModDatas, account_mod_datas_cf);
 
+struct MeasureGuard {
+    measure: Measure,
+    _timer: HistogramTimer,
+}
+
+impl Drop for MeasureGuard {
+    fn drop(&mut self) {
+        self.measure.stop();
+        // We print it in case metrics wouldn't have time to be scraped
+        info!("{}", self.measure);
+    }
+}
+
 // -----------------
 // Tests
 // -----------------
 #[cfg(test)]
 mod tests {
-    use solana_sdk::{
-        clock::UnixTimestamp,
-        instruction::{CompiledInstruction, InstructionError},
-        message::{v0, MessageHeader, SimpleAddressLoader, VersionedMessage},
-        pubkey::Pubkey,
-        signature::{Keypair, Signature},
-        signer::Signer,
-        transaction::{TransactionError, VersionedTransaction},
-        transaction_context::TransactionReturnData,
+    use solana_clock::UnixTimestamp;
+    use solana_instruction::error::InstructionError;
+    use solana_keypair::Keypair;
+    use solana_message::{
+        compiled_instruction::CompiledInstruction, v0, MessageHeader,
+        SimpleAddressLoader, VersionedMessage,
     };
+    use solana_pubkey::Pubkey;
+    use solana_signature::Signature;
+    use solana_signer::Signer;
+    use solana_transaction_context::TransactionReturnData;
+    use solana_transaction_error::{TransactionError, TransactionResult};
     use solana_transaction_status::{
         ConfirmedTransactionWithStatusMeta, InnerInstruction,
         InnerInstructions, TransactionStatusMeta, TransactionWithStatusMeta,
@@ -1408,7 +1442,7 @@ mod tests {
 
         (
             TransactionStatusMeta {
-                status: solana_sdk::transaction::Result::<()>::Err(
+                status: TransactionResult::Err(
                     TransactionError::InstructionError(
                         99,
                         InstructionError::Custom(69),
