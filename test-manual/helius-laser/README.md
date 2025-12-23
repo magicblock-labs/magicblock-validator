@@ -2,21 +2,23 @@
 
 ## What does it do
 
-This test validates the validator's laser gRPC client integration with Helius devnet. It performs a series of account operations and verifies that the local validator correctly clones and tracks account states from the remote Helius cluster.
+This test validates the validator's laser gRPC client integration with Helius or Triton devnet.
+It performs a series of account operations and verifies that the local validator correctly
+clones and tracks account states from the remote Helius cluster.
 
 The test:
 
-1. Sets up a local validator configured to use Helius devnet as remote cluster
+1. Sets up a local validator configured to use Helius/Triton devnet as remote cluster
 2. Performs SOL transfers between accounts on the remote cluster
 3. Clones the involved accounts to the local validator
 4. Does more transfers to trigger account state updates
-5. Verifies that account states between Helius devnet and local validator match exactly
+5. Verifies that account states between Helius/Tritonb devnet and local validator match exactly
 
 ## Why can it not be fully automated
 
 The test cannot be fully automated because it requires:
 
-- Access to a Helius API key for connecting to their devnet RPC and laser endpoints
+- Access to a Helius or Triton API key for connecting to their devnet RPC and laser/yellowstone endpoints
 - A Solana keypair on devnet with sufficient SOL for transaction fees
 - Manual airdrop of SOL to the test account before running
 
@@ -24,27 +26,27 @@ These external dependencies and manual setup steps prevent full automation.
 
 ## How to run it
 
-1. Ensure you have a Helius API key set in the `HELIUS_API_KEY` environment variable:
+1.a. Ensure you have a Helius API key set in the `HELIUS_API_KEY` environment variable:
    ```bash
    export HELIUS_API_KEY=your_helius_api_key_here
    ```
-
-2. Ensure your Solana CLI is configured for devnet:
+1.b. Alternatively, for Triton, set the `TRITON_API_KEY` environment variable:
    ```bash
-   solana config set --url devnet
+   export TRITON_API_KEY=your_triton_api_key_here
    ```
 
-3. Airdrop some SOL to your configured keypair:
+2. Run the test from the `test-manual` directory:
    ```bash
-   solana airdrop 1
+   make test-laser
    ```
+That last step will ensure the following:
 
-4. Run the test from the `test-manual` directory:
-   ```bash
-   make manual-test-laser
-   ```
+1. airdrop some SOL to your globally configured keypair
+2. start a local validator in ephemeral mode after creating a
+   temporary config which uses either a Helius or Triton GRPC endpoint
+3. run the test script
 
-The test will:
+The test script will:
 
 - Start a local validator in ephemeral mode
 - Perform account operations on devnet
@@ -55,3 +57,8 @@ The test will:
 - Clean up the validator process
 
 If successful, you'll see account cloning and subscription messages in the validator logs, followed by confirmation that all account states match.
+
+## Run Steps in Isolation
+
+Insid `test-manual/helius-laser/sh/` you can find bash scripts which you can run in order to
+perform the above step by step.
