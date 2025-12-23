@@ -61,17 +61,14 @@ impl borsh::de::BorshDeserialize for OrderBookOwned {
         // I could take mutable bytes from &[u8] as well and unsafe block will not
         // stop me, but that would break aliasing rules and therefore would invoke UB.
         // It's a test code, so copying should be OK.
-        let book_bytes = {
+        let mut book_bytes = {
             let mut aligned = rkyv::AlignedVec::with_capacity(book_bytes.len());
             aligned.extend_from_slice(book_bytes);
             aligned
         };
 
         OrderBook::try_new(unsafe {
-            slice::from_raw_parts_mut(
-                book_bytes.as_ptr() as *mut u8,
-                book_bytes.len(),
-            )
+            slice::from_raw_parts_mut(book_bytes.as_mut_ptr(), book_bytes.len())
         })
         .map(|book| OrderBookOwned::from(&book))
         .map_err(|_| borsh::io::Error::from(borsh::io::ErrorKind::InvalidData))

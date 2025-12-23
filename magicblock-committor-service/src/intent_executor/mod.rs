@@ -6,9 +6,6 @@ pub mod two_stage_executor;
 
 use std::{mem, ops::ControlFlow, sync::Arc, time::Duration};
 
-#[cfg(test)]
-mod null_task_info_fetcher;
-
 use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
 use log::{trace, warn};
@@ -25,8 +22,6 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
-#[cfg(test)]
-pub use null_task_info_fetcher::*;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;

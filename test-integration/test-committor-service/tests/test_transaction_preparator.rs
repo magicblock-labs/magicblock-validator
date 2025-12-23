@@ -35,15 +35,12 @@ async fn test_prepare_commit_tx_with_single_account() {
     let committed_account = create_committed_account(&account_data);
 
     let tasks = vec![
-        Box::new(
-            TaskBuilderImpl::create_commit_task(
-                1,
-                true,
-                committed_account.clone(),
-                &fixture.create_task_info_fetcher(),
-            )
-            .await,
-        ) as Box<dyn BaseTask>,
+        Box::new(TaskBuilderImpl::create_commit_task(
+            1,
+            true,
+            committed_account.clone(),
+            None,
+        )) as Box<dyn BaseTask>,
         Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
         }))),
@@ -98,24 +95,20 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
             1,
             true,
             committed_account2.clone(),
-            &fixture.create_task_info_fetcher(),
+            None,
         )
-        .await
         .task_type
         .into(),
     );
     // Create test data
     let tasks = vec![
         // account 1
-        Box::new(
-            TaskBuilderImpl::create_commit_task(
-                1,
-                true,
-                committed_account1.clone(),
-                &fixture.create_task_info_fetcher(),
-            )
-            .await,
-        ) as Box<dyn BaseTask>,
+        Box::new(TaskBuilderImpl::create_commit_task(
+            1,
+            true,
+            committed_account1.clone(),
+            None,
+        )) as Box<dyn BaseTask>,
         // account 2
         Box::new(buffer_commit_task),
         // finalize account 1
@@ -203,9 +196,8 @@ async fn test_prepare_commit_tx_with_base_actions() {
             1,
             true,
             committed_account.clone(),
-            &fixture.create_task_info_fetcher(),
+            None,
         )
-        .await
         .task_type
         .into(),
     );

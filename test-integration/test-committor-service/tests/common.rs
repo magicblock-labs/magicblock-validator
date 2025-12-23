@@ -10,7 +10,8 @@ use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
-            ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+            ResetType, TaskInfoFetcher, TaskInfoFetcherError,
+            TaskInfoFetcherResult,
         },
         IntentExecutorImpl,
     },
@@ -21,7 +22,7 @@ use magicblock_committor_service::{
     ComputeBudgetConfig,
 };
 use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
-use magicblock_rpc_client::{MagicBlockRpcClientResult, MagicblockRpcClient};
+use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -142,11 +143,23 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
 
     fn reset(&self, _: ResetType) {}
 
-    async fn get_base_account(
+    async fn get_base_accounts(
         &self,
-        pubkey: &Pubkey,
-    ) -> MagicBlockRpcClientResult<Option<Account>> {
-        self.0.get_account(pubkey).await
+        pubkeys: &[Pubkey],
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+        self.0
+            .get_multiple_accounts(pubkeys, None)
+            .await
+            .map_err(|err| {
+                TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(err))
+            })
+            .map(|accounts| {
+                pubkeys
+                    .iter()
+                    .zip(accounts.into_iter())
+                    .filter_map(|(key, value)| value.map(|value| (*key, value)))
+                    .collect()
+            })
     }
 }
 

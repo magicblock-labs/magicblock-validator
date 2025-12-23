@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_util::future::join_all;
 use log::error;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
     UndelegateType,
 };
+use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 
@@ -51,31 +51,18 @@ pub struct TaskBuilderImpl;
 pub const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 
 impl TaskBuilderImpl {
-    pub async fn create_commit_task<C: TaskInfoFetcher>(
+    pub fn create_commit_task(
         commit_id: u64,
         allow_undelegation: bool,
         account: CommittedAccount,
-        task_info_fetcher: &Arc<C>,
+        base_account: Option<Account>,
     ) -> ArgsTask {
-        let base_account = if account.account.data.len()
-            > COMMIT_STATE_SIZE_THRESHOLD
-        {
-            match task_info_fetcher.get_base_account(&account.pubkey).await {
-                Ok(Some(account)) => Some(account),
-                Ok(None) => {
-                    log::warn!("AccountNotFound for commit_diff, pubkey: {}, commit_id: {}, Falling back to commit_state.",
-                        account.pubkey, commit_id);
-                    None
-                }
-                Err(e) => {
-                    log::warn!("Failed to fetch base account for commit diff, pubkey: {}, commit_id: {}, error: {}. Falling back to commit_state.",
-                        account.pubkey, commit_id, e);
-                    None
-                }
-            }
-        } else {
-            None
-        };
+        let base_account =
+            if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
+                base_account
+            } else {
+                None
+            };
 
         if let Some(base_account) = base_account {
             ArgsTaskType::CommitDiff(CommitDiffTask {
@@ -123,14 +110,37 @@ impl TasksBuilder for TaskBuilderImpl {
             }
         };
 
-        let committed_pubkeys = accounts
-            .iter()
-            .map(|account| account.pubkey)
-            .collect::<Vec<_>>();
-        let commit_ids = commit_id_fetcher
-            .fetch_next_commit_ids(&committed_pubkeys)
-            .await
-            .map_err(TaskBuilderError::CommitTasksBuildError)?;
+        let (commit_ids, base_accounts) = {
+            let committed_pubkeys = accounts
+                .iter()
+                .map(|account| account.pubkey)
+                .collect::<Vec<_>>();
+
+            let diffable_pubkeys = accounts
+                .iter()
+                .filter(|account| {
+                    account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD
+                })
+                .map(|account| account.pubkey)
+                .collect::<Vec<_>>();
+
+            tokio::join!(
+                commit_id_fetcher.fetch_next_commit_ids(&committed_pubkeys),
+                commit_id_fetcher
+                    .get_base_accounts(diffable_pubkeys.as_slice())
+            )
+        };
+
+        let commit_ids =
+            commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
+
+        let base_accounts = match base_accounts {
+            Ok(map) => map,
+            Err(err) => {
+                log::warn!("Failed to fetch base accounts for CommitDiff (id={}): {}; falling back to CommitState", base_intent.id, err);
+                Default::default()
+            }
+        };
 
         // Persist commit ids for commitees
         commit_ids
@@ -141,13 +151,17 @@ impl TasksBuilder for TaskBuilderImpl {
                 }
             });
 
-        let tasks = join_all(accounts
+        let tasks = accounts
             .iter()
-            .map(|account| async {
+            .map(|account| {
                 let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                let task = Self::create_commit_task(commit_id, allow_undelegation, account.clone(), commit_id_fetcher).await;
+                // TODO (snawaz): if accounts do not have duplicate, then we can use remove
+                // instead:
+                //  let base_account = base_accounts.remove(&account.pubkey);
+                let base_account = base_accounts.get(&account.pubkey).cloned();
+                let task = Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account);
                 Box::new(task) as Box<dyn BaseTask>
-            })).await;
+            }).collect();
 
         Ok(tasks)
     }
