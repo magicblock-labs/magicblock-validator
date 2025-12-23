@@ -400,8 +400,9 @@ impl ChainLaserActor {
         let request = SubscribeRequest {
             accounts,
             commitment: Some((*commitment).into()),
-            // TODO: @@@ figure out why Triton gives us the following error
-            // gRPC status error: status: Internal, message: "from_slot is not supported"
+            // NOTE: triton does not support backfilling and we could not verify this with
+            // helius due to being rate limited.
+            // TODO(thlorenz): once we can test this enable backfilling for helius only
             from_slot: None,
             ..Default::default()
         };
