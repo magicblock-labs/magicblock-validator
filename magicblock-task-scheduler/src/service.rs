@@ -110,6 +110,17 @@ impl TaskSchedulerService {
             tasks.len()
         );
         for task in tasks {
+            if task.execution_interval_millis == 0
+                || task.execution_interval_millis > u32::MAX as i64
+            {
+                warn!(
+                    "Task {} has an invalid execution interval: {}. Skipping.",
+                    task.id, task.execution_interval_millis
+                );
+                self.db.remove_task(task.id).await?;
+                continue;
+            }
+
             let next_execution =
                 task.last_execution_millis + task.execution_interval_millis;
             let timeout = Duration::from_millis(
