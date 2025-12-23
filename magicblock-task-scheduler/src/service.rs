@@ -69,7 +69,7 @@ impl TaskSchedulerService {
         scheduled_tasks: ScheduledTasksRx,
         block: LatestBlock,
         token: CancellationToken,
-    ) -> Result<Self, TaskSchedulerError> {
+    ) -> TaskSchedulerResult<Self> {
         if config.reset {
             match std::fs::remove_file(path) {
                 Ok(_) => {}
