@@ -279,6 +279,9 @@ impl MagicValidator {
                 .build()
                 .expect("failed to bulid async runtime for rpc service");
             runtime.block_on(rpc.run());
+
+            drop(runtime);
+            info!("rpc runtime shutdown!");
         });
 
         let task_scheduler_db_path =
@@ -543,6 +546,7 @@ impl MagicValidator {
         .map_err(|err| {
             ApiError::FailedToUnregisterValidatorOnChain(format!("{err:#}"))
         })
+        .inspect(|_| info!("Unregistered validator on chain!"))
     }
 
     async fn ensure_validator_funded_on_chain(&self) -> ApiResult<()> {
@@ -684,6 +688,8 @@ impl MagicValidator {
         if let Err(err) = self.ledger_truncator.join() {
             error!("Ledger truncator did not gracefully exit: {:?}", err);
         }
+
+        info!("MagicValidator shutdown!");
     }
 
     pub fn ledger(&self) -> &Ledger {
