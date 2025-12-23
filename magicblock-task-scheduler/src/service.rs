@@ -290,6 +290,7 @@ impl TaskSchedulerService {
             }
         }
 
+        info!("TaskSchedulerService shutdown!");
         Ok(())
     }
 
