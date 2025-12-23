@@ -1,8 +1,10 @@
 use std::str::FromStr;
 
+use cleanass::{assert, assert_eq};
 use integration_test_tools::{
-    expect, loaded_accounts::LoadedAccounts,
-    validator::start_magicblock_validator_with_config_struct,
+    expect,
+    loaded_accounts::LoadedAccounts,
+    validator::{cleanup, start_magicblock_validator_with_config_struct},
     IntegrationTestContext,
 };
 use magicblock_config::{
@@ -56,24 +58,33 @@ fn test_auto_airdrop_feepayer_balance_after_tx() {
     );
     expect!(ctx.wait_for_next_slot_ephem(), validator);
 
-    // Create a brand new fee payer with zero balance on chain
+    // Create a brand new fee payer with zero balance
     let payer = Keypair::new();
     let recipient = Keypair::new();
 
-    // Send a 0-lamport transfer to trigger account creation/cloning for the new fee payer
+    // Send a zero lamport transfers to trigger account creation/cloning for the new fee payer
     // This should cause the validator to auto-airdrop 1 SOL to the payer
-    let ix =
+    // NOTE: we send two instructions to bypass the noop transaction optimization
+    let ix1 =
         system_instruction::transfer(&payer.pubkey(), &recipient.pubkey(), 0);
-    let _sig = expect!(
-        ctx.send_and_confirm_instructions_with_payer_ephem(&[ix], &payer),
+    let ix2 =
+        system_instruction::transfer(&payer.pubkey(), &recipient.pubkey(), 0);
+    let (sig, confirmed) = expect!(
+        ctx.send_and_confirm_instructions_with_payer_ephem(&[ix1, ix2], &payer),
         validator
+    );
+
+    assert!(
+        !confirmed,
+        cleanup(&mut validator),
+        "Transaction is not confirmed (due to invalid writable): {sig}",
     );
 
     // Fetch the payer balance from the ephemeral validator and assert it equals 1_000_000_000
     let balance =
         expect!(ctx.fetch_ephem_account_balance(&payer.pubkey()), validator);
-    assert_eq!(balance, 1_000_000_000);
+    assert_eq!(balance, 1_000_000_000, cleanup(&mut validator));
 
     // Cleanup validator process
-    integration_test_tools::validator::cleanup(&mut validator);
+    cleanup(&mut validator);
 }
