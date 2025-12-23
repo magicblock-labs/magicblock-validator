@@ -88,8 +88,7 @@ impl IxtestContext {
                     url: "ws://localhost:7800".to_string(),
                 },
             ];
-            let endpoints = Endpoints::try_from(endpoints_vec.as_slice())
-                .expect("Failed to create Endpoints");
+            let endpoints = Endpoints::from(endpoints_vec.as_slice());
             // Add all native programs
             let native_programs = native_program_accounts();
             let program_stub = AccountSharedData::new(

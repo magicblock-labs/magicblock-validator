@@ -2,7 +2,7 @@ use magicblock_chainlink::{
     remote_account_provider::pubsub_common::SubscriptionUpdate,
     testing::{
         chain_pubsub::{
-            recycle, setup_actor_and_client, shutdown, subscribe, unsubscribe,
+            reconnect, setup_actor_and_client, shutdown, subscribe, unsubscribe,
         },
         utils::{airdrop, init_logger, random_pubkey},
     },

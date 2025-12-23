@@ -145,10 +145,7 @@ impl Default for MatchSlotsConfig {
 }
 
 impl
-    RemoteAccountProvider<
-        ChainRpcClientImpl,
-        SubMuxClient<ChainPubsubClientImpl>,
-    >
+    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
 {
     pub async fn try_from_urls_and_config(
         endpoints: &Endpoints,
