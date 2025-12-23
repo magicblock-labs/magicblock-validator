@@ -2,8 +2,12 @@ use light_compressed_account::address::derive_address;
 use light_sdk::light_hasher::hash_to_field_size::hashv_to_bn254_field_size_be_const_array;
 use solana_pubkey::Pubkey;
 
-const ADDRESS_TREE: Pubkey =
+// Light protocol V2 accounts:
+// https://www.zkcompression.com/resources/addresses-and-urls#v2-2
+pub const ADDRESS_TREE: Pubkey =
     Pubkey::from_str_const("amt2kaJA14v3urZbZvnc5v2np8jqvc4Z8zDep5wbtzx");
+pub const OUTPUT_QUEUE: Pubkey =
+    Pubkey::from_str_const("oq1na8gojfdUhsfCpyjNt6h4JaDWtHf1yQj4koBWfto");
 
 /// Derives a CDA (Compressed derived Address) from a PDA (Program derived Address)
 /// of a compressed account we want to use in our validator in uncompressed form.

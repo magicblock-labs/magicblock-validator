@@ -41,7 +41,9 @@ use magicblock_chainlink::{
     Chainlink,
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
-use magicblock_core::compression::derive_cda_from_pda;
+use magicblock_core::compression::{
+    derive_cda_from_pda, ADDRESS_TREE, OUTPUT_QUEUE,
+};
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::AccountSharedData;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -95,10 +97,7 @@ pub const TEST_AUTHORITY: [u8; 64] = [
     13, 32, 77, 204, 244, 56, 166, 172, 66, 113, 150, 218, 112, 42, 110, 181,
     98, 158, 222, 194, 130, 93, 175, 100, 190, 106, 9, 69, 156, 80, 96, 72,
 ];
-const ADDRESS_TREE_PUBKEY: Pubkey =
-    pubkey!("amt2kaJA14v3urZbZvnc5v2np8jqvc4Z8zDep5wbtzx");
-const OUTPUT_QUEUE_PUBKEY: Pubkey =
-    pubkey!("oq1na8gojfdUhsfCpyjNt6h4JaDWtHf1yQj4koBWfto");
+
 impl IxtestContext {
     pub async fn init() -> Self {
         Self::init_with_config(ChainlinkConfig::default_with_lifecycle_mode(
@@ -446,7 +445,7 @@ impl IxtestContext {
                     vec![],
                     vec![AddressWithTree {
                         address: record_address.to_bytes(),
-                        tree: ADDRESS_TREE_PUBKEY,
+                        tree: ADDRESS_TREE,
                     }],
                     None,
                 )
@@ -456,9 +455,9 @@ impl IxtestContext {
 
             // Insert trees in accounts
             let address_merkle_tree_pubkey_index =
-                remaining_accounts.insert_or_get(ADDRESS_TREE_PUBKEY);
+                remaining_accounts.insert_or_get(ADDRESS_TREE);
             let state_queue_pubkey_index =
-                remaining_accounts.insert_or_get(OUTPUT_QUEUE_PUBKEY);
+                remaining_accounts.insert_or_get(OUTPUT_QUEUE);
 
             let packed_address_tree_info = PackedAddressTreeInfo {
                 root_index: rpc_result.addresses[0].root_index,

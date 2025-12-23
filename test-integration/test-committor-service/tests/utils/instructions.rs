@@ -6,7 +6,9 @@ use light_client::indexer::{
     ValidityProofWithContext,
 };
 use light_sdk::instruction::{PackedAccounts, SystemAccountMetaConfig};
-use magicblock_core::compression::derive_cda_from_pda;
+use magicblock_core::compression::{
+    derive_cda_from_pda, ADDRESS_TREE, OUTPUT_QUEUE,
+};
 use magicblock_program::validator::validator_authority_id;
 use program_flexi_counter::{
     instruction::{
@@ -15,7 +17,7 @@ use program_flexi_counter::{
     state::FlexiCounter,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::{instruction::Instruction, pubkey, rent::Rent};
+use solana_sdk::{instruction::Instruction, rent::Rent};
 
 pub fn init_validator_fees_vault_ix(validator_auth: Pubkey) -> Instruction {
     dlp::instruction_builder::init_validator_fees_vault(
@@ -24,11 +26,6 @@ pub fn init_validator_fees_vault_ix(validator_auth: Pubkey) -> Instruction {
         validator_auth,
     )
 }
-
-const ADDRESS_TREE_PUBKEY: Pubkey =
-    pubkey!("amt2kaJA14v3urZbZvnc5v2np8jqvc4Z8zDep5wbtzx");
-const OUTPUT_QUEUE_PUBKEY: Pubkey =
-    pubkey!("oq1na8gojfdUhsfCpyjNt6h4JaDWtHf1yQj4koBWfto");
 
 pub struct InitAccountAndDelegateIxs {
     pub init: Instruction,
@@ -106,7 +103,7 @@ pub async fn init_account_and_delegate_compressed_ixs(
                 vec![],
                 vec![AddressWithTree {
                     address: record_address.to_bytes(),
-                    tree: ADDRESS_TREE_PUBKEY,
+                    tree: ADDRESS_TREE,
                 }],
                 None,
             )
@@ -116,9 +113,9 @@ pub async fn init_account_and_delegate_compressed_ixs(
 
         // Insert trees in accounts
         let address_merkle_tree_pubkey_index =
-            remaining_accounts.insert_or_get(ADDRESS_TREE_PUBKEY);
+            remaining_accounts.insert_or_get(ADDRESS_TREE);
         let state_queue_pubkey_index =
-            remaining_accounts.insert_or_get(OUTPUT_QUEUE_PUBKEY);
+            remaining_accounts.insert_or_get(OUTPUT_QUEUE);
 
         let packed_address_tree_info = PackedAddressTreeInfo {
             root_index: rpc_result.addresses[0].root_index,
