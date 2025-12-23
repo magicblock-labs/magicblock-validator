@@ -63,3 +63,6 @@ pub const DEFAULT_METRICS_ADDR: &str = "0.0.0.0:9000";
 
 /// Default frequency of metrics collection in seconds
 pub const DEFAULT_METRICS_COLLECT_FREQUENCY_SEC: u64 = 30;
+
+// Task Scheduler Defaults
+pub const DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS: u64 = 10;
