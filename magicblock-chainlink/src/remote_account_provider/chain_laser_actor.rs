@@ -38,13 +38,34 @@ type LaserStreamUpdate = (usize, LaserResult);
 type LaserStream = Pin<Box<dyn Stream<Item = LaserResult> + Send>>;
 
 const PER_STREAM_SUBSCRIPTION_LIMIT: usize = 1_000;
-const SUBSCIRPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 10_000;
+const SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 10_000;
 const SLOTS_BETWEEN_ACTIVATIONS: u64 =
-    SUBSCIRPTION_ACTIVATION_INTERVAL_MILLIS / 400;
+    SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS / 400;
 
 // -----------------
 // ChainLaserActor
 // -----------------
+/// ChainLaserActor manages gRPC subscriptions to Helius Laser or Triton endpoints.
+///
+/// ## Subscription Lifecycle
+///
+/// 1. **Requested**: User calls `subscribe(pubkey)`. Pubkey is added to `subscriptions` set.
+/// 2. **Queued**: Every [SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS], `update_active_subscriptions()` creates new streams.
+/// 3. **Active**: Subscriptions are sent to Helius/Triton via gRPC streams in `active_subscriptions`.
+/// 4. **Updates**: Account updates flow back via the streams and are forwarded to the consumer.
+///
+/// ## Stream Management
+///
+/// - Subscriptions are grouped into chunks of up to 1,000 per stream (Helius limit).
+/// - Each chunk gets its own gRPC stream (`StreamMap<usize, LaserStream>`).
+/// - When subscriptions change, ALL streams are dropped and recreated.
+/// - This simplifies reasoning but loses in-flight updates during the transition.
+///
+/// ## Reconnection Behavior
+///
+/// - If a stream ends unexpectedly, `signal_connection_issue()` is called.
+/// - The actor sends an abort signal to the submux, which triggers reconnection.
+/// - The actor itself doesn't attempt to reconnect; it relies on external recovery.
 pub struct ChainLaserActor {
     /// Configuration used to create the laser client
     laser_client_config: LaserstreamConfig,
@@ -136,7 +157,7 @@ impl ChainLaserActor {
     pub async fn run(mut self) {
         let mut activate_subs_interval =
             tokio::time::interval(std::time::Duration::from_millis(
-                SUBSCIRPTION_ACTIVATION_INTERVAL_MILLIS,
+                SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS,
             ));
 
         loop {
