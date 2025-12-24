@@ -8,7 +8,10 @@ use std::{
 
 use futures_util::stream::FuturesUnordered;
 use log::*;
-use magicblock_metrics::metrics::inc_program_subscription_account_updates;
+use magicblock_metrics::metrics::{
+    inc_account_subscription_account_updates_count,
+    inc_program_subscription_account_updates_count,
+};
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -429,13 +432,13 @@ impl ChainPubsubActor {
                     update = update_stream.next() => {
                         if let Some(rpc_response) = update {
                             if log_enabled!(log::Level::Trace) && (!pubkey.eq(&clock::ID) ||
-                               rpc_response.context.slot % CLOCK_LOG_SLOT_FREQ == 0) {
+                                rpc_response.context.slot % CLOCK_LOG_SLOT_FREQ == 0) {
                                 trace!("[client_id={client_id}] Received update for {pubkey}: {rpc_response:?}");
                             }
-                            let update = SubscriptionUpdate::from((
-                                pubkey,
-                                rpc_response,
-                            ));
+                            let update = SubscriptionUpdate::from((pubkey, rpc_response));
+                            inc_account_subscription_account_updates_count(
+                                &client_id.to_string(),
+                            );
                             let _ = subscription_updates_sender.send(update).await.inspect_err(|err| {
                                 error!("[client_id={client_id}] Failed to send {pubkey} subscription update: {err:?}");
                             });
@@ -566,7 +569,7 @@ impl ChainPubsubActor {
                                     };
                                     let sub_update = SubscriptionUpdate::from((acc_pubkey, rpc_response));
                                     trace!("[client_id={client_id}] Sending program {program_pubkey} account update: {sub_update:?}");
-                                    inc_program_subscription_account_updates(
+                                    inc_program_subscription_account_updates_count(
                                         &client_id.to_string(),
                                     );
                                     let _ = subscription_updates_sender.send(sub_update)
