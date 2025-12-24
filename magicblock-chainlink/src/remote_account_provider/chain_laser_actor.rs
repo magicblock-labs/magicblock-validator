@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt,
     pin::Pin,
     sync::{
         atomic::{AtomicU16, AtomicU64, Ordering},
@@ -17,6 +18,10 @@ use helius_laserstream::{
     ChannelOptions, LaserstreamConfig, LaserstreamError,
 };
 use log::*;
+use magicblock_metrics::metrics::{
+    inc_account_subscription_account_updates_count,
+    inc_program_subscription_account_updates_count,
+};
 use solana_account::Account;
 use solana_commitment_config::CommitmentLevel as SolanaCommitmentLevel;
 use solana_pubkey::Pubkey;
@@ -41,6 +46,24 @@ const PER_STREAM_SUBSCRIPTION_LIMIT: usize = 1_000;
 const SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 10_000;
 const SLOTS_BETWEEN_ACTIVATIONS: u64 =
     SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS / 400;
+
+// -----------------
+// AccountUpdateSource
+// -----------------
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AccountUpdateSource {
+    Account,
+    Program,
+}
+
+impl fmt::Display for AccountUpdateSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Account => write!(f, "account"),
+            Self::Program => write!(f, "program"),
+        }
+    }
+}
 
 // -----------------
 // ChainLaserActor
@@ -497,8 +520,11 @@ impl ChainLaserActor {
     ) {
         match result {
             Ok(subscribe_update) => {
-                self.process_subscription_update(subscribe_update, "account")
-                    .await;
+                self.process_subscription_update(
+                    subscribe_update,
+                    AccountUpdateSource::Account,
+                )
+                .await;
             }
             Err(err) => {
                 error!(
@@ -522,8 +548,11 @@ impl ChainLaserActor {
     async fn handle_program_update(&mut self, result: LaserResult) {
         match result {
             Ok(subscribe_update) => {
-                self.process_subscription_update(subscribe_update, "program")
-                    .await;
+                self.process_subscription_update(
+                    subscribe_update,
+                    AccountUpdateSource::Program,
+                )
+                .await;
             }
             Err(err) => {
                 error!(
@@ -590,7 +619,7 @@ impl ChainLaserActor {
     async fn process_subscription_update(
         &mut self,
         update: SubscribeUpdate,
-        source: &str,
+        source: AccountUpdateSource,
     ) {
         let Some(update_oneof) = update.update_oneof else {
             return;
@@ -666,6 +695,16 @@ impl ChainLaserActor {
                 subscription_update
             );
         }
+
+        match source {
+            AccountUpdateSource::Account => {
+                inc_account_subscription_account_updates_count(&self.client_id);
+            }
+            AccountUpdateSource::Program => {
+                inc_program_subscription_account_updates_count(&self.client_id);
+            }
+        }
+
         self.subscription_updates_sender
             .send(subscription_update)
             .await
