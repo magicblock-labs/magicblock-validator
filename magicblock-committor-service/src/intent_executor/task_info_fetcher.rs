@@ -10,6 +10,7 @@ use log::warn;
 use lru::LruCache;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
+use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 
@@ -36,6 +37,11 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
 
     /// Resets cache for some or all accounts
     fn reset(&self, reset_type: ResetType);
+
+    async fn get_base_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>>;
 }
 
 pub enum ResetType<'a> {
@@ -262,6 +268,25 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
                 });
             }
         }
+    }
+
+    async fn get_base_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+        self.rpc_client
+            .get_multiple_accounts(pubkeys, None)
+            .await
+            .map_err(|err| {
+                TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(err))
+            })
+            .map(|accounts| {
+                pubkeys
+                    .iter()
+                    .zip(accounts.into_iter())
+                    .filter_map(|(key, value)| value.map(|value| (*key, value)))
+                    .collect()
+            })
     }
 }
 

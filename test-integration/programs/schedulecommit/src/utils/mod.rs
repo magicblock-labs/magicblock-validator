@@ -72,6 +72,12 @@ pub fn allocate_account_and_assign_owner(
         .max(1)
         .saturating_sub(account_info.lamports());
 
+    msg!(
+        "required_lamports: {}, payer has {}",
+        required_lamports,
+        payer_info.lamports()
+    );
+
     // 1. Transfer the required rent to the account
     if required_lamports > 0 {
         transfer_lamports(payer_info, account_info, required_lamports)?;

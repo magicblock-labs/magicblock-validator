@@ -10,10 +10,12 @@ use program_schedulecommit::{
         schedule_commit_and_undelegate_cpi_instruction,
         schedule_commit_and_undelegate_cpi_twice,
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
-        set_count_instruction,
+        schedule_commit_diff_instruction_for_order_book, set_count_instruction,
+        update_order_book_instruction, UserSeeds,
     },
-    FAIL_UNDELEGATION_COUNT,
+    BookUpdate, OrderLevel, FAIL_UNDELEGATION_COUNT,
 };
+use rand::{RngCore, SeedableRng};
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
@@ -51,7 +53,10 @@ fn commit_and_undelegate_one_account(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(1);
+    let ctx = get_context_with_delegated_committees(
+        1,
+        UserSeeds::MagicScheduleCommit,
+    );
     let ScheduleCommitTestContextFields {
         payer_ephem: payer,
         committees,
@@ -105,6 +110,62 @@ fn commit_and_undelegate_one_account(
     (ctx, *sig, tx_res)
 }
 
+fn commit_and_undelegate_order_book_account(
+    update: BookUpdate,
+) -> (
+    ScheduleCommitTestContext,
+    Signature,
+    Result<Signature, ClientError>,
+) {
+    let ctx = get_context_with_delegated_committees(1, UserSeeds::OrderBook);
+    let ScheduleCommitTestContextFields {
+        payer_ephem,
+        committees,
+        commitment,
+        ephem_client,
+        ..
+    } = ctx.fields();
+
+    assert_eq!(committees.len(), 1);
+
+    let ixs = [
+        update_order_book_instruction(
+            payer_ephem.pubkey(),
+            committees[0].1,
+            update,
+        ),
+        schedule_commit_diff_instruction_for_order_book(
+            payer_ephem.pubkey(),
+            committees[0].1,
+            magicblock_magic_program_api::id(),
+            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        ),
+    ];
+
+    let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &ixs,
+        Some(&payer_ephem.pubkey()),
+        &[&payer_ephem],
+        ephem_blockhash,
+    );
+
+    let sig = tx.get_signature();
+    let tx_res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+    debug!("txhash (scheduled_commit): {:?}", tx_res);
+
+    debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
+    (ctx, *sig, tx_res)
+}
+
 fn commit_and_undelegate_two_accounts(
     modify_after: bool,
 ) -> (
@@ -112,7 +173,10 @@ fn commit_and_undelegate_two_accounts(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(2);
+    let ctx = get_context_with_delegated_committees(
+        2,
+        UserSeeds::MagicScheduleCommit,
+    );
     let ScheduleCommitTestContextFields {
         payer_ephem: payer,
         committees,
@@ -172,7 +236,10 @@ fn commit_and_undelegate_two_accounts_twice() -> (
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(2);
+    let ctx = get_context_with_delegated_committees(
+        2,
+        UserSeeds::MagicScheduleCommit,
+    );
     let ScheduleCommitTestContextFields {
         payer_ephem: payer,
         committees,
@@ -226,6 +293,70 @@ fn test_committing_and_undelegating_one_account() {
         assert_one_committee_was_committed(&ctx, &res, true);
         assert_one_committee_synchronized_count(&ctx, &res, 1);
 
+        assert_one_committee_account_was_undelegated_on_chain(&ctx);
+    });
+}
+
+#[test]
+fn test_committing_and_undelegating_huge_order_book_account() {
+    run_test!({
+        let (rng_seed, update) = {
+            use rand::{
+                rngs::{OsRng, StdRng},
+                Rng,
+            };
+            let rng_seed = OsRng.next_u64();
+            println!("Important: use {rng_seed} as seed to regenerate the random inputs in case of test failure");
+            let mut random = StdRng::seed_from_u64(rng_seed);
+            let mut update = BookUpdate::default();
+            update.bids.extend((0..random.gen_range(5..10)).map(|_| {
+                OrderLevel {
+                    price: random.gen_range(75000..90000),
+                    size: random.gen_range(1..10),
+                }
+            }));
+            update.asks.extend((0..random.gen_range(5..10)).map(|_| {
+                OrderLevel {
+                    price: random.gen_range(125000..150000),
+                    size: random.gen_range(1..10),
+                }
+            }));
+            (rng_seed, update)
+        };
+        let (ctx, sig, tx_res) =
+            commit_and_undelegate_order_book_account(update.clone());
+        info!("'{}' {:?}", sig, tx_res);
+
+        let res = verify::fetch_and_verify_order_book_commit_result_from_logs(
+            &ctx, sig,
+        );
+
+        let book = res
+            .included
+            .values()
+            .next()
+            .expect("one order-book must exist");
+
+        assert_eq!(
+            book.bids.len(),
+            update.bids.len(),
+            "Use {rng_seed} to generate the input and investigate"
+        );
+        assert_eq!(
+            book.asks.len(),
+            update.asks.len(),
+            "Use {rng_seed} to generate the input and investigate"
+        );
+        assert_eq!(
+            book.bids, update.bids,
+            "Use {rng_seed} to generate the input and investigate"
+        );
+        assert_eq!(
+            book.asks, update.asks,
+            "Use {rng_seed} to generate the input and investigate"
+        );
+
+        assert_one_committee_was_committed(&ctx, &res, true);
         assert_one_committee_account_was_undelegated_on_chain(&ctx);
     });
 }
@@ -607,7 +738,10 @@ fn test_committing_and_undelegating_two_accounts_twice() {
 #[test]
 fn test_committing_after_failed_undelegation() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(1);
+        let ctx = get_context_with_delegated_committees(
+            1,
+            UserSeeds::MagicScheduleCommit,
+        );
         let ScheduleCommitTestContextFields {
             payer_ephem: payer,
             committees,

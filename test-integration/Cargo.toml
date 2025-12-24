@@ -36,8 +36,8 @@ chrono = "0.4"
 cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "2d0f16b" }
 futures = "0.3.31"
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "2d0f16b" }
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"
@@ -57,7 +57,7 @@ magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "735640a", features = [
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "3edb41022" , features = [
   "no-entrypoint",
 ] }
 magicblock-program = { path = "../programs/magicblock" }
@@ -71,6 +71,7 @@ program-schedulecommit-security = { path = "programs/schedulecommit-security" }
 rand = "0.8.5"
 random-port = "0.1.1"
 rayon = "1.10.0"
+rkyv = "0.7.45"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
@@ -89,6 +90,7 @@ solana-sdk-ids = { version = "2.2" }
 solana-system-interface = "1.0"
 solana-transaction-status = "2.2"
 spl-memo-interface = "1.0"
+static_assertions = "1.1.0"
 teepee = "0.0.1"
 tempfile = "3.10.1"
 test-chainlink = { path = "./test-chainlink" }
