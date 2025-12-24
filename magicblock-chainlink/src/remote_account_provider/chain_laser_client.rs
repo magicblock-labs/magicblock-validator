@@ -32,7 +32,7 @@ impl ChainLaserClientImpl {
         client_id: String,
         api_key: &str,
         commitment: CommitmentLevel,
-        abort_sender: mpsc::Sender<String>,
+        abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, messages, updates) = ChainLaserActor::new_from_url(

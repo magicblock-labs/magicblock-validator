@@ -105,8 +105,8 @@ pub struct ChainLaserActor {
     subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
     /// The commitment level to use for subscriptions
     commitment: CommitmentLevel,
-    /// Channel used to signal connection issues to the submux (sends client_id)
-    abort_sender: mpsc::Sender<String>,
+    /// Channel used to signal connection issues to the submux
+    abort_sender: mpsc::Sender<()>,
     /// The current slot on chain, shared with RemoteAccountProvider
     chain_slot: Arc<AtomicU64>,
     /// Unique client ID including the gRPC provider name for this actor instance used in logs
@@ -120,7 +120,7 @@ impl ChainLaserActor {
         client_id: &str,
         api_key: &str,
         commitment: SolanaCommitmentLevel,
-        abort_sender: mpsc::Sender<String>,
+        abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<(
         Self,
@@ -153,7 +153,7 @@ impl ChainLaserActor {
         client_id: &str,
         laser_client_config: LaserstreamConfig,
         commitment: SolanaCommitmentLevel,
-        abort_sender: mpsc::Sender<String>,
+        abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<(
         Self,
@@ -584,7 +584,7 @@ impl ChainLaserActor {
         subscriptions: &mut HashSet<Pubkey>,
         active_subscriptions: &mut StreamMap<usize, LaserStream>,
         program_subscriptions: &mut Option<(HashSet<Pubkey>, LaserStream)>,
-        abort_sender: &mpsc::Sender<String>,
+        abort_sender: &mpsc::Sender<()>,
         client_id: &str,
     ) {
         debug!("[client_id={client_id}] Signaling connection issue");
@@ -597,7 +597,7 @@ impl ChainLaserActor {
         );
 
         // Use try_send to avoid blocking and naturally coalesce signals
-        let _ = abort_sender.try_send(client_id.to_string()).inspect_err(|err| {
+        let _ = abort_sender.try_send(()).inspect_err(|err| {
             // Channel full is expected when reconnect is already in progress
             if !matches!(err, mpsc::error::TrySendError::Full(_)) {
                 error!("[client_id={client_id}] Failed to signal connection issue: {err:?}")

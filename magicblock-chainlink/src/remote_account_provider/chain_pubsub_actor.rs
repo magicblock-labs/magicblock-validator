@@ -65,15 +65,15 @@ pub struct ChainPubsubActor {
     /// Indicates whether the actor is connected or has been disconnected due RPC to connection
     /// issues
     is_connected: Arc<AtomicBool>,
-    /// Channel used to signal connection issues to the submux (sends client_id)
-    abort_sender: mpsc::Sender<String>,
+    /// Channel used to signal connection issues to the submux
+    abort_sender: mpsc::Sender<()>,
 }
 
 impl ChainPubsubActor {
     pub async fn new_from_url(
         pubsub_url: &str,
         client_id: &str,
-        abort_sender: mpsc::Sender<String>,
+        abort_sender: mpsc::Sender<()>,
         commitment: CommitmentConfig,
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
@@ -83,7 +83,7 @@ impl ChainPubsubActor {
 
     pub async fn new(
         client_id: &str,
-        abort_sender: mpsc::Sender<String>,
+        abort_sender: mpsc::Sender<()>,
         pubsub_client_config: PubsubClientConfig,
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
@@ -233,7 +233,7 @@ impl ChainPubsubActor {
         pubsub_connection: Arc<PubSubConnection>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         pubsub_client_config: PubsubClientConfig,
-        abort_sender: mpsc::Sender<String>,
+        abort_sender: mpsc::Sender<()>,
         client_id: &str,
         is_connected: Arc<AtomicBool>,
         shutdown_token: CancellationToken,
@@ -356,7 +356,7 @@ impl ChainPubsubActor {
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         pubsub_connection: Arc<PubSubConnection>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
-        abort_sender: mpsc::Sender<String>,
+        abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
         commitment_config: CommitmentConfig,
         client_id: &str,
@@ -484,7 +484,7 @@ impl ChainPubsubActor {
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         pubsub_connection: Arc<PubSubConnection>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
-        abort_sender: mpsc::Sender<String>,
+        abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
         commitment_config: CommitmentConfig,
         client_id: &str,
@@ -660,7 +660,7 @@ impl ChainPubsubActor {
         client_id: &str,
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-        abort_sender: mpsc::Sender<String>,
+        abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
     ) {
         // Only abort if we were connected; prevents duplicate aborts
@@ -696,7 +696,7 @@ impl ChainPubsubActor {
         drain_subscriptions(client_id, program_subs);
 
         // Use try_send to avoid blocking and naturally coalesce signals
-        let _ = abort_sender.try_send(client_id.to_string()).inspect_err(|err| {
+        let _ = abort_sender.try_send(()).inspect_err(|err| {
             // Channel full is expected when reconnect is already in progress
             if !matches!(err, mpsc::error::TrySendError::Full(_)) {
                 error!(

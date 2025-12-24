@@ -167,7 +167,7 @@ where
     T: ChainPubsubClient + ReconnectableClient,
 {
     pub fn new<U: SubscribedAccountsTracker>(
-        clients: Vec<(Arc<T>, mpsc::Receiver<String>)>,
+        clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
         subscribed_accounts_tracker: Arc<U>,
         dedupe_window_millis: Option<u64>,
     ) -> Self {
@@ -182,7 +182,7 @@ where
     }
 
     pub fn new_with_debounce<U: SubscribedAccountsTracker>(
-        clients: Vec<(Arc<T>, mpsc::Receiver<String>)>,
+        clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
         subscribed_accounts_tracker: Arc<U>,
         config: DebounceConfig,
     ) -> Self {
@@ -190,7 +190,7 @@ where
     }
 
     pub fn new_with_config<U: SubscribedAccountsTracker>(
-        clients: Vec<(Arc<T>, mpsc::Receiver<String>)>,
+        clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
         subscribed_accounts_tracker: Arc<U>,
         config: DebounceConfig,
     ) -> Self {
@@ -260,7 +260,7 @@ where
     // Reconnection
     // -----------------
     fn spawn_reconnectors<U: SubscribedAccountsTracker>(
-        clients: Vec<(Arc<T>, mpsc::Receiver<String>)>,
+        clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
         subscribed_accounts_tracker: Arc<U>,
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
         connected_clients: Arc<AtomicU16>,
@@ -273,12 +273,13 @@ where
             let program_subs = program_subs.clone();
             let connected_clients = connected_clients.clone();
             tokio::spawn(async move {
-                while let Some(client_id) = abort_rx.recv().await {
+                while (abort_rx.recv().await).is_some() {
                     // Drain any duplicate abort signals to coalesce reconnect attempts
                     while abort_rx.try_recv().is_ok() {}
 
                     debug!(
-                        "[client_id={client_id}] Reconnecter received abort signal, reconnecting client"
+                        "[client_id={}] Reconnecter received abort signal, reconnecting client",
+                        client.id()
                     );
 
                     // Update connection related metrics
@@ -856,10 +857,7 @@ mod tests {
         clients: Vec<Arc<ChainPubsubClientMock>>,
         subs: Vec<Pubkey>,
         dedupe_window_millis: Option<u64>,
-    ) -> (
-        SubMuxClient<ChainPubsubClientMock>,
-        Vec<mpsc::Sender<String>>,
-    ) {
+    ) -> (SubMuxClient<ChainPubsubClientMock>, Vec<mpsc::Sender<()>>) {
         let mut abort_senders = Vec::new();
         let client_tuples = clients
             .into_iter()
@@ -1472,10 +1470,7 @@ mod tests {
         client1.simulate_disconnect();
 
         // Trigger reconnect via abort channel
-        aborts[0]
-            .send("test-client-0".to_string())
-            .await
-            .expect("abort send");
+        aborts[0].send(()).await.expect("abort send");
 
         // Wait for reconnect to complete
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -1524,10 +1519,7 @@ mod tests {
         client1.simulate_disconnect();
 
         // Trigger reconnect; first attempt will fail resub; reconnector will retry after ~1s (fib(1)=1)
-        aborts[0]
-            .send("test-client-0".to_string())
-            .await
-            .expect("abort send");
+        aborts[0].send(()).await.expect("abort send");
 
         // Send updates until one passes after reconnection and resubscribe succeed
         // Keep unique slots to avoid dedupe

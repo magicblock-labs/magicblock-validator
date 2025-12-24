@@ -29,7 +29,7 @@ impl ChainUpdatesClient {
     pub async fn try_new_from_endpoint(
         endpoint: &Endpoint,
         commitment: CommitmentConfig,
-        abort_sender: mpsc::Sender<String>,
+        abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
