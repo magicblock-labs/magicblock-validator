@@ -5,7 +5,7 @@ use log::*;
 use program_schedulecommit::{
     api::{
         delegate_account_cpi_instruction, init_account_instruction,
-        pda_and_bump, schedule_commit_cpi_instruction,
+        pda_and_bump, schedule_commit_cpi_instruction, UserSeeds,
     },
     ScheduleCommitCpiArgs, ScheduleCommitInstruction,
 };
@@ -45,7 +45,10 @@ mod utils;
 #[test]
 fn test_committing_one_account() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(1);
+        let ctx = get_context_with_delegated_committees(
+            1,
+            UserSeeds::MagicScheduleCommit,
+        );
 
         let ScheduleCommitTestContextFields {
             payer_ephem: payer,
@@ -98,7 +101,10 @@ fn test_committing_one_account() {
 #[test]
 fn test_committing_two_accounts() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(2);
+        let ctx = get_context_with_delegated_committees(
+            2,
+            UserSeeds::MagicScheduleCommit,
+        );
 
         let ScheduleCommitTestContextFields {
             payer_ephem: payer,
@@ -229,6 +235,7 @@ fn init_and_delegate_player(
         payer.pubkey(),
         validator,
         player.pubkey(),
+        UserSeeds::MagicScheduleCommit,
     );
 
     // Send transaction

@@ -17,7 +17,8 @@ use program_flexi_counter::{
     state::FlexiCounter,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::{instruction::Instruction, rent::Rent};
+use solana_sdk::{instruction::Instruction, rent::Rent, signature::Keypair};
+use test_kit::Signer;
 
 pub fn init_validator_fees_vault_ix(validator_auth: Pubkey) -> Instruction {
     dlp::instruction_builder::init_validator_fees_vault(
@@ -152,5 +153,47 @@ pub async fn init_account_and_delegate_compressed_ixs(
         delegate: delegate_ix,
         pda,
         address: record_address.to_bytes(),
+    }
+}
+
+pub struct InitOrderBookAndDelegateIxs {
+    pub init: Instruction,
+    pub delegate: Instruction,
+    pub book_manager: Keypair,
+    pub order_book: Pubkey,
+}
+
+pub fn init_order_book_account_and_delegate_ixs(
+    payer: Pubkey,
+) -> InitOrderBookAndDelegateIxs {
+    use program_schedulecommit::{api, ID};
+
+    let book_manager = Keypair::new();
+
+    println!("schedulecommit ID: {}", ID);
+
+    let (order_book, _bump) = Pubkey::find_program_address(
+        &[b"order_book", book_manager.pubkey().as_ref()],
+        &ID,
+    );
+
+    let init_ix = api::init_order_book_instruction(
+        payer,
+        book_manager.pubkey(),
+        order_book,
+    );
+
+    let delegate_ix = api::delegate_account_cpi_instruction(
+        payer,
+        None,
+        book_manager.pubkey(),
+        api::UserSeeds::OrderBook,
+    );
+
+    InitOrderBookAndDelegateIxs {
+        init: init_ix,
+        delegate: delegate_ix,
+        book_manager,
+        order_book,
     }
 }

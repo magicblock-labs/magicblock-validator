@@ -1,6 +1,10 @@
 use compressed_delegation_client::types::{CommitArgs, FinalizeArgs};
-use dlp::args::{CallHandlerArgs, CommitStateArgs};
+use dlp::{
+    args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs},
+    compute_diff,
+};
 use magicblock_metrics::metrics::LabelValue;
+use solana_account::ReadableAccount;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 use solana_system_program::id as system_program_id;
@@ -11,9 +15,10 @@ use crate::tasks::{
     buffer_task::{BufferTask, BufferTaskType},
     task_builder::CompressedData,
     visitor::Visitor,
-    BaseActionTask, BaseTask, BaseTaskError, BaseTaskResult, CommitTask,
-    CompressedCommitTask, CompressedFinalizeTask, CompressedUndelegateTask,
-    FinalizeTask, PreparationState, PreparationTask, TaskType, UndelegateTask,
+    BaseActionTask, BaseTask, BaseTaskError, BaseTaskResult, CommitDiffTask,
+    CommitTask, CompressedCommitTask, CompressedFinalizeTask,
+    CompressedUndelegateTask, FinalizeTask, PreparationState, PreparationTask,
+    TaskType, UndelegateTask,
 };
 
 /// Task that will be executed on Base layer via arguments
@@ -21,6 +26,7 @@ use crate::tasks::{
 pub enum ArgsTaskType {
     Commit(CommitTask),
     CompressedCommit(CompressedCommitTask),
+    CommitDiff(CommitDiffTask),
     Finalize(FinalizeTask),
     CompressedFinalize(CompressedFinalizeTask),
     Undelegate(UndelegateTask), // Special action really
@@ -45,6 +51,7 @@ impl ArgsTask {
         // Only prepare compressed tasks [`ArgsTaskType`] type
         let preparation_state = match task_type {
             ArgsTaskType::Commit(_)
+            | ArgsTaskType::CommitDiff(_)
             | ArgsTaskType::Finalize(_)
             | ArgsTaskType::Undelegate(_)
             | ArgsTaskType::BaseAction(_) => PreparationState::NotNeeded,
@@ -97,6 +104,25 @@ impl BaseTask for ArgsTask {
                         &value.compressed_data.remaining_accounts,
                     )
                     .instruction()
+            }
+            ArgsTaskType::CommitDiff(value) => {
+                let args = CommitDiffArgs {
+                    nonce: value.commit_id,
+                    lamports: value.committed_account.account.lamports,
+                    diff: compute_diff(
+                        value.base_account.data(),
+                        value.committed_account.account.data(),
+                    )
+                    .to_vec(),
+                    allow_undelegation: value.allow_undelegation,
+                };
+
+                dlp::instruction_builder::commit_diff(
+                    *validator,
+                    value.committed_account.pubkey,
+                    value.committed_account.account.owner,
+                    args,
+                )
             }
             ArgsTaskType::Finalize(value) => {
                 dlp::instruction_builder::finalize(
@@ -174,6 +200,19 @@ impl BaseTask for ArgsTask {
                     BufferTaskType::Commit(value),
                 )))
             }
+            ArgsTaskType::CommitDiff(value) => {
+                // TODO (snawaz): Currently, we do not support executing CommitDiff
+                // as BufferTask, which is why we're forcing CommitDiffTask to become CommitTask
+                // before converting this task into BufferTask. Once CommitDiff is supported
+                // by BufferTask, we do not have to do this, as it's essentially a downgrade.
+                Ok(Box::new(BufferTask::new_preparation_required(
+                    BufferTaskType::Commit(CommitTask {
+                        commit_id: value.commit_id,
+                        allow_undelegation: value.allow_undelegation,
+                        committed_account: value.committed_account,
+                    }),
+                )))
+            }
             ArgsTaskType::BaseAction(_)
             | ArgsTaskType::Finalize(_)
             | ArgsTaskType::Undelegate(_)
@@ -202,6 +241,7 @@ impl BaseTask for ArgsTask {
     fn compute_units(&self) -> u32 {
         match &self.task_type {
             ArgsTaskType::Commit(_) => 70_000,
+            ArgsTaskType::CommitDiff(_) => 70_000,
             ArgsTaskType::BaseAction(task) => task.action.compute_units,
             ArgsTaskType::Undelegate(_) => 70_000,
             ArgsTaskType::Finalize(_) => 70_000,
@@ -220,6 +260,7 @@ impl BaseTask for ArgsTask {
         match &self.task_type {
             ArgsTaskType::Commit(_) => TaskType::Commit,
             ArgsTaskType::CompressedCommit(_) => TaskType::CompressedCommit,
+            ArgsTaskType::CommitDiff(_) => TaskType::Commit,
             ArgsTaskType::BaseAction(_) => TaskType::Action,
             ArgsTaskType::Undelegate(_) => TaskType::Undelegate,
             ArgsTaskType::CompressedUndelegate(_) => {
@@ -236,11 +277,22 @@ impl BaseTask for ArgsTask {
     }
 
     fn reset_commit_id(&mut self, commit_id: u64) {
-        let ArgsTaskType::Commit(commit_task) = &mut self.task_type else {
-            return;
+        match &mut self.task_type {
+            ArgsTaskType::Commit(task) => {
+                task.commit_id = commit_id;
+            }
+            ArgsTaskType::CompressedCommit(task) => {
+                task.commit_id = commit_id;
+            }
+            ArgsTaskType::CommitDiff(task) => {
+                task.commit_id = commit_id;
+            }
+            ArgsTaskType::BaseAction(_)
+            | ArgsTaskType::Finalize(_)
+            | ArgsTaskType::Undelegate(_)
+            | ArgsTaskType::CompressedFinalize(_)
+            | ArgsTaskType::CompressedUndelegate(_) => {}
         };
-
-        commit_task.commit_id = commit_id;
     }
 
     fn is_compressed(&self) -> bool {
@@ -288,6 +340,9 @@ impl BaseTask for ArgsTask {
             ArgsTaskType::CompressedCommit(value) => {
                 Some(value.committed_account.pubkey)
             }
+            ArgsTaskType::CommitDiff(value) => {
+                Some(value.committed_account.pubkey)
+            }
             ArgsTaskType::Finalize(value) => Some(value.delegated_account),
             ArgsTaskType::CompressedFinalize(value) => {
                 Some(value.delegated_account)
@@ -305,6 +360,7 @@ impl LabelValue for ArgsTask {
     fn value(&self) -> &str {
         match self.task_type {
             ArgsTaskType::Commit(_) => "args_commit",
+            ArgsTaskType::CommitDiff(_) => "args_commit_diff",
             ArgsTaskType::BaseAction(_) => "args_action",
             ArgsTaskType::Finalize(_) => "args_finalize",
             ArgsTaskType::Undelegate(_) => "args_undelegate",

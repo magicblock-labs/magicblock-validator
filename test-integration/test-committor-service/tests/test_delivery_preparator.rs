@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use borsh::BorshDeserialize;
 use compressed_delegation_client::CompressedDelegationRecord;
+use futures::future::join_all;
 use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
@@ -104,15 +105,12 @@ async fn test_prepare_multiple_buffers() {
         generate_random_bytes(10),
         generate_random_bytes(500 * 1024),
     ];
-    let buffer_tasks = datas
-        .iter()
-        .map(|data| {
-            let task =
-                BufferTaskType::Commit(create_commit_task(data.as_slice()));
-            Box::new(BufferTask::new_preparation_required(task))
-                as Box<dyn BaseTask>
-        })
-        .collect();
+    let buffer_tasks = join_all(datas.iter().map(|data| async {
+        let task = BufferTaskType::Commit(create_commit_task(data.as_slice()));
+        Box::new(BufferTask::new_preparation_required(task))
+            as Box<dyn BaseTask>
+    }))
+    .await;
     let mut strategy = TransactionStrategy {
         optimized_tasks: buffer_tasks,
         lookup_tables_keys: vec![],
@@ -186,14 +184,11 @@ async fn test_lookup_tables() {
         generate_random_bytes(20),
         generate_random_bytes(30),
     ];
-    let tasks = datas
-        .iter()
-        .map(|data| {
-            let task =
-                ArgsTaskType::Commit(create_commit_task(data.as_slice()));
-            Box::<ArgsTask>::new(task.into()) as Box<dyn BaseTask>
-        })
-        .collect::<Vec<_>>();
+    let tasks = join_all(datas.iter().map(|data| async {
+        let task = ArgsTaskType::Commit(create_commit_task(data.as_slice()));
+        Box::<ArgsTask>::new(task.into()) as Box<dyn BaseTask>
+    }))
+    .await;
 
     let lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
         &fixture.authority.pubkey(),

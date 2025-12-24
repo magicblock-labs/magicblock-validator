@@ -15,6 +15,7 @@ use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
+use solana_account::Account;
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
@@ -28,6 +29,8 @@ pub mod task_strategist;
 pub(crate) mod task_visitors;
 pub mod utils;
 pub mod visitor;
+
+pub use task_builder::TaskBuilderImpl;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
@@ -119,6 +122,14 @@ pub struct CommitTask {
     pub commit_id: u64,
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
+}
+
+#[derive(Clone, Debug)]
+pub struct CommitDiffTask {
+    pub commit_id: u64,
+    pub allow_undelegation: bool,
+    pub committed_account: CommittedAccount,
+    pub base_account: Account,
 }
 
 #[derive(Clone)]
@@ -349,6 +360,7 @@ pub type BaseTaskResult<T> = Result<T, BaseTaskError>;
 
 #[cfg(test)]
 mod serialization_safety_test {
+
     use magicblock_program::{
         args::ShortAccountMeta, magic_scheduled_base_intent::ProgramArgs,
     };

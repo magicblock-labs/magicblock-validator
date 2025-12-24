@@ -14,7 +14,8 @@ use magicblock_chainlink::testing::utils::PHOTON_URL;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
-            ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+            ResetType, TaskInfoFetcher, TaskInfoFetcherError,
+            TaskInfoFetcherResult,
         },
         IntentExecutorImpl,
     },
@@ -119,18 +120,23 @@ impl TestFixture {
     ) -> IntentExecutorImpl<TransactionPreparatorImpl, MockTaskInfoFetcher>
     {
         let transaction_preparator = self.create_transaction_preparator();
-        let task_info_fetcher = Arc::new(MockTaskInfoFetcher);
 
         IntentExecutorImpl::new(
             self.rpc_client.clone(),
             self.photon_client.clone(),
             transaction_preparator,
-            task_info_fetcher,
+            self.create_task_info_fetcher(),
         )
+    }
+
+    #[allow(dead_code)]
+    pub fn create_task_info_fetcher(&self) -> Arc<MockTaskInfoFetcher> {
+        Arc::new(MockTaskInfoFetcher(self.rpc_client.clone()))
     }
 }
 
-pub struct MockTaskInfoFetcher;
+pub struct MockTaskInfoFetcher(MagicblockRpcClient);
+
 #[async_trait]
 impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_next_commit_ids(
@@ -153,6 +159,25 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     }
 
     fn reset(&self, _: ResetType) {}
+
+    async fn get_base_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+        self.0
+            .get_multiple_accounts(pubkeys, None)
+            .await
+            .map_err(|err| {
+                TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(err))
+            })
+            .map(|accounts| {
+                pubkeys
+                    .iter()
+                    .zip(accounts.into_iter())
+                    .filter_map(|(key, value)| value.map(|value| (*key, value)))
+                    .collect()
+            })
+    }
 }
 
 #[allow(dead_code)]

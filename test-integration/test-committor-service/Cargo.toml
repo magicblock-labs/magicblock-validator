@@ -30,6 +30,7 @@ magicblock-table-mania = { workspace = true, features = [
   "randomize_lookup_table_slot",
 ] }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
+program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
 rand = { workspace = true }
 solana-account = { workspace = true }
 solana-pubkey = { workspace = true }

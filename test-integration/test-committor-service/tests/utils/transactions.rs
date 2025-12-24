@@ -19,8 +19,8 @@ use solana_sdk::{
 
 use crate::utils::instructions::{
     init_account_and_delegate_compressed_ixs, init_account_and_delegate_ixs,
-    init_validator_fees_vault_ix, InitAccountAndDelegateCompressedIxs,
-    InitAccountAndDelegateIxs,
+    init_order_book_account_and_delegate_ixs, init_validator_fees_vault_ix,
+    InitAccountAndDelegateIxs, InitOrderBookAndDelegateIxs,
 };
 
 #[macro_export]
@@ -173,7 +173,17 @@ pub async fn tx_logs_contain(
         .log_messages
         .clone()
         .unwrap_or_else(Vec::new);
-    logs.iter().any(|log| log.contains(needle))
+    logs.iter().any(|log| {
+        // Lots of existing tests pass "CommitState" as needle argument to this function, but since now CommitTask
+        // could invoke CommitState or CommitDiff depending on the size of the account, we also look for "CommitDiff"
+        // in the logs when needle == CommitState. It's easier to make this little adjustment here than computing
+        // the decision and passing either CommitState or CommitDiff from the tests themselves.
+        if needle == "CommitState" {
+            log.contains(needle) || log.contains("CommitDiff")
+        } else {
+            log.contains(needle)
+        }
+    })
 }
 
 /// This needs to be run for each test that required a new counter to be delegated
@@ -355,6 +365,68 @@ pub async fn init_and_delegate_compressed_account_on_chain(
     debug!("Compressed account: {:?}", compressed_account);
 
     (pda, compressed_account.hash, pda_acc)
+}
+
+/// This needs to be run for each test that required a new order_book to be delegated
+#[allow(dead_code)]
+pub async fn init_and_delegate_order_book_on_chain(
+    payer: &Keypair,
+) -> (Pubkey, Account) {
+    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+
+    rpc_client
+        .request_airdrop(&payer.pubkey(), 777 * LAMPORTS_PER_SOL)
+        .await
+        .unwrap();
+
+    let InitOrderBookAndDelegateIxs {
+        init,
+        delegate,
+        book_manager,
+        order_book,
+    } = init_order_book_account_and_delegate_ixs(payer.pubkey());
+
+    let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
+
+    //  Init account
+    rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &Transaction::new_signed_with_payer(
+                &[init],
+                Some(&payer.pubkey()),
+                &[payer, &book_manager],
+                latest_block_hash,
+            ),
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to init account");
+
+    // Delegate account
+    rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &Transaction::new_signed_with_payer(
+                &[delegate],
+                Some(&payer.pubkey()),
+                &[&payer],
+                latest_block_hash,
+            ),
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to delegate");
+
+    let order_book_acc = get_account!(rpc_client, order_book, "order_book");
+
+    (order_book, order_book_acc)
 }
 
 /// This needs to be run once for all tests
