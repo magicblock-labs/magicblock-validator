@@ -24,7 +24,7 @@ if [[ -n "${TRITON_API_KEY:-}" ]]; then
 else
     TEMPLATE_FILE="$CONFIG_DIR/helius-config-template.toml"
     HELIUS_API_KEY="$HELIUS_API_KEY"
-    sed "s/<helius-api-key>/$HELIUS_API_KEY/g" "$TEMPLATE_FILE" |  \
+    sed "s/<helius-api-key>/$HELIUS_API_KEY/g" "$TEMPLATE_FILE" \
     > "$OUTPUT_FILE"
 fi
 
