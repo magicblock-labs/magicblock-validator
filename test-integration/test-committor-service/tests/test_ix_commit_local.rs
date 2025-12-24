@@ -31,6 +31,7 @@ use test_kit::init_logger;
 use tokio::task::JoinSet;
 use utils::transactions::tx_logs_contain;
 
+use self::utils::transactions::init_and_delegate_order_book_on_chain;
 use crate::utils::{
     ensure_validator_authority,
     transactions::{
@@ -63,6 +64,7 @@ fn expect_strategies(
 // -----------------
 // Single Account Commits
 // -----------------
+
 #[tokio::test]
 async fn test_ix_commit_single_account_100_bytes() {
     commit_single_account(100, CommitStrategy::Args, false).await;
@@ -75,22 +77,47 @@ async fn test_ix_commit_single_account_100_bytes_and_undelegate() {
 
 #[tokio::test]
 async fn test_ix_commit_single_account_800_bytes() {
-    commit_single_account(800, CommitStrategy::FromBuffer, false).await;
+    commit_single_account(800, CommitStrategy::Args, false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_800_bytes_and_undelegate() {
-    commit_single_account(800, CommitStrategy::FromBuffer, true).await;
+    commit_single_account(800, CommitStrategy::Args, true).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_one_kb() {
-    commit_single_account(1024, CommitStrategy::FromBuffer, false).await;
+    commit_single_account(1024, CommitStrategy::Args, false).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_ten_kb() {
-    commit_single_account(10 * 1024, CommitStrategy::FromBuffer, false).await;
+    commit_single_account(10 * 1024, CommitStrategy::Args, false).await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_order_book_change_100_bytes() {
+    commit_book_order_account(100, CommitStrategy::Args, false).await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_order_book_change_679_bytes() {
+    commit_book_order_account(679, CommitStrategy::Args, false).await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_order_book_change_680_bytes() {
+    // We cannot use 680 as changed_len because that both 679 and 680 produce encoded tx
+    // of size 1644 (which is the max limit), but while the size of raw bytes for 679 is within
+    // 1232 limit, the size for 680 execeds by 1 (1233). That is why we used
+    // 681 as changed_len where CommitStrategy goes from Args to FromBuffer.
+    commit_book_order_account(681, CommitStrategy::FromBuffer, false).await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_order_book_change_10k_bytes() {
+    commit_book_order_account(10 * 1024, CommitStrategy::FromBuffer, false)
+        .await;
 }
 
 async fn commit_single_account(
@@ -158,12 +185,78 @@ async fn commit_single_account(
     .await;
 }
 
-// TODO(thlorenz): once delegation program supports larger commits
+async fn commit_book_order_account(
+    changed_len: usize,
+    expected_strategy: CommitStrategy,
+    undelegate: bool,
+) {
+    init_logger!();
+
+    let validator_auth = ensure_validator_authority();
+    fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
+
+    // Run each test with and without finalizing
+    let service = CommittorService::try_start(
+        validator_auth.insecure_clone(),
+        ":memory:",
+        ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+    )
+    .unwrap();
+    let service = CommittorServiceExt::new(Arc::new(service));
+
+    let payer = Keypair::new();
+    let (order_book_pk, mut order_book_ac) =
+        init_and_delegate_order_book_on_chain(&payer).await;
+
+    // Modify bytes so that a diff is produced and is sent to DLP
+    let data = &mut order_book_ac.data;
+    assert!(changed_len <= data.len());
+    for byte in &mut order_book_ac.data[..changed_len] {
+        *byte = byte.wrapping_add(1);
+    }
+    order_book_ac.owner = program_schedulecommit::id();
+
+    // We should always be able to Commit & Finalize 1 account either with Args or Buffers
+    let account = CommittedAccount {
+        pubkey: order_book_pk,
+        account: order_book_ac,
+    };
+    let base_intent = if undelegate {
+        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+            commit_action: CommitType::Standalone(vec![account]),
+            undelegate_action: UndelegateType::Standalone,
+        })
+    } else {
+        MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
+    };
+
+    let intent = ScheduledBaseIntentWrapper {
+        trigger_type: TriggerType::OnChain,
+        inner: ScheduledBaseIntent {
+            id: 0,
+            slot: 10,
+            blockhash: Hash::new_unique(),
+            action_sent_transaction: Transaction::default(),
+            payer: payer.pubkey(),
+            base_intent,
+        },
+    };
+
+    ix_commit_local(
+        service,
+        vec![intent],
+        expect_strategies(&[(expected_strategy, 1)]),
+    )
+    .await;
+}
+
+// TODO(thlorenz/snawaz): once delegation program supports larger commits
 // add 1MB and 10MB tests
 
 // -----------------
 // Multiple Account Commits
 // -----------------
+
 #[tokio::test]
 async fn test_ix_commit_two_accounts_1kb_2kb() {
     init_logger!();
@@ -171,7 +264,7 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
         &[1024, 2048],
         1,
         false,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 2)]),
+        expect_strategies(&[(CommitStrategy::Args, 2)]),
     )
     .await;
 }
@@ -219,25 +312,22 @@ async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
         &[1024, 2 * 1024, 5 * 1024, 10 * 1024],
         1,
         false,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 4)]),
+        expect_strategies(&[(CommitStrategy::Args, 4)]),
     )
     .await;
 }
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_2() {
-    commit_20_accounts_1kb(
-        2,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 20)]),
-    )
-    .await;
+    commit_20_accounts_1kb(2, expect_strategies(&[(CommitStrategy::Args, 20)]))
+        .await;
 }
 
 #[tokio::test]
 async fn test_commit_5_accounts_1kb_bundle_size_3() {
     commit_5_accounts_1kb(
         3,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
+        expect_strategies(&[(CommitStrategy::Args, 5)]),
         false,
     )
     .await;
@@ -247,7 +337,11 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
 async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
     commit_5_accounts_1kb(
         3,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 5)]),
+        expect_strategies(&[
+            // Intent fits in 1 TX only with ALT, see IntentExecutorImpl::try_unite_tasks
+            (CommitStrategy::FromBufferWithLookupTable, 3),
+            (CommitStrategy::Args, 2),
+        ]),
         true,
     )
     .await;
@@ -258,7 +352,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
     commit_5_accounts_1kb(
         4,
         expect_strategies(&[
-            (CommitStrategy::FromBuffer, 1),
+            (CommitStrategy::Args, 1),
             (CommitStrategy::FromBufferWithLookupTable, 4),
         ]),
         false,
@@ -271,7 +365,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
     commit_5_accounts_1kb(
         4,
         expect_strategies(&[
-            (CommitStrategy::FromBuffer, 1),
+            (CommitStrategy::Args, 1),
             (CommitStrategy::FromBufferWithLookupTable, 4),
         ]),
         true,
@@ -291,11 +385,8 @@ async fn test_commit_5_accounts_1kb_bundle_size_5_undelegate_all() {
 
 #[tokio::test]
 async fn test_commit_20_accounts_1kb_bundle_size_3() {
-    commit_20_accounts_1kb(
-        3,
-        expect_strategies(&[(CommitStrategy::FromBuffer, 20)]),
-    )
-    .await;
+    commit_20_accounts_1kb(3, expect_strategies(&[(CommitStrategy::Args, 20)]))
+        .await;
 }
 
 #[tokio::test]
@@ -314,7 +405,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_6() {
         expect_strategies(&[
             (CommitStrategy::FromBufferWithLookupTable, 18),
             // Two accounts don't make it into the bundles of size 6
-            (CommitStrategy::FromBuffer, 2),
+            (CommitStrategy::Args, 2),
         ]),
     )
     .await;
@@ -476,7 +567,7 @@ async fn commit_multiple_accounts(
     ix_commit_local(service, intents, expected_strategies).await;
 }
 
-// TODO(thlorenz): once delegation program supports larger commits add the following
+// TODO(thlorenz/snawaz): once delegation program supports larger commits add the following
 //                 tests
 //
 // ## Scenario 1
