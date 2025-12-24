@@ -7,9 +7,19 @@ use super::errors::RemoteAccountProviderError;
 
 #[derive(Debug, Clone)]
 pub enum Endpoint {
-    Rpc { url: String },
-    WebSocket { url: String },
-    Grpc { url: String, api_key: String },
+    Rpc {
+        url: String,
+        label: String,
+    },
+    WebSocket {
+        url: String,
+        label: String,
+    },
+    Grpc {
+        url: String,
+        label: String,
+        api_key: String,
+    },
 }
 
 impl Endpoints {
@@ -17,7 +27,7 @@ impl Endpoints {
     /// slice. If no RPC endpoint is found, returns None.
     pub fn rpc_url(&self) -> Option<String> {
         self.iter().find_map(|ep| {
-            if let Endpoint::Rpc { url } = ep {
+            if let Endpoint::Rpc { url, .. } = ep {
                 Some(url.clone())
             } else {
                 None
@@ -52,13 +62,22 @@ impl TryFrom<&Remote> for Endpoint {
 
     fn try_from(config: &Remote) -> Result<Self, Self::Error> {
         match config {
-            Remote::Http(url) => Ok(Endpoint::Rpc {
-                url: url.to_string(),
-            }),
-            Remote::Websocket(url) => Ok(Endpoint::WebSocket {
-                url: url.to_string(),
-            }),
+            Remote::Http(url) => {
+                let label = extract_label(url);
+                Ok(Endpoint::Rpc {
+                    url: url.to_string(),
+                    label,
+                })
+            }
+            Remote::Websocket(url) => {
+                let label = extract_label(url);
+                Ok(Endpoint::WebSocket {
+                    url: url.to_string(),
+                    label,
+                })
+            }
             Remote::Grpc(url) => {
+                let label = extract_label(url);
                 let (url, api_key) = parse_url_api_key(url);
                 let api_key = api_key.ok_or_else(|| {
                     RemoteAccountProviderError::MissingApiKey(format!(
@@ -66,7 +85,11 @@ impl TryFrom<&Remote> for Endpoint {
                         url
                     ))
                 })?;
-                Ok(Endpoint::Grpc { url, api_key })
+                Ok(Endpoint::Grpc {
+                    url,
+                    label,
+                    api_key,
+                })
             }
         }
     }
@@ -144,6 +167,27 @@ fn parse_url_api_key(url: &Url) -> (String, Option<String>) {
     (url.to_string(), None)
 }
 
+/// Extracts the label from a URL's domain name.
+/// Uses the host domain without protocol and path.
+///
+/// Examples:
+/// - wss://mainnet.helius-rpc.com/?api-key=... -> "helius-rpc"
+/// - wss://solana-mainnet.api.syndica.io/api-key/... -> "syndica"
+/// - wss://thrilling-bold-voice.solana-mainnet.quiknode.pro/... -> "quiknode"
+fn extract_label(url: &Url) -> String {
+    url.host_str()
+        .and_then(|host| {
+            let parts: Vec<&str> = host.split('.').collect();
+            // Get the second-to-last part (before TLD)
+            if parts.len() >= 2 {
+                Some(parts[parts.len() - 2].to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,5 +233,74 @@ mod tests {
             "https://magicblo-devd137-9da1.devnet.rpcpool.com/notanapi%key"
         );
         assert_eq!(api_key, None);
+    }
+
+    #[test]
+    fn test_extract_label_helius_rpc() {
+        let url =
+            Url::parse("wss://mainnet.helius-rpc.com/?api-key=secret").unwrap();
+        assert_eq!(extract_label(&url), "helius-rpc");
+    }
+
+    #[test]
+    fn test_extract_label_syndica() {
+        let url =
+            Url::parse("wss://solana-mainnet.api.syndica.io/api-key/readactec")
+                .unwrap();
+        assert_eq!(extract_label(&url), "syndica");
+    }
+
+    #[test]
+    fn test_extract_label_quiknode() {
+        let url = Url::parse(
+            "wss://thrilling-bold-voice.solana-mainnet.quiknode.pro/\
+             redacted",
+        )
+        .unwrap();
+        assert_eq!(extract_label(&url), "quiknode");
+    }
+
+    #[test]
+    fn test_extract_label_simple_domain() {
+        let url = Url::parse("https://api.solana.com").unwrap();
+        assert_eq!(extract_label(&url), "solana");
+    }
+
+    #[test]
+    fn test_extract_label_single_part_domain() {
+        let url = Url::parse("https://localhost").unwrap();
+        assert_eq!(extract_label(&url), "unknown");
+    }
+
+    #[test]
+    fn test_extract_label_with_query_params() {
+        let url =
+            Url::parse("https://example.rpcpool.com?param=value").unwrap();
+        assert_eq!(extract_label(&url), "rpcpool");
+    }
+
+    #[test]
+    fn test_extract_label_with_path() {
+        let url = Url::parse("https://example.api.com/some/deep/path").unwrap();
+        assert_eq!(extract_label(&url), "api");
+    }
+
+    #[test]
+    fn test_extract_label_with_port() {
+        let url = Url::parse("https://mainnet.provider.com:8000/path").unwrap();
+        assert_eq!(extract_label(&url), "provider");
+    }
+
+    #[test]
+    fn test_extract_label_http_protocol() {
+        let url = Url::parse("http://mainnet.helius-rpc.com/?api-key=secret")
+            .unwrap();
+        assert_eq!(extract_label(&url), "helius-rpc");
+    }
+
+    #[test]
+    fn test_extract_label_grpc_protocol() {
+        let url = Url::parse("grpc://solana.example.com:50051").unwrap();
+        assert_eq!(extract_label(&url), "example");
     }
 }
