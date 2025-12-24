@@ -29,11 +29,14 @@ pub fn create_sibling_schedule_cpis_instruction(
             is_writable: true,
         });
     }
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         program_schedulecommit_security::id(),
-        &ScheduleCommitSecurityInstruction::SiblingScheduleCommitCpis(
-            player_pubkeys.to_vec(),
-        ),
+        &borsh::to_vec(
+            &ScheduleCommitSecurityInstruction::SiblingScheduleCommitCpis(
+                player_pubkeys.to_vec(),
+            ),
+        )
+        .unwrap(),
         account_metas,
     )
 }
@@ -61,11 +64,14 @@ pub fn create_nested_schedule_cpis_instruction(
             is_writable: true,
         });
     }
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         program_schedulecommit_security::id(),
-        &ScheduleCommitSecurityInstruction::DirectScheduleCommitCpi(
-            player_pubkeys.to_vec(),
-        ),
+        &borsh::to_vec(
+            &ScheduleCommitSecurityInstruction::DirectScheduleCommitCpi(
+                player_pubkeys.to_vec(),
+            ),
+        )
+        .unwrap(),
         account_metas,
     )
 }
@@ -74,9 +80,9 @@ pub fn create_nested_schedule_cpis_instruction(
 /// It could be added to confuse our algorithm to detect the invoking program.
 pub fn create_sibling_non_cpi_instruction(payer: Pubkey) -> Instruction {
     let account_metas = vec![AccountMeta::new(payer, true)];
-    Instruction::new_with_borsh(
+    Instruction::new_with_bytes(
         program_schedulecommit_security::id(),
-        &ScheduleCommitSecurityInstruction::NonCpi,
+        &borsh::to_vec(&ScheduleCommitSecurityInstruction::NonCpi).unwrap(),
         account_metas,
     )
 }
