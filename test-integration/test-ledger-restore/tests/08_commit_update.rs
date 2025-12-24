@@ -52,7 +52,7 @@ fn test_restore_ledger_committed_and_updated_account() {
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
     let programs = get_programs_with_flexi_counter();
 
-    let (_, mut validator, ctx) = setup_validator_with_local_remote(
+    let (_tmpdir, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         Some(programs),
         true,
@@ -167,7 +167,7 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
     let payer = &payer_kp.pubkey();
     let programs = get_programs_with_flexi_counter();
 
-    let (_, mut validator, ctx) = setup_validator_with_local_remote(
+    let (_tmpdir, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         Some(programs),
         false,

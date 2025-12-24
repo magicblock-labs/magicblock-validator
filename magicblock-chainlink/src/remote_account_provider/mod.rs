@@ -15,6 +15,7 @@ use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
+use futures_util::future::try_join_all;
 use log::*;
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
@@ -381,9 +382,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let chain_slot = Arc::<AtomicU64>::default();
 
         // Build pubsub clients and wrap them into a SubMuxClient
-        let mut pubsubs: Vec<(Arc<ChainUpdatesClient>, mpsc::Receiver<()>)> =
-            Vec::with_capacity(endpoints.len());
-        for ep in endpoints.pubsubs() {
+        let pubsubs = endpoints.pubsubs();
+        let pubsub_futs = pubsubs.iter().map(|ep| async {
             let (abort_tx, abort_rx) = mpsc::channel(1);
             let client = ChainUpdatesClient::try_new_from_endpoint(
                 ep,
@@ -392,9 +392,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 chain_slot.clone(),
             )
             .await?;
-            pubsubs.push((Arc::new(client), abort_rx));
-        }
-
+            Ok::<_, RemoteAccountProviderError>((Arc::new(client), abort_rx))
+        });
+        let pubsubs = try_join_all(pubsub_futs).await?;
         let subscribed_accounts = Arc::new(AccountsLruCache::new({
             // SAFETY: NonZeroUsize::new only returns None if the value is 0.
             // RemoteAccountProviderConfig can only be constructed with
@@ -413,9 +413,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     &config.program_subs().iter().cloned().collect::<Vec<_>>()
                 )
             );
-            for program_id in config.program_subs() {
-                submux.subscribe_program(*program_id).await?;
-            }
+            let subscribe_program_futs = config
+                .program_subs()
+                .iter()
+                .map(|program_id| submux.subscribe_program(*program_id));
+            try_join_all(subscribe_program_futs).await?;
         }
 
         RemoteAccountProvider::<
