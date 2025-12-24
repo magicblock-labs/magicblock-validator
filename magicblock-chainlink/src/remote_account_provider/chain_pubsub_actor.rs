@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, AtomicU16, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
 };
@@ -87,11 +87,6 @@ impl ChainPubsubActor {
         pubsub_client_config: PubsubClientConfig,
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
-        static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
-        // Distinguish multiple client instances of the same RPC provider
-        let client_id =
-            format!("{client_id}-{}", CLIENT_ID.fetch_add(1, Ordering::SeqCst));
-
         let url = pubsub_client_config.pubsub_url.clone();
         let pubsub_connection = Arc::new(PubSubConnection::new(url).await?);
 
@@ -109,7 +104,7 @@ impl ChainPubsubActor {
             program_subs: Default::default(),
             subscription_updates_sender,
             shutdown_token,
-            client_id,
+            client_id: client_id.to_string(),
             is_connected: Arc::new(AtomicBool::new(true)),
             abort_sender,
         };

@@ -3,7 +3,7 @@ use std::{
     fmt,
     pin::Pin,
     sync::{
-        atomic::{AtomicU16, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc,
     },
 };
@@ -166,12 +166,6 @@ impl ChainLaserActor {
             mpsc::channel(MESSAGE_CHANNEL_SIZE);
         let commitment = grpc_commitment_from_solana(commitment);
 
-        static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
-        // Distinguish multiple client instances of the same gRPC provider
-        let client_id = format!(
-            "grpc:{client_id}-{}",
-            CLIENT_ID.fetch_add(1, Ordering::SeqCst)
-        );
         let me = Self {
             laser_client_config,
             messages_receiver,
@@ -182,7 +176,7 @@ impl ChainLaserActor {
             commitment,
             abort_sender,
             chain_slot,
-            client_id,
+            client_id: client_id.to_string(),
         };
 
         Ok((me, messages_sender, subscription_updates_receiver))

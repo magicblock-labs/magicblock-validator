@@ -1,6 +1,9 @@
 use std::{
     collections::HashSet,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU16, AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use async_trait::async_trait;
@@ -30,13 +33,19 @@ impl ChainUpdatesClient {
         chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
+        static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
+
         match endpoint {
             WebSocket { url, label } => {
                 debug!("Initializing WebSocket client for endpoint: {}", url);
+                let client_id = format!(
+                    "ws:{label}-{}",
+                    CLIENT_ID.fetch_add(1, Ordering::SeqCst)
+                );
                 Ok(ChainUpdatesClient::WebSocket(
                     ChainPubsubClientImpl::try_new_from_url(
                         url,
-                        label,
+                        client_id,
                         abort_sender,
                         commitment,
                     )
@@ -53,10 +62,14 @@ impl ChainUpdatesClient {
                     url
                 );
                 if is_known_grpc_url(url) {
+                    let client_id = format!(
+                        "grpc:{label}-{}",
+                        CLIENT_ID.fetch_add(1, Ordering::SeqCst)
+                    );
                     Ok(ChainUpdatesClient::Laser(
                         ChainLaserClientImpl::new_from_url(
                             url,
-                            label,
+                            client_id,
                             api_key,
                             commitment.commitment,
                             abort_sender,
@@ -158,6 +171,14 @@ impl ChainPubsubClient for ChainUpdatesClient {
         match self {
             WebSocket(client) => client.subs_immediately(),
             Laser(client) => client.subs_immediately(),
+        }
+    }
+
+    fn id(&self) -> &str {
+        use ChainUpdatesClient::*;
+        match self {
+            WebSocket(client) => client.id(),
+            Laser(client) => client.id(),
         }
     }
 }

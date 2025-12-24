@@ -174,6 +174,8 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     fn subscriptions(&self) -> Option<Vec<Pubkey>>;
 
     fn subs_immediately(&self) -> bool;
+
+    fn id(&self) -> &str;
 }
 
 #[async_trait]
@@ -195,18 +197,19 @@ pub trait ReconnectableClient {
 pub struct ChainPubsubClientImpl {
     actor: Arc<ChainPubsubActor>,
     updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
+    client_id: String,
 }
 
 impl ChainPubsubClientImpl {
     pub async fn try_new_from_url(
         pubsub_url: &str,
-        client_id: &str,
+        client_id: String,
         abort_sender: mpsc::Sender<String>,
         commitment: CommitmentConfig,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, updates) = ChainPubsubActor::new_from_url(
             pubsub_url,
-            client_id,
+            &client_id,
             abort_sender,
             commitment,
         )
@@ -214,6 +217,7 @@ impl ChainPubsubClientImpl {
         Ok(Self {
             actor: Arc::new(actor),
             updates_rcvr: Arc::new(Mutex::new(Some(updates))),
+            client_id,
         })
     }
 }
@@ -319,6 +323,10 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
     fn subs_immediately(&self) -> bool {
         true
+    }
+
+    fn id(&self) -> &str {
+        &self.client_id
     }
 }
 
@@ -520,6 +528,10 @@ pub mod mock {
 
         fn subs_immediately(&self) -> bool {
             true
+        }
+
+        fn id(&self) -> &str {
+            "ChainPubsubClientMock"
         }
     }
 
