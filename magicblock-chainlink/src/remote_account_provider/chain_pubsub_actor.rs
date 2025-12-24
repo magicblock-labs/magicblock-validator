@@ -10,8 +10,8 @@ use std::{
 use futures_util::stream::FuturesUnordered;
 use log::*;
 use magicblock_metrics::metrics::{
-    inc_account_subscription_account_updates,
-    inc_program_subscription_account_updates,
+    inc_account_subscription_account_updates_count,
+    inc_program_subscription_account_updates_count,
 };
 use solana_account_decoder_client_types::{UiAccount, UiAccountEncoding};
 use solana_commitment_config::CommitmentConfig;
@@ -486,7 +486,7 @@ impl ChainPubsubActor {
                                rpc_response.context.slot % CLOCK_LOG_SLOT_FREQ == 0) {
                                 trace!("[client_id={client_id}] Received update for {pubkey}: {rpc_response:?}");
                             }
-                            inc_account_subscription_account_updates(
+                            inc_account_subscription_account_updates_count(
                                 &client_id.to_string(),
                             );
                             let _ = subscription_updates_sender.send(SubscriptionUpdate {
@@ -623,7 +623,7 @@ impl ChainPubsubActor {
                                          },
                                      };
                                      trace!("[client_id={client_id}] Sending program {program_pubkey} account update: {sub_update:?}");
-                                     inc_program_subscription_account_updates(
+                                     inc_program_subscription_account_updates_count(
                                          &client_id.to_string(),
                                      );
                                      let _ = subscription_updates_sender.send(sub_update)
