@@ -172,6 +172,16 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
+    static ref ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "account_subscription_account_updates",
+                "Number of account updates received via account subscription",
+            ),
+            &["client_id"],
+        )
+        .unwrap();
+
     // -----------------
     // RPC/Aperture
     // -----------------
@@ -421,6 +431,7 @@ pub(crate) fn register() {
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES);
+        register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES);
         register!(COMMITTOR_INTENTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
@@ -640,6 +651,12 @@ pub fn inc_account_fetches_not_found(
 
 pub fn inc_program_subscription_account_updates(client_id: &impl LabelValue) {
     PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES
+        .with_label_values(&[client_id.value()])
+        .inc();
+}
+
+pub fn inc_account_subscription_account_updates(client_id: &impl LabelValue) {
+    ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES
         .with_label_values(&[client_id.value()])
         .inc();
 }
