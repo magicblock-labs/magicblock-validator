@@ -214,7 +214,8 @@ where
         let program_subs: Arc<Mutex<HashSet<Pubkey>>> = Default::default();
 
         // Counter tracking the number of currently connected clients.
-        let connected_clients = Arc::new(AtomicU16::new(0));
+        let num_clients = clients.len();
+        let connected_clients = Arc::new(AtomicU16::new(num_clients as u16));
 
         let clients = Self::spawn_reconnectors(
             clients,
@@ -222,6 +223,9 @@ where
             program_subs.clone(),
             connected_clients.clone(),
         );
+
+        // Set initial metrics for connected clients
+        metrics::set_connected_pubsub_clients_count(num_clients);
 
         let required_subscription_confirmations = {
             let n = clients.iter().filter(|x| x.subs_immediately()).count();
