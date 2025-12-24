@@ -312,6 +312,7 @@ impl metrics::LabelValue for TransactionStrategyExecutionError {
             Self::CpiLimitError(_, _) => "cpi_limit_failed",
             Self::CommitIDError(_, _) => "commit_nonce_failed",
             Self::UndelegationError(_, _) => "undelegation_failed",
+            Self::UnfinalizedAccountError(_, _) => "unfinalized_account_failed",
             _ => "failed",
         }
     }
