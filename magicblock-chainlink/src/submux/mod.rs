@@ -1,6 +1,7 @@
 use std::{
     cmp,
     collections::{HashMap, HashSet, VecDeque},
+    sync::atomic::{AtomicU16, Ordering},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -10,6 +11,8 @@ use log::*;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use tokio::sync::mpsc;
+
+use magicblock_metrics::metrics;
 
 use crate::remote_account_provider::{
     chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
@@ -209,10 +212,14 @@ where
 
         let program_subs: Arc<Mutex<HashSet<Pubkey>>> = Default::default();
 
+        // Counter tracking the number of currently connected clients.
+        let connected_clients = Arc::new(AtomicU16::new(0));
+
         let clients = Self::spawn_reconnectors(
             clients,
             subscribed_accounts_tracker,
             program_subs.clone(),
+            connected_clients.clone(),
         );
 
         let required_subscription_confirmations = {
@@ -251,6 +258,7 @@ where
         clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
         subscribed_accounts_tracker: Arc<U>,
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
+        connected_clients: Arc<AtomicU16>,
     ) -> Vec<Arc<T>> {
         let mut clients_only = Vec::with_capacity(clients.len());
         for (client, mut abort_rx) in clients.into_iter() {
@@ -258,6 +266,7 @@ where
             let subscribed_accounts_tracker =
                 subscribed_accounts_tracker.clone();
             let program_subs = program_subs.clone();
+            let connected_clients = connected_clients.clone();
             tokio::spawn(async move {
                 while abort_rx.recv().await.is_some() {
                     // Drain any duplicate abort signals to coalesce reconnect attempts
@@ -266,10 +275,16 @@ where
                     debug!(
                         "Reconnecter received abort signal, reconnecting client"
                     );
+                    // Decrement connected clients on disconnect and update metric
+                    connected_clients.fetch_sub(1, Ordering::SeqCst);
+                    metrics::set_connected_pubsub_clients_count(
+                        connected_clients.load(Ordering::SeqCst) as usize,
+                    );
                     Self::reconnect_client_with_backoff(
                         client.clone(),
                         subscribed_accounts_tracker.clone(),
                         program_subs.clone(),
+                        connected_clients.clone(),
                     )
                     .await;
                 }
@@ -282,6 +297,7 @@ where
         client: Arc<T>,
         accounts_tracker: Arc<U>,
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
+        connected_clients: Arc<AtomicU16>,
     ) {
         fn fib_with_max(n: u64) -> u64 {
             let (mut a, mut b) = (0u64, 1u64);
@@ -299,6 +315,7 @@ where
                 client.clone(),
                 &accounts_tracker,
                 &program_subs,
+                connected_clients.clone(),
             )
             .await
             {
@@ -322,6 +339,7 @@ where
         client: Arc<T>,
         accounts_tracker: &Arc<U>,
         program_subs: &Arc<Mutex<HashSet<Pubkey>>>,
+        connected_clients: Arc<AtomicU16>,
     ) -> bool {
         if let Err(err) = client.try_reconnect().await {
             debug!("Failed to reconnect client: {:?}", err);
@@ -350,6 +368,11 @@ where
             }
         }
 
+        // Increment connected clients on successful reconnect and update metric
+        connected_clients.fetch_add(1, Ordering::SeqCst);
+        metrics::set_connected_pubsub_clients_count(
+            connected_clients.load(Ordering::SeqCst) as usize,
+        );
         true
     }
 
