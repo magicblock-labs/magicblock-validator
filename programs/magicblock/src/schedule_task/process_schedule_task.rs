@@ -14,8 +14,6 @@ use crate::{
     validator::validator_authority_id,
 };
 
-const MIN_EXECUTION_INTERVAL: i64 = 10;
-
 pub(crate) fn process_schedule_task(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
@@ -59,16 +57,6 @@ pub(crate) fn process_schedule_task(
             payer_pubkey
         );
         return Err(InstructionError::MissingRequiredSignature);
-    }
-
-    // Enforce minimal execution interval
-    if args.execution_interval_millis < MIN_EXECUTION_INTERVAL {
-        ic_msg!(
-            invoke_context,
-            "ScheduleTask ERR: execution interval must be at least {} milliseconds",
-            MIN_EXECUTION_INTERVAL
-        );
-        return Err(InstructionError::InvalidInstructionData);
     }
 
     // Enforce minimal number of iterations
@@ -341,28 +329,6 @@ mod test {
             execution_interval_millis: 1000,
             iterations: 1,
             instructions: vec![],
-        };
-        let ix = InstructionUtils::schedule_task_instruction(
-            &payer.pubkey(),
-            args,
-            &pdas,
-        );
-        process_instruction(
-            &ix.data,
-            transaction_accounts,
-            ix.accounts,
-            Err(InstructionError::InvalidInstructionData),
-        );
-    }
-
-    #[test]
-    fn fail_process_schedule_invalid_execution_interval() {
-        let (payer, pdas, transaction_accounts) = setup_accounts(0);
-        let args = ScheduleTaskArgs {
-            task_id: 1,
-            execution_interval_millis: 9,
-            iterations: 1,
-            instructions: vec![create_simple_ix()],
         };
         let ix = InstructionUtils::schedule_task_instruction(
             &payer.pubkey(),
