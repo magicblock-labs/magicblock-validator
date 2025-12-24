@@ -24,6 +24,7 @@ use crate::{
     cloner::Cloner,
     config::ChainlinkConfig,
     fetch_cloner::FetchAndCloneResult,
+    filters::is_noop_system_transfer,
     remote_account_provider::{
         ChainPubsubClient, ChainPubsubClientImpl, ChainRpcClient,
         ChainRpcClientImpl, Endpoint, RemoteAccountProvider,
@@ -286,6 +287,14 @@ Kept: {} delegated, {} blacklisted",
         &self,
         tx: &SanitizedTransaction,
     ) -> ChainlinkResult<FetchAndCloneResult> {
+        if is_noop_system_transfer(tx) {
+            trace!(
+                "Skipping account ensure for noop system transfer transaction {}",
+                tx.signature()
+            );
+            return Ok(Default::default());
+        }
+
         let mut pubkeys = tx
             .message()
             .account_keys()

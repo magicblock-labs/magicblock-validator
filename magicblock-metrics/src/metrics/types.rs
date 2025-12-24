@@ -103,6 +103,18 @@ pub trait LabelValue {
     fn value(&self) -> &str;
 }
 
+impl LabelValue for &str {
+    fn value(&self) -> &str {
+        self
+    }
+}
+
+impl LabelValue for String {
+    fn value(&self) -> &str {
+        self
+    }
+}
+
 impl<T, E> LabelValue for Result<T, E>
 where
     T: LabelValue,

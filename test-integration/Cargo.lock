@@ -81,17 +81,6 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.7.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891477e0c6a8957309ee5c45a6368af3ae14bb510732d2684ffa19af310920f9"
-dependencies = [
- "getrandom 0.2.16",
- "once_cell",
- "version_check",
-]
-
-[[package]]
-name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
@@ -561,6 +550,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "bindgen"
+version = "0.71.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f58bf3d7db68cfbac37cfc485a8d711e87e064c3d0fe0435b92f7a407f9d6b3"
+dependencies = [
+ "bitflags 2.9.1",
+ "cexpr",
+ "clang-sys",
+ "itertools 0.12.1",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash 2.1.1",
+ "shlex",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -582,18 +589,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "031043d04099746d8db04daf1fa424b2bc8bd69d92b25962dcde24da39ab64a2"
 dependencies = [
  "typenum",
-]
-
-[[package]]
-name = "bitvec"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bc2832c24239b0141d5674bb9174f9d68a8b5b3f2753311927c172ca46f7e9c"
-dependencies = [
- "funty",
- "radium",
- "tap",
- "wyz",
 ]
 
 [[package]]
@@ -743,28 +738,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bytecheck"
-version = "0.6.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23cdc57ce23ac53c931e88a43d06d070a6fd142f2617be5855eb75efc9beb1c2"
-dependencies = [
- "bytecheck_derive",
- "ptr_meta 0.1.4",
- "simdutf8",
-]
-
-[[package]]
-name = "bytecheck_derive"
-version = "0.6.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3db406d29fbcd95542e92559bed4d8ad92636d1ca8b3b72ede10b4bcc010e659"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "bytemuck"
 version = "1.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -887,7 +860,7 @@ dependencies = [
  "num-traits",
  "serde",
  "wasm-bindgen",
- "windows-link",
+ "windows-link 0.1.3",
 ]
 
 [[package]]
@@ -917,6 +890,7 @@ checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
 dependencies = [
  "glob",
  "libc",
+ "libloading",
 ]
 
 [[package]]
@@ -1568,7 +1542,7 @@ dependencies = [
  "ephemeral-rollups-sdk-attribute-commit",
  "ephemeral-rollups-sdk-attribute-delegate",
  "ephemeral-rollups-sdk-attribute-ephemeral",
- "magicblock-delegation-program 1.1.0",
+ "magicblock-delegation-program",
  "magicblock-magic-program-api 0.2.1",
  "solana-program",
 ]
@@ -1682,7 +1656,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6503af7917fea18ffef8f7e8553fb8dff89e2e6837e94e09dd7fb069c82d62c"
 dependencies = [
  "bytes",
- "rkyv 0.8.11",
+ "rkyv",
  "serde",
  "simdutf8",
 ]
@@ -1865,12 +1839,6 @@ dependencies = [
  "libc",
  "winapi",
 ]
-
-[[package]]
-name = "funty"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures"
@@ -2081,10 +2049,10 @@ dependencies = [
 
 [[package]]
 name = "guinea"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "bincode",
- "magicblock-magic-program-api 0.4.1",
+ "magicblock-magic-program-api 0.5.0",
  "serde",
  "solana-program",
 ]
@@ -2141,9 +2109,6 @@ name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
-dependencies = [
- "ahash 0.7.8",
-]
 
 [[package]]
 name = "hashbrown"
@@ -2151,7 +2116,7 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
 ]
 
 [[package]]
@@ -2654,7 +2619,7 @@ dependencies = [
  "log",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program",
  "random-port",
  "rayon",
  "serde",
@@ -2824,6 +2789,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 
 [[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link 0.2.1",
+]
+
+[[package]]
 name = "libredox"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2839,13 +2814,14 @@ name = "librocksdb-sys"
 version = "0.17.1+9.9.3"
 source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=6d975197#6d975197a647996a6f616dccdfd129ae06a7959c"
 dependencies = [
- "bindgen",
+ "bindgen 0.69.5",
  "bzip2-sys",
  "cc",
  "glob",
  "libc",
  "libz-sys",
  "lz4-sys",
+ "zstd-sys",
 ]
 
 [[package]]
@@ -3033,7 +3009,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "bincode",
@@ -3044,10 +3020,10 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.4.1",
+ "magicblock-magic-program-api 0.5.0",
  "magicblock-program",
  "magicblock-rpc-client",
- "rand 0.8.5",
+ "rand 0.9.1",
  "solana-account",
  "solana-hash",
  "solana-instruction",
@@ -3065,7 +3041,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "log",
@@ -3087,7 +3063,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "lmdb-rkv",
  "log",
@@ -3103,7 +3079,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "arc-swap",
  "base64 0.21.7",
@@ -3148,7 +3124,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "borsh 1.5.7",
@@ -3164,7 +3140,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.4.1",
+ "magicblock-magic-program-api 0.5.0",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
@@ -3203,7 +3179,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3214,8 +3190,8 @@ dependencies = [
  "lru",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program 1.1.3",
- "magicblock-magic-program-api 0.4.1",
+ "magicblock-delegation-program",
+ "magicblock-magic-program-api 0.5.0",
  "magicblock-metrics",
  "solana-account",
  "solana-account-decoder",
@@ -3250,7 +3226,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "borsh 1.5.7",
  "paste",
@@ -3262,7 +3238,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -3273,7 +3249,7 @@ dependencies = [
  "log",
  "lru",
  "magicblock-committor-program",
- "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program",
  "magicblock-metrics",
  "magicblock-program",
  "magicblock-rpc-client",
@@ -3305,7 +3281,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "clap",
  "derive_more",
@@ -3323,10 +3299,10 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "flume",
- "magicblock-magic-program-api 0.4.1",
+ "magicblock-magic-program-api 0.5.0",
  "solana-account",
  "solana-account-decoder",
  "solana-hash",
@@ -3360,30 +3336,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-delegation-program"
-version = "1.1.3"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=735640a#735640a1260f5bf77d907b5fd46ca50dd162afbd"
-dependencies = [
- "bincode",
- "borsh 1.5.7",
- "bytemuck",
- "num_enum",
- "pinocchio",
- "pinocchio-log",
- "pinocchio-pubkey",
- "pinocchio-system",
- "rkyv 0.7.45",
- "solana-curve25519",
- "solana-program",
- "solana-security-txt",
- "static_assertions",
- "strum 0.27.2",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "magicblock-ledger"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -3433,7 +3387,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "bincode",
  "serde",
@@ -3442,7 +3396,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "http-body-util",
  "hyper 1.6.0",
@@ -3456,7 +3410,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "bincode",
  "log",
@@ -3466,6 +3420,7 @@ dependencies = [
  "magicblock-metrics",
  "magicblock-program",
  "parking_lot",
+ "rustc-hash 2.1.1",
  "solana-account",
  "solana-bpf-loader-program",
  "solana-compute-budget-program",
@@ -3489,12 +3444,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "bincode",
  "lazy_static",
  "magicblock-core",
- "magicblock-magic-program-api 0.4.1",
+ "magicblock-magic-program-api 0.5.0",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -3521,7 +3476,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "log",
  "solana-account",
@@ -3542,13 +3497,13 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ed25519-dalek",
  "log",
  "magicblock-metrics",
  "magicblock-rpc-client",
- "rand 0.8.5",
+ "rand 0.9.1",
  "sha3",
  "solana-address-lookup-table-interface",
  "solana-clock",
@@ -3568,7 +3523,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "bincode",
  "chrono",
@@ -3595,10 +3550,10 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "log",
- "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-commitment-config",
@@ -3612,7 +3567,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "git-version",
  "rustc_version",
@@ -4448,7 +4403,7 @@ dependencies = [
  "bincode",
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
- "magicblock-magic-program-api 0.4.1",
+ "magicblock-magic-program-api 0.5.0",
  "serde",
  "solana-program",
 ]
@@ -4471,8 +4426,8 @@ version = "0.0.0"
 dependencies = [
  "borsh 1.5.7",
  "ephemeral-rollups-sdk",
- "magicblock-delegation-program 1.1.3",
- "magicblock-magic-program-api 0.4.1",
+ "magicblock-delegation-program",
+ "magicblock-magic-program-api 0.5.0",
  "solana-program",
 ]
 
@@ -4572,31 +4527,11 @@ dependencies = [
 
 [[package]]
 name = "ptr_meta"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0738ccf7ea06b608c10564b31debd4f5bc5e197fc8bfe088f68ae5ce81e7a4f1"
-dependencies = [
- "ptr_meta_derive 0.1.4",
-]
-
-[[package]]
-name = "ptr_meta"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe9e76f66d3f9606f44e45598d155cb13ecf09f4a28199e48daf8c8fc937ea90"
 dependencies = [
- "ptr_meta_derive 0.3.0",
-]
-
-[[package]]
-name = "ptr_meta_derive"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16b845dbfca988fa33db069c0e230574d15a3088f147a87b64c7589eb662c9ac"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
+ "ptr_meta_derive",
 ]
 
 [[package]]
@@ -4718,18 +4653,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
-name = "radium"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
-
-[[package]]
 name = "rancor"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caf5f7161924b9d1cea0e4cabc97c372cea92b5f927fc13c6bca67157a0ad947"
 dependencies = [
- "ptr_meta 0.3.0",
+ "ptr_meta",
 ]
 
 [[package]]
@@ -4953,15 +4882,6 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
 name = "rend"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71fe3824f5629716b1589be05dacd749f6aa084c87e00e016714a8cdfccc997c"
-dependencies = [
- "bytecheck",
-]
-
-[[package]]
-name = "rend"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a35e8a6bf28cd121053a66aa2e6a2e3eaffad4a60012179f0e864aa5ffeff215"
@@ -5041,24 +4961,6 @@ dependencies = [
 
 [[package]]
 name = "rkyv"
-version = "0.7.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9008cd6385b9e161d8229e1f6549dd23c3d022f132a2ea37ac3a10ac4935779b"
-dependencies = [
- "bitvec",
- "bytecheck",
- "bytes",
- "hashbrown 0.12.3",
- "ptr_meta 0.1.4",
- "rend 0.4.2",
- "rkyv_derive 0.7.45",
- "seahash",
- "tinyvec",
- "uuid",
-]
-
-[[package]]
-name = "rkyv"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19f5c3e5da784cd8c69d32cdc84673f3204536ca56e1fa01be31a74b92c932ac"
@@ -5067,23 +4969,12 @@ dependencies = [
  "hashbrown 0.15.4",
  "indexmap 2.10.0",
  "munge",
- "ptr_meta 0.3.0",
+ "ptr_meta",
  "rancor",
- "rend 0.5.2",
- "rkyv_derive 0.8.11",
+ "rend",
+ "rkyv_derive",
  "tinyvec",
  "uuid",
-]
-
-[[package]]
-name = "rkyv_derive"
-version = "0.7.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "503d1d27590a2b0a3a4ca4c94755aa2875657196ecbf401a42eff41d7de532c0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -5345,7 +5236,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "magicblock-core",
- "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program",
  "program-schedulecommit",
  "solana-program",
  "solana-rpc-client",
@@ -5363,7 +5254,7 @@ dependencies = [
  "log",
  "magicblock-committor-program",
  "magicblock-committor-service",
- "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program",
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
@@ -5386,7 +5277,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "magicblock-core",
- "magicblock-magic-program-api 0.4.1",
+ "magicblock-magic-program-api 0.5.0",
  "program-schedulecommit",
  "schedulecommit-client",
  "solana-program",
@@ -5402,7 +5293,7 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "magicblock-core",
- "magicblock-magic-program-api 0.4.1",
+ "magicblock-magic-program-api 0.5.0",
  "program-schedulecommit",
  "program-schedulecommit-security",
  "schedulecommit-client",
@@ -5455,12 +5346,6 @@ name = "sdd"
 version = "3.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "584e070911c7017da6cb2eb0788d09f43d789029b5877d3e5ecc8acf86ceee21"
-
-[[package]]
-name = "seahash"
-version = "4.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
 
 [[package]]
 name = "security-framework"
@@ -5862,7 +5747,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d65a1a23a53cae19cb92bab2cbdd9e289e5210bb12175ce27642c94adf74b220"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
  "bincode",
  "blake3",
  "bv",
@@ -6163,7 +6048,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4ee734c35b736e632aa3b1367f933d93ee7b4129dd1e20ca942205d4834054e"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
  "lazy_static",
  "log",
  "qualifier_attr",
@@ -6389,7 +6274,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a675ead1473b32a7a5735801608b35cbd8d3f5057ca8dbafdd5976146bb7e9e4"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
  "lazy_static",
  "log",
  "solana-bincode",
@@ -6575,7 +6460,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89e1d3b52b4a014efeaaab67f14e40af3972a4be61c523d612860db8e3145529"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
  "lazy_static",
  "solana-epoch-schedule",
  "solana-hash",
@@ -7054,7 +6939,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f0962d3818fc942a888f7c2d530896aeaf6f2da2187592a67bbdc8cf8a54192"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
  "bincode",
  "bv",
  "caps",
@@ -7609,7 +7494,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5335e7925f6dc8d2fdcdc6ead3b190aca65f191a11cef74709a7a6ab5d0d5877"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
  "aquamarine",
  "arrayref",
  "base64 0.22.1",
@@ -7680,8 +7565,8 @@ dependencies = [
  "solana-vote",
  "solana-vote-program",
  "static_assertions",
- "strum 0.24.1",
- "strum_macros 0.24.3",
+ "strum",
+ "strum_macros",
  "symlink",
  "tar",
  "tempfile",
@@ -8088,7 +7973,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "bincode",
  "bs58",
@@ -8161,7 +8046,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0850baf834aba4a94a7558fa6cf6ca93fad284abf0363dec5fb9cab173a11fc4"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
  "itertools 0.12.1",
  "log",
  "percentage",
@@ -8205,7 +8090,7 @@ name = "solana-svm"
 version = "2.2.1"
 source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=3e9456ec4#3e9456ec4d5798ad8281537501c1e777d6888ba3"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
  "log",
  "percentage",
  "qualifier_attr",
@@ -8864,7 +8749,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd1adc42def3cb101f3ebef3cd2d642f9a21072bbcd4ec9423343ccaa6afa596"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
  "bumpalo",
  "bytes",
  "cfg-if",
@@ -9298,16 +9183,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
 dependencies = [
- "strum_macros 0.24.3",
-]
-
-[[package]]
-name = "strum"
-version = "0.27.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
-dependencies = [
- "strum_macros 0.27.2",
+ "strum_macros",
 ]
 
 [[package]]
@@ -9321,18 +9197,6 @@ dependencies = [
  "quote",
  "rustversion",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.27.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 2.0.104",
 ]
 
 [[package]]
@@ -9425,12 +9289,6 @@ version = "0.0.0"
 dependencies = [
  "solana-program",
 ]
-
-[[package]]
-name = "tap"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tar"
@@ -9531,7 +9389,7 @@ dependencies = [
  "log",
  "magicblock-chainlink",
  "magicblock-config",
- "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program",
  "program-flexi-counter",
  "program-mini",
  "solana-account",
@@ -9582,7 +9440,7 @@ dependencies = [
 
 [[package]]
 name = "test-kit"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "env_logger 0.11.8",
  "guinea",
@@ -9613,7 +9471,7 @@ dependencies = [
  "log",
  "magicblock-accounts-db",
  "magicblock-config",
- "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program",
  "program-flexi-counter",
  "solana-rpc-client",
  "solana-sdk",
@@ -9634,7 +9492,7 @@ dependencies = [
  "magic-domain-program",
  "magicblock-api",
  "magicblock-config",
- "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program",
  "magicblock-program",
  "magicblock-validator-admin",
  "solana-rpc-client",
@@ -9674,7 +9532,7 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "log",
- "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program",
  "program-flexi-counter",
  "solana-rpc-client-api",
  "solana-sdk",
@@ -10490,7 +10348,7 @@ dependencies = [
  "windows-collections",
  "windows-core",
  "windows-future",
- "windows-link",
+ "windows-link 0.1.3",
  "windows-numerics",
 ]
 
@@ -10511,7 +10369,7 @@ checksum = "c0fdd3ddb90610c7638aa2b3a3ab2904fb9e5cdbecc643ddb3647212781c4ae3"
 dependencies = [
  "windows-implement",
  "windows-interface",
- "windows-link",
+ "windows-link 0.1.3",
  "windows-result",
  "windows-strings",
 ]
@@ -10523,7 +10381,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc6a41e98427b19fe4b73c550f060b59fa592d7d686537eebf9385621bfbad8e"
 dependencies = [
  "windows-core",
- "windows-link",
+ "windows-link 0.1.3",
  "windows-threading",
 ]
 
@@ -10556,13 +10414,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e6ad25900d524eaabdbbb96d20b4311e1e7ae1699af4fb28c17ae66c80d798a"
 
 [[package]]
+name = "windows-link"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+
+[[package]]
 name = "windows-numerics"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9150af68066c4c5c07ddc0ce30421554771e528bde427614c61038bc2c92c2b1"
 dependencies = [
  "windows-core",
- "windows-link",
+ "windows-link 0.1.3",
 ]
 
 [[package]]
@@ -10571,7 +10435,7 @@ version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56f42bd332cc6c8eac5af113fc0c1fd6a8fd2aa08a0119358686e5160d0586c6"
 dependencies = [
- "windows-link",
+ "windows-link 0.1.3",
 ]
 
 [[package]]
@@ -10580,7 +10444,7 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56e6c93f3a0c3b36176cb1327a4958a0353d5d166c2a35cb268ace15e91d3b57"
 dependencies = [
- "windows-link",
+ "windows-link 0.1.3",
 ]
 
 [[package]]
@@ -10696,7 +10560,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b66463ad2e0ea3bbf808b7f1d371311c80e115c0b71d60efc142cafbcfb057a6"
 dependencies = [
- "windows-link",
+ "windows-link 0.1.3",
 ]
 
 [[package]]
@@ -10914,15 +10778,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea2f10b9bb0928dfb1b42b65e1f9e36f7f54dbdf08457afefb38afcdec4fa2bb"
 
 [[package]]
-name = "wyz"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
-dependencies = [
- "tap",
-]
-
-[[package]]
 name = "x509-parser"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11098,6 +10953,7 @@ version = "2.0.15+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb81183ddd97d0c74cedf1d50d85c8d08c1b8b68ee863bdee9e706eedba1a237"
 dependencies = [
+ "bindgen 0.71.1",
  "cc",
  "pkg-config",
 ]

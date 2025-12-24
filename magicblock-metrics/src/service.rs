@@ -87,6 +87,8 @@ impl MetricsService {
                     }
                 );
             }
+
+            info!("MetricsService shutdown!");
         })
     }
 }

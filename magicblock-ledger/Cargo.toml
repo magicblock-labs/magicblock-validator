@@ -40,7 +40,7 @@ solana-transaction-context = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
-rocksdb = { workspace = true, default-features = false, features = ["lz4"]}
+rocksdb = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -102,8 +102,12 @@ impl ConnectionHandler {
 
         loop {
             tokio::select! {
-                // Prioritize reading frames from the client.
+                // Prioritize fast system shutdown
                 biased;
+
+                // 0. We force shutdown the connection, without close frame
+                _ = self.cancel.cancelled() => break,
+
 
                 // 1. Handle an incoming frame from the client's WebSocket.
                 Ok(frame) = self.ws.read_frame() => {
@@ -163,10 +167,7 @@ impl ConnectionHandler {
                     }
                 }
 
-                // 4. Handle the global server shutdown signal.
-                _ = self.cancel.cancelled() => break,
-
-                // 5. Run cleanup logic for this connection (e.g., an expiring sub).
+                // 4. Run cleanup logic for this connection (e.g., an expiring sub).
                 _ = self.dispatcher.cleanup() => {}
 
                 else => {
