@@ -162,11 +162,21 @@ lazy_static::lazy_static! {
         "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
 
-    static ref PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES: IntCounterVec =
+    static ref PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
             Opts::new(
-                "program_subscription_account_updates",
+                "program_subscription_account_updates_count",
                 "Number of account updates received via program subscription",
+            ),
+            &["client_id"],
+        )
+        .unwrap();
+
+    static ref ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "account_subscription_account_updates_count",
+                "Number of account updates received via account subscription",
             ),
             &["client_id"],
         )
@@ -457,7 +467,8 @@ pub(crate) fn register() {
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
-        register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES);
+        register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
+        register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(COMMITTOR_INTENTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
@@ -706,8 +717,18 @@ pub fn inc_compressed_account_fetches_not_found(
         .inc_by(count);
 }
 
-pub fn inc_program_subscription_account_updates(client_id: &impl LabelValue) {
-    PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES
+pub fn inc_program_subscription_account_updates_count(
+    client_id: &impl LabelValue,
+) {
+    PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT
+        .with_label_values(&[client_id.value()])
+        .inc();
+}
+
+pub fn inc_account_subscription_account_updates_count(
+    client_id: &impl LabelValue,
+) {
+    ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT
         .with_label_values(&[client_id.value()])
         .inc();
 }
