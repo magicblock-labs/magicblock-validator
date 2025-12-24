@@ -198,11 +198,17 @@ impl BaseTask for ArgsTask {
     }
 
     fn reset_commit_id(&mut self, commit_id: u64) {
-        let ArgsTaskType::Commit(commit_task) = &mut self.task_type else {
-            return;
+        match &mut self.task_type {
+            ArgsTaskType::Commit(task) => {
+                task.commit_id = commit_id;
+            }
+            ArgsTaskType::CommitDiff(task) => {
+                task.commit_id = commit_id;
+            }
+            ArgsTaskType::BaseAction(_)
+            | ArgsTaskType::Finalize(_)
+            | ArgsTaskType::Undelegate(_) => {}
         };
-
-        commit_task.commit_id = commit_id;
     }
 }
 
