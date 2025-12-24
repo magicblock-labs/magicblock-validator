@@ -157,7 +157,9 @@ impl IntegrationTestContext {
         rpc_client: Option<&RpcClient>,
         label: &str,
     ) -> Option<Vec<String>> {
-        let rpc_client = rpc_client.or(self.chain_client.as_ref())?;
+        let rpc_client = rpc_client.unwrap_or_else(|| {
+            panic!("rpc_client for [{label}] does not exist")
+        });
 
         // Try this up to 50 times since devnet here returns the version response instead of
         // the EncodedConfirmedTransactionWithStatusMeta at times
@@ -166,6 +168,13 @@ impl IntegrationTestContext {
                 &sig,
                 RpcTransactionConfig {
                     commitment: Some(self.commitment),
+                    max_supported_transaction_version: if label == "chain" {
+                        // base chain cluster requires explicit v0 support,
+                        // while ephemeral uses default version handling
+                        Some(0)
+                    } else {
+                        None
+                    },
                     ..Default::default()
                 },
             ) {

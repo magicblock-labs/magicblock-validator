@@ -4,11 +4,11 @@ use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
         args_task::{ArgsTask, ArgsTaskType},
-        buffer_task::{BufferTask, BufferTaskType},
+        buffer_task::BufferTask,
         task_strategist::{TaskStrategist, TransactionStrategy},
         utils::TransactionUtils,
-        BaseActionTask, BaseTask, CommitTask, FinalizeTask, PreparationState,
-        UndelegateTask,
+        BaseActionTask, BaseTask, FinalizeTask, PreparationState,
+        TaskBuilderImpl, UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -35,11 +35,12 @@ async fn test_prepare_commit_tx_with_single_account() {
     let committed_account = create_committed_account(&account_data);
 
     let tasks = vec![
-        Box::new(ArgsTask::new(ArgsTaskType::Commit(CommitTask {
-            commit_id: 1,
-            committed_account: committed_account.clone(),
-            allow_undelegation: true,
-        }))) as Box<dyn BaseTask>,
+        Box::new(TaskBuilderImpl::create_commit_task(
+            1,
+            true,
+            committed_account.clone(),
+            None,
+        )) as Box<dyn BaseTask>,
         Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
         }))),
@@ -90,20 +91,24 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     let committed_account2 = create_committed_account(&account2_data);
 
     let buffer_commit_task = BufferTask::new_preparation_required(
-        BufferTaskType::Commit(CommitTask {
-            commit_id: 1,
-            committed_account: committed_account2.clone(),
-            allow_undelegation: true,
-        }),
+        TaskBuilderImpl::create_commit_task(
+            1,
+            true,
+            committed_account2.clone(),
+            None,
+        )
+        .task_type
+        .into(),
     );
     // Create test data
     let tasks = vec![
         // account 1
-        Box::new(ArgsTask::new(ArgsTaskType::Commit(CommitTask {
-            commit_id: 1,
-            committed_account: committed_account1.clone(),
-            allow_undelegation: true,
-        }))) as Box<dyn BaseTask>,
+        Box::new(TaskBuilderImpl::create_commit_task(
+            1,
+            true,
+            committed_account1.clone(),
+            None,
+        )) as Box<dyn BaseTask>,
         // account 2
         Box::new(buffer_commit_task),
         // finalize account 1
@@ -187,11 +192,14 @@ async fn test_prepare_commit_tx_with_base_actions() {
     };
 
     let buffer_commit_task = BufferTask::new_preparation_required(
-        BufferTaskType::Commit(CommitTask {
-            commit_id: 1,
-            committed_account: committed_account.clone(),
-            allow_undelegation: true,
-        }),
+        TaskBuilderImpl::create_commit_task(
+            1,
+            true,
+            committed_account.clone(),
+            None,
+        )
+        .task_type
+        .into(),
     );
     let tasks = vec![
         // commit account
