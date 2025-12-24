@@ -26,7 +26,7 @@ async fn setup() -> (ChainPubsubClientImpl, mpsc::Receiver<SubscriptionUpdate>)
     let (tx, _) = mpsc::channel(10);
     let client = ChainPubsubClientImpl::try_new_from_url(
         PUBSUB_URL,
-        "test-pubsub",
+        "test-pubsub".to_string(),
         tx,
         CommitmentConfig::confirmed(),
     )
