@@ -201,7 +201,7 @@ impl ChainPubsubClientImpl {
     pub async fn try_new_from_url(
         pubsub_url: &str,
         client_id: &str,
-        abort_sender: mpsc::Sender<()>,
+        abort_sender: mpsc::Sender<String>,
         commitment: CommitmentConfig,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, updates) = ChainPubsubActor::new_from_url(
