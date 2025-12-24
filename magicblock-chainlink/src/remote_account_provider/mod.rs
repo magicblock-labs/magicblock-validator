@@ -15,6 +15,7 @@ use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
+use futures_util::future::try_join_all;
 use log::*;
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
@@ -448,9 +449,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     &config.program_subs().iter().cloned().collect::<Vec<_>>()
                 )
             );
-            for program_id in config.program_subs() {
-                submux.subscribe_program(*program_id).await?;
-            }
+            let subscribe_program_futs = config
+                .program_subs()
+                .iter()
+                .map(|program_id| submux.subscribe_program(*program_id));
+            try_join_all(subscribe_program_futs).await?;
         }
 
         RemoteAccountProvider::<
