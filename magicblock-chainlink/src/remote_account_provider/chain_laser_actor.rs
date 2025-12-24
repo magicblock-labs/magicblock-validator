@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     pin::Pin,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU16, AtomicU64, Ordering},
         Arc,
     },
 };
@@ -86,11 +86,17 @@ pub struct ChainLaserActor {
     abort_sender: mpsc::Sender<()>,
     /// The current slot on chain, shared with RemoteAccountProvider
     chain_slot: Arc<AtomicU64>,
+    /// Unique client ID including the gRPC provider name for this actor instance used in logs
+    /// and metrics
+    // TODO: @@@ use for metrics
+    #[allow(dead_code)]
+    client_id: String,
 }
 
 impl ChainLaserActor {
     pub fn new_from_url(
         pubsub_url: &str,
+        client_id: &str,
         api_key: &str,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
@@ -113,10 +119,17 @@ impl ChainLaserActor {
             channel_options,
             replay: true,
         };
-        Self::new(laser_client_config, commitment, abort_sender, chain_slot)
+        Self::new(
+            client_id,
+            laser_client_config,
+            commitment,
+            abort_sender,
+            chain_slot,
+        )
     }
 
     pub fn new(
+        client_id: &str,
         laser_client_config: LaserstreamConfig,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
@@ -132,6 +145,12 @@ impl ChainLaserActor {
             mpsc::channel(MESSAGE_CHANNEL_SIZE);
         let commitment = grpc_commitment_from_solana(commitment);
 
+        static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
+        // Distinguish multiple client instances of the same gRPC provider
+        let client_id = format!(
+            "grpc:{client_id}-{}",
+            CLIENT_ID.fetch_add(1, Ordering::SeqCst)
+        );
         let me = Self {
             laser_client_config,
             messages_receiver,
@@ -142,6 +161,7 @@ impl ChainLaserActor {
             commitment,
             abort_sender,
             chain_slot,
+            client_id,
         };
 
         Ok((me, messages_sender, subscription_updates_receiver))

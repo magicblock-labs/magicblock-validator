@@ -27,6 +27,7 @@ pub struct ChainLaserClientImpl {
 impl ChainLaserClientImpl {
     pub async fn new_from_url(
         pubsub_url: &str,
+        client_id: &str,
         api_key: &str,
         commitment: CommitmentLevel,
         abort_sender: mpsc::Sender<()>,
@@ -34,6 +35,7 @@ impl ChainLaserClientImpl {
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, messages, updates) = ChainLaserActor::new_from_url(
             pubsub_url,
+            client_id,
             api_key,
             commitment,
             abort_sender,
