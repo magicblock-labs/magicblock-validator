@@ -292,12 +292,18 @@ where
                         connected_clients.load(Ordering::SeqCst) as usize,
                     );
                     if client.subs_immediately() {
-                        connected_clients_subscribing_immediately
-                            .fetch_sub(1, Ordering::SeqCst);
-                        metrics::set_connected_direct_pubsub_clients_count(
+                        let previous =
                             connected_clients_subscribing_immediately
-                                .load(Ordering::SeqCst)
-                                as usize,
+                                .fetch_sub(1, Ordering::SeqCst);
+                        let current = previous.saturating_sub(1);
+                        metrics::set_connected_direct_pubsub_clients_count(
+                            current as usize,
+                        );
+                        debug!(
+                            "[client_id={}] connected_clients_subscribing_immediately: {} -> {}",
+                            client.id(),
+                            previous,
+                            current
                         );
                     }
                     metrics::set_pubsub_client_uptime(client.id(), false);
@@ -384,15 +390,6 @@ where
             );
             return false;
         }
-        // Resubscribe all accounts from the authoritative tracker.
-        // This ensures subscriptions are restored even if all clients lost their state
-        // during disconnect/abort.
-        let account_subs = accounts_tracker.subscribed_accounts();
-
-        if let Err(err) = client.resub_multiple(account_subs).await {
-            debug!("[client_id={}] Failed to resubscribe accounts after reconnect: {:?}", client.id(), err);
-            return false;
-        }
 
         // Resubscribe all program subscriptions
         let programs: HashSet<Pubkey> =
@@ -407,6 +404,16 @@ where
                 );
                 return false;
             }
+        }
+
+        // Resubscribe all accounts from the authoritative tracker.
+        // This ensures subscriptions are restored even if all clients lost their state
+        // during disconnect/abort.
+        let account_subs = accounts_tracker.subscribed_accounts();
+
+        if let Err(err) = client.resub_multiple(account_subs).await {
+            debug!("[client_id={}] Failed to resubscribe accounts after reconnect: {:?}", client.id(), err);
+            return false;
         }
 
         // Update connection related metrics to signal successful reconnect
@@ -934,6 +941,19 @@ mod tests {
             vec![client1.clone(), client2.clone()],
             Some(100),
         );
+
+        // Both mock clients subscribe immediately, so counter should be initialized to 2
+        assert_eq!(
+            mux.connected_clients_subscribing_immediately
+                .load(Ordering::SeqCst),
+            2
+        );
+        // With 2 clients subscribing immediately:
+        // - required_account_subscription_confirmations = max(1, (2 * 2) / 3) = max(1, 1) = 1
+        // - required_program_subscription_confirmations = max(1, 2 / 3) = max(1, 0) = 1
+        assert_eq!(mux.required_account_subscription_confirmations(), 1);
+        assert_eq!(mux.required_program_subscription_confirmations(), 1);
+
         let mut mux_rx = mux.take_updates();
 
         let pk = Pubkey::new_unique();
@@ -1493,6 +1513,28 @@ mod tests {
             vec![pk],
             Some(100),
         );
+
+        // Initially both immediately subscribing clients are connected
+        macro_rules! assert_all_clients_connected {
+            () => {
+                assert_eq!(
+                    mux.connected_clients_subscribing_immediately
+                        .load(Ordering::SeqCst),
+                    2,
+                    "Both clients should be connected initially"
+                );
+                assert_eq!(
+                    mux.required_account_subscription_confirmations(),
+                    1
+                );
+                assert_eq!(
+                    mux.required_program_subscription_confirmations(),
+                    1
+                );
+            };
+        }
+        assert_all_clients_connected!();
+
         let mut mux_rx = mux.take_updates();
 
         mux.subscribe(pk).await.unwrap();
@@ -1510,13 +1552,40 @@ mod tests {
         .expect("stream open");
 
         // Simulate disconnect: client1 loses subscriptions and is "disconnected"
-        client1.simulate_disconnect();
+        {
+            client1.disable_reconnect();
+            client1.simulate_disconnect();
 
-        // Trigger reconnect via abort channel
-        aborts[0].send(()).await.expect("abort send");
+            // Trigger reconnect via abort channel and wait for message to be processed
+            aborts[0].send(()).await.expect("abort send");
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        // Wait for reconnect to complete
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // Only one direct sub client should be connected now (client2)
+            assert_eq!(
+                mux.connected_clients_subscribing_immediately
+                    .load(Ordering::SeqCst),
+                1
+            );
+            client1.enable_reconnect();
+
+            // Wait for reconnect and resub to complete
+            while !client1.is_connected_and_resubscribed() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            let mut max_tries = 20;
+            while mux
+                .connected_clients_subscribing_immediately
+                .load(Ordering::SeqCst)
+                < 2
+                && max_tries > 0
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                max_tries -= 1;
+            }
+        }
+
+        // After reconnect, client1 should be connected again
+        assert_all_clients_connected!();
 
         // After reconnect + resubscribe, client1's updates should be forwarded again
         client1

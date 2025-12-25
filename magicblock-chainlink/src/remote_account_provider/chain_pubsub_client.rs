@@ -381,8 +381,10 @@ pub mod mock {
         updates_sndr: mpsc::Sender<SubscriptionUpdate>,
         updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
         subscribed_pubkeys: Arc<Mutex<HashSet<Pubkey>>>,
+        subscription_count_at_disconnect: Arc<Mutex<usize>>,
         connected: Arc<Mutex<bool>>,
         pending_resubscribe_failures: Arc<Mutex<usize>>,
+        reconnectable: Arc<Mutex<bool>>,
     }
 
     impl ChainPubsubClientMock {
@@ -394,14 +396,18 @@ pub mod mock {
                 updates_sndr,
                 updates_rcvr: Arc::new(Mutex::new(Some(updates_rcvr))),
                 subscribed_pubkeys: Arc::new(Mutex::new(HashSet::new())),
+                subscription_count_at_disconnect: Arc::new(Mutex::new(0)),
                 connected: Arc::new(Mutex::new(true)),
                 pending_resubscribe_failures: Arc::new(Mutex::new(0)),
+                reconnectable: Arc::new(Mutex::new(true)),
             }
         }
 
         /// Simulate a disconnect: clear all subscriptions and mark client as disconnected.
         pub fn simulate_disconnect(&self) {
             *self.connected.lock().unwrap() = false;
+            *self.subscription_count_at_disconnect.lock().unwrap() =
+                self.subscribed_pubkeys.lock().unwrap().len();
             self.subscribed_pubkeys.lock().unwrap().clear();
         }
 
@@ -443,6 +449,20 @@ pub mod mock {
             };
             let update = SubscriptionUpdate::from((pubkey, rpc_response));
             self.send(update).await;
+        }
+
+        pub fn disable_reconnect(&self) {
+            *self.reconnectable.lock().unwrap() = false;
+        }
+
+        pub fn enable_reconnect(&self) {
+            *self.reconnectable.lock().unwrap() = true;
+        }
+
+        pub fn is_connected_and_resubscribed(&self) -> bool {
+            *self.connected.lock().unwrap()
+                && self.subscribed_pubkeys.lock().unwrap().len()
+                    == *self.subscription_count_at_disconnect.lock().unwrap()
         }
     }
 
@@ -538,6 +558,13 @@ pub mod mock {
     #[async_trait]
     impl ReconnectableClient for ChainPubsubClientMock {
         async fn try_reconnect(&self) -> RemoteAccountProviderResult<()> {
+            if !*self.reconnectable.lock().unwrap() {
+                return Err(
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        "mock: reconnect failed".to_string(),
+                    ),
+                );
+            }
             *self.connected.lock().unwrap() = true;
             Ok(())
         }
