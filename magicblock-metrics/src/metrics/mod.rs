@@ -403,6 +403,14 @@ lazy_static::lazy_static! {
         "Total number of connected pubsub clients"
     ).unwrap();
 
+    /// Gauge for pubsub clients that subscribe immediately when requested.
+    /// If this value goes to 0 then we should raise an alert as it means we are missing
+    /// account updtes.
+    static ref CONNECTED_DIRECT_PUBSUB_CLIENTS_GAUGE: IntGauge = IntGauge::new(
+        "connected_direct_pubsub_clients_gauge",
+        "Total number of connected pubsub clients that subscribe immediately when requested."
+    ).unwrap();
+
     static ref PUBSUB_CLIENT_UPTIME_GAUGE: IntGaugeVec = IntGaugeVec::new(
         Opts::new(
             "pubsub_client_uptime_gauge",
@@ -477,6 +485,7 @@ pub(crate) fn register() {
         register!(TABLE_MANIA_A_COUNT);
         register!(TABLE_MANIA_CLOSED_A_COUNT);
         register!(CONNECTED_PUBSUB_CLIENTS_GAUGE);
+        register!(CONNECTED_DIRECT_PUBSUB_CLIENTS_GAUGE);
         register!(PUBSUB_CLIENT_UPTIME_GAUGE);
     });
 }
@@ -723,6 +732,10 @@ pub fn inc_table_mania_close_a_count() {
 
 pub fn set_connected_pubsub_clients_count(count: usize) {
     CONNECTED_PUBSUB_CLIENTS_GAUGE.set(count as i64);
+}
+
+pub fn set_connected_direct_pubsub_clients_count(count: usize) {
+    CONNECTED_DIRECT_PUBSUB_CLIENTS_GAUGE.set(count as i64);
 }
 
 pub fn set_pubsub_client_uptime(client_id: &str, connected: bool) {

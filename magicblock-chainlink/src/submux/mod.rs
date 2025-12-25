@@ -140,14 +140,11 @@ where
     /// Accounts that should never be debounced, namely the clock sysvar account
     /// which we use to track the latest remote slot.
     never_debounce: HashSet<Pubkey>,
-    /// Number of clients that must confirm a subscription for it to be considered active.
-    /// NOTE: only clients that subscribe immediately are counted towards this.
-    required_subscription_confirmations: usize,
-    /// Number of clients that must confirm a program subscription for it to be considered
-    /// active.
-    required_program_subscription_confirmations: usize,
     /// Map of program account subscriptions we are holding inside the pubsub clients
     program_subs: Arc<Mutex<HashSet<Pubkey>>>,
+    /// Number of currently connected clients that activate subscriptions immediately when
+    /// requested.
+    connected_clients_subscribing_immediately: Arc<AtomicU16>,
 }
 
 // Parameters for the long-running forwarder loop, grouped to avoid
@@ -214,29 +211,32 @@ where
         let program_subs: Arc<Mutex<HashSet<Pubkey>>> = Default::default();
 
         // Initialize the tracking of the number of connected clients and their uptime.
-        // We assume all clients are connected at start.
-        let num_clients = clients.len();
-        let connected_clients = Arc::new(AtomicU16::new(num_clients as u16));
+        // We assume all clients are connected at startup.
+        let connected_clients = {
+            let n = clients.len();
+            metrics::set_connected_pubsub_clients_count(n);
+            Arc::new(AtomicU16::new(n as u16))
+        };
+
+        let connected_clients_subscribing_immediately = {
+            let n = clients
+                .iter()
+                .filter(|(client, _)| client.subs_immediately())
+                .count();
+            Arc::new(AtomicU16::new(n.try_into().unwrap_or(u16::MAX)))
+        };
         for (client, _) in &clients {
             metrics::set_pubsub_client_uptime(client.id(), true);
         }
-        metrics::set_connected_pubsub_clients_count(num_clients);
 
         let clients = Self::spawn_reconnectors(
             clients,
             subscribed_accounts_tracker,
             program_subs.clone(),
             connected_clients.clone(),
+            connected_clients_subscribing_immediately.clone(),
         );
 
-        let required_subscription_confirmations = {
-            let n = clients.iter().filter(|x| x.subs_immediately()).count();
-            cmp::max(1, (n * 2) / 3)
-        };
-        let required_program_subscription_confirmations = {
-            let n = clients.len();
-            cmp::max(1, n / 3)
-        };
         let me = Self {
             clients,
             out_tx,
@@ -247,9 +247,8 @@ where
             debounce_detection_window,
             debounce_states: debounce_states.clone(),
             never_debounce,
-            required_subscription_confirmations,
-            required_program_subscription_confirmations,
             program_subs,
+            connected_clients_subscribing_immediately,
         };
 
         // Spawn background tasks
@@ -266,6 +265,7 @@ where
         subscribed_accounts_tracker: Arc<U>,
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
         connected_clients: Arc<AtomicU16>,
+        connected_clients_subscribing_immediately: Arc<AtomicU16>,
     ) -> Vec<Arc<T>> {
         let mut clients_only = Vec::with_capacity(clients.len());
         for (client, mut abort_rx) in clients.into_iter() {
@@ -274,6 +274,8 @@ where
                 subscribed_accounts_tracker.clone();
             let program_subs = program_subs.clone();
             let connected_clients = connected_clients.clone();
+            let connected_clients_subscribing_immediately =
+                connected_clients_subscribing_immediately.clone();
             tokio::spawn(async move {
                 while (abort_rx.recv().await).is_some() {
                     // Drain any duplicate abort signals to coalesce reconnect attempts
@@ -289,7 +291,15 @@ where
                     metrics::set_connected_pubsub_clients_count(
                         connected_clients.load(Ordering::SeqCst) as usize,
                     );
-
+                    if client.subs_immediately() {
+                        connected_clients_subscribing_immediately
+                            .fetch_sub(1, Ordering::SeqCst);
+                        metrics::set_connected_direct_pubsub_clients_count(
+                            connected_clients_subscribing_immediately
+                                .load(Ordering::SeqCst)
+                                as usize,
+                        );
+                    }
                     metrics::set_pubsub_client_uptime(client.id(), false);
 
                     Self::reconnect_client_with_backoff(
@@ -297,6 +307,7 @@ where
                         subscribed_accounts_tracker.clone(),
                         program_subs.clone(),
                         connected_clients.clone(),
+                        connected_clients_subscribing_immediately.clone(),
                     )
                     .await;
                 }
@@ -310,6 +321,7 @@ where
         accounts_tracker: Arc<U>,
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
         connected_clients: Arc<AtomicU16>,
+        connected_clients_subscribing_immediately: Arc<AtomicU16>,
     ) {
         fn fib_with_max(n: u64) -> u64 {
             let (mut a, mut b) = (0u64, 1u64);
@@ -328,6 +340,7 @@ where
                 &accounts_tracker,
                 &program_subs,
                 connected_clients.clone(),
+                connected_clients_subscribing_immediately.clone(),
             )
             .await
             {
@@ -361,6 +374,7 @@ where
         accounts_tracker: &Arc<U>,
         program_subs: &Arc<Mutex<HashSet<Pubkey>>>,
         connected_clients: Arc<AtomicU16>,
+        connected_clients_subscribing_immediately: Arc<AtomicU16>,
     ) -> bool {
         if let Err(err) = client.try_reconnect().await {
             debug!(
@@ -401,6 +415,14 @@ where
             connected_clients.load(Ordering::SeqCst) as usize,
         );
         metrics::set_pubsub_client_uptime(client.id(), true);
+        if client.subs_immediately() {
+            connected_clients_subscribing_immediately
+                .fetch_add(1, Ordering::SeqCst);
+            metrics::set_connected_direct_pubsub_clients_count(
+                connected_clients_subscribing_immediately.load(Ordering::SeqCst)
+                    as usize,
+            );
+        }
 
         true
     }
@@ -672,6 +694,25 @@ where
         Some(all_subs.into_iter().collect())
     }
 
+    /// Number of clients that must confirm a program subscription for it to be considered active.
+    /// 2/3 of connected clients subscribing immediately.
+    fn required_account_subscription_confirmations(&self) -> usize {
+        let n = self
+            .connected_clients_subscribing_immediately
+            .load(Ordering::SeqCst) as usize;
+        cmp::max(1, (n * 2) / 3)
+    }
+
+    /// Number of clients that must confirm a program subscription for it to be considered
+    /// active.
+    /// 1/3 of connected clients subscribing immediately.
+    fn required_program_subscription_confirmations(&self) -> usize {
+        let n = self
+            .connected_clients_subscribing_immediately
+            .load(Ordering::SeqCst) as usize;
+        cmp::max(1, n / 3)
+    }
+
     fn allowed_in_debounce_window_count(&self) -> usize {
         (self.debounce_detection_window.as_millis()
             / self.debounce_interval.as_millis()) as usize
@@ -698,7 +739,7 @@ where
     ) -> RemoteAccountProviderResult<()> {
         AccountSubscriptionTask::Subscribe(
             pubkey,
-            self.required_subscription_confirmations,
+            self.required_account_subscription_confirmations(),
         )
         .process(self.clients.clone())
         .await
@@ -721,7 +762,7 @@ where
 
         AccountSubscriptionTask::SubscribeProgram(
             program_id,
-            self.required_program_subscription_confirmations,
+            self.required_program_subscription_confirmations(),
         )
         .process(self.clients.clone())
         .await
