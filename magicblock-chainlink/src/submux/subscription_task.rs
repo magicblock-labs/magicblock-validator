@@ -68,9 +68,6 @@ impl AccountSubscriptionTask {
         }
 
         let (tx, rx) = oneshot::channel();
-        let target_successes =
-            std::cmp::min(required_confirmations, total_clients);
-
         tokio::spawn(async move {
             let mut futures = FuturesUnordered::new();
             for (i, client) in clients.iter().enumerate() {
@@ -107,7 +104,7 @@ impl AccountSubscriptionTask {
                             continue;
                         }
                         successes += 1;
-                        if successes >= target_successes {
+                        if successes >= required_confirmations {
                             if let Some(tx) = tx.take() {
                                 let _ = tx.send(Ok(()));
                             }
@@ -124,7 +121,7 @@ impl AccountSubscriptionTask {
                     "Not enough clients succeeded to {}: {}. Required {}, got {}",
                     op_name.to_lowercase(),
                     errors.join(", "),
-                    target_successes,
+                    required_confirmations,
                     successes,
                 );
                 let _ = tx.send(Err(
