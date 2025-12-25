@@ -150,12 +150,12 @@ where
                 _,
                 signature,
             ) => {
-                if let Some(task) = err.task_index().and_then(|index| {
-                    transaction_strategy
-                        .optimized_tasks
-                        .as_slice()
-                        .get(index as usize)
-                }) {
+                let optimized_tasks =
+                    transaction_strategy.optimized_tasks.as_slice();
+                if let Some(task) = err
+                    .task_index()
+                    .and_then(|index| optimized_tasks.get(index as usize))
+                {
                     Self::handle_unfinalized_account_error(
                         inner,
                         signature,
@@ -163,6 +163,10 @@ where
                     )
                     .await
                 } else {
+                    error!(
+                        "RPC returned unexpected task index: {}. optimized_tasks_len: {}",
+                        err, optimized_tasks.len()
+                    );
                     Ok(ControlFlow::Break(()))
                 }
             }
