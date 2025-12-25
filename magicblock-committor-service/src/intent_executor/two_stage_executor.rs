@@ -19,7 +19,7 @@ use crate::{
         args_task::{ArgsTask, ArgsTaskType},
         task_strategist::TransactionStrategy,
         task_visitors::utility_visitor::TaskVisitorUtils,
-        BaseTask, FinalizeTask,
+        BaseTask,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -207,17 +207,12 @@ where
         failed_signature: &Option<Signature>,
         task: &dyn BaseTask,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let mut visitor = TaskVisitorUtils::GetCommitMeta(None);
-        task.visit(&mut visitor);
-
-        let TaskVisitorUtils::GetCommitMeta(Some(commit_meta)) = visitor else {
+        let Some(commit_meta) = TaskVisitorUtils::commit_meta(task) else {
             // Can't recover - break execution
             return Ok(ControlFlow::Break(()));
         };
-        let finalize_task =
-            Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
-                delegated_account: commit_meta.committed_pubkey,
-            }))) as Box<dyn BaseTask>;
+        let finalize_task: Box<dyn BaseTask> =
+            Box::new(ArgsTask::new(ArgsTaskType::Finalize(commit_meta.into())));
         inner
             .prepare_and_execute_strategy(
                 &mut TransactionStrategy {
