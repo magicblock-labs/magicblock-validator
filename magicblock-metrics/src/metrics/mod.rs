@@ -405,7 +405,7 @@ lazy_static::lazy_static! {
 
     /// Gauge for pubsub clients that subscribe immediately when requested.
     /// If this value goes to 0 then we should raise an alert as it means we are missing
-    /// account updtes.
+    /// account updates.
     static ref CONNECTED_DIRECT_PUBSUB_CLIENTS_GAUGE: IntGauge = IntGauge::new(
         "connected_direct_pubsub_clients_gauge",
         "Total number of connected pubsub clients that subscribe immediately when requested."

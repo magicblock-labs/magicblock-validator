@@ -701,7 +701,7 @@ where
         Some(all_subs.into_iter().collect())
     }
 
-    /// Number of clients that must confirm a program subscription for it to be considered active.
+    /// Number of clients that must confirm an account subscription for it to be considered active.
     /// 2/3 of connected clients subscribing immediately.
     fn required_account_subscription_confirmations(&self) -> usize {
         let n = self
