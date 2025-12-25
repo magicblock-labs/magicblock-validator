@@ -1,9 +1,12 @@
 language: en-US
-
+tone_instructions: ''
+early_access: true
+enable_free_tier: true
 reviews:
   # Review style + summary placement
   profile: chill
   high_level_summary_placeholder: "<!-- coderabbit-summary -->"
+  review_status: true
   collapse_walkthrough: true
 
   # Noise reduction (these default to true; we explicitly turn them off)
@@ -13,13 +16,17 @@ reviews:
   related_issues: false
   related_prs: false
   suggested_labels: false
-  suggested_reviewers: false
+  labeling_instructions: []
+  auto_apply_labels: false
+  suggested_reviewers: true
+  auto_assign_reviewers: false
   in_progress_fortune: false
   poem: false
-  enable_prompt_for_ai_agents: false
+  enable_prompt_for_ai_agents: true
 
   # Auto-review behavior
   auto_review:
+    enabled: true
     drafts: true
     auto_incremental_review: true
     base_branches: [".*"]
@@ -29,9 +36,7 @@ reviews:
     docstrings:
       enabled: false
     unit_tests:
-      enabled: false
-
-  # Don’t block merges on “process checks” (keep friction low)
+      enabled: true
   pre_merge_checks:
     docstrings:
       mode: off
@@ -44,11 +49,51 @@ reviews:
 
   # Lightweight, high-signal tools for this repo
   tools:
+    # Audited languages: Rust, Shell, TypeScript/JavaScript, Protobuf, Markdown, YAML, TOML, Makefile.
+    ast-grep:
+      rule_dirs: []
+      util_dirs: []
+      essential_rules: true
+      packages: []
+    shellcheck:
+      enabled: true
     markdownlint:
+      enabled: true
+    github-checks:
+      enabled: false
+      timeout_ms: 90000
+    languagetool:
+      enabled: true
+      enabled_rules: []
+      disabled_rules: []
+      enabled_categories: []
+      disabled_categories: []
+      enabled_only: false
+      level: default
+    biome:
+      enabled: true
+    yamllint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    eslint:
+      enabled: true
+    buf:
+      enabled: true
+    actionlint:
       enabled: true
     semgrep:
       enabled: true
-
+    clippy:
+      enabled: true
+    oxc:
+      enabled: true
+    dotenvLint:
+      enabled: true
+    checkmake:
+      enabled: true
+    osvScanner:
+      enabled: true
 chat:
   # We leave emoji/ASCII art, but no auto-replies
   art: true
@@ -58,3 +103,30 @@ knowledge_base:
   # Avoid web-search commentary in reviews
   web_search:
     enabled: false
+  code_guidelines:
+    enabled: true
+    filePatterns: []
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  jira:
+    usage: auto
+    project_keys: []
+  linear:
+    usage: auto
+    team_keys: []
+  pull_requests:
+    scope: auto
+  mcp:
+    usage: auto
+    disabled_servers: []
+code_generation:
+  docstrings:
+    language: en-US
+    path_instructions: []
+  unit_tests:
+    path_instructions: []
+issue_enrichment:
+  planning:
+    enabled: true
