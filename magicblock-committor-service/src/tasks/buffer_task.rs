@@ -1,5 +1,7 @@
 use dlp::{
-    args::CommitStateFromBufferArgs, instruction_builder::commit_size_budget,
+    args::CommitStateFromBufferArgs,
+    compute_diff,
+    instruction_builder::{commit_diff_size_budget, commit_size_budget},
     AccountSizeClass,
 };
 use magicblock_committor_program::Chunks;
@@ -182,6 +184,9 @@ impl BaseTask for BufferTask {
         match self.task_type {
             BufferTaskType::Commit(_) => {
                 commit_size_budget(AccountSizeClass::Huge)
+            }
+            BufferTaskType::CommitDiff(_) => {
+                commit_diff_size_budget(AccountSizeClass::Huge)
             }
         }
     }
