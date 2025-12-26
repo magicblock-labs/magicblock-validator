@@ -22,12 +22,14 @@ pub struct ChainLaserClientImpl {
     updates: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
     /// Channel to send messages to the actor
     messages: mpsc::Sender<ChainPubsubActorMessage>,
+    /// Client identifier
+    client_id: String,
 }
 
 impl ChainLaserClientImpl {
     pub async fn new_from_url(
         pubsub_url: &str,
-        client_id: &str,
+        client_id: String,
         api_key: &str,
         commitment: CommitmentLevel,
         abort_sender: mpsc::Sender<()>,
@@ -35,7 +37,7 @@ impl ChainLaserClientImpl {
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, messages, updates) = ChainLaserActor::new_from_url(
             pubsub_url,
-            client_id,
+            &client_id,
             api_key,
             commitment,
             abort_sender,
@@ -44,6 +46,7 @@ impl ChainLaserClientImpl {
         let client = Self {
             updates: Arc::new(Mutex::new(Some(updates))),
             messages,
+            client_id,
         };
         tokio::spawn(actor.run());
         Ok(client)
@@ -139,6 +142,10 @@ impl ChainPubsubClient for ChainLaserClientImpl {
 
     fn subs_immediately(&self) -> bool {
         false
+    }
+
+    fn id(&self) -> &str {
+        &self.client_id
     }
 }
 
