@@ -2,11 +2,7 @@ use log::error;
 
 use crate::{
     persist::{CommitStrategy, IntentPersister},
-    tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
-        buffer_task::{BufferTask, BufferTaskType},
-        visitor::Visitor,
-    },
+    tasks::{visitor::Visitor, Task},
 };
 
 pub enum PersistorContext {
@@ -23,9 +19,13 @@ impl<P> Visitor for PersistorVisitor<'_, P>
 where
     P: IntentPersister,
 {
-    fn visit_args_task(&mut self, task: &ArgsTask) {
+    fn visit_task(&mut self, task: &Task) {
         match self.context {
             PersistorContext::PersistStrategy { uses_lookup_tables } => {
+                let Task::Commit(ref commit_task) = task else {
+                    return;
+                };
+
                 let commit_strategy = if uses_lookup_tables {
                     CommitStrategy::StateArgsWithLookupTable
                 } else {
@@ -60,47 +60,6 @@ where
                         }
                     }
                     _ => {}
-                }
-            }
-        }
-    }
-
-    fn visit_buffer_task(&mut self, task: &BufferTask) {
-        match self.context {
-            PersistorContext::PersistStrategy { uses_lookup_tables } => {
-                let commit_strategy = if uses_lookup_tables {
-                    CommitStrategy::StateBufferWithLookupTable
-                } else {
-                    CommitStrategy::StateBuffer
-                };
-
-                match &task.task_type {
-                    BufferTaskType::Commit(task) => {
-                        if let Err(err) = self.persistor.set_commit_strategy(
-                            task.commit_id,
-                            &task.committed_account.pubkey,
-                            commit_strategy,
-                        ) {
-                            error!(
-                                "Failed to persist commit strategy {}: {}",
-                                commit_strategy.as_str(),
-                                err
-                            );
-                        }
-                    }
-                    BufferTaskType::CommitDiff(task) => {
-                        if let Err(err) = self.persistor.set_commit_strategy(
-                            task.commit_id,
-                            &task.committed_account.pubkey,
-                            commit_strategy,
-                        ) {
-                            error!(
-                                "Failed to persist commit strategy {}: {}",
-                                commit_strategy.as_str(),
-                                err
-                            );
-                        }
-                    }
                 }
             }
         }

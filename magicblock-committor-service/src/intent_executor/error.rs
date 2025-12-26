@@ -11,7 +11,7 @@ use solana_transaction_error::TransactionError;
 use crate::{
     tasks::{
         task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
-        BaseTask, TaskType,
+        Task, TaskType,
     },
     transaction_preparator::error::TransactionPreparatorError,
 };
@@ -174,7 +174,7 @@ impl TransactionStrategyExecutionError {
     pub fn try_from_transaction_error(
         err: TransactionError,
         signature: Option<Signature>,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[Task],
     ) -> Result<Self, TransactionError> {
         // There's always 2 budget instructions in front
         const OFFSET: u8 = 2;
@@ -256,7 +256,7 @@ impl metrics::LabelValue for TransactionStrategyExecutionError {
 }
 
 pub(crate) struct IntentTransactionErrorMapper<'a> {
-    pub tasks: &'a [Box<dyn BaseTask>],
+    pub tasks: &'a [Task],
 }
 impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
     type ExecutionError = TransactionStrategyExecutionError;
