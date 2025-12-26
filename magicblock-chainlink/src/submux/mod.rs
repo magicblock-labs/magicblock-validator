@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use crate::remote_account_provider::{
     chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
     errors::RemoteAccountProviderResult,
-    SubscriptionUpdate,
+    pubsub_common::SubscriptionUpdate,
 };
 
 const SUBMUX_OUT_CHANNEL_SIZE: usize = 5_000;
@@ -137,7 +137,11 @@ where
     /// which we use to track the latest remote slot.
     never_debounce: HashSet<Pubkey>,
     /// Number of clients that must confirm a subscription for it to be considered active.
+    /// NOTE: only clients that subscribe immediately are counted towards this.
     required_subscription_confirmations: usize,
+    /// Number of clients that must confirm a program subscription for it to be considered
+    /// active.
+    required_program_subscription_confirmations: usize,
     /// Map of program account subscriptions we are holding inside the pubsub clients
     program_subs: Arc<Mutex<HashSet<Pubkey>>>,
 }
@@ -212,6 +216,10 @@ where
         );
 
         let required_subscription_confirmations = {
+            let n = clients.iter().filter(|x| x.subs_immediately()).count();
+            cmp::max(1, (n * 2) / 3)
+        };
+        let required_program_subscription_confirmations = {
             let n = clients.len();
             cmp::max(1, n / 3)
         };
@@ -226,6 +234,7 @@ where
             debounce_states: debounce_states.clone(),
             never_debounce,
             required_subscription_confirmations,
+            required_program_subscription_confirmations,
             program_subs,
         };
 
@@ -453,7 +462,7 @@ where
     ) {
         while let Some(update) = inner_rx.recv().await {
             let now = Instant::now();
-            let key = (update.pubkey, update.rpc_response.context.slot);
+            let key = (update.pubkey, update.slot);
             if !Self::should_forward_dedup(
                 &params.cache,
                 key,
@@ -599,12 +608,16 @@ where
         maybe_forward_now
     }
 
-    fn get_subscriptions(clients: &[Arc<T>]) -> Vec<Pubkey> {
+    fn get_subscriptions(clients: &[Arc<T>]) -> Option<Vec<Pubkey>> {
         let mut all_subs = HashSet::new();
         for client in clients {
-            all_subs.extend(client.subscriptions());
+            if let Some(subs) = client.subscriptions() {
+                all_subs.extend(subs);
+            } else {
+                return None;
+            }
         }
-        all_subs.into_iter().collect()
+        Some(all_subs.into_iter().collect())
     }
 
     fn allowed_in_debounce_window_count(&self) -> usize {
@@ -656,7 +669,7 @@ where
 
         AccountSubscriptionTask::SubscribeProgram(
             program_id,
-            self.required_subscription_confirmations,
+            self.required_program_subscription_confirmations,
         )
         .process(self.clients.clone())
         .await
@@ -671,10 +684,10 @@ where
             .await
     }
 
-    async fn shutdown(&self) {
-        let _ = AccountSubscriptionTask::Shutdown
+    async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+        AccountSubscriptionTask::Shutdown
             .process(self.clients.clone())
-            .await;
+            .await
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
@@ -694,29 +707,39 @@ where
     /// Gets the maximum subscription count across all inner clients.
     /// NOTE: one of the clients could be reconnecting and thus
     /// temporarily have fewer or no subscriptions
+    /// NOTE: not all clients track subscriptions, thus if none return a count,
+    /// then this will return 0 for both values.
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize) {
+    ) -> Option<(usize, usize)> {
         let mut max_total = 0;
         let mut max_filtered = 0;
         for client in &self.clients {
-            let (total, filtered) = client.subscription_count(exclude).await;
-            if total > max_total {
-                max_total = total;
-            }
-            if filtered > max_filtered {
-                max_filtered = filtered;
+            if let Some((total, filtered)) =
+                client.subscription_count(exclude).await
+            {
+                if total > max_total {
+                    max_total = total;
+                }
+                if filtered > max_filtered {
+                    max_filtered = filtered;
+                }
             }
         }
-        (max_total, max_filtered)
+        Some((max_total, max_filtered))
     }
 
     /// Gets the union of all subscriptions across all inner clients.
     /// Unless one is reconnecting, this should be identical to
     /// getting it from a single inner client.
-    fn subscriptions(&self) -> Vec<Pubkey> {
+    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
         Self::get_subscriptions(&self.clients)
+    }
+
+    /// Returns true if any inner client subscribes immediately
+    fn subs_immediately(&self) -> bool {
+        self.clients.iter().any(|c| c.subs_immediately())
     }
 }
 
@@ -846,12 +869,13 @@ mod tests {
 
         assert_eq!(u1.pubkey, pk);
         assert_eq!(u2.pubkey, pk);
-        let lamports = |u: &SubscriptionUpdate| u.rpc_response.value.lamports;
+        let lamports =
+            |u: &SubscriptionUpdate| u.account.as_ref().unwrap().lamports;
         let mut lams = vec![lamports(&u1), lamports(&u2)];
         lams.sort();
         assert_eq!(lams, vec![10, 20]);
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -895,7 +919,7 @@ mod tests {
         .await;
         assert!(recv.is_err(), "no update after unsubscribe");
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     // -----------------
@@ -936,7 +960,7 @@ mod tests {
         .expect("first update expected")
         .expect("stream open");
         assert_eq!(first.pubkey, pk);
-        assert_eq!(first.rpc_response.context.slot, 7);
+        assert_eq!(first.slot, 7);
 
         // No second within short timeout (dedup window is 2s)
         let recv = tokio::time::timeout(
@@ -957,9 +981,9 @@ mod tests {
         .await
         .expect("next update expected")
         .expect("stream open");
-        assert_eq!(next.rpc_response.context.slot, 8);
+        assert_eq!(next.slot, 8);
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1007,7 +1031,7 @@ mod tests {
             .await
             .expect("expected update")
             .expect("stream open");
-            received.push(up.rpc_response.context.slot);
+            received.push(up.slot);
         }
         received.sort_unstable();
         assert_eq!(received, vec![1, 2, 3]);
@@ -1020,7 +1044,7 @@ mod tests {
         .await;
         assert!(recv_more.is_err(), "no extra updates expected");
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1081,7 +1105,7 @@ mod tests {
             .await
             .expect("expected first-batch update")
             .expect("stream open");
-            first_batch.push(up.rpc_response.context.slot);
+            first_batch.push(up.slot);
         }
         first_batch.sort_unstable();
         assert_eq!(first_batch, vec![1, 2, 3]);
@@ -1100,9 +1124,9 @@ mod tests {
         .await
         .expect("expected second-batch update")
         .expect("stream open");
-        assert_eq!(up.rpc_response.context.slot, 1);
+        assert_eq!(up.slot, 1);
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     // -----------------
@@ -1151,7 +1175,7 @@ mod tests {
         )
         .await
         {
-            slots.push(update.rpc_response.context.slot);
+            slots.push(update.slot);
         }
         slots
     }
@@ -1212,7 +1236,7 @@ mod tests {
                 <= mux.allowed_in_debounce_window_count()
         );
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1249,7 +1273,7 @@ mod tests {
                 <= mux.allowed_in_debounce_window_count()
         );
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1309,7 +1333,7 @@ mod tests {
                 <= mux.allowed_in_debounce_window_count()
         );
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1351,7 +1375,7 @@ mod tests {
             assert_eq!(received.len(), 10, "no updates should be debounced");
         }
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     // -----------------
@@ -1410,9 +1434,9 @@ mod tests {
         .expect("expect update after reconnect")
         .expect("stream open");
         assert_eq!(up.pubkey, pk);
-        assert_eq!(up.rpc_response.context.slot, 2);
+        assert_eq!(up.slot, 2);
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1470,8 +1494,8 @@ mod tests {
 
         let up = got.expect("should receive update after retry reconnect");
         assert_eq!(up.pubkey, pk);
-        assert!(up.rpc_response.context.slot >= 100);
+        assert!(up.slot >= 100);
 
-        mux.shutdown().await;
+        mux.shutdown().await.unwrap();
     }
 }

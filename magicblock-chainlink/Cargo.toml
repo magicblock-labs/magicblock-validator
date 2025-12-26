@@ -12,6 +12,7 @@ compressed-delegation-client = { workspace = true }
 env_logger = { workspace = true }
 futures-util = { workspace = true }
 light-client = { workspace = true }
+helius-laserstream = { workspace = true }
 log = { workspace = true }
 lru = { workspace = true }
 magicblock-config = { workspace = true }
@@ -48,6 +49,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }

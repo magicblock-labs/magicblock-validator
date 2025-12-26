@@ -2041,6 +2041,7 @@ mod tests {
 
         let (forward_tx, forward_rx) = mpsc::channel(1_000);
         let (subscribed_accounts, config) = create_test_lru_cache(1000);
+        let chain_slot = Arc::<AtomicU64>::default();
 
         let remote_account_provider = Arc::new(
             RemoteAccountProvider::new(
@@ -2050,6 +2051,7 @@ mod tests {
                 forward_tx,
                 &config,
                 subscribed_accounts,
+                chain_slot,
             )
             .await
             .unwrap(),

@@ -9,8 +9,9 @@ use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     remote_account_provider::{
-        chain_pubsub_client::ChainPubsubClientImpl,
-        chain_rpc_client::ChainRpcClientImpl, photon_client::PhotonClientImpl,
+        chain_rpc_client::ChainRpcClientImpl,
+        chain_updates_client::ChainUpdatesClient,
+        photon_client::PhotonClientImpl,
     },
     submux::SubMuxClient,
     Chainlink,
@@ -46,7 +47,7 @@ const POISONED_MUTEX_MSG: &str =
 
 pub type ChainlinkImpl = Chainlink<
     ChainRpcClientImpl,
-    SubMuxClient<ChainPubsubClientImpl>,
+    SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
     ChainlinkCloner,
     PhotonClientImpl,

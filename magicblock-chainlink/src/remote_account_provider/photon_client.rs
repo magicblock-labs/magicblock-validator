@@ -11,7 +11,7 @@ use solana_account::Account;
 use solana_clock::Slot;
 use solana_pubkey::Pubkey;
 
-use crate::remote_account_provider::RemoteAccountProviderResult;
+use crate::remote_account_provider::{Endpoint, RemoteAccountProviderResult};
 
 #[derive(Clone)]
 pub struct PhotonClientImpl(Arc<PhotonIndexer>);
@@ -27,7 +27,19 @@ impl PhotonClientImpl {
     pub(crate) fn new(photon_indexer: Arc<PhotonIndexer>) -> Self {
         Self(photon_indexer)
     }
-    pub(crate) fn new_from_url(url: &str, api_key: Option<String>) -> Self {
+    pub(crate) fn new_from_endpoint(
+        endpoint: &Endpoint,
+    ) -> RemoteAccountProviderResult<Self> {
+        let Endpoint::Compression { url, api_key } = endpoint else {
+            return Err(
+                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    format!(
+                        "Endpoint is not a compression endpoint: {:?}",
+                        endpoint
+                    ),
+                ),
+            );
+        };
         debug!("Creating PhotonClient with URL: {}", url);
         Self::new(Arc::new(PhotonIndexer::new(url.to_string(), api_key)))
     }

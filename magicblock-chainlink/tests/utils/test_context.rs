@@ -1,6 +1,6 @@
 #![allow(unused)]
 use std::{
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
     time::{Duration, Instant},
 };
 
@@ -93,6 +93,7 @@ impl TestContext {
                     tx,
                     &config,
                     subscribed_accounts,
+                    Arc::<AtomicU64>::default(),
                 )
                 .await;
 

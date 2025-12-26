@@ -5,8 +5,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     remote_account_provider::{
-        chain_pubsub_actor::{ChainPubsubActor, ChainPubsubActorMessage},
-        SubscriptionUpdate,
+        chain_pubsub_actor::ChainPubsubActor,
+        pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
     },
     testing::utils::{PUBSUB_URL, RPC_URL},
 };
@@ -65,4 +65,15 @@ pub async fn reconnect(actor: &ChainPubsubActor) {
     rx.await
         .expect("reconnect ack channel dropped")
         .expect("reconnect failed");
+}
+
+pub async fn shutdown(actor: &ChainPubsubActor) {
+    let (tx, rx) = oneshot::channel();
+    actor
+        .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
+        .await
+        .expect("failed to send Shutdown message");
+    rx.await
+        .expect("shutdown ack channel dropped")
+        .expect("shutdown failed");
 }

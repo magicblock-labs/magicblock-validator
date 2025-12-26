@@ -25,10 +25,9 @@ use tokio::{
 };
 
 use super::{
-    chain_pubsub_actor::{
-        ChainPubsubActor, ChainPubsubActorMessage, SubscriptionUpdate,
-    },
+    chain_pubsub_actor::ChainPubsubActor,
     errors::RemoteAccountProviderResult,
+    pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
 };
 
 type UnsubscribeFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
@@ -159,7 +158,7 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()>;
-    async fn shutdown(&self);
+    async fn shutdown(&self) -> RemoteAccountProviderResult<()>;
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate>;
 
@@ -170,9 +169,11 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize);
+    ) -> Option<(usize, usize)>;
 
-    fn subscriptions(&self) -> Vec<Pubkey>;
+    fn subscriptions(&self) -> Option<Vec<Pubkey>>;
+
+    fn subs_immediately(&self) -> bool;
 }
 
 #[async_trait]
@@ -217,8 +218,18 @@ impl ChainPubsubClientImpl {
 
 #[async_trait]
 impl ChainPubsubClient for ChainPubsubClientImpl {
-    async fn shutdown(&self) {
-        self.actor.shutdown().await;
+    async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.actor
+            .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
+            .await?;
+
+        rx.await.inspect_err(|err| {
+            warn!(
+                "ChainPubsubClientImpl::shutdown - RecvError \
+                     occurred while awaiting shutdown response: {err:?}"
+            );
+        })?
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
@@ -290,18 +301,22 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize) {
+    ) -> Option<(usize, usize)> {
         let total = self.actor.subscription_count(&[]);
         let filtered = if let Some(exclude) = exclude {
             self.actor.subscription_count(exclude)
         } else {
             total
         };
-        (total, filtered)
+        Some((total, filtered))
     }
 
-    fn subscriptions(&self) -> Vec<Pubkey> {
-        self.actor.subscriptions()
+    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+        Some(self.actor.subscriptions())
+    }
+
+    fn subs_immediately(&self) -> bool {
+        true
     }
 }
 
@@ -416,11 +431,8 @@ pub mod mock {
                 },
                 value: ui_acc,
             };
-            self.send(SubscriptionUpdate {
-                pubkey,
-                rpc_response,
-            })
-            .await;
+            let update = SubscriptionUpdate::from((pubkey, rpc_response));
+            self.send(update).await;
         }
     }
 
@@ -478,12 +490,14 @@ pub mod mock {
             Ok(())
         }
 
-        async fn shutdown(&self) {}
+        async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+            Ok(())
+        }
 
         async fn subscription_count(
             &self,
             exclude: Option<&[Pubkey]>,
-        ) -> (usize, usize) {
+        ) -> Option<(usize, usize)> {
             let pubkeys: Vec<Pubkey> = {
                 let subs = self.subscribed_pubkeys.lock().unwrap();
                 subs.iter().cloned().collect()
@@ -494,12 +508,16 @@ pub mod mock {
                 .iter()
                 .filter(|pubkey| !exclude.contains(pubkey))
                 .count();
-            (total, filtered)
+            Some((total, filtered))
         }
 
-        fn subscriptions(&self) -> Vec<Pubkey> {
+        fn subscriptions(&self) -> Option<Vec<Pubkey>> {
             let subs = self.subscribed_pubkeys.lock().unwrap();
-            subs.iter().copied().collect()
+            Some(subs.iter().copied().collect())
+        }
+
+        fn subs_immediately(&self) -> bool {
+            true
         }
     }
 

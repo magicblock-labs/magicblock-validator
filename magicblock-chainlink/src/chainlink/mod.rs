@@ -26,9 +26,10 @@ use crate::{
     fetch_cloner::FetchAndCloneResult,
     filters::is_noop_system_transfer,
     remote_account_provider::{
+        chain_updates_client::ChainUpdatesClient,
         photon_client::{PhotonClient, PhotonClientImpl},
-        ChainPubsubClient, ChainPubsubClientImpl, ChainRpcClient,
-        ChainRpcClientImpl, Endpoint, RemoteAccountProvider,
+        ChainPubsubClient, ChainRpcClient, ChainRpcClientImpl, Endpoints,
+        RemoteAccountProvider,
     },
     submux::SubMuxClient,
 };
@@ -110,7 +111,7 @@ impl<
 
     #[allow(clippy::too_many_arguments)]
     pub async fn try_new_from_endpoints(
-        endpoints: &[Endpoint],
+        endpoints: &Endpoints,
         commitment: CommitmentConfig,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
@@ -121,10 +122,10 @@ impl<
     ) -> ChainlinkResult<
         Chainlink<
             ChainRpcClientImpl,
-            SubMuxClient<ChainPubsubClientImpl>,
+            SubMuxClient<ChainUpdatesClient>,
             V,
             C,
-            PhotonClientImpl,
+            P,
         >,
     > {
         // Extract accounts provider and create fetch cloner while connecting

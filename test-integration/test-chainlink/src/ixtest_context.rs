@@ -1,4 +1,3 @@
-#![allow(unused)]
 use std::sync::Arc;
 
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -24,14 +23,10 @@ use magicblock_chainlink::{
     fetch_cloner::FetchCloner,
     native_program_accounts,
     remote_account_provider::{
-        chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
-        config::{
-            RemoteAccountProviderConfig,
-            DEFAULT_SUBSCRIBED_ACCOUNTS_LRU_CAPACITY,
-        },
-        photon_client::PhotonClientImpl,
-        Endpoint, RemoteAccountProvider,
+        chain_updates_client::ChainUpdatesClient,
+        photon_client::PhotonClientImpl, Endpoint, Endpoints,
+        RemoteAccountProvider,
     },
     submux::SubMuxClient,
     testing::{
@@ -62,11 +57,11 @@ use solana_transaction_status::{
 };
 use tokio::task;
 
-use crate::{programs::send_instructions, sleep_ms};
+use crate::sleep_ms;
 
 pub type IxtestChainlink = Chainlink<
     ChainRpcClientImpl,
-    SubMuxClient<ChainPubsubClientImpl>,
+    SubMuxClient<ChainUpdatesClient>,
     AccountsBankStub,
     ClonerStub,
     PhotonClientImpl,
@@ -82,7 +77,7 @@ pub struct IxtestContext {
         Arc<
             RemoteAccountProvider<
                 ChainRpcClientImpl,
-                SubMuxClient<ChainPubsubClientImpl>,
+                SubMuxClient<ChainUpdatesClient>,
                 PhotonClientImpl,
             >,
         >,
@@ -111,21 +106,23 @@ impl IxtestContext {
         let faucet_kp = Keypair::new();
 
         let commitment = CommitmentConfig::confirmed();
-        let lifecycle_mode = LifecycleMode::Ephemeral;
         let bank = Arc::<AccountsBankStub>::default();
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
         let (tx, rx) = tokio::sync::mpsc::channel(100);
-        let (fetch_cloner, remote_account_provider, photon_indexer) = {
-            let endpoints = [
+        let (fetch_cloner, remote_account_provider) = {
+            let endpoints_vec = vec![
                 Endpoint::Rpc {
-                    rpc_url: RPC_URL.to_string(),
-                    pubsub_url: "ws://localhost:7800".to_string(),
+                    url: RPC_URL.to_string(),
+                },
+                Endpoint::WebSocket {
+                    url: "ws://localhost:7800".to_string(),
                 },
                 Endpoint::Compression {
                     url: PHOTON_URL.to_string(),
                     api_key: None,
                 },
             ];
+            let endpoints = Endpoints::from(endpoints_vec.as_slice());
             // Add all native programs
             let native_programs = native_program_accounts();
             let program_stub = AccountSharedData::new(
@@ -334,7 +331,10 @@ impl IxtestContext {
         let counter_pda = self.counter_pda(&counter_auth.pubkey());
         // The committor service will call this in order to have
         // chainlink subscribe to account updates of the counter account
-        self.chainlink.undelegation_requested(counter_pda).await;
+        self.chainlink
+            .undelegation_requested(counter_pda)
+            .await
+            .unwrap();
 
         // In order to make the account undelegatable we first need to
         // commmit and finalize
@@ -727,7 +727,7 @@ impl IxtestContext {
         delegate: bool,
     ) -> (Pubkey, Pubkey) {
         let validator = delegate.then_some(self.validator_kp.pubkey());
-        let (sig, ephemeral_balance_pda, deleg_record) =
+        let (_sig, ephemeral_balance_pda, deleg_record) =
             dlp_interface::top_up_ephemeral_fee_balance(
                 &self.rpc_client,
                 payer,
