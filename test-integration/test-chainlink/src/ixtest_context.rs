@@ -129,6 +129,7 @@ impl IxtestContext {
                             validator_kp.pubkey(),
                             faucet_kp.pubkey(),
                             rx,
+                            None,
                         )),
                         Some(provider),
                     )

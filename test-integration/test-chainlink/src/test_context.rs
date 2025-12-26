@@ -101,6 +101,7 @@ impl TestContext {
                             validator_pubkey,
                             faucet_pubkey,
                             rx,
+                            None,
                         )),
                         Some(provider),
                     )

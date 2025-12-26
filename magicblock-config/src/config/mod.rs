@@ -10,7 +10,9 @@ pub mod validator;
 
 // Re-export types for backward compatibility and easier access
 pub use accounts::{AccountsDbConfig, BlockSize};
-pub use chain::{ChainLinkConfig, ChainOperationConfig, CommittorConfig};
+pub use chain::{
+    AllowedProgram, ChainLinkConfig, ChainOperationConfig, CommittorConfig,
+};
 pub use ledger::LedgerConfig;
 pub use lifecycle::LifecycleMode;
 pub use program::LoadableProgram;
