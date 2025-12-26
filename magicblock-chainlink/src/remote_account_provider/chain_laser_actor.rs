@@ -295,7 +295,7 @@ impl ChainLaserActor {
             });
         } else {
             self.subscriptions.insert(pubkey);
-            // If this is the first sub for the clock sysvar we want to activate it immediately
+            // If this is the first sub we want to activate it immediately
             if self.active_subscriptions.is_empty() {
                 self.update_active_subscriptions();
             }
