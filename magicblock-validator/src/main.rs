@@ -59,6 +59,9 @@ fn main() {
         .build()
         .expect("failed to build async runtime");
     runtime.block_on(run());
+    drop(runtime);
+
+    info!("main runtime shutdown!");
 }
 
 async fn run() {

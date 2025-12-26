@@ -1,4 +1,4 @@
-use std::{ffi::OsString, fs::File, io::Write, path::PathBuf};
+use std::{ffi::OsString, fs::File, io::Write, path::PathBuf, time::Duration};
 
 use isocountry::CountryCode;
 use serial_test::{parallel, serial};
@@ -436,6 +436,10 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     // Task scheduler reset should be false
     assert!(!config.task_scheduler.reset);
+    assert_eq!(
+        config.task_scheduler.min_interval,
+        Duration::from_millis(10)
+    );
 
     // The example file has the programs section with 2 entries
     assert_eq!(
@@ -491,6 +495,7 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
         // --- Task Scheduler ---
         EnvVarGuard::new("MBV_TASK_SCHEDULER__RESET", "true"),
+        EnvVarGuard::new("MBV_TASK_SCHEDULER__MIN_INTERVAL", "99ms"),
         // --- Chain Operation (Optional Section) ---
         // Figment can instantiate optional structs if their fields are present
         EnvVarGuard::new("MBV_CHAIN_OPERATION__COUNTRY_CODE", "DE"),
@@ -548,6 +553,10 @@ fn test_env_vars_full_coverage() {
 
     // Task Scheduler
     assert!(config.task_scheduler.reset);
+    assert_eq!(
+        config.task_scheduler.min_interval,
+        Duration::from_millis(99)
+    );
 
     // Chain Operation
     // Verify the optional struct was created and populated

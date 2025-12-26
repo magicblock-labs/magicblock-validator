@@ -289,6 +289,7 @@ impl TaskStrategist {
 
         // Get initial transaction size
         let mut current_tx_length = calculate_tx_length(tasks)?;
+
         if current_tx_length <= MAX_ENCODED_TRANSACTION_SIZE {
             return Ok(current_tx_length);
         }
@@ -373,6 +374,7 @@ mod tests {
         BaseAction, CommittedAccount, ProgramArgs,
     };
     use solana_account::Account;
+    use solana_program::system_program;
     use solana_pubkey::Pubkey;
     use solana_system_program::id as system_program_id;
 
@@ -384,12 +386,15 @@ mod tests {
         },
         persist::IntentPersisterImpl,
         tasks::{
-            task_builder::{TaskBuilderImpl, TasksBuilder},
-            BaseActionTask, CommitTask, TaskStrategy, UndelegateTask,
+            task_builder::{
+                TaskBuilderImpl, TasksBuilder, COMMIT_STATE_SIZE_THRESHOLD,
+            },
+            BaseActionTask, TaskStrategy, UndelegateTask,
         },
     };
 
     struct MockInfoFetcher;
+
     #[async_trait::async_trait]
     impl TaskInfoFetcher for MockInfoFetcher {
         async fn fetch_next_commit_ids(
@@ -411,24 +416,55 @@ mod tests {
         }
 
         fn reset(&self, _: ResetType) {}
+
+        async fn get_base_accounts(
+            &self,
+            _pubkeys: &[Pubkey],
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+            Ok(Default::default())
+        }
     }
 
     // Helper to create a simple commit task
-    fn create_test_commit_task(commit_id: u64, data_size: usize) -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::Commit(CommitTask {
-            commit_id,
-            allow_undelegation: false,
-            committed_account: CommittedAccount {
-                pubkey: Pubkey::new_unique(),
-                account: Account {
-                    lamports: 1000,
-                    data: vec![1; data_size],
-                    owner: system_program_id(),
-                    executable: false,
-                    rent_epoch: 0,
-                },
+    fn create_test_commit_task(
+        commit_id: u64,
+        data_size: usize,
+        diff_len: usize,
+    ) -> ArgsTask {
+        let committed_account = CommittedAccount {
+            pubkey: Pubkey::new_unique(),
+            account: Account {
+                lamports: 1000,
+                data: vec![1; data_size],
+                owner: system_program::id(),
+                executable: false,
+                rent_epoch: 0,
             },
-        }))
+        };
+
+        if diff_len == 0 {
+            TaskBuilderImpl::create_commit_task(
+                commit_id,
+                false,
+                committed_account,
+                None,
+            )
+        } else {
+            let base_account = {
+                let mut acc = committed_account.account.clone();
+                assert!(diff_len <= acc.data.len());
+                for byte in &mut acc.data[..diff_len] {
+                    *byte = byte.wrapping_add(1);
+                }
+                acc
+            };
+            TaskBuilderImpl::create_commit_task(
+                commit_id,
+                false,
+                committed_account,
+                Some(base_account),
+            )
+        }
     }
 
     // Helper to create a Base action task
@@ -466,7 +502,7 @@ mod tests {
     #[test]
     fn test_build_strategy_with_single_small_task() {
         let validator = Pubkey::new_unique();
-        let task = create_test_commit_task(1, 100);
+        let task = create_test_commit_task(1, 100, 0);
         let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
 
         let strategy = TaskStrategist::build_strategy(
@@ -484,7 +520,7 @@ mod tests {
     fn test_build_strategy_optimizes_to_buffer_when_needed() {
         let validator = Pubkey::new_unique();
 
-        let task = create_test_commit_task(1, 1000); // Large task
+        let task = create_test_commit_task(1, 1000, 0); // Large task
         let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
 
         let strategy = TaskStrategist::build_strategy(
@@ -505,7 +541,7 @@ mod tests {
     fn test_build_strategy_optimizes_to_buffer_u16_exceeded() {
         let validator = Pubkey::new_unique();
 
-        let task = create_test_commit_task(1, 66_000); // Large task
+        let task = create_test_commit_task(1, 66_000, 0); // Large task
         let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
 
         let strategy = TaskStrategist::build_strategy(
@@ -523,6 +559,67 @@ mod tests {
     }
 
     #[test]
+    fn test_build_strategy_does_not_optimize_large_account_but_small_diff() {
+        let validator = Pubkey::new_unique();
+
+        let task =
+            create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD); // large account but small diff
+        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
+
+        let strategy = TaskStrategist::build_strategy(
+            tasks,
+            &validator,
+            &None::<IntentPersisterImpl>,
+        )
+        .expect("Should build strategy with buffer optimization");
+
+        assert_eq!(strategy.optimized_tasks.len(), 1);
+        assert_eq!(strategy.optimized_tasks[0].strategy(), TaskStrategy::Args);
+    }
+
+    #[test]
+    fn test_build_strategy_does_not_optimize_large_account_and_above_threshold_diff(
+    ) {
+        let validator = Pubkey::new_unique();
+
+        let task =
+            create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD + 1); // large account but small diff
+        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
+
+        let strategy = TaskStrategist::build_strategy(
+            tasks,
+            &validator,
+            &None::<IntentPersisterImpl>,
+        )
+        .expect("Should build strategy with buffer optimization");
+
+        assert_eq!(strategy.optimized_tasks.len(), 1);
+        assert_eq!(strategy.optimized_tasks[0].strategy(), TaskStrategy::Args);
+    }
+
+    #[test]
+    fn test_build_strategy_does_optimize_large_account_and_large_diff() {
+        let validator = Pubkey::new_unique();
+
+        let task =
+            create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD * 4); // large account but small diff
+        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
+
+        let strategy = TaskStrategist::build_strategy(
+            tasks,
+            &validator,
+            &None::<IntentPersisterImpl>,
+        )
+        .expect("Should build strategy with buffer optimization");
+
+        assert_eq!(strategy.optimized_tasks.len(), 1);
+        assert_eq!(
+            strategy.optimized_tasks[0].strategy(),
+            TaskStrategy::Buffer
+        );
+    }
+
+    #[test]
     fn test_build_strategy_creates_multiple_buffers() {
         // TODO: ALSO MAX NUM WITH PURE BUFFER commits, no alts
         const NUM_COMMITS: u64 = 3;
@@ -531,7 +628,7 @@ mod tests {
 
         let tasks = (0..NUM_COMMITS)
             .map(|i| {
-                let task = create_test_commit_task(i, 500); // Large task
+                let task = create_test_commit_task(i, 500, 0); // Large task
                 Box::new(task) as Box<dyn BaseTask>
             })
             .collect();
@@ -559,7 +656,7 @@ mod tests {
         let tasks = (0..NUM_COMMITS)
             .map(|i| {
                 // Large task
-                let task = create_test_commit_task(i, 10000);
+                let task = create_test_commit_task(i, 10000, 0);
                 Box::new(task) as Box<dyn BaseTask>
             })
             .collect();
@@ -586,7 +683,7 @@ mod tests {
         let tasks = (0..NUM_COMMITS)
             .map(|i| {
                 // Large task
-                let task = create_test_commit_task(i, 1000);
+                let task = create_test_commit_task(i, 1000, 0);
                 Box::new(task) as Box<dyn BaseTask>
             })
             .collect();
@@ -602,9 +699,9 @@ mod tests {
     #[test]
     fn test_optimize_strategy_prioritizes_largest_tasks() {
         let mut tasks = [
-            Box::new(create_test_commit_task(1, 100)) as Box<dyn BaseTask>,
-            Box::new(create_test_commit_task(2, 1000)) as Box<dyn BaseTask>, // Larger task
-            Box::new(create_test_commit_task(3, 1000)) as Box<dyn BaseTask>, // Larger task
+            Box::new(create_test_commit_task(1, 100, 0)) as Box<dyn BaseTask>,
+            Box::new(create_test_commit_task(2, 1000, 0)) as Box<dyn BaseTask>, // Larger task
+            Box::new(create_test_commit_task(3, 1000, 0)) as Box<dyn BaseTask>, // Larger task
         ];
 
         let _ = TaskStrategist::optimize_strategy(&mut tasks);
@@ -617,7 +714,7 @@ mod tests {
     fn test_mixed_task_types_with_optimization() {
         let validator = Pubkey::new_unique();
         let tasks = vec![
-            Box::new(create_test_commit_task(1, 1000)) as Box<dyn BaseTask>,
+            Box::new(create_test_commit_task(1, 1000, 0)) as Box<dyn BaseTask>,
             Box::new(create_test_finalize_task()) as Box<dyn BaseTask>,
             Box::new(create_test_base_action_task(500)) as Box<dyn BaseTask>,
             Box::new(create_test_undelegate_task()) as Box<dyn BaseTask>,
