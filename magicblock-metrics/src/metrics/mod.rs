@@ -431,6 +431,22 @@ lazy_static::lazy_static! {
             vec![1.0, 3.0, 5.0, 10.0, 15.0, 17.0, 20.0]
         ),
     ).unwrap();
+
+    // -----------------
+    // Pubsub Clients
+    // -----------------
+    static ref CONNECTED_PUBSUB_CLIENTS_GAUGE: IntGauge = IntGauge::new(
+        "connected_pubsub_clients_gauge",
+        "Total number of connected pubsub clients"
+    ).unwrap();
+
+    static ref PUBSUB_CLIENT_UPTIME_GAUGE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "pubsub_client_uptime_gauge",
+            "Uptime of each pubsub client (1=connected, 0=disconnected)"
+        ),
+        &["client_id"],
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -502,6 +518,8 @@ pub(crate) fn register() {
         register!(TASK_INFO_FETCHER_COMPRESSED_COUNT);
         register!(TABLE_MANIA_A_COUNT);
         register!(TABLE_MANIA_CLOSED_A_COUNT);
+        register!(CONNECTED_PUBSUB_CLIENTS_GAUGE);
+        register!(PUBSUB_CLIENT_UPTIME_GAUGE);
     });
 }
 
@@ -773,4 +791,14 @@ pub fn inc_table_mania_a_count() {
 
 pub fn inc_table_mania_close_a_count() {
     TABLE_MANIA_CLOSED_A_COUNT.inc()
+}
+
+pub fn set_connected_pubsub_clients_count(count: usize) {
+    CONNECTED_PUBSUB_CLIENTS_GAUGE.set(count as i64);
+}
+
+pub fn set_pubsub_client_uptime(client_id: &str, connected: bool) {
+    PUBSUB_CLIENT_UPTIME_GAUGE
+        .with_label_values(&[client_id])
+        .set(if connected { 1 } else { 0 });
 }
