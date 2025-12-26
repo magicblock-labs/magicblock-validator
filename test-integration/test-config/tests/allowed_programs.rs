@@ -86,6 +86,9 @@ fn run_allowed_programs(allow_committor_program: bool) {
         validator
     );
 
+    // Give validator another moment to fully startup
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
     // We request both account infos and then verify that only the allowed one
     // is cloned if one was blocked
     expect!(
