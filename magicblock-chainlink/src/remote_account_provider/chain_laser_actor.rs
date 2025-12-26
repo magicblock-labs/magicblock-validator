@@ -108,7 +108,8 @@ pub struct ChainLaserActor {
     /// Channel used to signal connection issues to the submux
     abort_sender: mpsc::Sender<()>,
     /// The current slot on chain, shared with RemoteAccountProvider
-    chain_slot: Arc<AtomicU64>,
+    /// This is only set when the gRPC provider supports backfilling subscription updates
+    chain_slot: Option<Arc<AtomicU64>>,
     /// Unique client ID including the gRPC provider name for this actor instance used in logs
     /// and metrics
     client_id: String,
@@ -121,7 +122,7 @@ impl ChainLaserActor {
         api_key: &str,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
-        chain_slot: Arc<AtomicU64>,
+        chain_slot: Option<Arc<AtomicU64>>,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -154,7 +155,7 @@ impl ChainLaserActor {
         laser_client_config: LaserstreamConfig,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
-        chain_slot: Arc<AtomicU64>,
+        chain_slot: Option<Arc<AtomicU64>>,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -414,22 +415,26 @@ impl ChainLaserActor {
             .map(|chunk| chunk.to_vec())
             .collect::<Vec<_>>();
 
-        let chain_slot = self.chain_slot.load(Ordering::Relaxed);
-        let from_slot = {
+        // chain_slot is only set when backfilling is supported
+        let chain_slot =
+            self.chain_slot.as_ref().map(|x| x.load(Ordering::Relaxed));
+        let from_slot = chain_slot.and_then(|chain_slot| {
             if chain_slot == 0 {
                 None
             } else {
                 Some(chain_slot.saturating_sub(SLOTS_BETWEEN_ACTIVATIONS + 1))
             }
-        };
-        trace!(
-            "[client_id={}] Activating {} account subs at slot {} {} using {} stream(s)",
-            self.client_id,
-            self.subscriptions.len(),
-            chain_slot,
-            from_slot.map_or("".to_string(), |s| format!("from slot: {s}")),
-            chunks.len(),
-        );
+        });
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "[client_id={}] Activating {} account subs at slot {} {} using {} stream(s)",
+                self.client_id,
+                self.subscriptions.len(),
+                chain_slot.map_or("N/A".to_string(), |s| s.to_string()),
+                from_slot.map_or("".to_string(), |s| format!("from slot: {s}")),
+                chunks.len(),
+            );
+        }
         for (idx, chunk) in chunks.into_iter().enumerate() {
             let stream = Self::create_accounts_stream(
                 &chunk,

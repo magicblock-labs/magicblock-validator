@@ -13,9 +13,9 @@ use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 
 use crate::remote_account_provider::{
-    chain_laser_client::{is_known_grpc_url, ChainLaserClientImpl},
-    pubsub_common::SubscriptionUpdate,
-    ChainPubsubClient, ChainPubsubClientImpl, Endpoint, ReconnectableClient,
+    chain_laser_client::ChainLaserClientImpl,
+    pubsub_common::SubscriptionUpdate, ChainPubsubClient,
+    ChainPubsubClientImpl, Endpoint, ReconnectableClient,
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 
@@ -55,33 +55,30 @@ impl ChainUpdatesClient {
             Grpc {
                 url,
                 label,
+                supports_backfill,
                 api_key,
             } => {
                 debug!(
                     "Initializing Helius Laser client for gRPC endpoint: {}",
                     url
                 );
-                if is_known_grpc_url(url) {
-                    let client_id = format!(
-                        "grpc:{label}-{}",
-                        CLIENT_ID.fetch_add(1, Ordering::SeqCst)
-                    );
-                    Ok(ChainUpdatesClient::Laser(
-                        ChainLaserClientImpl::new_from_url(
-                            url,
-                            client_id,
-                            api_key,
-                            commitment.commitment,
-                            abort_sender,
-                            chain_slot,
-                        )
-                        .await?,
-                    ))
-                } else {
-                    Err(RemoteAccountProviderError::UnsupportedGrpcEndpoint(
-                        url.to_string(),
-                    ))
-                }
+                let client_id = format!(
+                    "grpc:{label}-{}",
+                    CLIENT_ID.fetch_add(1, Ordering::SeqCst)
+                );
+
+                let chain_slot = supports_backfill.then_some(chain_slot);
+                Ok(ChainUpdatesClient::Laser(
+                    ChainLaserClientImpl::new_from_url(
+                        url,
+                        client_id,
+                        api_key,
+                        commitment.commitment,
+                        abort_sender,
+                        chain_slot,
+                    )
+                    .await?,
+                ))
             }
             Rpc { .. } => {
                 Err(RemoteAccountProviderError::InvalidPubsubEndpoint(format!(
