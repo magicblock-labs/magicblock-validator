@@ -11,17 +11,18 @@ pub enum CommitStrategy {
     StateBuffer,
     /// Buffer and chunks with the use of a lookup table
     StateBufferWithLookupTable,
+
+    /// Args without the use of a lookup table
+    DiffArgs,
+    /// Args with the use of a lookup table
+    DiffArgsWithLookupTable,
+    /// Buffer and chunks which has the most overhead
+    DiffBuffer,
+    /// Buffer and chunks with the use of a lookup table
+    DiffBufferWithLookupTable,
 }
 
 impl CommitStrategy {
-    pub fn args(use_lookup: bool) -> Self {
-        if use_lookup {
-            Self::StateArgsWithLookupTable
-        } else {
-            Self::StateArgs
-        }
-    }
-
     pub fn as_str(&self) -> &str {
         use CommitStrategy::*;
         match self {
@@ -29,6 +30,10 @@ impl CommitStrategy {
             StateArgsWithLookupTable => "StateArgsWithLookupTable",
             StateBuffer => "StateBuffer",
             StateBufferWithLookupTable => "StateBufferWithLookupTable",
+            DiffArgs => "DiffArgs",
+            DiffArgsWithLookupTable => "DiffArgsWithLookupTable",
+            DiffBuffer => "DiffBuffer",
+            DiffBufferWithLookupTable => "DiffBufferWithLookupTable",
         }
     }
 
@@ -37,6 +42,8 @@ impl CommitStrategy {
             self,
             CommitStrategy::StateArgsWithLookupTable
                 | CommitStrategy::StateBufferWithLookupTable
+                | CommitStrategy::DiffArgsWithLookupTable
+                | CommitStrategy::DiffBufferWithLookupTable
         )
     }
 }
@@ -53,6 +60,10 @@ impl TryFrom<&str> for CommitStrategy {
             "FromBufferWithLookupTable" | "StateBufferWithLookupTable" => {
                 Ok(Self::StateBufferWithLookupTable)
             }
+            "DiffArgs" => Ok(Self::DiffArgs),
+            "DiffArgsWithLookupTable" => Ok(Self::DiffArgsWithLookupTable),
+            "DiffBuffer" => Ok(Self::DiffBuffer),
+            "DiffBufferWithLookupTable" => Ok(Self::DiffBufferWithLookupTable),
             _ => Err(CommitPersistError::InvalidCommitStrategy(
                 value.to_string(),
             )),
