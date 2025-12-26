@@ -131,6 +131,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 validator_pubkey,
                 faucet_pubkey,
                 rx,
+                chainlink_config.allowed_programs.clone(),
             );
             Some(fetch_cloner)
         } else {
