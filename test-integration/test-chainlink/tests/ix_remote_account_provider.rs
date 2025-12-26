@@ -29,9 +29,11 @@ async fn init_remote_account_provider(
     let endpoints_vec = vec![
         Endpoint::Rpc {
             url: RPC_URL.to_string(),
+            label: "test-rpc".to_string(),
         },
         Endpoint::WebSocket {
             url: PUBSUB_URL.to_string(),
+            label: "test-ws".to_string(),
         },
     ];
     let endpoints = Endpoints::from(endpoints_vec.as_slice());

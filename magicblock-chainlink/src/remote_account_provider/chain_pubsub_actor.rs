@@ -59,8 +59,9 @@ pub struct ChainPubsubActor {
     /// The token to use to cancel all subscriptions and shut down the
     /// message listener, essentially shutting down whis actor
     shutdown_token: CancellationToken,
-    /// Unique client ID for this actor instance used in logs
-    client_id: u16,
+    /// Unique client ID including the RPC provider name for this actor instance used in logs
+    /// and metrics
+    client_id: String,
     /// Indicates whether the actor is connected or has been disconnected due RPC to connection
     /// issues
     is_connected: Arc<AtomicBool>,
@@ -71,20 +72,25 @@ pub struct ChainPubsubActor {
 impl ChainPubsubActor {
     pub async fn new_from_url(
         pubsub_url: &str,
+        client_id: &str,
         abort_sender: mpsc::Sender<()>,
         commitment: CommitmentConfig,
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
         let config = PubsubClientConfig::from_url(pubsub_url, commitment);
-        Self::new(abort_sender, config).await
+        Self::new(client_id, abort_sender, config).await
     }
 
     pub async fn new(
+        client_id: &str,
         abort_sender: mpsc::Sender<()>,
         pubsub_client_config: PubsubClientConfig,
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
         static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
+        // Distinguish multiple client instances of the same RPC provider
+        let client_id =
+            format!("{client_id}-{}", CLIENT_ID.fetch_add(1, Ordering::SeqCst));
 
         let url = pubsub_client_config.pubsub_url.clone();
         let pubsub_connection = Arc::new(PubSubConnection::new(url).await?);
@@ -103,7 +109,7 @@ impl ChainPubsubActor {
             program_subs: Default::default(),
             subscription_updates_sender,
             shutdown_token,
-            client_id: CLIENT_ID.fetch_add(1, Ordering::SeqCst),
+            client_id,
             is_connected: Arc::new(AtomicBool::new(true)),
             abort_sender,
         };
@@ -115,7 +121,7 @@ impl ChainPubsubActor {
     }
 
     async fn shutdown(
-        client_id: u16,
+        client_id: &str,
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         shutdown_token: CancellationToken,
@@ -184,7 +190,7 @@ impl ChainPubsubActor {
         let subscription_updates_sender =
             self.subscription_updates_sender.clone();
         let pubsub_connection = self.pubsub_connection.clone();
-        let client_id = self.client_id;
+        let client_id = self.client_id.clone();
         let is_connected = self.is_connected.clone();
         let abort_sender = self.abort_sender.clone();
         tokio::spawn(async move {
@@ -207,7 +213,7 @@ impl ChainPubsubActor {
                                 subscription_updates_sender,
                                 pubsub_client_config,
                                 abort_sender,
-                                client_id,
+                                &client_id,
                                 is_connected,
                                 shutdown_token.clone(),
                                 msg
@@ -233,14 +239,14 @@ impl ChainPubsubActor {
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         pubsub_client_config: PubsubClientConfig,
         abort_sender: mpsc::Sender<()>,
-        client_id: u16,
+        client_id: &str,
         is_connected: Arc<AtomicBool>,
         shutdown_token: CancellationToken,
         msg: ChainPubsubActorMessage,
     ) {
         fn send_ok(
             response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-            client_id: u16,
+            client_id: &str,
         ) {
             let _ = response.send(Ok(())).inspect_err(|err| {
                 warn!(
@@ -358,7 +364,7 @@ impl ChainPubsubActor {
         abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
         commitment_config: CommitmentConfig,
-        client_id: u16,
+        client_id: &str,
     ) {
         if subs
             .lock()
@@ -420,6 +426,7 @@ impl ChainPubsubActor {
         // RPC succeeded - confirm to the requester that the subscription was made
         let _ = sub_response.send(Ok(()));
 
+        let client_id = client_id.to_string();
         tokio::spawn(async move {
             // Now keep listening for updates and relay them to the
             // subscription updates sender until it is cancelled
@@ -437,7 +444,7 @@ impl ChainPubsubActor {
                             }
                             let update = SubscriptionUpdate::from((pubkey, rpc_response));
                             inc_account_subscription_account_updates_count(
-                                &client_id.to_string(),
+                                &client_id,
                             );
                             let _ = subscription_updates_sender.send(update).await.inspect_err(|err| {
                                 error!("[client_id={client_id}] Failed to send {pubkey} subscription update: {err:?}");
@@ -445,7 +452,7 @@ impl ChainPubsubActor {
                         } else {
                             debug!("[client_id={client_id}] Subscription for {pubkey} ended (EOF); signaling connection issue");
                             Self::abort_and_signal_connection_issue(
-                                client_id,
+                                &client_id,
                                 subs.clone(),
                                 program_subs.clone(),
                                 abort_sender.clone(),
@@ -485,7 +492,7 @@ impl ChainPubsubActor {
         abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
         commitment_config: CommitmentConfig,
-        client_id: u16,
+        client_id: &str,
     ) {
         if program_subs
             .lock()
@@ -545,6 +552,7 @@ impl ChainPubsubActor {
         // RPC succeeded - confirm to the requester that the subscription was made
         let _ = sub_response.send(Ok(()));
 
+        let client_id = client_id.to_string();
         tokio::spawn(async move {
             // Now keep listening for updates and relay matching accounts to the
             // subscription updates sender until it is cancelled
@@ -570,7 +578,7 @@ impl ChainPubsubActor {
                                     let sub_update = SubscriptionUpdate::from((acc_pubkey, rpc_response));
                                     trace!("[client_id={client_id}] Sending program {program_pubkey} account update: {sub_update:?}");
                                     inc_program_subscription_account_updates_count(
-                                        &client_id.to_string(),
+                                        &client_id,
                                     );
                                     let _ = subscription_updates_sender.send(sub_update)
                                         .await
@@ -582,7 +590,7 @@ impl ChainPubsubActor {
                         } else {
                             debug!("[client_id={client_id}] Subscription for program {program_pubkey} ended (EOF); signaling connection issue");
                             Self::abort_and_signal_connection_issue(
-                                client_id,
+                                &client_id,
                                 subs.clone(),
                                 program_subs.clone(),
                                 abort_sender.clone(),
@@ -616,12 +624,12 @@ impl ChainPubsubActor {
     async fn try_reconnect(
         pubsub_connection: Arc<PubSubConnection>,
         pubsub_client_config: PubsubClientConfig,
-        client_id: u16,
+        client_id: &str,
         is_connected: Arc<AtomicBool>,
     ) -> RemoteAccountProviderResult<()> {
         // 1. Try to reconnect the pubsub connection
         if let Err(err) = pubsub_connection.reconnect().await {
-            debug!("[client_id={}] failed to reconnect: {err:?}", client_id);
+            debug!("[client_id={client_id}] failed to reconnect: {err:?}");
             return Err(err.into());
         }
         // Make a sub to any account and unsub immediately to verify connection
@@ -654,7 +662,7 @@ impl ChainPubsubActor {
     }
 
     fn abort_and_signal_connection_issue(
-        client_id: u16,
+        client_id: &str,
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         abort_sender: mpsc::Sender<()>,
@@ -671,7 +679,7 @@ impl ChainPubsubActor {
         debug!("[client_id={client_id}] aborting");
 
         fn drain_subscriptions(
-            client_id: u16,
+            client_id: &str,
             subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         ) {
             let drained_subs = {
