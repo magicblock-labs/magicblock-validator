@@ -18,6 +18,7 @@ pub enum Endpoint {
     Grpc {
         url: String,
         label: String,
+        supports_backfill: bool,
         api_key: String,
     },
 }
@@ -79,15 +80,25 @@ impl TryFrom<&Remote> for Endpoint {
             Remote::Grpc(url) => {
                 let label = extract_label(url);
                 let (url, api_key) = parse_url_api_key(url);
+                if !is_known_grpc_url(&url) {
+                    return Err(
+                        RemoteAccountProviderError::UnsupportedGrpcEndpoint(
+                            url,
+                        ),
+                    );
+                }
                 let api_key = api_key.ok_or_else(|| {
                     RemoteAccountProviderError::MissingApiKey(format!(
                         "gRPC endpoint requires api_key: {}",
                         url
                     ))
                 })?;
+
+                let supports_backfill = is_helius_laser_url(&url);
                 Ok(Endpoint::Grpc {
                     url,
                     label,
+                    supports_backfill,
                     api_key,
                 })
             }
@@ -188,6 +199,19 @@ fn extract_label(url: &Url) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+pub fn is_known_grpc_url(url: &str) -> bool {
+    is_helius_laser_url(url) || is_triton_url(url)
+}
+
+fn is_helius_laser_url(url: &str) -> bool {
+    // Example: https://laserstream-devnet-ewr.helius-rpc.com
+    url.contains("laserstream") && url.contains("helius-rpc.com")
+}
+
+fn is_triton_url(url: &str) -> bool {
+    // Example: https://magicblo-dev<redacted>.devnet.rpcpool.com
+    url.contains("rpcpool")
+}
 #[cfg(test)]
 mod tests {
     use super::*;
