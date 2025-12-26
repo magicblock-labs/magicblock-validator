@@ -1,5 +1,3 @@
-use std::fs;
-
 use magicblock_ledger::Ledger;
 use solana_clock::Slot;
 use solana_hash::Hash;
@@ -10,12 +8,11 @@ use solana_transaction::sanitized::SanitizedTransaction;
 use solana_transaction_status::{
     TransactionStatusMeta, VersionedConfirmedBlock,
 };
-use tempfile::NamedTempFile;
+use tempfile::tempdir;
 
 pub fn setup() -> Ledger {
-    let file = NamedTempFile::new().unwrap();
-    let path = file.into_temp_path();
-    fs::remove_file(&path).unwrap();
+    let directory = tempdir().unwrap();
+    let path = directory.keep();
     Ledger::open(&path).unwrap()
 }
 
