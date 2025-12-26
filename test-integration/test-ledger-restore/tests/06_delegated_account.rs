@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::{path::Path, process::Child};
 
 use cleanass::assert_eq;
