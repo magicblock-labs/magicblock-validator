@@ -23,8 +23,8 @@ use magicblock_aperture::{
 use magicblock_chainlink::{
     config::ChainlinkConfig,
     remote_account_provider::{
-        chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
+        chain_updates_client::ChainUpdatesClient, Endpoints,
     },
     submux::SubMuxClient,
     Chainlink,
@@ -94,7 +94,7 @@ use crate::{
 
 type ChainlinkImpl = Chainlink<
     ChainRpcClientImpl,
-    SubMuxClient<ChainPubsubClientImpl>,
+    SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
     ChainlinkCloner,
 >;
@@ -370,15 +370,12 @@ impl MagicValidator {
         accountsdb: &Arc<AccountsDb>,
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
-        use magicblock_chainlink::remote_account_provider::Endpoint;
-        let rpc_url = config.rpc_url().to_owned();
-        let endpoints = config
-            .websocket_urls()
-            .map(|pubsub_url| Endpoint {
-                rpc_url: rpc_url.clone(),
-                pubsub_url: pubsub_url.to_string(),
-            })
-            .collect::<Vec<_>>();
+        let endpoints = Endpoints::try_from(config.remotes.as_slice())
+            .map_err(|e| {
+                ApiError::from(
+                    magicblock_chainlink::errors::ChainlinkError::from(e),
+                )
+            })?;
 
         let cloner = ChainlinkCloner::new(
             committor_service,

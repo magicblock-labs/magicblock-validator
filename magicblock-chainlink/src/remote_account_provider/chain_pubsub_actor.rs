@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    fmt,
     sync::{
         atomic::{AtomicBool, AtomicU16, Ordering},
         Arc, Mutex,
@@ -13,7 +12,7 @@ use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_program_subscription_account_updates_count,
 };
-use solana_account_decoder_client_types::{UiAccount, UiAccountEncoding};
+use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
@@ -32,47 +31,13 @@ use super::{
     chain_pubsub_client::PubSubConnection,
     errors::{RemoteAccountProviderError, RemoteAccountProviderResult},
 };
+use crate::remote_account_provider::pubsub_common::{
+    AccountSubscription, ChainPubsubActorMessage, PubsubClientConfig,
+    SubscriptionUpdate, MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+};
 
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
-
-#[derive(Debug, Clone)]
-pub struct PubsubClientConfig {
-    pub pubsub_url: String,
-    pub commitment_config: CommitmentConfig,
-}
-
-impl PubsubClientConfig {
-    pub fn from_url(
-        pubsub_url: impl Into<String>,
-        commitment_config: CommitmentConfig,
-    ) -> Self {
-        Self {
-            pubsub_url: pubsub_url.into(),
-            commitment_config,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SubscriptionUpdate {
-    pub pubkey: Pubkey,
-    pub rpc_response: RpcResponse<UiAccount>,
-}
-
-impl fmt::Display for SubscriptionUpdate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "SubscriptionUpdate(pubkey: {}, update: {:?})",
-            self.pubkey, self.rpc_response
-        )
-    }
-}
-
-struct AccountSubscription {
-    cancellation_token: CancellationToken,
-}
 
 // -----------------
 // ChainPubsubActor
@@ -102,35 +67,6 @@ pub struct ChainPubsubActor {
     /// Channel used to signal connection issues to the submux
     abort_sender: mpsc::Sender<()>,
 }
-
-#[derive(Debug)]
-pub enum ChainPubsubActorMessage {
-    /// Subscribe to account updates for the given pubkey
-    AccountSubscribe {
-        pubkey: Pubkey,
-        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-    },
-    /// Unsubscribe from account updates for the given pubkey
-    AccountUnsubscribe {
-        pubkey: Pubkey,
-        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-    },
-    /// Subscribe to program account updates for the given program pubkey.
-    /// NOTE: only updates to accounts also subscribed to directly and thus
-    ///       part of [ChainPubsubActor::subscriptions] will be sent via the
-    ///       [ChainPubsubActor::subscription_updates_sender].
-    ProgramSubscribe {
-        pubkey: Pubkey,
-        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-    },
-    /// Attempt to reconnect the pubsub connection
-    Reconnect {
-        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
-    },
-}
-
-const SUBSCRIPTION_UPDATE_CHANNEL_SIZE: usize = 5_000;
-const MESSAGE_CHANNEL_SIZE: usize = 1_000;
 
 impl ChainPubsubActor {
     pub async fn new_from_url(
@@ -178,22 +114,23 @@ impl ChainPubsubActor {
         Ok((me, subscription_updates_receiver))
     }
 
-    pub async fn shutdown(&self) {
-        info!(
-            "[client_id={}] Shutting down ChainPubsubActor",
-            self.client_id
-        );
-        let subs = self
-            .subscriptions
+    async fn shutdown(
+        client_id: u16,
+        subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        shutdown_token: CancellationToken,
+    ) {
+        info!("[client_id={client_id}] Shutting down ChainPubsubActor");
+        let subs = subscriptions
             .lock()
             .unwrap()
             .drain()
-            .chain(self.program_subs.lock().unwrap().drain())
+            .chain(program_subs.lock().unwrap().drain())
             .collect::<Vec<_>>();
         for (_, sub) in subs {
             sub.cancellation_token.cancel();
         }
-        self.shutdown_token.cancel();
+        shutdown_token.cancel();
     }
 
     pub fn subscription_count(&self, filter: &[Pubkey]) -> usize {
@@ -272,6 +209,7 @@ impl ChainPubsubActor {
                                 abort_sender,
                                 client_id,
                                 is_connected,
+                                shutdown_token.clone(),
                                 msg
                             ));
                         } else {
@@ -297,6 +235,7 @@ impl ChainPubsubActor {
         abort_sender: mpsc::Sender<()>,
         client_id: u16,
         is_connected: Arc<AtomicBool>,
+        shutdown_token: CancellationToken,
         msg: ChainPubsubActorMessage,
     ) {
         fn send_ok(
@@ -395,6 +334,16 @@ impl ChainPubsubActor {
                 .await;
                 let _ = response.send(result);
             }
+            ChainPubsubActorMessage::Shutdown { response } => {
+                Self::shutdown(
+                    client_id,
+                    subscriptions,
+                    program_subs,
+                    shutdown_token,
+                )
+                .await;
+                let _ = response.send(Ok(()));
+            }
         }
     }
 
@@ -483,16 +432,14 @@ impl ChainPubsubActor {
                     update = update_stream.next() => {
                         if let Some(rpc_response) = update {
                             if log_enabled!(log::Level::Trace) && (!pubkey.eq(&clock::ID) ||
-                               rpc_response.context.slot % CLOCK_LOG_SLOT_FREQ == 0) {
+                                rpc_response.context.slot % CLOCK_LOG_SLOT_FREQ == 0) {
                                 trace!("[client_id={client_id}] Received update for {pubkey}: {rpc_response:?}");
                             }
+                            let update = SubscriptionUpdate::from((pubkey, rpc_response));
                             inc_account_subscription_account_updates_count(
                                 &client_id.to_string(),
                             );
-                            let _ = subscription_updates_sender.send(SubscriptionUpdate {
-                                pubkey,
-                                rpc_response,
-                            }).await.inspect_err(|err| {
+                            let _ = subscription_updates_sender.send(update).await.inspect_err(|err| {
                                 error!("[client_id={client_id}] Failed to send {pubkey} subscription update: {err:?}");
                             });
                         } else {
@@ -615,22 +562,21 @@ impl ChainPubsubActor {
                                 });
                             if let Ok(acc_pubkey) = acc_pubkey {
                                 if subs.lock().expect("subscriptions lock poisoned").contains_key(&acc_pubkey) {
-                                    let sub_update = SubscriptionUpdate {
-                                         pubkey: acc_pubkey,
-                                         rpc_response: RpcResponse {
-                                             context: rpc_response.context,
-                                             value: rpc_response.value.account,
-                                         },
-                                     };
-                                     trace!("[client_id={client_id}] Sending program {program_pubkey} account update: {sub_update:?}");
-                                     inc_program_subscription_account_updates_count(
-                                         &client_id.to_string(),
-                                     );
-                                     let _ = subscription_updates_sender.send(sub_update)
-                                         .await
-                                         .inspect_err(|err| {
-                                             error!("[client_id={client_id}] Failed to send {acc_pubkey} subscription update: {err:?}");
-                                         });
+                                    let ui_account = rpc_response.value.account;
+                                    let rpc_response = RpcResponse {
+                                        context: rpc_response.context,
+                                        value: ui_account,
+                                    };
+                                    let sub_update = SubscriptionUpdate::from((acc_pubkey, rpc_response));
+                                    trace!("[client_id={client_id}] Sending program {program_pubkey} account update: {sub_update:?}");
+                                    inc_program_subscription_account_updates_count(
+                                        &client_id.to_string(),
+                                    );
+                                    let _ = subscription_updates_sender.send(sub_update)
+                                        .await
+                                        .inspect_err(|err| {
+                                            error!("[client_id={client_id}] Failed to send {acc_pubkey} subscription update: {err:?}");
+                                        });
                                 }
                             }
                         } else {

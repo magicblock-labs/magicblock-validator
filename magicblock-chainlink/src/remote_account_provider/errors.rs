@@ -32,6 +32,21 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to manage subscriptions ({0})")]
     AccountSubscriptionsTaskFailed(String),
 
+    #[error("Failed to send message to laser actor: {0} ({1})")]
+    ChainLaserActorSendError(String, String),
+
+    #[error("Missing API key for: {0}")]
+    MissingApiKey(String),
+
+    #[error("Unsupported gRPC endpoint: {0}. Only Helius Laser endpoints are supported.")]
+    UnsupportedGrpcEndpoint(String),
+
+    #[error("Invalid pubsub endpoint: {0}")]
+    InvalidPubsubEndpoint(String),
+
+    #[error("Failed to setup an account subscription ({0})")]
+    AccountSubscriptionsFailed(String),
+
     #[error("Failed to resolve accounts ({0})")]
     AccountResolutionsFailed(String),
 

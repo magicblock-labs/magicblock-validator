@@ -1,6 +1,6 @@
 #![allow(unused)]
 use std::{
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
     time::{Duration, Instant},
 };
 
@@ -66,6 +66,7 @@ impl TestContext {
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
         let validator_pubkey = Pubkey::new_unique();
         let faucet_pubkey = Pubkey::new_unique();
+        let chain_slot = Arc::new(AtomicU64::new(slot));
         let (fetch_cloner, remote_account_provider) = {
             let (tx, rx) = tokio::sync::mpsc::channel(100);
             let config = RemoteAccountProviderConfig::try_new_with_metrics(
@@ -84,6 +85,7 @@ impl TestContext {
                     tx,
                     &config,
                     subscribed_accounts,
+                    chain_slot.clone(),
                 )
                 .await;
 
