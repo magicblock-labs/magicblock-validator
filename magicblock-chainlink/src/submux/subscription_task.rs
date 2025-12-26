@@ -46,6 +46,19 @@ impl AccountSubscriptionTask {
             _ => 1,
         };
 
+        // When no directly subscribing client is available then required_confirmations
+        // will still resolve to 1, see: SubmuxClient::required_program_subscription_confirmations
+        // This is intentional in order to avoid operating on stale data.
+        // In this case we will always fail with not enough clients succeeded.
+        // This will make any subscription fail and the validator will no longer be able to
+        // operate properly, however this is safer than operating on stale data.
+        // We rely on an alerting system to notify operators of this issue via the
+        // connected_direct_pubsub_clients_gauge metric (when it goes to zero).
+        // At this point the system needs to be troubleshot and restarted manually.
+        // For accounts already in the bank we will have established a gRPC subscription for
+        // redundancy and should be fine, but we should think about shutting down the validator
+        // if all clients are down.
+
         // Validate inputs
         if total_clients == 0 {
             let op_name = self.op_name();
@@ -68,9 +81,6 @@ impl AccountSubscriptionTask {
         }
 
         let (tx, rx) = oneshot::channel();
-        let target_successes =
-            std::cmp::min(required_confirmations, total_clients);
-
         tokio::spawn(async move {
             let mut futures = FuturesUnordered::new();
             for (i, client) in clients.iter().enumerate() {
@@ -82,9 +92,10 @@ impl AccountSubscriptionTask {
                             client.subscribe(pubkey).await,
                             client.subs_immediately(),
                         ),
-                        SubscribeProgram(program_id, _) => {
-                            (client.subscribe_program(program_id).await, true)
-                        }
+                        SubscribeProgram(program_id, _) => (
+                            client.subscribe_program(program_id).await,
+                            client.subs_immediately(),
+                        ),
                         Unsubscribe(pubkey) => {
                             (client.unsubscribe(pubkey).await, true)
                         }
@@ -107,7 +118,7 @@ impl AccountSubscriptionTask {
                             continue;
                         }
                         successes += 1;
-                        if successes >= target_successes {
+                        if successes >= required_confirmations {
                             if let Some(tx) = tx.take() {
                                 let _ = tx.send(Ok(()));
                             }
@@ -124,7 +135,7 @@ impl AccountSubscriptionTask {
                     "Not enough clients succeeded to {}: {}. Required {}, got {}",
                     op_name.to_lowercase(),
                     errors.join(", "),
-                    target_successes,
+                    required_confirmations,
                     successes,
                 );
                 let _ = tx.send(Err(
