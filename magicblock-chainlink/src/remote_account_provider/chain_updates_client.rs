@@ -31,18 +31,23 @@ impl ChainUpdatesClient {
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
         match endpoint {
-            WebSocket { url } => {
+            WebSocket { url, label } => {
                 debug!("Initializing WebSocket client for endpoint: {}", url);
                 Ok(ChainUpdatesClient::WebSocket(
                     ChainPubsubClientImpl::try_new_from_url(
                         url,
+                        label,
                         abort_sender,
                         commitment,
                     )
                     .await?,
                 ))
             }
-            Grpc { url, api_key } => {
+            Grpc {
+                url,
+                label,
+                api_key,
+            } => {
                 debug!(
                     "Initializing Helius Laser client for gRPC endpoint: {}",
                     url
@@ -51,6 +56,7 @@ impl ChainUpdatesClient {
                     Ok(ChainUpdatesClient::Laser(
                         ChainLaserClientImpl::new_from_url(
                             url,
+                            label,
                             api_key,
                             commitment.commitment,
                             abort_sender,

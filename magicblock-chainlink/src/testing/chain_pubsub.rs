@@ -19,6 +19,7 @@ pub async fn setup_actor_and_client() -> (
     let (tx, _) = mpsc::channel(10);
     let (actor, updates_rx) = ChainPubsubActor::new_from_url(
         PUBSUB_URL,
+        "test-client",
         tx,
         CommitmentConfig::confirmed(),
     )
