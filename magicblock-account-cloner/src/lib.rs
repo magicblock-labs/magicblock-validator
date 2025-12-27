@@ -101,9 +101,10 @@ impl ChainlinkCloner {
             remote_slot: Some(request.account.remote_slot()),
         };
 
-        let modify_ix = InstructionUtils::modify_accounts_instruction(vec![
-            account_modification,
-        ]);
+        let modify_ix = InstructionUtils::modify_accounts_instruction(
+            vec![account_modification],
+            None,
+        );
         // Defined positive commit frequency means commits should be scheduled
         let ixs = match request.commit_frequency_ms {
             // TODO(GabrielePicco): Hotfix. Do not schedule frequency commits until we impose limits.
@@ -185,11 +186,13 @@ impl ChainlinkCloner {
                         &program,
                         deploy_slot,
                     )?;
-                let mod_ix =
-                    InstructionUtils::modify_accounts_instruction(vec![
+                let mod_ix = InstructionUtils::modify_accounts_instruction(
+                    vec![
                         modifications.program_id_modification,
                         modifications.program_data_modification,
-                    ]);
+                    ],
+                    None,
+                );
 
                 Ok(Some(Transaction::new_signed_with_payer(
                     &[mod_ix],
@@ -255,6 +258,7 @@ impl ChainlinkCloner {
                     }];
                     InstructionUtils::modify_accounts_instruction(
                         pre_deploy_mods,
+                        None,
                     )
                 };
 
@@ -268,6 +272,7 @@ impl ChainlinkCloner {
                     }];
                     InstructionUtils::modify_accounts_instruction(
                         post_deploy_mods,
+                        None,
                     )
                 };
 
