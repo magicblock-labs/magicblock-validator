@@ -585,14 +585,14 @@ mod tests {
         persister.set_commit_id(1, &pubkey, 100).unwrap();
 
         persister
-            .set_commit_strategy(100, &pubkey, CommitStrategy::Args)
+            .set_commit_strategy(100, &pubkey, CommitStrategy::StateArgs)
             .unwrap();
 
         let updated = persister
             .get_commit_status_by_message(1, &pubkey)
             .unwrap()
             .unwrap();
-        assert_eq!(updated.commit_strategy, CommitStrategy::Args);
+        assert_eq!(updated.commit_strategy, CommitStrategy::StateArgs);
     }
 
     #[test]
