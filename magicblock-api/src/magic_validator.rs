@@ -5,7 +5,6 @@ use std::{
         Arc,
     },
     thread,
-    time::Duration,
 };
 
 use log::*;

@@ -52,8 +52,9 @@ fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
 }
 
 mod event_processor {
-    use magicblock_config::config::ApertureConfig;
-    use magicblock_config::consts::DEFAULT_LEDGER_BLOCK_TIME_MS;
+    use magicblock_config::{
+        config::ApertureConfig, consts::DEFAULT_LEDGER_BLOCK_TIME_MS,
+    };
 
     use super::*;
     use crate::state::NodeContext;
