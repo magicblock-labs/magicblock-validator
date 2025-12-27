@@ -11,7 +11,9 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 
-use crate::tasks::{task_strategist::TaskStrategistResult, BaseTask};
+use crate::tasks::{task_strategist::TaskStrategistResult, Task};
+
+use super::TaskInstruction;
 
 pub struct TransactionUtils;
 impl TransactionUtils {
@@ -28,7 +30,7 @@ impl TransactionUtils {
     }
 
     pub fn unique_involved_pubkeys(
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[Task],
         validator: &Pubkey,
         budget_instructions: &[Instruction],
     ) -> Vec<Pubkey> {
@@ -49,7 +51,7 @@ impl TransactionUtils {
 
     pub fn tasks_instructions(
         validator: &Pubkey,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[Task],
     ) -> Vec<Instruction> {
         tasks
             .iter()
@@ -59,7 +61,7 @@ impl TransactionUtils {
 
     pub fn assemble_tasks_tx(
         authority: &Keypair,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[Task],
         compute_unit_price: u64,
         lookup_tables: &[AddressLookupTableAccount],
     ) -> TaskStrategistResult<VersionedTransaction> {
@@ -123,8 +125,8 @@ impl TransactionUtils {
         Ok(tx)
     }
 
-    pub fn tasks_compute_units(tasks: &[impl AsRef<dyn BaseTask>]) -> u32 {
-        tasks.iter().map(|task| task.as_ref().compute_units()).sum()
+    pub fn tasks_compute_units(tasks: &[Task]) -> u32 {
+        tasks.iter().map(|task| task.compute_units()).sum()
     }
 
     pub fn budget_instructions(

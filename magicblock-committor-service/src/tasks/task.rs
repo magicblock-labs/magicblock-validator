@@ -2,11 +2,11 @@ use magicblock_metrics::metrics::LabelValue;
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
-use super::{BufferLifecycle, TaskInstruction};
+use super::{BufferLifecycle, TaskInstruction, TaskResult};
+use crate::tasks::TaskError;
 use crate::tasks::{
     visitor::Visitor, BaseActionTask, CommitTask, DeliveryStrategy,
-    FinalizeTask, PreparationState, TaskError, TaskResult, TaskType,
-    UndelegateTask,
+    FinalizeTask, PreparationState, TaskType, UndelegateTask,
 };
 
 /// Task to be executed on the Base layer.  

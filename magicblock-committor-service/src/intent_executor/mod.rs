@@ -48,7 +48,7 @@ use crate::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
         task_visitors::utility_visitor::TaskVisitorUtils,
-        BaseTask, TaskType,
+        Task, TaskType,
     },
     transaction_preparator::{
         delivery_preparator::BufferExecutionError,
@@ -161,7 +161,7 @@ where
             Some(value) => value,
             None => {
                 // Build tasks for commit stage
-                let commit_tasks = TaskBuilderImpl::commit_tasks(
+                let commit_tasks = TaskBuilderImpl::create_commit_tasks(
                     &self.task_info_fetcher,
                     &base_intent,
                     persister,
@@ -186,7 +186,7 @@ where
 
         // Build tasks for commit & finalize stages
         let (commit_tasks, finalize_tasks) = {
-            let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
+            let commit_tasks_fut = TaskBuilderImpl::create_commit_tasks(
                 &self.task_info_fetcher,
                 &base_intent,
                 persister,
@@ -633,7 +633,7 @@ where
     async fn execute_message_with_retries(
         &self,
         prepared_message: VersionedMessage,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[Task],
     ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
     {
         struct IntentErrorMapper<TxMap> {

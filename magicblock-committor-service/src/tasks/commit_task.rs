@@ -60,6 +60,10 @@ impl CommitTask {
     // or 4 u64 fields!
     pub const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 
+    // Max Solana transaction size (binary, not base64).
+    // See: runtime transaction packet limit (~1232 bytes).
+    pub const MAX_TX_SIZE: usize = 1232;
+
     pub fn new(
         commit_id: u64,
         allow_undelegation: bool,
@@ -74,18 +78,36 @@ impl CommitTask {
             None
         };
 
-        //TODO (snawaz): enforce correction by construction
+        let delivery = match base_account {
+            Some(base_account) => {
+                let diff = compute_diff(
+                    &base_account.data,
+                    &committed_account.account.data,
+                )
+                .len();
+
+                if diff < Self::MAX_TX_SIZE {
+                    DataDeliveryStrategy::DiffInArgs { base_account }
+                } else {
+                    let lifecycle = BufferLifecycle::new(
+                        commit_id,
+                        &committed_account,
+                        Some(&base_account),
+                    );
+                    DataDeliveryStrategy::DiffInBuffer {
+                        base_account,
+                        lifecycle,
+                    }
+                }
+            }
+            None => DataDeliveryStrategy::StateInArgs,
+        };
 
         CommitTask {
             commit_id,
             allow_undelegation,
             committed_account,
-            delivery: match base_account {
-                Some(base_account) => {
-                    DataDeliveryStrategy::DiffInArgs { base_account }
-                }
-                None => DataDeliveryStrategy::StateInArgs,
-            },
+            delivery,
         }
     }
 

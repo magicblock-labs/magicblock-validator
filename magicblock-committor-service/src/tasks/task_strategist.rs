@@ -7,18 +7,19 @@ use solana_signer::{Signer, SignerError};
 use crate::{
     persist::IntentPersister,
     tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
         task_visitors::persistor_visitor::{
             PersistorContext, PersistorVisitor,
         },
         utils::TransactionUtils,
-        BaseTask, FinalizeTask,
+        FinalizeTask, Task,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
 
+use super::TaskInstruction;
+
 pub struct TransactionStrategy {
-    pub optimized_tasks: Vec<Box<dyn BaseTask>>,
+    pub optimized_tasks: Vec<Task>,
     pub lookup_tables_keys: Vec<Pubkey>,
 }
 
@@ -65,16 +66,16 @@ impl StrategyExecutionMode {
     }
 }
 
-/// Takes [`BaseTask`]s and chooses the best way to fit them in TX
+/// Takes [`Task`]s and chooses the best way to fit them in TX
 /// It may change Task execution strategy so all task would fit in tx
 pub struct TaskStrategist;
 impl TaskStrategist {
-    /// Builds execution strategy from [`BaseTask`]s
+    /// Builds execution strategy from [`Task`]s
     /// 1. Optimizes tasks to fit in TX
     /// 2. Chooses the fastest execution mode for Tasks
     pub fn build_execution_strategy<P: IntentPersister>(
-        commit_tasks: Vec<Box<dyn BaseTask>>,
-        finalize_tasks: Vec<Box<dyn BaseTask>>,
+        commit_tasks: Vec<Task>,
+        finalize_tasks: Vec<Task>,
         authority: &Pubkey,
         persister: &Option<P>,
     ) -> TaskStrategistResult<StrategyExecutionMode> {
@@ -141,8 +142,8 @@ impl TaskStrategist {
     }
 
     fn build_two_stage<P: IntentPersister>(
-        commit_tasks: Vec<Box<dyn BaseTask>>,
-        finalize_tasks: Vec<Box<dyn BaseTask>>,
+        commit_tasks: Vec<Task>,
+        finalize_tasks: Vec<Task>,
         authority: &Pubkey,
         persister: &Option<P>,
     ) -> TaskStrategistResult<StrategyExecutionMode> {
@@ -166,7 +167,7 @@ impl TaskStrategist {
     /// Returns [`TransactionStrategy`] for tasks
     /// Returns Error if all optimizations weren't enough
     pub fn build_strategy<P: IntentPersister>(
-        mut tasks: Vec<Box<dyn BaseTask>>,
+        mut tasks: Vec<Task>,
         validator: &Pubkey,
         persistor: &Option<P>,
     ) -> TaskStrategistResult<TransactionStrategy> {
@@ -221,7 +222,7 @@ impl TaskStrategist {
     /// Attempt to use ALTs for ALL keys in tx
     /// Returns `true` if ALTs make tx fit, otherwise `false`
     /// TODO(edwin): optimize to use only necessary amount of pubkeys
-    pub fn attempt_lookup_tables(tasks: &[Box<dyn BaseTask>]) -> bool {
+    pub fn attempt_lookup_tables(tasks: &[Task]) -> bool {
         let placeholder = Keypair::new();
         // Gather all involved keys in tx
         let budgets = TransactionUtils::tasks_compute_units(tasks);
@@ -256,7 +257,7 @@ impl TaskStrategist {
 
     pub fn collect_lookup_table_keys(
         authority: &Pubkey,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[Task],
     ) -> Vec<Pubkey> {
         let budgets = TransactionUtils::tasks_compute_units(tasks);
         let budget_instructions =
@@ -274,10 +275,10 @@ impl TaskStrategist {
     /// Note that the returned size, though possibly optimized one, may still not be under
     /// the limit MAX_ENCODED_TRANSACTION_SIZE. The caller needs to check and make decision accordingly.
     fn try_optimize_tx_size_if_needed(
-        tasks: &mut [Box<dyn BaseTask>],
+        tasks: &mut [Task],
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
-        let calculate_tx_length = |tasks: &[Box<dyn BaseTask>]| {
+        let calculate_tx_length = |tasks: &[Task]| {
             match TransactionUtils::assemble_tasks_tx(
                 &Keypair::new(), // placeholder
                 tasks,
@@ -321,11 +322,9 @@ impl TaskStrategist {
 
             let task = {
                 // This is tmp task that will be replaced by old or optimized one
-                let tmp_task =
-                    ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
-                        delegated_account: Pubkey::new_unique(),
-                    }));
-                let tmp_task = Box::new(tmp_task) as Box<dyn BaseTask>;
+                let tmp_task = Task::Finalize(FinalizeTask {
+                    delegated_account: Pubkey::new_unique(),
+                });
                 std::mem::replace(&mut tasks[index], tmp_task)
             };
             match task.try_optimize_tx_size() {
@@ -389,7 +388,7 @@ mod tests {
         persist::IntentPersisterImpl,
         tasks::{
             task_builder::{TaskBuilderImpl, TasksBuilder},
-            BaseActionTask, CommitTask, DeliveryStrategy, UndelegateTask,
+            BaseActionTask, CommitTask, DeliveryStrategy, Task, UndelegateTask,
         },
     };
 
@@ -468,8 +467,8 @@ mod tests {
     }
 
     // Helper to create a Base action task
-    fn create_test_base_action_task(len: usize) -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::BaseAction(BaseActionTask {
+    fn create_test_base_action_task(len: usize) -> Task {
+        Task::BaseAction(BaseActionTask {
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
                 escrow_authority: Pubkey::new_unique(),
@@ -480,23 +479,23 @@ mod tests {
                 },
                 compute_units: 30_000,
             },
-        }))
+        })
     }
 
     // Helper to create a finalize task
-    fn create_test_finalize_task() -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+    fn create_test_finalize_task() -> Task {
+        Task::Finalize(FinalizeTask {
             delegated_account: Pubkey::new_unique(),
-        }))
+        })
     }
 
     // Helper to create an undelegate task
-    fn create_test_undelegate_task() -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::Undelegate(UndelegateTask {
+    fn create_test_undelegate_task() -> Task {
+        Task::Undelegate(UndelegateTask {
             delegated_account: Pubkey::new_unique(),
             owner_program: system_program_id(),
             rent_reimbursement: Pubkey::new_unique(),
-        }))
+        })
     }
 
     #[test]
