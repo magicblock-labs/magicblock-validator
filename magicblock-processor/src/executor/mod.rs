@@ -172,7 +172,8 @@ impl TransactionExecutor {
             tokio::select! {
                 // Prioritize processing incoming transactions.
                 biased;
-                Some(txn) = self.rx.recv() => {
+                txn = self.rx.recv() => {
+                    let Some(txn) = txn else { break };
                     match txn.mode {
                         TransactionProcessingMode::Execution(tx) => {
                             self.execute([txn.transaction], tx, false);

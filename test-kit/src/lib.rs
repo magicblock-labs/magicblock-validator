@@ -137,6 +137,7 @@ impl ExecutionTestEnv {
             tasks_tx: validator_channels.tasks_service,
             environment,
             is_auto_airdrop_lamports_enabled: false,
+            shutdown: Default::default(),
         };
 
         // Load test program

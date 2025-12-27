@@ -4,7 +4,10 @@
 //! It is responsible for creating and managing a pool of `TransactionExecutor`
 //! workers and dispatching transactions to them for execution.
 
-use std::sync::{Arc, RwLock};
+use std::{
+    sync::{Arc, RwLock},
+    thread::JoinHandle,
+};
 
 use coordinator::{ExecutionCoordinator, TransactionWithId};
 use locks::{ExecutorId, MAX_SVM_EXECUTORS};
@@ -19,6 +22,7 @@ use tokio::{
     runtime::Builder,
     sync::mpsc::{channel, Receiver, Sender},
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::executor::{SimpleForkGraph, TransactionExecutor};
 
@@ -46,6 +50,8 @@ pub struct TransactionScheduler {
     program_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     /// A handle to the globally shared state of the latest block.
     latest_block: LatestBlock,
+    /// A global cancellation token used to signal system shutdown
+    shutdown: CancellationToken,
 }
 
 impl TransactionScheduler {
@@ -87,6 +93,7 @@ impl TransactionScheduler {
             executors,
             latest_block: state.ledger.latest_block().clone(),
             program_cache,
+            shutdown: state.shutdown,
         }
     }
 
@@ -95,7 +102,7 @@ impl TransactionScheduler {
     /// The scheduler runs in its own thread with a dedicated single-threaded Tokio
     /// runtime. This design ensures that the scheduling logic, which is a critical
     /// path, does not compete for resources with other tasks.
-    pub fn spawn(self) {
+    pub fn spawn(self) -> JoinHandle<()> {
         let task = move || {
             let runtime = Builder::new_current_thread()
                 .thread_name("transaction-scheduler")
@@ -103,7 +110,7 @@ impl TransactionScheduler {
                 .expect("Failed to build single-threaded Tokio runtime");
             runtime.block_on(tokio::task::unconstrained(self.run()));
         };
-        std::thread::spawn(task);
+        std::thread::spawn(task)
     }
 
     /// The main event loop of the transaction scheduler.
@@ -134,12 +141,15 @@ impl TransactionScheduler {
                 Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {
                     self.handle_new_transaction(txn);
                 }
+                _ = self.shutdown.cancelled() => { break }
                 // The main transaction channel has closed, indicating a system shutdown.
                 else => {
                     break
                 }
             }
         }
+        drop(self.executors);
+        self.ready_rx.recv().await;
         info!("Transaction scheduler has terminated");
     }
 

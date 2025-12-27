@@ -21,6 +21,7 @@ use solana_program_runtime::{
     loaded_programs::ProgramCache, solana_sbpf::program::BuiltinProgram,
 };
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
+use tokio_util::sync::CancellationToken;
 
 use crate::executor::SimpleForkGraph;
 
@@ -46,6 +47,8 @@ pub struct TransactionSchedulerState {
     pub tasks_tx: ScheduledTasksTx,
     /// True when auto airdrop for fee payers is enabled.
     pub is_auto_airdrop_lamports_enabled: bool,
+    /// A global cancellation token used to signal system shutdown
+    pub shutdown: CancellationToken,
 }
 
 impl TransactionSchedulerState {
