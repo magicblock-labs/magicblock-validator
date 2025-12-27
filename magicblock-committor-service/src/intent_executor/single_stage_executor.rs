@@ -2,6 +2,7 @@ use std::ops::ControlFlow;
 
 use log::error;
 use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 
 use crate::{
     intent_executor::{
@@ -12,8 +13,13 @@ use crate::{
         task_info_fetcher::TaskInfoFetcher,
         ExecutionOutput, IntentExecutorImpl,
     },
-    persist::IntentPersister,
-    tasks::task_strategist::TransactionStrategy,
+    persist::{IntentPersister, IntentPersisterImpl},
+    tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
+        task_strategist::TransactionStrategy,
+        task_visitors::utility_visitor::TaskVisitorUtils,
+        BaseTask,
+    },
     transaction_preparator::TransactionPreparator,
 };
 
@@ -139,6 +145,31 @@ where
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
+            err
+            @ TransactionStrategyExecutionError::UnfinalizedAccountError(
+                _,
+                signature,
+            ) => {
+                let optimized_tasks =
+                    transaction_strategy.optimized_tasks.as_slice();
+                if let Some(task) = err
+                    .task_index()
+                    .and_then(|index| optimized_tasks.get(index as usize))
+                {
+                    Self::handle_unfinalized_account_error(
+                        inner,
+                        signature,
+                        task.as_ref(),
+                    )
+                    .await
+                } else {
+                    error!(
+                        "RPC returned unexpected task index: {}. optimized_tasks_len: {}",
+                        err, optimized_tasks.len()
+                    );
+                    Ok(ControlFlow::Break(()))
+                }
+            }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
@@ -156,5 +187,40 @@ where
                 Ok(ControlFlow::Break(()))
             }
         }
+    }
+
+    /// Handles unfinalized account error
+    /// Sends a separate tx to finalize account and then continues execution
+    async fn handle_unfinalized_account_error(
+        inner: &IntentExecutorImpl<T, F>,
+        failed_signature: &Option<Signature>,
+        task: &dyn BaseTask,
+    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
+        let Some(commit_meta) = TaskVisitorUtils::commit_meta(task) else {
+            // Can't recover - break execution
+            return Ok(ControlFlow::Break(()));
+        };
+        let finalize_task: Box<dyn BaseTask> =
+            Box::new(ArgsTask::new(ArgsTaskType::Finalize(commit_meta.into())));
+        inner
+            .prepare_and_execute_strategy(
+                &mut TransactionStrategy {
+                    optimized_tasks: vec![finalize_task],
+                    lookup_tables_keys: vec![],
+                },
+                &None::<IntentPersisterImpl>,
+            )
+            .await
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)?
+            .map_err(|err| IntentExecutorError::FailedToFinalizeError {
+                err,
+                commit_signature: None,
+                finalize_signature: *failed_signature,
+            })?;
+
+        Ok(ControlFlow::Continue(TransactionStrategy {
+            optimized_tasks: vec![],
+            lookup_tables_keys: vec![],
+        }))
     }
 }
