@@ -244,7 +244,7 @@ where
                                 &pubkey,
                                 account.delegated(),
                                 in_bank.remote_slot(),
-                                deleg_record.clone(),
+                                deleg_record,
                                 &self.validator_pubkey,
                             ) {
                                 continue;
