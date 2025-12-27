@@ -1,21 +1,8 @@
-use dyn_clone::DynClone;
-use magicblock_committor_program::{
-    instruction_builder::{
-        close_buffer::{create_close_ix, CreateCloseIxArgs},
-        init_buffer::{create_init_ix, CreateInitIxArgs},
-        realloc_buffer::{
-            create_realloc_buffer_ixs, CreateReallocBufferIxArgs,
-        },
-        write_buffer::{create_write_ix, CreateWriteIxArgs},
-    },
-    pdas, ChangesetChunks, Chunks,
-};
-use magicblock_metrics::metrics::LabelValue;
-use magicblock_program::magic_scheduled_base_intent::{
-    BaseAction, CommittedAccount,
-};
-use solana_account::Account;
-use solana_instruction::Instruction;
+use std::fmt::Debug;
+
+use dlp::args::CallHandlerArgs;
+use magicblock_program::magic_scheduled_base_intent::BaseAction;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
@@ -29,7 +16,22 @@ pub(crate) mod task_visitors;
 pub mod utils;
 pub mod visitor;
 
-pub use task_builder::TaskBuilderImpl;
+mod commit_task;
+
+pub use buffer_lifecycle::*;
+pub use commit_task::*;
+pub use task::*;
+//
+// TODO (snawaz): Ideally, TaskType should not exist.
+// Instead we should have Task, an enum with all its variants.
+//
+// Also, instead of TaskStrategy, we can have requires_buffer() -> bool?
+//
+
+/// The only requirement for a type to become a task is to implement TaskInstruction.
+pub trait TaskInstruction {
+    fn instruction(&self, validator: &Pubkey) -> Instruction;
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
@@ -47,76 +49,20 @@ pub enum PreparationState {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum TaskStrategy {
+pub enum DeliveryStrategy {
     Args,
     Buffer,
 }
 
-/// A trait representing a task that can be executed on Base layer
-pub trait BaseTask: Send + Sync + DynClone + LabelValue {
-    /// Gets all pubkeys that involved in Task's instruction
-    fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
-        self.instruction(validator)
-            .accounts
-            .iter()
-            .map(|meta| meta.pubkey)
-            .collect()
-    }
-
-    /// Gets instruction for task execution
-    fn instruction(&self, validator: &Pubkey) -> Instruction;
-
-    /// Optimize for transaction size so that more instructions can be buddled together in a single
-    /// transaction. Return Ok(new_tx_optimized_task), else Err(self) if task cannot be optimized.
-    fn try_optimize_tx_size(
-        self: Box<Self>,
-    ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>>;
-
-    /// Returns [`PreparationTask`] if task needs to be prepared before executing,
-    /// otherwise returns None
-    fn preparation_state(&self) -> &PreparationState;
-
-    /// Switched [`PreparationTask`] to a new one
-    fn switch_preparation_state(
-        &mut self,
-        new_state: PreparationState,
-    ) -> BaseTaskResult<()>;
-
-    /// Returns [`Task`] budget
-    fn compute_units(&self) -> u32;
-
-    /// Returns current [`TaskStrategy`]
-    #[cfg(test)]
-    fn strategy(&self) -> TaskStrategy;
-
-    /// Returns [`TaskType`]
-    fn task_type(&self) -> TaskType;
-
-    /// Calls [`Visitor`] with specific task type
-    fn visit(&self, visitor: &mut dyn Visitor);
-
-    /// Resets commit id
-    fn reset_commit_id(&mut self, commit_id: u64);
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum DataDelivery {
+    StateInArgs,
+    StateInBuffer,
+    DiffInArgs,
+    DiffInBuffer,
 }
 
-dyn_clone::clone_trait_object!(BaseTask);
-
-#[derive(Clone)]
-pub struct CommitTask {
-    pub commit_id: u64,
-    pub allow_undelegation: bool,
-    pub committed_account: CommittedAccount,
-}
-
-#[derive(Clone, Debug)]
-pub struct CommitDiffTask {
-    pub commit_id: u64,
-    pub allow_undelegation: bool,
-    pub committed_account: CommittedAccount,
-    pub base_account: Account,
-}
-
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct UndelegateTask {
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
@@ -309,11 +255,7 @@ mod serialization_safety_test {
     };
     use solana_account::Account;
 
-    use crate::tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
-        buffer_task::{BufferTask, BufferTaskType},
-        *,
-    };
+    use crate::tasks::{Task, *};
 
     // Test all ArgsTask variants
     #[test]
@@ -321,10 +263,10 @@ mod serialization_safety_test {
         let validator = Pubkey::new_unique();
 
         // Test Commit variant
-        let commit_task: ArgsTask = ArgsTaskType::Commit(CommitTask {
-            commit_id: 123,
-            allow_undelegation: true,
-            committed_account: CommittedAccount {
+        let commit_task = Task::Commit(CommitTask::new(
+            123,
+            true,
+            CommittedAccount {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
                     lamports: 1000,
@@ -334,8 +276,8 @@ mod serialization_safety_test {
                     rent_epoch: 0,
                 },
             },
-        })
-        .into();
+            None,
+        ));
         assert_serializable(&commit_task.instruction(&validator));
 
         // Test Finalize variant
@@ -380,23 +322,22 @@ mod serialization_safety_test {
     fn test_buffer_task_instruction_serialization() {
         let validator = Pubkey::new_unique();
 
-        let buffer_task = BufferTask::new_preparation_required(
-            BufferTaskType::Commit(CommitTask {
-                commit_id: 456,
-                allow_undelegation: false,
-                committed_account: CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: Account {
-                        lamports: 2000,
-                        data: vec![7, 8, 9],
-                        owner: Pubkey::new_unique(),
-                        executable: false,
-                        rent_epoch: 0,
-                    },
+        let task = Task::Commit(CommitTask::new(
+            456,
+            false,
+            CommittedAccount {
+                pubkey: Pubkey::new_unique(),
+                account: Account {
+                    lamports: 2000,
+                    data: vec![7, 8, 9],
+                    owner: Pubkey::new_unique(),
+                    executable: false,
+                    rent_epoch: 0,
                 },
-            }),
-        );
-        assert_serializable(&buffer_task.instruction(&validator));
+            },
+            None,
+        ));
+        assert_serializable(&task.instruction(&validator));
     }
 
     // Test preparation instructions
@@ -404,30 +345,33 @@ mod serialization_safety_test {
     fn test_preparation_instructions_serialization() {
         let authority = Pubkey::new_unique();
 
-        // Test BufferTask preparation
-        let buffer_task = BufferTask::new_preparation_required(
-            BufferTaskType::Commit(CommitTask {
-                commit_id: 789,
-                allow_undelegation: true,
-                committed_account: CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: Account {
-                        lamports: 3000,
-                        data: vec![0; 1024], // Larger data to test chunking
-                        owner: Pubkey::new_unique(),
-                        executable: false,
-                        rent_epoch: 0,
-                    },
+        // Test buffer strategy preparation
+        let task = Task::Commit(CommitTask::new(
+            789,
+            true,
+            CommittedAccount {
+                pubkey: Pubkey::new_unique(),
+                account: Account {
+                    lamports: 3000,
+                    data: vec![0; 1024], // Larger data to test chunking
+                    owner: Pubkey::new_unique(),
+                    executable: false,
+                    rent_epoch: 0,
                 },
-            }),
-        );
+            },
+            None,
+        ));
 
-        let PreparationState::Required(preparation_task) =
-            buffer_task.preparation_state()
-        else {
-            panic!("invalid preparation state on creation!");
-        };
-        assert_serializable(&preparation_task.init_instruction(&authority));
+        assert_eq!(task.strategy(), DeliveryStrategy::Args);
+
+        let task = task.try_optimize_tx_size().unwrap();
+
+        assert_eq!(task.strategy(), DeliveryStrategy::Buffer);
+
+        let lifecycle = task.lifecycle().unwrap();
+        let preparation_task = &lifecycle.preparation;
+
+        assert_serializable(&preparation_task.instruction(&authority));
         for ix in preparation_task.realloc_instructions(&authority) {
             assert_serializable(&ix);
         }

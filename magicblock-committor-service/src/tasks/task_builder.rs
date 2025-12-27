@@ -6,20 +6,16 @@ use magicblock_program::magic_scheduled_base_intent::{
     CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
     UndelegateType,
 };
-use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 
-use super::{CommitDiffTask, CommitTask};
+use super::CommitTask;
 use crate::{
     intent_executor::task_info_fetcher::{
         TaskInfoFetcher, TaskInfoFetcherError,
     },
     persist::IntentPersister,
-    tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
-        BaseActionTask, BaseTask, FinalizeTask, UndelegateTask,
-    },
+    tasks::{BaseActionTask, FinalizeTask, Task, UndelegateTask},
 };
 
 #[async_trait]
@@ -41,46 +37,6 @@ pub trait TasksBuilder {
 /// V1 Task builder
 /// V1: Actions are part of finalize tx
 pub struct TaskBuilderImpl;
-
-// Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
-// reduce instruction size. Below this threshold, the commit is sent
-// as CommitState. The value (256) is chosen because it is sufficient
-// for small accounts, which typically could hold up to 8 u32 fields or
-// 4 u64 fields. These integers are expected to be on the hot path
-// and updated continuously.
-pub const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
-
-impl TaskBuilderImpl {
-    pub fn create_commit_task(
-        commit_id: u64,
-        allow_undelegation: bool,
-        account: CommittedAccount,
-        base_account: Option<Account>,
-    ) -> ArgsTask {
-        let base_account =
-            if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
-                base_account
-            } else {
-                None
-            };
-
-        if let Some(base_account) = base_account {
-            ArgsTaskType::CommitDiff(CommitDiffTask {
-                commit_id,
-                allow_undelegation,
-                committed_account: account,
-                base_account,
-            })
-        } else {
-            ArgsTaskType::Commit(CommitTask {
-                commit_id,
-                allow_undelegation,
-                committed_account: account,
-            })
-        }
-        .into()
-    }
-}
 
 #[async_trait]
 impl TasksBuilder for TaskBuilderImpl {
@@ -119,14 +75,15 @@ impl TasksBuilder for TaskBuilderImpl {
             let diffable_pubkeys = accounts
                 .iter()
                 .filter(|account| {
-                    account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD
+                    account.account.data.len()
+                        > CommitTask::COMMIT_STATE_SIZE_THRESHOLD
                 })
                 .map(|account| account.pubkey)
                 .collect::<Vec<_>>();
 
             tokio::join!(
-                commit_id_fetcher.fetch_next_commit_ids(&committed_pubkeys),
-                commit_id_fetcher
+                task_info_fetcher.fetch_next_commit_ids(&committed_pubkeys),
+                task_info_fetcher
                     .get_base_accounts(diffable_pubkeys.as_slice())
             )
         };
@@ -155,12 +112,14 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .map(|account| {
                 let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                // TODO (snawaz): if accounts do not have duplicate, then we can use remove
-                // instead:
-                //  let base_account = base_accounts.remove(&account.pubkey);
-                let base_account = base_accounts.get(&account.pubkey).cloned();
-                let task = Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account);
-                Box::new(task) as Box<dyn BaseTask>
+                            let base_account = base_accounts.get(&account.pubkey).cloned();
+
+                Task::Commit(CommitTask::new(
+                    commit_id,
+                    allow_undelegation,
+                    account.clone(),
+                    base_account,
+                ))
             }).collect();
 
         Ok(tasks)
