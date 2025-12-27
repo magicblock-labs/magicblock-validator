@@ -1,5 +1,6 @@
 use std::{error::Error, fmt::Display};
 
+use agave_geyser_plugin_interface::geyser_plugin_interface::GeyserPluginError;
 use json::Serialize;
 use solana_transaction_error::TransactionError;
 
@@ -11,7 +12,15 @@ pub(crate) const INVALID_PARAMS: i16 = -32602;
 pub(crate) const INTERNAL_ERROR: i16 = -32603;
 pub(crate) const PARSE_ERROR: i16 = -32700;
 
-#[derive(Serialize, Debug)]
+#[derive(thiserror::Error, Debug)]
+pub enum ApertureError {
+    #[error("RPC error: {0}")]
+    Rpc(#[from] RpcError),
+    #[error("Geyser error: {0}")]
+    Geyser(#[from] GeyserPluginError),
+}
+
+#[derive(Serialize, Debug, thiserror::Error)]
 pub struct RpcError {
     code: i16,
     message: String,
@@ -19,15 +28,9 @@ pub struct RpcError {
 
 impl Display for RpcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "RPC Error. Code: {}. Message: {}",
-            self.code, self.message
-        )
+        write!(f, "Code: {}. Message: {}", self.code, self.message)
     }
 }
-
-impl Error for RpcError {}
 
 impl From<hyper::Error> for RpcError {
     fn from(value: hyper::Error) -> Self {

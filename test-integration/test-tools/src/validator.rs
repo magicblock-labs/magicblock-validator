@@ -205,7 +205,8 @@ pub fn start_magicblock_validator_with_config_struct(
     let metrics_port = resolve_port();
 
     let mut config = config.clone();
-    config.listen = BindAddress(SocketAddr::new(config.listen.ip(), rpc_port));
+    config.aperture.listen =
+        BindAddress(SocketAddr::new(config.aperture.listen.ip(), rpc_port));
     config.metrics.address =
         BindAddress(SocketAddr::new(config.metrics.address.ip(), metrics_port));
 
@@ -246,7 +247,8 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
     let metrics_port = resolve_port();
 
     let mut config = config.clone();
-    config.listen = BindAddress(SocketAddr::new(config.listen.ip(), rpc_port));
+    config.aperture.listen =
+        BindAddress(SocketAddr::new(config.aperture.listen.ip(), rpc_port));
     config.metrics.address =
         BindAddress(SocketAddr::new(config.metrics.address.ip(), metrics_port));
 

@@ -43,11 +43,6 @@ pub struct CliParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage: Option<PathBuf>,
 
-    /// Primary listen address for the main RPC service.
-    #[arg(long, short)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub listen: Option<BindAddress>,
-
     /// Listen address for the metrics endpoint.
     #[arg(long, short)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,11 +52,15 @@ pub struct CliParams {
     #[command(flatten)]
     pub validator: CliValidatorConfig,
 
+    /// Aperture-specific arguments
+    #[command(flatten)]
+    pub aperture: CliApertureConfig,
     /// Ledger-specific arguments.
     #[command(flatten)]
     pub ledger: CliLedgerConfig,
 }
 
+/// CLI analog of configuration for the validator's core behavior and identity.
 #[derive(Args, Serialize, Debug)]
 pub struct CliValidatorConfig {
     /// Base fee in lamports for transactions.
@@ -73,6 +72,22 @@ pub struct CliValidatorConfig {
     #[arg(long, short)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keypair: Option<SerdeKeypair>,
+}
+
+/// CLI analog of configuration for Aperture functionality: RPC, Websocket, Geyser
+#[derive(Args, Serialize, Debug)]
+#[clap(rename_all = "kebab-case")]
+pub struct CliApertureConfig {
+    /// Primary listen address for the main RPC service.
+    #[arg(long, short)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listen: Option<BindAddress>,
+    /// Number of event processor background task, these are responsible
+    /// for syncing aperture state with the rest of the validator and
+    /// propagating the updates to websocket and geyser subscribers
+    #[arg(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_processors: Option<usize>,
 }
 
 #[derive(Args, Serialize, Debug, Default)]

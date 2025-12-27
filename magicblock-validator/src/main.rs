@@ -78,9 +78,9 @@ async fn run() {
     };
     info!("Starting validator with config:\n{:#?}", config);
     const WS_PORT_OFFSET: u16 = 1;
-    let rpc_port = config.listen.port();
+    let rpc_port = config.aperture.listen.port();
     let ws_port = rpc_port + WS_PORT_OFFSET; // WebSocket port is typically RPC port + 1
-    let rpc_host = config.listen.ip();
+    let rpc_host = config.aperture.listen.ip();
     let validator_identity = config.validator.keypair.pubkey();
     let mut api = match MagicValidator::try_from_config(config).await {
         Ok(api) => api,

@@ -64,6 +64,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "agave-geyser-plugin-interface"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df63ffb691b27f0253e893d083126cbe98a6b1ace29108992310f323f1ac50b0"
+dependencies = [
+ "log",
+ "solana-clock",
+ "solana-signature",
+ "solana-transaction",
+ "solana-transaction-status",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "agave-transaction-view"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3267,6 +3281,7 @@ dependencies = [
 name = "magicblock-aperture"
 version = "0.5.0"
 dependencies = [
+ "agave-geyser-plugin-interface",
  "arc-swap",
  "base64 0.21.7",
  "bincode",
@@ -3276,6 +3291,7 @@ dependencies = [
  "http-body-util",
  "hyper 1.6.0",
  "hyper-util",
+ "libloading",
  "log",
  "magicblock-account-cloner",
  "magicblock-accounts-db",
@@ -3304,6 +3320,7 @@ dependencies = [
  "solana-transaction-error",
  "solana-transaction-status",
  "sonic-rs",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.15",
 ]
@@ -3500,6 +3517,7 @@ dependencies = [
  "solana-transaction",
  "solana-transaction-context",
  "solana-transaction-error",
+ "solana-transaction-status-client-types",
  "tokio",
 ]
 
@@ -3542,7 +3560,7 @@ dependencies = [
  "solana-security-txt",
  "static_assertions",
  "strum 0.27.2",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
