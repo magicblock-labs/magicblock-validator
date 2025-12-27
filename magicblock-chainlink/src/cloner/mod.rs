@@ -12,6 +12,10 @@ pub struct AccountCloneRequest {
     pub pubkey: Pubkey,
     pub account: AccountSharedData,
     pub commit_frequency_ms: Option<u64>,
+    /// If the account is delegated to another validator,
+    /// this contains that validator's pubkey. None if account is not
+    /// delegated to another validator.
+    pub delegated_to_other: Option<Pubkey>,
 }
 
 #[async_trait]
