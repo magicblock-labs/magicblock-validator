@@ -226,6 +226,10 @@ impl HttpDispatcher {
             RequestAirdrop => self.request_airdrop(request).await,
             SendTransaction => self.send_transaction(request).await,
             SimulateTransaction => self.simulate_transaction(request).await,
+            GetRoutes => self.get_routes(request),
+            // Alias for getLatestBlockhash; exists for Magic Router SDK compatibility.
+            GetBlockhashForAccounts => self.get_latest_blockhash(request),
+            GetDelegationStatus => self.get_delegation_status(request).await,
         }
     }
 
