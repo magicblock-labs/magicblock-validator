@@ -283,7 +283,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
             .map(|accounts| {
                 pubkeys
                     .iter()
-                    .zip(accounts.into_iter())
+                    .zip(accounts)
                     .filter_map(|(key, value)| value.map(|value| (*key, value)))
                     .collect()
             })

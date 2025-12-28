@@ -1202,65 +1202,68 @@ where
             }
 
             let ata_results = ata_join_set.join_all().await;
-            for res in ata_results.into_iter() {
-                match res {
-                    Ok(Ok(AccountWithCompanion {
-                        pubkey: ata_pubkey,
-                        account: ata_account,
-                        companion_pubkey: eata_pubkey,
-                        companion_account: maybe_eata_account,
-                    })) => {
-                        // Convert to AccountSharedData
-                        let mut account_to_clone =
-                            ata_account.account_shared_data_cloned();
-                        let mut commit_frequency_ms = None;
-                        let mut delegated_to_other = None;
-                        if let Some(eata_acc) = maybe_eata_account {
-                            let eata_shared =
-                                eata_acc.account_shared_data_cloned();
-                            if let Some(deleg) = self
-                                .fetch_and_parse_delegation_record(
-                                    eata_pubkey,
-                                    self.remote_account_provider.chain_slot(),
-                                    fetch_origin,
-                                )
-                                .await
-                            {
-                                // Set delegated_to_other if delegated to another validator
-                                delegated_to_other =
-                                    self.get_delegated_to_other(&deleg);
 
-                                let is_delegated_to_us = deleg
-                                    .authority
-                                    .eq(&self.validator_pubkey)
-                                    || deleg.authority.eq(&Pubkey::default());
-                                if is_delegated_to_us {
-                                    if let Some(projected_ata) =
-                                        eata_shared.maybe_into_ata(deleg.owner)
-                                    {
-                                        account_to_clone = projected_ata;
-                                        account_to_clone.set_delegated(true);
-                                        commit_freency_ms =
-                                            Some(deleg.commit_frequency_ms);
-                                    }
-                                }
-                            }
-                        }
-
-                        accounts_to_clone.push(AccountCloneRequest {
-                            pubkey: ata_pubkey,
-                            account: account_to_clone,
-                            commit_frequency_ms,
-                            delegated_to_other,
-                        });
-                    }
+            for result in ata_results {
+                let AccountWithCompanion {
+                    pubkey: ata_pubkey,
+                    account: ata_account,
+                    companion_pubkey: eata_pubkey,
+                    companion_account: maybe_eata_account,
+                } = match result {
+                    Ok(Ok(v)) => v,
                     Ok(Err(err)) => {
                         warn!("Failed to resolve ATA/eATA companion: {err}");
+                        continue;
                     }
                     Err(join_err) => {
                         warn!("Failed to join ATA/eATA fetch task: {join_err}");
+                        continue;
+                    }
+                };
+
+                // Defaults: clone the ATA as-is
+                let mut account_to_clone =
+                    ata_account.account_shared_data_cloned();
+                let mut commit_frequency_ms = None;
+                let mut delegated_to_other = None;
+
+                // If there's an eATA, try to use it + delegation record to project the ATA
+                if let Some(eata_acc) = maybe_eata_account {
+                    let eata_shared = eata_acc.account_shared_data_cloned();
+
+                    if let Some(deleg) = self
+                        .fetch_and_parse_delegation_record(
+                            eata_pubkey,
+                            self.remote_account_provider.chain_slot(),
+                            fetch_origin,
+                        )
+                        .await
+                    {
+                        delegated_to_other =
+                            self.get_delegated_to_other(&deleg);
+                        commit_frequency_ms = Some(deleg.commit_frequency_ms);
+
+                        let delegated_to_us = deleg.authority
+                            == self.validator_pubkey
+                            || deleg.authority == Pubkey::default();
+
+                        if delegated_to_us {
+                            if let Some(projected_ata) =
+                                eata_shared.maybe_into_ata(deleg.owner)
+                            {
+                                account_to_clone = projected_ata;
+                                account_to_clone.set_delegated(true);
+                            }
+                        }
                     }
                 }
+
+                accounts_to_clone.push(AccountCloneRequest {
+                    pubkey: ata_pubkey,
+                    account: account_to_clone,
+                    commit_frequency_ms,
+                    delegated_to_other,
+                });
             }
         }
 
