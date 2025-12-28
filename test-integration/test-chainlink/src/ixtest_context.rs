@@ -104,6 +104,7 @@ impl IxtestContext {
                         pubkey,
                         account: program_stub.clone(),
                         commit_frequency_ms: None,
+                        delegated_to_other: None,
                     })
                     .await
                     .unwrap();
