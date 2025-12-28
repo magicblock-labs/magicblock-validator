@@ -570,8 +570,8 @@ pub(crate) fn validate_commit_schedule_permissions(
     if parent_program_id != Some(committee_owner)
         && !signers.contains(committee_pubkey)
         && !signers.contains(&validator_id)
-        && !(parent_program_id == Some(&EATA_PROGRAM_ID)
-            && committee_owner.eq(&TOKEN_PROGRAM_ID))
+        && (parent_program_id != Some(&EATA_PROGRAM_ID)
+            || committee_owner != &TOKEN_PROGRAM_ID)
     {
         match parent_program_id {
             None => {
