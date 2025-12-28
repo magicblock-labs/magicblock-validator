@@ -172,3 +172,11 @@ impl GeyserPluginManager {
         Ok(())
     }
 }
+
+impl Drop for GeyserPluginManager {
+    fn drop(&mut self) {
+        for plugin in &mut self.plugins {
+            plugin.on_unload();
+        }
+    }
+}
