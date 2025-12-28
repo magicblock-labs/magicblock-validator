@@ -963,7 +963,7 @@ async fn single_flow_transaction_strategy(
     task_info_fetcher: &Arc<CacheTaskInfoFetcher>,
     intent: &ScheduledBaseIntent,
 ) -> TransactionStrategy {
-    let mut tasks = TaskBuilderImpl::commit_tasks(
+    let mut tasks = TaskBuilderImpl::create_commit_tasks(
         task_info_fetcher,
         intent,
         &None::<IntentPersisterImpl>,

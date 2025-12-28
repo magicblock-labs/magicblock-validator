@@ -41,17 +41,6 @@ impl Task {
 
     #[allow(clippy::result_large_err)]
     pub fn try_optimize_tx_size(self) -> Result<Task, Task> {
-        // TODO (snawaz): do two things:
-        // 1. this does not properly handle preparation state as both ArgsTask
-        // and CommitTask have this. Only CommitTask needs to have this.
-        // 3. Remove PreparationState.
-        // 4. Instead have enum LifecycleTask { PreparationTask, CleanupTask } or struct (ee
-        //    [2].
-        // 5. NotNeeded is not needed (pun not intended). Instead use Option<LifecycleTask>
-        //
-        // ref:
-        // 1: https://chatgpt.com/s/t_691e1c39f47081919efcc73a2f599cf9
-        // 2: https://chatgpt.com/s/t_691e1d7e82a08191963b43c6c8ad7a96
         match self {
             Task::Commit(value) => value
                 .try_optimize_tx_size()
