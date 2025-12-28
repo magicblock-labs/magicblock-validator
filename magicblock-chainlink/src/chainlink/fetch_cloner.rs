@@ -293,6 +293,11 @@ where
                         );
                     }
 
+                    // Determine if delegated to another validator
+                    let delegated_to_other = deleg_record
+                        .as_ref()
+                        .and_then(|dr| self.get_delegated_to_other(dr));
+
                     // Once we clone an account that is delegated to us we no longer need
                     // to receive updates for it from chain
                     // The subscription will be turned back on once the committor service schedules
@@ -318,6 +323,7 @@ where
                             pubkey,
                             account,
                             commit_frequency_ms: None,
+                            delegated_to_other,
                         })
                         .await
                     {
@@ -628,6 +634,19 @@ where
         }
     }
 
+    /// Returns the pubkey of another validator if account is delegated to them,
+    /// None if delegated to us or delegated to the system program (confined).
+    fn get_delegated_to_other(
+        &self,
+        delegation_record: &DelegationRecord,
+    ) -> Option<Pubkey> {
+        let is_delegated_to_us =
+            delegation_record.authority.eq(&self.validator_pubkey)
+                || delegation_record.authority.eq(&Pubkey::default());
+
+        (!is_delegated_to_us).then_some(delegation_record.authority)
+    }
+
     /// Fetches and parses the delegation record for an account, returning the
     /// parsed DelegationRecord if found and valid, None otherwise.
     async fn fetch_and_parse_delegation_record(
@@ -821,6 +840,7 @@ where
                                             pubkey,
                                             account: account_shared_data,
                                             commit_frequency_ms: None,
+                                            delegated_to_other: None,
                                         });
                                     }
                                 }
@@ -1006,7 +1026,9 @@ where
                 record_subs.push(delegation_record_pubkey);
 
                 // If the account is delegated we set the owner and delegation state
-                let commit_frequency_ms = if let Some(delegation_record_data) =
+                let (commit_frequency_ms, delegated_to_other) = if let Some(
+                    delegation_record_data,
+                ) =
                     delegation_record
                 {
                     // NOTE: failing here is fine when resolving all accounts for a transaction
@@ -1041,19 +1063,24 @@ where
 
                     trace!("Delegation record found for {pubkey}: {delegation_record:?}");
 
-                    self.apply_delegation_record_to_account(
+                    let delegated_to_other =
+                        self.get_delegated_to_other(&delegation_record);
+
+                    let commit_freq = self.apply_delegation_record_to_account(
                         &mut account,
                         &delegation_record,
-                    )
+                    );
+                    (commit_freq, delegated_to_other)
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.remote_slot()));
-                    None
+                    (None, None)
                 };
                 accounts_to_clone.push(AccountCloneRequest {
                     pubkey,
                     account: account.into_account_shared_data(),
                     commit_frequency_ms,
+                    delegated_to_other,
                 });
             }
 
@@ -1766,6 +1793,7 @@ where
                 pubkey,
                 account,
                 commit_frequency_ms: None,
+                delegated_to_other: None,
             })
             .await?;
         Ok(())

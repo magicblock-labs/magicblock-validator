@@ -67,11 +67,15 @@ declare_process_instruction!(
         let signers = instruction_context.get_signers(transaction_context)?;
 
         match instruction {
-            ModifyAccounts(mut account_mods) => process_mutate_accounts(
+            ModifyAccounts {
+                mut accounts,
+                message,
+            } => process_mutate_accounts(
                 signers,
                 invoke_context,
                 transaction_context,
-                &mut account_mods,
+                &mut accounts,
+                message,
             ),
             ScheduleCommit => {
                 dispatch_commit(signers, invoke_context, CommitKind::Commit)
