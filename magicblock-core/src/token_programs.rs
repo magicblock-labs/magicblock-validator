@@ -5,8 +5,8 @@ use spl_token::state::{Account as SplAccount, AccountState};
 
 // Shared program IDs and helper functions for SPL Token, Associated Token, and eATA programs.
 
-// SPL Token Program ID (Tokenkeg...)
-pub const SPL_TOKEN_PROGRAM_ID: Pubkey =
+// Token Program ID (Tokenkeg...)
+pub const TOKEN_PROGRAM_ID: Pubkey =
     pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
 // Associated Token Account Program ID (ATokenG...)
@@ -15,7 +15,7 @@ pub const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
 
 // Enhanced ATA (eATA) Program ID (5iC4wK...)
 pub const EATA_PROGRAM_ID: Pubkey =
-    pubkey!("5iC4wKZizyxrKh271Xzx3W4Vn2xUyYvSGHeoB2mdw5HA");
+    pubkey!("SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2");
 
 /// Derives the standard Associated Token Account (ATA) address for the given wallet owner and token mint.
 ///
@@ -27,7 +27,7 @@ pub const EATA_PROGRAM_ID: Pubkey =
 /// The derived ATA address as `Pubkey`.
 pub fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
-        &[owner.as_ref(), SPL_TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
+        &[owner.as_ref(), TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
         &ASSOCIATED_TOKEN_PROGRAM_ID,
     )
     .0
@@ -46,7 +46,7 @@ pub fn try_derive_ata_address_and_bump(
     mint: &Pubkey,
 ) -> Option<(Pubkey, u8)> {
     Pubkey::try_find_program_address(
-        &[owner.as_ref(), SPL_TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
+        &[owner.as_ref(), TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
         &ASSOCIATED_TOKEN_PROGRAM_ID,
     )
 }
@@ -147,6 +147,38 @@ pub fn is_ata(
     }
 }
 
+/// Return the eata pubkey and EphemeralAta
+pub fn try_remap_ata_to_eata(
+    pubkey: &Pubkey,
+    account: &AccountSharedData,
+) -> Option<(Pubkey, EphemeralAta)> {
+    if account.owner() != &TOKEN_PROGRAM_ID || !account.delegated() {
+        return None;
+    }
+
+    let data = account.data();
+    if data.len() < 72 {
+        return None;
+    }
+
+    let mint = Pubkey::new_from_array(data[0..32].try_into().ok()?);
+    let owner = Pubkey::new_from_array(data[32..64].try_into().ok()?);
+    let amount = u64::from_le_bytes(data[64..72].try_into().ok()?);
+
+    let ata = derive_ata(&owner, &mint);
+    if ata != *pubkey {
+        return None;
+    }
+
+    let eata = EphemeralAta {
+        owner,
+        mint,
+        amount,
+    };
+
+    Some((derive_eata(&owner, &mint), eata))
+}
+
 // ---------------- eATA -> ATA projection helpers ----------------
 
 /// Try to convert an eATA account data buffer into a concrete SPL Token
@@ -198,6 +230,24 @@ impl From<EphemeralAta> for AccountSharedData {
         };
 
         AccountSharedData::from(account)
+    }
+}
+
+impl From<EphemeralAta> for Account {
+    fn from(val: EphemeralAta) -> Self {
+        // Encode as: owner(32) | mint(32) | amount(8)
+        let mut data = Vec::with_capacity(72);
+        data.extend_from_slice(val.owner.as_ref());
+        data.extend_from_slice(val.mint.as_ref());
+        data.extend_from_slice(&val.amount.to_le_bytes());
+
+        Account {
+            lamports: Rent::default().minimum_balance(SplAccount::LEN),
+            data,
+            owner: EATA_PROGRAM_ID,
+            executable: false,
+            ..Default::default()
+        }
     }
 }
 

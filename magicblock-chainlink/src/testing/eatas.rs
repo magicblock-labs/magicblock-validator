@@ -1,6 +1,5 @@
 pub use magicblock_core::token_programs::{
-    derive_ata, derive_eata, EphemeralAta, EATA_PROGRAM_ID,
-    SPL_TOKEN_PROGRAM_ID,
+    derive_ata, derive_eata, EphemeralAta, EATA_PROGRAM_ID, TOKEN_PROGRAM_ID,
 };
 use solana_account::Account;
 use solana_program::{program_option::COption, program_pack::Pack};
@@ -30,7 +29,7 @@ pub fn create_ata_account(owner: &Pubkey, mint: &Pubkey) -> Account {
     let lamports = Rent::default().minimum_balance(data.len());
 
     Account {
-        owner: SPL_TOKEN_PROGRAM_ID,
+        owner: TOKEN_PROGRAM_ID,
         data,
         lamports,
         executable: false,

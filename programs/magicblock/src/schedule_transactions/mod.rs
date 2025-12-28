@@ -13,11 +13,9 @@ pub(crate) use process_schedule_commit::*;
 pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };
-use solana_account::{AccountSharedData, ReadableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_pubkey::Pubkey;
 
 use crate::utils::accounts::get_instruction_pubkey_with_idx;
 
@@ -39,35 +37,4 @@ pub fn check_magic_context_id(
     }
 
     Ok(())
-}
-
-// Helper to remap SPL Token ATAs to eATAs for delegated accounts.
-// This keeps ScheduleCommit and ScheduleBaseIntent paths consistent.
-use magicblock_core::token_programs::{
-    derive_ata, derive_eata, SPL_TOKEN_PROGRAM_ID,
-};
-
-pub(crate) fn remap_ata_to_eata_if_delegated(
-    account: &AccountSharedData,
-    pubkey: &Pubkey,
-) -> Pubkey {
-    if account.delegated() && account.owner() == &SPL_TOKEN_PROGRAM_ID {
-        let data = account.data();
-        if data.len() >= 64 {
-            // SAFETY: slices validated by len check; fall back to original key on any parse error
-            if let (Ok(mint_arr), Ok(owner_arr)) = (
-                <[u8; 32]>::try_from(&data[0..32]),
-                <[u8; 32]>::try_from(&data[32..64]),
-            ) {
-                let mint = Pubkey::new_from_array(mint_arr);
-                let wallet_owner = Pubkey::new_from_array(owner_arr);
-                let ata = derive_ata(&wallet_owner, &mint);
-                if ata == *pubkey {
-                    return derive_eata(&wallet_owner, &mint);
-                }
-            }
-        }
-    }
-
-    *pubkey
 }

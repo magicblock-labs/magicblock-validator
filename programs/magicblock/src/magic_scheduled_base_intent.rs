@@ -1,6 +1,11 @@
 use std::{cell::RefCell, collections::HashSet};
 
-use magicblock_core::Slot;
+use magicblock_core::{
+    token_programs::{
+        try_remap_ata_to_eata, EATA_PROGRAM_ID, TOKEN_PROGRAM_ID,
+    },
+    Slot,
+};
 use magicblock_magic_program_api::args::{
     ActionArgs, BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
     MagicBaseIntentArgs, ShortAccountMeta, UndelegateTypeArgs,
@@ -18,7 +23,6 @@ use solana_transaction::Transaction;
 
 use crate::{
     instruction_utils::InstructionUtils,
-    schedule_transactions::remap_ata_to_eata_if_delegated,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx,
@@ -325,6 +329,44 @@ impl<'a> From<CommittedAccountRef<'a>> for CommittedAccount {
     }
 }
 
+impl CommittedAccount {
+    /// Build a CommittedAccount from an AccountSharedData reference, optionally
+    /// overriding the owner with `parent_program_id` and remapping ATA -> eATA
+    /// if applicable.
+    pub fn from_account_shared(
+        pubkey: Pubkey,
+        account_shared: &AccountSharedData,
+        parent_program_id: Option<Pubkey>,
+    ) -> Self {
+        if let Some((eata_pubkey, eata)) =
+            try_remap_ata_to_eata(&pubkey, account_shared)
+        {
+            return CommittedAccount {
+                pubkey: eata_pubkey,
+                account: eata.into(),
+            };
+        }
+
+        let mut account: Account = account_shared.to_owned().into();
+        account.owner = parent_program_id.unwrap_or(account.owner);
+
+        CommittedAccount { pubkey, account }
+    }
+
+    /// Same as `from_account_shared` but allows passing a precomputed
+    /// ATA->eATA remap to avoid recomputation when the caller needs to log
+    /// or inspect the remap.
+    pub fn from_account_shared_with_remap(
+        pubkey: Pubkey,
+        account_shared: &AccountSharedData,
+        parent_program_id: Option<Pubkey>,
+    ) -> Self {
+        // Compute remap internally; delegate to from_account_shared which
+        // performs ATA -> eATA remapping and owner override if applicable.
+        Self::from_account_shared(pubkey, account_shared, parent_program_id)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommitType {
     /// Regular commit without actions
@@ -406,19 +448,12 @@ impl CommitType {
                 Self::validate_accounts(&committed_accounts_ref, context)?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
-                    .map(|el| {
-                        let (pubkey, account_ref) = el;
-                        let remapped = remap_ata_to_eata_if_delegated(
+                    .map(|(pubkey, account_ref)| {
+                        CommittedAccount::from_account_shared(
+                            pubkey,
                             &account_ref.borrow(),
-                            &pubkey,
-                        );
-                        let mut committed_account: CommittedAccount =
-                            (remapped, account_ref).into();
-                        committed_account.account.owner = context
-                            .parent_program_id
-                            .unwrap_or(committed_account.account.owner);
-
-                        committed_account
+                            context.parent_program_id,
+                        )
                     })
                     .collect();
 
@@ -440,19 +475,12 @@ impl CommitType {
                     .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
-                    .map(|el| {
-                        let (pubkey, account_ref) = el;
-                        let remapped = remap_ata_to_eata_if_delegated(
+                    .map(|(pubkey, account_ref)| {
+                        CommittedAccount::from_account_shared(
+                            pubkey,
                             &account_ref.borrow(),
-                            &pubkey,
-                        );
-                        let mut committed_account: CommittedAccount =
-                            (remapped, account_ref).into();
-                        committed_account.account.owner = context
-                            .parent_program_id
-                            .unwrap_or(committed_account.account.owner);
-
-                        committed_account
+                            context.parent_program_id,
+                        )
                     })
                     .collect();
 
@@ -542,6 +570,8 @@ pub(crate) fn validate_commit_schedule_permissions(
     if parent_program_id != Some(committee_owner)
         && !signers.contains(committee_pubkey)
         && !signers.contains(&validator_id)
+        && !(parent_program_id == Some(&EATA_PROGRAM_ID)
+            && committee_owner.eq(&TOKEN_PROGRAM_ID))
     {
         match parent_program_id {
             None => {
