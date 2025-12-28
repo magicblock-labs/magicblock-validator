@@ -20,4 +20,4 @@ Examples:
 
 ## Checklist
 - [ ] docs updated (if needed)
-- [ ] linked issue: #
+- [ ] closes #
