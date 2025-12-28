@@ -1270,7 +1270,6 @@ impl Ledger {
             measure: Measure::start("Ledger shutdown"),
             _timer: start_ledger_shutdown_timer(),
         };
-        self.flush()?;
         self.db.backend.db.cancel_all_background_work(wait);
 
         Ok(())
