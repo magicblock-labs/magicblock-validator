@@ -147,6 +147,7 @@ impl<
                 validator_pubkey,
                 faucet_pubkey,
                 rx,
+                chainlink_config.allowed_programs.clone(),
             );
             Some(fetch_cloner)
         } else {
