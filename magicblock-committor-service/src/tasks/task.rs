@@ -10,6 +10,7 @@ use crate::tasks::{
 
 /// Task to be executed on the Base layer.  
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Task {
     Commit(CommitTask),
     Finalize(FinalizeTask),
@@ -38,6 +39,7 @@ impl Task {
             .collect()
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_optimize_tx_size(self) -> Result<Task, Task> {
         // TODO (snawaz): do two things:
         // 1. this does not properly handle preparation state as both ArgsTask

@@ -272,6 +272,7 @@ impl CommitTask {
     /// In order to reduce the transition size, this function
     /// flips *_InArgs to *_InBuffer and attach a LifecycleTask.
     ///
+    #[allow(clippy::result_large_err)]
     pub fn try_optimize_tx_size(mut self) -> Result<CommitTask, CommitTask> {
         // The only way to optimize for tx size is to use buffer strategy.
         // If the task is already using buffer strategy, then it cannot optimize further.
