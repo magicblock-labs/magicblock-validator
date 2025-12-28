@@ -10,7 +10,7 @@ use hyper::{
     Request, Response,
 };
 use hyper_util::rt::TokioIo;
-use log::warn;
+use log::{info, warn};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::oneshot::Receiver,
@@ -94,13 +94,17 @@ impl WebsocketServer {
                     self.handle(stream);
                 },
                 // The server shutdown signal has been received.
-                _ = self.state.cancel.cancelled() => break,
+                _ = self.state.cancel.cancelled() => {
+                    info!("Websocket server shutdown signal has been received");
+                    break
+                }
             }
         }
         // Drop the main `ConnectionState` which holds the original `Shutdown` handle.
         drop(self.state);
         // Wait for all spawned connection tasks to finish.
         let _ = self.shutdown.await;
+        info!("Websocket server has shutdown");
     }
 
     /// Spawns a task to handle a new TCP stream as a potential WebSocket connection.

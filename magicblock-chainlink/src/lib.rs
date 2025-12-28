@@ -7,6 +7,7 @@ pub mod submux;
 
 pub use chainlink::*;
 pub use magicblock_metrics::metrics::AccountFetchOrigin;
+mod filters;
 
 #[cfg(any(test, feature = "dev-context"))]
 pub mod testing;

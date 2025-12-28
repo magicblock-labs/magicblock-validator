@@ -24,9 +24,10 @@ use crate::{
     cloner::Cloner,
     config::ChainlinkConfig,
     fetch_cloner::FetchAndCloneResult,
+    filters::is_noop_system_transfer,
     remote_account_provider::{
-        ChainPubsubClient, ChainPubsubClientImpl, ChainRpcClient,
-        ChainRpcClientImpl, Endpoint, RemoteAccountProvider,
+        chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
+        ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
     },
     submux::SubMuxClient,
 };
@@ -100,7 +101,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
     #[allow(clippy::too_many_arguments)]
     pub async fn try_new_from_endpoints(
-        endpoints: &[Endpoint],
+        endpoints: &Endpoints,
         commitment: CommitmentConfig,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
@@ -109,12 +110,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
     ) -> ChainlinkResult<
-        Chainlink<
-            ChainRpcClientImpl,
-            SubMuxClient<ChainPubsubClientImpl>,
-            V,
-            C,
-        >,
+        Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>,
     > {
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
@@ -135,6 +131,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 validator_pubkey,
                 faucet_pubkey,
                 rx,
+                chainlink_config.allowed_programs.clone(),
             );
             Some(fetch_cloner)
         } else {
@@ -286,6 +283,14 @@ Kept: {} delegated, {} blacklisted",
         &self,
         tx: &SanitizedTransaction,
     ) -> ChainlinkResult<FetchAndCloneResult> {
+        if is_noop_system_transfer(tx) {
+            trace!(
+                "Skipping account ensure for noop system transfer transaction {}",
+                tx.signature()
+            );
+            return Ok(Default::default());
+        }
+
         let mut pubkeys = tx
             .message()
             .account_keys()
