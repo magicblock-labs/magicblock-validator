@@ -33,7 +33,7 @@ impl ChainLaserClientImpl {
         api_key: &str,
         commitment: CommitmentLevel,
         abort_sender: mpsc::Sender<()>,
-        chain_slot: Arc<AtomicU64>,
+        chain_slot: Option<Arc<AtomicU64>>,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, messages, updates) = ChainLaserActor::new_from_url(
             pubsub_url,
@@ -172,18 +172,4 @@ impl ReconnectableClient for ChainLaserClientImpl {
         }
         Ok(())
     }
-}
-
-pub fn is_known_grpc_url(url: &str) -> bool {
-    is_helius_laser_url(url) || is_triton_url(url)
-}
-
-fn is_helius_laser_url(url: &str) -> bool {
-    // Example: https://laserstream-devnet-ewr.helius-rpc.com
-    url.contains("laserstream") && url.contains("helius-rpc.com")
-}
-
-fn is_triton_url(url: &str) -> bool {
-    // Example: https://magicblo-dev<redacted>.devnet.rpcpool.com
-    url.contains("rpcpool")
 }

@@ -41,7 +41,7 @@ pub enum RemoteAccountProviderError {
     #[error("Missing API key for: {0}")]
     MissingApiKey(String),
 
-    #[error("Unsupported gRPC endpoint: {0}. Only Helius Laser endpoints are supported.")]
+    #[error("Unsupported gRPC endpoint: {0}. Only Helius and Triton endpoints are supported.")]
     UnsupportedGrpcEndpoint(String),
 
     #[error("Invalid pubsub endpoint: {0}")]
