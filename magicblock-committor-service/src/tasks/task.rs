@@ -79,6 +79,15 @@ impl Task {
         }
     }
 
+    pub fn lifecycle(&self) -> Option<&BufferLifecycle> {
+        match &self {
+            Task::Commit(commit) => commit.lifecycle(),
+            Task::BaseAction(_) => None,
+            Task::Undelegate(_) => None,
+            Task::Finalize(_) => None,
+        }
+    }
+
     pub fn compute_units(&self) -> u32 {
         match &self {
             Task::Commit(_) => 70_000,
@@ -94,15 +103,6 @@ impl Task {
             Task::BaseAction(_) => DeliveryStrategy::Args,
             Task::Undelegate(_) => DeliveryStrategy::Args,
             Task::Finalize(_) => DeliveryStrategy::Args,
-        }
-    }
-
-    pub fn lifecycle(&self) -> Option<&BufferLifecycle> {
-        match &self {
-            Task::Commit(commit) => commit.lifecycle(),
-            Task::BaseAction(_) => None,
-            Task::Undelegate(_) => None,
-            Task::Finalize(_) => None,
         }
     }
 

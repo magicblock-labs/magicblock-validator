@@ -30,8 +30,12 @@ use solana_transaction_error::TransactionError;
 use crate::{
     persist::{CommitStatus, IntentPersister},
     tasks::{
-        task_strategist::TransactionStrategy, CreateBufferTask, DestroyTask,
-        PreparationState, Task, TaskError,
+        task_strategist::TransactionStrategy,
+        CreateBufferTask,
+        DestroyTask,
+        // PreparationState,
+        Task,
+        TaskError,
     },
     utils::persist_status_update,
     ComputeBudgetConfig,
@@ -98,11 +102,16 @@ impl DeliveryPreparator {
         task: &mut Task,
         persister: &Option<P>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
-        let PreparationState::Required(preparation_task) =
-            task.preparation_state()
-        else {
+        // let PreparationState::Required(preparation_task) =
+        //     task.preparation_state()
+        // else {
+        //     return Ok(());
+        // };
+        let Some(lifecycle) = task.lifecycle() else {
             return Ok(());
         };
+
+        let preparation_task = &lifecycle.preparation;
 
         // Persist as failed until rewritten
         let update_status = CommitStatus::BufferAndChunkPartiallyInitialized;
@@ -138,8 +147,8 @@ impl DeliveryPreparator {
             update_status,
         );
 
-        let cleanup_task = preparation_task.cleanup_task();
-        task.switch_preparation_state(PreparationState::Cleanup(cleanup_task))?;
+        //let cleanup_task = preparation_task.cleanup_task();
+        //task.switch_preparation_state(PreparationState::Cleanup(cleanup_task))?;
         Ok(())
     }
 
@@ -169,19 +178,28 @@ impl DeliveryPreparator {
         }
 
         // Prepare cleanup task
-        let PreparationState::Required(preparation_task) =
-            task.preparation_state().clone()
-        else {
+        // let PreparationState::Required(preparation_task) =
+        //     task.preparation_state().clone()
+        // else {
+        //     return Ok(());
+        // };
+        // task.switch_preparation_state(PreparationState::Cleanup(
+        //     preparation_task.cleanup_task(),
+        // ))?;
+        // self.cleanup(authority, std::slice::from_ref(task), &[])
+        //     .await?;
+        // task.switch_preparation_state(PreparationState::Required(
+        //     preparation_task,
+        // ))?;
+
+        // self.prepare_task(authority, task, persister).await
+
+        let Some(_lifecycle) = task.lifecycle() else {
             return Ok(());
         };
-        task.switch_preparation_state(PreparationState::Cleanup(
-            preparation_task.cleanup_task(),
-        ))?;
+
         self.cleanup(authority, std::slice::from_ref(task), &[])
             .await?;
-        task.switch_preparation_state(PreparationState::Required(
-            preparation_task,
-        ))?;
 
         self.prepare_task(authority, task, persister).await
     }
@@ -434,13 +452,14 @@ impl DeliveryPreparator {
         let cleanup_tasks: Vec<_> = tasks
             .iter()
             .filter_map(|task| {
-                if let PreparationState::Cleanup(cleanup_task) =
-                    task.preparation_state()
-                {
-                    Some(cleanup_task)
-                } else {
-                    None
-                }
+                task.lifecycle().map(|lc| &lc.cleanup)
+                //if let PreparationState::Cleanup(cleanup_task) =
+                //    task.preparation_state()
+                //{
+                //    Some(cleanup_task)
+                //} else {
+                //    None
+                //}
             })
             .collect();
 
