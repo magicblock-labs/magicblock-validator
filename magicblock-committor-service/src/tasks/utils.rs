@@ -11,9 +11,8 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 
-use crate::tasks::{task_strategist::TaskStrategistResult, Task};
-
 use super::TaskInstruction;
+use crate::tasks::{task_strategist::TaskStrategistResult, Task};
 
 pub struct TransactionUtils;
 impl TransactionUtils {

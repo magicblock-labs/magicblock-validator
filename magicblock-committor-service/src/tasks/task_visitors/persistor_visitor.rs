@@ -68,9 +68,7 @@ where
                     );
                 }
             }
-            Task::Finalize(_) | Task::Undelegate(_) | Task::BaseAction(_) => {
-                return
-            }
+            Task::Finalize(_) | Task::Undelegate(_) | Task::BaseAction(_) => {}
         };
     }
 }

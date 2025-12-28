@@ -4,6 +4,7 @@ use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::{Signer, SignerError};
 
+use super::TaskInstruction;
 use crate::{
     persist::IntentPersister,
     tasks::{
@@ -15,8 +16,6 @@ use crate::{
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
-
-use super::TaskInstruction;
 
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<Task>,

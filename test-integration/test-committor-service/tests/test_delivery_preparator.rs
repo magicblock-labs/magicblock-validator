@@ -21,11 +21,9 @@ async fn test_prepare_10kb_buffer() {
     let preparator = fixture.create_delivery_preparator();
 
     let data = generate_random_bytes(10 * 1024);
-    let buffer_task = BufferTaskType::Commit(create_commit_task(&data));
+    let buffer_task = Task::Commit(create_commit_task(&data));
     let mut strategy = TransactionStrategy {
-        optimized_tasks: vec![Box::new(BufferTask::new_preparation_required(
-            buffer_task,
-        ))],
+        optimized_tasks: vec![buffer_task],
         lookup_tables_keys: vec![],
     };
 
@@ -205,11 +203,9 @@ async fn test_already_initialized_error_handled() {
 
     let data = generate_random_bytes(10 * 1024);
     let mut task = create_commit_task(&data);
-    let buffer_task = BufferTaskType::Commit(task.clone());
+    let buffer_task = Task::Commit(task.clone());
     let mut strategy = TransactionStrategy {
-        optimized_tasks: vec![Box::new(BufferTask::new_preparation_required(
-            buffer_task,
-        ))],
+        optimized_tasks: vec![buffer_task],
         lookup_tables_keys: vec![],
     };
 
@@ -244,11 +240,9 @@ async fn test_already_initialized_error_handled() {
     let data =
         generate_random_bytes(task.committed_account.account.data.len() - 2);
     task.committed_account.account.data = data.clone();
-    let buffer_task = BufferTaskType::Commit(task);
+    let buffer_task = Task::Commit(task);
     let mut strategy = TransactionStrategy {
-        optimized_tasks: vec![Box::new(BufferTask::new_preparation_required(
-            buffer_task,
-        ))],
+        optimized_tasks: vec![buffer_task],
         lookup_tables_keys: vec![],
     };
 

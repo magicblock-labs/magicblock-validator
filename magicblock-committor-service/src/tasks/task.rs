@@ -3,10 +3,9 @@ use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
 use super::{BufferLifecycle, TaskInstruction, TaskResult};
-use crate::tasks::TaskError;
 use crate::tasks::{
     visitor::Visitor, BaseActionTask, CommitTask, DeliveryStrategy,
-    FinalizeTask, PreparationState, TaskType, UndelegateTask,
+    FinalizeTask, PreparationState, TaskError, TaskType, UndelegateTask,
 };
 
 /// Task to be executed on the Base layer.  
@@ -130,11 +129,12 @@ impl Task {
 
 impl LabelValue for Task {
     fn value(&self) -> &str {
-        use super::DataDeliveryStrategy::*;
         use Task::*;
+
+        use super::DataDeliveryStrategy::*;
         match self {
             Commit(commit) => match commit.delivery {
-                StateInArgs { .. } => "state_args_commit",
+                StateInArgs => "state_args_commit",
                 StateInBuffer { .. } => "state_buffer_commit",
                 DiffInArgs { .. } => "diff_args_commit",
                 DiffInBuffer { .. } => "diff_buffer_commit",

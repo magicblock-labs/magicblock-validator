@@ -130,9 +130,9 @@ pub type TaskResult<T> = Result<T, TaskError>;
 #[cfg(test)]
 mod serialization_safety_test {
 
-    use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
     use magicblock_program::{
-        args::ShortAccountMeta, magic_scheduled_base_intent::ProgramArgs,
+        args::ShortAccountMeta,
+        magic_scheduled_base_intent::{CommittedAccount, ProgramArgs},
     };
     use solana_account::Account;
 

@@ -115,13 +115,13 @@ impl CommitTask {
         match &self.delivery {
             DataDeliveryStrategy::StateInArgs => None,
             DataDeliveryStrategy::StateInBuffer { lifecycle } => {
-                Some(&lifecycle)
+                Some(lifecycle)
             }
             DataDeliveryStrategy::DiffInArgs { base_account: _ } => None,
             DataDeliveryStrategy::DiffInBuffer {
                 lifecycle,
                 base_account: _,
-            } => Some(&lifecycle),
+            } => Some(lifecycle),
         }
     }
 

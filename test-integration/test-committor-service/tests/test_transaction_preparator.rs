@@ -6,7 +6,7 @@ use magicblock_committor_service::{
         task_strategist::{TaskStrategist, TransactionStrategy},
         utils::TransactionUtils,
         BaseActionTask, CommitTask, FinalizeTask, PreparationState, Task,
-        TaskBuilderImpl, UndelegateTask,
+        UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -180,27 +180,19 @@ async fn test_prepare_commit_tx_with_base_actions() {
         }],
     };
 
-    let buffer_commit_task = BufferTask::new_preparation_required(
-        TaskBuilderImpl::create_commit_task(
-            1,
-            true,
-            committed_account.clone(),
-            None,
-        )
-        .task_type
-        .into(),
-    );
+    let buffer_commit_task =
+        Task::Commit(CommitTask::new(1, true, committed_account.clone(), None));
     let tasks = vec![
         // commit account
-        Box::new(buffer_commit_task.clone()) as Box<dyn BaseTask>,
+        buffer_commit_task,
         // finalize account
-        Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+        Task::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
-        }))),
+        }),
         // BaseAction
-        Box::new(ArgsTask::new(ArgsTaskType::BaseAction(BaseActionTask {
+        Task::BaseAction(BaseActionTask {
             action: base_action,
-        }))),
+        }),
     ];
 
     // Test preparation
