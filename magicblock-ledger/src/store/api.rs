@@ -1704,7 +1704,7 @@ mod tests {
             .write_transaction(
                 sig_uno,
                 slot_uno,
-                &sanitized_uno.clone(),
+                &sanitized_uno,
                 tx_uno.tx_with_meta.get_status_meta().unwrap(),
             )
             .is_ok());
@@ -1730,7 +1730,7 @@ mod tests {
             .write_transaction(
                 sig_dos,
                 slot_dos,
-                &sanitized_dos.clone(),
+                &sanitized_dos,
                 tx_dos.tx_with_meta.get_status_meta().unwrap(),
             )
             .is_ok());
@@ -2366,7 +2366,7 @@ mod tests {
                 .write_transaction(
                     sig_uno,
                     slot_uno,
-                    &sanitized_uno.clone(),
+                    &sanitized_uno,
                     tx_uno.tx_with_meta.get_status_meta().unwrap(),
                 )
                 .is_ok());
@@ -2389,7 +2389,7 @@ mod tests {
                 .write_transaction(
                     sig_dos,
                     slot_dos,
-                    &sanitized_dos.clone(),
+                    &sanitized_dos,
                     tx_dos.tx_with_meta.get_status_meta().unwrap(),
                 )
                 .is_ok());

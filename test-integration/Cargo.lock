@@ -3668,6 +3668,7 @@ dependencies = [
  "solana-transaction-error",
  "solana-transaction-status",
  "tokio",
+ "tokio-util 0.7.15",
 ]
 
 [[package]]

@@ -74,6 +74,11 @@ impl GeyserPluginManager {
                 }
             })?;
             let plugin_raw: *mut dyn GeyserPlugin = create_plugin();
+            if plugin_raw.is_null() {
+                return Err(GeyserPluginError::ConfigFileReadError {
+                    msg: "Plugin factory returned null pointer".into(),
+                });
+            }
             let mut plugin: Box<dyn GeyserPlugin> = Box::from_raw(plugin_raw);
             plugin.on_load(&file_path.to_string_lossy(), false)?;
             plugin.notify_end_of_startup()?;
@@ -115,7 +120,7 @@ impl GeyserPluginManager {
     pub fn notify_slot(&self, slot: u64) -> Result<(), GeyserPluginError> {
         check_if_enabled!(self);
         let status = &SlotStatus::Rooted;
-        let parent = Some(slot.saturating_sub(1));
+        let parent = slot.checked_sub(1);
         for plugin in &self.plugins {
             plugin.update_slot_status(slot, parent, status)?;
         }
@@ -152,7 +157,7 @@ impl GeyserPluginManager {
         check_if_enabled!(self);
         let block = ReplicaBlockInfoV4 {
             slot: block.meta.slot,
-            parent_slot: block.meta.slot.strict_sub(1),
+            parent_slot: block.meta.slot.saturating_sub(1),
             blockhash: &block.hash.to_string(),
             block_height: Some(block.meta.slot),
             rewards: &RewardsAndNumPartitions {

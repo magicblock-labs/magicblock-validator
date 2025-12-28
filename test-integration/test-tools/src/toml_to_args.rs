@@ -40,6 +40,10 @@ pub enum ProgramLoader {
     BpfProgram,
 }
 
+fn extract_port_from_listen(listen: &str) -> &str {
+    listen.split(':').nth(1).unwrap_or("8899")
+}
+
 pub fn config_to_args(
     config_path: &PathBuf,
     program_loader: Option<ProgramLoader>,
@@ -52,7 +56,7 @@ pub fn config_to_args(
         .as_ref()
         .map(|a| a.listen.as_str())
         .unwrap_or("127.0.0.1:8899");
-    let port = listen.split(':').nth(1).unwrap_or("8899");
+    let port = extract_port_from_listen(listen);
 
     let mut args = vec![
         "--log".to_string(),
@@ -107,9 +111,5 @@ pub fn rpc_port_from_config(config_path: &PathBuf) -> u16 {
         .as_ref()
         .map(|a| a.listen.as_str())
         .unwrap_or("127.0.0.1:8899");
-    listen
-        .split(':')
-        .nth(1)
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(8899)
+    extract_port_from_listen(listen).parse().unwrap_or(8899)
 }

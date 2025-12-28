@@ -99,7 +99,7 @@ impl Chunks {
         &mut self,
         offset: usize,
     ) -> Result<(), ChunksError> {
-        if offset % self.chunk_size as usize > 0 {
+        if offset % self.chunk_size as usize != 0 {
             Err(ChunksError::InvalidOffsetError(offset, self.chunk_size))
         } else {
             let idx = offset / self.chunk_size as usize;
