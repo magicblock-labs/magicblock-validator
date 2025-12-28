@@ -13,7 +13,10 @@ pub enum MagicBlockInstruction {
     ///  - **0.**    `[WRITE, SIGNER]` Validator Authority
     ///  - **1..n.** `[WRITE]` Accounts to modify
     ///  - **n+1**  `[SIGNER]` (Implicit NativeLoader)
-    ModifyAccounts(HashMap<Pubkey, AccountModificationForInstruction>),
+    ModifyAccounts {
+        accounts: HashMap<Pubkey, AccountModificationForInstruction>,
+        message: Option<String>,
+    },
 
     /// Schedules the accounts provided at end of accounts Vec to be committed.
     /// It should be invoked from the program whose PDA accounts are to be
