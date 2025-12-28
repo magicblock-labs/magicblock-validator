@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use log::{info, warn};
 use magicblock_config::config::ApertureConfig;
@@ -59,14 +59,8 @@ impl EventProcessor {
     fn new(
         channels: &DispatchEndpoints,
         state: &SharedState,
-        plugins: &[PathBuf],
+        geyser: Arc<GeyserPluginManager>,
     ) -> ApertureResult<Self> {
-        // SAFETY:
-        // Geyser plugin system works with the FFI, and is inherently unsafe,
-        // the plugin must be 100% compatible with the validator to be used
-        // without any memory violations, and it is the responsibility of the
-        // node operator to ensure that loaded plugin is correct and safe to use.
-        let geyser = unsafe { GeyserPluginManager::new(plugins) }?.into();
         Ok(Self {
             subscriptions: state.subscriptions.clone(),
             transactions: state.transactions.clone(),
@@ -94,9 +88,16 @@ impl EventProcessor {
         channels: &DispatchEndpoints,
         cancel: CancellationToken,
     ) -> ApertureResult<()> {
+        // SAFETY:
+        // Geyser plugin system works with the FFI, and is inherently unsafe,
+        // the plugin must be 100% compatible with the validator to be used
+        // without any memory violations, and it is the responsibility of the
+        // node operator to ensure that loaded plugin is correct and safe to use.
+        let geyser: Arc<_> =
+            unsafe { GeyserPluginManager::new(&config.geyser_plugins) }?.into();
         for id in 0..config.event_processors {
-            let processor =
-                EventProcessor::new(channels, state, &config.geyser_plugins)?;
+            let geyser = geyser.clone();
+            let processor = EventProcessor::new(channels, state, geyser)?;
             tokio::spawn(processor.run(id, cancel.clone()));
         }
         Ok(())

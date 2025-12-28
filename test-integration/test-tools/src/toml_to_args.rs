@@ -90,7 +90,9 @@ pub fn config_to_args(
     }
 
     // Add the first HTTP/HTTPS remote URL if available
-    if let Some(http_remote) = config.remotes.iter().find(|r| r.starts_with("http")) {
+    if let Some(http_remote) =
+        config.remotes.iter().find(|r| r.starts_with("http"))
+    {
         args.push("--url".into());
         args.push(http_remote.clone());
     }
