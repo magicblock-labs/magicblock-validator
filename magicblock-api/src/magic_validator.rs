@@ -123,6 +123,7 @@ pub struct MagicValidator {
     _metrics: (MetricsService, tokio::task::JoinHandle<()>),
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
+    transaction_execution: thread::JoinHandle<()>,
 }
 
 impl MagicValidator {
@@ -229,6 +230,7 @@ impl MagicValidator {
                 .chainlink
                 .auto_airdrop_lamports
                 > 0,
+            shutdown: token.clone(),
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
         txn_scheduler_state
@@ -258,7 +260,7 @@ impl MagicValidator {
             txn_scheduler_state,
         );
         info!("Running execution backend with {transaction_executors} threads");
-        transaction_scheduler.spawn();
+        let transaction_execution = transaction_scheduler.spawn();
 
         let shared_state = SharedState::new(
             node_context,
@@ -326,6 +328,7 @@ impl MagicValidator {
             transaction_scheduler: dispatch.transaction_scheduler,
             block_udpate_tx: validator_channels.block_update,
             task_scheduler: Some(task_scheduler),
+            transaction_execution,
         })
     }
 
@@ -696,16 +699,21 @@ impl MagicValidator {
                 error!("Failed to unregister: {}", err)
             }
         }
+        // we have two memory mapped databases,
+        // flush them to disk before exitting
         self.accountsdb.flush();
 
-        // we have two memory mapped databases, flush them to disk before exitting
         if let Err(err) = self.ledger.shutdown(true) {
             error!("Failed to shutdown ledger: {:?}", err);
         }
         let _ = self.rpc_handle.join();
+        if let Some(handle) = self.slot_ticker {
+            let _ = handle.await;
+        }
         if let Err(err) = self.ledger_truncator.join() {
             error!("Ledger truncator did not gracefully exit: {:?}", err);
         }
+        let _ = self.transaction_execution.join();
 
         info!("MagicValidator shutdown!");
     }
