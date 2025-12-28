@@ -12,6 +12,7 @@ bincode = { workspace = true }
 log = { workspace = true }
 parking_lot = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 
 magicblock-accounts-db = { workspace = true }
 magicblock-core = { workspace = true }

@@ -3214,6 +3214,7 @@ dependencies = [
  "solana-transaction-status",
  "test-kit",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
