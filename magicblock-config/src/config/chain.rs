@@ -3,6 +3,7 @@ use std::time::Duration;
 use isocountry::CountryCode;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use solana_pubkey::Pubkey;
 use url::Url;
 
 use crate::consts;
@@ -50,9 +51,21 @@ pub struct ChainLinkConfig {
     /// Amount of lamports to automatically airdrop to feepayer accounts on clone.
     pub auto_airdrop_lamports: u64,
 
-    /// The maximum number of non-delegated accounts to track simultaneously for updates.
+    /// The maximum number of non-delegated accounts to track simultaneously for
+    /// updates.
     pub max_monitored_accounts: usize,
 
     /// When true, confined accounts are removed during accounts bank reset.
     pub remove_confined_accounts: bool,
+
+    /// If specified, only these programs will be cloned into the validator.
+    /// If empty or not specified, all programs are allowed.
+    pub allowed_programs: Option<Vec<AllowedProgram>>,
+}
+
+/// A program that is allowed to be cloned into the validator.
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct AllowedProgram {
+    /// The public key of the program.
+    pub id: Pubkey,
 }

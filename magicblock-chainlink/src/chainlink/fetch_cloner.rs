@@ -12,6 +12,7 @@ use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use log::*;
+use magicblock_config::config::AllowedProgram;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -66,6 +67,10 @@ where
     /// These are accounts that we should never clone into our validator.
     /// native programs, sysvars, native tokens, validator identity and faucet
     blacklisted_accounts: HashSet<Pubkey>,
+
+    /// If specified, only these programs will be cloned. If None or empty,
+    /// all programs are allowed.
+    allowed_programs: Option<HashSet<Pubkey>>,
 }
 
 struct AccountWithCompanion {
@@ -150,9 +155,13 @@ where
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
+        allowed_programs: Option<Vec<AllowedProgram>>,
     ) -> Arc<Self> {
         let blacklisted_accounts =
             blacklisted_accounts(&validator_pubkey, &faucet_pubkey);
+        let allowed_programs = allowed_programs.map(|programs| {
+            programs.iter().map(|p| p.id).collect::<HashSet<_>>()
+        });
         let me = Arc::new(Self {
             remote_account_provider: remote_account_provider.clone(),
             accounts_bank: accounts_bank.clone(),
@@ -161,6 +170,7 @@ where
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
+            allowed_programs,
         });
 
         me.clone()
@@ -172,6 +182,24 @@ where
     /// Get the current fetch count
     pub fn fetch_count(&self) -> u64 {
         self.fetch_count.load(Ordering::Relaxed)
+    }
+
+    /// Check if a program is allowed to be cloned.
+    /// Returns true if:
+    /// - No allowed_programs restriction is set (None), OR
+    /// - The allowed_programs set is empty (treats empty as unrestricted), OR
+    /// - The program is in the allowed_programs set
+    fn is_program_allowed(&self, program_id: &Pubkey) -> bool {
+        match &self.allowed_programs {
+            None => true,
+            Some(allowed) => {
+                if allowed.is_empty() {
+                    true
+                } else {
+                    allowed.contains(program_id)
+                }
+            }
+        }
     }
 
     /// Start listening to subscription updates
@@ -302,6 +330,13 @@ where
         pubkey: Pubkey,
         account: AccountSharedData,
     ) {
+        if !self.is_program_allowed(&pubkey) {
+            debug!(
+                "Skipping clone of program {pubkey}: not in allowed_programs"
+            );
+            return;
+        }
+
         if account.owner().eq(&LOADER_V1) {
             // This is a program deployed on chain with BPFLoader1111111111111111111111111111111111.
             // By definition it cannot be upgraded, hence we should never get a subscription
@@ -1144,6 +1179,13 @@ where
         }
 
         for acc in loaded_programs {
+            if !self.is_program_allowed(&acc.program_id) {
+                debug!(
+                    "Skipping clone of program {}: not in allowed_programs",
+                    acc.program_id
+                );
+                continue;
+            }
             let cloner = self.cloner.clone();
             join_set.spawn(async move { cloner.clone_program(acc).await });
         }
@@ -1964,6 +2006,7 @@ mod tests {
             validator_pubkey,
             faucet_pubkey,
             subscription_rx,
+            None,
         );
         (fetch_cloner, subscription_tx)
     }
@@ -3236,6 +3279,225 @@ mod tests {
         assert_subscribed_without_delegation_record!(
             remote_account_provider,
             &[&account_pubkey]
+        );
+    }
+
+    // -----------------
+    // Allowed Programs Tests
+    // -----------------
+
+    #[tokio::test]
+    async fn test_allowed_programs_filters_programs() {
+        init_logger();
+        let validator_pubkey = random_pubkey();
+        let program_id_allowed = random_pubkey();
+        let program_id_blocked = random_pubkey();
+        const CURRENT_SLOT: u64 = 100;
+
+        let program_account_allowed = Account {
+            lamports: 1_000_000,
+            data: vec![1, 2, 3, 4],
+            owner: solana_sdk_ids::bpf_loader::id(),
+            executable: true,
+            rent_epoch: 0,
+        };
+
+        let program_account_blocked = Account {
+            lamports: 1_000_000,
+            data: vec![5, 6, 7, 8],
+            owner: solana_sdk_ids::bpf_loader::id(),
+            executable: true,
+            rent_epoch: 0,
+        };
+
+        let setup_accounts = vec![
+            (program_id_allowed, program_account_allowed),
+            (program_id_blocked, program_account_blocked),
+        ];
+
+        let FetcherTestCtx {
+            accounts_bank,
+            fetch_cloner: _fetch_cloner,
+            remote_account_provider,
+            ..
+        } = setup(setup_accounts.into_iter(), CURRENT_SLOT, validator_pubkey)
+            .await;
+
+        // Create FetchCloner with only one program allowed
+        let (_subscription_tx, subscription_rx) = mpsc::channel(100);
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+        let allowed_programs = Some(vec![AllowedProgram {
+            id: program_id_allowed,
+        }]);
+        let fetch_cloner = FetchCloner::new(
+            &remote_account_provider,
+            &accounts_bank,
+            &cloner,
+            validator_pubkey,
+            random_pubkey(),
+            subscription_rx,
+            allowed_programs,
+        );
+
+        // Fetch and clone both programs
+        let result = fetch_cloner
+            .fetch_and_clone_accounts(
+                &[program_id_allowed, program_id_blocked],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                Some(&[program_id_allowed, program_id_blocked]),
+            )
+            .await;
+
+        debug!("Test result: {result:?}");
+        assert!(result.is_ok());
+
+        // The allowed program should be in the bank
+        assert!(
+            accounts_bank.get_account(&program_id_allowed).is_some(),
+            "Allowed program should be in the bank"
+        );
+
+        // The blocked program should NOT be in the bank
+        assert!(
+            accounts_bank.get_account(&program_id_blocked).is_none(),
+            "Blocked program should NOT be in the bank"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_allowed_programs_none_allows_all() {
+        init_logger();
+        let validator_pubkey = random_pubkey();
+        let program_id1 = random_pubkey();
+        let program_id2 = random_pubkey();
+        const CURRENT_SLOT: u64 = 100;
+
+        let program_account = Account {
+            lamports: 1_000_000,
+            data: vec![1, 2, 3, 4],
+            owner: solana_sdk_ids::bpf_loader::id(),
+            executable: true,
+            rent_epoch: 0,
+        };
+
+        let setup_accounts = vec![
+            (program_id1, program_account.clone()),
+            (program_id2, program_account),
+        ];
+
+        let FetcherTestCtx {
+            accounts_bank,
+            fetch_cloner: _fetch_cloner,
+            remote_account_provider,
+            ..
+        } = setup(setup_accounts.into_iter(), CURRENT_SLOT, validator_pubkey)
+            .await;
+
+        // Create FetchCloner with NO allowed_programs restriction (None)
+        let (_subscription_tx, subscription_rx) = mpsc::channel(100);
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+        let fetch_cloner = FetchCloner::new(
+            &remote_account_provider,
+            &accounts_bank,
+            &cloner,
+            validator_pubkey,
+            random_pubkey(),
+            subscription_rx,
+            None, // No restriction
+        );
+
+        // Fetch and clone both programs
+        let result = fetch_cloner
+            .fetch_and_clone_accounts(
+                &[program_id1, program_id2],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                Some(&[program_id1, program_id2]),
+            )
+            .await;
+
+        debug!("Test result: {result:?}");
+        assert!(result.is_ok());
+
+        // Both programs should be in the bank
+        assert!(
+            accounts_bank.get_account(&program_id1).is_some(),
+            "Program 1 should be in the bank"
+        );
+        assert!(
+            accounts_bank.get_account(&program_id2).is_some(),
+            "Program 2 should be in the bank"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_allowed_programs_empty_allows_all() {
+        init_logger();
+        let validator_pubkey = random_pubkey();
+        let program_id1 = random_pubkey();
+        let program_id2 = random_pubkey();
+        const CURRENT_SLOT: u64 = 100;
+
+        let program_account = Account {
+            lamports: 1_000_000,
+            data: vec![1, 2, 3, 4],
+            owner: solana_sdk_ids::bpf_loader::id(),
+            executable: true,
+            rent_epoch: 0,
+        };
+
+        let setup_accounts = vec![
+            (program_id1, program_account.clone()),
+            (program_id2, program_account),
+        ];
+
+        let FetcherTestCtx {
+            accounts_bank,
+            fetch_cloner: _fetch_cloner,
+            remote_account_provider,
+            ..
+        } = setup(setup_accounts.into_iter(), CURRENT_SLOT, validator_pubkey)
+            .await;
+
+        // Create FetchCloner with an EMPTY allowed_programs list
+        let (_subscription_tx, subscription_rx) = mpsc::channel(100);
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+        let allowed_programs = Some(vec![]); // Empty list
+        let fetch_cloner = FetchCloner::new(
+            &remote_account_provider,
+            &accounts_bank,
+            &cloner,
+            validator_pubkey,
+            random_pubkey(),
+            subscription_rx,
+            allowed_programs,
+        );
+
+        // Fetch and clone both programs
+        let result = fetch_cloner
+            .fetch_and_clone_accounts(
+                &[program_id1, program_id2],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                Some(&[program_id1, program_id2]),
+            )
+            .await;
+
+        debug!("Test result: {result:?}");
+        assert!(result.is_ok());
+
+        // Both programs should be in the bank (empty list is treated as unrestricted)
+        assert!(
+            accounts_bank.get_account(&program_id1).is_some(),
+            "Program 1 should be in the bank (empty allowed_programs allows all)"
+        );
+        assert!(
+            accounts_bank.get_account(&program_id2).is_some(),
+            "Program 2 should be in the bank (empty allowed_programs allows all)"
         );
     }
 }
