@@ -62,6 +62,8 @@ pub(super) struct TransactionExecutor {
     /// is tightly contolled and will be removed in the nearest future
     /// True when auto airdrop for fee payers is enabled (auto_airdrop_lamports > 0).
     is_auto_airdrop_lamports_enabled: bool,
+    /// Whether to enforce access permissions during transaction execution.
+    is_enforcing_access_permissions: bool,
 }
 
 impl TransactionExecutor {
@@ -113,6 +115,7 @@ impl TransactionExecutor {
             tasks_tx: state.tasks_tx.clone(),
             is_auto_airdrop_lamports_enabled: state
                 .is_auto_airdrop_lamports_enabled,
+            is_enforcing_access_permissions: enforce_access_permissions,
         };
 
         this.processor.fill_missing_sysvar_cache_entries(&this);

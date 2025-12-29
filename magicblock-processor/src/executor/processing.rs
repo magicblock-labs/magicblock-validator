@@ -343,6 +343,9 @@ impl super::TransactionExecutor {
     /// 1. No modification of the non-delegated feepayer in gasless mode
     /// 2. No lamport modification of confined accounts
     fn verify_account_states(&self, processed: &mut ProcessedTransaction) {
+        if !self.is_enforcing_access_permissions {
+            return;
+        }
         let ProcessedTransaction::Executed(executed) = processed else {
             return;
         };
