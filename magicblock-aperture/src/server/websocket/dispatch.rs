@@ -153,7 +153,7 @@ pub(crate) enum SubResult {
     SubId(SubscriptionID),
     /// The result of an unsubscription request (`true` for success).
     Unsub(bool),
-    /// The hearbeat response message
+    /// The heartbeat response message
     Pong(&'static str),
 }
 
