@@ -94,6 +94,14 @@ reviews:
       enabled: true
     osvScanner:
       enabled: true
+  path_instructions:
+    - path: "{magicblock-*,programs,storage-proto}/**"
+      instructions: |
+        Treat any usage of `.unwrap()` or `.expect()` in production Rust code as a MAJOR issue.
+        These should not be categorized as trivial or nit-level concerns.
+        Request proper error handling or explicit justification with invariants.
+    - path: "{test-*,tools}/**"
+      instructions: Usage of `.unwrap()` or `.expect()` in test code is acceptable and may be treated as trivial.
 chat:
   # We leave emoji/ASCII art, but no auto-replies
   art: true
