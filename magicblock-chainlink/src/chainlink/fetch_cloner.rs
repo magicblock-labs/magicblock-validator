@@ -14,7 +14,9 @@ use dlp::{
 use log::*;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::{
-    token_programs::{is_ata, try_derive_eata_address_and_bump, MaybeIntoAta},
+    token_programs::{
+        is_ata, try_derive_eata_address_and_bump, MaybeIntoAta, EATA_PROGRAM_ID,
+    },
     traits::AccountsBank,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
@@ -567,10 +569,16 @@ where
             delegation_record.authority.eq(&self.validator_pubkey)
                 || is_confined;
 
+        // Always update owner and confined flags
         account
             .set_owner(delegation_record.owner)
-            .set_confined(is_confined)
-            .set_delegated(is_delegated_to_us);
+            .set_confined(is_confined);
+
+        if is_delegated_to_us && delegation_record.owner != EATA_PROGRAM_ID {
+            account.set_delegated(true);
+        } else if !is_delegated_to_us {
+            account.set_delegated(false);
+        }
         if is_delegated_to_us {
             Some(delegation_record.commit_frequency_ms)
         } else {
@@ -1243,16 +1251,18 @@ where
                             self.get_delegated_to_other(&deleg);
                         commit_frequency_ms = Some(deleg.commit_frequency_ms);
 
-                        let delegated_to_us = deleg.authority
-                            == self.validator_pubkey
-                            || deleg.authority == Pubkey::default();
+                        let delegated_to_us =
+                            deleg.authority == self.validator_pubkey;
 
                         if delegated_to_us {
                             if let Some(projected_ata) =
                                 eata_shared.maybe_into_ata(deleg.owner)
                             {
                                 account_to_clone = projected_ata;
-                                account_to_clone.set_delegated(true);
+                                if account_to_clone.owner() != &EATA_PROGRAM_ID
+                                {
+                                    account_to_clone.set_delegated(true);
+                                }
                             }
                         }
                     }
