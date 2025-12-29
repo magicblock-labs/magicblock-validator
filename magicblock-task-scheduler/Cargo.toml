@@ -19,9 +19,8 @@ magicblock-program = { workspace = true }
 rusqlite = { workspace = true }
 solana-instruction = { workspace = true }
 solana-message = { workspace = true }
-solana-program = { workspace = true }
 solana-pubkey = { workspace = true }
-solana-pubsub-client = { workspace = true }
+solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-signature = { workspace = true }
 solana-transaction = { workspace = true }
@@ -29,9 +28,3 @@ solana-transaction-error = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["time"] }
-
-[dev-dependencies]
-magicblock-magic-program-api = { workspace = true }
-test-kit = { workspace = true }
-guinea = { workspace = true }
-solana-account = { workspace = true }
