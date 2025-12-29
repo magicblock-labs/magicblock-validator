@@ -15,10 +15,12 @@ use magicblock_config::{
     types::network::Remote,
     ValidatorParams,
 };
+use serial_test::file_serial;
 use solana_sdk::{signature::Keypair, signer::Signer, system_instruction};
 use test_kit::init_logger;
 
 #[test]
+#[file_serial]
 fn test_auto_airdrop_feepayer_balance_after_tx() {
     init_logger!();
 
