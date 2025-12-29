@@ -567,11 +567,13 @@ pub(crate) fn validate_commit_schedule_permissions(
     signers: &HashSet<Pubkey>,
 ) -> Result<(), InstructionError> {
     let validator_id = validator_authority_id();
+    let is_eata_token_program_call = parent_program_id
+        == Some(&EATA_PROGRAM_ID)
+        && committee_owner == &TOKEN_PROGRAM_ID;
     if parent_program_id != Some(committee_owner)
         && !signers.contains(committee_pubkey)
         && !signers.contains(&validator_id)
-        && (parent_program_id != Some(&EATA_PROGRAM_ID)
-            || committee_owner != &TOKEN_PROGRAM_ID)
+        && !is_eata_token_program_call
     {
         match parent_program_id {
             None => {

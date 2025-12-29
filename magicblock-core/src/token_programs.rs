@@ -1,6 +1,8 @@
 use solana_account::{Account, AccountSharedData, ReadableAccount};
-use solana_program::{program_option::COption, program_pack::Pack, rent::Rent};
-use solana_program::program_error::ProgramError;
+use solana_program::{
+    program_error::ProgramError, program_option::COption, program_pack::Pack,
+    rent::Rent,
+};
 use solana_pubkey::{pubkey, Pubkey};
 use spl_token::state::{Account as SplAccount, AccountState};
 

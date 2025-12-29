@@ -1192,7 +1192,12 @@ where
                     &ata_info.owner,
                     &ata_info.mint,
                 ) {
-                    let _ = self.subscribe_to_account(&eata).await;
+                    if let Err(err) = self.subscribe_to_account(&eata).await {
+                        warn!(
+                            "Failed to subscribe to derived eATA {}: {}",
+                            eata, err
+                        );
+                    }
 
                     let effective_slot =
                         if let Some(min_slot) = min_context_slot {
