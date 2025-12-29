@@ -76,11 +76,13 @@ impl TransactionExecutor {
         rx: TransactionToProcessRx,
         ready_tx: Sender<ExecutorId>,
         programs_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
+        enforce_access_permissions: bool,
     ) -> Self {
         let slot = state.accountsdb.slot();
         let mut processor = TransactionBatchProcessor::new_uninitialized(
             slot,
             Default::default(),
+            enforce_access_permissions,
         );
 
         // Override the default program cache with a globally shared one.

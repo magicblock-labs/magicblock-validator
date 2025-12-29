@@ -252,9 +252,12 @@ impl MagicValidator {
         // runtime, -1 is taken up by the transaction scheduler itself
         let transaction_executors =
             (num_cpus::get() / 2).saturating_sub(1).max(1) as u32;
+        let enforce_access_permissions =
+            config.lifecycle.enforce_access_permissions();
         let transaction_scheduler = TransactionScheduler::new(
             transaction_executors,
             txn_scheduler_state,
+            enforce_access_permissions,
         );
         info!("Running execution backend with {transaction_executors} threads");
         let transaction_execution = transaction_scheduler.spawn();

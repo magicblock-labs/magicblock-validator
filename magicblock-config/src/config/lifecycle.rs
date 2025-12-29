@@ -28,4 +28,10 @@ impl LifecycleMode {
     pub fn needs_remote_account_provider(&self) -> bool {
         !matches!(self, LifecycleMode::Offline)
     }
+
+    /// Check whether the validator lifecycle enforces access permissions
+    /// which is only the case currently in [LifecycleMode::Ephemeral] mode
+    pub fn enforce_access_permissions(&self) -> bool {
+        matches!(self, LifecycleMode::Ephemeral)
+    }
 }

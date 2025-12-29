@@ -61,7 +61,11 @@ impl TransactionScheduler {
     /// 1.  Prepares the shared program cache and ensures necessary sysvars are in the `AccountsDb`.
     /// 2.  Creates a pool of `TransactionExecutor` workers, each with its own dedicated channel.
     /// 3.  Spawns each worker in its own OS thread for maximum isolation and performance.
-    pub fn new(executors: u32, state: TransactionSchedulerState) -> Self {
+    pub fn new(
+        executors: u32,
+        state: TransactionSchedulerState,
+        enforce_access_permissions: bool,
+    ) -> Self {
         let count = executors.clamp(1, MAX_SVM_EXECUTORS) as usize;
         let mut executors = Vec::with_capacity(count);
 
@@ -80,6 +84,7 @@ impl TransactionScheduler {
                 transactions_rx,
                 ready_tx.clone(),
                 program_cache.clone(),
+                enforce_access_permissions,
             );
             executor.populate_builtins();
             executor.spawn();
