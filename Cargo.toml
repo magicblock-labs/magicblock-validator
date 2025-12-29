@@ -203,8 +203,9 @@ tonic-build = "0.9.2"
 url = "2.5.0"
 
 [workspace.dependencies.solana-svm]
-git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "3e9456ec4"
+path = "../magicblock-svm"
+# git = "https://github.com/magicblock-labs/magicblock-svm.git"
+# rev = "3e9456ec4"
 features = ["dev-context-only-utils"]
 
 [workspace.dependencies.rocksdb]
@@ -220,7 +221,8 @@ version = "0.22.0"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "57158728" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "3e9456ec4" }
+# solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "3e9456ec4" }
+solana-svm = { path = "../magicblock-svm" }
 # Fork is used to enable `disable_manual_compaction` usage
 # Fork is based on commit d4e9e16 of rocksdb (parent commit of 0.23.0 release)
 # without patching update isn't possible due to conflict with solana deps
