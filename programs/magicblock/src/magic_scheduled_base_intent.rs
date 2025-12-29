@@ -352,19 +352,6 @@ impl CommittedAccount {
 
         CommittedAccount { pubkey, account }
     }
-
-    /// Same as `from_account_shared` but allows passing a precomputed
-    /// ATA->eATA remap to avoid recomputation when the caller needs to log
-    /// or inspect the remap.
-    pub fn from_account_shared_with_remap(
-        pubkey: Pubkey,
-        account_shared: &AccountSharedData,
-        parent_program_id: Option<Pubkey>,
-    ) -> Self {
-        // Compute remap internally; delegate to from_account_shared which
-        // performs ATA -> eATA remapping and owner override if applicable.
-        Self::from_account_shared(pubkey, account_shared, parent_program_id)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

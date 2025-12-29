@@ -174,7 +174,7 @@ pub(crate) fn process_schedule_commit(
                 &signers,
             )?;
 
-            let committed = CommittedAccount::from_account_shared_with_remap(
+            let committed = CommittedAccount::from_account_shared(
                 *acc_pubkey,
                 &acc.borrow(),
                 parent_program_id.cloned(),
