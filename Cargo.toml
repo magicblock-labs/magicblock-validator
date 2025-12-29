@@ -38,7 +38,7 @@ resolver = "2"
 
 [workspace.package]
 # Solana Version (2.2.x)
-version = "0.5.0"
+version = "0.6.0"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
@@ -99,7 +99,7 @@ magicblock-committor-program = { path = "./magicblock-committor-program", featur
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "3edb41022" , features = [
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "3edb41022", features = [
   "no-entrypoint",
 ] }
 magicblock-ledger = { path = "./magicblock-ledger" }
