@@ -35,6 +35,18 @@ fn test_lifecycle_offline_allows_system_transfer_to_non_delegated() {
     run_lifecycle_transfer_test(LifecycleMode::Offline, true);
 }
 
+#[test]
+#[file_serial]
+fn test_lifecycle_replica_allows_system_transfer_to_non_delegated() {
+    run_lifecycle_transfer_test(LifecycleMode::Replica, true);
+}
+
+#[test]
+#[file_serial]
+fn test_lifecycle_programs_replica_allows_system_transfer_to_non_delegated() {
+    run_lifecycle_transfer_test(LifecycleMode::ProgramsReplica, true);
+}
+
 fn run_lifecycle_transfer_test(
     lifecycle_mode: LifecycleMode,
     expect_success: bool,
@@ -101,9 +113,8 @@ fn run_lifecycle_transfer_test(
                 payer.pubkey()
             );
         }
-        LifecycleMode::Offline => {
-            // For offline mode, airdrop directly to the validator without
-            // using chain
+        // All other modes support direct airdrop
+        _ => {
             expect!(
                 ctx.airdrop_ephem(&payer.pubkey(), LAMPORTS_PER_SOL),
                 validator
@@ -114,13 +125,6 @@ fn run_lifecycle_transfer_test(
                 payer.pubkey()
             );
         }
-        _ => {
-            panic!(
-                "Test only supports Ephemeral and Offline lifecycle modes, \
-                 got {:?}",
-                lifecycle_mode
-            );
-        }
     }
 
     // 4. Send a transfer to a non-delegated account that doesn't yet exist
@@ -128,7 +132,7 @@ fn run_lifecycle_transfer_test(
     let ix = system_instruction::transfer(
         &payer.pubkey(),
         &non_delegated_recipient.pubkey(),
-        1000,
+        1_000_000,
     );
 
     let (sig, confirmed) = expect!(
